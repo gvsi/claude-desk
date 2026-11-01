@@ -32,8 +32,9 @@
 
 /* Each app color token the reading pages, their figures and the error page draw with, on the paper: the page and
    the figures' cards (tiles, as the article's cards are), ink and secondary ink, the hairlines and their stronger
-   edge, the fills, the link color (which focus rings take too) and the status dots. A token the tokens file
-   defines from another (status-info) is pointed here too, since it was resolved on the app's root. */
+   edge, the fills, the link color, the focus ring (the secondary ink, as on the app) and the status dots. A token
+   the tokens file defines from another (ring-focus, status-info) is pointed here too, since it was resolved on
+   the app's root. */
 .cd-about-paper--app {
   --bg-app: var(--va-paper);
   --bg-panel: var(--va-tile);
@@ -50,6 +51,7 @@
   --fill-hover: var(--va-hover);
   --fill-secondary: var(--va-band);
   --accent-blue: var(--va-link);
+  --ring-focus: var(--va-ink-2);
   --status-handled: var(--va-done);
   --status-held: var(--va-held);
   --status-refused: var(--va-declined);

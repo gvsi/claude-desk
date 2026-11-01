@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
+import { Button } from '../components/Button/Button.tsx';
+import { Chip } from '../components/Chip/Chip.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
 import { TextField } from '../components/TextField/TextField.tsx';
+import { TextLink } from '../components/TextLink/TextLink.tsx';
 
 /** What a focus style could change: the outline, the border, a shadow ring and the fill. */
 const LOOK = [
@@ -32,6 +35,16 @@ function looks(field: Element, top: Element): Record<string, string>[] {
     drawn.push(Object.fromEntries([['element', el.className], ...LOOK.map((name) => [name, style[name]])]));
   }
   return drawn;
+}
+
+/** A color token as the browser resolves it on the page. */
+function tokenColor(token: string): string {
+  const probe = document.createElement('span');
+  probe.style.color = `var(${token})`;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
 }
 
 /** A button before `children`, so a Tab from it is the next stop's keyboard focus. */
@@ -81,6 +94,38 @@ describe('focus', () => {
     expect(document.activeElement).toBe(field);
     expect(field.matches(':focus-visible'), 'focus came from the keyboard').toBe(true);
     expect(looks(field, screen.container)).toEqual(atRest);
+    await screen.unmount();
+  });
+
+  const CONTROLS: [string, ReactNode][] = [
+    ['a button', <Button variant="secondary" onClick={noop}>Save</Button>],
+    ['a link', <TextLink href="#rules">See rule</TextLink>],
+    ['a chip', <Chip onClick={noop}>Book a visit</Chip>],
+  ];
+
+  it.each(CONTROLS)('controls_ring_in_ring_focus_on_keyboard_focus_only: %s', async (_, control) => {
+    // The ring is its own warm token: the secondary ink, never the link blue.
+    const ring = tokenColor('--ring-focus');
+    expect(ring).toBe(tokenColor('--text-secondary'));
+    expect(ring).not.toBe(tokenColor('--accent-blue'));
+
+    const screen = await render(<AfterStart>{control}</AfterStart>);
+    const start = screen.getByRole('button', { name: 'Start' }).element() as HTMLButtonElement;
+    const target = screen.container.querySelector<HTMLElement>('[data-focus-probe] :is(a, button)');
+    if (target === null) throw new Error('no control');
+
+    // Clicked: focus, and no ring.
+    await userEvent.click(target);
+    expect(document.activeElement).toBe(target);
+    expect(target.matches(':focus-visible'), 'focus came from the pointer').toBe(false);
+    expect(getComputedStyle(target).outlineStyle).toBe('none');
+
+    // By keyboard: the 2 px ring at a 2 px offset, in the token's color.
+    start.focus();
+    await userEvent.tab();
+    expect(document.activeElement).toBe(target);
+    const style = getComputedStyle(target);
+    expect([style.outlineStyle, style.outlineWidth, style.outlineOffset, style.outlineColor]).toEqual(['solid', '2px', '2px', ring]);
     await screen.unmount();
   });
 });

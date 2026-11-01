@@ -86,7 +86,7 @@ export const Owner: Story = {
     await userEvent.tab();
     const attach = canvas.getByRole('button', { name: 'Add a photo or file' });
     await expect(attach).toHaveFocus();
-    expectComputed(attach, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgb(126, 174, 218)', outlineOffset: '2px' });
+    expectComputed(attach, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', outlineOffset: '2px' });
     expectComputed(box, { outlineStyle: 'none' });
     await userEvent.tab({ shift: true });
     await expect(input).toHaveFocus();
@@ -325,7 +325,7 @@ export const FailedLong: Story = {
     await expect(retry.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
     await userEvent.tab();
     await expect(kept).toHaveFocus();
-    expectComputed(kept, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgb(126, 174, 218)', outlineOffset: '2px' });
+    expectComputed(kept, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', outlineOffset: '2px' });
     await userEvent.tab();
     await expect(retry).toHaveFocus();
     await userEvent.keyboard('{Enter}');

@@ -43,7 +43,7 @@
 }
 
 .vision-article :focus-visible {
-  outline-color: var(--va-link);
+  outline-color: var(--va-ink-2);
 }
 
 /* What keyboard focus scrolls to stops clear of the bar. */
@@ -336,7 +336,7 @@
 }
 
 .vision-article .va-card:focus-visible {
-  outline: 2px solid var(--va-link);
+  outline: 2px solid var(--va-ink-2);
   outline-offset: 2px;
 }
 
@@ -441,7 +441,7 @@
 }
 
 .vision-article .va-next__link:focus-visible::after {
-  outline: 2px solid var(--va-link);
+  outline: 2px solid var(--va-ink-2);
   outline-offset: 2px;
 }
 

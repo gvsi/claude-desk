@@ -595,9 +595,9 @@ describe('the figures on paper', () => {
       for (const text of all('svg text')) {
         expect(contrastRatio(getComputedStyle(text).fill, ground(text)), `${where}: ${text.textContent}`).toBeGreaterThanOrEqual(4.5);
       }
-      // A focus ring, in the paper's link color, on the paper and on a figure's card.
-      const ring = tokenColor('--accent-blue', root);
-      expect(ring, where).toBe('rgb(45, 91, 138)');
+      // A focus ring, in the paper's secondary ink, never its link blue, on the paper and on a figure's card.
+      const ring = tokenColor('--ring-focus', root);
+      expect(ring, where).toBe('rgb(92, 88, 80)');
       for (const on of [paper, ground(all('.cd-about-frame')[0] as Element)]) expect(contrastRatio(ring, on), where).toBeGreaterThanOrEqual(3);
       await screen.unmount();
     }

@@ -131,7 +131,7 @@ function pairs(
 
 const TEXT = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'] as const;
 
-const MARKS = ['accent-blue', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
+const MARKS = ['accent-blue', 'ring-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
 const SURFACES = ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'] as const;
 
 export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
@@ -144,6 +144,8 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(MARKS, SURFACES, 3, 'Focus rings and status dots on the app, panels, raised surfaces and the selected row.'),
   ...pairs(MARKS, ['fill-card'], 3, 'Focus rings and status dots inside cards.', 'bg-app'),
   ...pairs(MARKS, ['fill-hover'], 3, 'Focus rings and status dots on a hovered conversation or attempt row.', 'bg-app'),
+  ...pairs(['ring-focus'], ['bg-muted'], 3, "The focus ring on the reviewer bar's Start over."),
+  ...pairs(['ring-focus'], ['fill-hover'], 3, 'The focus ring just inside a menu item that has focus, on its hover fill in a menu.', 'bg-surface'),
   ...pairs(
     ['mark-ink-light', 'mark-clay'],
     ['bg-app', 'bg-panel', 'bg-surface'],

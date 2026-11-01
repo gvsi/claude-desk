@@ -4,7 +4,9 @@
  * page's code.
  */
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { userEvent } from 'vitest/browser';
 
+import { contrastRatio } from '../../ds/contrast.ts';
 import { FONT_SHEET_URL, loadWebFonts } from '../../ds/test/fonts.ts';
 import { writeLocal } from '../../lib/storage.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -244,6 +246,32 @@ describe('The Vision article', () => {
     await screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).click();
     await expect.poll(() => router.state.location.pathname).toBe(CARDS[0].href);
     await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
+  });
+
+  it('keyboard_focus_rings_in_the_papers_secondary_ink', async () => {
+    // No blue focus ring on the paper either: keyboard focus on a link in the bar, a picture card and the way to the
+    // next page shows the 2 px ring in the paper's secondary ink, 3:1 and more against the paper.
+    const { screen } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    const article = screen.getByRole('article').element();
+    const paper = getComputedStyle(article.closest('.vision-article') as Element).backgroundColor;
+    expect(paper).toBe('rgb(244, 242, 236)');
+    const inBar = document.querySelector<HTMLElement>('.va-bar a');
+    const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
+    const next = document.querySelector<HTMLElement>('.va-next__link');
+    for (const [name, link, ring] of [
+      ['a link in the bar', inBar, (el: Element) => getComputedStyle(el)],
+      ['a picture card', card, (el: Element) => getComputedStyle(el)],
+      ['the next page', next, (el: Element) => getComputedStyle(el, '::after')],
+    ] as const) {
+      if (link === null) throw new Error(`no ${name}`);
+      await userEvent.keyboard('{Shift}');
+      link.focus();
+      expect(link.matches(':focus-visible'), name).toBe(true);
+      const style = ring(link);
+      expect([style.outlineStyle, style.outlineWidth, style.outlineColor], name).toEqual(['solid', '2px', 'rgb(92, 88, 80)']);
+      expect(contrastRatio(style.outlineColor, paper), name).toBeGreaterThanOrEqual(3);
+    }
   });
 
   it('the_cover_band_is_decoration_hidden_on_phones', async () => {

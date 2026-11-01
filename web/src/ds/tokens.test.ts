@@ -79,6 +79,13 @@ describe('design tokens', () => {
     expect(actual).toEqual(expected);
   });
 
+  test('focus_ring_is_the_secondary_ink', () => {
+    // Keyboard focus shows a warm ring, never the link blue: the secondary ink, which the About pages' paper
+    // points at its own (owner, 2026-11-01). Text entry draws no ring at all, so no other ring token exists.
+    expect(tokenValue('ring-focus')).toBe('{text-secondary}');
+    expect(colorNames.filter((name) => name.startsWith('ring-'))).toEqual(['ring-focus']);
+  });
+
   test('intro_dialog_tokens_match_the_board', () => {
     const expected = {
       scrim: 'rgba(0,0,0,0.5)',
@@ -325,9 +332,12 @@ describe('design tokens', () => {
     add(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'bg-app');
     add(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'bg-surface');
     add(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5);
-    const marks = ['accent-blue', 'status-handled', 'status-held', 'status-refused', 'status-info'];
+    const marks = ['accent-blue', 'ring-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'];
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
+    // The focus ring on the reviewer bar, and just inside a menu item that has focus.
+    add(['ring-focus'], ['bg-muted'], 3);
+    add(['ring-focus'], ['fill-hover'], 3, 'bg-surface');
     // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
     // top bar, and the intro dialog's surface; its dark ink on the intro illustration's light card.
     add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3);
