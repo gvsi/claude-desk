@@ -1394,6 +1394,27 @@ BLOCKED_PROSE = "It comes to $89 for the visit."           # a number in prose: 
 OTHER_LANGUAGE = "Bonjour, je peux vous aider."             # unsupported_language: no rewrite fixes it
 
 
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
+    ("", [Clause(template="handoff")], True, True, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED_PROSE, [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED_PROSE, [Clause(template="hours", fact_id="charter:hours")], True, False, ["hours"],
+     "Reply checked against Maria Rivera's rules"),
+    (BLOCKED_PROSE, [], False, False, [], "Passed to Maria Rivera to answer"),
+], ids=["passing-handoff", "final-handoff", "final-kept-card", "unshown-first-attempt"])
+async def test_check_reply_receipt_follows_the_shown_handoff_clause(kernel, ro_read, prose, clauses, final, ok,
+                                                                  templates, receipt):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=0, prose=prose, clauses=clauses)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply",
+                                                            CheckReplyRequest(draft=draft, final=final))
+    assert verdict.ok is ok
+    assert [block.template for block in verdict.blocks] == templates
+    assert verdict.visitor_plain == receipt
+
+
 async def checked(http: KernelHttp, created: SessionCreated, prose: str, *, final: bool) -> ReplyVerdict:
     draft = ReplyDraft(session_id=created.state.session_id, generation=0, prose=prose)
     return await http.session(created.session_token).call("POST /check_reply",

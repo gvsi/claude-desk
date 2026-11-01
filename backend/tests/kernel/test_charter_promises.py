@@ -18,8 +18,8 @@ from .helpers import kernel_ctx
 from .test_adapters import rivera
 from .test_desk_writes import desks_of, entries_of, facts_of, new_desk, post_desk, put_part
 from .test_decide import open_visitor
-from .test_reply_check import (PUBLIC_ALLOW_WORD_CASES, assert_handed_off, checked, clause, own_quote,
-                               public_key, reply_entries, verify_verdict)
+from .test_reply_check import (PUBLIC_ALLOW_WORD_CASES, assert_handed_off, assert_kept, checked, clause,
+                               own_quote, public_key, reply_entries, verify_verdict)
 
 
 POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urgent", "how_we_help", "custom")
@@ -250,13 +250,15 @@ async def test_reply_does_not_scan_quote_numbers_as_policy_text(app, client, quo
 
 
 async def test_prose_only_failure_keeps_its_existing_rule_beside_a_policy(app, client):
+    """A promise in Claude's words beside an honest policy card fails under the prose's own rule, not
+    `policy_combined`, and the checked card is kept with no prose (the owner's ruling of 2026-11-01)."""
     copy = await rivera(app, client)
     visitor = await open_visitor(client, copy)
     verdict = await checked(client, visitor, "No charge for consultations.", [
         clause("policy", "charter:policy:service_area")])
     assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
         ("promise_word", "lex.en.promise", [])]
-    assert_handed_off(verdict)
+    assert_kept(verdict, [("policy", "charter:policy:service_area")])
 
 
 @pytest.mark.parametrize(("unsafe", "honest", "rules"), [
