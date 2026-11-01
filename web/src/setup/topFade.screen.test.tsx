@@ -4,6 +4,7 @@
  * message shows whole.
  */
 import { expect, it } from 'vitest';
+import { userEvent } from 'vitest/browser';
 
 import { newIdempotencyKey } from '../api/http.ts';
 import type { SetupState } from '../api/views.ts';
@@ -40,6 +41,22 @@ it('the_conversation_fades_at_its_top_edge_only_once_scrolled_from_the_top', asy
   await expect.poll(() => area.scrollTop).toBeGreaterThan(0);
   await expect.poll(() => area.hasAttribute('data-scrolled')).toBe(true);
   expect(getComputedStyle(area).maskImage).toMatch(/^linear-gradient\(/);
+
+  // A control inside the conversation that has keyboard focus shows whole, its ring too: nothing
+  // fades. This conversation has none of its own here, so the test puts one at its end.
+  const control = document.createElement('button');
+  control.type = 'button';
+  control.textContent = 'A control in the conversation';
+  area.querySelector('.cd-setup-chat__column')?.append(control);
+  await screen.getByRole('textbox', { name: 'Your answer' }).click();
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  const focused = document.activeElement;
+  expect(focused !== area && area.contains(focused), `focus on a control in the conversation: ${focused?.outerHTML.slice(0, 120)}`).toBe(true);
+  expect(area.hasAttribute('data-scrolled')).toBe(true);
+  expect(getComputedStyle(area).maskImage).toBe('none');
+  (focused as HTMLElement).blur();
+  expect(getComputedStyle(area).maskImage).toMatch(/^linear-gradient\(/);
+  control.remove();
 
   // Back at the top, the first message shows whole.
   area.scrollTop = 0;

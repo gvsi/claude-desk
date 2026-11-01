@@ -165,8 +165,9 @@
 /* Where messages scroll under the bar, they fade out over 24 px rather than being cut at its edge.
    The area is marked while it is scrolled from its top (useTopFade), so the first message, at the
    top, never fades. A mask reads only alpha: the opaque app ground stands for "shown", and nothing
-   is painted. Not while the area has keyboard focus, so its focus ring shows whole. */
-.cd-setup-chat__scroll[data-scrolled]:not(:focus-visible) {
+   is painted. Not while the area, or a control in it, has keyboard focus, so its focus ring shows
+   whole. */
+.cd-setup-chat__scroll[data-scrolled]:not(:focus-visible):not(:has(:focus-visible)) {
   mask-image: linear-gradient(to bottom, transparent, var(--bg-app) var(--space-24));
 }
 .cd-setup-chat__column {

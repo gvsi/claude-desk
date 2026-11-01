@@ -5,6 +5,7 @@
  * where the shell scrolls and the chat's head sticks over the conversation, nothing is faded.
  */
 import { expect, it, vi } from 'vitest';
+import { userEvent } from 'vitest/browser';
 
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -44,6 +45,16 @@ it('the_conversation_fades_at_its_top_edge_only_once_scrolled_from_the_top', asy
   // Kept at its end, it is scrolled from the top: the fade shows, as a mask, never a colour.
   await expect.poll(() => area.scrollTop).toBeGreaterThan(0);
   await expect.poll(() => area.hasAttribute('data-scrolled')).toBe(true);
+  expect(getComputedStyle(area).maskImage).toMatch(/^linear-gradient\(/);
+
+  // A control inside the conversation that has keyboard focus shows whole, its ring too: nothing fades.
+  await screen.getByRole('textbox', { name: /^Message / }).click();
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  const focused = document.activeElement;
+  expect(focused !== area && area.contains(focused), `focus on a control in the conversation: ${focused?.outerHTML.slice(0, 120)}`).toBe(true);
+  expect(area.hasAttribute('data-scrolled')).toBe(true);
+  expect(getComputedStyle(area).maskImage).toBe('none');
+  (focused as HTMLElement).blur();
   expect(getComputedStyle(area).maskImage).toMatch(/^linear-gradient\(/);
 
   // Back at the top, the first message shows whole.

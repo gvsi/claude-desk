@@ -114,8 +114,8 @@
    its edge. The region is marked while it is scrolled from its top (useTopFade), so the first
    message, at the top, never fades. A mask reads only alpha: the opaque app ground stands for
    "shown", and nothing is painted. Only while the region itself scrolls: on a short shell the
-   shell scrolls instead, under the chat's head that sticks over it. Not while the region has
-   keyboard focus, so its focus ring shows whole. */
-.cd-public-shell:not(.cd-public-shell--short) .cd-public-shell__scroll[data-scrolled]:not(:focus-visible) {
+   shell scrolls instead, under the chat's head that sticks over it. Not while the region, or a
+   control in it, has keyboard focus, so its focus ring shows whole. */
+.cd-public-shell:not(.cd-public-shell--short) .cd-public-shell__scroll[data-scrolled]:not(:focus-visible):not(:has(:focus-visible)) {
   mask-image: linear-gradient(to bottom, transparent, var(--bg-app) var(--space-24));
 }
