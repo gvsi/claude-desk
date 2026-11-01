@@ -10,10 +10,14 @@ import { canFollowSetup, openSetupEvents, type SetupRead, type SetupStreamEvent 
 import type { SetupState } from '../api/views.ts';
 import { settledWords } from '../lib/GrowingReply.tsx';
 
-/** What a running turn shows so far: the finished reads' labels, in order, and the reply's words. */
+/** What a running turn shows so far: its reads and their labels, and the reply's words. */
 export interface Growing {
-  /** One label per read, in the order the reads ended: the saved `tool_label` message's words. */
-  labels: readonly { read: SetupRead; text: string }[];
+  /**
+   * One row per read, in the order the reads started; `text` is its label once it ends, in the saved
+   * `tool_label` message's words, and null while it runs. The saved turn read back corrects any
+   * difference (several failed searches stream a label each, and the interview keeps one).
+   */
+  labels: readonly { read: SetupRead; text: string | null }[];
   /** Claude's reply so far; empty before its first word and after a reset. */
   text: string;
   /** `done` came: the reply is whole, its last word included, until the saved turn takes its place. */
@@ -21,6 +25,11 @@ export interface Growing {
 }
 
 export const NOTHING_YET: Growing = { labels: [], text: '', final: false };
+
+/** The labels of the reads that have ended, in the order the reads started. */
+export function shownLabels(growing: Growing): string[] {
+  return growing.labels.flatMap(({ text }) => (text === null ? [] : [text]));
+}
 
 /** Whether `growing` has words to show: any once it is whole, else a word something follows. */
 export function hasWords(growing: Growing): boolean {
@@ -47,13 +56,14 @@ export function stepSetupStream(now: Growing, event: SetupStreamEvent | { type: 
     case 'reset':
       return { growing: { labels: now.labels, text: '', final: false }, next: 'read_on' };
     case 'reading':
-      // A read in progress shows as Claude writing, as the setup boards draw it.
-      return { growing: now, next: 'read_on' };
+      // A read in progress shows as Claude writing, as the setup boards draw it: a row with no label yet.
+      return { growing: { ...now, labels: [...now.labels, { read: event.read, text: null }] }, next: 'read_on' };
     case 'label': {
-      // Keyed by what was read: the reads run at once and end in any order, each shown once.
+      // The reads run at once and end in any order: a label ends the first read of its kind still
+      // running, in its place, or, from a read this stream never heard start, follows the rest.
+      const at = now.labels.findIndex(({ read, text }) => read === event.read && text === null);
       const label = { read: event.read, text: event.text };
-      const known = now.labels.some(({ read }) => read === event.read);
-      const labels = known ? now.labels.map((shown) => (shown.read === event.read ? label : shown)) : [...now.labels, label];
+      const labels = at === -1 ? [...now.labels, label] : now.labels.map((row, index) => (index === at ? label : row));
       return { growing: { labels, text: now.text, final: now.final }, next: 'read_on' };
     }
     case 'done':
@@ -199,6 +209,6 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
     setAttempt((n) => n + 1);
   }, [inFlight, watching]);
 
-  const shown = watching && !superseded && (growing.labels.length > 0 || growing.text.trim() !== '') ? growing : null;
+  const shown = watching && !superseded && (shownLabels(growing).length > 0 || growing.text.trim() !== '') ? growing : null;
   return { growing: shown, fellBack: watching && fellBack, progress };
 }

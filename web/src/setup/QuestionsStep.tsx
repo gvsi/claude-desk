@@ -419,11 +419,13 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
         {consenting === null ? null : <VisitorMessage text={consenting ? copy.allow : copy.decline} />}
         {/* The running turn as it is written: its reads' labels, then Claude's reply, which the saved
             turn replaces. Screen readers hear "Claude is writing" until the saved turn, then it once. */}
-        {growing?.labels.map((label) => (
-          <div key={label.read} aria-hidden="true">
-            <ToolLabel text={label.text} />
-          </div>
-        ))}
+        {growing?.labels.map((label, index) =>
+          label.text === null ? null : (
+            <div key={index} aria-hidden="true">
+              <ToolLabel text={label.text} />
+            </div>
+          ),
+        )}
         {growing !== null && hasWords(growing) ? (
           <div className="cd-claude-message cd-setup-growing" lang="en" aria-hidden="true">
             <GrowingReply text={growing.text} streaming={!growing.final} />
