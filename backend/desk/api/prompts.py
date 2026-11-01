@@ -553,8 +553,8 @@ DEMO_TASKS: dict[DemoTaskSet, dict[DemoTask, str]] = {
         "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
         "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
     },
-    # A Desk with nothing to book or pay up front answers with its own next step, and the agent stops there; an
-    # amount above the agent's limit is asked about but not paid.
+    # A Desk with nothing to book or pay up front answers with its own next step, and the agent stops there; the
+    # kernel refuses any charge above the agent's signed mandate, whatever the agent asks.
     "trade": {
         "book_visit": "Book the earliest visit for Alex Kim.",
         "quote_and_deposit": "Ask what Alex Kim pays up front for a visit, and pay it if it's within your spending "
