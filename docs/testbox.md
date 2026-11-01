@@ -57,7 +57,8 @@ private local directories, credential/key files and local build outputs. Do not 
 secrets in source files or command arguments. Git history at HEAD and origin/main travels
 as an incremental bundle when either ref changes, including unpushed commits, without copying
 local Git configuration or hooks.
-HEAD and the index match the caller while uncommitted working files remain intact.
+HEAD and the index use the caller's committed HEAD; staged and unstaged source changes
+remain in the working tree.
 Changing branches removes stale synced files and invalidates affected build/schema caches.
 Remote test reports remain in the lane; source files are never copied back automatically.
 
