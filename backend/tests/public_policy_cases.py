@@ -17,13 +17,14 @@ AMENITY_ACCEPTED = ["Free parking for consultations.", "Ofrecemos café gratis."
 AI_DENIAL_REFUSALS = [(text, "policy.ai_denial") for text in (
     "I'm a human receptionist.", "I am a human assistant.", "I'm a human agent here to help.",
     "I'm a human representative.", "I'm human and happy to help.", "I'm human too.",
-    "Soy una persona.", "Soy una recepcionista humana.", "Soy un recepcionista humano.",
+    "Soy una persona.", "Soy una persona real.", "Soy una recepcionista humana.", "Soy un recepcionista humano.",
     "Soy una agente humana.", "Soy un agente humano.", "Soy una asistente humana.",
     "You'll be talking to a human.", "You will be chatting with a real person.",
     "You’ll be speaking with a person.",
     "Call us. You'll be talking to a human.",
 )]
 AI_DENIAL_CONTROLS = [
+    "Soy una persona amable.", "Soy una persona responsable y puntual.", "Soy una persona de confianza.",
     "No soy una persona, soy una IA.", "No soy una recepcionista humana.",
     "You'll be talking to a real person when you call.",
     "Call us and you'll be talking to a real person.",
