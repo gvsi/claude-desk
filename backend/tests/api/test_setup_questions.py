@@ -1659,6 +1659,106 @@ async def test_setup_searches_the_web_after_consent(app, browser, fake, kernel_h
     assert (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json() == state
 
 
+async def test_homework_decides_every_read_before_any_execution(
+    app, browser, fake, kernel_http, model, monkeypatch,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    queries = ["salon intake", "salon cancellations"]
+    state = await begin(owner, model, website=WEBSITE, search_queries=queries)
+    kernel = app.state.runtime.kernel
+    send = kernel._client.send
+    session = asyncio.Condition()
+    active_executions = 0
+    contexts = 0
+    call_order = []
+    completed_searches = []
+
+    async def locked(request, **kwargs):
+        nonlocal active_executions, contexts
+        route = request.url.path
+        if route.startswith("/context/"):
+            contexts += 1
+            if contexts == 4:
+                # A later context arrives while the earlier search would already be executing.
+                await asyncio.sleep(0.01)
+        if route == "/decide":
+            call_order.append(route)
+            # Real decisions take an exclusive session lock, conflicting with running executes.
+            async with session:
+                await session.wait_for(lambda: active_executions == 0)
+                return await send(request, **kwargs)
+        if route == "/execute":
+            call_order.append(route)
+            record = fake.decisions[json.loads(request.content)["decision_id"]]
+            async with session:
+                active_executions += 1
+            try:
+                if record.tool == "native.web_search":
+                    # Scaled 12 s search > 6 s decision timeout, but inside the homework budget.
+                    await asyncio.sleep(0.12)
+                    completed_searches.append(record.decision.decision_id)
+                return await send(request, **kwargs)
+            finally:
+                async with session:
+                    active_executions -= 1
+                    session.notify_all()
+        return await send(request, **kwargs)
+
+    monkeypatch.setattr(kernel, "_timeout_s", 0.06)
+    monkeypatch.setattr(kernel._client, "send", locked)
+    monkeypatch.setattr(desk_setup, "WEB_SEARCH_EXECUTE_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(desk_setup, "HOMEWORK_BUDGET_S", 0.5)
+    state = await consent(owner, state["interview_id"], True, model)
+
+    assert call_order == ["/decide"] * 4 + ["/execute"] * 4
+    assert len(set(completed_searches)) == len(queries)
+    assert [message["text"] for message in state["messages"] if message["role"] == "tool_label"] == [
+        "Searched your Claude memory", "Read rivera-plumbing.example",
+        *[f"Searched the web: {query}" for query in queries]]
+    assert state["question"] == "what_you_do" and not state["busy"]
+
+
+@pytest.mark.parametrize("blocked_route", ["/context/", "/decide"], ids=["context", "decision"])
+async def test_homework_budget_includes_context_and_decisions(
+    app, browser, fake, kernel_http, model, monkeypatch, blocked_route,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, website=WEBSITE, search_queries=["salon intake"])
+    kernel = app.state.runtime.kernel
+    send = kernel._client.send
+    cancelled = asyncio.Event()
+    calls = 0
+
+    async def blocked(request, **kwargs):
+        nonlocal calls
+        if request.url.path.startswith(blocked_route):
+            calls += 1
+            if calls == 2:  # Memory has an allow; the website's context or decision uses the remaining budget.
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+        return await send(request, **kwargs)
+
+    async def after_cancellation(request):
+        assert cancelled.is_set()
+        assert not fake.called("POST /execute")
+        return unparsed(understanding(next_topic="what_you_do"))
+
+    monkeypatch.setattr(kernel._client, "send", blocked)
+    monkeypatch.setattr(desk_setup, "HOMEWORK_BUDGET_S", 0.2)
+    model.add(after_cancellation)
+    state = await consent(owner, state["interview_id"], True, model)
+
+    assert len(fake.called("POST /decide")) == 1
+    assert not fake.called("POST /execute")
+    assert [message["text"] for message in state["messages"] if message["role"] == "tool_label"] == [
+        "Couldn't search your Claude memory", "Couldn't read rivera-plumbing.example",
+        "Couldn't search the web just now"]
+    assert state["question"] == "what_you_do" and not state["busy"]
+
+
 @pytest.mark.parametrize("all_slow", [True, False], ids=["all_timeout", "mixed_results"])
 async def test_homework_shares_a_budget_and_keeps_time_for_understanding(
     app, browser, fake, kernel_http, model, engine, monkeypatch, all_slow,
@@ -1666,12 +1766,15 @@ async def test_homework_shares_a_budget_and_keeps_time_for_understanding(
     owner = await new_owner(app, browser, kernel_http)
     queries = ["salon intake", "salon cancellations", "salon urgent requests"]
     state = await begin(owner, model, website=WEBSITE, search_queries=queries)
-    run = desk_setup.run_setup_tool
+    execute = desk_setup.execute_setup_tool
     started, cancelled = [], []
     all_started = asyncio.Event()
     slow = {"native.read_memory", "native.fetch_website", queries[1]}
 
-    async def reading(ctx, desk_id, tool, args, **kwargs):
+    async def reading(ctx, tool, decision, **kwargs):
+        call = next(call.body["call"] for call in fake.called("POST /decide")
+                    if call.body["call"]["call_id"] == decision.call_id)
+        args = call["args"]
         key = args["query"] if tool == "native.web_search" else tool
         started.append(key)
         if len(started) == 5:
@@ -1682,7 +1785,7 @@ async def test_homework_shares_a_budget_and_keeps_time_for_understanding(
                 await asyncio.Event().wait()
             # Searches finish out of query order; their labels must keep query order.
             await asyncio.sleep(0.02 if key == queries[0] else 0)
-            return await run(ctx, desk_id, tool, args, **kwargs)
+            return await execute(ctx, tool, decision, **kwargs)
         except asyncio.CancelledError:
             cancelled.append(key)
             raise
@@ -1693,9 +1796,9 @@ async def test_homework_shares_a_budget_and_keeps_time_for_understanding(
         await asyncio.sleep(0.05)
         return unparsed(understanding(next_topic="what_you_do"))
 
-    monkeypatch.setattr(desk_setup, "run_setup_tool", reading)
-    monkeypatch.setattr(desk_setup, "HOMEWORK_BUDGET_S", 0.1, raising=False)
-    monkeypatch.setattr(desk_setup, "TURN_RUN_TIMEOUT_S", 1)
+    monkeypatch.setattr(desk_setup, "execute_setup_tool", reading)
+    monkeypatch.setattr(desk_setup, "HOMEWORK_BUDGET_S", 0.5, raising=False)
+    monkeypatch.setattr(desk_setup, "TURN_RUN_TIMEOUT_S", 2)
     model.add(slow_understanding)
     state = await consent(owner, state["interview_id"], True, model)
     assert state["consent"] is True and state["question"] == "what_you_do" and not state["busy"]
@@ -1845,14 +1948,14 @@ async def test_a_failed_search_shows_its_label_and_setup_goes_on(
     elif failure == "failed":
         fake.script("native.web_search", exec_state="failed")
     else:
-        run = desk_setup.run_setup_tool
+        decide = desk_setup.decide_setup_tool
 
         async def unavailable_search(*args, **kwargs):
             if args[2] == "native.web_search":
                 fake.fail("POST /decide", "timeout")
-            return await run(*args, **kwargs)
+            return await decide(*args, **kwargs)
 
-        monkeypatch.setattr(desk_setup, "run_setup_tool", unavailable_search)
+        monkeypatch.setattr(desk_setup, "decide_setup_tool", unavailable_search)
     state = await consent(owner, state["interview_id"], True, model)
     assert state["question"] == "what_you_do" and not state["busy"]
     assert [message["text"] for message in state["messages"] if message["role"] == "tool_label"] == [

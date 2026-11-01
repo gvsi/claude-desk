@@ -36,7 +36,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   moved on like any other.
 - **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
   their Claude memory (`native.read_memory`), reads the named website (`native.fetch_website`) and runs up to three
-  keyword web searches (`native.web_search`) concurrently within `HOMEWORK_BUDGET_S` on yes. On no it skips every
+  keyword web searches (`native.web_search`) on yes. Decisions finish sequentially before concurrent executions;
+  both phases share `HOMEWORK_BUDGET_S`. On no it skips every
   read. `_after_consent` appends the consultant
   opening and first fact question; the labels and reply are saved together. Web search content reaches only that
   opening's understanding call. A website the owner names later after no is kept as text.
@@ -72,7 +73,8 @@ the final commit ends the task without rollback. Removing a pending answer immed
 after Claude's consent question also reopens consent. GET and every turn recover all pending entries older than
 `TURN_ABANDONED_S` (120 seconds) when this process holds no run for the interview.
 
-Each setup tool call is an owner call on the new Desk (`run_setup_tool`): the tool must be in the owner's `/context`,
+Each setup tool call is an owner call on the new Desk (`decide_setup_tool`, `execute_setup_tool`, composed by
+`run_setup_tool`): the tool must be in the owner's `/context`,
 then `/decide`, and `/execute` only on an allow. A read that is held, refused or fails doesn't stop setup: its inline
 label says it couldn't. What a read returned is kept in the transcript (for later turns, as untrusted text), never
 shown to the owner beyond its label, and reaches the model only inside a wrapper (`prompts.wrap`).
@@ -269,6 +271,7 @@ from desk.contracts import (
     BusinessSeed,
     CalendarSlot,
     Claim,
+    Decision,
     DeskSeed,
     Effect,
     ExecResult,
@@ -838,6 +841,14 @@ async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict, *
     `/decide`, and `/execute` on an allow. None when it isn't given, is held or refused, or the kernel refuses or
     can't be reached: nothing ran that the kernel didn't allow, and setup goes on. `timeout_s` overrides only
     execution's transport deadline; context and decision calls retain the client's default."""
+    decision = await decide_setup_tool(owner, desk_id, tool, args)
+    if decision is None:
+        return None
+    return await execute_setup_tool(owner, tool, decision, timeout_s=timeout_s)
+
+
+async def decide_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict) -> Decision | None:
+    """Check the owner's context and obtain an allow, without starting execution. Fail closed on kernel errors."""
     session_id, generation = owner.owner_session_id, owner.owner_generation
     try:
         context = await owner.kernel.call("GET /context/{session_id}?desk_id=", path={"session_id": session_id},
@@ -851,8 +862,23 @@ async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict, *
         if decision.outcome != "allow":
             logger.info("the setup tool %s was decided %s", tool, decision.outcome)
             return None
+        return decision
+    except KernelFailed as failure:
+        logger.warning("the setup tool %s was refused (%s)", tool, failure.code)
+    except KernelUnavailable:
+        logger.warning("the setup tool %s couldn't reach the kernel", tool)
+    return None
+
+
+async def execute_setup_tool(owner: OwnerCtx, tool: str, decision: Decision, *,
+                             timeout_s: float | None = None) -> ExecResult | None:
+    """Execute an allowed setup decision; the kernel rechecks the baseline at execution as usual."""
+    if decision.outcome != "allow":
+        return None
+    try:
         return await owner.kernel.call("POST /execute", ExecuteRequest(decision_id=decision.decision_id,
-                                                                       session_id=session_id, generation=generation),
+                                                                       session_id=owner.owner_session_id,
+                                                                       generation=owner.owner_generation),
                                        timeout_s=timeout_s)
     except KernelFailed as failure:
         logger.warning("the setup tool %s was refused (%s)", tool, failure.code)
@@ -868,8 +894,7 @@ def _memory_text(view: dict) -> str:
     return "\n".join(lines)[:READ_TEXT_MAX]
 
 
-async def _read_memory(owner: OwnerCtx, desk_id: str) -> Entry:
-    result = await run_setup_tool(owner, desk_id, "native.read_memory", {"query": MEMORY_QUERY})
+def _memory_entry(result: ExecResult | None) -> Entry:
     if result is None or result.state != "succeeded":
         return Entry(role="tool_label", text=MEMORY_FAILED_LABEL, read="memory")
     return Entry(role="tool_label", text=MEMORY_LABEL, read="memory", content=_memory_text(result.model_view))
@@ -877,6 +902,10 @@ async def _read_memory(owner: OwnerCtx, desk_id: str) -> Entry:
 
 async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> Entry:
     result = await run_setup_tool(owner, desk_id, "native.fetch_website", {"url": url})
+    return _website_entry(result, url=url, host=host)
+
+
+def _website_entry(result: ExecResult | None, *, url: str, host: str) -> Entry:
     if result is None or result.state != "succeeded":
         return Entry(role="tool_label", text=WEBSITE_FAILED_LABEL.format(host=host), read="website", website=url)
     view = result.model_view
@@ -887,10 +916,8 @@ async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> E
     return Entry(role="tool_label", text=label, read="website", content=content[:READ_TEXT_MAX], website=url)
 
 
-async def _search_web(owner: OwnerCtx, desk_id: str, query: str) -> Entry:
+def _web_search_entry(result: ExecResult | None, *, query: str) -> Entry:
     """Keep the search's plain result lines as untrusted homework for the understanding call alone."""
-    result = await run_setup_tool(owner, desk_id, "native.web_search", {"query": query},
-                                  timeout_s=WEB_SEARCH_EXECUTE_TIMEOUT_S)
     if result is None or result.state != "succeeded":
         return Entry(role="tool_label", text=WEB_SEARCH_FAILED_LABEL, read="web_search")
     results = result.model_view.get("results")
@@ -901,26 +928,40 @@ async def _search_web(owner: OwnerCtx, desk_id: str, query: str) -> Entry:
 
 
 async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
-    """Read together under one budget; cancel unfinished reads and keep labels in their display order."""
+    """Decide all reads before executing together; both phases share one budget and keep display order."""
     desk_id = interview.desk_id
-    reads = [(_read_memory(owner, desk_id), Entry(role="tool_label", text=MEMORY_FAILED_LABEL, read="memory"))]
+    reads: list[tuple[str, dict, Callable[[ExecResult | None], Entry], float | None]] = [
+        ("native.read_memory", {"query": MEMORY_QUERY}, _memory_entry, None)]
     site = website_url(interview.transcript[0].website)
     if site is not None:
         url, host = site
-        reads.append((_read_website(owner, desk_id, url, host),
-                      Entry(role="tool_label", text=WEBSITE_FAILED_LABEL.format(host=host), read="website", website=url)))
-    reads.extend((_search_web(owner, desk_id, query),
-                  Entry(role="tool_label", text=WEB_SEARCH_FAILED_LABEL, read="web_search"))
+        reads.append(("native.fetch_website", {"url": url}, partial(_website_entry, url=url, host=host), None))
+    reads.extend(("native.web_search", {"query": query}, partial(_web_search_entry, query=query),
+                  WEB_SEARCH_EXECUTE_TIMEOUT_S)
                  for query in (interview.transcript[0].search_queries or [])[:3])
-    tasks = [asyncio.create_task(read) for read, _ in reads]
+    tasks: dict[int, asyncio.Task[ExecResult | None]] = {}
     try:
-        await asyncio.wait(tasks, timeout=HOMEWORK_BUDGET_S)
+        async with asyncio.timeout(HOMEWORK_BUDGET_S):
+            allowed = []
+            for index, (tool, args, _, timeout_s) in enumerate(reads):
+                decision = await decide_setup_tool(owner, desk_id, tool, args)
+                if decision is not None:
+                    allowed.append((index, tool, decision, timeout_s))
+            # /decide takes an exclusive session lock; /execute holds a shared lock through the read.
+            # Finish every decision first so a long search cannot block a later decision's short timeout.
+            for index, tool, decision, timeout_s in allowed:
+                tasks[index] = asyncio.create_task(execute_setup_tool(owner, tool, decision, timeout_s=timeout_s))
+            if tasks:
+                await asyncio.gather(*tasks.values())
+    except TimeoutError:
+        pass
     finally:
-        for task in tasks:
+        for task in tasks.values():
             if not task.done():
                 task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-    return [failed if task.cancelled() else task.result() for task, (_, failed) in zip(tasks, reads, strict=True)]
+        await asyncio.gather(*tasks.values(), return_exceptions=True)
+    return [entry(tasks[index].result() if index in tasks and not tasks[index].cancelled() else None)
+            for index, (_, _, entry, _) in enumerate(reads)]
 
 
 # The interview -----------------------------------------------------------------------------------------------------
