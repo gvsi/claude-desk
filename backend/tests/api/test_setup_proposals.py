@@ -1387,6 +1387,28 @@ async def test_payment_accept_is_refused_while_business_tools_are_disabled(propo
     assert next(card for card in shown(declined) if card["proposal_id"] == ids[1])["state"] == "declined"
 
 
+@pytest.mark.parametrize("payment", [False, True])
+@pytest.mark.parametrize("amount", [None, 25_000])
+async def test_disabled_payment_amount_error_precedes_non_payment_validation(
+        proposals, app, engine, payment, amount):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    proposal_id = ids[1 if payment else 0]
+    await show_card(engine, interview_id, proposal_id)
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
+    body = {"accept": True}
+    if amount is not None:
+        body["amount_cents"] = amount
+    before = await stored(engine, interview_id)
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{proposal_id}?cards=1", json=body)
+    if payment or amount is not None:
+        assert reply.status_code == 422, reply.text
+        assert reply.json()["error"] == ("amount_required" if payment else "invalid")
+        assert await stored(engine, interview_id) == before
+    else:
+        assert reply.status_code == 200, reply.text
+
+
 @pytest.mark.parametrize("tools_enabled", [False, True])
 @pytest.mark.parametrize("config_missing", [False, True])
 async def test_stored_accepted_unpriced_payment_is_declined_and_excluded_from_rules(
