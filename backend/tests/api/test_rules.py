@@ -1001,6 +1001,8 @@ async def test_simulate_tool_change_proxies(app, browser, fake, kernel_http):
     assert (native.status_code, native.json()) == (422, {"error": "kernel", "code": "invalid"})
     unknown = await owner.browser.post(f"{tools}/simulate_change", json={"tool": "admin.export_customers"})
     assert (unknown.status_code, unknown.json()) == (422, {"error": "invalid"})
+    business = await owner.browser.post(f"{tools}/simulate_change", json={"tool": "desk.intake"})
+    assert (business.status_code, business.json()) == (422, {"error": "invalid"})
     other = await new_owner(app, browser, fake, kernel_http)
     elsewhere = await other.browser.post(f"{tools}/simulate_change", json={"tool": "payments.create_refund"})
     assert (elsewhere.status_code, elsewhere.json()) == (404, {"error": "not_found"})

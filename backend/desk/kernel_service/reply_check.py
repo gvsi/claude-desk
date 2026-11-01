@@ -5,14 +5,15 @@ the session-state rows ("Session state responses": token, copy, closed, generati
 
 1. A paused session (the breaker) gets only the handoff clause and a `session_paused` violation;
    nothing is scanned.
-2. Language: `lang.detect` on the prose. Another language is `unsupported_language`; too little to
-   tell falls back to the session's language, else English. Cards render in this language. The
-   session's language is set at turn start from the visitor's latest message
-   (`POST /sessions/{session_id}/turn`, `turn.py`), and kept or changed at the end by the language
-   of Claude's prose (step 7). It decides only the language a reply whose prose can't be told
-   renders in: the code's checks find the same in a draft whichever language the session reads,
-   since both lexicons always run; the soft-promise check is told that language, with the cards
-   rendered in it.
+2. Language: `lang.detect` on the prose. Positive evidence of another language is
+   `unsupported_language`; four or more unmarked words are `uncertain_language`, one checked
+   rewrite. Both use the session's language, else English, as does too little to tell. Cards
+   render in this language. The session's language is set at turn start from the visitor's latest
+   message (`POST /sessions/{session_id}/turn`, `turn.py`), and kept or changed at the end by the
+   language of Claude's prose (step 7); neither unmarked nor unsupported prose changes it. It
+   decides only the language a reply whose prose can't be told renders in: the code's checks find
+   the same in a draft whichever language the session reads, since both lexicons always run; the
+   soft-promise check is told that language, with the cards rendered in it.
 3. `scan_prose`: numerals and the letters drawn as digits, currency and percent signs, words
    mixing Latin letters with another script (but for the Desk's own name and its business's
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
@@ -39,21 +40,29 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reads the prose and the cards, each as its kind's label and its text (`render.check_text`,
    "Payment link card: ..."; never the visitor's words), and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
-   (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks
-   too (`soft.unavailable`). While the session has an open handoff the handoff card opened
+   (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (8 s), with no recheck and no
+   fallback (the owner's decision of 2026-10-31), inside the API's 12 s for the route: no
+   verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
+   (`soft.unavailable`), which gets one rewrite like the other prose kinds (the owner's ruling
+   of 2026-11-01); the final check makes its own try. While the session has an open handoff the
+   handoff card opened
    (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
    doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
    here" is backed, as the card that opened it said. A call-back request backs nothing (the
    owner's decision of 2026-10-31): its own card names a time and never says the owner will
    reply here, and once its window has passed nothing promises a call. That handoff is read
-   without a lock, so the model never holds one; a reply that passes with its card is checked
-   again in step 7. When configured, TypeSafe Jev evaluates the same prose, labelled cards and
-   fixed next steps concurrently, within three seconds of Sonnet's six-second window. Its top score
-   at or above 0.95 adds `soft.jev`; its failure leaves Sonnet's verdict standing. No key means
-   no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not ledger floats.
-6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
-   handoff clause, in the reply's language, or no block at all for a first attempt the API
-   rewrites (`final` false, every violation one a rewrite can fix), which is never shown.
+   without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
+   each check one pooled connection, across the try. A reply that passes with the handoff's
+   card is checked again in step 7. When configured, TypeSafe Jev evaluates the same prose, labelled
+   cards and fixed next steps concurrently, within three seconds of Sonnet's eight-second window.
+   Its top score at or above 0.95 adds `soft.jev`; its failure leaves Sonnet's verdict standing.
+   No key means no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not
+   ledger floats.
+6. `ok` when nothing was found: the prose (when not empty) and the cards. A prose-only failure
+   keeps checked cards without the prose, then the handoff clause if Claude drafted one, which
+   opens the owner's handoff as the handoff card does; any other failure, or no card to keep,
+   shows only the handoff clause. A first attempt the API rewrites (`final` false, every
+   violation one a rewrite can fix) has no blocks and is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
    lines, until the next turn starts (its row written only now, so no lock on it is held while the
    model reads the draft); a reply that passed step 5 with an open handoff's card passes only if a
@@ -99,7 +108,7 @@ from desk.public_person import future_person_direction
 from desk.public_contact import valid_public_contact
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
-from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Person
+from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
@@ -110,7 +119,7 @@ from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import principal_for, verified
 from desk.next_steps import next_steps
-from desk.rewrites import REWRITABLE
+from desk.rewrites import PROSE_ONLY, REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
@@ -584,7 +593,7 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
                 if (free_reach is not None and free_reach[start] >= end
-                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS)
+                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS, amenities=True)
                         and ("(?=" not in pattern.pattern or _Lookahead(
                             reading, origin, pattern, match.start(), match.end()).holds_at(free_reach[start]))):
                     continue
@@ -601,16 +610,19 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
     return sorted(hits, key=lambda hit: (hit[0], hit[2]))
 
 
-def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
+def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str], *,
+                        amenities: bool) -> bool:
     """A promise hit in public text passes only as a real word the owner allowed for this key, read across
-    case, width and accents without substituting lookalikes, or as an English or Spanish free-price
-    phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
-    "Consultations are complimentary." don't. `text` is the key's own text."""
+    case, width and accents without substituting lookalikes, or, with `amenities`, as an English or Spanish
+    free-price phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
+    "Consultations are complimentary." don't. `text` is the key's own text. `amenities` has no default, so
+    every caller states it: charter policy text keeps the amenity exception, while business tool card
+    fields follow the master plan's narrower rule, where only `allow_words` can pass a promise hit."""
     word = "".join(char for char in unicodedata.normalize("NFKD", text[start:end])
                    if unicodedata.category(char) not in ("Mn", "Me")).casefold()
     promise = rule.startswith("lex.") and rule.endswith(".promise")
     return ((promise and word in allow_words)
-            or ((promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
+            or (amenities and (promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
 
 
 # The service area's allowance (the owner's ruling: distances, number words, years and day words).
@@ -689,7 +701,7 @@ def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, 
 
 
 def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
-                     policy_key: str | None = None) -> list[str]:
+                     policy_key: str | None = None, amenities: bool = True) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
     Both prose lexicons run, whatever the text's language. Policy-only phrases also refuse
@@ -698,13 +710,14 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
     Format controls are refused because
     policy cards render the original text, whereas the prose scan reads normalized text.
     Pure: no reads or writes, and no matched text returned to callers that record a refusal.
+    The amenity exception is for charter policy text only; any other caller passes `amenities=False`.
     """
     normalized = shown(text)
     rules = {rule for start, end, rule, _ in _prose_hits(normalized)
-             if not _allowed_public_hit(normalized, start, end, rule, allow_words)
+             if not _allowed_public_hit(normalized, start, end, rule, allow_words, amenities=amenities)
              and not _allowed_service_area_hit(policy_key, normalized, start, end, rule)}
     rules.update(rule for start, end, rule in _policy_phrase_spans(normalized)
-                 if not _allowed_public_hit(normalized, start, end, rule, allow_words))
+                 if not _allowed_public_hit(normalized, start, end, rule, allow_words, amenities=amenities))
     if lang.positive_other_language(normalized):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
@@ -713,7 +726,8 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
 
 
 def scan_public_policies(values: Mapping[str, str],
-                         allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
+                         allow_words: Mapping[str, frozenset[str]] = {}, *,
+                         amenities: bool = True) -> dict[str, list[str]]:
     """Scan policies individually and as adjacent paragraphs/cards, separated by a newline.
 
     Keys sort like their `charter:<key>` fact IDs on the public page (C collation). Offsets
@@ -721,12 +735,14 @@ def scan_public_policies(values: Mapping[str, str],
     Keep full match ranges for attribution, even when a violation's display span is truncated.
     Only contributing keys and rule IDs leave the scan. Allowed words apply to one key only;
     matches or their required right context crossing a key boundary remain refused.
+    The amenity exception is for charter policy text only; any other caller passes `amenities=False`.
     """
-    return _scan_public_parts(sorted(values.items()), allow_words)
+    return _scan_public_parts(sorted(values.items()), allow_words, amenities=amenities)
 
 
 def _scan_public_parts(values: Sequence[tuple[str | None, str]],
-                       allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
+                       allow_words: Mapping[str, frozenset[str]] = {}, *,
+                       amenities: bool = True) -> dict[str, list[str]]:
     """The public-text rules in the supplied rendering order, attributed to policy IDs.
 
     A None key is reply prose: it supplies context, but its own refusals stay with the
@@ -736,7 +752,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     for key, value in values:
         if key is not None:
             fields.setdefault(key, set()).update(scan_public_text(
-                value, allow_words.get(key, frozenset()), policy_key=key))
+                value, allow_words.get(key, frozenset()), policy_key=key, amenities=amenities))
     ranges: list[tuple[str | None, int, int]] = []
     pieces: list[str] = []
     offset = 0
@@ -755,7 +771,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     for start, end, rule in _policy_phrase_spans(combined):
         if any(key is not None and low <= start and end <= high
                and _allowed_public_hit(combined[low:high], start - low, end - low, rule,
-                                       allow_words.get(key, frozenset()))
+                                       allow_words.get(key, frozenset()), amenities=amenities)
                for key, low, high in ranges):
             continue
         for key, low, high in ranges:
@@ -779,7 +795,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
         contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]
         if any(key is not None and low <= start and end <= high
                and (_allowed_public_hit(combined[low:high], start - low, match_end - low, rule,
-                                        allow_words.get(key, frozenset()))
+                                        allow_words.get(key, frozenset()), amenities=amenities)
                     or _allowed_service_area_hit(key, combined[low:high], start - low, match_end - low, rule))
                for key, low, high in contributors):
             continue
@@ -855,7 +871,7 @@ async def _free_slots(ctx: KernelCtx, desk_id: str, fact: Fact) -> Fact | None:
 
 async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, desk: DeskInfo,
                         clauses: Sequence[Clause], language: render.Language,
-                        canaries: Mapping[str, str]) -> tuple[list[RenderedBlock], list[Violation]]:
+                        canaries: Mapping[str, str]) -> tuple[list[RenderedBlock], list[Violation], dict[str, list[Claim]]]:
     """Step 4: each clause's card, or why it can't be shown. A clause must name a registered
     template Claude may draft (`template_unavailable`, `kernel_only_template`); a handoff or
     verify prompt names no fact; any other names a fact of this copy and Desk (`unknown_fact`)
@@ -876,6 +892,7 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
     now = ctx.clock.now()
     blocks: list[RenderedBlock] = []
     violations: list[Violation] = []
+    rendered_claims: dict[str, list[Claim]] = {}
     for clause in clauses:
         template = render.TEMPLATES.get(clause.template)
         if clause.fact_id is not None and (named := labels.find_canaries(clause.fact_id, canaries)):
@@ -901,6 +918,8 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
                 violations.append(_clause_violation(clause, "unentitled_fact", "not_a_reader"))
                 continue
             fact = row if isinstance(row, Fact) else labels.fact_of(row)
+            # Preserve the source claims before slot filtering and before any locked ORM refresh.
+            rendered_claims[fact.fact_id] = [claim.model_copy(deep=True) for claim in fact.claims]
             if not template.reads(fact):
                 violations.append(_clause_violation(clause, "unknown_fact", "template_mismatch"))
                 continue
@@ -924,7 +943,7 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
             violations.append(_clause_violation(clause, "unknown_fact", "contact_format"))
             continue
         blocks.append(block)
-    return blocks, violations
+    return blocks, violations, rendered_claims
 
 
 # ---- The verdict ----------------------------------------------------------------------------------
@@ -950,6 +969,64 @@ def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
     return render.render_clause(Clause(template="handoff"), None, language, desk)
 
 
+def blocked_blocks(cards: Sequence[RenderedBlock], violations: Sequence[Violation],
+                   language: render.Language, desk: DeskInfo) -> list[RenderedBlock]:
+    """Keep checked cards for prose-only failures, without the prose, and after them the handoff
+    clause when Claude drafted one (the owner's ruling of 2026-11-01), rendered by the kernel in the
+    reply's language; `finalize` then opens the owner's handoff for it as for any shown handoff
+    card. All other failures, or no card to keep, show the handoff clause alone."""
+    if violations and all(violation.kind in PROSE_ONLY for violation in violations):
+        kept = [card for card in cards if card.kind == "card" and card.template != "handoff"]
+        if kept:
+            drafted = any(card.kind == "card" and card.template == "handoff" for card in cards)
+            return kept + ([handoff(language, desk)] if drafted else [])
+    return [handoff(language, desk)]
+
+
+async def recheck_cards(ctx: KernelCtx, session_row: SessionRow,
+                        blocks: Sequence[RenderedBlock], *,
+                        rendered_claims: Mapping[str, list[Claim]]) -> tuple[list[RenderedBlock], list[Violation]]:
+    """Re-read card entitlements and currency after holding the session row, before signing.
+
+    The explicit lock also covers a repeated check whose frozen last-seen value caused no UPDATE.
+    Open handoffs are held before facts, including for a possible last-card fallback. Fact rows
+    are refreshed FOR SHARE in fact ID order, rather than using earlier ORM identity-map values:
+    a withdrawal either commits first or waits until this verdict's transaction commits.
+    No model call runs under this lock; the draft's generation remains unchanged for its signature.
+    """
+    cards = [block for block in blocks if block.kind == "card" and block.fact_id is not None]
+    if not cards:
+        return list(blocks), []
+    current = await _lock_session(ctx, session_row)
+    await open_handoff_ids(ctx, session_row, lock=True)
+    rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == session_row.desk_id, FactRow.fact_id.in_([card.fact_id for card in cards]))
+        .order_by(FactRow.fact_id).with_for_update(read=True).execution_options(populate_existing=True)))}
+    # Every Desk already has a head. Take the final lock before checking expiry too: waiting for
+    # the reply's append must not let a card age out between its currency check and signing.
+    (await ctx.db.execute(ctx.repo.scoped(select(LedgerHead.desk_id).where(
+        LedgerHead.desk_id == session_row.desk_id).with_for_update()))).scalar_one()
+    readers, now = labels.session_readers(current), ctx.clock.now()
+    kept, refused = [], []
+    for block in blocks:
+        if block not in cards:
+            kept.append(block)
+            continue
+        clause = Clause(template=block.template, fact_id=block.fact_id)
+        row = rows.get(block.fact_id)
+        if current.closed_at is not None or (row is not None and not labels.can_read(row.readers, readers)):
+            refused.append(_clause_violation(clause, "unentitled_fact", "not_a_reader"))
+        elif row is None:
+            refused.append(_clause_violation(clause, "unknown_fact", "no_such_fact"))
+        elif not render.TEMPLATES[block.template].current(labels.fact_of(row), now):
+            refused.append(_clause_violation(clause, "stale_fact", "not_current"))
+        elif row.claims != rendered_claims.get(block.fact_id):
+            refused.append(_clause_violation(clause, "stale_fact", "claims_changed"))
+        else:
+            kept.append(block)
+    return kept, refused
+
+
 async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft, *,
                       final: bool = True) -> ReplyVerdict:
     """Steps 1 to 7 for a draft from Claude in an authenticated session ("Reply check"). `final` is
@@ -970,15 +1047,22 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     detected = lang.detect(language_prose)
     language: render.Language = detected if detected in ("en", "es") else fallback
     violations: list[Violation] = []
-    if detected == "other":
-        violations.append(Violation(kind="unsupported_language", span=_span(language_prose), rule_id="language"))
+    if detected in ("other", "unmarked"):
+        violations.append(Violation(
+            kind="uncertain_language" if detected == "unmarked" else "unsupported_language",
+            span=_span(language_prose), rule_id="language_uncertain" if detected == "unmarked" else "language"))
     # Clauses first: the scan exempts only booking or callback cards that passed; refusals follow the prose's.
-    cards, refused = await check_clauses(ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
+    cards, refused, rendered_claims = await check_clauses(
+        ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
                              booking_card=any(card.template == "booking_confirmed" for card in cards),
                              callback_card=any(card.template == "callback_confirmed" for card in cards))
     violations += refused
     violations += policy_card_violations(prose, cards)
+    detected_language = detected if detected in ("en", "es") else None
+    if any(violation.kind == "unsupported_language" for violation in violations):
+        # The scan can reject mixed-script prose even when ordinary markers detected English.
+        language, detected_language = fallback, None
     usage = None
     soft_checks = None
     handoff_backed = False                  # the soft-promise check was shown an open handoff's card
@@ -991,30 +1075,33 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing)
         violations += found
     if violations:
-        blocks = [handoff(language, desk)]
+        blocks = blocked_blocks(cards, violations, language, desk)
     else:
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
                           author="claude", fact_ids=fact_ids, soft_promise=usage, soft_checks=soft_checks, seen=True,
-                          detected=detected if detected in ("en", "es") else None, canaries=canaries,
-                          handoff_backed=handoff_backed, final=final)
+                          detected=detected_language, canaries=canaries,
+                          handoff_backed=handoff_backed, final=final, rendered_claims=rendered_claims)
 
 
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None, dict]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card), each shown to Sonnet and Jev alike as its kind's
-    label and its text (`render.check_text`). A `soft_promise` violation per flag set
-    (`soft.promise`, `soft.denies_ai`), or `soft.unavailable` when there is no verdict, each
-    spanning the prose's start; optional Jev adds `soft.jev`, also spanning the prose's start.
-    Returns violations, Sonnet usage and both verdicts for the ledger. (`finalize` adds
+    label and its text (`render.check_text`), with the session's fixed next steps from its
+    resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
+    no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
+    (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
+    error, a refusal, an unparsable answer) is `check_unavailable` (`soft.unavailable`). Optional
+    Jev runs beside it, bounded on its own, and adds `soft.jev` (a `soft_promise`), also spanning
+    the prose's start. Returns the violations, Sonnet's usage and both verdicts for the ledger.
+    (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
         Desk.desk_id == session_row.desk_id)))).one()
     tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
-    steps = next_steps(tools)
     data = SoftPromiseInput(language=language, prose=prose, cards=[render.check_text(card) for card in cards],
-                            next_steps=steps)
+                            next_steps=next_steps(tools))
     if ctx.settings.typesafe_api_key:
         # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
         (verdict, usage), jev_result = await asyncio.gather(
@@ -1024,15 +1111,15 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
         verdict, usage = await ctx.decisions.soft_promise(data)
         jev_result = jev.Result(status="off")
     if verdict is None:
-        rule_ids = ["soft.unavailable"]
+        violations = [Violation(kind="check_unavailable", span=_span(prose), rule_id="soft.unavailable")]
     else:
         rule_ids = (["soft.promise"] if verdict.promises_beyond_cards else []) + (
             ["soft.denies_ai"] if verdict.denies_being_ai else [])
-    violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=rule_id) for rule_id in rule_ids]
+        violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=rule_id) for rule_id in rule_ids]
+    record = {"sonnet": {"flags": verdict.model_dump(mode="json") if verdict is not None else None,
+                         "blocked": bool(violations)}, "jev": jev_result.ledger_summary()}
     if jev_result.blocked:
         violations.append(Violation(kind="soft_promise", span=_span(prose), rule_id="soft.jev"))
-    record = {"sonnet": {"flags": verdict.model_dump(mode="json") if verdict is not None else None,
-                         "blocked": bool(rule_ids)}, "jev": jev_result.ledger_summary()}
     return violations, usage, record
 
 
@@ -1051,17 +1138,22 @@ def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int
 
 async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[RenderedBlock],
                    violations: Sequence[Violation], language: render.Language, author: str,
-                   fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None, soft_checks: dict | None = None,
-                   seen: bool = False,
+                   fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None,
+                   soft_checks: dict | None = None, seen: bool = False,
                    detected: render.Language | None = None, visitor_plain_key: str | None = None,
                    message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES,
-                   handoff_backed: bool = False, final: bool = True) -> ReplyVerdict:
+                   handoff_backed: bool = False, final: bool = True,
+                   rendered_claims: Mapping[str, list[Claim]] | None = None) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
-    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, soft_checks, final}`, the reply
-    receipt and the signature, at the session's generation as the request read it. `ok` is no
-    violations. The receipt is the status line `visitor_plain_key`, or without one `reply_checked`
-    when ok and `reply_handed_off` otherwise. The owner's say ends here too, with its own receipts
-    and the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
+    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, soft_checks, dropped,
+    final}`, the reply receipt and the signature, at the session's generation as the request read it.
+    `dropped` names each card refused at signing (`{fact_id, rule_id}`, never text), so a card a
+    prose-blocked draft lost is still accounted for. `ok` is no violations. The receipt is the
+    status line `visitor_plain_key`, or for a shown reply `reply_handed_off` exactly when its blocks
+    include the handoff clause (template `handoff`), otherwise `reply_checked`, so checked cards
+    kept alone after a prose-only failure carry the reply receipt. A blocked first attempt with no
+    shown blocks keeps `reply_handed_off`. The owner's say ends here too, with its own receipts and
+    the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
     holding one of `canaries` is ledgered only as a marker of its hash (`ledger.withheld_ref`).
 
     With `seen` (a draft the session's own call sent), the session row is written first: seen
@@ -1079,14 +1171,25 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     record. If the owner marked it done meanwhile, or a call-back request made it a call-back's,
     nothing backs the card's words any longer: the verdict fails as the
     check would have failed it without the card, with a `soft_promise` violation
-    (`soft.handoff_closed`) and the handoff card in the prose's place, which then opens a new
+    (`soft.handoff_closed`). The shared blocked-block helper keeps checked cards, and a drafted
+    handoff after them; with none to keep it substitutes the handoff card, which may open a new
     handoff.
 
+    Cards on passing and blocked drafts are rechecked under the session lock before signing:
+    closed_at, person and assurance are read afresh, then all cited facts' readers, status and
+    expiry and claims in one ordered FOR SHARE query, held through the signature and commit. Claims
+    must match the snapshot used to render the cards, including facts replaced in place. Open handoffs
+    are locked before facts so a last-card refusal can fall back without reversing the lock order.
+    Currency is checked after taking the ledger head too, so expiry is current after every lock
+    wait. A blocked draft drops cards that no longer pass. A passing draft whose backing card
+    was withdrawn fails with that clause's refusal, so none of its prose is shown.
+
     When the verdict of Claude's draft shows the handoff card and the visitor will see it, the
-    session's owner handoff is opened next, before the ledger head (`open_card_handoff`), and
-    ledgered just before the verdict: a reply that passed citing the handoff clause always; a
-    blocked draft when it is `final`, or when one of its violations is outside the kinds a rewrite
-    can fix (`desk.rewrites.REWRITABLE`), since the API then hands off at once. A first attempt
+    session's owner handoff is opened next (`open_card_handoff`) and ledgered just before the
+    verdict, reusing any locks the card recheck already holds: a reply that passed citing the
+    handoff clause always; a blocked draft when it is `final`, or when one of its violations is
+    outside the kinds a rewrite can fix (`desk.rewrites.REWRITABLE`), since the API then hands off
+    at once. A first attempt
     (`final` false) blocked only for rewritable kinds is never shown, since the API asks Claude
     for a rewrite, so it opens none, and its verdict, still signed and ledgered, carries no blocks:
     the kernel never signs a showable handoff card that no handoff backs, and the API's rewrite
@@ -1100,7 +1203,17 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     if handoff_backed and not violations and not await handoff_still_open(ctx, session_row):
         prose = next((block.text for block in blocks if block.kind == "prose"), "")
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
-        blocks = [handoff(language, await _desk_info(ctx, session_row.desk_id))]
+        blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
+    dropped: list[Violation] = []      # cards refused at signing, whether or not the prose had passed
+    if author == "claude":
+        blocks, refused = await recheck_cards(ctx, session_row, blocks, rendered_claims=rendered_claims or {})
+        dropped = refused
+        if refused:
+            # A passing draft may have relied on a card just withdrawn: none of its prose is safe
+            # to keep. Already-blocked prose keeps only the cards that still pass, in draft order.
+            if not violations:
+                violations = refused
+            blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
     shown = not violations or final or any(violation.kind not in REWRITABLE for violation in violations)
     if author == "claude" and not shown:
         blocks = []                    # the API rewrites it: no handoff card is signed that no handoff backs
@@ -1112,16 +1225,18 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     summary = {"message_id": message_id, "author": author, "ok": ok, "language": language,
                "violations": [violation.kind for violation in violations],
                "rule_ids": [violation.rule_id for violation in violations],
-               "fact_ids": [ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries)
-                            else ledger.safe_ref(fact_id) for fact_id in fact_ids],
+               "fact_ids": [_ref(fact_id, canaries) for fact_id in fact_ids],
                "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None,
                "soft_checks": soft_checks,
+               "dropped": [{"fact_id": _ref(fact_id, canaries), "rule_id": violation.rule_id}
+                           for violation in dropped for fact_id in violation.fact_ids],
                "final": final}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
     owner = (await _desk_info(ctx, session_row.desk_id)).owner_display_name
     if visitor_plain_key is None:
-        visitor_plain_key = "reply_checked" if ok else "reply_handed_off"
+        visitor_plain_key = ("reply_handed_off" if not shown or any(block.template == "handoff" for block in blocks)
+                             else "reply_checked")
     visitor_plain = render.status(visitor_plain_key, language, owner=owner)
     signature = sign_verdict(ctx.signer, session_id=session_row.session_id, generation=session_row.generation,
                              message_id=message_id, blocks=blocks, visitor_plain=visitor_plain, ledger_seq=entry.seq)
@@ -1129,6 +1244,11 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                         message_id=message_id, generation=session_row.generation, visitor_plain=visitor_plain,
                         ledger_seq=entry.seq, signature=signature)
 
+
+
+def _ref(fact_id: str, canaries: Mapping[str, str]) -> str:
+    """A fact ID as a reply's ledger entry names it: one holding a canary only as its hash's marker."""
+    return ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries) else ledger.safe_ref(fact_id)
 
 # ---- The handoff the card opens -------------------------------------------------------------------
 
@@ -1162,7 +1282,8 @@ async def _lock_session(ctx: KernelCtx, session_row: SessionRow):
     takes, read as columns (its generation, kind, assurance and person), so the row the request
     read keeps the generation the verdict is signed at."""
     return (await ctx.db.execute(ctx.repo.scoped(
-        select(SessionRow.generation, SessionRow.kind, SessionRow.assurance, SessionRow.person_id).where(
+        select(SessionRow.session_id, SessionRow.generation, SessionRow.kind, SessionRow.assurance,
+               SessionRow.person_id, SessionRow.closed_at).where(
             SessionRow.session_id == session_row.session_id).with_for_update(key_share=True)))).one()
 
 
@@ -1216,7 +1337,8 @@ async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | No
     takes, read as columns, so the row the request read keeps the generation the verdict is signed
     at), then the session's open handoffs `FOR SHARE`, then the ledger head. Two checks of one
     session, a call-back's execution (which holds the session row `FOR UPDATE`) and the owner's
-    mark of done (which holds the handoff `FOR UPDATE`) each come wholly before or after it.
+    mark of done (which holds the handoff `FOR UPDATE`) each come wholly before or after it. A
+    last-card fallback reuses these locks from `recheck_cards`; its new handoff has a fresh key.
 
     It opens none when a take-over or hand-back has moved the session to another generation since
     the request read it (`deliver()` drops the verdict, so the visitor never sees the card); while
@@ -1337,6 +1459,6 @@ async def post_check_reply(body: CheckReplyRequest, ctx: Ctx, request: Request) 
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id))
     verdict = await check_draft(ctx, row, draft, final=body.final)
-    if row.kind == "agent":            # a turn ends at a blocked check only when the API said it was final
+    if row.kind == "agent":            # immediate kinds, an explicit final check, or the second check end the turn
         await agents.end_turn(ctx, request, verdict, final=body.final and "final" in body.model_fields_set)
     return verdict

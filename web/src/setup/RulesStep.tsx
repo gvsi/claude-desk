@@ -9,12 +9,12 @@ import {
   Button,
   Card,
   EmptyState,
-  LoadingLine,
   MoneyLimit,
   Notice,
   OutcomeGroups,
   PageHeader,
   SituationRow,
+  SkeletonScreen,
   StatusLabel,
   type OutcomeGroupRow,
   type RuleMode,
@@ -28,6 +28,7 @@ import { SETUP_COPY } from './copy.ts';
 import { useLanding } from './landing.ts';
 import { aroundBusiness, setupRulesQuery } from './shared.ts';
 import { PublicLinesStep } from './PublicLinesStep.tsx';
+import { DraftRulesSkeleton, SituationsSkeleton } from './StepSkeletons.tsx';
 
 const copy = SETUP_COPY.rules;
 
@@ -148,7 +149,7 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
     const s = SETUP_COPY.situations;
     let body: ReactNode;
     if (situations.data === undefined) {
-      body = situations.isError ? failure(situations.error, () => void situations.refetch()) : <LoadingLine>{s.loading}</LoadingLine>;
+      body = situations.isError ? failure(situations.error, () => void situations.refetch()) : null;
     } else {
       body = (
         <>
@@ -186,14 +187,21 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
     return (
       <div className="cd-setup-step">
         <PageHeader title={s.title} subtitle={aroundBusiness(s.subtitle, business)} />
-        {body}
+        <SkeletonScreen
+          loading={situations.data === undefined && !situations.isError}
+          status={s.loading}
+          skeleton={<SituationsSkeleton />}
+          className="cd-setup-step__region"
+        >
+          {body}
+        </SkeletonScreen>
       </div>
     );
   }
 
   let body: ReactNode;
   if (draft.data === undefined) {
-    body = draft.isError ? failure(draft.error, () => void draft.refetch()) : <LoadingLine>{copy.loading}</LoadingLine>;
+    body = draft.isError ? failure(draft.error, () => void draft.refetch()) : null;
   } else {
     const check = checkStatus(draft.data.proof);
     // Only a draft whose check passed goes on; one that can't be checked, or failed, waits here.
@@ -217,7 +225,16 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} subtitle={copy.subtitle} />
-      {body}
+      {/* The rows name customers from the people read, so the draft waits for it too. Opened at
+          Real situations, the draft is read first, under the situations' shapes and words. */}
+      <SkeletonScreen
+        loading={draft.data === undefined ? !draft.isError : people.isPending}
+        status={view === 'situations' ? SETUP_COPY.situations.loading : copy.loading}
+        skeleton={view === 'situations' ? <SituationsSkeleton /> : <DraftRulesSkeleton />}
+        className="cd-setup-step__region"
+      >
+        {body}
+      </SkeletonScreen>
     </div>
   );
 }

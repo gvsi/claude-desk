@@ -24,6 +24,7 @@ const KIND_LINES = {
   head_checkpoint: 'A signed checkpoint of the record so far.',
   desk_data: "A change to your Desk's details.",
   web_search: 'Web search.',
+  business_tools: "A change to your Desk's jobs.",
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**

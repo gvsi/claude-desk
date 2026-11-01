@@ -86,11 +86,19 @@ def _profile(row: Tool) -> ToolProfile:
 async def session_context(ctx: KernelCtx, principal: Principal, session_row: SessionRow,
                           desk_row: Desk) -> SessionContext:
     """The kernel's local time, tools, facts and knowledge given to the authenticated session."""
+    from desk.kernel_service.adapters import blocks
+
     desk_id = desk_row.desk_id
     rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id).order_by(Tool.tool)))
     profiles = {row.tool: _profile(row) for row in rows if row.profile is not None}
     given = await resolved_tools(ctx, principal, session_row, desk_row)
     declared = decide.declared_tools(principal.kind)
+    valid_business = {tool for tool, profile in profiles.items() if profile.source == "business"
+                      and profile.status == "enabled"
+                      and profile.business is not None and profile.business.config.block in blocks.SUPPORTED_BLOCKS
+                      and await adapters.resolve(ctx, desk_id, tool) is not None}
+    if principal.kind in ("visitor", "agent"):
+        declared = declared | valid_business
 
     readers = labels.session_readers(session_row)
     # the owner reads the business's own text; a conversation is never given a document's canary
@@ -131,7 +139,8 @@ async def resolved_tools(ctx: KernelCtx, principal: Principal, session_row: Sess
     enabled = await decide.enabled_tools(ctx, desk_row.desk_id)
     given = decide.tools_given(principal, session_row, desk_row, enabled)
     return [_profile(enabled[tool]) for tool in sorted(given)
-            if adapters.resolve(tool, enabled[tool]) is not None]
+            if adapters.profile_sha256(enabled[tool].profile) == enabled[tool].profile_sha256
+            and await adapters.resolve(ctx, desk_row.desk_id, tool) is not None]
 
 
 router = APIRouter()

@@ -380,11 +380,11 @@ async def chat(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, desk_id
 
 
 async def _suggested_card(owner: OwnerCtx, tool: str, effects: list[str], approved: list[dict],
-                          cap_cents: int) -> RuleCard | None:
+                          cap_cents: int, *, label: str | None = None) -> RuleCard | None:
     """The auto card that would have let Claude handle the `approved` requests of `tool`: for anyone, or for the
     verified record owner when the tool reaches private data; on a money tool, up to the largest amount approved
     (each read from the kernel) and never above the money cap, and none while the cap is 0."""
-    label = TOOL_LABELS[tool]
+    label = label if label is not None else TOOL_LABELS.get(tool, tool)
     card = {"card_id": f"suggested-{tool.replace('.', '-').replace('_', '-')}", "applies_to": tool, "mode": "auto",
             "who": "record_owner" if "private_data" in effects else "anyone",
             "reason": SUGGESTED_REASON.format(label=label.capitalize())}
@@ -408,10 +408,13 @@ async def suggestions(owner: OwnerCtx, desk_id: str, now: datetime) -> list[Sugg
     before `now` (by when each request was made) that no auto card of the active rules covers, by tool."""
     row = await active_row(owner, desk_id)
     active, cap = version_from_row(row), version_cap(row)
-    tools = {tool["tool"]: list(tool["effects"]) for tool in await owner.ro.rows("tools", desk_id=desk_id)}
+    listed = await owner.ro.rows("tools", desk_id=desk_id)
+    tools = {tool["tool"]: list(tool["effects"]) for tool in listed}
+    labels = {row["tool"]: (row["business"]["title"] if row.get("business") is not None
+                           else TOOL_LABELS.get(row["tool"], row["tool"])) for row in listed}
     since = now - SUGGEST_WINDOW
     recent = {decision["decision_id"]: decision for decision in await owner.ro.rows("decisions", desk_id=desk_id)
-              if utc(decision["created_at"]) >= since and decision["tool"] in tools and decision["tool"] in TOOL_LABELS}
+              if utc(decision["created_at"]) >= since and decision["tool"] in tools}
     approved: dict[str, list[dict]] = {}
     if recent:
         for approval in await owner.ro.rows("approvals", decision_id=list(recent), answer="allow_once"):
@@ -422,10 +425,10 @@ async def suggestions(owner: OwnerCtx, desk_id: str, now: datetime) -> list[Sugg
         if len(rows) < SUGGEST_AFTER or any(each.mode == "auto"
                                             for each in covering_cards(active.cards, tool, tools[tool])):
             continue
-        card = await _suggested_card(owner, tool, tools[tool], rows, cap)
+        card = await _suggested_card(owner, tool, tools[tool], rows, cap, label=labels[tool])
         if card is not None:
             found.append(Suggestion(tool=tool, count=len(rows), card=card,
-                                    text=SUGGESTION_TEXT.format(count=len(rows), label=TOOL_LABELS[tool])))
+                                    text=SUGGESTION_TEXT.format(count=len(rows), label=labels[tool])))
     return found
 
 

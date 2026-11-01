@@ -743,6 +743,11 @@
     padding: 12px 16px 0;
   }
 
+  /* 8 px either side of each name, not the laptop's 12, keeps the three pages on one row down to a 375 px phone. */
+  .vision-article .va-switch__link {
+    padding: 0 8px;
+  }
+
   .vision-article .va-hero {
     padding: 56px 16px 28px;
     text-align: left;

@@ -113,6 +113,55 @@ describe('the scripted Desk', () => {
     }
   });
 
+  it('kept_cards_with_drafted_handoff_open_the_owner_card_handoff', async () => {
+    const { session, events } = await openChat();
+    await send('cards-kept-handoff');
+    await drain();
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(events.find(([, ev]) => ev.type === 'receipt')?.[1]).toMatchObject({
+      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Maria Rivera'),
+    });
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    const ledger = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === session.session_id);
+    expect(ledger?.map((e) => e.event.kind)).toEqual(['session', 'decide', 'execute', 'desk_data', 'reply']);
+    expect(ledger?.find((e) => e.event.kind === 'decide')?.event.summary).toMatchObject({ tool: 'native.quote', outcome: 'allow' });
+    const entry = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
+    expect(entry?.event.summary).toMatchObject({ ok: false, violations: ['number_in_prose'] });
+    expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off, blocks: [rivera.blocks.quote.en, rivera.blocks.handoff.en] });
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(items.filter((item) => item.handoff?.session_id === session.session_id)).toMatchObject([
+      { decision: null, handoff: { kind: 'card', status: 'open' } },
+    ]);
+  });
+
+  it('cards_only_failure_keeps_checked_cards_without_a_handoff', async () => {
+    const { session, events } = await openChat();
+    await send('cards-only');
+    await drain();
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(events.find(([, ev]) => ev.type === 'receipt')?.[1]).toMatchObject({
+      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Maria Rivera'),
+    });
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    const ledger = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === session.session_id);
+    expect(ledger?.map((e) => e.event.kind)).toEqual(['session', 'decide', 'execute', 'reply']);
+    expect(ledger?.find((e) => e.event.kind === 'decide')?.event.summary).toMatchObject({ tool: 'native.quote', outcome: 'allow' });
+    const entry = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
+    expect(entry?.event.summary).toMatchObject({ ok: false, violations: ['number_in_prose'] });
+    expect(reply).toMatchObject({ handoff: false, visitor_plain: VISITOR_PLAIN.en.reply_checked, blocks: [rivera.blocks.quote.en] });
+    expect([...mockStore.world.handoffs.values()].filter((h) => h.handoff.session_id === session.session_id)).toEqual([]);
+  });
+
+  it('passed_handoff_card_sets_the_handoff_flag_and_line', async () => {
+    const { session, events } = await openChat();
+    await send('Talk to Maria');
+    await drain();
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off, blocks: [rivera.blocks.handoff.en] });
+    const entry = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
+    expect(entry?.event.summary).toMatchObject({ ok: true, violations: [] });
+  });
+
   it('script_matches_the_first_rule', async () => {
     const cases: [text: string, rule: RuleName, language: 'en' | 'es'][] = [
       // "off" comes before "pay": a discount asked with cash is held, not a payment link.
@@ -217,6 +266,13 @@ describe('the scripted Desk', () => {
       ['Who is Mariana?', 'other'],
       ['¿Cuánto?', 'price'],
       ['Llámame.', 'callback'],
+      // The two demo commands for a kept-card reply pick their rule only as the whole message.
+      ['cards-only', 'cards-only'],
+      [' Cards-Kept-Handoff ', 'cards-kept-handoff'],
+      ['Are you cards-only, or can I pay cash?', 'deposit'],
+      ['Is it cards-kept-handoff?', 'other'],
+      ['solo-tarjetas', 'cards-only'],
+      ['¿Aceptan solo-tarjetas?', 'other'],
     ];
     for (const [text, rule] of cases) expect(matchRule(text).name, text).toBe(rule);
 
@@ -853,6 +909,25 @@ describe('the scripted Desk', () => {
     expect(toolsDecided(preview.session_id)).toEqual(['native.quote']);
   });
 
+  it.each(['Talk to Maria', 'cards-kept-handoff'])('preview_handoff_opens_no_owner_item_%s', async (text) => {
+    mockStore.reset('rivera_quiet');
+    const opened = await call('openPreview', { params: { desk_id: deskId } });
+    expect(opened.status).toBe(200);
+    const { state } = opened.body as VisitorSession;
+    const events: [number, SseEvent][] = [];
+    mockStore.listen(slug, 0, (seq, ev) => events.push([seq, ev]));
+    await send(text);
+    await drain();
+
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off });
+    expect(reply?.type === 'message' && reply.blocks.some((block) => block.template === 'handoff')).toBe(true);
+    expect([...mockStore.world.handoffs.values()].filter((h) => h.handoff.session_id === state.session_id)).toEqual([]);
+    expect((await call('needsYou', { params: { desk_id: deskId } })).body).toEqual([]);
+    const entries = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === state.session_id);
+    expect(entries?.some((e) => e.event.summary.part === 'handoffs')).toBe(false);
+  });
+
   it('answering_is_read_when_a_turn_starts', async () => {
     // As the API gives a turn its tools when the turn starts: a question waiting behind a turn in
     // progress goes by Answering as it stands when its own turn begins, not when it was sent.
@@ -1461,7 +1536,7 @@ describe('rules and tools', () => {
     expect(before.tools.map((row) => row.tool)).toContain('payments.create_refund');
     expect(before.tools.every((row) => row.status === 'enabled')).toBe(true);
     expect(Object.keys(before.tools[0] ?? {}).sort()).toEqual(
-      ['cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
+      ['business', 'cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
     );
     // Each row lists the active cards that cover its tool, in card order, a shared one marked so (plan 02b Task 9).
     const quote = rivera.ruleCards['rv-quote'];
