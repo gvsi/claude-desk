@@ -56,10 +56,12 @@ async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read
 AMENITY_WORDING = ('Free parking', 'Complimentary coffee', 'Estacionamiento gratis', 'No cost parking')
 INTAKE = {'block': 'intake', 'questions': ['What?']}
 PAYMENT = {'block': 'purpose_payment', 'purpose': 'Initial retainer', 'amount_cents': 5000}
+SEEDED_URGENT = 'desk.emergency-callback'   # the Rivera seed's urgent business tool, on every copy
 
 
 async def put_card(kernel, ro_read, title, config):
-    """PUT one tool `desk.card`; return the refusal's detail (None when it passes) and the stored rows."""
+    """PUT one tool `desk.card`; return the refusal's detail (None when it passes) and the stored rows,
+    leaving out the Rivera seed's own urgent tool (`SEEDED_URGENT`), which every copy has."""
     from desk.api.kernel_client import KernelFailed
 
     http, schema, _ = kernel
@@ -73,7 +75,8 @@ async def put_card(kernel, ro_read, title, config):
     except KernelFailed as error:
         assert (error.status, error.code) == (422, 'invalid')
         detail = error.detail
-    return detail, ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
+    return detail, ro_read(schema, copy.copy_id,
+                           "SELECT tool FROM {ro}.tools WHERE source = 'business' AND tool <> %s", (SEEDED_URGENT,))
 
 
 @pytest.mark.kernel_plan('01c')
