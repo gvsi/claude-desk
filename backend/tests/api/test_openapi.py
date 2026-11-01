@@ -93,6 +93,23 @@ def test_public_line_writes_document_kernel_conflicts():
         assert "code: conflict" in conflict["description"], path
 
 
+def test_public_fact_confirmation_and_price_removal_require_displayed_values():
+    document = export_openapi()
+    schemas = document["components"]["schemas"]
+    assert "revision" in schemas["SetupPublicLines"]["required"]
+    confirm = schemas["SetupPublicLinesConfirmIn"]
+    assert set(confirm["required"]) == {"keys", "revision"}
+    assert confirm["properties"]["keys"]["minItems"] == 1
+    assert confirm["properties"]["revision"]["minLength"] == 1
+    removal = document["paths"]["/api/owner/setup/{id}/public_lines/prices/{item_id}"]["delete"]
+    query = {parameter["name"]: parameter for parameter in removal["parameters"] if parameter["in"] == "query"}
+    assert set(query) == {"title", "unit_cents"}
+    assert all(parameter["required"] for parameter in query.values())
+    assert query["title"]["schema"]["minLength"] == 1
+    assert query["unit_cents"]["schema"]["type"] == "integer"
+    assert query["unit_cents"]["schema"]["minimum"] == 0
+
+
 def test_every_route_has_typed_responses():
     document = export_openapi()
     schemas = document["components"]["schemas"]

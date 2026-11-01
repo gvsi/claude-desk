@@ -2814,13 +2814,14 @@ async def delete_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id:
 
 
 async def delete_public_price(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, item_id: str,
-                              now: datetime) -> SetupPublicLines:
+                              now: datetime, *, title: str, unit_cents: int) -> SetupPublicLines:
     await _read(engine, owner, interview_id)
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         seen = _stored(interview)
         items = price_items(interview.answers.price_items)
-        if item_id not in {item.item_id for item in items}:
+        item = next((item for item in items if item.item_id == item_id), None)
+        if item is None or item.title != title or item.unit_cents != unit_cents:
             raise ApiProblem(409, "conflict")
         if "price_items" not in interview.answers.suggested_fields:
             raise PublicLineProblem("not_suggested", key="prices")

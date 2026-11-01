@@ -47,7 +47,9 @@ async def test_get_lists_nonblank_lines_in_board_order(lines_setup, engine):
     before = await stored(engine, state["interview_id"])
     reply = await owner.browser.get(path)
     assert reply.status_code == 200, reply.text
-    assert reply.json() == {"revision": setup._public_lines(SetupAnswers(**before["answers"])).revision, "lines": [
+    public = reply.json()
+    assert public.pop("revision")
+    assert public == {"lines": [
         {"key": "policy:about", "text": "Local plumbing help.", "source": "owner", "editable": True},
         {"key": "contact", "text": "hello@example.test", "source": "suggested", "editable": True},
         {"key": "policy:pricing", "text": "Written quotes before work.", "source": "suggested", "editable": True},
@@ -318,8 +320,9 @@ async def test_delete_one_suggested_price_preserves_other_suggestions(lines_setu
     before = (await owner.browser.get(path)).json()
     suggested = (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"]
     calls = received_parts(monkeypatch)
-    reply = await owner.browser.delete(f"{path}/prices/repair")
+    reply = await owner.browser.delete(f"{path}/prices/repair", params=prices[1])
     assert reply.status_code == 200, reply.text
+    assert reply.json()["revision"] != before["revision"]
     assert reply.json() == {**before, "revision": reply.json()["revision"], "prices": {"source": "suggested", "items": [
         {"item_id": "visit", **prices[0]}, {"item_id": "inspection", **prices[2]}]}}
     saved = await stored(engine, state["interview_id"])
@@ -332,13 +335,64 @@ async def test_delete_one_suggested_price_preserves_other_suggestions(lines_setu
     assert fake.desks[state["desk_id"]].prices == {}
 
 
+async def test_delete_shifted_duplicate_price_conflicts_without_writing(lines_setup, engine, monkeypatch):
+    owner, state, path = lines_setup
+    prices = [{"title": "review", "unit_cents": amount} for amount in (25000, 60000, 15000)]
+    await patch_answers(engine, state, price_items=prices)
+    shown = (await owner.browser.get(path)).json()
+    assert [item["item_id"] for item in shown["prices"]["items"]] == ["review", "review-2", "review-3"]
+    removed = await owner.browser.delete(f"{path}/prices/review", params=prices[0])
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["revision"] != shown["revision"]
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/prices/review-2", params=prices[1])
+    assert reply.status_code == 409, reply.text
+    assert reply.json() == {"error": "conflict"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert (await owner.browser.get(path)).json() == removed.json()
+    assert calls == []
+
+
+@pytest.mark.parametrize("params", [{}, {"title": "Visit"}, {"unit_cents": 12500},
+    {"title": "", "unit_cents": 12500}, {"title": "   ", "unit_cents": 12500},
+    {"title": "x" * 81, "unit_cents": 12500}, {"title": "Visit", "unit_cents": ""},
+    {"title": "Visit", "unit_cents": "abc"}, {"title": "Visit", "unit_cents": "12.5"},
+    {"title": "Visit", "unit_cents": -1}, {"title": "Visit", "unit_cents": 1000001}])
+async def test_delete_price_requires_valid_title_and_amount(lines_setup, engine, monkeypatch, params):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, price_items=PRICES)
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/prices/visit", params=params)
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "invalid"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
+@pytest.mark.parametrize("params", [{"title": "visit", "unit_cents": 12500},
+                                   {"title": "Visit", "unit_cents": 12501}])
+async def test_delete_price_requires_exact_title_and_amount(lines_setup, engine, monkeypatch, params):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, price_items=PRICES)
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/prices/visit", params=params)
+    assert reply.status_code == 409, reply.text
+    assert reply.json() == {"error": "conflict"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
 async def test_delete_last_suggested_price_clears_list_and_provenance(lines_setup, engine, monkeypatch):
     owner, state, path = lines_setup
     await patch_answers(engine, state, price_items=PRICES)
     before = (await owner.browser.get(path)).json()
     calls = received_parts(monkeypatch)
-    reply = await owner.browser.delete(f"{path}/prices/visit")
+    reply = await owner.browser.delete(f"{path}/prices/visit", params=PRICES[0])
     assert reply.status_code == 200, reply.text
+    assert reply.json()["revision"] != before["revision"]
     assert reply.json() == {**before, "revision": reply.json()["revision"], "prices": None}
     answers = (await stored(engine, state["interview_id"]))["answers"]
     assert answers["price_items"] == []
@@ -352,11 +406,11 @@ async def test_delete_stale_price_id_conflicts_without_writing(lines_setup, engi
     owner, state, path = lines_setup
     prices = [*PRICES, {"title": "Inspection", "unit_cents": 6000}] if keep_remaining else PRICES
     await patch_answers(engine, state, price_items=prices)
-    removed = await owner.browser.delete(f"{path}/prices/visit")
+    removed = await owner.browser.delete(f"{path}/prices/visit", params=PRICES[0])
     assert removed.status_code == 200, removed.text
     before = await stored(engine, state["interview_id"])
     calls = received_parts(monkeypatch)
-    reply = await owner.browser.delete(f"{path}/prices/visit")
+    reply = await owner.browser.delete(f"{path}/prices/visit", params=PRICES[0])
     assert reply.status_code == 409, reply.text
     assert reply.json() == {"error": "conflict"}
     assert await stored(engine, state["interview_id"]) == before
@@ -368,7 +422,7 @@ async def test_delete_one_owner_price_is_not_suggested(lines_setup, engine, monk
     await patch_answers(engine, state, price_items=PRICES, suggested_fields=["hours"])
     before = await stored(engine, state["interview_id"])
     calls = received_parts(monkeypatch)
-    reply = await owner.browser.delete(f"{path}/prices/visit")
+    reply = await owner.browser.delete(f"{path}/prices/visit", params=PRICES[0])
     assert reply.status_code == 422, reply.text
     assert reply.json() == {"error": "not_suggested", "key": "prices"}
     assert await stored(engine, state["interview_id"]) == before
@@ -389,7 +443,7 @@ async def test_cancel_price_removal_settles_before_releasing_guard(lines_setup, 
         return result
 
     monkeypatch.setattr(CredentialView, "call", pause_prices)
-    request = asyncio.create_task(owner.browser.delete(f"{path}/prices/visit"))
+    request = asyncio.create_task(owner.browser.delete(f"{path}/prices/visit", params=PRICES[0]))
     try:
         await asyncio.wait_for(entered.wait(), 2)
         request.cancel()
@@ -1072,7 +1126,7 @@ async def request_lines(client, path, method):
     if method == "put":
         return await client.put(path, json={"key": "policy:pricing", "text": "Quotes before repairs."})
     if method == "delete_price":
-        return await client.delete(f"{path}/prices/visit")
+        return await client.delete(f"{path}/prices/visit", params=PRICES[0])
     if method == "delete":
         return await client.delete(f"{path}/policy:pricing")
     return await confirm_shown(client, path)

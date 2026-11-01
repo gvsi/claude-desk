@@ -3850,7 +3850,7 @@
     "/api/owner/setup/{id}/public_lines/prices/{item_id}": {
       "delete": {
         "summary": "Setup Delete Public Price",
-        "description": "Remove one suggested price by its current price-list id, returning the whole public projection.\nOwner prices are 422 `not_suggested`; a missing item id is 409 `conflict`.\nAllowed at `rules` or `situations`, under the same turn guard, publication and repair as edits.",
+        "description": "Remove one suggested price only when its current id, title and amount match what the owner saw.\nOwner prices are 422 `not_suggested`; a missing or mismatched item is 409 `conflict`.\nAllowed at `rules` or `situations`, under the same turn guard, publication and repair as edits.",
         "operationId": "owner_setup_delete_public_price",
         "parameters": [
           {
@@ -3870,6 +3870,29 @@
             "schema": {
               "type": "string",
               "title": "Item Id"
+            }
+          },
+          {
+            "name": "title",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "\\S",
+              "title": "Title"
+            }
+          },
+          {
+            "name": "unit_cents",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000,
+              "minimum": 0,
+              "title": "Unit Cents"
             }
           }
         ],

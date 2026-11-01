@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -279,13 +279,16 @@ async def setup_delete_public_line(interview_id: InterviewId, key: str, request:
 @router.delete("/{id}/public_lines/prices/{item_id}", response_model=SetupPublicLines,
                responses=PUBLIC_LINES_WRITE_RESPONSES)
 async def setup_delete_public_price(interview_id: InterviewId, item_id: str, request: Request,
-                                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
-    """Remove one suggested price by its current price-list id, returning the whole public projection.
-    Owner prices are 422 `not_suggested`; a missing item id is 409 `conflict`.
+                                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)],
+                                    title: Annotated[str, Query(min_length=1, max_length=80, pattern=r"\S")],
+                                    unit_cents: Annotated[int, Query(ge=0, le=1_000_000)]) -> Any:
+    """Remove one suggested price only when its current id, title and amount match what the owner saw.
+    Owner prices are 422 `not_suggested`; a missing or mismatched item is 409 `conflict`.
     Allowed at `rules` or `situations`, under the same turn guard, publication and repair as edits."""
     state = runtime(request).started()
     return await _public_lines_answer(setup.delete_public_price(ctx, state.database(), interview_id,
-                                                               item_id, state.clock()))
+                                                               item_id, state.clock(), title=title,
+                                                               unit_cents=unit_cents))
 
 
 # The proving routes ----------------------------------------------------------------------------------------------
