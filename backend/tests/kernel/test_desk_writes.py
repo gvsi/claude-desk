@@ -19,8 +19,8 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import (ApprovalResult, BusinessSeed, CalendarSlot, Claim, DemoInboxEntry, DeskSeed, HoursWindow,
-                            NotificationDefaults, PriceItem, SeedDocument, SeedPerson, SessionCreated)
+from desk.contracts import (BRAND_PALETTE, ApprovalResult, BusinessSeed, CalendarSlot, Claim, DemoInboxEntry, DeskSeed,
+                            HoursWindow, NotificationDefaults, PriceItem, SeedDocument, SeedPerson, SessionCreated)
 from desk.db.models import (ActorSession, Booking, Business, Desk, Document, Execution, Fact, LedgerEntry, NotificationPref,
                              Person, PolicyVersion, Quote, Tool, VerificationChallenge)
 from desk.db.models import CalendarSlot as SlotRow
@@ -633,6 +633,71 @@ async def test_business_and_charter_validate(app, client):
     # an apostrophe, a hyphen and an accent are a name
     await updated(client, copy, "business", business | {"owner_display_name": "Mike O'Neil-Turner",
                                                          "timezone": "America/Chicago"})
+
+
+RIVERA_NAMES = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles"}
+
+
+def picked(key: str) -> dict[str, str]:
+    """The brand a palette pick stores: its key and the table's colours."""
+    return {"palette": key, **BRAND_PALETTE[key]}
+
+
+async def stored_brand(app: FastAPI, copy: Rivera) -> dict[str, str]:
+    [business] = await rows_of(app, copy.copy_id, select(Business))
+    return business.brand
+
+
+async def test_a_palette_pick_stores_the_tables_colours_and_ledgers_its_key(app, client):
+    copy = await rivera(app, client)
+    assert await stored_brand(app, copy) == picked("teal")              # the seed's pick
+    [business] = await rows_of(app, copy.copy_id, select(Business))
+    for key in ("navy", "clay", "none", "teal"):
+        before = len(await entries_of(app, copy))
+        await updated(client, copy, "business", RIVERA_NAMES | {"brand_palette": key})
+        assert await stored_brand(app, copy) == picked(key), key
+        # the key, a closed identifier, and never a colour
+        [entry] = (await entries_of(app, copy))[before:]
+        assert (entry.event.kind, entry.event.summary) == (
+            "desk_data", {"part": "business", "refs": [business.business_id], "palette": key}), key
+    # a brand passed back as it was read (setup's renames) keeps its pick, with the table's colours, whatever it sends
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand": {"palette": "navy", "primary": "#000000"}})
+    assert await stored_brand(app, copy) == picked("navy")
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand": {"palette": "plum", "accent": "#FFFFFF",
+                                                                       "extra": "#123456"}})
+    assert await stored_brand(app, copy) == picked("plum")
+    # "none", no colours, is stored as its key alone, and passed back keeps no colours
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand": {"palette": "none", "primary": "#000000"}})
+    assert await stored_brand(app, copy) == picked("none") == {"palette": "none"}
+    # no pick and an empty brand store nothing (read as teal), ledgered as any other business write
+    before = len(await entries_of(app, copy))
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand_palette": None, "brand": {}})
+    assert await stored_brand(app, copy) == {}
+    [entry] = (await entries_of(app, copy))[before:]
+    assert entry.event.summary == {"part": "business", "refs": [business.business_id]}
+
+
+async def test_a_palette_pick_is_one_of_the_tables_keys_and_the_only_source(app, client):
+    copy = await rivera(app, client)
+    refused = [RIVERA_NAMES | {"brand_palette": key} for key in ("magenta", "Teal", "", "#1F4E4A")]
+    refused += [RIVERA_NAMES | {"brand_palette": key, "brand": brand}       # a pick takes its colours from the table
+                for key, brand in (("navy", {"primary": "#1F3A5C"}), ("navy", {"palette": "navy"}),
+                                   ("navy", picked("navy")), ("none", {"palette": "none"}))]
+    refused += [RIVERA_NAMES | {"brand": {"palette": key, **BRAND_PALETTE["teal"]}} for key in ("magenta", "", "TEAL")]
+    brand_before, entries_before = await stored_brand(app, copy), len(await entries_of(app, copy))
+    for body in refused:
+        response = await put_part(client, copy, "business", body)
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), body
+    assert await stored_brand(app, copy) == brand_before
+    assert len(await entries_of(app, copy)) == entries_before
+    # a new Desk's business is held to the same, and a pick it carries takes the table's colours
+    response = await post_desk(client, copy, new_desk(brand={"palette": "magenta"}))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    response = await post_desk(client, copy, new_desk(brand={"palette": "forest", "primary": "#000000"}))
+    assert response.status_code == 200, response.text
+    desk = (await desks_of(app, copy))[DeskCreated.model_validate(response.json()).desk_id]
+    [lopez] = await rows_of(app, copy.copy_id, select(Business).where(Business.business_id == desk.business_id))
+    assert lopez.brand == picked("forest")
 
 
 async def public_hours(client: httpx.AsyncClient, copy: Rivera, lang: str = "en") -> list[tuple]:

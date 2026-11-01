@@ -29,7 +29,8 @@ import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { SETUP_WORK_GIVE_UP_MS } from './useSetupWork.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -127,6 +128,21 @@ async function microtasks(): Promise<void> {
 
 /** The idempotency key of each start the page sent, in order. */
 const startKeys = () => requests('startSetup').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+
+/**
+ * Resolves once `key`'s next request has its answer on the page. The memory question's answer and
+ * Claude's writing dots show the moment it is pressed, before its request is answered, so a test
+ * that lets a held turn go, or moves time on, waits for this first.
+ */
+function answerOf(key: RouteKey): Promise<void> {
+  return new Promise((resolve) => {
+    const stop = observeRequests((outcome) => {
+      if (outcome.key !== key) return;
+      stop();
+      resolve();
+    });
+  });
+}
 
 /** Where `key`'s first request sits in the request log, or -1. */
 const firstAt = (key: RouteKey) => mockStore.requests.findIndex((r) => r.key === key);
@@ -1349,8 +1365,12 @@ describe('setup', () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       const state = await startInterview(null);
       const finish = holdNextConsent(mockStore.world, state.interview_id);
+      // The line is for a step that can't follow the reads as they stream: here the stream is refused.
+      mockStore.inject({ route: 'setupEvents', status: 503, times: 10 });
       const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const answered = answerOf('setupConsent');
       await screen.getByRole('button', { name: 'Yes, use it' }).click();
+      await answered;
       const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
       const wait = screen.getByText(words, { exact: true });
       await expect.element(writing).toBeVisible();
@@ -1390,9 +1410,11 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
+    await answered;
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
@@ -1415,9 +1437,11 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
+    await answered;
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     expectNoHorizontalScroll();
     finish('failed');
@@ -1431,18 +1455,55 @@ describe('setup', () => {
     await expect.element(notice).not.toBeInTheDocument();
   });
 
-  it('async_consent_gives_up_at_90_seconds_and_try_again_reads_the_landed_work', async () => {
+  it('async_consent_that_lands_after_90_seconds_is_picked_up_without_try_again', async () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
-    await vi.advanceTimersByTimeAsync(89999);
+    await answered;
+    // A turn may run to the API's 110 s run deadline, well past the old 90 s give-up.
+    await vi.advanceTimersByTimeAsync(108000);
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+    finish('landed');
+    // Each poll is a real request under a fake clock, and a tick that finds a read still in flight is skipped: step
+    // the clock 100 ms at a time, with real time for the reads to answer, until a poll picks up the landed turn. No
+    // give-up may show on the way, and the poll must come long before the 140 s limit (108 s + 20 s at most).
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    for (let waited = 0; (box.element() as HTMLTextAreaElement).disabled; waited += 100) {
+      expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+      expect(waited, 'a poll picks up the landed turn').toBeLessThan(20_000);
+      await vi.advanceTimersByTimeAsync(100);
+      await new Promise<void>((resolve) => realSetTimeout(resolve, 20));
+    }
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS);
+    vi.useRealTimers();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(requests('setupConsent')).toHaveLength(1);
+  });
+
+  it('async_consent_gives_up_once_a_turn_can_no_longer_be_running_and_try_again_reads_the_landed_work', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
+    });
+    await answered;
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS - 1);
     expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
     await until(() => {
@@ -1496,7 +1557,7 @@ describe('setup', () => {
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
-    expect(requests('setup', mark)).toHaveLength(1);
+    await expect.poll(() => requests('setup', mark)).toHaveLength(1);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
     finish('landed');
@@ -1556,12 +1617,14 @@ describe('setup', () => {
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { routes: firstVisit.routes });
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
-    await vi.advanceTimersByTimeAsync(90000);
+    await answered;
+    await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS);
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);
@@ -2175,8 +2238,11 @@ describe('setup', () => {
     expect(ticks.every((n, i) => i === 0 || n > (ticks[i - 1] ?? 0))).toBe(true);
 
     // Once landed, nothing lingers: the rows are drawn still, and the count is the check's own.
+    // The landing class leaves on the render after the last animation ends, so wait for that too.
     await expect.poll(() => moving(list.element())).toEqual([]);
-    for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
+    const landed = () => [...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName);
+    await expect.poll(() => landed().filter((name) => name !== 'none')).toEqual([]);
+    expect(landed().length).toBeGreaterThan(0);
     await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
 
     // A screen reader reads the check's own count from the first, never the ticks, all six rows
@@ -2419,8 +2485,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     expect(deskOf(state).summary.answering).toBe(true);
     await expect.element(screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true })).toBeVisible();
-    // The Desks, read again after the lost answer, say it answers: "Answering now" shows.
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    // The Desks, read again after the lost answer, say it answers: "Acting for you now" shows.
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
 
     // The link is the API's `public_url`, and "Open" opens it in a new tab.
     const url = `${window.location.origin}/d/${state.slug}`;
@@ -2446,7 +2512,7 @@ describe('setup', () => {
     await screen.getByRole('link', { name: 'Go to Today' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     // Today's Answering reads on at once: going live refreshed the Desks the page had read.
-    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+    await expect.element(screen.getByRole('switch', { name: /Claude acts for you/ })).toHaveAttribute('aria-checked', 'true');
     // And the Desk is live, so Today no longer leads back into setup.
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
@@ -2552,7 +2618,7 @@ describe('setup', () => {
     await expect.element(live).toHaveAttribute('aria-current', 'step');
     await expect.element(live).not.toHaveTextContent('done');
     expect(stepCircle(live.element()).textContent).toBe('5');
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
 
     await screen.getByRole('button', { name: 'Go live' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
@@ -2573,11 +2639,11 @@ describe('setup', () => {
     });
     await expect.poll(() => getComputedStyle(check).strokeDashoffset).toBe('0px');
 
-    // Under the title and its line, "Answering now" with its handled dot breathing on the presence loop.
-    const answering = screen.getByText('Answering now', { exact: true });
+    // Under the title and its line, "Acting for you now" with its handled dot breathing on the presence loop.
+    const answering = screen.getByText('Acting for you now', { exact: true });
     await expect.element(answering).toBeVisible();
     const dot = answering.element().querySelector('.cd-status-dot--handled');
-    if (!dot) throw new Error('No handled dot beside "Answering now"');
+    if (!dot) throw new Error('No handled dot beside "Acting for you now"');
     expect(getComputedStyle(dot)).toMatchObject({ animationDuration: '5s', animationIterationCount: 'infinite', animationDirection: 'alternate' });
     expect(getComputedStyle(dot).animationName).not.toBe('none');
     // breathing_dot_keeps_3_to_1: at its faintest the dot still stands out from its ground by 3:1,
@@ -2604,14 +2670,14 @@ describe('setup', () => {
 
     // "Go live" in the stale preview: the API says it is live already (409), the interview read again
     // says so, and the step shows live, its check drawn, but with Answering off it never says
-    // "Answering now", before or after the Desks are read again.
+    // "Acting for you now", before or after the Desks are read again.
     await screen.getByRole('button', { name: 'Go live' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
     expect(requests('goLive', mark)).toHaveLength(1);
     await expect.element(setupSteps(screen).last()).toHaveTextContent('Live, done');
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
     await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
-    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
     expect(deskOf(state).summary.answering).toBe(false);
   });
 
@@ -2632,7 +2698,7 @@ describe('setup', () => {
     await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
 
     // While they are read, the step waits whole, on setup's loading line: no title without its
-    // business, and no link that "Answering now" would push down when it lands.
+    // business, and no link that "Acting for you now" would push down when it lands.
     await expect.element(screen.getByText(OPENING, { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Copy link' }).elements()).toHaveLength(0);
     expect(screen.getByRole('heading', { level: 1 }).elements()).toHaveLength(0);
@@ -2640,7 +2706,7 @@ describe('setup', () => {
     // Once they land, the title, its line and the link draw together, and the link stays put.
     release();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
     const link = screen.getByRole('button', { name: 'Copy link' });
     await expect.element(link).toBeVisible();
     const top = link.element().getBoundingClientRect().top;
@@ -2649,7 +2715,7 @@ describe('setup', () => {
     expect(screen.getByText(OPENING, { exact: true }).elements()).toHaveLength(0);
 
     // In the page: a go-live whose answer was lost, with the Desks read again slowly. The step stays
-    // on the preview until they land, then turns live with "Answering now" already under the title.
+    // on the preview until they land, then turns live with "Acting for you now" already under the title.
     const second = await interviewAtPreview();
     const page2 = (await renderRoute(`/app/setup/${second.interview_id}`)).screen;
     await expect.element(page2.getByRole('button', { name: 'Go live' })).toBeVisible();
@@ -2675,7 +2741,7 @@ describe('setup', () => {
     expect(page2.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' }).elements()).toHaveLength(0);
     land();
     await expect.element(page2.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
-    expect(page2.getByText('Answering now', { exact: true }).elements()).toHaveLength(1);
+    expect(page2.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(1);
   });
 
   it('going_live_under_reduced_motion_is_drawn_still', async () => {
@@ -2694,10 +2760,10 @@ describe('setup', () => {
       expect(getComputedStyle(check).animationName).toBe('none');
       expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
       expect(check.getAnimations()).toHaveLength(0);
-      const answering = screen.getByText('Answering now', { exact: true });
+      const answering = screen.getByText('Acting for you now', { exact: true });
       await expect.element(answering).toBeVisible();
       const dot = answering.element().querySelector('.cd-status-dot--handled');
-      if (!dot) throw new Error('No handled dot beside "Answering now"');
+      if (!dot) throw new Error('No handled dot beside "Acting for you now"');
       expect(getComputedStyle(dot)).toMatchObject({ animationName: 'none', opacity: '1' });
       expect(dot.getAnimations()).toHaveLength(0);
     } finally {
@@ -2718,7 +2784,7 @@ describe('setup', () => {
     expect(getComputedStyle(check).animationName).toBe('none');
     expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
     // The Desks say it is answering, so the line shows, its dot breathing as it does on Today.
-    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Acting for you now', { exact: true })).toBeVisible();
 
     // A live Desk whose owner has turned Answering off since doesn't claim to be answering.
     const off = await interviewAtPreview();
@@ -2727,7 +2793,7 @@ describe('setup', () => {
     const reopened = (await renderRoute(`/app/setup/${off.interview_id}`)).screen;
     // The title names the business from the Desks, so once it does, the line has had its answer.
     await expect.element(reopened.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
-    expect(reopened.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(reopened.getByText('Acting for you now', { exact: true }).elements()).toHaveLength(0);
   });
 
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {
@@ -3350,7 +3416,7 @@ describe('setup', () => {
     await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
     expect(title.closest('.cd-page-header')?.querySelector('.cd-page-header__subtitle')).toBeNull();
-    const lines = [SETUP_COPY.live.previewAnsweringOff, SETUP_COPY.live.previewOnlyYou];
+    const lines = ['Claude takes messages only until you go live.', SETUP_COPY.live.previewOnlyYou];
     for (const words of lines) expect(ownerParts(screen.container).textContent?.split(words).length, words).toBe(2);
     const { bar, line, note, goLive } = launchParts(screen);
     expect(line.textContent).toBe(lines[0]);
@@ -3683,6 +3749,24 @@ describe('consultant setup', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('the_other_answer_shows_a_stronger_edge_with_focus', async () => {
+    // Text entry shows its caret and a stronger edge with focus, never a ring (owner, 2026-11-01). The
+    // "Something else" input draws no border of its own, so its row takes the field's focused edge.
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const other = screen.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toBeVisible();
+    const row = other.element().closest<HTMLElement>('.cd-setup-q3__row--other');
+    if (!row) throw new Error('the "Something else" input sits in its row');
+    const edge = tokenColor('--line-field-focus');
+    expect(getComputedStyle(row).boxShadow).not.toContain(edge);
+    await other.click();
+    expect(getComputedStyle(row).boxShadow).toContain(edge);
+    expect(getComputedStyle(other.element()).outlineStyle).toBe('none');
+    (other.element() as HTMLInputElement).blur();
+    expect(getComputedStyle(row).boxShadow).not.toContain(edge);
+  });
+
   it('keeps_the_other_answer_within_the_existing_answer_limit', async () => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -3788,6 +3872,71 @@ describe('consultant setup', () => {
     await userEvent.keyboard('4');
     await expect.poll(() => insideList(rows[3]!)).toBe(true);
     expectNoHorizontalScroll();
+  });
+
+  it('shows_claudes_markdown_in_the_conversation_as_one_reply', async () => {
+    // A reply whose list has blank lines between its items is one list, with its bold.
+    const state = await consultantAt();
+    const reply = 'Thanks. Here is what I took from that:\n\n- **Individuals** come to you for their returns\n\n- **Small businesses** come for their books';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: reply, choices: [], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const bold = screen.getByRole('log').getByText('Individuals', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect(message.querySelectorAll('ul')).toHaveLength(1);
+    expect([...message.querySelectorAll('li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Individuals come to you for their returns',
+      'Small businesses come for their books',
+    ]);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
+  });
+
+  it('shows_a_docked_question_in_markdown_named_without_its_marks', async () => {
+    const state = await consultantAt();
+    const question = 'Got it.\n\n**Which work comes in most** during tax season?\n\n- Returns for individuals\n- Books for small businesses';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Returns', recommended: true }, { text: 'Books', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Returns', exact: true })).toBeVisible();
+    const dock = screen.container.querySelector('.cd-setup-question-panel section') as HTMLElement;
+    const shown = dock.querySelector('.cd-setup-q3__question') as HTMLElement;
+
+    // The question's bold and list, in the dock's own type, its paragraphs as far apart as before.
+    expect([...shown.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Which work comes in most']);
+    expect([...shown.querySelectorAll('li')].map((el) => el.textContent)).toEqual(['Returns for individuals', 'Books for small businesses']);
+    const second = getComputedStyle(shown.querySelectorAll('p')[1] as HTMLElement);
+    expect([second.fontSize, second.lineHeight, second.marginTop]).toEqual(['17px', '25px', '12px']);
+
+    // The dock is named by the question as it reads, with none of the Markdown's marks.
+    await expect(dock).toHaveAccessibleName('Got it. Which work comes in most during tax season? Returns for individuals Books for small businesses');
+  });
+
+  it('enter_on_a_link_in_a_docked_question_is_the_links_own', async () => {
+    const state = await consultantAt();
+    const question = 'Which payments do you take? [Stripe’s guide](https://stripe.com/docs) lists the usual ones.';
+    mockStore.inject({ route: 'setup', status: 200, times: 100, body: { ...state, messages: [
+      ...state.messages,
+      { role: 'owner', text: 'Both, about evenly', choices: [], card: null },
+      { role: 'claude', text: question, choices: [{ text: 'Cards', recommended: true }, { text: 'Bank transfers', recommended: false }], card: null },
+    ] } satisfies SetupState });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const link = screen.getByRole('link', { name: 'Stripe’s guide', exact: true });
+    await expect.element(link).toHaveAttribute('href', 'https://stripe.com/docs');
+    link.element().focus();
+    // The dock's keys leave a focused link alone: Enter opens it and sends no choice.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    link.element().dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(requests('setupAnswer')).toHaveLength(0);
   });
 
   it.each(['desktop', 'phone'] as const)('keeps_the_question_panel_and_composer_in_the_%s_dock', async (viewport) => {
@@ -4043,7 +4192,7 @@ describe('consultant setup', () => {
     await mockStore.dispatch('setupSuggestions', { params: { id: state.interview_id }, query: { cards: '1' }, body: {} });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'A few questions', exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('heading', { name: "Let's set up your Desk", exact: true }).elements()).toHaveLength(0);
     expect(screen.container.querySelector('.cd-setup-dock')).toBeNull();
   });
 
@@ -4287,7 +4436,7 @@ describe('consultant setup', () => {
     const state = await consultantAt('intake');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
-    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: "Let's set up your Desk" })).toBeVisible();
     await expect.element(screen.getByText('Here’s the rest, as I’d set it up.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
     const payment = screen.getByRole('article', { name: 'Send a retainer link' });
@@ -4472,10 +4621,37 @@ describe('consultant setup', () => {
   it('opens_with_choices_and_no_cards_or_question_subtitle', async () => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: "Let's set up your Desk" })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Both, about evenly' })).toBeVisible();
     expect(screen.getByRole('article').elements()).toHaveLength(0);
     expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
     expect(screen.getByText(/Question \d of|About seven/).elements()).toHaveLength(0);
+  });
+});
+
+describe('the test-client offer', () => {
+  it.each(['desktop', 'phone'] as const)('a_yes_says_done_and_continue_goes_to_tools_while_turns_stream_on_%s', async (viewport) => {
+    // A scripted run to the end of its questions, the owner's own contact typed on the last: the offer follows.
+    const state = await startInterview(false, 'Lakeview Accounts. I’m Lee. We help local businesses.');
+    const id = state.interview_id;
+    for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) await mockStore.dispatch('setupAnswer', { params: { id }, body: { question, text: 'Yes' } });
+    await mockStore.dispatch('setupAnswer', {
+      params: { id },
+      body: { question: 'contact_and_after_hours', text: 'Email me at lee@example.com. After hours, take a message.' },
+    });
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport });
+    const offer = screen.getByRole('region', { name: TEST_CLIENT_OFFER, exact: true });
+    await expect.element(offer).toBeVisible();
+    // The offer's answer runs as a streamed turn, as on the API, and its stream says only done.
+    mockStore.streamSetupTurns();
+    mockStore.planStream('setup', { quiet: true });
+    await offer.getByRole('button', { name: TEST_CLIENT_YES, exact: true }).click();
+    await expect.element(screen.getByText(TEST_CLIENT_ADDED, { exact: true })).toBeVisible();
+    const proceed = screen.getByRole('button', { name: SETUP_COPY.tools.continue, exact: true });
+    await expect.element(proceed).toBeVisible();
+    expect(screen.container.querySelector('.cd-setup-growing')).toBeNull();
+    await proceed.click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'test_client', text: TEST_CLIENT_YES });
   });
 });

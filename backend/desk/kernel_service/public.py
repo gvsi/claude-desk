@@ -25,12 +25,13 @@ page is still served.
 `starter:<n>:<lang>`. They are trimmed, limited to 80 characters and checked for canaries, never
 rendered as charter cards. A failed read logs only the error's type and serves an empty list.
 
-The header's names and brand colors are the owner's words as typed, which owner writes check for
-document canaries (`desks.refuse_public_canaries`), as they check the slug a new Desk's address is
-made from. One stored before that check and holding a canary of the copy's documents, even split
-or disguised (`labels.canary_fields`), is withheld: the page shows the field's fallback (an empty
-name, the default brand) and the owner is alerted in the Demo inbox, whatever their notification
-defaults, at most once an hour per Desk.
+The header's names are the owner's words as typed, and its brand colors are the business's palette
+pick as `effective_brand` reads it (teal when it stored none, free-form colors from before the
+palette as stored). Owner writes check them for document canaries (`desks.refuse_public_canaries`),
+as they check the slug a new Desk's address is made from. One stored before that check and
+holding a canary of the copy's documents, even split or disguised (`labels.canary_fields`), is
+withheld: the page shows the field's fallback (an empty name, no brand colors) and the owner is
+alerted in the Demo inbox, whatever their notification defaults, at most once an hour per Desk.
 
 A stored policy line that fails the public-text scan is withheld individually. The remaining
 policies are rescanned in display order after each removal. The owner isn't alerted (the owner's
@@ -53,7 +54,7 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from desk.public_contact import valid_public_contact
-from desk.contracts import Clause, Fact, HoursWindow, RenderedBlock
+from desk.contracts import Clause, Fact, HoursWindow, RenderedBlock, effective_brand
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Fact as FactRow
@@ -90,7 +91,8 @@ def header_of(desk: Desk, business: Business, canaries: Mapping[str, str]) -> tu
     written or split (`labels.canary_fields`), in its fallback; and the fields withheld. The mock
     checkout names the business by this header's name too (`payments.link_view`)."""
     header: dict[str, Any] = {"business_name": business.name, "desk_name": desk.name,
-                              "owner_display_name": business.owner_display_name, "brand": business.brand}
+                              "owner_display_name": business.owner_display_name,
+                              "brand": effective_brand(business.brand)}
     withheld = labels.canary_fields(header, canaries)
     return header | {field: deepcopy(HEADER_FALLBACKS[field]) for field in withheld}, withheld
 

@@ -314,7 +314,7 @@ describe('ArchitectureFigure', () => {
       // The caption: the figure's number, the reader's own words, and the name.
       const caption = screen.container.querySelector('figcaption');
       expect(caption?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-        `Figure 1 v1 architecture: two processes, two checkpoints. ${name}.`,
+        `Figure 1 The first release’s architecture: two processes, two checkpoints. ${name}.`,
       );
       await screen.unmount();
     }
@@ -595,9 +595,9 @@ describe('the figures on paper', () => {
       for (const text of all('svg text')) {
         expect(contrastRatio(getComputedStyle(text).fill, ground(text)), `${where}: ${text.textContent}`).toBeGreaterThanOrEqual(4.5);
       }
-      // A focus ring, in the paper's link color, on the paper and on a figure's card.
-      const ring = tokenColor('--accent-blue', root);
-      expect(ring, where).toBe('rgb(45, 91, 138)');
+      // A focus ring, in the paper's secondary ink, never its link blue, on the paper and on a figure's card.
+      const ring = tokenColor('--ring-focus', root);
+      expect(ring, where).toBe('rgb(92, 88, 80)');
       for (const on of [paper, ground(all('.cd-about-frame')[0] as Element)]) expect(contrastRatio(ring, on), where).toBeGreaterThanOrEqual(3);
       await screen.unmount();
     }

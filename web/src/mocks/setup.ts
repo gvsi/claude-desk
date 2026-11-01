@@ -9,11 +9,13 @@
  * interview and its step. The interviews are kept per copy beside its world, so a start over leaves
  * none behind.
  */
+import { effectiveBrand } from './brand.ts';
 import type { Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   BusinessOut,
   Choice,
   ConnectorProposal,
+  DemoTaskSet,
   DeskSetup,
   DeskSummary,
   JobProposal,
@@ -39,6 +41,7 @@ import { formatHours } from '../lib/format.ts';
 import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { appendBusinessTools } from './businessTools.ts';
+import { playReply, type PlayedRead } from './ownerStreams.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
@@ -47,6 +50,9 @@ import { storedPublicState } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
+
+/** Setup's business types (the API's `BusinessType`), each also a set of the agent's task words. */
+type BusinessType = Exclude<DemoTaskSet, 'rivera'>;
 
 /** Plan 02's limits on the business's description and on an answer. */
 const DESCRIPTION_MAX = 1500;
@@ -77,6 +83,12 @@ export const FOLLOW_UP = "That's fine. Give me your best guess, and you can chan
 
 /** What Claude says once the last question is answered. */
 export const QUESTIONS_DONE = "Thanks, that's everything I need. Next, choose what Claude can use.";
+
+/** The test-client offer at the end of setup's plan, its two choices and Claude's line after a yes: the API's own words. */
+export const TEST_CLIENT_OFFER = 'Want to try your Desk the way a client would? I can add you as a test client, with your own contact, so you can check verification and private answers yourself.';
+export const TEST_CLIENT_YES = 'Add me as a test client';
+export const TEST_CLIENT_NO = 'Not now';
+export const TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me.";
 /** The label of the read of the owner's Claude memory, as the API writes it. */
 export const MEMORY_LABEL = 'Searched your Claude memory';
 
@@ -91,12 +103,18 @@ interface Interview {
   covered: Set<QuestionKey>;
   answers: Partial<Record<QuestionKey, string>>;
   usedSuggestions: boolean;
+  /** What the owner typed on the contact question, follow-ups included, which their test-client contact comes from. */
+  contactSaid: string[];
+  /** Whether the test-client offer was asked: it is asked once. */
+  offered: boolean;
   /** The words and booking days of the business the description names, for its situations and draft rules (`situationWordsOf`). */
   words: SituationWords;
   /** The business's name, its owner's first name and a line about it, as the API takes them from the description. */
   business: string;
   ownerName: string | null;
   about: string | null;
+  /** The business type setup read in the description (`businessTypeOf`). */
+  businessType: BusinessType;
   timezone: string;
   /** Include "search fails" in the description to preview the API's single search failure label. */
   searchFails: boolean;
@@ -114,6 +132,31 @@ interface Interview {
   /** Consent runs in the background when a test holds it; its result lands on a later GET. */
   holdConsent: boolean;
   consentResult: 'landed' | 'failed' | null;
+  /**
+   * While a streamed turn runs, the interview as reads see it: busy, with the owner's words. The
+   * turn has landed in `state` already and shows once its stream ends.
+   */
+  view: SetupState | null;
+  /** The turn whose events a stream follows: a streamed turn, or a held one followed while busy. */
+  run: SetupRun | null;
+}
+
+/** What follows a setup turn's events: the events as the API frames them, and the stream's end. */
+export interface SetupFollower {
+  send(name: 'delta' | 'reset' | 'reading' | 'label' | 'done' | 'error', data: Record<string, unknown>): void;
+  close(): void;
+}
+
+/** A running turn as its stream shows it: the reads started and ended so far, and the reply so far. */
+interface SetupRun {
+  id: string;
+  reading: { read: PlayedRead['read']; host: string | null }[];
+  labels: { read: PlayedRead['read']; text: string }[];
+  text: string;
+  followers: Set<SetupFollower>;
+  stop: () => void;
+  /** Answers the turn's held request, if it has one, with the interview as it stands. */
+  land: () => void;
 }
 
 const INTERVIEWS = new WeakMap<MockWorld, Map<string, Interview>>();
@@ -130,11 +173,17 @@ function interviewsOf(world: MockWorld): Map<string, Interview> {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Cards are opt-in per response; filtering never removes the interview's stored proposals. */
-const stateOf = (interview: Interview, query?: URLSearchParams): SetupState => ({
-  ...interview.state,
-  pending_card: query?.get('cards') === '1' ? interview.state.pending_card ?? null : null,
-  messages: interview.state.messages.filter((m) => query?.get('cards') === '1' || m.card === null).map((m) => ({ ...m })),
-});
+const stateOf = (interview: Interview, query?: URLSearchParams): SetupState => {
+  const shown = interview.view ?? interview.state;
+  return {
+    ...shown,
+    pending_card: query?.get('cards') === '1' ? shown.pending_card ?? null : null,
+    messages: shown.messages.filter((m) => query?.get('cards') === '1' || m.card === null).map((m) => ({ ...m })),
+  };
+};
+
+/** A turn is running: a streamed one, or one a test holds. */
+const busyOf = (interview: Interview): boolean => interview.view !== null || interview.state.busy === true;
 
 const ok = <T>(body: T) => ({ status: 200, body }) as const;
 /** A new interview: 201, as the API answers its creation. */
@@ -301,6 +350,22 @@ function aboutOf(description: string): string | null {
   return line === '' ? null : line;
 }
 
+/**
+ * The business type setup's start would read in the description (the API's `SetupStart.business_type`,
+ * which a model chooses there): work at the customer's place, appointments at an office, renting
+ * homes, or anything else. The mock reads it from a few words, in English and Spanish.
+ */
+const OFFICE = /\b(?:CPA|accountants?|accounting|bookkeeping|tax(?:es)?|dentists?|dental|lawyers?|law firm|clinic|contables?|contabilidad|impuestos|dentista)\b/i;
+const LANDLORD = /\b(?:apartments?|rentals?|tenants?|landlord|units?|departamentos?|inquilinos?|alquiler(?:es)?)\b/i;
+const TRADE = /\b(?:plumb(?:er|ing)|electricians?|cleaning|cleaners?|leaks?|drains?|water heaters?|handyman|roofing|plomer[oa]s?|fugas?|drenajes?)\b/i;
+
+function businessTypeOf(description: string): BusinessType {
+  if (OFFICE.test(description)) return 'office';
+  if (LANDLORD.test(description)) return 'landlord';
+  if (TRADE.test(description)) return 'trade';
+  return 'other';
+}
+
 /** A slug for the business, unique in the copy. */
 function slugFor(world: MockWorld, business: string): string {
   const base =
@@ -368,9 +433,10 @@ type BookingDays = NonNullable<RuleCard['hours']>['days'];
 const WEEKDAYS: BookingDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 
 /**
- * A business's words for the six situations setup tries (`situationsFor`), in their order, and for
- * the rules its draft names them in. Only the words and the business's own booking days differ
- * between businesses: what each situation tries, plans and gets otherwise follows the draft alone.
+ * A business's words for the six situations setup tries (`situationsFor`), in their order, for
+ * the rules its draft names them in, and for the web searches setup shows once the owner allows its
+ * reads. Only the words and the business's own booking days differ between businesses: what each
+ * situation tries, plans and gets otherwise follows the draft alone.
  */
 interface SituationWords {
   /**
@@ -393,6 +459,11 @@ interface SituationWords {
   saturday: string;
   /** Someone else's private details. */
   someoneElses: string;
+  /**
+   * What setup searches the web for once the owner allows it: two topics about running this kind
+   * of business, each shown as "Searched the web: …".
+   */
+  searches: readonly [string, string];
 }
 
 /** Turner Plumbing's words: the situations as the mock always told them. */
@@ -405,6 +476,7 @@ const PLUMBER_WORDS: SituationWords = {
   document: 'A customer asks for their last invoice',
   saturday: 'A visitor wants a Saturday morning visit for a slow drain',
   someoneElses: "Someone asks for another customer's address",
+  searches: ['emergency plumber call-out fees', 'water heater replacement quotes'],
 };
 
 /** Words for a business none of the starters describes: nothing in them names a kind of work. */
@@ -417,6 +489,7 @@ const ANY_BUSINESS_WORDS: SituationWords = {
   document: 'A customer asks for their last invoice',
   saturday: 'A visitor wants to book a time on Saturday morning',
   someoneElses: "Someone asks for another customer's address",
+  searches: ['small business booking and deposit policies', 'new customer intake questions'],
 };
 
 /** A CPA firm's description, as the consultant run tells one apart. */
@@ -442,6 +515,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: "A client asks for last year's return",
       saturday: 'A visitor wants a free consult on Saturday morning',
       someoneElses: "Someone asks for another client's tax return",
+      searches: ['CPA free consultation and engagement letters', 'tax return client intake questions'],
     },
   ],
   [[/\b(?:plumb|plomer)/i], PLUMBER_WORDS],
@@ -458,6 +532,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: 'A client asks for their last receipt',
       saturday: 'A visitor wants balayage on Saturday morning',
       someoneElses: "Someone asks for another client's phone number",
+      searches: ['hair salon deposits and late cancellations', 'salon new client consultation form'],
     },
   ],
   [
@@ -471,6 +546,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: 'A tenant asks for a copy of their lease',
       saturday: 'A visitor wants a Saturday morning viewing',
       someoneElses: 'Someone asks which apartment another tenant lives in',
+      searches: ['rental application fees and deposits', 'tenant maintenance request form'],
     },
   ],
 ];
@@ -852,11 +928,155 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
   } else {
     say(interview, 'claude', QUESTIONS_DONE);
   }
+  // With the owner's own contact typed, the test-client offer comes once, after the plan, and the Tools step waits for it.
+  if (!interview.offered && ownerContactOf(interview) !== null) {
+    interview.offered = true;
+    askTestClient(interview);
+    return;
+  }
+  enterTools(world, interview);
+}
+
+/** The Tools step, after the plan and any test-client offer: accepted jobs become business tools, accepted apps connect. */
+function enterTools(world: MockWorld, interview: Interview): void {
+  interview.state.question = null;
   moveTo(interview, 'tools');
+  const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
   if (interview.consultant) appendBusinessTools(world.desk(interview.state.desk_id), jobs);
   for (const { card } of interview.state.messages) {
     if (card) connectAcceptedProposal(world, interview, card);
   }
+}
+
+// The owner's own contact for the test client, read as the API reads it (setup.py `_owner_contact` and `_whose`): every
+// email and phone typed on the contact question, without the hours beside a phone and without one the owner rejects
+// or gives as another person's, which carries on to every contact after it in its sentence until the owner marks one
+// as their own; of the rest, those marked as the owner's own come first, then the one email, else the one phone.
+const CONTACT_EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+const CONTACT_PHONE = /(?<![\w+(])\+?\(?\d(?:[\d().-]|\s(?=[\d(]))*\d(?!\w)/g;
+const HOUR = String.raw`(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?(?:\s*[ap]\.?m\b\.?)?`;
+const TIMES = new RegExp(String.raw`(?<![\w.+-])(?:${HOUR}\s*(?:-|–|—|\bto\b|\buntil\b|\btill\b|\ba\b|\bhasta\b)\s*${HOUR}|24\s*\/\s*7|(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?\s*[ap]\.?m\b\.?|(?:[01]?\d|2[0-4]):[0-5]\d)(?![\w-]|[.:]\d)`, 'gi');
+const SENTENCE_END = /[;!?\n]|\.(?=\s|$)/g;
+const REJECTED = /\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b/;
+const OWNERS = /\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|mi celular|el mío|el mio)\b/;
+const SOMEONE_ELSE = /\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b/;
+/** A name just before a contact ("Ana at …", "Mike: …") or as a possessive ("Ana's email is …"). */
+const NAMED = /(\p{L}[\p{L}'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$/u;
+const POSSESSIVE = /(\p{L}[\p{L}-]*)'s\b/gu;
+/** The capitalized words that are never a person's name: a contact's labels and other common words (setup.py `_NOT_NAMES`). */
+const NOT_NAMES = new Set([
+  'call', 'us', 'at', 'or', 'text', 'email', 'phone', 'tel', 'mobile', 'office', 'website', 'web', 'llámanos', 'al',
+  'escríbenos', 'a', 'teléfono', 'correo', 'llama', 'móvil', 'celular', 'oficina', 'sitio', 'página', 'electrónico',
+  'ext', 'ask', 'for', 'site', 'and', 'o', 'y',
+  'my', 'me', 'contact', 'contacts', 'customers', 'clients', 'reach', 'use', 'write', 'message', 'our', 'the', 'please',
+  'bookings', 'booking', 'sales', 'orders', 'support', 'info', 'hello', 'emergencies', 'emergency', 'urgent', 'after',
+  'hours', 'business', 'just', 'then', 'otherwise', 'also', 'contacto', 'clientes', 'cliente', 'escríbeme', 'llámame',
+  'escribe', 'reservas', 'urgencias', 'para', 'por', 'favor', 'mi',
+]);
+const wordsOf = (text: string | null): string[] => (text ?? '').toLowerCase().match(/\p{L}+/gu) ?? [];
+const capitalized = (word: string): boolean => word[0] !== undefined && word[0] !== word[0].toLowerCase();
+
+/** What the words before a contact say about whose it is, by the marker closest to it (setup.py `_whose`). */
+function whose(words: string, owner: ReadonlySet<string>, notNames: ReadonlySet<string>): 'owner' | 'rejected' | 'other' | null {
+  const folded = words.toLowerCase();
+  const closest = new Map<'owner' | 'rejected' | 'other', number>();
+  const note = (kind: 'owner' | 'rejected' | 'other', at: number) => closest.set(kind, Math.max(closest.get(kind) ?? -1, at));
+  for (const [pattern, kind] of [[REJECTED, 'rejected'], [OWNERS, 'owner'], [SOMEONE_ELSE, 'other']] as const) {
+    for (const match of folded.matchAll(new RegExp(pattern.source, 'g'))) note(kind, match.index + match[0].length);
+  }
+  const names = [...words.matchAll(POSSESSIVE)].map((match) => [match[1]!, match.index + match[0].length] as const);
+  const named = NAMED.exec(words);
+  if (named) names.push([named[1]!, named.index + named[0].length] as const);
+  for (const [name, at] of names) {
+    if (!capitalized(name)) continue;
+    if (owner.has(name.toLowerCase())) note('owner', at);
+    else if (!notNames.has(name.toLowerCase())) note('other', at);
+  }
+  let found: 'owner' | 'rejected' | 'other' | null = null;
+  for (const [kind, at] of closest) if (found === null || at > closest.get(found)!) found = kind;
+  return found;
+}
+
+/** Each email and phone in `text`, in order, a phone as one number of 7 to 15 digits. */
+function contactsIn(text: string): { start: number; end: number; value: string; email: boolean }[] {
+  const found = [...text.matchAll(CONTACT_EMAIL)].map((match) => ({ start: match.index, end: match.index + match[0].length, value: match[0], email: true }));
+  const blank = (match: string) => ' '.repeat(match.length);
+  const rest = text.replace(CONTACT_EMAIL, blank).replace(/(?:https?:\/\/|www\.)\S+/g, blank).replace(TIMES, blank);
+  for (const match of rest.matchAll(CONTACT_PHONE)) {
+    const phone = (/^(.*\d{3})[\s(]+\d{1,2}$/.exec(match[0])?.[1] ?? match[0]).replace(/[\s(.-]+$/, '');
+    const digits = phone.replace(/\D/g, '').length;
+    if (digits >= 7 && digits <= 15) found.push({ start: match.index, end: match.index + phone.length, value: phone, email: false });
+  }
+  return found.sort((a, b) => a.start - b.start);
+}
+
+function ownerContactOf(interview: Interview): string | null {
+  const owner = new Set(wordsOf(interview.ownerName));
+  const notNames = new Set([...NOT_NAMES, ...wordsOf(interview.business)]);
+  const contacts = new Map<string, { value: string; email: boolean; rejected: boolean; someoneElses: boolean; marked: boolean }>();
+  for (const said of interview.contactSaid) {
+    const text = said.replace(/’/g, "'");
+    const ends = [...text.matchAll(SENTENCE_END)].map((match) => match.index + match[0].length);
+    let sentence = -1;
+    let carried: 'rejected' | 'other' | null = null;
+    let previous = 0;
+    for (const { start, end, value, email } of contactsIn(text)) {
+      const begins = Math.max(0, ...ends.filter((stop) => stop <= start));
+      if (begins !== sentence) [sentence, carried, previous] = [begins, null, begins];
+      const marker = whose(text.slice(previous, start), owner, notNames);
+      previous = end;
+      if (marker !== null) carried = marker === 'owner' ? null : marker;
+      const key = email ? value.toLowerCase() : value.replace(/\D/g, '');
+      const contact = contacts.get(key) ?? { value, email, rejected: false, someoneElses: false, marked: false };
+      contact.value = value;
+      contacts.set(key, contact);
+      if (carried === 'rejected') contact.rejected = true;
+      else if (carried === 'other') contact.someoneElses = true;
+      else if (marker === 'owner') contact.marked = true;
+    }
+  }
+  const kept = [...contacts.values()].filter(({ rejected, someoneElses }) => !rejected && !someoneElses);
+  const marked = kept.filter(({ marked }) => marked);
+  const pool = marked.length > 0 ? marked : kept;
+  const emails = pool.filter(({ email }) => email);
+  const phones = pool.filter(({ email }) => !email);
+  if (emails.length > 0) return emails.length === 1 ? emails[0]!.value : null;
+  return phones.length === 1 ? phones[0]!.value : null;
+}
+
+/**
+ * The words a typed answer to the offer is read by (setup.py `_reads_yes`): a question or a conditional yes is
+ * neither, then a "no" one wins; with neither, the offer is asked again.
+ */
+const TYPED_YES = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'please do', 'do it', 'add me', 'sounds good', 'sí', 'si', 'vale', 'claro', 'dale', 'añádeme', 'agrégame'];
+const TYPED_NO = ['no', 'not', "don't", 'dont', 'nope', 'not now', 'later', 'skip', 'no gracias'];
+
+const UNCLEAR = /[?¿]|^\W*(?:what|how|why|does|can|is|will|qué|cómo|por qué)(?![\p{L}\p{N}])|^\W*do\s+(?:you|i|we|they|he|she|this|that)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])if(?![\p{L}\p{N}])/iu;
+const SI = /(?<![\p{L}\p{N}])si(?![\p{L}\p{N}])/iu;
+const SI_ALONE = /^\W*si\s*(?:$|[,.!])/i;
+
+function readsYes(text: string): boolean | null {
+  if (UNCLEAR.test(text) || (SI.test(text) && !SI_ALONE.test(text))) return null;
+  const said = ` ${(text.toLowerCase().replace(/’/g, "'").match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu) ?? []).join(' ')} `;
+  if (TYPED_NO.some((phrase) => said.includes(` ${phrase} `))) return false;
+  if (TYPED_YES.some((phrase) => said.includes(` ${phrase} `))) return true;
+  return null;
+}
+
+function askTestClient(interview: Interview): void {
+  interview.state.question = 'test_client';
+  say(interview, 'claude', TEST_CLIENT_OFFER, [{ text: TEST_CLIENT_YES, recommended: true }, { text: TEST_CLIENT_NO, recommended: false }]);
+}
+
+/** A yes says Claude's line and a no says nothing, and both move on to the Tools step; anything else gets the offer again. */
+function answerTestClient(world: MockWorld, interview: Interview, text: string): void {
+  const yes = readsYes(text);
+  if (yes === null) {
+    askTestClient(interview);
+    return;
+  }
+  if (yes) say(interview, 'claude', TEST_CLIENT_ADDED);
+  enterTools(world, interview);
 }
 
 /** The reads and first question after the owner gives (or declines) consent. */
@@ -866,8 +1086,7 @@ function completeConsent(interview: Interview): void {
     if (interview.searchFails) {
       say(interview, 'tool_label', "Couldn't search the web just now");
     } else {
-      say(interview, 'tool_label', 'Searched the web: hair salon deposits and late cancellations');
-      say(interview, 'tool_label', 'Searched the web: salon new client consultation form');
+      for (const search of interview.words.searches) say(interview, 'tool_label', `Searched the web: ${search}`);
     }
   }
   if (interview.consultant) openConsultant(interview);
@@ -907,6 +1126,7 @@ export function holdNextDecision(world: MockWorld, interviewId: string): (outcom
     interview.decisionDone();
     interview.decisionDone = null;
     interview.state.busy = false;
+    endRun(interview, 'done');
   };
 }
 
@@ -918,6 +1138,10 @@ export function holdNextDecision(world: MockWorld, interviewId: string): (outcom
 function applyAnswer(world: MockWorld, interview: Interview, text: string, ownerStored = false): void {
   const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
   if (!ownerStored) say(interview, 'owner', text.trim());
+  if (interview.state.question === 'test_client') {
+    answerTestClient(world, interview, text);
+    return;
+  }
   if (interview.state.pending_card) {
     const card = interview.proposals.find((card) => card.proposal_id === interview.state.pending_card)!;
     const words = text.trim();
@@ -967,6 +1191,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
     }
     return;
   }
+  if (interview.state.question === 'contact_and_after_hours') interview.contactSaid.push(text.trim());
   if (FOLLOW_UP_TRIGGER.test(text)) {
     say(interview, 'claude', FOLLOW_UP);
     return;
@@ -1017,7 +1242,137 @@ export function holdNextAnswer(world: MockWorld, interviewId: string): () => voi
     interview.running = null;
     applyAnswer(world, interview, turn.text, turn.ownerStored);
     interview.state.busy = false;
+    endRun(interview, 'done');
   };
+}
+
+const runId = () => `r_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+
+/** What a saved read label read, as its stream names it: the owner's Claude memory, a web search, or their site. */
+function readOf(label: string): Pick<PlayedRead, 'read' | 'host'> {
+  if (label === MEMORY_LABEL || label.includes('Claude memory')) return { read: 'memory', host: null };
+  if (/^(?:Searched the web|Couldn't search the web)/.test(label)) return { read: 'web_search', host: null };
+  const host = label.replace(/^(?:Read|Couldn't read) /, '').split(',')[0] ?? null;
+  return { read: 'website', host };
+}
+
+/** Ends the turn its stream follows: `done` (the turn landed) or `error`, then each stream closes. */
+function endRun(interview: Interview, how: 'done' | 'error' | 'drop'): void {
+  const run = interview.run;
+  if (run === null) return;
+  interview.run = null;
+  run.stop();
+  for (const follower of run.followers) {
+    if (how === 'done') follower.send('done', { run: run.id });
+    else if (how === 'error') follower.send('error', { run: run.id, error: 'model_unavailable' });
+    follower.close();
+  }
+}
+
+/**
+ * Runs a turn as a stream: the owner's words are in already; `commit` lands the rest of the turn
+ * now, and reads go on seeing the interview busy, as it was, until the turn's reads and reply have
+ * streamed. Answers 202 at once with the interview busy, as the API does for a turn still running;
+ * with `hold`, its request waits instead (`later`) and answers 200 with the landed turn once the
+ * stream has said `done`, as the API answers a turn that ends within its wait.
+ */
+function streamTurn(
+  sv: Server,
+  interview: Interview,
+  req: Req,
+  commit: () => void,
+  { hold = false } = {},
+): { status: 202; body: SetupState; later?: Promise<{ status: 200; body: SetupState }> } {
+  const view = structuredClone({ ...interview.state, busy: true });
+  const before = interview.state.messages.length;
+  commit();
+  const added = interview.state.messages.slice(before);
+  const reads = added.flatMap((m): PlayedRead[] => (m.role === 'tool_label' ? [{ ...readOf(m.text), text: m.text }] : []));
+  // The reply streams; a question with choices is the next message, which docks once the turn lands.
+  const text = added.filter((m) => m.role === 'claude' && m.card == null && m.text.trim() !== '' && m.choices.length === 0).map((m) => m.text).join('\n\n');
+  interview.view = view;
+  const run: SetupRun = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {}, land: () => {} };
+  interview.run = run;
+  const later = hold
+    ? new Promise<{ status: 200; body: SetupState }>((resolve) => {
+        run.land = () => resolve({ status: 200, body: stateOf(interview, req.query) });
+      })
+    : undefined;
+  const plan = sv.takePlan('setup');
+  // A setup turn that fails is the API's to roll back; the mock's streamed turns only land or break off.
+  const played = plan === null ? null : { ...plan, fail: undefined };
+  run.stop = playReply({ text, wordMs: sv.streams.wordMs, reads, plan: played }, {
+    event(ev) {
+      const at = { run: run.id };
+      if (ev.name === 'delta') {
+        run.text = ev.text;
+        for (const follower of run.followers) follower.send('delta', { ...at, text: ev.text });
+      } else if (ev.name === 'reset') {
+        run.text = '';
+        for (const follower of run.followers) follower.send('reset', at);
+      } else if (ev.name === 'reading') {
+        run.reading.push({ read: ev.read, host: ev.host });
+        for (const follower of run.followers) follower.send('reading', { ...at, read: ev.read, host: ev.host });
+      } else if (ev.name === 'label') {
+        run.labels.push({ read: ev.read, text: ev.text });
+        for (const follower of run.followers) follower.send('label', { ...at, read: ev.read, text: ev.text });
+      }
+    },
+    end(how) {
+      // The turn has landed whatever its stream did: a broken connection loses only the display.
+      interview.view = null;
+      if (plan?.doneAfter) {
+        // The request answers with the landed turn first; the stream says so after.
+        run.land();
+        void plan.doneAfter.finally(() => {
+          if (interview.run === run) endRun(interview, how === 'error' ? 'done' : how);
+        });
+        return;
+      }
+      endRun(interview, how === 'error' ? 'done' : how);
+      if (plan?.landAfter) void plan.landAfter.finally(run.land);
+      else run.land();
+    },
+  });
+  return { status: 202, body: stateOf(interview, req.query), ...(later === undefined ? {} : { later }) };
+}
+
+/**
+ * Follows interview `id`'s running turn for one stream: the reads ended and the reply so far at
+ * once, then each event as it comes, until `done`. A turn a test holds is followed silently until
+ * it lands; with no turn running, `done` with no run at once. Returns the function that stops it.
+ */
+export function followSetupTurn(world: MockWorld, id: string, follower: SetupFollower): () => void {
+  const interview = interviewsOf(world).get(id);
+  if (interview && interview.run === null && busyOf(interview)) {
+    interview.run = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {}, land: () => {} };
+  }
+  const run = interview?.run ?? null;
+  if (run === null) {
+    follower.send('done', { run: null });
+    follower.close();
+    return () => {};
+  }
+  // A stream that comes late hears the turn so far in its order: each read started, each ended, the reply.
+  for (const started of run.reading) follower.send('reading', { run: run.id, ...started });
+  for (const label of run.labels) follower.send('label', { run: run.id, ...label });
+  if (run.text !== '') follower.send('delta', { run: run.id, text: run.text });
+  run.followers.add(follower);
+  return () => {
+    run.followers.delete(follower);
+  };
+}
+
+/** Stops every streamed turn in `world`, its streams closed with nothing more: the copy is going. */
+export function stopSetupRuns(world: MockWorld): void {
+  for (const interview of interviewsOf(world).values()) {
+    const run = interview.run;
+    if (run === null) continue;
+    interview.run = null;
+    run.stop();
+    run.land();
+    for (const follower of run.followers) follower.close();
+  }
 }
 
 /** The interview the path names, and its Desk, or why the request can't have it. */
@@ -1112,6 +1467,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     covered: new Set(),
     answers: {},
     usedSuggestions: false,
+    contactSaid: [],
+    offered: false,
     state: {
       interview_id: world.id('setup'),
       desk_id: deskId,
@@ -1133,6 +1490,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     business,
     ownerName,
     about: aboutOf(text),
+    businessType: businessTypeOf(text),
     timezone,
     searchFails: /search fails/i.test(text),
     capCents: 0,
@@ -1144,6 +1502,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     running: null,
     holdConsent: false,
     consentResult: null,
+    view: null,
+    run: null,
   };
   desk.ownerName = ownerOf(interview);
   interviewsOf(world).set(interview.state.interview_id, interview);
@@ -1233,11 +1593,13 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (interview.consentResult === 'landed') {
       interview.consentResult = null;
       completeConsent(interview);
+      endRun(interview, 'done');
     } else if (interview.consentResult === 'failed') {
       interview.consentResult = null;
       interview.state.busy = false;
       interview.state.consent = null;
       interview.state.messages.pop();
+      endRun(interview, 'error');
     }
     return ok(stateOf(interview, req.query));
   },
@@ -1247,7 +1609,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     const allow = isRecord(req.body) ? req.body.allow : undefined;
     if (req.malformed || typeof allow !== 'boolean') return INVALID;
     const { interview } = found;
-    if (interview.state.busy) return { status: 202, body: stateOf(interview, req.query) };
+    if (busyOf(interview)) return { status: 202, body: stateOf(interview, req.query) };
     if (interview.state.consent != null) return CONFLICT;
     interview.cardsEnabled = req.query?.get('cards') === '1';
     interview.state.consent = allow;
@@ -1258,23 +1620,23 @@ export const SETUP_ROUTES: ServedRoutes = {
       return { status: 202, body: stateOf(interview, req.query) };
     }
     // Without consent, nothing is ever read.
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, () => completeConsent(interview));
     completeConsent(interview);
     return ok(stateOf(interview, req.query));
   },
   setupAnswer(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
-    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
+    if (busyOf(found.interview)) return { status: 202, body: stateOf(found.interview, req.query) };
     const body = isRecord(req.body) ? req.body : {};
     const { text, question, card } = body;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX) return INVALID;
     const cardAnswer = question === null && typeof card === 'string' && card !== '';
-    if (!cardAnswer && (card !== undefined || typeof question !== 'string' || !SETUP_QUESTIONS.some((q) => q.key === question))) return INVALID;
+    if (!cardAnswer && (card !== undefined || typeof question !== 'string' || !(question === 'test_client' || SETUP_QUESTIONS.some((q) => q.key === question)))) return INVALID;
     const { interview } = found;
-    const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
     // An answer to a question the interview has moved past is refused, never applied to the next one.
     if (interview.state.step !== 'questions') return CONFLICT;
-    if (cardAnswer ? card !== interview.state.pending_card : at === -1 || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
+    if (cardAnswer ? card !== interview.state.pending_card : interview.state.question === null || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
     // One turn at a time, as the API runs them: another answer while one is running is refused.
     if (interview.running !== null) return CONFLICT;
     if (interview.holdNext) {
@@ -1289,6 +1651,10 @@ export const SETUP_ROUTES: ServedRoutes = {
       }
       return ok(stateOf(interview, req.query));
     }
+    if (sv.streams.setupTurns) {
+      say(interview, 'owner', text.trim());
+      return streamTurn(sv, interview, req, () => applyAnswer(sv.world, interview, text, true), { hold: sv.streams.answersAtOnce !== true });
+    }
     applyAnswer(sv.world, interview, text);
     return ok(stateOf(interview, req.query));
   },
@@ -1301,7 +1667,7 @@ export const SETUP_ROUTES: ServedRoutes = {
   setupProposal(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
-    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
+    if (busyOf(found.interview)) return { status: 202, body: stateOf(found.interview, req.query) };
     const { interview } = found;
     const proposal = interview.state.messages.find((message) => message.card?.proposal_id === req.params.proposal_id)?.card;
     if (!proposal) return NOT_FOUND;
@@ -1342,21 +1708,37 @@ export const SETUP_ROUTES: ServedRoutes = {
       interview.state.busy = true;
       return { status: 202, body: stateOf(interview, req.query) };
     }
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, apply, { hold: sv.streams.answersAtOnce !== true });
     apply();
     return ok(stateOf(interview, req.query));
   },
   setupSuggestions(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
-    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
+    if (busyOf(found.interview)) return { status: 202, body: stateOf(found.interview, req.query) };
     const { interview } = found;
     if (interview.state.step !== 'questions' || interview.state.consent === null || interview.running !== null) return CONFLICT;
     if (req.malformed || !isRecord(req.body) || Object.keys(req.body).length !== 0) return INVALID;
+    if (interview.state.question === 'test_client') {
+      // The plan is closed already: the suggestions move on with no second plan, and nothing is added.
+      say(interview, 'owner', 'Use your suggestions');
+      enterTools(sv.world, interview);
+      return ok(stateOf(interview, req.query));
+    }
     interview.usedSuggestions = true;
     say(interview, 'owner', 'Use your suggestions');
-    say(interview, 'claude', CPA_COPY.rest);
-    finishQuestions(sv.world, interview, true);
+    const finish = () => {
+      say(interview, 'claude', CPA_COPY.rest);
+      finishQuestions(sv.world, interview, true);
+    };
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, finish);
+    finish();
     return ok(stateOf(interview, req.query));
+  },
+  setupEvents(sv, req) {
+    // A 200 opens the stream (handlers.ts); `followSetupTurn` follows the running turn.
+    const found = interviewOf(sv, req);
+    return isFailure(found) ? found : { status: 200 };
   },
   setupConnect(sv, req) {
     const found = interviewOf(sv, req);
@@ -1446,6 +1828,14 @@ export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
 }
 
 /**
+ * Which words the built-in agent's tasks take on the Desk (`GET …/agent_tasks`): its setup business
+ * type for a Desk setup made, else null (the copy's own Desk, Turner's, whose set is `rivera`).
+ */
+export function setupTaskSet(world: MockWorld, deskId: string): BusinessType | null {
+  return interviewForDesk(world, deskId)?.businessType ?? null;
+}
+
+/**
  * A setup Desk's public page: its name, owner, confirmed hours and owner lines that pass the mock scan (the
  * original About before its lines are seeded, also scanned); null for any other Desk.
  */
@@ -1457,7 +1847,7 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
     business_name: interview.business,
     desk_name: desk.summary.name,
     owner_display_name: ownerOf(interview),
-    brand: { ...BUSINESS.brand },
+    brand: effectiveBrand(desk.brand),
     charter: publicState ? [
       ...publicState.lines.filter(({ text, source, held }) => source === 'owner' && !held && !publicLineRefused(text)).map(({ key, text }) => cardBlock(key === 'contact' ? 'contact' : 'policy', { fact_id: `charter:${key}`, title: text })),
       ...(publicState.hours?.source === 'owner' && publicState.hours.windows.length ? [cardBlock('hours', {
@@ -1504,6 +1894,7 @@ export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[])
         name: interview.business,
         owner_display_name: ownerOf(interview),
         timezone: interview.timezone,
+        brand: effectiveBrand(desk.brand),
         desks: [{ ...desk.summary, setup: unfinishedSetup(world, desk.summary.desk_id) }],
       },
     ];

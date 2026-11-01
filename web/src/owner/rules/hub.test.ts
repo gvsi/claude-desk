@@ -9,6 +9,7 @@ import type { RuleCard, ToolName } from '../../api/contracts.ts';
 import type { NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { chenBusinessTools } from '../../mocks/businessTools.ts';
+import { businessTools } from '../connectors/catalog.ts';
 import { describeEffects, type ToolSummaryView } from '../../ds/index.ts';
 import { needsYou, peopleOut, rulesView } from '../../mocks/readModels.ts';
 import { PRESETS, RIVERA } from '../../mocks/seed.ts';
@@ -548,18 +549,22 @@ describe('the rows a confirmed change lands on', () => {
   });
 
   it('a_preset_lands_on_every_tool_whose_rules_it_changes', () => {
-    // "Ask me first" drops each of Turner's own rules: every tool one of them governed changes, and
-    // the tools only the starter's cards govern (open times, leads, callbacks, identity checks) don't.
+    // "Ask me first" drops each of Turner's own rules: every tool one of them governed changes, the
+    // urgent callback among them, and the tools only the starter's cards govern (open times, leads,
+    // callbacks, identity checks) don't.
     const stored = mockStore.world.draftCards(desk(), PRESETS.ask_first);
     const changed = rowsChangedBy(draftFromDiff(stored, desk().policy, 'ask_first'), view().tools);
     expect([...changed.tools].sort()).toEqual(
-      ['native.book', 'native.charge_mandate', 'native.payment_link', 'native.quote', 'native.release_document', 'payments.create_refund', 'payments.list_charges'].sort(),
+      ['desk.emergency-callback', 'native.book', 'native.charge_mandate', 'native.payment_link', 'native.quote', 'native.release_document', 'payments.create_refund', 'payments.list_charges'].sort(),
     );
     expect(changed.moneyLimit).toBe(false);
   });
 
-  /** The names of the tools a change lands on, which the review's row titles name. */
-  const namesOf = (tools: readonly string[]) => new Set(tools.map((tool) => targetWords(tool)));
+  /**
+   * The names of the tools a change lands on, as the review's row titles name them: a Desk's own
+   * job by its title, from the Desk's tool rows.
+   */
+  const namesOf = (tools: readonly string[]) => new Set(tools.map((tool) => targetWords(tool, businessTools(view().tools))));
   /** The titles of the review's rows, each once. */
   const titlesOf = (draft: RuleDraft) => new Set(changeRows(draft, people(), view().tools).map((row) => row.title));
 
@@ -577,10 +582,13 @@ describe('the rows a confirmed change lands on', () => {
 
   it('a_preset_lands_on_exactly_the_tools_its_review_lists', () => {
     // "Recommended rules" in place of Turner's own: its quote and document rules replace Turner's
-    // with ones that differ only in their ids, so its review lists neither, and neither lands.
+    // with ones that differ only in their ids, so its review lists neither, and neither lands. Its
+    // urgent callback job loses its own rule, so the review lists it by its title, and it lands.
     const draft = draftFromDiff(mockStore.world.draftCards(desk(), PRESETS.auto), desk().policy, 'auto');
     const changed = rowsChangedBy(draft, view().tools);
     expect(namesOf(changed.tools)).toEqual(titlesOf(draft));
+    expect(changed.tools).toContain('desk.emergency-callback');
+    expect(titlesOf(draft)).toContain('Emergency callback');
     expect(changed.tools).not.toContain('native.quote');
     expect(changed.tools).not.toContain('native.release_document');
     expect(changed.moneyLimit).toBe(false);

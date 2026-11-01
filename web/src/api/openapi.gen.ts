@@ -47,12 +47,20 @@ export interface AgentRunStarted {
   run_id: string;
 }
 /**
+ * Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
+ * the business type setup stored for it (`other` without one). A key, never words: the page holds every word.
+ */
+export interface AgentTasks {
+  task_set: "rivera" | "trade" | "office" | "landlord" | "other";
+}
+/**
  * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
  * with the blocks and signed statuses the kernel checked and the Desk showed the agent.
  *
  * An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
  * 2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is
- * (owner decision, 2026-11-01). The agent's model writes it from a fixed `DemoTask` and the Desk's kernel-checked
+ * (owner decision, 2026-11-01). The agent's model writes it from a fixed task line that code picks from signed
+ * templates, keyed by the Desk's setup business type, with no owner or visitor text, and the Desk's kernel-checked
  * replies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the
  * Desk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
  * blocks and statuses.
@@ -241,6 +249,9 @@ export interface BusinessOut {
   name: string;
   owner_display_name: string;
   timezone: string;
+  brand: {
+    [k: string]: string;
+  };
   desks: DeskSummary[];
 }
 /**
@@ -324,7 +335,10 @@ export interface ConnectorProposal {
  * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
  * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
  * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
- * written yet.
+ * written yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,
+ * checked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual
+ * refusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff
+ * clearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -338,6 +352,8 @@ export interface ConversationSummary {
   };
   owner_preview: boolean;
   latest_visitor_text: string | null;
+  latest_outcome: ("visit_booked" | "deposit_paid" | "turned_down") | null;
+  replayed?: boolean;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -535,6 +551,7 @@ export interface Lead {
   display_name: string | null;
   note: string | null;
   created_at: string;
+  replayed?: boolean;
 }
 /**
  * 202: the visitor's message is stored; Claude's answer arrives on the event stream.
@@ -561,7 +578,7 @@ export interface MoneyCapIn {
  * wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
  * characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
  * AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
- * shown as "Claude's note on a stopped reply: {summary}" and never quoted as the visitor's), else None. A held
+ * shown as "Claude's note on what the Desk stopped: {summary}" and never quoted as the visitor's), else None. A held
  * request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
  * AI-written text: a visitor could steer a summary to sway an approval.
  */
@@ -603,6 +620,7 @@ export interface OwnerTranscript {
   state: SessionState;
   items: OwnerTranscriptItem[];
   typing_until: string | null;
+  replayed?: boolean;
 }
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
@@ -842,6 +860,7 @@ export interface SetupAnswerIn {
         | "documents_and_payments"
         | "money_limit"
         | "contact_and_after_hours"
+        | "test_client"
       )
     | null;
   card?: string | null;
@@ -936,9 +955,9 @@ export interface SetupStartIn {
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
- * conversation so far. Its messages start at Claude's consent
- * question: the owner's opening description isn't shown back to them.
+ * before consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end
+ * waits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's
+ * consent question: the owner's opening description isn't shown back to them.
  */
 export interface SetupState {
   interview_id: string;
@@ -955,6 +974,7 @@ export interface SetupState {
         | "documents_and_payments"
         | "money_limit"
         | "contact_and_after_hours"
+        | "test_client"
       )
     | null;
   pending_card?: string | null;
@@ -1214,6 +1234,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
+  "GET /api/owner/setup/{id}/events": { 200: null },
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/proposals/{proposal_id}": { 200: "SetupState", 202: "SetupState" },
@@ -1237,6 +1258,7 @@ export const API_OPERATIONS = {
   "POST /api/public/desks/{slug}/verify/check": { 200: "VerifyChecked" },
   "GET /api/public/desks/{slug}/demo_inbox": { 200: "DemoInboxEntry[]" },
   "POST /api/public/desks/{slug}/agents/key": { 200: "DemoAgentIssued" },
+  "GET /api/public/desks/{slug}/agent_tasks": { 200: "AgentTasks" },
   "POST /api/public/desks/{slug}/send_agent": { 202: "AgentRunStarted" },
   "GET /api/public/desks/{slug}/send_agent/{run_id}": { 200: "DemoAgentRun" },
   "GET /api/d/{token}": { 200: null },

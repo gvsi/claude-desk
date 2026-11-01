@@ -178,7 +178,7 @@ describe('the About documents', () => {
     expect(proposal).toEqual({
       route: '/about/proposal',
       title: 'Product proposal',
-      summary: 'What Claude Desk is, who it’s for, what v1 enforces in code, and how we’ll know it works.',
+      summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
       pullQuote: 'Talking Claude around can’t make it act past the owner’s rules.',
       hero: 'architecture',
       next: 'prediction',

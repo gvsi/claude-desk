@@ -7,7 +7,7 @@ import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { CopyList } from '../components/CopyList/CopyList.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
-import { ShareCard } from '../components/ShareCard/ShareCard.tsx';
+import { SHARE_CARD_QR_COLORS, ShareCard } from '../components/ShareCard/ShareCard.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { PUBLIC_LINK, RiveraFrame } from './parts.tsx';
@@ -25,7 +25,7 @@ const WORDS = [
 
 /**
  * A stand-in for the web app's QR code (plan 04 draws the real one from the Desk's link): a fixed
- * pattern of squares on a light ground, so the board shows the slot filled. It encodes nothing.
+ * pattern of squares in the card's QR colors, filling its sand tile. It encodes nothing.
  */
 function QrPlaceholder() {
   const cells: [number, number][] = [];
@@ -39,9 +39,9 @@ function QrPlaceholder() {
     }
   }
   return (
-    <svg viewBox="-1 -1 27 27" width="152" height="152" role="img" aria-label={`QR code for ${PUBLIC_LINK}`} style={{ display: 'block', background: '#faf9f5' }}>
+    <svg viewBox="-1 -1 27 27" width="100%" height="100%" role="img" aria-label={`QR code for ${PUBLIC_LINK}`} style={{ display: 'block', background: SHARE_CARD_QR_COLORS.light }}>
       {cells.map(([x, y]) => (
-        <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill="#141413" />
+        <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill={SHARE_CARD_QR_COLORS.dark} />
       ))}
     </svg>
   );

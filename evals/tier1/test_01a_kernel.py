@@ -44,6 +44,8 @@ from evals.tier1.test_labels_and_injection import LANGUAGES, block_text, dumped,
 from evals.tier1.test_reply_golden import (
     CLEAN_EN,
     HANDED_OFF,
+    OFFER,
+    OFFERED,
     STAND_IN_CANARY,
     check_reply,
     handed_off,
@@ -332,19 +334,20 @@ async def test_a_documents_canary_in_a_reply_is_blocked(k: KernelHarness, record
 @pytest.mark.requires("01a")
 @pytest.mark.parametrize("final", [True, False], ids=["final", "rewrite"])
 async def test_an_unmarked_first_reply_gets_one_rewrite(k: KernelHarness, records, final: bool):
-    """Unmarked prose never shows; the first check rewrites and the final one hands off."""
+    """Unmarked prose never shows; the first check rewrites and the final one asks with the call-back offer,
+    which the golden Desk has, so no owner handoff opens (the owner's decision of 2026-11-01)."""
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
     verdict = await check_reply(k, visitor, UNMARKED_PROSE, final=final, expect=Expect(fields={
         "ok": False, "violations": {"$len": 1}, "violations.0.kind": "uncertain_language",
         "violations.0.rule_id": "language_uncertain", "language": "en",
-        **shown_blocks(HANDED_OFF if final else [])}))
+        **shown_blocks(OFFERED if final else []), **({"blocks.0.text": OFFER["en"]} if final else {})}))
     if k.is_real:
         events = [entry.event for entry in await records.ledger_entries(desk.copy.copy_id, desk.desk_id)
                   if entry.event.session_id == visitor.state.session_id]
         hands = [e for e in events if e.kind == "desk_data" and e.summary.get("part") == "handoffs"]
-        assert len(hands) == int(final)
-        assert verdict.blocks == [] if not final else verdict.blocks[0].template == "handoff"
+        assert hands == []
+        assert [(block.kind, block.text) for block in verdict.blocks] == ([("prose", OFFER["en"])] if final else [])
 
 
 @pytest.mark.requires("01a")

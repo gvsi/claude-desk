@@ -35,7 +35,9 @@
   font-weight: 400;
 }
 
-.vision-article a {
+/* A link in the article and its end. The top bar (AboutBar) draws its own. */
+.vision-article :where(main) a,
+.vision-article :where(.va-end) a {
   color: var(--va-link);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -43,78 +45,13 @@
 }
 
 .vision-article :focus-visible {
-  outline-color: var(--va-link);
+  outline-color: var(--va-ink-2);
 }
 
-/* What keyboard focus scrolls to stops clear of the bar. */
+/* What keyboard focus scrolls to stops clear of the top bar, whose height is on the root (AboutBar.css). */
 .vision-article main a,
 .vision-article .va-end a {
-  scroll-margin-top: 80px;
-}
-
-/* The bar across the top, which stays while the page scrolls: the name, then the About set's switch with this
-   page marked, and the way into the prototype (PrototypeLink, drawn here in the article's ink). */
-
-.vision-article .va-bar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 56px;
-  padding: 0 40px;
-  background: var(--va-bar);
-  border-bottom: 1px solid var(--va-line);
-  font-size: 14px;
-  line-height: 20px;
-}
-
-.vision-article .va-bar__brand {
-  margin-right: auto;
-  font-family: var(--font-serif);
-  font-size: 18px;
-  font-weight: 460;
-  letter-spacing: -0.1px;
-}
-
-.vision-article .va-switch {
-  display: flex;
-  gap: 4px;
-}
-
-.vision-article .va-switch__link {
-  display: inline-flex;
-  align-items: center;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  color: var(--va-ink-2);
-  font-size: 14px;
-  line-height: 20px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.vision-article .va-switch__link:hover {
-  background: var(--va-hover);
-  color: var(--va-ink);
-}
-
-.vision-article .va-switch__link[aria-current='page'] {
-  background: var(--va-band);
-  color: var(--va-ink);
-}
-
-.vision-article .va-bar .cd-about-try {
-  margin-left: 4px;
-  box-shadow: inset 0 0 0 1px var(--va-line);
-  color: var(--va-ink);
-  text-decoration: none;
-}
-
-.vision-article .va-bar .cd-about-try:hover {
-  background: var(--va-hover);
+  scroll-margin-top: calc(var(--about-top) + 24px);
 }
 
 /* The headline block: the meta line, the headline, the dek and the note under it. */
@@ -336,14 +273,17 @@
 }
 
 .vision-article .va-card:focus-visible {
-  outline: 2px solid var(--va-link);
+  outline: 2px solid var(--va-ink-2);
   outline-offset: 2px;
 }
 
+/* The phone keeps its own height rather than the picture's, so its frame runs on past the picture's foot and the
+   cut falls across the bezel's straight sides, never at the frame's own lower corners. */
 .vision-article .va-card__top {
   display: flex;
   flex: none;
   justify-content: center;
+  align-items: flex-start;
   height: 150px;
   padding-top: 16px;
   overflow: hidden;
@@ -441,7 +381,7 @@
 }
 
 .vision-article .va-next__link:focus-visible::after {
-  outline: 2px solid var(--va-link);
+  outline: 2px solid var(--va-ink-2);
   outline-offset: 2px;
 }
 
@@ -716,23 +656,6 @@
 
 /* Phones: the headline block to the left, no cover band, and each figure stacked and centered. */
 @media (max-width: 720px) {
-  .vision-article .va-bar {
-    gap: 10px;
-    padding: 0 16px;
-  }
-
-  /* The switch leaves the bar for a row under it, which scrolls away with the page. */
-  .vision-article .va-switch {
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 12px 16px 0;
-  }
-
-  /* 8 px either side of each name, not the laptop's 12, keeps the three pages on one row down to a 375 px phone. */
-  .vision-article .va-switch__link {
-    padding: 0 8px;
-  }
-
   .vision-article .va-hero {
     padding: 56px 16px 28px;
     text-align: left;

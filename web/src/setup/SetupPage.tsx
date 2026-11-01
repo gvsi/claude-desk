@@ -15,7 +15,7 @@ import { QuestionsStep } from './QuestionsStep.tsx';
 import { RulesStep } from './RulesStep.tsx';
 import { SafetyStep } from './SafetyStep.tsx';
 import { StartStep } from './StartStep.tsx';
-import { SETUP_REACHES, laterStep } from './shared.ts';
+import { SETUP_REACHES, laterStep, useOpensAtTop } from './shared.ts';
 import { SetupOpening } from './StepSkeletons.tsx';
 import { ToolsStep } from './ToolsStep.tsx';
 
@@ -178,14 +178,30 @@ function SetupInterview({ setupId }: { setupId: string }) {
   );
   /** The page moves on: the screen shows the next step; the API confirms it with that step's own request. */
   const moveTo = useCallback((step: SetupStep) => update((now) => (now === undefined ? now : { ...now, step })), [update]);
-  /** The API answered with the interview as it stands. */
-  const onState = useCallback(
+  /**
+   * Reads of the interview and the answers of the requests that change it can land out of order: a
+   * read of a busy interview every 2 s can answer after the read once its turn is saved. Each read is
+   * numbered as it goes out and lands only if nothing newer has landed since, so an older read never
+   * replaces a newer interview; a request's own answer is newer than every read sent before it.
+   */
+  const reads = useRef<{ sent: number; landed: number; latest: SetupState | null }>({ sent: 0, landed: 0, latest: null });
+  /** Shows `next`, the interview as the API last said it stands. */
+  const publish = useCallback(
     (next: SetupState) => {
+      reads.current.latest = next;
       if (confirmed.current === 'questions' && next.step === 'tools') closing.current = true;
       confirm(next.step);
       update(() => next);
     },
     [confirm, update],
+  );
+  /** The API answered a request with the interview as it stands. */
+  const onState = useCallback(
+    (next: SetupState) => {
+      reads.current.landed = reads.current.sent;
+      publish(next);
+    },
+    [publish],
   );
   /**
    * Leaving setup carries the interview as it stands into the copy's Desks once more (then they are
@@ -214,17 +230,24 @@ function SetupInterview({ setupId }: { setupId: string }) {
     },
     [carry, queryClient, setupId, asConfirmed],
   );
-  /** The interview read again, after a write whose answer was lost; null when it can't be read. */
-  const reread = useCallback(
-    () => request('setup', { params: { id: setupId } })
+  /**
+   * The interview read again, after a write whose answer was lost or while it is busy; null when it
+   * can't be read. A read something newer has overtaken changes nothing and answers with that newer
+   * interview.
+   */
+  const reread = useCallback(() => {
+    reads.current.sent += 1;
+    const sent = reads.current.sent;
+    return request('setup', { params: { id: setupId } })
       .then((next) => {
+        if (sent <= reads.current.landed) return reads.current.latest ?? next;
+        reads.current.landed = sent;
         // Hold the closing before publishing the read to the cache, so Tools never mounts first.
-        onState(next);
+        publish(next);
         return next;
       })
-      .catch(() => null),
-    [setupId, onState],
-  );
+      .catch(() => null);
+  }, [setupId, publish]);
 
   const state = setup.data;
   // The step setup opened at on this page: a step come to after it was reached live, and its
@@ -233,6 +256,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const [openedAt, setOpenedAt] = useState<SetupStep | null>(null);
   if (openedAt === null && state !== undefined) setOpenedAt(state.step);
   const opened = openedAt ?? state?.step;
+  // While Questions closes, the tools the API has moved on to wait for its "Continue".
+  const closingQuestions = state !== undefined && closing.current && !continued && state.step === 'tools';
+  // Each step opens at its top, by the bar's step: Your rules' views open at their tops on their own
+  // (RulesStep), and the preview going live stays the same screen.
+  useOpensAtTop(state === undefined ? null : STEP_INDEX[closingQuestions ? 'questions' : state.step]);
   // An interview outside this copy: the app's not-found screen.
   if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
@@ -258,12 +286,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
 
   const name = business ?? '';
   const wentLiveHere = state.step === 'live' && openedAt !== null && openedAt !== 'live';
-  // "Answering now" follows the latest Desks read alone, whatever this page saw happen: going live
+  // "Acting for you now" follows the latest Desks read alone, whatever this page saw happen: going live
   // here writes Answering on into them, and a Desk whose owner has turned Answering off since, here
   // or elsewhere, doesn't claim it. The check's drawing is the page's own history, kept apart.
   const answering = desk?.answering === true;
   let body: ReactNode;
-  const shownStep = closing.current && !continued && state.step === 'tools' ? 'questions' : state.step;
+  const shownStep = closingQuestions ? 'questions' : state.step;
   switch (shownStep) {
     case 'questions':
       body = <QuestionsStep state={state} onState={onState} reread={reread} onContinue={() => setContinued(true)} />;
@@ -280,7 +308,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       break;
     case 'preview':
     case 'live':
-      // Live, the title names the business and "Answering now" follows the Desks, so while they are
+      // Live, the title names the business and "Acting for you now" follows the Desks, so while they are
       // first read (on a reload) the step waits whole on the loading line, rather than drawing a
       // title and a link that their arrival would rewrite and push down.
       body =

@@ -92,7 +92,7 @@ function VisionOwnerFrame({ business, owner, desks, currentDeskId, current, peop
 
 /** Claude's words in a conversation, in serif, as a checked reply's prose block. */
 function Reply({ text, language = 'en' }: { text: string; language?: CopyLanguage }) {
-  return <ClaudeMessage blocks={[proseBlock(text)]} language={language} ownerName={rivera.business.ownerName} />;
+  return <ClaudeMessage plainProse blocks={[proseBlock(text)]} language={language} ownerName={rivera.business.ownerName} />;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -158,7 +158,7 @@ export function TeamDeskConversations() {
       current="conversations"
       peopleLabel="Teammates"
       counts={{ conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } }}
-      answeringDescription="Claude answers your team under your rules"
+      answeringDescription="Within your rules"
     >
       <div className="board-filled-page board-vision-page board-vision-team">
         <div>
@@ -299,19 +299,19 @@ export const CLAUDE_ACCOUNT_TURNS = {
 
 /**
  * Dana's last visit, the drain clearing, as the kernel renders a booking card (`render/en.py`): the
- * day, then "Arriving {start} to {end}" and "With {owner}", with no booking number.
+ * day, then "{start} to {end}" and "With {owner}", with no booking number.
  */
 export const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-61',
   title: 'Tuesday, October 20',
-  lines: ['Arriving 10:00 am to 12:00 pm', 'With Mike Turner'],
+  lines: ['10:00 am to 12:00 pm', 'With Mike Turner'],
 });
 
 /** The visitor's booking on the phone, as the kernel renders a booking card. */
 export const PHONE_BOOKING = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-77',
   title: 'Tuesday, November 3',
-  lines: ['Arriving 2:00 pm to 4:00 pm', 'With Mike Turner'],
+  lines: ['2:00 pm to 4:00 pm', 'With Mike Turner'],
 });
 
 /** Turner Plumbing's public page, under the vision bar, for a returning visitor signed in with a Claude account. */
@@ -332,7 +332,7 @@ export function ClaudeAccountChat() {
       <Transcript label="Conversation with Turner Plumbing">
         <SystemLine text="Signed in with your Claude account." />
         <TranscriptRow margin={<MarginReceipt source={CHECKED} plain={t.checked} ledgerSeq={40} />}>
-          <ClaudeMessage blocks={[proseBlock(t.ask)]} language="en" ownerName={owner} />
+          <ClaudeMessage plainProse blocks={[proseBlock(t.ask)]} language="en" ownerName={owner} />
         </TranscriptRow>
         <TranscriptRow>
           <VisitorMessage text={t.yes} />
@@ -343,7 +343,7 @@ export function ClaudeAccountChat() {
             <MarginReceipt key="checked" source={CHECKED} plain={t.checked} ledgerSeq={42} />,
           ]}
         >
-          <ClaudeMessage blocks={[proseBlock(t.matched), DANA_LAST_VISIT]} language="en" ownerName={owner} />
+          <ClaudeMessage plainProse blocks={[proseBlock(t.matched), DANA_LAST_VISIT]} language="en" ownerName={owner} />
         </TranscriptRow>
         <TranscriptRow>
           <VisitorMessage text={t.invoice} />
@@ -360,6 +360,7 @@ export function ClaudeAccountChat() {
             language="en"
             ownerName={owner}
             inertDownload
+            plainProse
           />
         </TranscriptRow>
       </Transcript>
@@ -444,7 +445,7 @@ function VisitorPhone() {
           <TranscriptRow margin={<MarginReceipt source={decided('executed')} plain="Booked on Mike Turner’s calendar" ledgerSeq={0} />}>
             {/* Owner's copy ruling, 2026-10-30: the booking is the kernel's booking card, and Claude's
                 words promise nothing it doesn't back (the board's "Mike will text you when he’s on his way."). */}
-            <ClaudeMessage blocks={[proseBlock(PHONE_REPLY), PHONE_BOOKING]} language="en" ownerName={rivera.business.ownerName} />
+            <ClaudeMessage plainProse blocks={[proseBlock(PHONE_REPLY), PHONE_BOOKING]} language="en" ownerName={rivera.business.ownerName} />
           </TranscriptRow>
         </Transcript>
       </div>
@@ -572,7 +573,7 @@ export const CITY_SUGGESTIONS = ['Book an inspection', 'Pay the fee', 'Talk to s
 
 /** Claude's words in the city's chat, as a checked reply's prose block. */
 function CityReply({ text }: { text: string }) {
-  return <ClaudeMessage blocks={[proseBlock(text)]} language="en" ownerName={CITY_STAFF} />;
+  return <ClaudeMessage plainProse blocks={[proseBlock(text)]} language="en" ownerName={CITY_STAFF} />;
 }
 
 /** The two receipts under each of Claude's answers: the reply's check, then what ran or waits. */
@@ -605,7 +606,7 @@ export function CityOfficeChat() {
           <VisitorMessage text={t.status} />
         </TranscriptRow>
         <TranscriptRow margin={cityReceipts(51, decided('executed'), t.codeSent)}>
-          <ClaudeMessage blocks={[proseBlock(t.verifyFirst), CITY_VERIFY_PROMPT]} language="en" ownerName={CITY_STAFF} />
+          <ClaudeMessage plainProse blocks={[proseBlock(t.verifyFirst), CITY_VERIFY_PROMPT]} language="en" ownerName={CITY_STAFF} />
         </TranscriptRow>
         <SystemLine text={t.verified} />
         <TranscriptRow margin={cityReceipts(53, decided('executed'), t.readFile)}>
@@ -623,7 +624,7 @@ export function CityOfficeChat() {
           <VisitorMessage text={t.inspector} />
         </TranscriptRow>
         <TranscriptRow margin={cityReceipts(55, decided('executed'), t.readCalendar)}>
-          <ClaudeMessage blocks={[proseBlock(t.times), CITY_INSPECTION_TIMES]} language="en" ownerName={CITY_STAFF} />
+          <ClaudeMessage plainProse blocks={[proseBlock(t.times), CITY_INSPECTION_TIMES]} language="en" ownerName={CITY_STAFF} />
         </TranscriptRow>
         <TranscriptRow>
           <VisitorMessage text={t.garage} />

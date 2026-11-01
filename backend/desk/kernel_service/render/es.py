@@ -70,6 +70,7 @@ MESSAGES: dict[str, str] = {
     "inbox_code_preview": "Nuevo código de verificación",
     "inbox_code_body": ("Tu código de {business} es {code}. Vence en diez minutos. "
                         "Si no lo pediste, ignora este mensaje."),
+    "offer_callback": "¿Quiere que solicite una llamada?",
 }
 
 WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
@@ -145,7 +146,7 @@ def hours(fact: Fact | None, desk: DeskInfo) -> Card:
 
 
 def booking_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
-    """`{date}` / `Llegada de {start} a {end}` / `Con {owner}`; sin el ID de la reserva."""
+    """`{date}` / `De {start} a {end}` / `Con {owner}`; sin el ID de la reserva."""
     start, end = booking_window(fact, desk)
     found = claims(fact)
     if "appointment_type" in found:
@@ -153,7 +154,7 @@ def booking_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
         return Card(title=date(start), lines=(f"{quoted(found['appointment_type'])} a las {clock(start)}",
                                               f"Unos {found['appointment_minutes']} minutos",
                                               f"Con {desk.owner_display_name}"))
-    return Card(title=date(start), lines=(f"Llegada de {clock(start)} a {clock(end)}",
+    return Card(title=date(start), lines=(f"De {clock(start)} a {clock(end)}",
                                           f"Con {desk.owner_display_name}"))
 
 

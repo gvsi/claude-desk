@@ -30,12 +30,12 @@ const PAGES = {
   proposal: {
     route: '/about/proposal',
     title: 'Product proposal',
-    summary: 'What Claude Desk is, who it’s for, what v1 enforces in code, and how we’ll know it works.',
+    summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
     sections: [
       'The product',
       'Who it’s for and the problem',
       'Why Anthropic',
-      'v1',
+      'The first release',
       'How we’ll know it works',
       'Business path',
       'The prototype',
@@ -801,14 +801,14 @@ describe('ReaderPage', () => {
     await back.unmount();
 
     // Once the document has gone, its section isn't kept: the other document opens at its top and stays there. The
-    // other document's "v1" is drawn in the very heading that was "Limitations", at the same place in its document.
+    // other document's "The first release" is drawn in the very heading that was "Limitations", at the same place in its document.
     loaded = typeStillLoading();
     const third = await renderReader('prediction', { hash: '#limitations' });
     await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
     const heading = document.getElementById('limitations');
     at.navigate?.('/about/proposal');
     await expect.poll(title).toBe('Product proposal');
-    expect(document.getElementById('v1'), 'the same heading element').toBe(heading);
+    expect(document.getElementById('the-first-release'), 'the same heading element').toBe(heading);
     await expect.poll(() => window.scrollY).toBe(0);
     swapType();
     loaded();
@@ -851,8 +851,8 @@ describe('ReaderPage', () => {
     const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
     await page.viewport(DESKTOP.width, height);
     await expect.poll(() => window.innerHeight).toBe(height);
-    await jumpTo(placeOf('v1'));
-    await expect.poll(marked).toEqual(['v1 (location)']);
+    await jumpTo(placeOf('the-first-release'));
+    await expect.poll(marked).toEqual(['The first release (location)']);
     followContentsLink('business-path');
     const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
     await expect.poll(() => Math.round(window.scrollY)).toBe(end());
@@ -875,8 +875,8 @@ describe('ReaderPage', () => {
     const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
     await page.viewport(DESKTOP.width, height);
     await expect.poll(() => window.innerHeight).toBe(height);
-    await jumpTo(placeOf('v1'));
-    await expect.poll(marked).toEqual(['v1 (location)']);
+    await jumpTo(placeOf('the-first-release'));
+    await expect.poll(marked).toEqual(['The first release (location)']);
     followContentsLink('business-path');
     const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
     await expect.poll(() => Math.round(window.scrollY)).toBe(end());
@@ -899,7 +899,7 @@ describe('ReaderPage', () => {
     const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
     await page.viewport(DESKTOP.width, height);
     await expect.poll(() => window.innerHeight).toBe(height);
-    await jumpTo(placeOf('v1'));
+    await jumpTo(placeOf('the-first-release'));
     followContentsLink('business-path');
     await expect.poll(() => Math.round(window.scrollY)).toBe(Math.round(document.documentElement.scrollHeight - window.innerHeight));
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -950,8 +950,8 @@ describe('ReaderPage', () => {
     const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
     await page.viewport(DESKTOP.width, height);
     await expect.poll(() => window.innerHeight).toBe(height);
-    await jumpTo(placeOf('v1'));
-    await expect.poll(marked).toEqual(['v1 (location)']);
+    await jumpTo(placeOf('the-first-release'));
+    await expect.poll(marked).toEqual(['The first release (location)']);
     followContentsLink('business-path');
     const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
     await expect.poll(() => Math.round(window.scrollY)).toBe(end());
@@ -1413,7 +1413,7 @@ describe('ReaderPage', () => {
     await jumpTo(placeOf('how-well-know-it-works'));
     await expect.poll(marked).toEqual(['How we’ll know it works (location)']);
     await jumpTo(window.scrollY - (line - headingOf('how-well-know-it-works').getBoundingClientRect().top) - 40);
-    await expect.poll(marked).toEqual(['v1 (location)']);
+    await expect.poll(marked).toEqual(['The first release (location)']);
     await screen.unmount();
   });
 
@@ -1425,8 +1425,8 @@ describe('ReaderPage', () => {
     const height = Math.max(1400, belowPlace + 100);
     await page.viewport(DESKTOP.width, height);
     await expect.poll(() => window.innerHeight).toBe(height);
-    await jumpTo(placeOf('v1'));
-    await expect.poll(marked).toEqual(['v1 (location)']);
+    await jumpTo(placeOf('the-first-release'));
+    await expect.poll(marked).toEqual(['The first release (location)']);
 
     followContentsLink('business-path');
     const end = document.documentElement.scrollHeight - window.innerHeight;

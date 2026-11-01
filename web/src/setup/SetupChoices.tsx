@@ -1,23 +1,33 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { Choice } from '../api/views.ts';
-import { Card, IconButton } from '../ds/index.ts';
+import { Card, ChatMarkdown, IconButton } from '../ds/index.ts';
 import { Icon } from '../ds/icons/index.tsx';
 import { SETUP_COPY } from './copy.ts';
 
 const copy = SETUP_COPY.questions;
 
-/** Only the current question lives in the dock; its answer remains in the transcript. */
-export function SetupChoices({ question, choices, maxLength, disabled, onChoose, onDismiss }: {
+/**
+ * Only the current question lives in the dock; its answer remains in the transcript. The memory
+ * question (`consent`) docks the same way with its two answers only, as the setup boards draw it:
+ * no dismiss and no "Something else…", since the message box stays under it, and no arrow keys in
+ * its hint. There Esc goes to the message box and leaves the question docked.
+ */
+export function SetupChoices({ question, choices, maxLength, disabled, onChoose, onDismiss, kind = 'question' }: {
   question: string;
   choices: Choice[];
   maxLength: number;
   disabled: boolean;
   onChoose: (text: string) => void;
   onDismiss: () => void;
+  kind?: 'question' | 'consent';
 }) {
   const [other, setOther] = useState('');
   const [active, setActive] = useState(0);
+  const offersOther = kind === 'question';
+  /** The rows the keys move between: the choices, and "Something else…" where it is offered. */
+  const rows = choices.length + (offersOther ? 1 : 0);
   const root = useRef<HTMLDivElement>(null);
+  const questionId = useId();
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (disabled || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -29,7 +39,8 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       }
       // The composer's words and controls elsewhere keep their normal keys.
       if (!inside && target !== document.body) return;
-      if (target.closest('.cd-icon-button')) return;
+      // So do Dismiss and a link in Claude's question: Enter opens the link.
+      if (target.closest('.cd-icon-button, a[href]')) return;
       const otherInput = target instanceof HTMLInputElement;
       const move = (index: number) => {
         setActive(index);
@@ -46,25 +57,27 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       };
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        move((active + (event.key === 'ArrowDown' ? 1 : choices.length)) % (choices.length + 1));
-      } else if (!otherInput && /^[1-9]$/.test(event.key) && Number(event.key) <= choices.length + 1) {
+        move((active + (event.key === 'ArrowDown' ? 1 : rows - 1)) % rows);
+      } else if (!otherInput && /^[1-9]$/.test(event.key) && Number(event.key) <= rows) {
         event.preventDefault(); move(Number(event.key) - 1);
       } else if (event.key === 'Enter') {
+        // Reading the owner's memory and website takes a choice made in the panel, never an Enter from the page.
+        if (!offersOther && !inside) return;
         event.preventDefault();
-        const text = active === choices.length ? other.trim() : choices[active]?.text;
+        const text = offersOther && active === choices.length ? other.trim() : choices[active]?.text;
         if (text) onChoose(text);
       }
     };
     document.addEventListener('keydown', keydown);
     return () => document.removeEventListener('keydown', keydown);
-  }, [active, choices, disabled, onChoose, onDismiss, other]);
+  }, [active, choices, disabled, onChoose, onDismiss, other, offersOther, rows]);
   return (
-    <div className="cd-setup-question-panel"><Card as="section" label={question} padding={16}>
+    <div className="cd-setup-question-panel"><Card as="section" labelledBy={questionId} padding={16}>
       <div className="cd-setup-q3" ref={root}>
         <div className="cd-setup-q3__scroll">
         <div className="cd-setup-q3__head">
-          <div className="cd-setup-q3__question cd-type-reply">{question.split(/\n\s*\n/).map((text, index) => <p key={index}>{text}</p>)}</div>
-          <IconButton label={copy.dismiss} icon="close" onClick={onDismiss} />
+          <div id={questionId} className="cd-setup-q3__question cd-type-reply"><ChatMarkdown text={question} links="open" /></div>
+          {offersOther ? <IconButton label={copy.dismiss} icon="close" onClick={onDismiss} /> : null}
         </div>
         <ol className="cd-setup-q3__list" role="list">
           {choices.map((choice, index) => <li key={choice.text}>
@@ -75,17 +88,19 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
               <kbd className="cd-setup-kbd cd-type-meta" aria-hidden="true">{index + 1}</kbd><span>{choice.text}</span>
             </button>
           </li>)}
-          <li><label className={`cd-setup-q3__row cd-setup-q3__row--other cd-type-body${active === choices.length ? ' is-active' : ''}`}>
+          {offersOther ? <li><label className={`cd-setup-q3__row cd-setup-q3__row--other cd-type-body${active === choices.length ? ' is-active' : ''}`}>
             <kbd className="cd-setup-kbd cd-type-meta" aria-hidden="true">{choices.length + 1}</kbd>
             <input className="cd-type-body" aria-label={copy.other} placeholder={copy.other} value={other}
               maxLength={maxLength} disabled={disabled} onFocus={() => setActive(choices.length)} onChange={(event) => setOther(event.target.value)} />
-          </label></li>
+          </label></li> : null}
         </ol>
         </div>
         <p className="cd-setup-q3__hint cd-type-meta">
-          <kbd className="cd-setup-kbd cd-setup-kbd--arrow cd-type-meta"><Icon name="chevron-down" size={14} className="cd-setup-kbd__up" /><span className="cd-sr-only">{copy.upArrow}</span></kbd>
-          <kbd className="cd-setup-kbd cd-setup-kbd--arrow cd-type-meta"><Icon name="chevron-down" size={14} /><span className="cd-sr-only">{copy.downArrow}</span></kbd> {copy.move}
-          <kbd className="cd-setup-kbd cd-type-meta">1–{choices.length + 1}</kbd> {copy.pick}
+          {offersOther ? <>
+            <kbd className="cd-setup-kbd cd-setup-kbd--arrow cd-type-meta"><Icon name="chevron-down" size={14} className="cd-setup-kbd__up" /><span className="cd-sr-only">{copy.upArrow}</span></kbd>
+            <kbd className="cd-setup-kbd cd-setup-kbd--arrow cd-type-meta"><Icon name="chevron-down" size={14} /><span className="cd-sr-only">{copy.downArrow}</span></kbd> {copy.move}
+          </> : null}
+          <kbd className="cd-setup-kbd cd-type-meta">1–{rows}</kbd> {copy.pick}
           <kbd className="cd-setup-kbd cd-type-meta">Enter</kbd> {copy.send}
           <kbd className="cd-setup-kbd cd-type-meta">Esc</kbd> {copy.typeInstead}
         </p>

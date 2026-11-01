@@ -685,6 +685,70 @@ describe('design system source guards', () => {
     ]);
   });
 
+  it('only_delivered_replies_and_setup_questions_can_open_markdown_links', () => {
+    // Default and explicit inert links stay available to stopped drafts. Any other links prop
+    // (including a constant) or spread could open links, so only these consumers may use it:
+    // delivered replies (ClaudeMessage), the owner chats' growing reply, which takes ClaudeMessage's
+    // PROSE_LINKS so the saved reply replaces it without a jump, and setup's docked question.
+    const canOpen = (text: string) =>
+      matches(/<ChatMarkdown\b[\s\S]*?>/)(withoutComments(text)).filter(
+        (tag) =>
+          /\{\s*\.\.\./.test(tag) ||
+          (/\blinks\s*=/.test(tag) && !/\blinks\s*=\s*(?:["']inert["']|\{\s*["']inert["']\s*\})/.test(tag)),
+      );
+    expect(canOpen('<ChatMarkdown text={text} links="open" />')).toHaveLength(1);
+    expect(canOpen('<ChatMarkdown text={text} links="open"></ChatMarkdown>')).toHaveLength(1);
+    expect(canOpen("<ChatMarkdown\n text={text}\n links={'open'}\n />")).toHaveLength(1);
+    expect(canOpen('<ChatMarkdown text={text} links={PROSE_LINKS} />')).toHaveLength(1);
+    expect(canOpen('<ChatMarkdown {...props} />')).toHaveLength(1);
+    expect(canOpen('<ChatMarkdown text={text} />; <ChatMarkdown text={text} links="inert" />')).toEqual([]);
+    expect(canOpen("// <ChatMarkdown links='open' />\n<ChatMarkdown text={text} links={'inert'} />")).toEqual([]);
+    const allowed = ['ds/components/ClaudeMessage/ClaudeMessage.tsx', 'lib/GrowingReply.tsx', 'setup/SetupChoices.tsx'];
+    const consumers = webSources()
+      .filter(({ file }) => !/\.(?:stories|test)\./.test(file))
+      .filter(({ text }) => canOpen(text).length > 0)
+      .map(({ file }) => file);
+    expect(consumers).toEqual(allowed);
+  });
+
+  it('plain_prose_only_on_the_vision_pages', () => {
+    // Claude's prose renders as Markdown on every chat. The Vision pages aren't chats and show their
+    // words as written, so only ClaudeMessage, the vision boards' page parts and the vision pages may
+    // name `plainProse`.
+    const named = (text: string) => matches(/\bplainProse\b/)(withoutComments(text));
+    expect(named('<ClaudeMessage plainProse blocks={blocks} />')).toEqual(['plainProse']);
+    expect(named('// plainProse in a comment\nconst plainProsey = 1;')).toEqual([]);
+    const allowed = (file: string) => file.startsWith('ds/components/ClaudeMessage/') || file === 'ds/boards/vision.tsx' || file.startsWith('vision/');
+    const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
+    expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
+    // Every vision page with Claude's words passes it, so the check can't pass by finding nothing.
+    expect(files.filter(({ file, text }) => file.startsWith('vision/') && named(text).length > 0).map(({ file }) => file)).toEqual([
+      'vision/CityOfficePage.tsx',
+      'vision/ClaudeAccountPage.tsx',
+      'vision/PhonePage.tsx',
+      'vision/VisionFrame.tsx',
+    ]);
+    // And every ClaudeMessage they draw passes it, however its props are laid out across lines.
+    const withoutPlainProse = (text: string) =>
+      matches(/<ClaudeMessage\b[\s\S]*?\/>/)(withoutComments(text)).filter((tag) => !/\bplainProse\b/.test(tag));
+    expect(withoutPlainProse('<ClaudeMessage\n  blocks={blocks}\n  language="en"\n/>\n<ClaudeMessage\n  plainProse\n  blocks={blocks}\n/>')).toEqual([
+      '<ClaudeMessage\n  blocks={blocks}\n  language="en"\n/>',
+    ]);
+    const visionTags = files.filter(({ file }) => file.startsWith('vision/') || file === 'ds/boards/vision.tsx');
+    expect(visionTags.flatMap(({ file, text }) => withoutPlainProse(text).map((tag) => `${file}: ${tag}`))).toEqual([]);
+    expect(visionTags.flatMap(({ text }) => matches(/<ClaudeMessage\b/)(withoutComments(text))).length).toBeGreaterThanOrEqual(14);
+  });
+
+  it('focus_rings_are_never_the_link_blue', () => {
+    // The owner, 2026-11-01: no blue focus border anywhere. A ring is the warm `ring-focus`, drawn as an
+    // outline or a shadow; neither may use the link blue, with or without a fallback.
+    const src = path.join(DS, '..');
+    const blue = filesUnder(src)
+      .filter((file) => file.endsWith('.css'))
+      .flatMap((file) => [...withoutComments(readFileSync(path.join(src, file), 'utf8')).matchAll(/\b(?:outline(?:-color)?|box-shadow)\s*:[^;{}]*var\(\s*--(?:accent-blue|va-link)\s*(?:,[^)]*)?\)/g)].map((m) => `${file}: ${m[0]}`));
+    expect(blue).toEqual([]);
+  });
+
   // Importing the index transforms every component on first use. When the whole suite runs, the
   // browser projects compete for the same CPU, so this import gets more than the default 5 s.
   it('index_exports_every_component', { timeout: 60_000 }, async () => {

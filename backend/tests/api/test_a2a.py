@@ -465,8 +465,9 @@ async def test_a_first_reply_claude_can_rewrite_never_reaches_the_agent(app, bro
 
 
 async def test_an_agents_first_reply_on_the_turns_last_call_is_final(app, browser, fake, kernel_http, model, engine):
-    # On the turn's last allowed model call there is no rewrite: the first reply is checked as final, and blocked, the
-    # handoff the kernel opened for the owner is what the agent gets, once.
+    # On the turn's last allowed model call there is no rewrite: the first reply is checked as final, and blocked only
+    # for its prose with no card to keep, the kernel's call-back offer is what the agent gets, once, and no owner
+    # handoff opens (the owner's decision of 2026-11-01).
     agent = await new_agent(app, browser, fake, kernel_http)
     model.add(*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(loop.MAX_MODEL_CALLS - 1)),
               say("It's $180."))
@@ -475,10 +476,10 @@ async def test_an_agents_first_reply_on_the_turns_last_call_is_final(app, browse
 
     assert answered.status_code == 200, answered.text
     assert len(model.requests) == loop.MAX_MODEL_CALLS
-    assert [block["template"] for block in answered.json()["blocks"]] == ["handoff"]
+    assert [(block["template"], block["text"]) for block in answered.json()["blocks"]] == [
+        (None, "Would you like me to arrange a callback?")]
     assert finals(fake, agent.session_id) == [True]
-    assert [(row["kind"], row["status"]) for row in fake.handoffs.values()
-            if row["session_id"] == agent.session_id] == [("card", "open")]
+    assert [row for row in fake.handoffs.values() if row["session_id"] == agent.session_id] == []
 
 
 async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, kernel_http, model, engine,

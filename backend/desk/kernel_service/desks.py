@@ -54,7 +54,7 @@ from sqlalchemy.sql import ColumnElement
 from desk.calendar import calendar_slots
 from desk.public_contact import valid_public_contact
 from desk.contracts import (BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, SeedDocument,
-                            ToolProfile)
+                            ToolProfile, stored_brand)
 from desk.contracts import CalendarSlot as CalendarSlotSeed
 from desk.contracts import PriceItem as PriceItemSeed
 from desk.db.models import Action as ActionRow
@@ -362,7 +362,7 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
         business_id = new_id("biz")
         ctx.db.add(Business(business_id=business_id, copy_id=copy_id, name=business.name,
                             owner_display_name=business.owner_display_name, timezone=business.timezone,
-                            brand=business.brand))
+                            brand=stored_brand(business.brand)))
     desk_id = new_id("desk")
     ctx.db.add(Desk(desk_id=desk_id, copy_id=copy_id, business_id=business_id, name=desk.name, slug=slug,
                     hours=desk.hours, answering=answering, created_at=now))
@@ -524,14 +524,16 @@ async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_ids: Sequence[st
 async def put_business(ctx: KernelCtx, desk_row: Desk, body: DeskBusinessRequest) -> list[str]:
     """The Desk's business, replaced: its name, the owner's display name, time zone and brand. The
     public page shows all but the time zone, so a document's canary in them is refused first
-    (`refuse_public_canaries`)."""
+    (`refuse_public_canaries`). A palette pick (`brand_palette`, or a `palette` key in a brand
+    passed back as it was read) is stored as its key and the table's colours (`stored_brand`),
+    never colours of the request's."""
     await refuse_public_canaries(ctx, "business", {"name": body.name, "owner_display_name": body.owner_display_name,
                                                    "brand": body.brand}, desk_row.desk_id)
     validate_business(BusinessSeed(**body.model_dump()))
     business = (await ctx.db.scalars(ctx.repo.scoped(select(Business).where(
         Business.business_id == desk_row.business_id).with_for_update()))).one()
     business.name, business.owner_display_name = body.name, body.owner_display_name
-    business.timezone, business.brand = body.timezone, body.brand
+    business.timezone, business.brand = body.timezone, stored_brand(body.brand, body.brand_palette)
     return [business.business_id]
 
 
@@ -1000,12 +1002,16 @@ PARTS: dict[str, tuple[type[KernelRequest], Writer]] = {   # PUT /desks/{id}/{pa
 
 async def put_part(ctx: KernelCtx, request: Request, desk_id: str, part: str, body: KernelRequest) -> DeskUpdated:
     """`PUT /desks/{id}/{part}`: the part replaced (people upserted and removed) and ledgered
-    `desk_data` `{part, refs}`, in one transaction."""
+    `desk_data` `{part, refs}`, in one transaction; a business write that stored a palette pick
+    adds its key, `palette` (a closed identifier, never a colour)."""
     desk_row = await owner_desk(ctx, request, desk_id)
     _, write = PARTS[part]
     refs = await write(ctx, desk_row, body)
     await ctx.db.flush()
-    await ledger_desk_data(ctx, desk_row, {"part": part, "refs": refs})
+    summary: dict[str, Any] = {"part": part, "refs": refs}
+    if isinstance(body, DeskBusinessRequest) and "palette" in (brand := stored_brand(body.brand, body.brand_palette)):
+        summary["palette"] = brand["palette"]
+    await ledger_desk_data(ctx, desk_row, summary)
     return DeskUpdated(desk_id=desk_row.desk_id, updated_at=ctx.clock.now())
 
 

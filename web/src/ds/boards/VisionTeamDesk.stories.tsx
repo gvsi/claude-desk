@@ -25,7 +25,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-R2-Vision-TeamDesk',
     canvasNote: [
-      'Signed on 2026-10-30. Turner Plumbing’s team asks its own Desk, the “Team” Desk in the sidebar’s Desk picker, with “Teammates” as its people’s word and the team’s Answering line.',
+      'Signed on 2026-10-30. Turner Plumbing’s team asks its own Desk, the “Team” Desk in the sidebar’s Desk picker, with “Teammates” as its people’s word and the team’s Claude acts for you line.',
       'Luis’s messages are VisitorMessage bubbles and Claude’s words ClaudeMessage prose, each fact in a vision fact card; his access is the AccessPanel.',
       'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “The gate code is on today’s job card.” and “I can show your own logged hours for last week if that helps.” put dates in Claude’s words. They read “The gate code is on her job card.” beside a Job card with the visit’s date and time, and “Here are your own logged hours.” beside an hours card with the week’s dates; the payroll receipt says “No pay was shared.” and a second receipt says the hours are Luis’s own. The kernel scans only Claude’s words; a real receipt is its own fixed line. These receipts are free text written for the page, so the story holds them to the kernel’s prose check too: the first names no time (“assigned to her visit”, the time being on the Job card), and the warranty’s says “Document released…”, as “warranty” is a promise word to that check. The page is 1061 px tall at 1512 px, as the components measure it (the redrawn canvas board is 1022 px); the board is to be redrawn to match.',
       'Receipts sit 8 px under what they explain, the system’s spacing, where the board leaves 6 px; the transcript’s rows are 14 px apart, the Transcript’s gap, where the board leaves 12 px.',
@@ -45,7 +45,7 @@ export const Board: Story = {
     const sidebar = canvas.getByRole('complementary', { name: 'Claude Desk' });
     await expect(within(sidebar).getByRole('button', { name: 'Switch Desk, current: Team' })).toBeVisible();
     await expect(within(sidebar).getByRole('link', { name: 'Teammates' })).toBeVisible();
-    await expect(within(sidebar).getByRole('switch', { name: 'Answering' })).toHaveAccessibleDescription('Claude answers your team under your rules');
+    await expect(within(sidebar).getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
 
     // The title and its line, "Add a teammate" at the right.
     const main = canvas.getByRole('main');
@@ -121,7 +121,7 @@ export const Board: Story = {
     await expectTabOrder(userEvent, [
       within(bar).getByRole('link', { name: 'Back to Vision' }),
       within(sidebar).getByRole('button', { name: 'Switch Desk, current: Team' }),
-      within(sidebar).getByRole('switch', { name: 'Answering' }),
+      within(sidebar).getByRole('switch', { name: 'Claude acts for you' }),
       add,
       ...rows,
       within(chat).getByRole('button', { name: 'Whisper' }),

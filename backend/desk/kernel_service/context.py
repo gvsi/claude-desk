@@ -138,9 +138,32 @@ async def resolved_tools(ctx: KernelCtx, principal: Principal, session_row: Sess
     """The callable session tools, after adapter resolution; shared with the reply check."""
     enabled = await decide.enabled_tools(ctx, desk_row.desk_id)
     given = decide.tools_given(principal, session_row, desk_row, enabled)
-    return [_profile(enabled[tool]) for tool in sorted(given)
-            if adapters.profile_sha256(enabled[tool].profile) == enabled[tool].profile_sha256
-            and await adapters.resolve(ctx, desk_row.desk_id, tool) is not None]
+    return [_profile(enabled[tool]) for tool in sorted(given) if await _resolves(ctx, desk_row.desk_id, enabled[tool])]
+
+
+async def _resolves(ctx: KernelCtx, desk_id: str, row: Tool) -> bool:
+    """An enabled row's profile still matches its pin, and its adapter resolves."""
+    return (adapters.profile_sha256(row.profile) == row.profile_sha256
+            and await adapters.resolve(ctx, desk_id, row.tool) is not None)
+
+
+async def business_free_names(ctx: KernelCtx, desk_id: str) -> list[str]:
+    """The titles and appointment types (`blocks.free_name_fields`: never a payment's title) of the
+    Desk's enabled business tools that resolve, by the checks `resolved_tools` makes, in tool order:
+    the names inside whose repeat the reply check lets a free word stand in Claude's prose
+    (`reply_check.scan_prose`'s `approved_free_names`, the owner's decision of 2026-10-31).
+    Desk-wide, whichever tools the session is given."""
+    from desk.kernel_service.adapters import blocks
+
+    enabled = await decide.enabled_tools(ctx, desk_id)
+    names: list[str] = []
+    for tool in sorted(enabled):
+        row = enabled[tool]
+        if row.source == "business" and row.profile.business is not None and await _resolves(ctx, desk_id, row):
+            definition = row.profile.business
+            names += [getattr(definition if field == "title" else definition.config, field)
+                      for field in blocks.free_name_fields(definition.config.block)]
+    return names
 
 
 router = APIRouter()

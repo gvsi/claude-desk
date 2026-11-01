@@ -8,13 +8,15 @@
  * live ones do.
  */
 import type { HoursWindow, KnowledgeItem, OpenStatus, RuleCard, ToolName, ToolProfile } from '../api/contracts.ts';
-import type { PolicyVersionOut, RulesPreset } from '../api/views.ts';
+import type { JobProposal, PolicyVersionOut, RulesPreset } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS, placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import { paletteBrand } from '../public/palette.ts';
 import { seedAgentChat } from './agents.ts';
+import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
-import type { MockWorld, ReplayTurn, ToolRecord } from './world.ts';
+import type { DeskRecord, MockWorld, ReplayTurn, ToolRecord } from './world.ts';
 
-export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document';
+export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document' | 'rivera_no_brand';
 
 export interface CopyIds {
   copyId: string;
@@ -57,7 +59,7 @@ export const BUSINESS = {
   name: rivera.business.name,
   owner_display_name: rivera.business.ownerName,
   timezone: 'America/Los_Angeles',
-  brand: { ...rivera.business.brand },
+  brand: paletteBrand('teal'),
 } as const;
 
 /** Mon–Fri 08:00–18:00 and Sat 09:00–13:00. */
@@ -334,6 +336,35 @@ export function riveraTools(): ToolRecord[] {
   ];
 }
 
+/**
+ * Mike's urgent business tool, as the kernel's Turner seed gives every copy (`RIVERA_BUSINESS_TOOLS`):
+ * an emergency callback that alerts her at once, whatever her notification settings.
+ */
+const RIVERA_URGENT_JOB = {
+  title: 'Emergency callback',
+  how: 'Asks Mike to call back urgently about an emergency.',
+  config: { block: 'urgent', urgent_when: 'A burst or leaking pipe, flooding, a sewage backup, or no water' },
+} as const satisfies Pick<JobProposal, 'title' | 'how' | 'config'>;
+
+/** The kernel seed's card that lets anyone use Mike's urgent tool (`rv-urgent`). */
+const RIVERA_URGENT_CARD = presetCard({
+  card_id: 'rv-urgent',
+  applies_to: 'desk.emergency-callback',
+  mode: 'auto',
+  who: 'anyone',
+  reason: 'Anyone can ask for an urgent callback, which alerts you at once.',
+});
+
+/**
+ * Gives a Turner copy's Desk its urgent tool, turned on, and the card that allows it, as the
+ * kernel's copy does: the tool built as setup builds a Desk's own tools, then turned on as the
+ * seed's rules version activates, with `rv-urgent` last among the seed's cards.
+ */
+function seedRiveraUrgentTool(desk: DeskRecord): void {
+  seedBusinessTools(desk, businessToolRows([RIVERA_URGENT_JOB]).map((row) => ({ ...row, status: 'enabled', review_reason: null })));
+  desk.policy = { ...desk.policy, cards: [...desk.policy.cards, { ...RIVERA_URGENT_CARD }] };
+}
+
 const MINUTE = 60_000;
 
 /** What the seeded visitor asked, twelve minutes before the copy opened: the hold on Today. */
@@ -370,6 +401,7 @@ export function seedWorld(world: MockWorld): void {
     hours: RIVERA_HOURS,
     openStatus: RIVERA_OPEN_STATUS,
   });
+  seedRiveraUrgentTool(main);
   const knowledge: KnowledgeItem[] = [
     {
       item_id: 'kn-website',
@@ -390,6 +422,8 @@ export function seedWorld(world: MockWorld): void {
   for (const [i, item] of knowledge.entries()) {
     world.knowledge.set(`${ids.deskId}:${item.item_id}`, { deskId: ids.deskId, item, createdAt: opened - (knowledge.length - i), forced: false });
   }
+  if (seed === 'rivera_no_brand') main.brand = {};
+
   if (seed === 'rivera_two_desks') {
     world.addDesk({
       desk_id: ids.emergenciesDeskId,

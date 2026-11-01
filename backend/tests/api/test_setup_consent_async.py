@@ -9,7 +9,7 @@ from desk.api import setup
 from desk.api.deps import ApiProblem
 from tests.api.fakes import unavailable
 from tests.api.test_setup_questions import (  # noqa: F401 — fixtures shared with setup's question tests
-    WEBSITE, app, begin as begin_questions, held_limits, model, new_owner,
+    WEBSITE, app, begin as begin_questions, held_limits, landed as landed_state, model, new_owner,
 )
 
 
@@ -18,6 +18,13 @@ async def begin(owner, model, **fields):
     # These lifecycle tests use the consultant's fallback to the first question.
     model.add(unavailable())
     return state
+
+
+async def settled(app, interview_id):
+    """Wait for the interview's run to end, however it ends: consent answers 202 at once, so a failed consent shows
+    only in its task, its log and the state it reopens."""
+    with contextlib.suppress(Exception):
+        await app.state.runtime.turn_runs.wait(interview_id)
 
 
 async def test_the_turn_deadline_is_available_during_the_turn_but_never_stored(
@@ -334,14 +341,46 @@ async def test_after_timeout_or_shutdown_preserves_the_landed_state(
         [("setup turn after failed (%s)", ("TimeoutError",))] if end == "timeout" else [])
 
 
-async def test_consent_answers_200_with_the_first_question_when_the_reads_finish_in_time(
+@pytest.mark.parametrize("allow", [True, False])
+async def test_consent_answers_202_at_once_while_its_turn_runs(
+        app, browser, fake, kernel_http, model, allow):
+    from tests.api.fakes import gated
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin_questions(owner, model, website=WEBSITE)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    assert setup.TURN_WAIT_S == 25          # consent never holds the request for the other turns' wait
+    release = fake.gate("POST /execute") if allow else asyncio.Event()
+    model.add(unavailable() if allow else gated(unavailable(), release))
+    try:
+        reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": allow}), 2)
+        assert reply.status_code == 202, reply.text
+        busy = reply.json()
+        assert busy["busy"] is True and busy["consent"] is allow and busy["question"] is None
+        assert busy["messages"][-1] == {
+            "role": "owner", "text": setup.CONSENT_ANSWERS[allow], "choices": [], "card": None}
+        assert app.state.runtime.turn_runs.holds(interview_id)
+        assert (await owner.browser.get(path)).json() == busy
+        repeat = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": not allow}), 2)
+        assert (repeat.status_code, repeat.json()) == (202, busy)
+    finally:
+        release.set()
+    await app.state.runtime.turn_runs.wait(interview_id)
+    landed = (await owner.browser.get(path)).json()
+    assert landed["busy"] is False and landed["consent"] is allow and landed["question"] == setup.QUESTION_KEYS[0]
+    assert len(model.requests) == 2
+    assert len(fake.called("POST /execute")) == (2 if allow else 0)
+
+
+async def test_consent_lands_its_reads_and_the_first_question(
         app, browser, fake, kernel_http, model, db):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
     assert state["busy"] is False
     reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/consent", json={"allow": True})
-    assert reply.status_code == 200, reply.text
-    landed = reply.json()
+    assert reply.status_code == 202, reply.text
+    landed = await landed_state(owner, state["interview_id"])
     assert landed["busy"] is False and landed["question"] == setup.QUESTION_KEYS[0]
     assert [message["text"] for message in landed["messages"][2:4]] == [
         "Searched your Claude memory", "Read turner-plumbing.example"]
@@ -360,7 +399,8 @@ async def test_an_empty_model_reply_never_leaves_the_interview_busy(
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     path = f"/api/owner/setup/{interview_id}"
-    assert (await owner.browser.post(path + "/consent", json={"allow": False})).status_code == 200
+    assert (await owner.browser.post(path + "/consent", json={"allow": False})).status_code == 202
+    await landed_state(owner, interview_id)
     reply = await answer(owner, model, interview_id, "We repair water heaters.",
                          turn(reply="", step_done=False, summary="Water heater repairs."))
     assert reply.status_code == 200, reply.text
@@ -391,7 +431,6 @@ async def test_a_failed_run_rolls_consent_back(app, browser, fake, kernel_http, 
         await release.wait()
         raise RuntimeError("private-owner-data")
 
-    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
     monkeypatch.setattr(setup, "_after_consent", failing)
     reply = await owner.browser.post(path + "/consent", json={"allow": True})
     assert reply.status_code == 202
@@ -404,9 +443,9 @@ async def test_a_failed_run_rolls_consent_back(app, browser, fake, kernel_http, 
     assert rolled_back == state
     assert "private-owner-data" not in caplog.text
     monkeypatch.setattr(setup, "_after_consent", after)
-    monkeypatch.setattr(setup, "TURN_WAIT_S", 25)
     again = await owner.browser.post(path + "/consent", json={"allow": True})
-    assert again.status_code == 200 and again.json()["busy"] is False
+    assert again.status_code == 202 and again.json()["busy"] is True
+    assert (await landed_state(owner, state["interview_id"]))["consent"] is True
 
 
 async def test_a_repeat_while_busy_answers_202_without_a_second_run(
@@ -454,8 +493,8 @@ async def test_a_slow_consent_answers_202_busy_and_lands_later(
         "claude", "owner", "tool_label", "tool_label", "claude"]
 
 
-async def test_a_failure_within_the_wait_answers_the_error_as_today(
-        app, browser, fake, kernel_http, model, monkeypatch):
+async def test_a_failed_consent_answers_busy_then_reopens_consent(
+        app, browser, fake, kernel_http, model, monkeypatch, caplog):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     path = f"/api/owner/setup/{state['interview_id']}"
@@ -465,8 +504,10 @@ async def test_a_failure_within_the_wait_answers_the_error_as_today(
 
     monkeypatch.setattr(setup, "_after_consent", failing)
     reply = await owner.browser.post(path + "/consent", json={"allow": True})
-    assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+    assert reply.status_code == 202 and reply.json()["busy"] is True
+    await settled(app, state["interview_id"])
     assert (await owner.browser.get(path)).json() == state
+    assert "setup turn failed (ApiProblem)" in caplog.text
 
 
 def abandoned(db, interview_id, age):
@@ -500,9 +541,10 @@ async def test_an_abandoned_run_is_rolled_back_on_get_and_on_consent(
         assert (await owner.browser.get(path)).json() == state
     else:
         fresh = await owner.browser.post(path + "/consent", json={"allow": False})
-        assert fresh.status_code == 200, fresh.text
-        assert fresh.json()["busy"] is False and fresh.json()["consent"] is False
-        assert fresh.json()["question"] == setup.QUESTION_KEYS[0]
+        assert fresh.status_code == 202, fresh.text
+        fresh = await landed_state(owner, interview_id)
+        assert fresh["busy"] is False and fresh["consent"] is False
+        assert fresh["question"] == setup.QUESTION_KEYS[0]
 
 
 @pytest.mark.parametrize("consent_pending", [True, False])
@@ -580,8 +622,9 @@ async def test_declined_consent_reads_nothing_and_still_asks(
 
     monkeypatch.setattr(setup, "_after_consent", asking)
     reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/consent", json={"allow": False})
-    assert reply.status_code == 200, reply.text
-    assert reply.json()["busy"] is False and reply.json()["question"] == setup.QUESTION_KEYS[0]
+    assert reply.status_code == 202, reply.text
+    current = await landed_state(owner, state["interview_id"])
+    assert current["busy"] is False and current["question"] == setup.QUESTION_KEYS[0]
     assert seen == [state["interview_id"]]
     assert fake.called("POST /decide") == [] and fake.called("POST /execute") == []
 
@@ -626,13 +669,13 @@ async def test_a_stalled_detached_entry_is_bounded_by_the_run_deadline(
     monkeypatch.setattr(setup, "detached", detached)
     monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 100)
     retry = await owner.browser.post(path + "/consent", json={"allow": False})
-    assert retry.status_code == 200 and retry.json()["busy"] is False
-    assert retry.json()["question"] == setup.QUESTION_KEYS[0]
+    assert retry.status_code == 202 and retry.json()["busy"] is True
+    assert (await landed_state(owner, interview_id))["question"] == setup.QUESTION_KEYS[0]
 
 
-@pytest.mark.parametrize(("end", "slow"), [("deadline", False), ("deadline", True), ("shutdown", True)])
+@pytest.mark.parametrize("end", ["deadline", "shutdown"])
 async def test_a_run_deadline_or_shutdown_reopens_consent(
-        app, browser, fake, kernel_http, model, monkeypatch, end, slow, caplog):
+        app, browser, fake, kernel_http, model, monkeypatch, end, caplog):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
     path = f"/api/owner/setup/{state['interview_id']}"
@@ -643,7 +686,6 @@ async def test_a_run_deadline_or_shutdown_reopens_consent(
         await release.wait()
 
     monkeypatch.setattr(setup, "_after_consent", waiting)
-    monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
     monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 100)
     if end == "deadline":
         # Keep the real timeout, but arm it only after database staging reaches the stalled step.
@@ -652,26 +694,19 @@ async def test_a_run_deadline_or_shutdown_reopens_consent(
     request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": True}))
     try:
         await asyncio.wait_for(entered.wait(), 5)
-        if slow:
-            reply = await asyncio.wait_for(asyncio.shield(request), 5)
+        reply = await asyncio.wait_for(asyncio.shield(request), 5)
         if end == "deadline":
             deadline.reschedule(asyncio.get_running_loop().time())
-        if not slow:
-            reply = await asyncio.wait_for(asyncio.shield(request), 5)
-        assert reply.status_code == (202 if slow else 503)
-        if slow:
-            task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
-            if end == "shutdown":
-                await app.state.runtime.turn_runs.close()
-                assert task.cancelled()
-                assert "CancelledError" in caplog.text
-            else:
-                with pytest.raises(ApiProblem) as failed:
-                    await asyncio.wait_for(asyncio.shield(task), 5)
-                assert (failed.value.status, failed.value.error) == (503, "model_unavailable")
-                assert "TimeoutError" in caplog.text
+        assert reply.status_code == 202
+        task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
+        if end == "shutdown":
+            await app.state.runtime.turn_runs.close()
+            assert task.cancelled()
+            assert "CancelledError" in caplog.text
         else:
-            assert reply.json() == {"error": "model_unavailable"}
+            with pytest.raises(ApiProblem) as failed:
+                await asyncio.wait_for(asyncio.shield(task), 5)
+            assert (failed.value.status, failed.value.error) == (503, "model_unavailable")
             assert "TimeoutError" in caplog.text
         assert (await owner.browser.get(path)).json() == state
         assert state["interview_id"] not in setup._RUNNING
@@ -783,9 +818,10 @@ async def test_a_cancelled_request_leaves_the_run_on_its_own_connection(
     request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": True}))
     await asyncio.wait_for(entered.wait(), 5)
     try:
+        # Consent answers 202 once its busy state is stored, so the request may already have answered by now.
         request.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await request
+        (outcome,) = await asyncio.gather(request, return_exceptions=True)
+        assert isinstance(outcome, asyncio.CancelledError) or outcome.status_code == 202
         busy = (await owner.browser.get(path)).json()
         assert busy["busy"] is True and busy["messages"][-1]["role"] == "owner"
         assert all(message["role"] != "tool_label" for message in busy["messages"])
@@ -987,7 +1023,8 @@ async def test_a_failed_run_removes_only_its_markers_from_a_changed_transcript(
 
     monkeypatch.setattr(setup, "_after_consent", changed)
     reply = await owner.browser.post(path + "/consent", json={"allow": True})
-    assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+    assert reply.status_code == 202
+    await settled(app, interview_id)
     consent, transcript = db.execute("SELECT consent, transcript FROM app.setup_interviews WHERE interview_id = %s",
                                      (interview_id,)).fetchone()
     assert transcript == kept
@@ -1012,9 +1049,10 @@ async def test_two_fresh_consents_store_only_one_owner_answer(
     finally:
         admit.set()
         reply = await first
-    assert reply.status_code == 200
+    assert reply.status_code == 202
+    current = await landed_state(owner, state["interview_id"])
     assert asked.count("setup_turn") == 1 and len(fake.called("POST /execute")) == 1
-    assert [message for message in reply.json()["messages"] if message["role"] == "owner"] == [
+    assert [message for message in current["messages"] if message["role"] == "owner"] == [
         {"role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None}]
 
 
@@ -1054,9 +1092,10 @@ async def test_a_competing_consent_cannot_take_the_guard_during_handoff(
     try:
         await asyncio.wait_for(loaded.wait(), 5)
         reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": False}), 5)
-        assert reply.status_code == 200, reply.text
+        assert reply.status_code == 202, reply.text
         second = await asyncio.wait_for(asyncio.shield(competing), 5)
         assert second.status_code in (202, 409), second.text
+        await asyncio.wait_for(runs.wait(interview_id), 5)
         assert asked.count("setup_turn") == 1
         assert executions == [interview_id]
         assert (await owner.browser.get(path)).json()["busy"] is False
@@ -1085,7 +1124,8 @@ async def test_a_stalled_rollback_does_not_outlive_the_abandonment_window(
     try:
         reply = await asyncio.wait_for(owner.browser.post(
             f"/api/owner/setup/{state['interview_id']}/consent", json={"allow": False}), 5)
-        assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+        assert reply.status_code == 202
+        await asyncio.wait_for(settled(app, state["interview_id"]), 5)
         assert "couldn't be reopened (TimeoutError)" in caplog.text
         assert not app.state.runtime.turn_runs.holds(state["interview_id"])
     finally:

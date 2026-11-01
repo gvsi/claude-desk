@@ -231,6 +231,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   const kept = [...answers.kept.values()].filter(mine);
   const answered = [...answers.answered.values()].filter((entry) => mine(entry.item));
   const heldIds = [...new Set([...held, ...kept].map((item) => item.decision.decision_id).concat(answered.map((a) => a.decision.decision_id)))];
+  // A request still held in this chat, not answered here: its handoff cards leave Claude's note out.
+  const holdOpen = [...held, ...kept].some((item) => !answers.answered.has(item.decision.decision_id));
   const readAt = needsYou.dataUpdatedAt;
 
   // Each held request answered in place, as Today answers it: one card from held to answered, so the
@@ -323,7 +325,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
         {callbacks.length > 0 ? (
           <div ref={setHandoffCards} className="cd-conversation__handoffs">
             {callbacks.map((item) => (
-              <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
+              <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} showSummary={!holdOpen} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
             ))}
           </div>
         ) : null}

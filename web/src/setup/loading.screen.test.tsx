@@ -6,30 +6,34 @@
 import { QueryClient } from '@tanstack/react-query';
 import { http } from 'msw';
 import { beforeAll, expect, it, onTestFinished, vi } from 'vitest';
+import { page } from 'vitest/browser';
 
 import { newIdempotencyKey } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
-import type { SetupState } from '../api/views.ts';
+import type { SetupPublicLines, SetupState } from '../api/views.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
 import { worker } from '../mocks/browser.ts';
+import { storePublicState } from '../mocks/publicLineStore.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdReads } from '../test/holdReads.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectScreenBasics } from '../test/screen.ts';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
+import { START_EXAMPLES } from './copy.ts';
 
 beforeAll(loadWebFonts);
 
 const DESCRIPTION =
   "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
 
-type Step = 'tools' | 'rules' | 'situations' | 'safety_check';
+/** Setup's steps that load, and What customers will read, which opens from Real situations. */
+type Step = 'tools' | 'rules' | 'situations' | 'safety_check' | 'public_lines';
 
 /** A new interview in the mock, its questions answered (the money limit as $500), moved on to `step`. */
-async function interviewAt(step: Step): Promise<SetupState> {
+async function interviewAt(step: Step, description = DESCRIPTION): Promise<SetupState> {
   const started = await mockStore.dispatch('startSetup', {
-    body: { description: DESCRIPTION, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() },
+    body: { description, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() },
   });
   if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
   const state = started.body as SetupState;
@@ -40,11 +44,37 @@ async function interviewAt(step: Step): Promise<SetupState> {
     await mockStore.dispatch('setupAnswer', { params, body: { question: question.key, text } });
   }
   if (step !== 'tools') await mockStore.dispatch('setupRules', { params });
-  if (step === 'situations' || step === 'safety_check') await mockStore.dispatch('setupSituations', { params });
+  if (step === 'situations' || step === 'safety_check' || step === 'public_lines') await mockStore.dispatch('setupSituations', { params });
   if (step === 'safety_check') await mockStore.dispatch('setupSafetyCheck', { params });
   const current = await mockStore.dispatch('setup', { params });
   if ('network' in current || current.status !== 200) throw new Error('the mock reads the current setup');
   return current.body as SetupState;
+}
+
+/**
+ * A fresh CPA copy at Real situations, whose lines are the ones What customers will read's shapes
+ * draw: its six lines, under Claude's suggested contact, hours and prices, or on their own when
+ * `suggestions` is false, as for a business Claude found nothing more about.
+ */
+async function linesInterview(suggestions: boolean): Promise<SetupState> {
+  const state = await interviewAt('public_lines', START_EXAMPLES.en.examples[3]!.description);
+  if (!suggestions) {
+    const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the public lines');
+    const lines = (read.body as SetupPublicLines).lines.filter((line) => line.source === 'owner');
+    storePublicState(mockStore.world, state.interview_id, { lines, hours: null, prices: null });
+  }
+  return state;
+}
+
+/**
+ * Opens What customers will read as the owner does, with Real situations' "Looks right", clicked
+ * where it is: the page stays at its top, as the step's boards draw it.
+ */
+async function openLines(): Promise<void> {
+  // Real situations' own read comes first, and on a busy machine it can take longer than the default second.
+  const looksRight = await vi.waitFor(() => page.getByRole('button', { name: 'Looks right', exact: true }).element() as HTMLButtonElement, { timeout: 5_000 });
+  looksRight.click();
 }
 
 /** Start from the loaded setup entry page, with this interview cached before its step mounts. */
@@ -76,7 +106,7 @@ function holdPosts(path: string): { held: () => number; release: () => void } {
   return { held: () => waiting, release };
 }
 
-const path = (route: 'setup' | 'setupTools' | 'setupRules' | 'setupSituations' | 'setupSafetyCheck', state: SetupState) =>
+const path = (route: 'setup' | 'setupTools' | 'setupRules' | 'setupSituations' | 'setupSafetyCheck' | 'setupPublicLines', state: SetupState) =>
   ROUTES[route].path.replace('{id}', state.interview_id);
 
 /** The step's real title and, for the tools, "Continue": they stay real over the region and must not move. */
@@ -93,6 +123,10 @@ interface StepLoad {
   status: string;
   /** The step's read the test holds, and how. */
   hold: (state: SetupState) => { held: () => number; release: () => void };
+  /** The interview the step opens on, when it isn't the plumber's at the step itself. */
+  interview?: () => Promise<SetupState>;
+  /** How the owner gets to the step once setup shows the interview's own step, when it isn't that one. */
+  reach?: () => Promise<void>;
   /** Parts whose words are known: they land where their shapes were, within 2 px. */
   anchors: readonly SkeletonAnchor[];
   stays: readonly string[];
@@ -113,6 +147,16 @@ const RESULT_ROW = (row: number) => `.cd-setup-step__rows > li:nth-child(${row})
 const MAIN_BUTTON_PART: Part = { name: 'main-button', page: MAIN_BUTTON };
 /** The rows of a card of situations or tricks, as `prefix-0` and on. */
 const resultRows = (prefix: string, rows: number): Part[] => Array.from({ length: rows }, (_, i) => ({ name: `${prefix}-${i}`, page: RESULT_ROW(i + 1) }));
+/** What customers will read's first card: Claude's suggestions when there are any, else the owner's lines. */
+const FIRST_CARD = '.cd-setup-step__region .cd-card';
+/** The card of Claude's suggestions, which the shapes don't draw. */
+const SUGGESTIONS_CARD = '.cd-card:has(.cd-public-lines-suggested)';
+/** The card of the owner's lines. */
+const LINES_CARD = '.cd-card:has(> .cd-public-lines--owned)';
+/** One of the owner's lines in their card. */
+const LINES_ROW = (row: number) => `.cd-public-lines--owned > .cd-public-lines__row:nth-child(${row})`;
+/** A fresh copy's six lines, as `public-lines-row-0` and on. */
+const linesRows: Part[] = Array.from({ length: 6 }, (_, i) => ({ name: `public-lines-row-${i}`, page: LINES_ROW(i + 1) }));
 
 /**
  * The most an estimated part may differ from its shape: one line of the words it holds (body and
@@ -192,6 +236,27 @@ const STEPS: Readonly<Record<Step, StepLoad>> = {
     // The last row in view: the sixth at 1440, the fourth at 390.
     moved: (viewport) => [{ name: `trick-row-${viewport === 'desktop' ? 5 : 3}`, page: RESULT_ROW(viewport === 'desktop' ? 6 : 4) }, MAIN_BUTTON_PART],
   },
+  // Opened from Real situations on a fresh CPA copy, whose six lines the shapes draw. Here Claude
+  // has no suggestions, so the lines land where their shapes were; with suggestions, which the
+  // shapes don't draw, the lines move down once (public_lines_suggestions_move_the_rows_once).
+  public_lines: {
+    status: 'Opening your setup',
+    hold: (state) => holdReads(path('setupPublicLines', state)),
+    interview: () => linesInterview(false),
+    reach: openLines,
+    anchors: [
+      { name: 'public-lines-card', page: FIRST_CARD, dimensions: ['width'] },
+      // The first line's words come with the read: its height is an estimate, checked below.
+      { name: 'public-lines-row-0', page: LINES_ROW(1), dimensions: ['width'] },
+      // Its label's words and Edit are the app's own.
+      { name: 'public-lines-label-0', page: `${LINES_ROW(1)} > .cd-public-lines__label`, size: true },
+      { name: 'public-lines-edit-0', page: `${LINES_ROW(1)} .cd-button`, size: true },
+    ],
+    stays: [TITLE],
+    estimated: linesRows,
+    // The last row in view: How we help, at both widths.
+    moved: () => [linesRows[5]!, MAIN_BUTTON_PART],
+  },
 };
 
 /** The page's element for `selector`, not a shape in a skeleton layer. */
@@ -264,9 +329,11 @@ async function frames(count: number): Promise<void> {
  * main button) is drawn in one place while the shapes show and lands in one place, so it moves at
  * most once, in one direction, and doesn't move again; and it moves by exactly what the estimated
  * parts above it differ by, so the move is the words wrapping and nothing else. On a platform whose
- * fonts wrap the words as the estimate does, the move is zero.
+ * fonts wrap the words as the estimate does, the move is zero. `pushed` is how far a part the shapes
+ * don't draw (Claude's suggestions on What customers will read), landing above every part this
+ * checks, pushes each of them down.
  */
-function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: ReturnType<typeof watchPlaces>): void {
+function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: ReturnType<typeof watchPlaces>, pushed = 0): void {
   const estimated = load.estimated ?? [];
   const moved = load.moved?.(viewport) ?? [];
   const records = new Map([...estimated, ...moved].map((part, i) => [part.name, watched.seen[i]!]));
@@ -298,7 +365,8 @@ function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: Return
     // Every estimated part that ends above this one moves it by its own difference in height.
     const above = estimated.filter((other) => other.name !== part.name && shapeOf(other).bottom <= shape.top + SKELETON_TOLERANCE_PX);
     const explained = above.reduce((sum, other) => sum + taller.get(other.name)!, 0);
-    expect(Math.abs(landed.top - shape.top - explained), `${label}: moves ${landed.top - shape.top} px; the estimated parts above it differ by ${explained} px`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    const pushes = pushed === 0 ? '' : `parts the shapes don't draw push it ${pushed} px and `;
+    expect(Math.abs(landed.top - shape.top - pushed - explained), `${label}: moves ${landed.top - shape.top} px; ${pushes}the estimated parts above it differ by ${explained} px`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     expect(Math.abs(landed.left - shape.left), `${label}: lands at its shape's left`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     // A row's width comes from its column and the button's from its known label, never from the data.
     expect(Math.abs(landed.width - shape.width), `${label}: lands as wide as its shape`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
@@ -347,7 +415,7 @@ it('accepted_moves_reject_a_10_px_spacing_error_in_an_earlier_estimated_row', ()
 for (const viewport of ['desktop', 'phone'] as const) {
   for (const [step, load] of Object.entries(STEPS) as [Step, StepLoad][]) {
     it(`setup_steps_load_in_place: ${step} at ${viewport}`, async () => {
-      const state = await interviewAt(step);
+      const state = await (load.interview?.() ?? interviewAt(step));
       const read = load.hold(state);
       const open = await loadedSetup(state, viewport);
       let watched!: ReturnType<typeof watchPlaces>;
@@ -357,6 +425,7 @@ for (const viewport of ['desktop', 'phone'] as const) {
         stays: load.stays,
         open: async () => {
           await open();
+          await load.reach?.();
           await vi.waitFor(() => expect(read.held()).toBe(1));
           // Watch this step, after the entry page's own main button has left.
           watched = watchPlaces([...(load.estimated ?? []), ...(load.moved?.(viewport) ?? [])]);
@@ -370,6 +439,42 @@ for (const viewport of ['desktop', 'phone'] as const) {
       await expectScreenBasics(document.body, { owner: true });
     });
   }
+}
+
+for (const viewport of ['desktop', 'phone'] as const) {
+  it(`public_lines_suggestions_move_the_rows_once: ${viewport}`, async () => {
+    // Decision 15's accepted move: a fresh copy's lines come with Claude's suggested contact, hours
+    // and prices, which the shapes don't draw. Their card lands where the shapes' card was, and the
+    // owner's lines and "Looks right" move down once, by that card and the gap under it, then stay.
+    const state = await linesInterview(true);
+    const lines = STEPS.public_lines;
+    const read = lines.hold(state);
+    const open = await loadedSetup(state, viewport);
+    const load: StepLoad = { ...lines, moved: () => [...linesRows, MAIN_BUTTON_PART] };
+    let watched!: ReturnType<typeof watchPlaces>;
+    await expectSkeletonLoad({
+      status: lines.status,
+      anchors: [{ name: 'public-lines-card', page: FIRST_CARD, dimensions: ['width'] }],
+      stays: lines.stays,
+      open: async () => {
+        await open();
+        await openLines();
+        await vi.waitFor(() => expect(read.held()).toBe(1));
+        watched = watchPlaces([...(load.estimated ?? []), ...load.moved!(viewport)]);
+      },
+      release: read.release,
+    });
+    await frames(10);
+    watched.stop();
+    const suggestions = onPage(SUGGESTIONS_CARD);
+    const owned = onPage(LINES_CARD);
+    expect(suggestions, "Claude's suggestions land first").toBe(onPage(FIRST_CARD));
+    expect(owned, "the owner's lines land under them").toBeDefined();
+    const pushed = owned!.getBoundingClientRect().top - suggestions!.getBoundingClientRect().top;
+    expect(pushed, 'the lines move down by the suggestions and their gap').toBeGreaterThan(0);
+    expectAcceptedMoves(load, viewport, watched, pushed);
+    await expectScreenBasics(document.body, { owner: true });
+  });
 }
 
 it('setup_reload_hands_off', async () => {
@@ -492,6 +597,79 @@ for (const viewport of ['desktop', 'phone'] as const) {
   });
 }
 
+it('setup_public_lines_hands_off', async () => {
+  // From Real situations the owner opens what customers will read: its title lands at once, its
+  // lines draw as shapes while they are read, then the lines land under the fading shapes, with no
+  // frame without either. The page keeps one heading throughout: Real situations', then the step's.
+  const state = await linesInterview(true);
+  const read = holdReads(path('setupPublicLines', state));
+  const open = await loadedSetup(state);
+  await open();
+  await expect.element(page.getByRole('heading', { level: 1, name: 'Real situations', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const headings: string[][] = [];
+  const record = () => headings.push([...document.querySelectorAll('h1')].map((h1) => h1.textContent ?? ''));
+  const watching = new MutationObserver(record);
+  onTestFinished(() => watching.disconnect());
+  record();
+  watching.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-state'] });
+  const gaps = watchSkeletonGaps('.cd-public-lines');
+
+  await openLines();
+  await vi.waitFor(() => expect(read.held()).toBe(1));
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown'));
+  expect(document.querySelector('.cd-setup-step .cd-skeleton-screen [role="status"]')?.textContent).toBe('Opening your setup');
+  read.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  watching.disconnect();
+
+  expect(gaps()).toBe(0);
+  expect(headings.filter((h1) => h1.length !== 1), 'one h1 at every commit').toEqual([]);
+  expect([...new Set(headings.map(([h1]) => h1))]).toEqual(['Real situations', 'What customers will read']);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+/** Each step the owner opens with the main button at the end of the one before, and that button. */
+const ENTRIES = [
+  { from: 'tools', press: 'Continue', to: 'rules', title: 'Your rules' },
+  { from: 'rules', press: 'Check real situations', to: 'situations', title: 'Real situations' },
+  { from: 'situations', press: 'Looks right', to: 'public_lines', title: 'What customers will read' },
+  { from: 'public_lines', press: 'Looks right', to: 'safety_check', title: 'Safety check' },
+] as const;
+
+it.each(ENTRIES)('a_step_opened_from_the_end_of_the_one_before_starts_at_its_top: $title', async ({ from, press, to, title }) => {
+  // On a phone the owner scrolls to the step's end to go on. The next step opens at its top, its
+  // title in view while its read is out, and stays there as what it read lands.
+  // What customers will read is longer than a phone's window with Claude's suggestions on it.
+  const state = from === 'public_lines' ? await linesInterview(true) : await interviewAt(from);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+  if (from === 'public_lines') {
+    await openLines();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What customers will read', exact: true })).toBeVisible();
+  }
+  const button = screen.getByRole('button', { name: press, exact: true });
+  await expect.element(button).toBeEnabled();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  button.element().scrollIntoView({ block: 'end' });
+  await vi.waitFor(() => expect(window.scrollY).toBeGreaterThan(0));
+  const read = STEPS[to].hold(state);
+  (button.element() as HTMLButtonElement).click();
+
+  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+  const heading = screen.getByRole('heading', { level: 1, name: title, exact: true });
+  await expect.element(heading).toBeInTheDocument();
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')).not.toBeNull());
+  expect(window.scrollY, 'the step opens at its top').toBe(0);
+  const top = heading.element().getBoundingClientRect().top;
+  expect(top).toBeGreaterThanOrEqual(0);
+  expect(heading.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
+
+  read.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(window.scrollY, 'nothing jumps as the step lands').toBe(0);
+  expect(heading.element().getBoundingClientRect().top).toBe(top);
+});
+
 it('setup_tools_first_read_failure_clears_the_skeleton', async () => {
   const state = await interviewAt('tools');
   const tools = holdReads(path('setupTools', state));
@@ -521,6 +699,24 @@ it('setup_interview_first_read_failure_clears_the_skeleton', async () => {
   expect(document.querySelector('[aria-busy]')).toBeNull();
   await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
   expect(mockStore.requests.filter((r) => r.key === 'setup')).toHaveLength(readsBefore + 2);
+});
+
+it('setup_public_lines_first_read_failure_clears_the_skeleton', async () => {
+  const state = await linesInterview(true);
+  const lines = holdReads(path('setupPublicLines', state));
+  const readsBefore = mockStore.requests.filter((r) => r.key === 'setupPublicLines').length;
+  mockStore.inject({ route: 'setupPublicLines', status: 503 });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { retryScale: 0 });
+  await openLines();
+  await vi.waitFor(() => expect(lines.held()).toBe(1));
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown'));
+
+  lines.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy]')).toBeNull();
+  await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  expect(screen.getByRole('heading', { level: 1, name: 'What customers will read', exact: true }).elements()).toHaveLength(1);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLines')).toHaveLength(readsBefore + 1);
 });
 
 /** The safety check's count on the page, not its shape in a fading layer. */
@@ -626,6 +822,25 @@ it('setup_steps_still_under_reduced_motion', async () => {
       await vi.waitFor(() => expect(draft.held()).toBe(1));
     },
     release: draft.release,
+  });
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('public_lines_still_under_reduced_motion', async () => {
+  const lines = STEPS.public_lines;
+  const state = await linesInterview(false);
+  const read = lines.hold(state);
+  const open = await loadedSetup(state);
+  await expectSkeletonStill({
+    status: lines.status,
+    anchors: lines.anchors,
+    stays: lines.stays,
+    open: async () => {
+      await open();
+      await openLines();
+      await vi.waitFor(() => expect(read.held()).toBe(1));
+    },
+    release: read.release,
   });
   await expectScreenBasics(document.body, { owner: true });
 });

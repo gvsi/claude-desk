@@ -41,12 +41,11 @@ def public_fields(tool: BusinessTool) -> dict[str, str]:
 
 
 def free_allow_words(tool: BusinessTool) -> dict[str, frozenset[str]]:
-    """The shared free words, allowed in a title or appointment type only, and never on a payment's card."""
-    if tool.config.block == "purpose_payment":
-        return {}
+    """The shared free words, allowed in a title or appointment type only, and never on a payment's
+    card (`blocks.free_name_fields`, which the reply check's names also come from)."""
+    fields = blocks.free_name_fields(tool.config.block)
     return {f"{tool.tool}.{index}-{field}": reply_check.FREE_WORDS
-            for index, field in enumerate(blocks.CARD_FIELDS[tool.config.block])
-            if field in {"title", "appointment_type"}}
+            for index, field in enumerate(blocks.CARD_FIELDS[tool.config.block]) if field in fields}
 
 
 def payment_title_refused_fields(tool: BusinessTool) -> list[str]:

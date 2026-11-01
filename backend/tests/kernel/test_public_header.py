@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, PriceItem, RenderedBlock
+from desk.contracts import BRAND_PALETTE, Claim, PriceItem, RenderedBlock
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import Fact as FactRow
@@ -33,7 +33,7 @@ from .test_adapters import Rivera, rivera
 from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, put_part, updated
 from .test_labels_hardening import assert_no_canary_on_record, disguises, documents, full_width
 
-RIVERA_BRAND = {"primary": "#1F4E4A", "accent": "#B87333"}
+RIVERA_BRAND = {"palette": "teal", **BRAND_PALETTE["teal"]}   # as the seed stores it
 RIVERA_BUSINESS = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner",
                    "timezone": "America/Los_Angeles", "brand": RIVERA_BRAND}
 
@@ -453,3 +453,26 @@ async def test_ordinary_names_pass(app, client):
     after_hours = LOPEZ_DESK.model_copy(update={"name": "Line 2, after hours"})
     response = await post_desk(client, copy, new_desk(desk=after_hours))
     assert response.status_code == 200, response.text
+
+
+async def test_the_public_page_serves_a_pick_a_free_form_brand_or_teal(app, client):
+    copy = await rivera(app, client)
+    teal = {"palette": "teal", **BRAND_PALETTE["teal"]}
+    assert (await public_page(client, copy)).brand == teal                       # the seed's pick
+    # a pick shows as its key and the table's colours
+    for key in ("plum", "clay"):
+        await updated(client, copy, "business", business(brand={}, brand_palette=key))
+        assert (await public_page(client, copy)).brand == {"palette": key, **BRAND_PALETTE[key]}, key
+    # a brand passed back with a pick shows the table's colours, never the colours it sent
+    await updated(client, copy, "business", business(brand={"palette": "navy", "primary": "#000000"}))
+    assert (await public_page(client, copy)).brand == {"palette": "navy", **BRAND_PALETTE["navy"]}
+    # "none", no colours: the key alone, so the web draws its neutral header
+    await updated(client, copy, "business", business(brand={}, brand_palette="none"))
+    assert (await public_page(client, copy)).brand == {"palette": "none"}
+    # nothing stored reads as teal; free-form colours from before the palette show as stored
+    await updated(client, copy, "business", business(brand={}))
+    assert (await public_page(client, copy)).brand == teal
+    legacy = {"primary": "#0F3D3A", "accent": "#C2410C"}
+    await store_business(app, copy, brand=legacy)
+    assert (await public_page(client, copy)).brand == legacy
+    assert await withheld_alerts(app, copy) == []

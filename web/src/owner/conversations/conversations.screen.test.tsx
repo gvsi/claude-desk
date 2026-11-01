@@ -9,9 +9,9 @@ import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision, StatusEvent } from '../../api/contracts.ts';
-import type { ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
+import type { Attempt, ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
 import { ROUTES } from '../../api/routes.ts';
-import { rivera } from '../../ds/fixtures/index.ts';
+import { proseBlock, rivera } from '../../ds/fixtures/index.ts';
 import { typingPingMs } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
 import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, writing } from '../../mocks/script.ts';
@@ -21,6 +21,7 @@ import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
+import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
@@ -34,6 +35,8 @@ const DANA = rivera.people.dana.name;
 const SEEDED_REASON = rivera.decisions.held.reason_plain;
 const REFUND_REASON = rivera.heldRefund.reason_plain;
 
+/** The handoff card's AI-written line, before its note (owner decision, 2026-11-01). */
+const NOTE = "Claude's note on what the Desk stopped";
 /** The seeded chats: Dana's live one, and the visitor whose 15% discount is held. */
 const DANA_LIVE = 'ses-dana-web';
 const SEEDED_HOLD = 'ses-visitor-web';
@@ -190,11 +193,11 @@ async function served<T>(key: 'conversations' | 'conversation' | 'needsYou', par
  * Alex Kim's assistant books the earliest visit, as the agents page sends it from a visitor's chat:
  * the agent's chat once its run is done.
  */
-async function bookTheEarliestVisit(): Promise<string> {
+async function bookTheEarliestVisit(task = 'book_visit'): Promise<string> {
   const slug = RIVERA.slug;
   const opened = await mockStore.dispatch('openSession', { params: { slug } });
   if ('network' in opened || opened.status !== 200) throw new Error("the visitor's chat opens");
-  const sent = await mockStore.dispatch('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'book-the-earliest-visit' } });
+  const sent = await mockStore.dispatch('sendAgent', { params: { slug }, body: { task, idempotency_key: task } });
   if ('network' in sent || sent.status !== 202) throw new Error('the agent is sent');
   const runId = (sent.body as { run_id: string }).run_id;
   const runState = async () => {
@@ -217,12 +220,63 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it('open_conversation_fills_its_pane_at_1512', async () => {
+    // The open conversation takes the pane's width, inside its padding: the status, the transcript,
+    // the controls and the whisper box. Messages keep their own widths, the visitor's at the right.
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width: 1512, height: 982 } });
+    const whisperBox = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    await expect.element(whisperBox).toBeVisible();
+    const chat = log(screen);
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(chat.getByText(first ?? '', { exact: true })).toBeVisible();
+    const pane = document.querySelector<HTMLElement>('.cd-conversations__open');
+    if (!pane) throw new Error('the conversation opens in its pane');
+    const style = getComputedStyle(pane);
+    const inner = {
+      left: pane.getBoundingClientRect().left + Number.parseFloat(style.paddingLeft),
+      right: pane.getBoundingClientRect().right - Number.parseFloat(style.paddingRight),
+    };
+    const fills = (el: Element, name: string) => {
+      const rect = el.getBoundingClientRect();
+      expect(Math.abs(rect.left - inner.left), `${name} left`).toBeLessThanOrEqual(1);
+      expect(Math.abs(rect.right - inner.right), `${name} right`).toBeLessThanOrEqual(1);
+    };
+    expect(inner.right - inner.left).toBeGreaterThan(900);
+    const transcript = chat.element();
+    fills(transcript, 'transcript');
+    fills(whisperBox.element().closest('.cd-composer') ?? whisperBox.element(), 'whisper box');
+    // Her bubble ends at the transcript's right edge, at most 85% of its width.
+    const bubble = chat.getByText(first ?? '', { exact: true }).element().getBoundingClientRect();
+    expect(Math.abs(bubble.right - transcript.getBoundingClientRect().right)).toBeLessThanOrEqual(1);
+    expect(bubble.width).toBeLessThanOrEqual(transcript.getBoundingClientRect().width * 0.85 + 1);
+    // Claude's words keep to the reading width (640 px), from the transcript's left, so their lines
+    // stay around 80 characters while the row is the pane's width.
+    const prose = [...transcript.querySelectorAll<HTMLElement>('.cd-claude-message__prose')];
+    expect(prose.length).toBeGreaterThan(0);
+    expect(prose.some((p) => p.getBoundingClientRect().width > 600), 'a reply long enough to reach the cap').toBe(true);
+    for (const p of prose) {
+      expect(p.getBoundingClientRect().width).toBeLessThanOrEqual(640);
+      expect(Math.abs(p.getBoundingClientRect().left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    }
+    // Take over stays at the left, under the note about whispers, with its own line under it.
+    const takeOver = screen.getByRole('button', { name: 'Take over' }).element().getBoundingClientRect();
+    const note = document.querySelector('.cd-conversation__controls .cd-take-over__lead')!.getBoundingClientRect();
+    expect(Math.abs(takeOver.left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    expect(takeOver.top).toBeGreaterThanOrEqual(note.bottom);
+    const line = document.querySelector('.cd-conversation__controls .cd-take-over__action .cd-take-over__line');
+    if (line) expect(line.getBoundingClientRect().top).toBeGreaterThanOrEqual(takeOver.bottom);
+    expectNoHorizontalScroll();
+  });
+
   it.each(['scroll', 'focus'] as const)('a_first_callback_on_a_later_poll_leaves_her_%s_in_place', async (place) => {
     const chat = named(DANA_LIVE, DANA);
     const last = lengthen(chat);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
     const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    // The long chat overflows its region first: until it has, the region's end reads as its latest
+    // and a place 300 px down can't be set.
+    await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
     await expect.poll(() => region.scrollHeight - region.clientHeight - region.scrollTop).toBeLessThanOrEqual(1);
     if (place === 'scroll') {
       region.scrollTop = 300;
@@ -253,6 +307,8 @@ describe('Conversations', () => {
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
     const region = screen.container.querySelector('.cd-conversation__scroll')!;
     const endGap = () => region.scrollHeight - region.clientHeight - region.scrollTop;
+    // As above, the long chat overflows its region first; until then its end reads as its latest at 0.
+    await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
     await expect.poll(endGap).toBeLessThanOrEqual(1);
     expect(region.scrollTop).toBeGreaterThan(0);
     mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
@@ -349,6 +405,57 @@ describe('Conversations', () => {
     await expect.element(log(screen).getByText('I can help with that.', { exact: true })).toBeVisible();
   });
 
+  it('denied_request_hands_off_with_claudes_summary', async () => {
+    // The seeded chat's draft was stopped, so its triage is Safety's. Its held request shows no
+    // summary; denied, the follow-up hands the chat to Mike, and the handoff's card carries that
+    // summary as Claude's own words, under the visitor's.
+    const safety = await mockStore.dispatch('safety', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in safety || safety.status !== 200) throw new Error('the mock reads Safety');
+    const triage = (safety.body as Attempt[]).find((a) => a.kind === 'reply_blocked')?.triage;
+    if (!triage) throw new Error("Safety triages the seeded chat's stopped draft");
+
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const held = heldCard(screen, SEEDED_REASON);
+    await expect.element(held).toBeVisible();
+    expect(screen.container.textContent).not.toContain(NOTE);
+    await held.getByRole('button', { name: 'Deny this time' }).click();
+
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    const line = card.getByText(`${NOTE}: ${triage.summary}`, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    expect(line.element().previousElementSibling?.textContent).toMatch(/^From the visitor: “.+”$/);
+    expect(line.element().closest('[data-copy="user"]')).toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('handoff_note_waits_while_the_chat_has_a_request_held', async () => {
+    // While this chat still has a request held, its handoff card leaves Claude's note out, so the
+    // note never sits beside an approval it could sway (owner decision, 2026-11-01).
+    // A handoff opened in Dana's chat, shown as this held chat's, with a note in it.
+    mockStore.world.reply(named(DANA_LIVE, DANA), [rivera.blocks.handoff.en], 'en');
+    const read = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads Needs you');
+    const items = read.body as NeedsYouItem[];
+    expect(items.some((item) => item.handoff != null)).toBe(true);
+    const summary = 'Asked for a discount; the Desk stopped a draft.';
+    mockStore.inject({
+      route: 'needsYou', status: 200, times: 10_000,
+      body: items.map((item) => (item.handoff == null ? item : {
+        ...item, claude_summary: summary, handoff: { ...item.handoff, session_id: SEEDED_HOLD },
+      })),
+    });
+
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const held = heldCard(screen, SEEDED_REASON);
+    await expect.element(held).toBeVisible();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    expect(card.element().textContent).not.toContain(NOTE);
+    // Answered here, the request no longer waits on Mike, so the note shows, though this read still lists it.
+    await held.getByRole('button', { name: 'Deny this time' }).click();
+    await expect.element(card.getByText(`${NOTE}: ${summary}`, { exact: true })).toBeVisible();
+  });
+
   it('takeover_closes_the_card_handoff_and_refreshes_needs_you', async () => {
     const chat = named(DANA_LIVE, DANA);
     mockStore.world.reply(chat, [rivera.blocks.handoff.en], 'en');
@@ -441,6 +548,40 @@ describe('Conversations', () => {
     });
   });
 
+  it('unnamed_agent_row_shows_its_confirmed_outcome', async () => {
+    const booked = await bookTheEarliestVisit();
+    const agent = session(booked);
+    agent.displayName = null;
+    agent.state = { ...agent.state, verified: false };
+    const { screen } = await renderRoute(LIST);
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Agent/ });
+    await expect.element(row.getByText('Agent · Visit booked', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--info')).not.toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('agent_rows_show_confirmed_outcomes_and_attention_first', async () => {
+    const booked = await bookTheEarliestVisit();
+    const paid = await bookTheEarliestVisit('quote_and_deposit');
+    const refused = await bookTheEarliestVisit('push_the_limit');
+    const desk = mockStore.world.desk(RIVERA.deskId)!;
+    const quiet = mockStore.world.addSession(desk, { agent: "Alex Kim's assistant" });
+    mockStore.world.visitorText(quiet, 'Hello');
+    const { screen } = await renderRoute(LIST);
+    const status = (id: string) => document.querySelector(`a[href="${conversation(id)}"] .cd-conversation-item__status-text`)?.textContent;
+    await expect.poll(() => status(booked)).toBe('Agent · Visit booked');
+    expect(status(paid)).toBe('Agent · Deposit paid');
+    expect(status(refused)).toBe('Agent · Turned down');
+    expect(status(quiet.state.session_id)).toBe('Agent');
+
+    const ctx = mockStore.world.context(session(booked), 'en', 'Ask Mike');
+    ctx.decide({ ...DECISIONS.quote, outcome: 'hold', executed: false });
+    mockStore.world.reply(session(paid), [rivera.blocks.handoff.en], 'en');
+    await expect.poll(() => status(booked)).toBe('Needs you');
+    await expect.poll(() => status(paid)).toBe('Wants you');
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('list_and_detail', async () => {
     named(DANA_LIVE, DANA);
     const { screen, router } = await renderRoute(LIST);
@@ -513,6 +654,21 @@ describe('Conversations', () => {
       await expectScreenBasics(other.screen.container, { owner: true });
       expectNoHorizontalScroll();
     }
+  });
+
+  it('a_reply_in_markdown_shows_bold_and_a_list', async () => {
+    // A reply of Claude's in Markdown, in Dana's chat: the owner reads it as she did.
+    const items = ['Is the water heater leaking from the top or the bottom?', 'Is the pilot light still on?'];
+    const chat = named(DANA_LIVE, DANA);
+    const text = `We can look at that. **Two things** help me point you the right way:\n\n${items.map((item) => `- ${item}`).join('\n')}`;
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock(text)]));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const bold = log(screen).getByText('Two things', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect([...message.querySelectorAll('li')].map((el) => el.textContent)).toEqual(items);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
   });
 
   it('agent_name_reads_as_its_own_words', async () => {
@@ -918,13 +1074,17 @@ describe('Conversations', () => {
     (lastReceipt.element() as HTMLElement).focus({ preventScroll: true });
     const column = scrollerOf(log(screen).element());
     expect(column.contains(head.element())).toBe(true);
-    const at = column.scrollTop;
+    const on = Math.round(lastReceipt.element().getBoundingClientRect().top);
 
-    // A message arrives while focus is in the transcript: nothing moves under her.
+    // A message arrives while focus is in the transcript: nothing moves under her. The held cards
+    // now quote her two latest lines, so the one above her can change height; the receipt she's on
+    // stays where it was on screen.
     mockStore.world.visitorText(chat, 'Are you still there?');
     await expect.element(log(screen).getByText('Are you still there?', { exact: true })).toBeInTheDocument();
+    await expect.poll(() => heldCard(screen, REFUND_REASON).first().element().textContent).toContain('Are you still there?');
     await readsMore('conversation', 2);
-    expect(column.scrollTop).toBe(at);
+    expect(column.contains(lastReceipt.element())).toBe(true);
+    expect(Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);
     expect(document.activeElement).toBe(lastReceipt.element());
   });
 
@@ -1530,6 +1690,25 @@ describe('Conversations', () => {
     expect(landed.rows()).toHaveLength(1);
   });
 
+  it('the_owners_live_view_reveals_a_new_reply_and_draws_what_happened_whole', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const revealed = watchRevealing();
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 2);
+    // What happened so far is drawn whole: none of Claude's replies in it is revealed.
+    expect(log(screen).element().querySelectorAll('.cd-claude-message').length).toBeGreaterThan(0);
+    expect(revealed()).toEqual([]);
+
+    // Dana asks while the owner watches, and Claude's reply comes in as Dana sees it: its words, then
+    // its quote card a beat after them, then its two receipts a beat apart.
+    const reply = watchReveal();
+    priceTurn(chat, 'How much is drain clearing?');
+    expectRevealed(await reply, { cards: [0.12], lines: [0.24, 0.36] });
+    expect(revealed()).toHaveLength(1);
+  });
+
   it('a_reply_that_came_while_away_draws_still', async () => {
     const chat = named(DANA_LIVE, DANA);
     const landed = watchLandings();
@@ -1590,9 +1769,12 @@ describe('Conversations', () => {
     await expect.poll(shown).toMatch(/^Automatic\. /);
     const read = shown();
 
-    // The reply comes, and the receipt moves under it, after the reply's own check. The reply and its
-    // check land; the receipt the owner has already read shows at once.
+    // The reply comes, and the receipt moves under it, after the reply's own check. The reply is
+    // revealed, and its own check waits for its words, then follows its quote card; the receipt the
+    // owner has already read shows at once, and never waits.
+    const revealed = watchReveal();
     for (const step of [...rest, turnEnd]) world.emit(chat, step(turn));
+    const frames = await revealed;
     await expect.poll(() => quotes().length).toBe(before + 1);
     const reply = quotes().at(-1)?.closest('.cd-transcript-row');
     if (!reply) throw new Error('the reply has its row');
@@ -1600,7 +1782,13 @@ describe('Conversations', () => {
     const lines = [...reply.querySelectorAll('.cd-margin-receipt')];
     expect(lines).toHaveLength(2);
     expect(lines[1]?.textContent).toBe(read);
-    expect(landed.lines(reply)).toEqual([lines[0]]);
+    const waiting = frames.filter((frame) => frame.revealing);
+    expect(waiting.length).toBeGreaterThan(0);
+    for (const frame of waiting) expect(frame.lines.map((line) => line.visibility)).toEqual(['hidden', 'visible']);
+    expect(frames.find((frame) => !frame.revealing)?.lines).toEqual([
+      { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.24s' },
+      { visibility: 'visible', name: 'none', delay: '0s' },
+    ]);
   });
 
   it('the_owners_own_words_never_land', async () => {

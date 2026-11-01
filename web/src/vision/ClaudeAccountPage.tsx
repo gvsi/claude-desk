@@ -53,7 +53,7 @@ export function ClaudeAccountPage() {
                 <MarginReceipt key="checked" source={s.checked} plain={t.checked} ledgerSeq={42} />,
               ]}
             >
-              <ClaudeMessage blocks={CLAUDE_ACCOUNT_WELCOME} language="en" ownerName={owner} />
+              <ClaudeMessage plainProse blocks={CLAUDE_ACCOUNT_WELCOME} language="en" ownerName={owner} />
             </TranscriptRow>
             <TranscriptRow>
               <VisitorMessage text={t.invoice} />
@@ -64,7 +64,7 @@ export function ClaudeAccountPage() {
                 <MarginReceipt key="released" source={s.released} plain={t.releasedReceipt} ledgerSeq={44} />,
               ]}
             >
-              <ClaudeMessage blocks={CLAUDE_ACCOUNT_INVOICE} language="en" ownerName={owner} inertDownload />
+              <ClaudeMessage plainProse blocks={CLAUDE_ACCOUNT_INVOICE} language="en" ownerName={owner} inertDownload />
             </TranscriptRow>
           </Transcript>
         </PublicShell>

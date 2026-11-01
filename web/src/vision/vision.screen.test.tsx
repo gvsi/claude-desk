@@ -596,7 +596,7 @@ describe('Vision pages against their boards', () => {
     const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' });
     await expect.element(sidebar.getByRole('button', { name: 'Switch Desk, current: Team' })).toBeVisible();
     await expect.element(sidebar.getByRole('link', { name: 'Teammates' })).toBeVisible();
-    await expect.element(sidebar.getByRole('switch', { name: 'Answering' })).toHaveAccessibleDescription('Claude answers your team under your rules');
+    await expect.element(sidebar.getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
 
     // The title and its line, "Add a teammate" at the right.
     expectComputed(title.element(), SPEC.pageTitle);
@@ -691,7 +691,7 @@ describe('Vision pages against their boards', () => {
     await expectTabOrderFromTheTop([
       bar.querySelector('a') as HTMLElement,
       sidebar.getByRole('button', { name: 'Switch Desk, current: Team' }).element() as HTMLElement,
-      sidebar.getByRole('switch', { name: 'Answering' }).element() as HTMLElement,
+      sidebar.getByRole('switch', { name: 'Claude acts for you' }).element() as HTMLElement,
       add.element() as HTMLElement,
       ...rows,
       chat.getByRole('button', { name: 'Whisper' }).element() as HTMLElement,
@@ -764,7 +764,7 @@ describe('Vision pages against their boards', () => {
     // kernel renders one: the day, when Mike arrives and who, with no booking number.
     const lastVisit = log.getByRole('article', { name: 'Booked' });
     await expect.element(lastVisit).toBeVisible();
-    expect(lastVisit.element().textContent).toBe('BookedTuesday, October 20Arriving 10:00 am to 12:00 pmWith Mike Turner');
+    expect(lastVisit.element().textContent).toBe('BookedTuesday, October 2010:00 am to 12:00 pmWith Mike Turner');
     expect(lastVisit.element().closest('.cd-claude-message')?.querySelector('.cd-claude-message__prose')?.textContent).toBe(ACCOUNT.matched);
 
     // The invoice is a document card, only for her, with its download. A vision page makes no
@@ -896,7 +896,7 @@ describe('Vision pages against their boards', () => {
     // The booking is the kernel's booking card, in the same message as Claude's words, as the kernel
     // renders one: the day, when Mike arrives and who, with no booking number.
     const booked = visitor.getByRole('article', { name: 'Booked' });
-    expect(booked.element().textContent).toBe('BookedTuesday, November 3Arriving 2:00 pm to 4:00 pmWith Mike Turner');
+    expect(booked.element().textContent).toBe('BookedTuesday, November 32:00 pm to 4:00 pmWith Mike Turner');
     const reply = one(log, '.cd-claude-message__prose');
     expect(reply.textContent).toBe('You’re all set. Here’s your visit.');
     expect(booked.element().closest('.cd-claude-message')).toBe(reply.closest('.cd-claude-message'));

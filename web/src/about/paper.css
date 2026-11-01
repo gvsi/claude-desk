@@ -4,11 +4,11 @@
 
    Two classes, each on a page's root, and no rule on anything inside one:
    - .cd-about-paper declares the palette. Its names keep the article's prefix: these are its colors.
-   - .cd-about-paper--app, beside it on a page drawn with the app's own components (the two reading pages, and the
-     set's error page and wait), points the app's color tokens at the palette inside that page alone, so a card, a
-     pill, a link, a focus ring or the footer draws in ink on paper with no rule of its own; and lays the paper
-     under the page, the window's height at least. The article draws every part in its own rules, so its root takes
-     only the palette. */
+   - .cd-about-paper--app, beside it on a page drawn with the app's own components (the two reading pages, the
+     set's error page and wait, and the Vision article, whose top bar is the reading pages'), points the app's color
+     tokens at the palette inside that page alone, so a card, a pill, a link, a focus ring or the footer draws in ink
+     on paper with no rule of its own; and lays the paper under the page, the window's height at least. The article
+     draws every other part in its own rules, from the palette itself. */
 
 .cd-about-paper {
   /* The page. */
@@ -32,8 +32,9 @@
 
 /* Each app color token the reading pages, their figures and the error page draw with, on the paper: the page and
    the figures' cards (tiles, as the article's cards are), ink and secondary ink, the hairlines and their stronger
-   edge, the fills, the link color (which focus rings take too) and the status dots. A token the tokens file
-   defines from another (status-info) is pointed here too, since it was resolved on the app's root. */
+   edge, the fills, the link color, the focus ring (the secondary ink, as on the app) and the status dots. A token
+   the tokens file defines from another (ring-focus, status-info) is pointed here too, since it was resolved on
+   the app's root. */
 .cd-about-paper--app {
   --bg-app: var(--va-paper);
   --bg-panel: var(--va-tile);
@@ -50,6 +51,10 @@
   --fill-hover: var(--va-hover);
   --fill-secondary: var(--va-band);
   --accent-blue: var(--va-link);
+  --ring-focus: var(--va-ink-2);
+  /* No text entry is drawn on the paper. If one ever is, map line-field here too, so its outline and the
+     composer's focused edge reach 3:1 on the paper. */
+  --line-field-focus: var(--va-ink-2);
   --status-handled: var(--va-done);
   --status-held: var(--va-held);
   --status-refused: var(--va-declined);

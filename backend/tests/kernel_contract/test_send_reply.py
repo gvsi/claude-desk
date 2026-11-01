@@ -28,6 +28,7 @@ from tests.kernel_contract.test_contract import (
     issue_payment_link,
     item_id,
     session_handoffs,
+    turn,
 )
 
 REWRITE = "Happy to help with your drain."
@@ -123,6 +124,60 @@ async def test_a_final_prose_failure_delivers_the_kept_card_then_the_drafted_han
     (payload,) = (await conn.execute(text(
         "SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"), {"s": session_id})).one()
     assert payload["handoff"] and "89" not in str(payload["blocks"])
+    assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == [
+        ("card", "open")]
+    assert await handed_to_you(http, copy) == 1
+
+
+OFFER = {"en": "Would you like me to arrange a callback?", "es": "¿Quiere que solicite una llamada?"}
+RECEIPT = {"en": "Reply checked against Mike Turner's rules", "es": "Respuesta revisada con las reglas de Mike Turner"}
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("language", ["en", "es"])
+async def test_a_final_prose_failure_with_nothing_to_keep_delivers_the_call_back_offer(kernel, ro_read, conn,
+                                                                                      language):
+    """Only the prose fails on the final check and no card is kept, on a Desk that offers call backs: the kernel's
+    call-back offer is shown as a reply, as kept cards are, not a handoff (the owner's decision of 2026-11-01). The
+    delivered event carries no handoff flag, and no owner handoff opens or alerts. Claude reads `delivered` with
+    `prose_shown` false, since its own prose wasn't shown, and the offer's words as `shown_instead`, so a visitor's
+    "yes" next comes with the question it answers."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    if language == "es":                    # the visitor writes Spanish, so a draft too short to tell speaks it
+        assert (await turn(http.session(visitor.session_token), session_id, 0,
+                           "Hola, ¿me puede ayudar con una fuga?")).language == "es"
+    draft = {"prose": "It comes to $89 for the visit." if language == "en" else "$89.", "clauses": []}
+    outcome = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_offer")
+    assert outcome.result == {"outcome": "delivered", "message_id": outcome.message_id, "prose_shown": False,
+                              "shown_instead": OFFER[language]}
+    assert outcome.delivered == "reply" and not outcome.is_error
+    assert [check["final"] for check in caller.kernel.checks] == [True]
+    assert await delivered(conn, session_id) == [[None]]
+    (payload,) = (await conn.execute(text(
+        "SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"), {"s": session_id})).one()
+    assert not payload["handoff"]
+    assert [block["text"] for block in payload["blocks"]] == [OFFER[language]]
+    assert payload["visitor_plain"] == RECEIPT[language]
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+    assert await handed_to_you(http, copy) == 0
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_final_prose_failure_with_a_drafted_handoff_and_nothing_to_keep_hands_off(kernel, ro_read, conn):
+    """A handoff clause Claude drafted is honoured when only the prose fails and no card is kept: the handoff card,
+    not the call-back offer, as a handoff that opens the owner's item, with no `shown_instead`."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    draft = {"prose": "It comes to $89 for the visit.", "clauses": [{"template": "handoff"}]}
+    outcome = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_drafted")
+    assert outcome.result == {"outcome": "delivered_handoff", "prose_shown": False}
+    assert outcome.delivered == "handoff"
+    assert await delivered(conn, session_id) == [["handoff"]]
     assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == [
         ("card", "open")]
     assert await handed_to_you(http, copy) == 1

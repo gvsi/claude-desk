@@ -272,7 +272,8 @@ export function RulesPage() {
   if (settled && !firstReadsEnded) setFirstReadsEnded(true);
   const loading = (!settled && !firstReadsEnded) || waitingForOpening || awaitingLanding;
   const drawn = !loading && active !== undefined;
-  // Back and "Keep my rules" may return while the gate leaves the page too short to restore.
+  // Back and "Keep my rules" return to the owner's place once drawn: while the gate holds the page,
+  // it may be too short to reach the place, and the question about a hold comes in above it.
   useLayoutEffect(() => {
     if (drawn) reachPlace(location.key);
   }, [drawn, reachPlace, location.key]);

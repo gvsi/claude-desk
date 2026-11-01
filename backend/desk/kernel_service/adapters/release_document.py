@@ -1,8 +1,10 @@
 """`native.release_document`: one of the Desk's documents, shared with the verified person it belongs to.
 
-The call names a document by its ID. `normalize` resolves it from `documents`: it must be this
-Desk's, else the call is refused at step 1; the resource's owner is the document's record owner,
-read from the row, never from args. Who may have it is Cedar's: the baseline lets private data go
+The call names a document by its ID, bare or as its fact ID (`document:<id>`, as Claude's context
+shows it: `base.fact_ref`). `normalize` resolves it from `documents`: it must be this Desk's, else
+the call is refused at step 1; the resource is the row's own ID and its owner the document's record
+owner, read from the row, never from args, and everything after `normalize` names the document by
+`action.resource.id`. Who may have it is Cedar's: the baseline lets private data go
 only to a verified principal who is the record owner.
 
 `execute` writes a `document_links` row whose token (`secrets.token_urlsafe(32)`) opens the
@@ -41,7 +43,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_service import auth, labels, ledger, render, repo
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (AdapterFailure, AdapterRefusal, AdapterResult, ExecCtx, Normalized,
-                                               NormalizeCtx)
+                                               NormalizeCtx, fact_ref)
 from desk.kernel_service.repo import KernelCtx, KernelFailure, new_id
 
 LINK_TTL = timedelta(hours=24)
@@ -100,7 +102,7 @@ class ReleaseDocumentAdapter:
     releases_private_data = True          # a link to the verified person's document, read only as them
 
     async def normalize(self, nctx: NormalizeCtx, args: ReleaseDocumentArgs) -> Normalized:
-        document = await find_document(nctx.ctx, nctx.desk_row.desk_id, args.document_id)
+        document = await find_document(nctx.ctx, nctx.desk_row.desk_id, fact_ref(args.document_id, "document"))
         if document is None:
             raise AdapterRefusal("no_such_document")
         return Normalized(resource=ResourceRef(kind="document", id=document.document_id,

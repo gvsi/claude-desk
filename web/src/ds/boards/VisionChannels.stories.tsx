@@ -44,7 +44,7 @@ export const Board: Story = {
     await expectTabOrder(userEvent, [
       within(bar).getByRole('link', { name: 'Back to Vision' }),
       canvas.getByRole('button', { name: 'Switch business, current: Turner Plumbing' }),
-      canvas.getByRole('switch', { name: 'Answering' }),
+      canvas.getByRole('switch', { name: 'Claude acts for you' }),
     ]);
   },
 };

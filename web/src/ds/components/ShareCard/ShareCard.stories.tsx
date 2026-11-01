@@ -2,11 +2,12 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
-import { ShareCard } from './ShareCard.tsx';
+import { SHARE_CARD_QR_COLORS, ShareCard } from './ShareCard.tsx';
 
 /**
  * A stand-in for the web app's QR code (plan 04 draws the real one from the Desk's link): a fixed
- * pattern of squares on a light ground, so the story shows the slot filled. It encodes nothing.
+ * pattern of squares in the card's QR colors, filling the tile, so the story shows it filled. It
+ * encodes nothing.
  */
 function QrPlaceholder({ url = 'desk.example/rivera' }: { url?: string }) {
   const cells: [number, number][] = [];
@@ -18,9 +19,9 @@ function QrPlaceholder({ url = 'desk.example/rivera' }: { url?: string }) {
     }
   }
   return (
-    <svg viewBox="-1 -1 23 23" width="152" height="152" role="img" aria-label={`QR code for ${url}`} style={{ display: 'block', background: '#faf9f5' }}>
+    <svg viewBox="-1 -1 23 23" width="100%" height="100%" role="img" aria-label={`QR code for ${url}`} style={{ display: 'block', background: SHARE_CARD_QR_COLORS.light }}>
       {cells.map(([x, y]) => (
-        <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill="#141413" />
+        <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill={SHARE_CARD_QR_COLORS.dark} />
       ))}
     </svg>
   );
@@ -53,10 +54,21 @@ export const Printable: Story = {
     expectComputed(disclosure, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', textAlign: 'center' });
     expectComputed(within(card).getByText('Turner Plumbing'), { fontSize: '15px', lineHeight: '20px', fontWeight: '520', textAlign: 'center' });
     expectComputed(card, { paddingTop: '20px', paddingLeft: '20px', borderTopLeftRadius: '12px', backgroundColor: 'rgba(250, 249, 245, 0.03)' });
-    // The QR code is the screen's, in a 152 px square slot, 12 px under the name, centered.
+    // The QR code is the screen's, on a 152 px sand tile 12 px under the name, centered, filling the
+    // 128 px inside it (N-Live-REV-QR-B).
     const qr = within(card).getByRole('img', { name: 'QR code for desk.example/rivera' });
-    const slot = qr.parentElement!.getBoundingClientRect();
+    const tile = qr.parentElement!;
+    const slot = tile.getBoundingClientRect();
     await expect([slot.width, slot.height]).toEqual([152, 152]);
+    const code = qr.getBoundingClientRect();
+    await expect([code.width, code.height, code.left - slot.left, code.top - slot.top]).toEqual([128, 128, 12, 12]);
+    expectComputed(tile, {
+      paddingTop: '12px',
+      borderTopLeftRadius: '12px',
+      backgroundColor: 'rgb(234, 230, 220)',
+      boxShadow: 'rgba(28, 27, 25, 0.13) 0px 0px 0px 1px inset',
+    });
+    await expect(SHARE_CARD_QR_COLORS).toEqual({ dark: '#1c1b19', light: '#eae6dc' });
     const box = card.getBoundingClientRect();
     await expect(Math.round(slot.left - box.left)).toBe(Math.round(box.right - slot.right));
     // 300 px wide and, with the line on two lines, 306 px tall, as on the board.

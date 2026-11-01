@@ -53,7 +53,7 @@ function readableField(color: string | null): string {
   }
 }
 
-export function brandFrom(desk: PublicDesk): DeskBrand {
+export function brandFrom(desk: Pick<PublicDesk, 'business_name' | 'desk_name' | 'owner_display_name' | 'brand'>): DeskBrand {
   const name = desk.business_name;
   const brand: Record<string, unknown> = desk.brand ?? {};
   return {

@@ -7,9 +7,11 @@
  * here is a credential.
  */
 import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type KnowledgeItem, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
+import { paletteBrand, paletteKey } from '../public/palette.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
+  AgentTasks,
   ApprovalAnswerOut,
   CancelAccepted,
   CancelReason,
@@ -58,7 +60,17 @@ import {
   type Step,
 } from './script.ts';
 import { PRESETS, presetCards, seedWorld, type MockSeed } from './seed.ts';
-import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
+import {
+  SETUP_ROUTES,
+  setupPublicDesk,
+  setupTaskSet,
+  stopSetupRuns,
+  withSetupBusinesses,
+  withSetupBusinessName,
+  withSetupDesks,
+  withSetupGreeting,
+} from './setup.ts';
+import { TEST_PACE, type OwnerStreamPlan, type StreamSettings } from './ownerStreams.ts';
 import { PUBLIC_LINES_ROUTES } from './publicLines.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
@@ -268,6 +280,9 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
+/** The owner-chat streams a test can plan: Ask Claude's answer, or a setup turn. */
+export type OwnerStreamKind = 'ruleChat' | 'setup';
+
 /**
  * How a store numbers its copies and names their payment and document links: the screen tests'
  * one copy from 1, so its ids are the seed's, and the dev server's at random, so each copy's are
@@ -287,13 +302,35 @@ export class Server {
   world: MockWorld;
   /** The built-in agent's runs in this copy. */
   readonly agents = new AgentRuns();
+  /** How this copy's owner-chat streams are written; a test may change whether setup's turns stream. */
+  readonly streams: StreamSettings;
+  /** Streams a test planned, each taken by the next stream of its kind. */
+  private readonly plans: Record<OwnerStreamKind, OwnerStreamPlan[]> = { ruleChat: [], setup: [] };
+  /**
+   * Claude's answer to the last rule chat, kept when the change it drafted is refused for the
+   * payment limit: as on the API, a streamed chat has written the answer by then, and the refusal
+   * follows it.
+   */
+  refusedAnswer: string | null = null;
   private readonly turns = new Map<string, { queue: Scheduled[]; timer: ReturnType<typeof setTimeout> | null }>();
 
   constructor(
     readonly seed: MockSeed,
     private readonly naming: CopyNaming,
+    streams: StreamSettings = TEST_PACE,
   ) {
+    this.streams = { ...streams };
     this.world = this.freshWorld();
+  }
+
+  /** Plans the next stream of `kind`: Ask Claude's answer, or a setup turn. */
+  planStream(kind: OwnerStreamKind, plan: OwnerStreamPlan): void {
+    this.plans[kind].push(plan);
+  }
+
+  /** The plan for this stream of `kind`, if a test made one. */
+  takePlan(kind: OwnerStreamKind): OwnerStreamPlan | null {
+    return this.plans[kind].shift() ?? null;
   }
 
   private freshWorld(seed: MockSeed = this.seed): MockWorld {
@@ -312,6 +349,7 @@ export class Server {
     for (const turn of this.turns.values()) if (turn.timer !== null) clearTimeout(turn.timer);
     this.turns.clear();
     this.agents.stop();
+    stopSetupRuns(this.world);
   }
 
   /**
@@ -465,6 +503,21 @@ const SERVED: ServedRoutes = {
     const on = isRecord(req.body) ? req.body.on : undefined;
     if (typeof on !== 'boolean') return INVALID;
     desk.summary.answering = on;
+    return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
+  },
+  setBusiness(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const body = req.body;
+    if (req.malformed || !isRecord(body) || typeof body.name !== 'string' || typeof body.owner_display_name !== 'string' || typeof body.timezone !== 'string') return INVALID;
+    if (!isRecord(body.brand) || Object.keys(body.brand).length > 0 || typeof body.brand_palette !== 'string') return INVALID;
+    const palette = paletteKey({ palette: body.brand_palette });
+    if (palette === null) return INVALID;
+    const business = withSetupBusinesses(sv.world, [businessOut(sv.world)]).find((b) => b.desks.some((d) => d.desk_id === desk.summary.desk_id));
+    for (const summary of business?.desks ?? []) {
+      const sibling = sv.world.desk(summary.desk_id);
+      if (sibling) sibling.brand = paletteBrand(palette);
+    }
     return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
   },
   deleteDesk(sv, req) {
@@ -626,6 +679,8 @@ const SERVED: ServedRoutes = {
     return isFailure(desk) ? desk : ok(rulesView(desk));
   },
   ruleChat(sv, req) {
+    // Only this chat's own refusal may stream its answer: whatever an earlier chat kept goes now.
+    sv.refusedAnswer = null;
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
     const text = isRecord(req.body) ? req.body.text : undefined;
@@ -644,7 +699,10 @@ const SERVED: ServedRoutes = {
       .reverse();
     const reply = ruleChatReply(text, desk.policy.cards, held);
     if (reply.add.length === 0) return ok({ answer: reply.answer, draft: null } satisfies RuleChatOut);
-    return aboveMoneyCap(desk, reply.add) ?? ok({ answer: reply.answer, draft: sv.world.draft(desk, reply.add) } satisfies RuleChatOut);
+    const refused = aboveMoneyCap(desk, reply.add);
+    if (refused === null) return ok({ answer: reply.answer, draft: sv.world.draft(desk, reply.add) } satisfies RuleChatOut);
+    sv.refusedAnswer = reply.answer;
+    return refused;
   },
   suggestions(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -774,8 +832,8 @@ const SERVED: ServedRoutes = {
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
     const { session } = visitor;
     sv.world.visitorText(session, text);
-    // The turn's tools are read when it starts, which may be after a turn in progress ends.
-    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session)), session.language, text);
+    // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
+    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session), session.person), session.language, text);
     // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
     else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
@@ -825,6 +883,15 @@ const SERVED: ServedRoutes = {
     // A demo key for this browser's chat with the Desk, shown once and kept nowhere.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
+  },
+  agentTasks(sv, req) {
+    // The Desk's set, read with this browser's chat as the API reads it: its setup business type,
+    // Turner's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    const deskId = visitor.desk.summary.desk_id;
+    const own = sv.world.desks[0]?.summary.desk_id === deskId;
+    return ok({ task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other') } satisfies AgentTasks);
   },
   sendAgent(sv, req) {
     const visitor = sv.visitor(req.params.slug, req.cookies);

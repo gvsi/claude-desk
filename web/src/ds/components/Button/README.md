@@ -6,7 +6,7 @@
 
 - `primary` for the one action a view is about ("Send counter-offer", "Join the chat"): an inverted neutral, at most one per view.
 - `secondary` for the other actions beside it, such as "Allow this time" on an approval card.
-- `ghost` for quiet actions that shouldn't compete ("Start over", "Mark done").
+- `ghost` for quiet actions that shouldn't compete ("Start over").
 - `danger` for an answer that refuses, once: "Deny this time", a soft `button-danger-fill` behind `button-danger-text`.
 - `danger-ghost` for a quieter refusal beside it: `button-danger-text` with no fill.
 - The red variants are only for refusing. They are never a status, a warning or decoration, and their words still say exactly what happens.
@@ -57,7 +57,7 @@
 
 A menu button keeps its variant's look, and its hover fill while its menu is open (`aria-expanded="true"`); its padding is `space-14` before the words and `space-10` after the chevron (`space-12` and `space-8` inline), because the icon carries its own margin.
 
-Disabled dims every variant to 40%. Busy never dims, even on a button that is disabled too: busy wins, and each variant steps to its busy colors and shows its spinner, as `busy` above says. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
+Disabled dims every variant to 40%. Busy never dims, even on a button that is disabled too: busy wins, and each variant steps to its busy colors and shows its spinner, as `busy` above says. Keyboard focus shows the base stylesheet's 2 px `ring-focus` ring at a 2 px offset on every variant; a click shows none.
 
 A label longer than its line, such as a long name on a phone or in the take-over bar's controls column, wraps inside the button in balanced lines, and the button grows taller with the same padding. A word wider than the line, such as a name with no spaces, breaks inside the button too (`overflow-wrap: anywhere`), even in a row of buttons. It is never wider than its container, and one line of label keeps it exactly `size-control` (or `size-control-main`) tall.
 

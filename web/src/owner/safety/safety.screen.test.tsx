@@ -317,7 +317,7 @@ describe('Safety', () => {
     const { screen } = await renderRoute(SAFETY);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
     await expect.element(screen.getByText('I turned down 2 requests this week.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('img', { name: `${entries} entries`, exact: true })).toBeVisible();
     expect(document.body.textContent).not.toMatch(/talk me around|attempts? (?:was|were) stopped/);
 
@@ -418,7 +418,7 @@ describe('Safety', () => {
     const ask = 'Can I get 50% off if I pay cash?';
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: ask } });
-    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.fromTheVisitor === ask)?.decision;
+    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.decision.action?.discount_bp === 5000)?.decision;
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('held');
     await mockStore.dispatch('answer', { params: { decision_id: asked()?.decision_id ?? '' }, body: { answer: 'allow_once' } });
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('executed');
@@ -444,13 +444,41 @@ describe('Safety', () => {
     injectLedger(ledgerPage(threeEntries(), { chain_ok: false, first_bad_seq: 2 }));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
     await expect.element(screen.getByText("Entry 2 doesn't match the chain", { exact: true })).toBeVisible();
-    expect(screen.getByText('Every entry checks out').elements()).toHaveLength(0);
+    expect(screen.getByText('Every entry matches the chain').elements()).toHaveLength(0);
 
     // An entry's full trace says the chain is broken, and where, never that it was verified.
     await recordRow(screen, 3).click();
     const trace = region(screen, 'Full trace of entry 3');
     await expect.element(trace.getByText('Chain broken at entry 2', { exact: true })).toBeVisible();
     expect(trace.getByText(/Chain verified/).elements()).toHaveLength(0);
+  });
+
+  it('a_long_trace_scrolls_in_its_column_and_the_page_stays_put', async () => {
+    // A trace taller than the window, in a window short enough for it (owner comment, 2026-11-01:
+    // "long trace column makes the whole page jump"). Opening it leaves the page where it was, and
+    // the trace scrolls inside its own column beside the list.
+    const checks = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`check_${i}`, { status: 'ok', blocked: false, latency_ms: i }]));
+    const entries = threeEntries();
+    entries[2] = entry(3, '2026-10-20T16:52:00.000000Z', { kind: 'reply', session_id: 'ses-1', summary: { author: 'claude', ok: true, language: 'en', violations: [], soft_checks: checks } });
+    injectLedger(ledgerPage(entries));
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`, { viewport: { width: 1440, height: 700 } });
+    await expect.element(recordRow(screen, 3)).toBeVisible();
+    const main = recordRow(screen, 3).element().closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    const before = main.scrollTop;
+
+    await recordRow(screen, 3).click();
+    const trace = region(screen, 'Full trace of entry 3');
+    await expect.element(trace).toBeVisible();
+    await expect.poll(() => document.activeElement).toBe(trace.element());
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    expect(main.scrollTop).toBe(before);
+    const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
+    if (!beside) throw new Error('the trace sits in the column beside the list');
+    expect(beside.scrollHeight).toBeGreaterThan(beside.clientHeight);
+    // Exactly the main area's height inside its 24 px top and 20 px bottom padding, so all of it
+    // shows once the page is scrolled to it, 20 px clear of the main area's bottom.
+    expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
   });
 
   it('dev_key_is_labelled', async () => {
@@ -776,6 +804,30 @@ describe('Safety', () => {
     await expect.element(trace.getByText('Handoff closed when you took over. Recorded by the checkpoint.', { exact: true })).toBeVisible();
   });
 
+  it('handoff_closed_by_a_booking_says_so', async () => {
+    // The handoff card hands Mike the chat, then the visitor books a time in it, which closes the
+    // card's handoff: the record calls that closing what it was, never her Mark done, and its full
+    // trace reads the row's name as its sentence.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Mike?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can someone come Tuesday?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'The first one, please.' } });
+    await expect.poll(() => [...mockStore.world.handoffs.values()].map((h) => h.handoff.status), { timeout: 5_000 }).toEqual(['done']);
+    const { entries } = await mockLedger();
+    const closed = entries.find((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs' && e.event.summary.closed_by === 'booking');
+    if (!closed) throw new Error('the booking closed the card handoff');
+    injectLedger(ledgerPage(entries));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, closed.seq).getByText('Handoff closed when they booked a time', { exact: true })).toBeVisible();
+    expect(screen.getByText('Chat marked done', { exact: true }).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+    await recordRow(screen, closed.seq).click();
+    const trace = region(screen, `Full trace of entry ${closed.seq}`);
+    await expect.element(trace.getByText('Handoff closed when they booked a time. Recorded by the checkpoint.', { exact: true })).toBeVisible();
+  });
+
   it('filters_start_with_all', async () => {
     injectLedger(ledgerPage(threeEntries()));
     const sorted = (summary: string, category: TriageCategory, n: number) =>
@@ -951,7 +1003,7 @@ describe('Safety', () => {
     await listSeededHold();
     const { screen } = await renderRoute(SAFETY);
     await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     // A held request is held, not stopped, and claims nothing about what happens next.
     await screen.getByRole('link', { name: /^Today, \d{1,2}:\d{2} [ap]m A visitor not on record/ }).click();
@@ -991,7 +1043,7 @@ describe('Safety', () => {
     // The record was read and checked; then a later read fails. The check says so, first, beside
     // what it last found, and stays until a read works, so an old check never reads as current.
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    const checked = screen.getByText('Every entry checks out', { exact: true });
+    const checked = screen.getByText('Every entry matches the chain', { exact: true });
     const record = screen.getByRole('list', { name: 'Every entry, newest first' });
     await expect.element(checked).toBeVisible();
     await expect.element(record).toBeVisible();
@@ -1050,7 +1102,7 @@ describe('Safety', () => {
     const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
     await expect.element(line, { timeout: 5_000 }).toBeVisible();
     await expect.element(nothing).not.toBeInTheDocument();
-    expect(line.element().compareDocumentPosition(screen.getByText('Every entry checks out').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.element().compareDocumentPosition(screen.getByText('Every entry matches the chain').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await readsMore('safety', 2);
     await readsMore('today', 1);
     expect(nothing.elements()).toHaveLength(0);

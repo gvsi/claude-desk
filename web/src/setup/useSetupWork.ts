@@ -3,8 +3,21 @@ import { UNSAFE_DataRouterContext, useLocation } from 'react-router';
 
 import type { SetupState } from '../api/views.ts';
 
-/** Polls only work still running on the questions step. `reread` updates the page's interview. */
-export function useSetupWork(state: SetupState, reread: () => Promise<SetupState | null>) {
+/**
+ * How long polling waits for setup's work before offering "Try again". It must outlast the API's
+ * `TURN_ABANDONED_S` (130 s, in backend/desk/api/setup.py): by then a turn has landed, rolled back
+ * or been recovered as abandoned, so the next read answers it. Consent answers 202 at once, so this
+ * starts as the turn does; the 10 s past abandonment covers a few 2 s reads. Its test holds the two
+ * together.
+ */
+export const SETUP_WORK_GIVE_UP_MS = 140_000;
+
+/**
+ * Polls only work still running on the questions step. `reread` updates the page's interview.
+ * `progress` counts what the turn's stream has said so far: the whole wait starts again with each,
+ * so a turn that is visibly writing never reads as given up.
+ */
+export function useSetupWork(state: SetupState, reread: () => Promise<SetupState | null>, progress = 0) {
   const working = state.step === 'questions' && state.busy === true;
   const [gaveUp, setGaveUp] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -36,6 +49,11 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
     };
   }, [state.interview_id, router, pathname]);
 
+  // The turn's stream said something more: it hasn't given up, and the wait starts again.
+  useEffect(() => {
+    setGaveUp(false);
+  }, [progress]);
+
   useEffect(() => {
     if (!working) {
       setGaveUp(false);
@@ -45,12 +63,12 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
     if (gaveUp || signal === undefined || signal.aborted) return;
     const controller = new AbortController();
     let reading = false;
-    // Registered before the interval so the deadline wins over a tick at exactly 90 s.
+    // Registered before the interval so the deadline wins over a tick at exactly the limit.
     const deadline = setTimeout(() => {
       if (controller.signal.aborted || signal.aborted) return;
       stop();
       setGaveUp(true);
-    }, 90000);
+    }, SETUP_WORK_GIVE_UP_MS);
     const timer = setInterval(() => {
       if (controller.signal.aborted || signal.aborted || reading) return;
       reading = true;
@@ -76,9 +94,9 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
       signal.removeEventListener('abort', stop);
       stop();
     };
-  }, [state.interview_id, working, gaveUp, reread, visit]);
+  }, [state.interview_id, working, gaveUp, reread, visit, progress]);
 
-  /** Read first: a failed read keeps the notice; a still-busy interview gets a fresh 90 s. */
+  /** Read first: a failed read keeps the notice; a still-busy interview gets a fresh wait. */
   const retry = useCallback(async () => {
     const signal = leaving.current?.signal;
     if (!gaveUp || retryRead.current || signal === undefined || signal.aborted) return;

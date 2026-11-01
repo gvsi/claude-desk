@@ -60,9 +60,9 @@ from evals.tier1.test_reply_golden import (
     HANDED_OFF,
     STAND_IN_CANARY,
     check_reply,
-    handed_off,
     ledger_head,
     ledgered_since,
+    offered,
     passes,
     shown_blocks,
 )
@@ -242,7 +242,7 @@ async def test_a_visitors_turn_message_only_sets_the_language(k: KernelHarness, 
         assert await ledgered_since(records, desk, head) == [], "the turn's start wrote a ledger entry"
     # the draft too short to tell goes first: a Spanish draft's own verdict would make the session Spanish
     await check_reply(k, visitor, TOO_SHORT_TO_TELL, expect=passes(visitor, ["prose"], language="es"))
-    await check_reply(k, visitor, BOOKING_CLAIM_ES, expect=handed_off(visitor, "promise_word"))
+    await check_reply(k, visitor, BOOKING_CLAIM_ES, expect=offered(visitor, "promise_word", "es"))
     page = await verified_ledger(k, desk)
 
     if k.is_real:

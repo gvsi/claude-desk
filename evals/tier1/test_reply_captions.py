@@ -155,7 +155,7 @@ def test_the_terse_payment_caption_still_reads_as_unsupported():
          "expect": {"ok": True, "language": "es", "blocks": ["prose", "booking_confirmed"]}},
         {"id": "booking-es-without-card", "requires": ["01a"], "prose": "Su cita está confirmada.",
          "clauses": [],
-         "expect": {"ok": False, "violations": ["promise_word"], "blocks": ["handoff"]}},
+         "expect": {"ok": False, "language": "es", "violations": ["promise_word"], "blocks": ["prose"]}},
         {"id": "quote-amount", "requires": ["01a"],
          "prose": prompts.REPLY_EXAMPLES["Quote (quote with the returned quote fact)"]["en"] + " $89",
          "clauses": [{"template": "quote", "fact": "own-quote"}],

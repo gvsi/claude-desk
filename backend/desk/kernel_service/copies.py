@@ -8,12 +8,20 @@ the mock payments server with their facts (`seed.seed_charges`), Mike's urgent b
 the owner's own replacement (`seed.seed_business_tools`), its rule cards activated from their
 CI-proved report at the seed's money cap of $500, turning the urgent tool on as they activate
 (`activation.activate_shipped` with `enables`), the held request waiting on Today
-(`seed.seed_held_request`) and the copy's owner session, all in one transaction. Without a report
+(`seed.seed_held_request`), on a hosted copy the sample week (below) and the copy's owner session, all in one
+transaction. Without a report
 for the cards as compiled, with a tool listed at a hash the seed wasn't proved with, or with a
 business tool the card-text check refuses, nothing is created: 503 `seed_unproved`. A mock
 payments server that can't be reached is 503 `internal`, logged `mockpay_unavailable`, and
 nothing is created either. The owner token in the answer is the copy's credential: it is shown
 once and stored only as its hash.
+
+The sample week (`seed.seed_sample_week`) is written only when the kernel's settings turn it on (`SAMPLE_WEEK=1`,
+the hosted kernel's container alone) and the request asks for history (`replay_night`, which the hosted API sends
+and the evals' targets don't): a week of finished conversations written as the copy's own rows, with every ledger
+entry marked `replayed`, inside this same transaction after the seed, so no live event can land among them. Its
+events and recording ID go back in `replayed_messages` and `replay_id` for the API to store; otherwise, or when
+the week can't be written whole, they are empty and None.
 """
 
 from fastapi import APIRouter
@@ -29,8 +37,9 @@ from desk.kernel_service.sessions import session_state
 router = APIRouter()
 
 
-async def create_copy(ctx: KernelCtx) -> CopyCreated:
-    """A new copy seeded with Turner Plumbing, and its owner session, in the caller's transaction."""
+async def create_copy(ctx: KernelCtx, *, sample_week: bool = False) -> CopyCreated:
+    """A new copy seeded with Turner Plumbing, and its owner session, in the caller's transaction; with
+    `sample_week`, it opens on the sample week too (module docstring)."""
     copy_id = new_id("copy")
     ctx.bind(copy_id)
     now = ctx.clock.now()
@@ -45,6 +54,8 @@ async def create_copy(ctx: KernelCtx) -> CopyCreated:
     urgent = await seed.seed_business_tools(ctx, created.desk_id, seed.RIVERA_BUSINESS_TOOLS)
     await activation.activate_shipped(ctx, created.desk_id, "rivera", desk.auto_money_cap_cents, enables=urgent)
     seeded_chat = await seed.seed_held_request(ctx, copy_id, created.desk_id)
+    events, replay_id = (await seed.seed_sample_week(ctx, copy_id, created.desk_id, now) if sample_week
+                         else ([], None))
     token = auth.new_token()
     owner = SessionRow(session_id=auth.new_session_id(), copy_id=copy_id, desk_id=None, kind="owner",
                        secret_hash=auth.hash_token(token), verified=True, assurance="owner_session", mode="ai",
@@ -52,9 +63,9 @@ async def create_copy(ctx: KernelCtx) -> CopyCreated:
     ctx.db.add(owner)
     await ctx.db.flush()
     return CopyCreated(copy_id=copy_id, desk_ids=[created.desk_id], owner_session=session_state(owner),
-                       owner_token=token, seeded_chat=seeded_chat)
+                       owner_token=token, seeded_chat=seeded_chat, replayed_messages=events, replay_id=replay_id)
 
 
 @router.post("/copies", response_model=CopyCreated)
 async def post_copies(body: CreateCopyRequest, ctx: Ctx) -> CopyCreated:
-    return await create_copy(ctx)
+    return await create_copy(ctx, sample_week=ctx.settings.sample_week and body.replay_night)

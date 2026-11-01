@@ -1,9 +1,12 @@
 """The built-in visiting agent (Plan 02b, Task 5; master plan, "Trust boundary": the simulated third party).
 
 A visitor on a Desk's public page can send Alex Kim's assistant, an AI agent this process runs, to do one of three
-tasks on the Desk (`DEMO_TASKS`): book a visit, pay the service call deposit within its spending limit, or ask for a
-charge above that limit. The kernel mints the agent for the visitor's session (`POST /agents/demo`): an Ed25519 key
-and a spending limit (a mandate) its demo wallet signs.
+tasks on the Desk (`DEMO_TASKS`): book, pay up front within its spending limit, or ask for a charge above that limit.
+Each task is a fixed line from the Desk's set (plan 09, C2): code picks it by the business type setup stored for the
+Desk, or Turner's for the copy's own Desk (`demo_task_set`), so the agent asks a CPA's Desk for a consult and a
+landlord's for a viewing, and no business's, owner's or visitor's words reach its model through its task. The kernel
+mints the agent for the visitor's session (`POST /agents/demo`): an Ed25519 key and a spending limit (a mandate) its
+demo wallet signs.
 
 The agent talks to the Desk as another person's agent would: as a separate client of the public A2A endpoint
 (`settings.a2a_loopback`), signing each request with its key, so the kernel checks every signature, binds every
@@ -45,12 +48,14 @@ import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import get_args
 from urllib.parse import quote
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from desk.api.idempotency import Admissions
 from desk.api.metrics import over_daily_budget, record_model_call
@@ -59,15 +64,19 @@ from desk.api.prompts import (
     DESK_REPLY_TAG,
     VISITING_AGENT_SYSTEM,
     AgentStep,
+    BusinessType,
     DemoTask,
+    DemoTaskSet,
     agent_task,
     desk_reply_text,
     wrap,
 )
+from desk.api.ro import KernelRO
 from desk.api.schemas import AgentTurn, DemoAgentRun
 from desk.api.settings import Settings
 from desk.api.store import Ids
 from desk.contracts import A2ARequest, DemoAgentIssued
+from desk.db.models import SetupInterview
 from desk.events import A2AResponse
 
 logger = logging.getLogger(__name__)
@@ -82,6 +91,8 @@ A2A_TIMEOUT_S = 120.0           # an answer waits for the Desk's turn: up to 30 
 
 Record = Callable[[ModelResponse], Awaitable[None]]
 Spent = Callable[[], Awaitable[bool]]
+INTERVIEWS = SetupInterview.__table__
+BUSINESS_TYPES: frozenset[str] = frozenset(get_args(BusinessType))
 
 
 class RunFailed(Exception):
@@ -139,6 +150,24 @@ def signed_headers(key: Ed25519PrivateKey, agent_key_id: str, desk_slug: str, ra
             "X-Agent-Nonce": nonce, "X-Agent-Sig": sig}
 
 
+# Which task lines -----------------------------------------------------------------------------------------------
+
+
+async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> DemoTaskSet:
+    """Which fixed task lines the agent reads on the Desk (`DEMO_TASKS`): the business type setup stored for it, on the
+    newest of the copy's setup interviews that made it (`other` when that one has none); with no such interview, the
+    copy's own Desk, its oldest (the Turner seed), reads `rivera` and any other `other`. Only that closed type and which
+    Desk is the copy's oldest decide the set; no business's, owner's or visitor's words reach the agent."""
+    found = await conn.execute(select(INTERVIEWS.c.business_type).where(
+        INTERVIEWS.c.copy_id == ro.copy_id, INTERVIEWS.c.desk_id == desk_id).order_by(
+        INTERVIEWS.c.created_at.desc(), INTERVIEWS.c.interview_id.desc()).limit(1))
+    row = found.first()
+    if row is not None:
+        return row.business_type if row.business_type in BUSINESS_TYPES else "other"
+    desks = await ro.desks()
+    return "rivera" if desks and desks[0]["desk_id"] == desk_id else "other"
+
+
 # One run ------------------------------------------------------------------------------------------------------
 
 
@@ -185,19 +214,19 @@ async def _send(a2a: httpx.AsyncClient, path: str, raw: bytes, headers: dict[str
 
 
 async def run_demo_agent(issued: DemoAgentIssued, task: DemoTask, slug: str, a2a: httpx.AsyncClient,
-                         model: ModelClient, run: DemoAgentRun, *, clock: Callable[[], datetime],
-                         record: Record, spent: Spent | None = None) -> None:
-    """Run the agent on `task` against the slug's Desk through `a2a`, the public endpoint's client, filling in `run`
-    as it goes and ending it `done` or `failed`. Each model call is recorded with `record`; requests are signed with
-    the issued key at `clock`'s time, the first opening the session with the issued mandate. With `spent` (production:
-    whether today's model budget is spent), it is asked before each step, and once it says so the run ends `failed`
-    with no further model call."""
+                         model: ModelClient, run: DemoAgentRun, *, task_set: DemoTaskSet,
+                         clock: Callable[[], datetime], record: Record, spent: Spent | None = None) -> None:
+    """Run the agent on `task`, in the fixed line of the Desk's `task_set`, against the slug's Desk through `a2a`, the
+    public endpoint's client, filling in `run` as it goes and ending it `done` or `failed`. Each model call is recorded
+    with `record`; requests are signed with the issued key at `clock`'s time, the first opening the session with the
+    issued mandate. With `spent` (production: whether today's model budget is spent), it is asked before each step,
+    and once it says so the run ends `failed` with no further model call."""
     session_id: str | None = None
     try:                                            # everything in the run ends it `done` or `failed`, the key too
         key = _private_key(issued.agent_private_key_hex)
         agent_key_id, mandate = issued.agent_key_id, issued.mandate
         path = f"/api/a2a/{quote(slug, safe='')}"
-        messages = [_user(agent_task(task))]
+        messages = [_user(agent_task(task, task_set))]
         for n in range(1, MAX_EXCHANGES + 1):
             if spent is not None and await spent():
                 raise RunFailed("today's model budget is spent")
@@ -317,9 +346,10 @@ class DemoAgents:
         if held is not None and held.run_id == run.run_id:
             del self._keys[(copy_id, key)]
 
-    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids, *, run: DemoAgentRun) -> str:
-        """Start a run of the issued agent on `task` for the launcher's session, in the record its key's claim made;
-        its run ID. The issued key goes to the run's coroutine alone."""
+    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids, *, run: DemoAgentRun,
+               task_set: DemoTaskSet) -> str:
+        """Start a run of the issued agent on `task`, in the line of the Desk's `task_set`, for the launcher's session,
+        in the record its key's claim made; its run ID. The issued key goes to the run's coroutine alone."""
 
         async def record(response: ModelResponse) -> None:
             async with self._engine.connect() as conn:
@@ -330,8 +360,9 @@ class DemoAgents:
             async with self._engine.connect() as conn:
                 return await over_daily_budget(conn, self._clock)
 
-        work = asyncio.create_task(run_demo_agent(issued, task, slug, self._a2a, self._model, run, clock=self._clock,
-                                                  record=record, spent=spent if self._production else None),
+        work = asyncio.create_task(run_demo_agent(issued, task, slug, self._a2a, self._model, run, task_set=task_set,
+                                                  clock=self._clock, record=record,
+                                                  spent=spent if self._production else None),
                                    name="desk-demo-agent")
         self._tasks.add(work)
         work.add_done_callback(self._tasks.discard)

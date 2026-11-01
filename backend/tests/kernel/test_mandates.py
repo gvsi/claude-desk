@@ -769,6 +769,24 @@ async def test_demo_agent_pays_the_rivera_deposit(app, client, frozen_clock):
             "card", "charge_confirmed", fact.fact_id, "Service call deposit, $20.00", [], None)
 
 
+async def test_an_agent_may_name_its_quote_by_its_fact_id(app, client, frozen_clock):
+    """An agent's context shows its quote by its fact ID (`quote:<id>`), as a visitor's does, and the
+    tool takes "the quote_id in your context": the whole fact ID charges exactly the quote the bare ID
+    would, within the mandate, and no other prefix is read as the quote's."""
+    setup = await rivera_agent(app, client, frozen_clock)
+    signed = setup.turn()
+    quote_id = await quoted(client, signed)
+    other = await asked(client, signed, CHARGE, f"charge:{quote_id}", call_id="call-other")
+    assert (other.outcome, other.action) == ("refuse", None)
+    decision = await asked(client, signed, CHARGE, f"quote:{quote_id}")
+    assert (decision.outcome, decision.card_ids, decision.action.resource.id, decision.action.amount_cents) == (
+        "allow", ["rv-mandate"], quote_id, 2_000), decision.reason_plain
+    assert (await executed(client, signed, decision)).state == "succeeded"
+    assert await quote_status(app, setup.desk.copy_id, quote_id) == "paid"
+    assert agent_charges(setup.desk.copy_id) == [
+        (decision.action.action_id, 2_000, f"agent:{setup.agent.key_id}", "succeeded")]
+
+
 # ---- A quote is paid once -------------------------------------------------------------------------------
 
 async def quote_status(app: FastAPI, copy_id: str, quote_id: str) -> str:
@@ -798,7 +816,8 @@ async def test_a_quote_is_charged_once(desk_prove, app, client, frozen_clock):
         assert again.visitor_plain == "Not something I can do here"
     refusals = [entry for entry in decide_entries(await ledger_rows(app, setup.desk), setup.session_id)
                 if entry.get("outcome") == "refuse"]
-    assert refusals == [{"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paid"}] * 2
+    assert refusals == [{"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paid",
+                         "policy_version": first.policy_version, "auto_money_cap_cents": 50_000}] * 2
     assert [(key, amount) for key, amount, _, _ in agent_charges(copy_id)] == [(first.action.action_id, 2_000)]
     assert mandate_spend(copy_id) == [(2_000, 0)]
 
@@ -842,7 +861,8 @@ async def test_a_charge_that_timed_out_keeps_its_quote_unpayable_before_its_outc
     response = await asyncio.wait_for(running, 10)
     assert ExecResult.model_validate(response.json()).state == "unknown"
     assert paying_refusals(await ledger_rows(app, setup.desk), setup.session_id) == [
-        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying"}]
+        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying",
+         "policy_version": first.policy_version, "auto_money_cap_cents": 50_000}]
     assert await reservations(app, copy_id) == [(first.action.action_id, 2_000, "reserved")]   # kept while unknown
     assert agent_charges(copy_id) == []
     assert await quote_status(app, copy_id, quote_id) != "paid"
@@ -868,7 +888,8 @@ async def test_a_charge_cut_off_after_its_intent_keeps_its_quote_unpayable_until
     again = await asked(client, signed, CHARGE, quote_id, call_id="call-charge-2")
     assert (again.outcome, again.action) == ("refuse", None), again.reason_plain
     assert paying_refusals(await ledger_rows(app, setup.desk), setup.session_id) == [
-        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying"}]
+        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying",
+         "policy_version": first.policy_version, "auto_money_cap_cents": 50_000}]
     assert agent_charges(copy_id) == []
 
     frozen_clock.advance(31)                            # an orphan now: a read reconciles it

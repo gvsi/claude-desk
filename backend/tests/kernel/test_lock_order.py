@@ -10,8 +10,8 @@ their reconciliation (a private action's too, once its session closed: its adapt
 the action withheld, refused or left unknown by what it answers), answers, cancels and reads, a
 verification start allowed or approved, a right code checked, a document link opened, a person
 removed or given another contact, a Desk deleted, a reply check that opens a handoff for its card,
-and a handoff closed, after the Desk row an owner's write holds first; and Plan 01c's payment
-paths, over the real adapters and the mock payments server.
+a booking that closes the card's handoff, and a handoff closed, after the Desk row an owner's write
+holds first; and Plan 01c's payment paths, over the real adapters and the mock payments server.
 """
 
 import asyncio
@@ -56,6 +56,10 @@ from .test_release_document import DANA, confirmed, documents, links, open_link,
 from .test_owner_messages import sent
 from .test_reply_check import checked
 from .test_verification import check, code_in, entry_of, started
+
+# A reply in another language: a failure no rewrite fixes, so the handoff card shows and opens the card handoff
+# these cases need, where a prose-only block would show the call-back offer and open none.
+OTHER_LANGUAGE = "Bonjour, je peux vous aider."
 
 # The tables whose rows the kernel locks, in the order it locks them (repo.py); `handoffs` stands
 # for an adapter's own rows.
@@ -409,13 +413,13 @@ async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, clie
     _, visitor = await visitor_of(app, client)
     frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written
     with lock_log(app) as log:
-        assert not (await checked(client, visitor, "That will be $180.")).ok
+        assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok
     # the session row, then the handoffs (the session's open ones, none, then the card's, inserted), then the
     # handoff's entry and the verdict's; the owner's alert is an insert under a fresh key
     assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
     frozen_clock.advance(1)
     with lock_log(app) as log:
-        assert not (await checked(client, visitor, "That will be $180.")).ok
+        assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok
     # the open one, held FOR SHARE so the owner can't mark it done meanwhile, and only the verdict's entry
     assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
@@ -423,7 +427,7 @@ async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, clie
 
 async def test_a_reply_backed_by_an_open_handoff_keeps_the_lock_order(app, client, frozen_clock):
     _, visitor = await visitor_of(app, client)
-    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card opens a handoff
     frozen_clock.advance(1)
     with lock_log(app) as log:
         assert (await checked(client, visitor, "Mike Turner will reply here.")).ok
@@ -542,7 +546,7 @@ async def test_deleting_a_desk_runs_in_the_lock_order(app, client):
 
 async def test_a_call_back_taking_over_a_card_handoff_runs_in_the_lock_order(app, client):
     _, visitor = await visitor_of(app, client)
-    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card opens a handoff
     allowed = await decided(client, visitor, "native.request_callback", CALLBACK)
     with lock_log(app) as log:
         assert (await executed(client, visitor, allowed)).state == "succeeded"
@@ -584,7 +588,7 @@ async def test_closing_a_handoff_runs_in_the_lock_order(app, client):
 @pytest.mark.parametrize("how", ["takeover", "owner_message"])
 async def test_the_owner_handling_a_conversation_closes_its_card_handoff_in_the_lock_order(app, client, how):
     copy, visitor = await visitor_of(app, client)
-    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card's handoff opens
+    assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card's handoff opens
     with lock_log(app) as log:
         if how == "takeover":
             await set_mode(client, copy, visitor.session_id, "owner", 0)
@@ -605,6 +609,22 @@ async def test_a_booking_runs_in_the_lock_order(app, client, reviewer):
     # T2 takes the slot it books (an adapter's own row) after the session, decision and execution
     t2 = [tables for tables in log.transactions if "calendar_slots" in tables]
     assert len(t2) == 1 and t2[0][:3] == ["sessions", "decisions", "executions"], log.transactions
+    assert all(in_lock_order(tables) for tables in log.transactions), log.transactions
+
+
+async def test_a_booking_closing_a_card_handoff_runs_in_the_lock_order(app, client, reviewer):
+    _, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card opens a handoff
+    reviewer.answer = PASS
+    allowed = await book(client, visitor, "S-20261102-1400")
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    # T2, holding the session row FOR UPDATE: the slot it books FOR SHARE and its booking (an adapter's own
+    # rows), then the session's open card handoff, closed, then the facts (the handoff's, none, and the
+    # booking's), then the closing's entry and the outcome
+    t2 = [tables for tables in log.transactions if "calendar_slots" in tables]
+    assert t2 == [["sessions", "decisions", "executions", "calendar_slots", "handoffs", "facts", "ledger_heads"]], (
+        log.transactions)
     assert all(in_lock_order(tables) for tables in log.transactions), log.transactions
 
 

@@ -10,35 +10,42 @@ counts): a later card opens none and alerts nothing until the owner marks the op
 owner's say never opens one. (While a handoff is open, the soft-promise check reads the card's
 text as one of the reply's cards: test_soft_promise.py.)
 
+A draft blocked only for its prose, with no checked card to keep, asks the visitor first when the
+Desk offers a call back: the kernel's call-back offer replaces the handoff card, and opens nothing
+(the owner's decision of 2026-11-01). Tests that need a blocked draft to show the handoff card run
+on a Desk with its call-back tool turned off (`without_call_backs`), or cite the card in Claude's
+own reply (`hand_over`).
+
 Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), whose
 notification defaults alert the owner of a handoff at once.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 import sqlalchemy.exc
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, DemoInboxEntry, Label, ReplyVerdict, SessionCreated
+from desk.contracts import Claim, Decision, DemoInboxEntry, ExecResult, Label, ReplyVerdict, SessionCreated
 from desk.db.models import DemoInboxEntry as DemoInboxRow
-from desk.db.models import Document, Fact, Handoff, LedgerEntry
-from desk.kernel_service import ledger, reply_check
+from desk.db.models import Booking, CalendarSlot, Document, Fact, Handoff, LedgerEntry
+from desk.kernel_service import adapters, execute, ledger, reply_check
 from desk.kernel_service.decisions import SoftPromiseVerdict
 
 from .helpers import kernel_ctx, ledger_rows, rows_of
-from .test_adapters import Rivera, quote_args, rivera, run, visitor_of
+from .test_adapters import Rivera, book, quote_args, rivera, run, visitor_of
 from .test_approvals import answered, post_cancel
 from .test_context import context_of, fact_ids, owner_session_id
-from .test_decide import Visitor, decided, open_visitor, set_mode, set_session
+from .test_decide import PASS, Visitor, decided, open_visitor, set_mode, set_session
 from .test_execute import executed
 from .test_lead_tools import CALLBACK, TZ, alert_now, callback, handoff_done, owner_alerts
 from .test_owner_messages import sent
 from .test_release_document import DANA, confirmed
-from .test_reply_check import (assert_handed_off, checked, clause, keep_alive_until, post_check, public_key,
-                               reply_entries, verify_verdict, own_quote)
+from .test_reply_check import (assert_handed_off, assert_offered, checked, clause, keep_alive_until, post_check,
+                               public_key, reply_entries, verify_verdict, own_quote, without_call_backs)
 from .test_verification import api_rows, check, code_in, entry_of, started
 
 CARD_REASON = "The Desk handed this to you."
@@ -51,13 +58,22 @@ HANDOFF_CARD = {"en": "Let me check with Mike Turner.\nMike Turner will reply he
                 "es": "Déjame consultarlo con Mike Turner.\nMike Turner te responderá aquí."}
 
 
+async def hand_over(client, visitor: Visitor) -> ReplyVerdict:
+    """Claude's own reply citing the handoff card, which passes and shows the card whether or not
+    the Desk offers a call back, as the API's own handoff does."""
+    verdict = await checked(client, visitor, "", [clause("handoff")])
+    assert verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+    return verdict
+
+
 @pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
     ("", [clause("handoff")], True, True, ["handoff"], "Passed to Mike Turner to answer"),
-    (BLOCKED, [], True, False, ["handoff"], "Passed to Mike Turner to answer"),
+    ("Je peux vous aider avec ça.", [], True, False, ["handoff"], "Passed to Mike Turner to answer"),
+    (BLOCKED, [], True, False, [None], "Reply checked against Mike Turner's rules"),   # the call-back offer
     (BLOCKED, [clause("hours", "charter:hours")], True, False, ["hours"],
      "Reply checked against Mike Turner's rules"),
     (BLOCKED, [], False, False, [], "Passed to Mike Turner to answer"),
-], ids=["passing-handoff", "final-handoff", "final-kept-card", "unshown-first-attempt"])
+], ids=["passing-handoff", "final-handoff", "final-offer", "final-kept-card", "unshown-first-attempt"])
 async def test_reply_receipt_follows_the_shown_handoff_clause(app, client, prose, clauses, final, ok, templates,
                                                             receipt):
     _, visitor = await visitor_of(app, client)
@@ -123,8 +139,9 @@ async def test_card_retention_never_salvages_non_prose_failures(app, client, rev
         prose = "Je peux envoyer un plombier pour la fuite."
     elif failure == "paused":
         await set_session(app, copy, visitor.session_id, mode="paused")
-    else:
+    else:                # no card to keep, and no call back to offer in the handoff's place
         clauses = []
+        await without_call_backs(app, copy)
     verdict = await checked(client, visitor, prose, clauses)
     assert_handed_off(verdict)
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
@@ -172,6 +189,98 @@ async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewe
     verify_verdict(await public_key(client), visitor.session_id, verdict)
 
 
+@pytest.mark.parametrize(("prose", "soft_answer", "kind", "language"), [
+    ("I guarantee it.", None, "promise_word", "en"),
+    ("Eso es gratis.", None, "promise_word", "es"),
+    (CLEAN, FLAGGED, "soft_promise", "en"),
+    ("Perfecto, ya lo reviso.", FLAGGED, "soft_promise", "es"),
+], ids=["promise-en", "promise-es", "soft-en", "soft-es"])
+async def test_a_prose_only_block_with_nothing_to_keep_offers_a_call_back(app, client, reviewer, prose, soft_answer,
+                                                                          kind, language):
+    """Self-serve first: a shown block failing only for its prose, with no checked card to keep,
+    asks the visitor before involving the owner. On a Desk that offers call backs (Turner's seed
+    gives visitors `native.request_callback`), the kernel shows its signed call-back offer in the
+    reply's language in place of the handoff card, so no owner handoff opens and no alert goes out
+    (the owner's decision of 2026-11-01)."""
+    copy, visitor = await visitor_of(app, client)
+    if soft_answer is not None:
+        reviewer.soft_answer = soft_answer
+    verdict = await checked(client, visitor, prose)
+    assert {v.kind for v in verdict.violations} == {kind}
+    assert_offered(verdict, language)
+    assert await handoffs_of(app, copy) == []
+    assert await handoff_alerts(app, copy) == []
+    assert handoff_entries(await ledger_rows(app, copy)) == []
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("session", ["drafted handoff", "call-back open", "card open", "checker outage"])
+async def test_the_offer_never_replaces_a_handoff_the_conversation_has(app, client, reviewer, session):
+    """The call-back offer asks first only where nothing else stands. A handoff clause Claude drafted
+    is honoured, and opens the owner's handoff as the card does. A session with an open handoff of
+    either kind, a call-back request's or a card's, sees the handoff card, which opens nothing new
+    and alerts no one again. A checker outage (`check_unavailable`) hands off."""
+    copy, visitor = await visitor_of(app, client)
+    prose, clauses = BLOCKED, []
+    if session == "drafted handoff":
+        clauses = [clause("handoff")]
+    elif session == "call-back open":
+        await callback(client, visitor)
+    elif session == "card open":
+        await hand_over(client, visitor)
+    else:
+        prose, reviewer.soft_answer = CLEAN, None                 # the soft check gives no verdict
+    before = [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)]
+    alerts_before = len(await handoff_alerts(app, copy))
+    verdict = await checked(client, visitor, prose, clauses)
+    assert {v.kind for v in verdict.violations} == {"check_unavailable" if session == "checker outage"
+                                                    else "number_in_prose"}
+    assert_handed_off(verdict)
+    after = [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)]
+    if before:                                                    # the open one stands, and no alert repeats
+        assert (after, len(await handoff_alerts(app, copy))) == (before, alerts_before)
+    else:                                                         # the card shown opens the owner's handoff
+        assert [(kind, status) for _, kind, status in after] == [("card", "open")]
+        assert len(await handoff_alerts(app, copy)) == 1
+
+
+@pytest.mark.parametrize(("prose", "soft_answer", "language"), [
+    ("I guarantee it.", None, "en"),
+    ("Eso es gratis.", None, "es"),
+    (CLEAN, FLAGGED, "en"),
+], ids=["promise-en", "promise-es", "soft-en"])
+async def test_a_desk_without_call_backs_still_hands_a_prose_only_block_to_the_owner(app, client, reviewer, prose,
+                                                                                     soft_answer, language):
+    """With no call back to offer (the owner turned the tool off), a prose-only failure with no card
+    to keep shows the handoff card, as before, and it opens the owner's handoff and alert."""
+    copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)
+    if soft_answer is not None:
+        reviewer.soft_answer = soft_answer
+    verdict = await checked(client, visitor, prose)
+    assert_handed_off(verdict, language)
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
+    assert len(await handoff_alerts(app, copy)) == 1
+
+
+async def test_a_business_tool_for_urgent_requests_offers_the_call_back_too(app, client, monkeypatch):
+    """The offer follows the session's resolved tools: a business tool of block `urgent` offers a
+    call back as `native.request_callback` does (`desk.next_steps`)."""
+    from desk.kernel_service import context
+
+    copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)
+    resolved_tools = context.resolved_tools
+    urgent = SimpleNamespace(tool="desk.urgent", business=SimpleNamespace(config=SimpleNamespace(block="urgent")))
+
+    async def with_urgent(*args):
+        return [*await resolved_tools(*args), urgent]
+
+    monkeypatch.setattr(context, "resolved_tools", with_urgent)
+    assert_offered(await checked(client, visitor, "I guarantee it."))
+    assert await handoffs_of(app, copy) == []
+
+
 @pytest.mark.parametrize("session", ["card open", "call-back open", "hold awaiting", "preview"])
 @pytest.mark.parametrize("drafted", [False, True], ids=["no-handoff", "drafted-handoff"])
 async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, client, reviewer, session, drafted):
@@ -190,7 +299,7 @@ async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, 
     if drafted:
         clauses.append(clause("handoff"))
     if session == "card open":
-        await checked(client, visitor, BLOCKED)
+        await hand_over(client, visitor)
     elif session == "call-back open":
         await callback(client, visitor)
     elif session == "hold awaiting":
@@ -239,7 +348,9 @@ def handoff_entries(entries: list[LedgerEntry]) -> list[tuple[str | None, dict]]
 ], ids=["code-check", "model-check"])
 async def test_a_blocked_draft_opens_one_handoff_and_alerts_the_owner(app, client, reviewer, prose, soft_answer,
                                                                       kind):
+    """On a Desk that offers no call back, a blocked draft with no card to keep shows the handoff card."""
     copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)
     if soft_answer is not None:
         reviewer.soft_answer = soft_answer
     verdict = await checked(client, visitor, prose)
@@ -274,6 +385,7 @@ async def test_a_blocked_draft_opens_one_handoff_and_alerts_the_owner(app, clien
 
 async def test_one_handoff_is_open_at_a_time_per_session(app, client, reviewer):
     copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)                          # so each blocked draft shows the handoff card
     assert_handed_off(await checked(client, visitor, BLOCKED))
     [first] = await handoffs_of(app, copy)
     entries = len(await ledger_rows(app, copy))
@@ -334,10 +446,10 @@ async def test_an_open_call_back_request_is_the_sessions_handoff(app, client):
 
 async def test_after_the_owner_marks_it_done_the_next_card_opens_a_new_one(app, client):
     copy, visitor = await visitor_of(app, client)
-    assert_handed_off(await checked(client, visitor, BLOCKED))
+    await hand_over(client, visitor)
     [first] = await handoffs_of(app, copy)
     assert (await handoff_done(client, first.handoff_id, copy.owner)).status_code == 200
-    assert_handed_off(await checked(client, visitor, BLOCKED))
+    await hand_over(client, visitor)
     statuses = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
     [second] = [handoff_id for handoff_id in statuses if handoff_id != first.handoff_id]
     assert statuses == {first.handoff_id: ("card", "done"), second: ("card", "open")}
@@ -352,7 +464,7 @@ async def test_after_the_owner_marks_it_done_the_next_card_opens_a_new_one(app, 
     caller = await open_visitor(client, copy)
     requested = (await callback(client, caller)).model_view["handoff_id"]
     assert (await handoff_done(client, requested, copy.owner)).status_code == 200
-    assert_handed_off(await checked(client, caller, BLOCKED))
+    await hand_over(client, caller)
     kinds = sorted((row.kind, row.status) for row in await handoffs_of(app, copy)
                    if row.session_id == caller.session_id)
     assert kinds == [("callback", "done"), ("card", "open")]
@@ -363,6 +475,7 @@ async def test_the_alert_names_only_who_is_waiting(app, client):
     verified person is named as the owner's records name them, anyone else is "A visitor". It
     names no decision."""
     copy = await rivera(app, client)
+    await without_call_backs(app, copy)                          # so the blocked drafts show the handoff card
     dana = await confirmed(client, copy, DANA)
     prose = "Dana, I'll send the $180 invoice to dana@example.com tonight."
     assert_handed_off(await checked(client, dana, prose))
@@ -389,7 +502,7 @@ async def test_the_alert_names_only_who_is_waiting(app, client):
 async def test_another_copys_owner_sees_neither_the_handoff_nor_the_alert(app, client):
     copy, visitor = await visitor_of(app, client)
     other = await rivera(app, client)
-    assert_handed_off(await checked(client, visitor, BLOCKED))
+    await hand_over(client, visitor)
     [handoff] = await handoffs_of(app, copy)
     [alert] = await handoff_alerts(app, copy)
 
@@ -421,6 +534,7 @@ async def test_an_owner_say_opens_none(app, client):
 
 async def test_the_handoff_and_the_verdict_share_a_transaction(app, client, monkeypatch):
     copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)                          # so the blocked draft shows the handoff card
     append = ledger.append
 
     async def failing_reply_entry(ctx, *, copy_id, desk_id, event):
@@ -446,6 +560,7 @@ async def test_a_card_a_take_over_keeps_from_the_visitor_opens_none(app, client,
     new generation, so `deliver()` drops the verdict and the visitor never sees its card: the
     owner, who took the conversation over, gets no handoff for it."""
     copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)                          # so the blocked draft shows the handoff card
     asked, answer = asyncio.Event(), asyncio.Event()
     reviewer.soft_answer = FLAGGED
     soft_promise = reviewer.soft_promise
@@ -550,6 +665,7 @@ async def test_a_draft_no_rewrite_can_fix_opens_one_even_on_a_first_attempt(app,
 @pytest.mark.parametrize("final", [True, None], ids=["final", "absent"])
 async def test_a_final_draft_or_one_that_says_nothing_opens_one(app, client, final):
     copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)                          # so the blocked draft shows the handoff card
     assert_handed_off(await checked_as(client, visitor, BLOCKED, final=final))     # the handoff card, shown
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
     assert len(await handoff_alerts(app, copy)) == 1
@@ -573,6 +689,7 @@ async def test_the_owners_own_preview_opens_no_handoff(app, client):
     the preview, blocked draft or cited clause, opens no handoff and alerts no one (the owner's
     decision of 2026-10-31)."""
     copy = await rivera(app, client)
+    await without_call_backs(app, copy)                          # so the blocked drafts show the handoff card
     response = await client.post("/sessions", headers=copy.owner, json={"desk_slug": copy.slug, "kind": "visitor",
                                                                         "preview": True})
     assert response.status_code == 200, response.text
@@ -721,7 +838,7 @@ async def test_a_call_back_request_closes_the_open_card_handoff_and_opens_its_ow
     alerts as call-backs do."""
     copy, visitor = await visitor_of(app, client)                 # Friday 10:04 in Oakland: 11:00 to 12:00
     await alert_now(app, copy, "callback")
-    assert_handed_off(await checked(client, visitor, BLOCKED))
+    await hand_over(client, visitor)
     [card] = await handoffs_of(app, copy)
     decision = await decided(client, visitor, "native.request_callback", CALLBACK)
     result = await executed(client, visitor, decision)
@@ -810,7 +927,7 @@ async def test_a_session_holding_several_open_handoffs_has_them_closed_by_the_ne
     for handoff_id, call_id in (("handoff-zzzz", "call-1"), ("handoff-aaaa", "call-2")):
         earlier = await decided(client, visitor, "native.request_callback", CALLBACK, call_id=call_id)
         await legacy_call_back(app, copy, visitor, handoff_id, earlier.action.action_id)
-    assert_handed_off(await checked(client, visitor, BLOCKED))
+    await hand_over(client, visitor)
     assert await handoff_alerts(app, copy) == []                                      # no card's handoff beside them
 
     latest = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-3")
@@ -840,6 +957,7 @@ async def test_a_held_request_awaiting_the_owner_is_the_conversations_item(app, 
     sends no alert, so the owner sees one item and gets one alert. Once the hold has an end
     (the owner's answer, the visitor's cancel, or its expiry), the next card opens one as usual."""
     copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)                          # so the blocked drafts show the handoff card
     held = await held_quote(client, visitor)
     assert_handed_off(await checked(client, visitor, BLOCKED))
     assert (await checked(client, visitor, "", [clause("handoff")])).ok          # nor a card Claude cites
@@ -861,6 +979,7 @@ async def test_a_hold_that_cant_be_read_opens_the_handoff_as_usual(app, client, 
     """The skip only spares the owner a second alert, so a read of the session's holds that fails
     opens the handoff and alerts as usual: it fails toward telling the owner."""
     copy, visitor = await visitor_of(app, client)
+    await without_call_backs(app, copy)                          # so the blocked draft shows the handoff card
     await held_quote(client, visitor)
 
     async def unreadable(ctx, session_row):
@@ -906,7 +1025,8 @@ def closing_summaries(entries: list[LedgerEntry]) -> list[dict]:
 
 
 async def card_handoff(app: FastAPI, client, copy: Rivera, visitor: Visitor) -> Handoff:
-    """The session's card handoff, opened by a blocked final check."""
+    """The session's card handoff, opened by a blocked final check on a Desk that offers no call back."""
+    await without_call_backs(app, copy)
     assert_handed_off(await checked(client, visitor, BLOCKED))
     [handoff] = await handoffs_of(app, copy)
     assert (handoff.kind, handoff.status) == ("card", "open")
@@ -971,3 +1091,151 @@ async def test_the_owner_handling_the_conversation_leaves_a_call_back_open(app, 
     assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == [
         (requested, "callback", "open")]
     assert closing_summaries(await ledger_rows(app, copy)) == []
+
+
+# ---- A booking closes the card's handoff (the owner's decision of 2026-11-01) --------------------------
+
+SLOT = "S-20261102-1000"                    # Monday 10:00 to 12:00, inside rv-book-wk's hours
+BOOKED = "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm."
+
+
+async def preview_of(client, copy: Rivera) -> Visitor:
+    """The owner's own preview of the Desk, as a visitor session."""
+    response = await client.post("/sessions", headers=copy.owner, json={
+        "desk_slug": copy.slug, "kind": "visitor", "preview": True})
+    assert response.status_code == 200, response.text
+    created = SessionCreated.model_validate(response.json())
+    return Visitor(session_id=created.state.session_id, token=created.session_token)
+
+
+async def held_card(app: FastAPI, copy: Rivera, visitor: Visitor) -> Handoff:
+    """An open card handoff the session holds from before, as `reply_check.open_card_handoff`
+    writes one (no fact). A preview's card opens none now, so its test writes it here."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add(Handoff(handoff_id="handoff-earlier", copy_id=copy.copy_id, desk_id=copy.desk_id,
+                           session_id=visitor.session_id, reason=CARD_REASON, status="open", kind="card",
+                           action_id="handoff-earlier", created_at=ctx.clock.now()))
+    [handoff] = await handoffs_of(app, copy)
+    return handoff
+
+
+async def booked(client, reviewer, visitor: Visitor, slot_id: str = SLOT,
+                 call_id: str = "call-book") -> tuple[Decision, ExecResult]:
+    """A weekday booking the reviewer passes, allowed and executed."""
+    reviewer.answer = PASS
+    decision = await book(client, visitor, slot_id, call_id=call_id)
+    assert decision.outcome == "allow", decision.reason_plain
+    result = await executed(client, visitor, decision)
+    assert result.state == "succeeded"
+    return decision, result
+
+
+def closed_in_its_execution(entries: list[LedgerEntry], decision: Decision, handoff_id: str) -> bool:
+    """Whether the booking's closing of `handoff_id` is ledgered once, in the booking's execution:
+    after its decision's entry and before its outcome's, as a call-back's closing is."""
+    seqs = {(entry.event.kind, entry.event.ref_id): entry.seq for entry in entries}
+    closing = [entry.seq for entry in entries if entry.event.kind == "desk_data"
+               and entry.event.summary == {"part": "handoffs", "refs": [handoff_id], "closed_by": "booking"}]
+    return (len(closing) == 1
+            and seqs[("decide", decision.decision_id)] < closing[0] < seqs[("execute", decision.decision_id)])
+
+
+@pytest.mark.parametrize("session", ["visitor", "preview"])
+async def test_a_booking_closes_the_sessions_card_handoff(app, client, reviewer, session):
+    """A visitor who books has had what they asked for done, so the handoff the card opened closes
+    with the booking, in its transaction, as the owner's mark of done closes one, and is ledgered as
+    closed by it: Needs you stops listing the conversation. The owner's booking alert still goes
+    out. A card's handoff has no fact, so none is left committed. The owner's own preview, where a
+    card opens no handoff, closes one it holds the same way."""
+    copy, visitor = await visitor_of(app, client)
+    await alert_now(app, copy, "booking")
+    if session == "preview":
+        visitor = await preview_of(client, copy)
+        card = await held_card(app, copy, visitor)
+    else:
+        card = await card_handoff(app, client, copy, visitor)
+
+    decision, _ = await booked(client, reviewer, visitor)
+    assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == [
+        (card.handoff_id, "card", "done")]
+    assert api_rows(copy.copy_id, "SELECT handoff_id, status FROM kernel_ro.handoffs") == [(card.handoff_id, "done")]
+    assert await rows_of(app, copy.copy_id, select(Fact).where(
+        Fact.fact_id == f"handoff:{card.handoff_id}", Fact.status != "expired")) == []
+    entries = await ledger_rows(app, copy)
+    assert closing_summaries(entries) == [{"part": "handoffs", "refs": [card.handoff_id], "closed_by": "booking"}]
+    assert closed_in_its_execution(entries, decision, card.handoff_id)
+    if session == "visitor":
+        assert BOOKED in [alert.body for alert in await owner_alerts(client, copy)]
+    # a later booking in the session closes nothing more
+    await booked(client, reviewer, visitor, "S-20261102-1200", call_id="call-book-2")
+    assert closing_summaries(await ledger_rows(app, copy)) == closing_summaries(entries)
+
+
+async def test_a_typed_booking_closes_the_sessions_card_handoff(app, client):
+    """A booking made through a typed booking tool runs the native booking's execution, so it
+    closes the card's handoff the same way."""
+    from .test_typed_booking import TOOL, configured
+
+    copy, visitor = await configured(app, client)
+    card = await card_handoff(app, client, copy, visitor)
+    decision = await decided(client, visitor, TOOL, {"slot_id": SLOT})
+    assert decision.outcome == "allow", decision.reason_plain
+    assert (await executed(client, visitor, decision)).state == "succeeded"
+    assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "done")]
+    entries = await ledger_rows(app, copy)
+    assert closing_summaries(entries) == [{"part": "handoffs", "refs": [card.handoff_id], "closed_by": "booking"}]
+    assert closed_in_its_execution(entries, decision, card.handoff_id)
+    # both hold the session row FOR UPDATE in their execution, as the session's handoff rows need
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        assert (await adapters.resolve(ctx, copy.desk_id, TOOL)).locks_session is True
+    assert adapters.ADAPTERS["native.book"].locks_session is True
+
+
+async def test_a_booking_leaves_a_call_back_open(app, client, reviewer):
+    """A call-back promises the visitor a call, which a booking doesn't keep, so it stays open, its
+    fact committed, until the owner marks it done."""
+    copy, visitor = await visitor_of(app, client)
+    requested = await callback(client, visitor)
+    await booked(client, reviewer, visitor)
+    assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == [
+        (requested.model_view["handoff_id"], "callback", "open")]
+    [fact] = requested.facts
+    assert [row.status for row in await rows_of(app, copy.copy_id, select(Fact).where(
+        Fact.fact_id == fact.fact_id))] == ["committed"]
+    assert closing_summaries(await ledger_rows(app, copy)) == []
+
+
+async def test_a_booking_closes_only_its_own_sessions_card_handoff(app, client, reviewer):
+    copy, visitor = await visitor_of(app, client)
+    card = await card_handoff(app, client, copy, visitor)
+    await booked(client, reviewer, await open_visitor(client, copy))
+    assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "open")]
+    assert closing_summaries(await ledger_rows(app, copy)) == []
+
+
+@pytest.mark.parametrize("failure", ["slot_changed", "slot_taken"])
+async def test_a_booking_that_fails_closes_nothing(app, client, reviewer, monkeypatch, failure):
+    """A booking that fails in its execution (the slot moved since the re-check, or another
+    session took it) books nothing, so the card's handoff stays open."""
+    copy, visitor = await visitor_of(app, client)
+    card = await card_handoff(app, client, copy, visitor)
+    reviewer.answer = PASS
+    decision = await book(client, visitor, SLOT)
+    assert decision.outcome == "allow", decision.reason_plain
+    if failure == "slot_taken":
+        await booked(client, reviewer, await open_visitor(client, copy), call_id="call-other")
+    else:
+        async def slot_moves() -> None:
+            async with kernel_ctx(app) as ctx:
+                ctx.bind(copy.copy_id)
+                slot = (await ctx.db.scalars(ctx.repo.scoped(select(CalendarSlot).where(
+                    CalendarSlot.desk_id == copy.desk_id, CalendarSlot.slot_id == SLOT)))).one()
+                slot.starts_at += timedelta(hours=1)
+
+        monkeypatch.setattr(execute, "_after_intent", slot_moves)
+    assert (await executed(client, visitor, decision)).state == "failed"
+    assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "open")]
+    assert closing_summaries(await ledger_rows(app, copy)) == []
+    assert visitor.session_id not in {row.session_id for row in await rows_of(app, copy.copy_id, select(Booking))}

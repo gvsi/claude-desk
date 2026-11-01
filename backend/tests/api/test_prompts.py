@@ -43,6 +43,9 @@ from desk.api.prompts import (
     TRIAGE_SYSTEM,
     VISITING_AGENT_SYSTEM,
     AgentStep,
+    BusinessType,
+    DemoTask,
+    DemoTaskSet,
     DeskIdentity,
     HoursAnswer,
     PriceAnswer,
@@ -52,6 +55,7 @@ from desk.api.prompts import (
     Translation,
     Triage,
     TriageCategory,
+    agent_task,
     conversation_system,
 )
 from desk.api.model import strict_schema
@@ -114,7 +118,8 @@ def test_system_prompt_uses_the_business_policies():
         "phone number or email, reusing anything already given, and finish any intake questions, then save them with "
         "native__capture_lead in the same turn if it's one of your tools; save a lead only once you have their name, "
         "and keep its note short. If they'd rather not give contact details, or saving doesn't go through, still "
-        "book. Ask only about their "
+        "book. Book only after they've answered that question: a time they pick without answering it isn't a no, so "
+        "ask once more, and book if they still don't give them. Ask only about their "
         "request and these booking details: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
         "otherwise native__request_callback. Beside its callback_confirmed card",
@@ -283,7 +288,7 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
         "(for something urgent, the urgent steps above come first), then offer the one next step that fits; "
         "don't push a booking before they've said what they need. When they're unsure what they need or want to "
         "understand their situation, help them with general trade advice first, committing Turner Plumbing to "
-        "nothing; offer open times only when they ask, or after that help when they want to go further. "
+        "nothing; find or show open times only once they ask for them or say yes to your offer to find some. "
         "Never lead with open times; offer only the real next steps listed above. When they ask what's next, offer "
         "the step as a question naming a step you can take, such as \"Would you like me to find a time?\", rather "
         "than stating what will happen. If you say what the step involves, such as what a consult covers, show the "
@@ -303,14 +308,18 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
     from desk.kernel_service.reply_check import scan_prose
     example = re.search(r'"(Is it [^"]+)"', period).group(1)
     assert scan_prose(example) == []
-    assert (f"- Call {RIVERA.owner_name} by name when you mean them, never \"the owner\", unless the name itself would "
-            "trip the check, as above.") in lines
+    assert (f"- Call {RIVERA.owner_name} and {RIVERA.business_name} by name when you mean them, or say \"we\" for the "
+            "business, never \"the owner\" or \"this business\", unless a name itself would trip the check, as "
+            "above.") in lines
     intake = next(line for line in lines if line.startswith("- For a new request"))
     assert "Before booking, ask for what's missing of their name and a phone number or email" in intake
     assert "reusing anything already given, and finish any intake questions" in intake
     assert "then save them with native__capture_lead in the same turn if it's one of your tools" in intake
     assert "save a lead only once you have their name, and keep its note short" in intake
     assert "If they'd rather not give contact details, or saving doesn't go through, still book." in intake
+    # picking a time without answering isn't a decline: the booking waits for the answer, then a second ask
+    assert ("Book only after they've answered that question: a time they pick without answering it isn't a no, so "
+            "ask once more, and book if they still don't give them.") in intake
     assert ("- Use bullets, not numbered lists: numbers in your own words are blocked, list numbers included."
             in lines)
     assert "never for a password, a code, a card or account number or an ID number" in intake
@@ -333,7 +342,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.22"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.26"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -634,6 +643,29 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
         assert "documents_and_payments (a limit): whether the Desk may send customers their own documents" in system
 
 
+def test_setup_writing_allows_markdown_but_no_exclamation_marks():
+    """The setup chat renders Markdown, so setup's writing rule no longer bans headings, bold or emoji; it keeps the
+    ban on exclamation marks, and keeps card fields, choices and the lines customers read plain text with no emoji.
+    The visitor's and agent's prompt has its own wording and doesn't take setup's rule."""
+    plain = ("Markdown shows only in your replies, questions and the closing plan; card fields, choices and the lines "
+             "customers read stay plain text, with no emoji.")
+    with_writing = {name for name, value in vars(prompts).items()
+                    if name != "_WRITING" and isinstance(value, str) and prompts._WRITING in value}
+    assert with_writing == {"SETUP_UNDERSTAND_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_NEXT_SYSTEM",
+                            "SETUP_CARD_ANSWER_SYSTEM"}
+    for name in with_writing:
+        system = getattr(prompts, name)
+        assert (f'one item per line starting with "- ". No exclamation marks. {plain} The owner reads your messages '
+                'one after another') in system, name
+        assert "No headings, bold or emoji" not in system, name
+    assert "  " not in prompts._WRITING
+    for kind in ("visitor", "agent"):
+        text = conversation_system(RIVERA.model_copy(update={"kind": kind}))[0]["text"]
+        assert "- Write the way you'd talk to them: plain words, no jargon, no exclamation marks. Never scold" in text
+        assert prompts._WRITING not in text and "No exclamation marks." not in text and "How you write" not in text
+        assert plain not in text and "Markdown" not in text
+
+
 @pytest.mark.parametrize("owner", ["Mike Turner", "June Park"])
 def test_status_sentences_are_name_free_and_present_where_used(owner):
     text = conversation_system(RIVERA.model_copy(update={"owner_name": owner}))[0]["text"]
@@ -734,7 +766,9 @@ def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
 def test_reply_prompt_explains_when_only_cards_were_shown():
     text = conversation_system(RIVERA)[0]["text"]
     assert ('If send_reply answers "delivered" or "delivered_handoff" with prose_shown false, your prose wasn\'t '
-            "shown, only the cards or the handoff; don't refer to that prose later.") in text
+            "shown, only the cards, the handoff, or the words in shown_instead; don't refer to that prose later. When "
+            "shown_instead is there, the visitor saw those words from you, so carry on from them: a yes to that callback "
+            "offer means arrange the callback.") in text
 
 
 def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
@@ -745,11 +779,60 @@ def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
     )
 
 
+# The built-in agent's task lines (plan 09, C2), as signed: Turner's seed keeps its three, and every other Desk reads
+# the lines of its setup business type. Fixed words only: no business's, owner's or visitor's text.
+SIGNED_TASK_LINES = {
+    "rivera": {
+        "book_visit": "Book the earliest visit for a leaking water heater for Alex Kim.",
+        "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
+        "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
+    },
+    "trade": {
+        "book_visit": "Book the earliest visit for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for a visit, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay for the whole job in one charge, above your spending limit.",
+    },
+    "office": {
+        "book_visit": "Book the earliest consult for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for a consult, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay for the whole engagement in one charge, above your spending limit.",
+    },
+    "landlord": {
+        "book_visit": "Book the earliest viewing of an open unit for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays to apply for a unit, and pay it if it's within your spending "
+                             "limit.",
+        "push_the_limit": "Ask to pay the move-in costs in one charge, above your spending limit.",
+    },
+    "other": {
+        "book_visit": "Book the earliest appointment for Alex Kim.",
+        "quote_and_deposit": "Ask what Alex Kim pays up front for an appointment, and pay it if it's within your "
+                             "spending limit.",
+        "push_the_limit": "Ask to pay for the whole service in one charge, above your spending limit.",
+    },
+}
+
+
+def test_each_desk_set_has_its_own_fixed_task_lines():
+    # Every set has a line for each task, and the agent's first message is AGENT_TASK around exactly that line.
+    assert DEMO_TASKS == SIGNED_TASK_LINES
+    assert set(get_args(DemoTaskSet)) == set(DEMO_TASKS) == {"rivera", *get_args(BusinessType)}
+    for task_set, lines in DEMO_TASKS.items():
+        assert set(lines) == set(get_args(DemoTask))
+        for task, line in lines.items():
+            assert agent_task(task, task_set) == AGENT_TASK.format(task=line)
+    # No line names an amount, a date, a discount or a booking already made: each one asks.
+    for line in (line for lines in DEMO_TASKS.values() for line in lines.values()):
+        assert not re.search(r"[\d$%]|\b(free|discount|confirmed|booked)\b", line, re.IGNORECASE), line
+
+
 PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
                 "TIME_NOTE", "WEEKDAYS",
                 "REPLY_DIAGNOSTICS", "REPLY_RULE_IDS", "INVALID_REPLY_DIAGNOSTIC", "INVALID_REPLY_SHAPES",
                 "REPLY_EXAMPLES", "STATUS_LINES",
-                "REWRITE_INSTRUCTION", "NOTES", "DEMO_TASKS", "DemoTask", "VISITING_AGENT_SYSTEM", "AGENT_TASK",
+                "REWRITE_INSTRUCTION", "NOTES", "DEMO_TASKS", "DemoTask", "DemoTaskSet", "VISITING_AGENT_SYSTEM",
+                "AGENT_TASK",
                 "RECEIPT_LINE", "agent_task", "AgentStep", "desk_reply_text",
                 # the setup interview's (Plan 02b)
                 "SETUP_START_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_TURN_HEAD", "SETUP_RETRY", "QUESTIONS",
@@ -792,7 +875,8 @@ def _fixed() -> set[str]:
     """The fixed strings a model reads, as prompts.py holds them: no other module may hold one."""
     from desk.api.prompts import INVALID_REPLY_DIAGNOSTIC, REPLY_DIAGNOSTICS
 
-    return {REWRITE_INSTRUCTION, TIME_NOTE, *NOTES.values(), *DEMO_TASKS.values(), SEND_REPLY_TOOL["description"],
+    return {REWRITE_INSTRUCTION, TIME_NOTE, *NOTES.values(),
+            *(line for lines in DEMO_TASKS.values() for line in lines.values()), SEND_REPLY_TOOL["description"],
             INVALID_REPLY_DIAGNOSTIC, *REPLY_DIAGNOSTICS.values(),
             *(line for line in conversation_system(RIVERA)[0]["text"].splitlines() if len(line) > 20),
             *(line for line in VISITING_AGENT_SYSTEM.splitlines() if len(line) > 20),

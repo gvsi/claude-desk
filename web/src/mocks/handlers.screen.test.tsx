@@ -58,7 +58,8 @@ describe('mock API handlers', () => {
     expect(desk.status).toBe(200);
     const publicDesk = (await desk.json()) as PublicDesk;
     expect(publicDesk.owner_display_name).toBe('Mike Turner');
-    expect(Object.keys(publicDesk.brand).sort()).toEqual(['accent', 'primary']);
+    expect(Object.keys(publicDesk.brand).sort()).toEqual(['accent', 'palette', 'primary']);
+    expect(publicDesk.brand.palette).toBe('teal');
     // The kernel's open status, 90 seconds before the 6:00 pm close, which is when its text next changes.
     const status = publicDesk.open_status;
     expect(status).toMatchObject({ open: true, text: 'Open now, until 6:00 pm', opens_at: null });

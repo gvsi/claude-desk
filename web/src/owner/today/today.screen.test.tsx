@@ -41,6 +41,7 @@ import {
   nextFrames,
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
+import { customerLink } from '../customerLink.ts';
 import { CAUSE_COPY } from '../safety/copy.ts';
 import { needsYouKey, ownerInboxQuery } from '../useDesks.ts';
 import { COPIED_FOR_MS, TodayPage } from './TodayPage.tsx';
@@ -63,6 +64,8 @@ const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
 /** The owner line for the kernel's `conflict` (the design system's error copy). */
 const CHANGED = 'This changed while you were looking. Reload to see where it stands.';
 
+/** The handoff card's AI-written line, before its note (owner decision, 2026-11-01). */
+const NOTE = "Claude's note on what the Desk stopped";
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
@@ -601,25 +604,40 @@ describe('Today', () => {
     needsYou.release();
   });
 
-  it('today_from_another_page_opens_with_its_inbox_read', async () => {
-    // Opened from another page, Today keeps its skeleton until the copy's Demo
-    // inbox is in too, here slowly, so its button never opens as a line saying it is opening, one
-    // line shorter, with Last 7 days under it then pushed down.
-    const { screen } = await renderRoute(CONVERSATIONS);
+  it('demo_inbox_opens_from_the_demo_bar_on_every_page', async () => {
+    // The Demo inbox is in the demo bar, just before Start over, on every page of a Desk: read once as
+    // the bar first draws, and not again as the owner moves between pages.
+    const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
-    const inbox = holdReads(ROUTES.ownerInbox.path);
-    const lastSevenDays = watchTop(() => [...document.querySelectorAll('.cd-today h2')].find((h) => h.textContent === 'Last 7 days') ?? null);
-    const sawItOpening = watchFor('Opening your Demo inbox');
-    await mainNav(screen).getByRole('link', { name: 'Today' }).click();
-    await vi.waitFor(() => expect(inbox.held()).toBe(1));
-    // Time for Today to be drawn, had it opened without its inbox.
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expectTodayOpening();
+    const inbox = screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true });
+    await expect.element(inbox).toBeVisible();
+    expect(inbox.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
+    const startOver = screen.getByRole('button', { name: 'Start over', exact: true });
+    expect(box(startOver.element()).left - box(inbox.element()).right).toBeCloseTo(16, 0);
+    expect(box(inbox.element()).top).toBeCloseTo(box(startOver.element()).top, 0);
+    // Start over's look, its count 6 px after its words.
+    expect(inbox.element().classList.contains('cd-button--ghost')).toBe(true);
+    const words = inbox.element().querySelector('.cd-demo-inbox-sheet__button')!;
+    expect(getComputedStyle(words).columnGap).toBe('6px');
+    expect(requests('ownerInbox')).toHaveLength(1);
 
-    inbox.release();
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
-    expect(lastSevenDays()).toHaveLength(1);
-    expect(sawItOpening()).toBe(false);
+    // It opens here, and focus comes back to it as the sheet closes.
+    await inbox.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(inbox.element());
+    const afterSheet = requests('ownerInbox').length;
+
+    // On to Today, which opens without reading it again; the bar keeps it.
+    await mainNav(screen).getByRole('link', { name: 'Today' }).click();
+    await expect.element(region(screen, 'Needs you')).toBeVisible();
+    await expect.element(inbox).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(requests('ownerInbox')).toHaveLength(afterSheet);
+    // Today's right column no longer holds it.
+    expect(document.querySelector('.cd-today-aside .cd-owner-inbox')).toBeNull();
   });
 
   it('today_later_in_a_reloaded_visit_holds_on_its_own', { timeout: 15_000 }, async () => {
@@ -693,6 +711,37 @@ describe('Today', () => {
     needsYou.release();
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await vi.waitFor(() => expect(document.querySelector('main')!.scrollTop).toBe(300));
+  });
+
+  it('back_within_a_today_drawn_at_once_keeps_where_the_owner_scrolled_since', async () => {
+    // Back to Today with its reads still in memory: it is drawn at once, at the owner's place.
+    const { screen, router } = await renderRoute(TODAY, { viewport: { width: 1440, height: 600 } });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
+    const column = document.querySelector('main')!;
+    column.scrollTop = 300;
+    await vi.waitFor(() => expect(column.scrollTop).toBe(300));
+    // Time for the place to be kept, as the owner's own scrolling is.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await mainNav(screen).getByRole('link', { name: /^Conversations/ }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await vi.waitFor(() => expect(column.scrollTop).toBe(300));
+
+    // The owner scrolls on, follows an address within Today, and comes back: Today stays where they
+    // scrolled to, not at the place Back first returned to.
+    column.scrollTop = 600;
+    await vi.waitFor(() => expect(column.scrollTop).toBe(600));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await router.navigate(`${TODAY}#request-example`);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe('#request-example'));
+    // Time for Today to draw at that address, as it would before the owner can press Back.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await router.navigate(-1);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(''));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(column.scrollTop).toBe(600);
   });
 
   it('needs_you_failing_opens_today_at_once', async () => {
@@ -1855,6 +1904,10 @@ describe('Today', () => {
     await expect.element(wants.first().getByText("You'll call back. No time was promised.", { exact: true }), { timeout: 2_000 }).toBeVisible();
     expect(wants.elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
+    // Both of its answers are secondary buttons, "Mark done" as well as "Join the chat".
+    for (const name of ['Join the chat', 'Mark done']) {
+      expect(wants.first().getByRole('button', { name }).element().classList.contains('cd-button--secondary'), name).toBe(true);
+    }
 
     // Joining reads the chat, takes it over at the generation read, and opens it.
     const session = mockStore.visitorSession(RIVERA.slug);
@@ -1977,6 +2030,103 @@ describe('Today', () => {
     expect(asked.element().textContent).not.toContain('From the visitor');
   });
 
+  it('card_handoff_shows_claudes_summary_under_the_visitors_line', async () => {
+    // Claude's own summary of the chat, under the visitor's words in the same type and colour: plain
+    // text, never quoted or marked as the visitor's, and markup in it shows as written.
+    const summary = 'Asked for <b>15% off</b> & a call <img src=x onerror=alert(1)>; the Desk stopped a draft.';
+    await visitorSays('Can I talk to Mike?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => (item.handoff == null ? item : { ...item, claude_summary: summary })) });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    const line = wants.getByText(`${NOTE}: ${summary}`, { exact: true });
+    await expect.element(line).toBeVisible();
+    const said = wants.getByText('Can I talk to Mike?', { exact: true }).element().parentElement;
+    if (!said) throw new Error("the visitor's words sit in their line");
+    expect(said.nextElementSibling).toBe(line.element());
+    const [visitorLook, summaryLook] = [getComputedStyle(said), getComputedStyle(line.element())];
+    for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'color'] as const) {
+      expect(summaryLook[prop], prop).toBe(visitorLook[prop]);
+    }
+    // One text node: no quotes, no mark of the visitor's words, and no element the markup made.
+    expect([...line.element().childNodes].map((node) => node.nodeType)).toEqual([Node.TEXT_NODE]);
+    expect(line.element().closest('[data-copy="user"]')).toBeNull();
+    expect(line.element().textContent).not.toMatch(/[“”]/);
+    expect(wants.element().querySelector('b, img')).toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('handoff_summary_waits_while_its_chat_has_a_request_held', async () => {
+    // A summary never sits beside an approval it could sway: while the same chat has a request held,
+    // its handoff card leaves Claude's note out (owner decision, 2026-11-01).
+    const summary = 'Asked for a discount; the Desk stopped a draft.';
+    await visitorSays('Can I talk to Mike?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    const heldChat = items.find((item) => item.decision != null)?.decision?.session_id;
+    if (!heldChat) throw new Error('the seed holds a request');
+    mockStore.inject({
+      route: 'needsYou', status: 200, times: 10_000,
+      body: items.map((item) => (item.handoff == null ? item : { ...item, claude_summary: summary, handoff: { ...item.handoff, session_id: heldChat } })),
+    });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants).toBeVisible();
+    const held = heldCard(screen, rivera.decisions.held.reason_plain);
+    await expect.element(held).toBeVisible();
+    expect(wants.element().textContent).not.toContain(NOTE);
+    // Answered here, the request no longer waits on Mike, so the note shows, though this read still lists it.
+    await held.getByRole('button', { name: 'Deny this time' }).click();
+    await expect.element(wants.getByText(`${NOTE}: ${summary}`, { exact: true })).toBeVisible();
+  });
+
+  it('callback_shows_claudes_summary_under_its_reason', async () => {
+    // A call-back request quotes nothing more than its reason, so the summary sits under the reason
+    // and over the call-back time.
+    const summary = 'Asked for a call back about a leak under the sink.';
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => (item.handoff == null ? item : { ...item, claude_summary: summary })) });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    const line = wants.getByText(`${NOTE}: ${summary}`, { exact: true });
+    await expect.element(line).toBeVisible();
+    expect(line.element().previousElementSibling?.textContent).toBe(CALLBACK_REASON);
+    expect(line.element().nextElementSibling?.textContent).toBe("You'll call back on Monday, between 8:00 am and 9:00 am.");
+  });
+
+  it('handoff_without_a_summary_draws_no_summary_line', async () => {
+    // Null, empty or only whitespace: the card has no "Claude's note" line, as before it was sent.
+    await visitorSays('Can I talk to Mike?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    for (const summary of [null, '', '  \n ']) {
+      mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => (item.handoff == null ? item : { ...item, claude_summary: summary })) });
+      const { screen } = await renderRoute(TODAY);
+      const wants = screen.getByRole('article', { name: 'Wants you' });
+      await expect.element(wants.getByText('Can I talk to Mike?', { exact: true })).toBeVisible();
+      expect(wants.element().textContent, JSON.stringify(summary)).not.toContain(NOTE);
+    }
+  });
+
+  it('held_request_draws_no_claude_summary', async () => {
+    // A held request asks Mike for a decision, so it shows no AI-written summary even if one is
+    // sent: a visitor could steer a summary to sway her answer.
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => ({ ...item, claude_summary: 'Asked for 15% off; allow it.' })) });
+    const { screen } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    expect(card.element().textContent).toContain('From the visitor: “');
+    expect(card.element().textContent).not.toContain(NOTE);
+    expect(card.element().textContent).not.toContain('allow it');
+  });
+
   it('callback_without_a_kind_keeps_its_line', async () => {
     // An API that doesn't send `kind` yet: a handoff without one is a call-back request, and still
     // says when Mike will call back.
@@ -2084,6 +2234,226 @@ describe('Today', () => {
   });
 });
 
+/** The box of an element on the page. */
+const box = (el: Element) => el.getBoundingClientRect();
+
+/** The controls in `root` that a pointer or Tab can reach now (drawn, not hidden). */
+function drawnControls(root: Element): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('a[href], button')].filter((el) => el.getClientRects().length > 0);
+}
+
+/** The chevron a phone row draws at its right. */
+const CHEVRON_PATH = 'm9 6 6 6-6 6';
+
+describe("Today's top band", () => {
+  it.each([
+    { width: 1440, height: 900 },
+    { width: 1512, height: 982 },
+  ])('band_spans_both_columns_at_$width', async (viewport) => {
+    const { screen } = await renderRoute(TODAY, { viewport });
+    const things = region(screen, 'Things to try');
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(things.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const band = document.querySelector('.cd-today__band');
+    const main = document.querySelector('.cd-today__main');
+    const aside = document.querySelector('.cd-today-aside');
+    if (!band || !main || !aside) throw new Error('Today draws its band and its two columns');
+
+    // The band sits above both columns and spans them, 32 px over their tops.
+    expect(box(band).bottom + 32).toBeCloseTo(box(main).top, 0);
+    expect(box(band).bottom + 32).toBeCloseTo(box(aside).top, 0);
+    expect(box(band).left).toBeCloseTo(box(main).left, 0);
+    expect(box(band).right).toBeCloseTo(box(aside).right, 0);
+
+    // The header: the greeting at the left; the link pill and "Chat as a customer" at the right of its
+    // line, their tops 4 px under the title's.
+    const header = band.querySelector('.cd-greeting');
+    const pill = band.querySelector('.cd-greeting__link');
+    if (!header || !pill) throw new Error('the band starts with the greeting and its link pill');
+    const title = box(screen.getByRole('heading', { level: 1 }).element());
+    const chat = screen.getByRole('link', { name: 'Chat as a customer', exact: true }).element();
+    expect(header.contains(chat)).toBe(true);
+    expect(chat.getAttribute('href')).toBe(customerLink(RIVERA.slug, RIVERA.deskId));
+    expect(chat.getAttribute('target')).toBe('_blank');
+    expect(box(pill).left).toBeGreaterThan(title.right);
+    expect(box(chat).left - box(pill).right).toBeCloseTo(12, 0);
+    expect(box(chat).right).toBeCloseTo(box(band).right, 0);
+    expect(box(pill).top - title.top).toBeCloseTo(4, 0);
+    expect(box(chat).top - title.top).toBeCloseTo(4, 0);
+    // The greeting has 16 px over it on a laptop, inside the page's own padding.
+    expectComputed(band.querySelector('.cd-today__greeting')!, { paddingTop: '16px' });
+
+    // Things to try, under the header in the band: four equal cards in one row, 16 px apart, across
+    // the band, each card's next step on one line.
+    expect(band.contains(things.element())).toBe(true);
+    expect(box(things.element()).top - box(header).bottom).toBeCloseTo(32, 0);
+    const cards = things.getByRole('listitem').elements();
+    expect(cards).toHaveLength(4);
+    const rects = cards.map(box);
+    for (const rect of rects) {
+      expect(rect.top).toBeCloseTo(rects[0]!.top, 0);
+      expect(rect.width).toBeCloseTo(rects[0]!.width, 0);
+      expect(rect.height).toBeCloseTo(rects[0]!.height, 0);
+    }
+    for (let i = 1; i < 4; i += 1) expect(rects[i]!.left - rects[i - 1]!.right).toBeCloseTo(16, 0);
+    expect(rects[0]!.left).toBeCloseTo(box(band).left, 0);
+    expect(rects[3]!.right).toBeCloseTo(box(band).right, 0);
+    for (const card of cards) {
+      expectComputed(card, { borderTopWidth: '1px', borderTopLeftRadius: '12px', paddingTop: '16px', paddingLeft: '16px' });
+    }
+    const steps = cards.map((card) => drawnControls(card));
+    expect(steps.map((found) => found.map((el) => el.textContent))).toEqual([
+      ['Open your public page'],
+      ['Show me ideas'],
+      ['Open the request'],
+      ['Start a Desk'],
+    ]);
+    const stepTops = steps.map(([step]) => box(step!).top);
+    for (const top of stepTops) expect(top).toBeCloseTo(stepTops[0]!, 0);
+    // The card wrapper has no chrome of its own on a laptop.
+    expectComputed(things.element().querySelector(':scope > .cd-card')!, { borderTopWidth: '0px', paddingTop: '0px', backgroundColor: 'rgba(0, 0, 0, 0)' });
+    // "Hide this list" on the title's line, the caption under both; the Vision link 12 px under the cards.
+    const thingsTitle = box(things.getByRole('heading', { level: 2, name: 'Things to try' }).element());
+    const hide = box(things.getByRole('button', { name: 'Hide this list' }).element());
+    expect(hide.top + hide.height / 2).toBeCloseTo(thingsTitle.top + thingsTitle.height / 2, 0);
+    expect(hide.right).toBeCloseTo(box(band).right, 0);
+    const vision = box(things.getByRole('link', { name: 'Vision: where a Desk could go next' }).element().closest('p')!);
+    expect(vision.top - rects[0]!.bottom).toBeCloseTo(12, 0);
+
+    // The right column no longer has the public page card or its line.
+    expect(screen.getByRole('heading', { name: 'Your public page' }).query()).toBeNull();
+    expect(document.body.textContent).not.toContain('Chats on it are real conversations');
+    // Needs you, Live now and Since last night stay in the left column; the right column keeps the week.
+    for (const name of ['Needs you', 'Live now', 'Since last night']) expect(main.contains(region(screen, name).element())).toBe(true);
+    expect(aside.querySelector('.cd-week')).not.toBeNull();
+    expectNoHorizontalScroll();
+  });
+
+  it.each([
+    { width: 1440, height: 900 },
+    { width: 1512, height: 982 },
+  ])('column_titles_and_first_cards_line_up_at_$width', async (viewport) => {
+    // The right column opens with its own section title, "Last 7 days", as "Needs you" opens the left:
+    // the two titles share a top, and so do the two first cards under them, 12 px under each title.
+    const { screen } = await renderRoute(TODAY, { viewport });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const week = region(screen, 'Last 7 days');
+    await expect.element(week).toBeVisible();
+    const needsTitle = box(region(screen, 'Needs you').getByRole('heading', { level: 2, name: 'Needs you' }).element());
+    const weekTitle = box(week.getByRole('heading', { level: 2, name: 'Last 7 days' }).element());
+    expect(weekTitle.top).toBeCloseTo(needsTitle.top, 0);
+    const heldTop = box(heldCard(screen, SEEDED_REASON).element().closest('.cd-card') ?? heldCard(screen, SEEDED_REASON).element()).top;
+    const weekCard = week.element().querySelector(':scope > .cd-card');
+    if (!weekCard) throw new Error('the week is a card under its title');
+    expect(box(weekCard).top).toBeCloseTo(heldTop, 0);
+    expect(box(weekCard).top - weekTitle.bottom).toBeCloseTo(12, 0);
+    // The title is the section's, with no count; the card holds no heading of its own.
+    expect(week.element().querySelector('.cd-section-header .cd-count-pill')).toBeNull();
+    expect(weekCard.querySelector('h2')).toBeNull();
+  });
+
+  it('phone_stacks_the_header_and_makes_each_thing_one_row', async () => {
+    const { screen, router } = await renderRoute(TODAY, { viewport: 'phone' });
+    const things = region(screen, 'Things to try');
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(screen.getByText('One person is talking to your Desk right now.')).toBeVisible();
+
+    // Title, presence line, link pill, then "Chat as a customer", down the page from one left edge.
+    const title = box(screen.getByRole('heading', { level: 1 }).element());
+    const presence = box(document.querySelector('.cd-greeting__presence')!);
+    const pill = box(document.querySelector('.cd-greeting__link')!);
+    // The header's own "Chat as a customer" (the row of Things to try has the same name, by design).
+    const header = page.elementLocator(document.querySelector('.cd-greeting')!);
+    const chat = box(header.getByRole('link', { name: 'Chat as a customer', exact: true }).element());
+    expect(presence.top).toBeGreaterThanOrEqual(title.bottom);
+    expect(pill.top - presence.bottom).toBeCloseTo(16, 0);
+    expect(chat.top).toBeGreaterThanOrEqual(pill.bottom);
+    for (const each of [presence, pill, chat]) expect(each.left).toBeCloseTo(title.left, 0);
+    // No extra room over the greeting on a phone.
+    expectComputed(document.querySelector('.cd-today__greeting')!, { paddingTop: '0px' });
+
+    // Each row is one control named by its title, with a chevron at its right and no button inside.
+    const rows = things.getByRole('listitem').elements();
+    expect(rows).toHaveLength(4);
+    const names = ['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk'];
+    for (const [i, row] of rows.entries()) {
+      const controls = drawnControls(row);
+      expect(controls, names[i]).toHaveLength(1);
+      expect(controls[0]!.querySelector(`path[d="${CHEVRON_PATH}"]`), names[i]).not.toBeNull();
+      expect(box(controls[0]!).right).toBeCloseTo(box(row).right, 0);
+    }
+    const chatRow = things.getByRole('link', { name: 'Chat as a customer', exact: true });
+    await expect.element(chatRow).toHaveAttribute('href', customerLink(RIVERA.slug, RIVERA.deskId));
+    await expect.element(chatRow).toHaveAttribute('target', '_blank');
+    // A press anywhere on the row is the row's: its words, not just its chevron.
+    const answerRow = things.getByRole('button', { name: 'Answer a held request', exact: true });
+    const answerTitle = box(things.getByRole('heading', { level: 3, name: 'Answer a held request' }).element());
+    expect(document.elementFromPoint(answerTitle.left + 4, answerTitle.top + answerTitle.height / 2)).toBe(answerRow.element());
+    // Tabbed to, the row shows the focus ring around the whole row.
+    things.getByRole('button', { name: 'Try to break it', exact: true }).element().focus();
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).toBe(answerRow.element());
+    const ring = getComputedStyle(answerRow.element(), '::after');
+    expect([ring.outlineStyle, ring.outlineWidth]).toEqual(['solid', '2px']);
+    const ringBox = { top: rows[2]!.getBoundingClientRect().top, bottom: rows[2]!.getBoundingClientRect().bottom };
+    expect(ringBox.bottom - ringBox.top).toBeGreaterThan(box(answerRow.element()).height);
+    await answerRow.click();
+    expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+
+    // "Try to break it" opens its ideas under the row, and says so.
+    const breakRow = things.getByRole('button', { name: 'Try to break it', exact: true });
+    await expect.element(breakRow).toHaveAttribute('aria-expanded', 'false');
+    await breakRow.click();
+    await expect.element(breakRow).toHaveAttribute('aria-expanded', 'true');
+    await expect.element(things.getByRole('group', { name: 'Ideas to try' })).toBeVisible();
+    await things.getByRole('group', { name: 'Ideas to try' }).getByRole('button').first().hover();
+
+    // "Hide this list" on the title's line, at its right; the caption under them.
+    const thingsTitle = box(things.getByRole('heading', { level: 2, name: 'Things to try' }).element());
+    const hide = box(things.getByRole('button', { name: 'Hide this list' }).element());
+    expect(hide.top + hide.height / 2).toBeCloseTo(thingsTitle.top + thingsTitle.height / 2, 0);
+    expect(box(document.querySelector('.cd-things__caption')!).top).toBeGreaterThanOrEqual(hide.bottom);
+    expectNoHorizontalScroll();
+
+    // "Create your own Desk" goes to setup through the router.
+    await things.getByRole('link', { name: 'Create your own Desk', exact: true }).click();
+    await expect.poll(() => router.state.location.pathname).toBe('/app/setup');
+  });
+
+  it.each(['desktop', 'phone'] as const)('held_request_card_shows_before_anything_is_held_on_%s', async (viewport) => {
+    // The caption counts four things, so all four show, "Answer a held request" with its line and no
+    // next step until something is held.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet', viewport });
+    const things = region(screen, 'Things to try');
+    await expect.element(things).toBeVisible();
+    const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
+    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    const row = () => things.getByRole('listitem').nth(2).element();
+    await expect.element(things.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
+    expect(drawnControls(row())).toEqual([]);
+    expect(row().querySelector('.cd-status-dot--held')).toBeNull();
+    expect(row().querySelector(`path[d="${CHEVRON_PATH}"]`)).toBeNull();
+
+    // The owner chats in a preview: one of the four is done, and all four still show.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(titles()).toHaveLength(4);
+
+    // Once something is held, the same card in the same place shows the dot and its next step.
+    await visitorSays('Can I get 50% off if I pay cash?');
+    await expect
+      .element(things.getByText('A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.', { exact: true }), { timeout: 3_000 })
+      .toBeVisible();
+    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    expect(row().querySelector('.cd-status-dot--held')).not.toBeNull();
+    const step = drawnControls(row());
+    expect(step).toHaveLength(1);
+    if (viewport === 'desktop') expect(step[0]!.textContent).toBe('Open the request');
+    else expect(step[0]!.getAttribute('aria-labelledby')).toBeTruthy();
+  });
+});
+
 describe("Today's unfinished setup", () => {
   /** The start step's first example: Juniper Hair Studio, whose owner is Priya Shah. */
   const JUNIPER = START_EXAMPLES.en.examples[0]?.description ?? '';
@@ -2122,7 +2492,7 @@ describe("Today's unfinished setup", () => {
     await expect
       .element(
         card.getByText(
-          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.",
           { exact: true },
         ),
       )
@@ -2157,7 +2527,7 @@ describe("Today's unfinished setup", () => {
     await expect
       .element(
         card.getByText(
-          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.",
           { exact: true },
         ),
       )
@@ -2166,7 +2536,7 @@ describe("Today's unfinished setup", () => {
   });
 
   /** The card's line at the rules, with Answering off. */
-  const AT_RULES = "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.";
+  const AT_RULES = "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.";
 
   /**
    * Opens setup at its tools, with the copy's Desks read there, at the tools; then `meanwhile` sets
@@ -2262,7 +2632,7 @@ describe("Today's unfinished setup", () => {
       .element(card.getByText("Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.", { exact: true }))
       .toBeVisible();
     expect(card.element().textContent).not.toMatch(/Answering/);
-    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+    await expect.element(screen.getByRole('switch', { name: /Claude acts for you/ })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('a_draft_that_lands_after_leaving_moves_the_card_on', async () => {
@@ -2290,7 +2660,7 @@ describe("Today's unfinished setup", () => {
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect
-      .element(card.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .element(card.getByText('Your answers are saved. Pick up at your tools. Claude takes messages only until your Desk is live.', { exact: true }))
       .toBeVisible();
 
     release();
@@ -2298,7 +2668,7 @@ describe("Today's unfinished setup", () => {
   });
 
   /** The card's line at the tools, with Answering off. */
-  const AT_TOOLS = 'Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.';
+  const AT_TOOLS = 'Your answers are saved. Pick up at your tools. Claude takes messages only until your Desk is live.';
 
   /**
    * From Today, setup reopened at its tools; the rules it goes on to can't be checked (the API keeps
@@ -2449,20 +2819,20 @@ describe("Today's unfinished setup", () => {
     };
     await lineAt(
       '3Rules',
-      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.",
     );
     await mockStore.dispatch('setupSituations', { params: { id } });
     await lineAt(
       '3Rules',
-      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Claude takes messages only until then.",
     );
     await mockStore.dispatch('setupSafetyCheck', { params: { id } });
     await lineAt(
       '4Safety check',
-      "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live. Answering stays off until then.",
+      "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live. Claude takes messages only until then.",
     );
     await mockStore.dispatch('setupConfirm', { params: { id } });
-    await lineAt('5Live', 'Your answers are saved. Pick up at going live. Answering stays off until then.');
+    await lineAt('5Live', 'Your answers are saved. Pick up at going live. Claude takes messages only until then.');
 
     await mockStore.dispatch('goLive', { params: { id } });
     const live = await renderRoute(`/app/${state.desk_id}/today`);
@@ -2477,14 +2847,14 @@ describe("Today's unfinished setup", () => {
     const atQuestions = await renderRoute(`/app/${next.desk_id}/today`);
     const first = region(atQuestions.screen, 'Finish setting up Juniper Hair Studio');
     await expect
-      .element(first.getByText('Your answers are saved. Pick up at the questions. Answering stays off until your Desk is live.', { exact: true }))
+      .element(first.getByText('Your answers are saved. Pick up at the questions. Claude takes messages only until your Desk is live.', { exact: true }))
       .toBeVisible();
     expect(first.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
     const tools = await deskAtTools();
     const atTools = await renderRoute(`/app/${tools.desk_id}/today`);
     const second = region(atTools.screen, 'Finish setting up Juniper Hair Studio');
     await expect
-      .element(second.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .element(second.getByText('Your answers are saved. Pick up at your tools. Claude takes messages only until your Desk is live.', { exact: true }))
       .toBeVisible();
     expect(second.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('2Tools');
   });

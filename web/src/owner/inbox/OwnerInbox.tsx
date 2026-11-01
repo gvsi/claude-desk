@@ -1,34 +1,33 @@
 /**
- * Today's Demo inbox: what Claude would have sent the owner by text or email (the kernel's alert
- * for each held request, the copy's codes and ledger checkpoints), in the design system's
- * `DemoInboxSheet` with `viewer="owner"`: a "Demo inbox" button with a count, which opens the
- * entries in a sheet at the right, each with when it came on the business's clock. An alert about a
- * held request links to that request's card on its own Desk's Today ("Open the request") only while
- * the request still waits for the owner: the inbox is the whole copy's, so while the sheet is open
- * each such request is read for the Desk it was held on, and so is that Desk's Needs you. The alert
- * links only while its request is still in that Needs you, as read since the sheet opened by a read
- * that worked. A request answered anywhere, on Today too before its card is dismissed, shows its
- * alert with no link.
+ * The owner app's Demo inbox, in the demo bar on every page of a Desk, just before Start over: what
+ * Claude would have sent the owner by text or email (the kernel's alert for each held request, the
+ * copy's codes and ledger checkpoints), in the design system's `DemoInboxSheet` with
+ * `viewer="owner"`: a quiet "Demo inbox" button with a count, which opens the entries in a sheet at
+ * the right, each with when it came on the business's clock. An alert about a held request links to
+ * that request's card on its own Desk's Today ("Open the request") only while the request still
+ * waits for the owner: the inbox is the whole copy's, so while the sheet is open each such request
+ * is read for the Desk it was held on, and so is that Desk's Needs you. The alert links only while
+ * its request is still in that Needs you, as read since the sheet opened by a read that worked. A
+ * request answered anywhere, on Today too before its card is dismissed, shows its alert with no
+ * link.
  *
- * The copy's inbox is read with Today's other reads, as Today opens or just before, so the button
- * counts what is there and the sheet opens onto entries already read, never onto an inbox that only
- * looks empty. It is read again as the sheet opens and every few seconds while it is open, with
- * each linked Desk's Needs you that is no longer fresh, and sends no new read from the moment it
- * closes (a read already out finishes, with its one retry). Today keeps its skeleton until that
- * first read settles; if the inbox has nothing read and no failure after that (its entries dropped
- * for a new copy), the button's place says the inbox is opening. If the first read failed, Today
- * opens on it, without sending it again, and the inbox's title says it couldn't be opened, with "Try
- * again". A later read that fails says the same under the sheet's button, and inside the sheet
- * while it is open, where the page behind is out of reach, so the entries read before never pass
- * for current.
+ * The copy's inbox is read once as the bar first draws, and again as the sheet opens and every few
+ * seconds while it is open, with each linked Desk's Needs you that is no longer fresh; it sends no
+ * new read from the moment it closes (a read already out finishes, with its one retry), nor as the
+ * owner moves between pages, where the bar stays. Until the first read settles the button isn't
+ * drawn, so the sheet never opens onto an inbox that only looks empty. A read that fails, the first
+ * or a later one, says so inside the sheet, with "Try again": the bar has no room for the line, and
+ * the sheet opens onto it, never onto entries that pass for current.
  */
 import { focusManager, hashKey, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 
 import { pollMs } from '../../app/poll.ts';
-import { Button, DemoInboxSheet, LoadingLine, Notice, SectionHeader, type DemoInboxItem } from '../../ds/index.ts';
+import { Button, DemoInboxSheet, Notice, type DemoInboxItem } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { decisionQuery } from '../conversations/ownerReceipt.ts';
+import { followInAppLinks } from '../inAppLinks.ts';
 import { requestPath } from '../today/requestLink.ts';
 import { FRESH_MS, OWNER_INBOX_KEY, needsYouQuery, ownerInboxQuery } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
@@ -43,7 +42,7 @@ export interface OwnerInboxProps {
 }
 
 export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
-  const titleId = `${useId()}-title`;
+  const navigate = useNavigate();
   // Whether the sheet is open, as the sheet says each time it opens or closes. `openNow` changes the
   // moment it says so, before Today draws the change. The poll and a return to the tab or the
   // network ask it, so the inbox sends no new read from the moment it closes, not even one that
@@ -60,10 +59,10 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   };
   const inbox = useQuery({
     ...ownerInboxQuery(),
-    // Today's opening reads it first (`useTodayOpening`); this reads it again only while the sheet is
-    // open, where a return to the tab or the network reads however fresh the last read is.
+    // Read as the bar first draws; again only while the sheet is open, where a return to the tab or the
+    // network reads however fresh the last read is.
     staleTime: FRESH_MS,
-    // Today opens on what its first read found, a failure included, as it does with its other reads.
+    // A failed read is read again from the sheet's "Try again", not each time the bar draws again.
     retryOnMount: false,
     refetchOnWindowFocus: () => (openNow.current ? 'always' : false),
     refetchOnReconnect: () => (openNow.current ? 'always' : false),
@@ -167,38 +166,22 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
       </Notice>
     );
 
-  let content;
-  if (inbox.data !== undefined) {
-    // Every entry here is read whole, so nothing waits to open; a retry reads them all again. The
-    // sheet stays first, so a failed read's line coming or going never closes it. The line shows
-    // inside the open sheet, and here under its button for when it is closed.
-    content = (
-      <>
-        <DemoInboxSheet
-          viewer="owner"
-          items={items}
-          language="en"
-          onRetry={() => void refetch()}
-          notice={failed}
-          onOpenChange={openChanged}
-        />
-        {failed}
-      </>
-    );
-  } else if (failed !== null) {
-    // Nothing read yet, so no sheet, which would say the inbox is empty: its title over the line.
-    content = (
-      <section className="cd-owner-inbox__failed" aria-labelledby={titleId}>
-        <SectionHeader id={titleId} title="Demo inbox" />
-        {failed}
-      </section>
-    );
-  } else {
-    content = <LoadingLine>Opening your Demo inbox</LoadingLine>;
-  }
+  // Nothing drawn until the first read settles. Every entry here is read whole, so nothing waits to
+  // open; a retry reads them all again. A failed read's line shows inside the sheet, which stays
+  // open as it comes or goes; with nothing read, the sheet holds the line alone.
+  if (inbox.data === undefined && failed === null) return null;
   return (
-    <div className="cd-owner-inbox">
-      {content}
+    // "Open the request" goes through the router, so the app stays loaded.
+    <div className="cd-owner-inbox" onClick={followInAppLinks(navigate)}>
+      <DemoInboxSheet
+        viewer="owner"
+        quiet
+        items={items}
+        language="en"
+        onRetry={() => void refetch()}
+        notice={failed}
+        onOpenChange={openChanged}
+      />
     </div>
   );
 }

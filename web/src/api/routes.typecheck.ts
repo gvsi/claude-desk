@@ -29,6 +29,7 @@ export const ROUTE_MODELS = {
   me: 'CopyOut',
   desks: 'BusinessOut[]',
   setAnswering: 'DeskUpdated',
+  setBusiness: 'DeskUpdated',
   deleteDesk: null,
   openPreview: 'VisitorSession',
 
@@ -86,6 +87,7 @@ export const ROUTE_MODELS = {
   setupAnswer: 'SetupState',
   setupProposal: 'SetupState',
   setupSuggestions: 'SetupState',
+  setupEvents: null,
   setupTools: 'SetupTools',
   setupConnect: 'ToolRow[]',
   setupPublicLines: 'SetupPublicLines',
@@ -106,6 +108,7 @@ export const ROUTE_MODELS = {
   visitorInbox: 'DemoInboxEntry[]',
   agentCard: 'AgentCardOut',
   agentKey: 'DemoAgentIssued',
+  agentTasks: 'AgentTasks',
   sendAgent: 'AgentRunStarted',
   agentRun: 'DemoAgentRun',
 
@@ -138,7 +141,6 @@ export const NEVER_CALLED = [
   'POST /api/owner/desks',
   // Settings is read-only by the owner's ruling, and no plan 04 task edits these parts.
   'PUT /api/owner/desks/{desk_id}/people',
-  'PUT /api/owner/desks/{desk_id}/business',
   'PUT /api/owner/desks/{desk_id}/charter',
   'PUT /api/owner/desks/{desk_id}/hours',
   'PUT /api/owner/desks/{desk_id}/prices',

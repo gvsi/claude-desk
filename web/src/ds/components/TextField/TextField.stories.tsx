@@ -111,10 +111,11 @@ export const Password: Story = {
     await expect(field).toHaveAttribute('autocomplete', 'current-password');
     await expect(field).not.toHaveAttribute('aria-describedby');
 
-    // Focus shows the 2 px blue ring at a 2 px offset.
+    // Focus by keyboard too shows the caret and the outline one step stronger (line-field-focus, the
+    // tertiary ink), never a ring.
     await userEvent.tab();
     await expect(field).toHaveFocus();
-    expectComputed(field, { outlineStyle: 'solid', outlineWidth: '2px', outlineOffset: '2px', outlineColor: 'rgb(126, 174, 218)' });
+    expectComputed(field, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.6)', boxShadow: 'none' });
     await userEvent.keyboard('demo');
     await expect(args.onChange).toHaveBeenLastCalledWith('demo');
   },
@@ -186,7 +187,7 @@ export const ReadOnly: Story = {
   },
   parameters: {
     canvasNote:
-      'Held fields use the muted fill of N-Explore-ReadOnly-B (owner, 2026-10-31, option B): a line-control outline on fill-secondary, with readable, selectable text and the focus ring. Setup’s description is held while a start whose answer was lost is tried again with its words as they were (plan 04, Task 12).',
+      'Held fields use the muted fill of N-Explore-ReadOnly-B (owner, 2026-10-31, option B): a line-control outline on fill-secondary, with readable, selectable text. Setup’s description is held while a start whose answer was lost is tried again with its words as they were (plan 04, Task 12).',
   },
   play: async ({ args, canvas, userEvent }) => {
     const multiline = canvas.getByRole('textbox', { name: 'Your business' }) as HTMLTextAreaElement;
@@ -215,13 +216,14 @@ export const ReadOnly: Story = {
       await expect([field.selectionStart, field.selectionEnd]).toEqual([0, value.length]);
     }
 
-    // Both stay in the tab order and keep the focus ring.
+    // Both stay in the tab order. A held field has no caret, so keyboard focus rings it in the warm
+    // `ring-focus` (the secondary ink), as any other control; its border doesn't change.
     multiline.focus();
     await userEvent.tab();
     await expect(singleLine).toHaveFocus();
-    expectComputed(singleLine, { outlineStyle: 'solid', outlineWidth: '2px', outlineOffset: '2px', outlineColor: 'rgb(126, 174, 218)' });
+    expectComputed(singleLine, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'none' });
     await userEvent.tab({ shift: true });
     await expect(multiline).toHaveFocus();
-    expectComputed(multiline, { outlineStyle: 'solid', outlineWidth: '2px', outlineOffset: '2px', outlineColor: 'rgb(126, 174, 218)' });
+    expectComputed(multiline, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'none' });
   },
 };

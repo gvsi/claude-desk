@@ -1,8 +1,18 @@
+import { useRef } from 'react';
+
 import type { CardBlock, RenderedBlock } from '../../../api/contracts.ts';
+import { ChatMarkdown } from '../ChatMarkdown/ChatMarkdown.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
+import { useMessageReveal } from './useMessageReveal.ts';
 
 import './ClaudeMessage.css';
+
+/**
+ * Links in Claude's prose show their text only and open in a new tab. The kernel's reply check
+ * reads Markdown links and holds every link to the business's contact.
+ */
+export const PROSE_LINKS = 'open' as const;
 
 export interface ClaudeMessageProps {
   /** The delivered message's blocks (`EvMessage.blocks`), in order, exactly as they arrived. */
@@ -13,24 +23,56 @@ export interface ClaudeMessageProps {
   ownerName: string;
   /** Vision pages only: each document card's Download goes nowhere (`ReplyCard`'s `inertDownload`). */
   inertDownload?: boolean;
+  /** Vision pages only: each prose block as written, one plain paragraph, never Markdown. */
+  plainProse?: boolean;
+  /**
+   * The message arrived live, on a page already open: its words are revealed word by word, then its
+   * cards fade and rise in, one by one, and what its `TranscriptRow` attaches follows them. Read
+   * once, when first drawn. Never for a message from history. Under reduced motion it shows whole.
+   */
+  reveal?: boolean;
 }
 
+/** A prose block with words in it: a blank one has nothing to say, so it takes no space. */
+const hasWords = (block: RenderedBlock) => block.kind === 'prose' && block.text.trim() !== '';
+
 /**
- * A message from Claude, or from the Desk itself (author `desk`): each prose block as a serif
- * paragraph, each card block as a typed reply card, in order. No bubble, no avatar and nothing
- * else: the delivered blocks are the whole message.
+ * A message from Claude, or from the Desk itself (author `desk`): each prose block as Markdown in
+ * the serif reply type, each card block as a typed reply card, in order. No bubble, no avatar and
+ * nothing else: the delivered blocks are the whole message.
  */
-export function ClaudeMessage({ blocks, language, ownerName, inertDownload = false }: ClaudeMessageProps) {
+export function ClaudeMessage({ blocks, language, ownerName, inertDownload = false, plainProse = false, reveal = false }: ClaudeMessageProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Each prose block's place among the prose blocks, by its index in `blocks`.
+  const prose = blocks.flatMap((block, index) => (hasWords(block) ? [index] : []));
+  // Revealed one after another, the prose blocks share one pace, set by all their words.
+  const words = prose.reduce((sum, index) => sum + (blocks[index]?.text.length ?? 0), 0);
+  // The Vision pages' plain prose is never revealed.
+  const shown = useMessageReveal(ref, prose.length, blocks.filter((block) => block.kind !== 'prose').length, reveal && !plainProse);
   return (
-    <div className="cd-claude-message" lang={language}>
+    <div ref={ref} className={`cd-claude-message${shown.root.className}`} lang={language} aria-busy={shown.root['aria-busy']} style={shown.root.style}>
       {blocks.map((block, index) => {
         if (block.kind === 'prose') {
-          // A blank prose block has nothing to say, so it takes no space.
-          if (block.text.trim() === '') return null;
+          // A blank prose block has nothing to say, so it takes no space; a revealed one waits for the words before it.
+          const nth = prose.indexOf(index);
+          if (nth === -1 || nth >= shown.drawn) return null;
+          if (plainProse) {
+            return (
+              <p key={index} className="cd-claude-message__prose cd-claude-message__prose--plain cd-type-reply">
+                {block.text}
+              </p>
+            );
+          }
           return (
-            <p key={index} className="cd-claude-message__prose cd-type-reply">
-              {block.text}
-            </p>
+            <div key={index} className="cd-claude-message__prose cd-type-reply">
+              <ChatMarkdown
+                text={block.text}
+                links={PROSE_LINKS}
+                reveal={shown.revealing}
+                revealLength={words}
+                onRevealed={shown.revealing ? () => shown.revealed(nth) : undefined}
+              />
+            </div>
           );
         }
         // Anything else is a card. A template this build doesn't know shows its text in a

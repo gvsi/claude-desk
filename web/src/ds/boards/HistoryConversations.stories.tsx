@@ -223,12 +223,12 @@ export const Board: Story = {
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);
 
-    // focus_order_is_logical: the business, the pages, Answering, the caption, the list, the receipts.
+    // focus_order_is_logical: the business, the pages, Claude acts for you, the caption, the list, the receipts.
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expectTabOrder(userEvent, [
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(nav).getAllByRole('link'),
-      within(column).getByRole('switch', { name: 'Answering' }),
+      within(column).getByRole('switch', { name: 'Claude acts for you' }),
       caption,
       ...rows,
       ...within(log).getAllByRole('button', { name: /Open the full trace/ }),

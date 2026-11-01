@@ -108,7 +108,7 @@ async def test_the_reply_checks_fallback_follows_the_turn(app, client):
         "$180.00", ["Drain clearing", "Válido hasta lunes 2 de noviembre, 9:04"])
     assert (handoff.title, handoff.lines) == (
         "Déjame consultarlo con Mike Turner.", ["Mike Turner te responderá aquí."])
-    # prose too short to tell, handed off: the handoff speaks it too
+    # prose too short to tell, handed off: the handoff speaks it too (the card's handoff is open, so no call-back offer)
     verdict = await checked(client, visitor, "Le prometo.")
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("promise_word", "lex.es.promise")]
     assert_handed_off(verdict, "es")

@@ -252,10 +252,10 @@ const bookedProse: Record<Language, RenderedBlock> = {
   es: proseBlock('Ya está todo listo. Aquí tienes tu visita.'),
 };
 
-/** The booked card's words, as the kernel renders a confirmed booking: {date} / Arriving {start} to {end} / With {owner}. */
+/** The booked card's words, as the kernel renders a confirmed booking: {date} / {start} to {end} / With {owner}. */
 const BOOKED: Record<Language, { title: string; lines: readonly string[] }> = {
-  en: { title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With {owner}'] },
-  es: { title: 'martes 3 de noviembre', lines: ['Llegada de 14:00 a 16:00', 'Con {owner}'] },
+  en: { title: 'Tuesday, November 3', lines: ['2:00 pm to 4:00 pm', 'With {owner}'] },
+  es: { title: 'martes 3 de noviembre', lines: ['De 14:00 a 16:00', 'Con {owner}'] },
 };
 
 /** The kernel's booked card on a Desk whose owner is `owner`, in `language`; on Turner's Desk, the fixtures' card. */
@@ -986,9 +986,20 @@ export function stepsWithTools(tools: readonly ToolName[], steps: readonly Step[
   return allTools || tools.every((tool) => TOOLS_WHILE_NOT_ANSWERING.has(tool)) ? steps : HANDOFF_STEPS;
 }
 
-/** The turn the visitor's words start on a Desk whose owner is `owner`: their rule's steps, as the session may run them. */
-export function scriptedTurn(text: string, allTools: boolean, owner: DeskOwner): readonly Step[] {
+/** Whether the chat's verified person (`person`, null when it has none) is the one the invoice belongs to. */
+function ownsInvoice(person: { personId: string } | null): boolean {
+  return person !== null && person.personId === DECISIONS.releaseInvoice.resource.owner_person_id;
+}
+
+/**
+ * The turn the visitor's words start on a Desk whose owner is `owner`, in a chat whose verified
+ * person is `person`: their rule's steps, as the session may run them. Verification lasts for the
+ * chat, as the API's does, so the invoice's owner asking for it again once verified gets Claude's
+ * turn after a confirmed code (`afterVerify`), with no second code.
+ */
+export function scriptedTurn(text: string, allTools: boolean, owner: DeskOwner, person: { personId: string } | null): readonly Step[] {
   const rule = matchRule(text, owner);
+  if (rule.name === 'invoice' && ownsInvoice(person)) return afterVerify(allTools);
   return stepsWithTools(rule.tools, rule.steps, allTools);
 }
 
@@ -1136,7 +1147,8 @@ export const TOOL_LABELS: Readonly<Partial<Record<string, string>>> = {
  * How Turner's Claude answers the owner on Rules, in place of the API's model turn: the Rules
  * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rules for
  * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
- * quote rule up to that amount); "Why was this refund held?" is answered about the newest held
+ * quote rule up to that amount; "Send payment links on your own up to $800" an automatic payment
+ * link rule up to it); "Why was this refund held?" is answered about the newest held
  * request of the tool it names, with the rule that held it, and an offer to draft one unless it is
  * above the payment limit; another question is answered with no draft, and anything else says what
  * Claude can draft. `active` is the Desk's active rules, and `held` its held requests, newest first.
@@ -1174,6 +1186,23 @@ export function ruleChatReply(text: string, active: readonly RuleCard[], held: r
           who: 'anyone',
           max_amount_cents: 60_000,
           reason: 'Water heater installs quoted up to $600.',
+        }),
+      ],
+    };
+  }
+  const linkLimit = /\bpayment links?\b/.test(lower) && !lower.trim().endsWith('?') ? /\$\s?(\d[\d,]*)/.exec(text) : null;
+  if (linkLimit?.[1]) {
+    const dollars = Number(linkLimit[1].replace(/,/g, ''));
+    return {
+      answer: `Here's that change: I send payment links on my own up to $${dollars.toLocaleString('en-US')}, and anything above that asks you first. Nothing changes until you confirm it.`,
+      add: [
+        draftCard({
+          card_id: 'card-payment-links',
+          applies_to: 'native.payment_link',
+          mode: 'auto',
+          who: 'anyone',
+          max_amount_cents: dollars * 100,
+          reason: `Payment links sent on their own up to $${dollars.toLocaleString('en-US')}.`,
         }),
       ],
     };

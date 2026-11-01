@@ -50,8 +50,11 @@
   line-height: 25px;
 }
 
-.cd-setup-q3__question > p { margin: 0; }
-.cd-setup-q3__question > p + p { margin-top: var(--space-12); }
+/* Claude's question as Markdown keeps the dock's own type, its paragraphs 12 px apart and its line
+   breaks folded, as before it was Markdown. */
+.cd-setup-q3__question > .cd-md { font-size: inherit; line-height: inherit; }
+.cd-setup-q3__question > .cd-md > p { white-space: normal; }
+.cd-setup-q3__question > .cd-md > p + p { margin-top: var(--space-12); }
 
 .cd-setup-q3__list {
   display: flex;
@@ -126,6 +129,9 @@
 
 .cd-setup-q3__row--other input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); }
 .cd-setup-q3__row--other input::placeholder { color: var(--text-secondary); }
+/* The "Something else" input draws no border of its own, so with focus its row takes the field's
+   focused edge, as every text entry does (owner, 2026-11-01). */
+.cd-setup-q3__row--other:has(input:focus) { box-shadow: inset 0 0 0 1px var(--line-field-focus); }
 /* The signed chat frame: the bar and dock keep their size; only the transcript scrolls. */
 .cd-setup--chat {
   height: 100dvh;
@@ -311,4 +317,18 @@
   .cd-setup-c3__rows { grid-template-columns: 1fr; }
   .cd-setup-c3__row dd { padding-top: 0; }
   .cd-setup-c3__row + .cd-setup-c3__row dd { border-top: 0; }
+}
+
+/* A setup reply as it is written takes the writing dots' place on screen; their words stay for
+   screen readers until the saved turn. */
+.cd-setup-growing ~ .cd-writing-indicator {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }

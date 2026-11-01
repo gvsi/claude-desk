@@ -53,7 +53,7 @@ export const LEXICON: readonly LexiconEntry[] = [
   { language: 'en', category: 'date', pattern: String.raw`january|february|march|april|june|july|august|september|october|november|december` },
   { language: 'en', category: 'date', pattern: String.raw`(?:(?<=[^\W\d_] )|(?<=[^\W\d_], )|(?:in|on|by|until|till|next|this|early|late|mid|last)[\s-]+)(?-i:May)` },
   { language: 'en', category: 'date', pattern: String.raw`today|tonight|tomorrow|yesterday|weekends?|noon|midnight|o['’]?clock` },
-  { language: 'en', category: 'date', pattern: String.raw`(?:next|this|last)[\s-]+(?:week|month|year)|this[\s-]+(?:morning|afternoon|evening)` },
+  { language: 'en', category: 'date', pattern: String.raw`(?:next|this|last)[\s-]+(?:week|month)|(?:next|this)[\s-]+year(?![’']s\b)|this[\s-]+(?:morning|afternoon|evening)` },
   { language: 'en', category: 'date', pattern: String.raw`[ap]\.\s?m\.?|pm` },
   { language: 'en', category: 'date', pattern: String.raw`same[\s-]{0,3}day` },
   { language: 'en', category: 'date', pattern: String.raw`(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?)` },

@@ -20,11 +20,12 @@ describe('handoffEntryOf', () => {
   it('names_the_handoff_entries_as_the_kernel_writes_them', () => {
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], kind: 'card' }))).toBe('opened');
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'] }))).toBe('done');
-    // The kernel closing one: a call-back that replaced it, the owner taking the chat over, or the
-    // owner writing in it.
+    // The kernel closing one: a call-back that replaced it, the owner taking the chat over, the
+    // owner writing in it, or the visitor booking a time in it.
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], replaced_by: 'h-2' }))).toBe('replaced');
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], closed_by: 'takeover' }))).toBe('took_over');
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], closed_by: 'owner_message' }))).toBe('wrote');
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], closed_by: 'booking' }))).toBe('booked');
   });
 
   it('leaves_every_other_entry_alone', () => {
@@ -41,5 +42,6 @@ describe('handoffEntryOf', () => {
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], closed_by: null }))).toBeNull();
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], replaced_by: null }))).toBeNull();
     expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], replaced_by: 'h-2', closed_by: 'takeover' }))).toBeNull();
+    expect(handoffEntryOf(entry('desk_data', { part: 'handoffs', refs: ['h-1'], kind: 'card', closed_by: 'booking' }))).toBeNull();
   });
 });

@@ -16,7 +16,10 @@ import { AGENT_TURN_GAP_MS } from './agents.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { EVENT_GAP_MS } from './script.ts';
 import { RIVERA } from './seed.ts';
-import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, thanksTo } from './setup.ts';
+import {
+  holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, setupTaskSet,
+  thanksTo, TEST_CLIENT_ADDED, TEST_CLIENT_NO, TEST_CLIENT_OFFER, TEST_CLIENT_YES,
+} from './setup.ts';
 import { mockStore } from './store.ts';
 
 interface Started {
@@ -533,6 +536,78 @@ describe('setup consultant run and decisions', () => {
   });
 });
 
+describe('the test-client offer, as the API asks it', () => {
+  const LAKEVIEW = 'Lakeview Accounts. I’m Lee. We help local businesses.';
+  const CONTACT = 'Email me at lee@example.com. After hours, take a message.';
+  const OFFER = {
+    role: 'claude', text: TEST_CLIENT_OFFER, card: null,
+    choices: [{ text: TEST_CLIENT_YES, recommended: true }, { text: TEST_CLIENT_NO, recommended: false }],
+  };
+
+  /** A scripted run to its end, typing `contact` on the contact question; or, with `suggestions`, using the suggestions once it's typed. */
+  async function finished(contact: string, suggestions = false): Promise<SetupState> {
+    let state = await startState(LAKEVIEW);
+    const id = state.interview_id;
+    state = await setupState('setupConsent', id, { allow: false });
+    for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) state = await setupState('setupAnswer', id, { question, text: 'Yes' });
+    if (!suggestions) return setupState('setupAnswer', id, { question: 'contact_and_after_hours', text: contact });
+    // An answer that leaves the contact question open keeps it waiting, as a follow-up does.
+    state = await setupState('setupAnswer', id, { question: 'contact_and_after_hours', text: `Not sure yet. ${contact}` });
+    expect(state.question).toBe('contact_and_after_hours');
+    return setupState('setupSuggestions', id, {});
+  }
+
+  it('asks_once_after_the_closing_plan_when_the_owner_typed_their_contact', async () => {
+    const state = await finished(CONTACT);
+    expect([state.step, state.question]).toEqual(['questions', 'test_client']);
+    expect(state.messages.slice(-2)).toEqual([{ role: 'claude', text: QUESTIONS_DONE, choices: [], card: null }, OFFER]);
+    // With no contact of the owner's own, as the API reads it: none typed, hours only, another person's or a rejected one.
+    for (const contact of [
+      'Yes', 'The same as on my website.', 'We are open 8.00-17.00', 'Ana: ana@example.test',
+      'Call my assistant Ana at (510) 555-0142 or email ana@example.test.', 'Do not use old@example.test or 510-555-0142.',
+      'Ana’s email is ana@example.test',
+    ]) {
+      const without = await finished(contact);
+      expect([without.step, without.question, without.messages.at(-1)?.text], contact).toEqual(['tools', null, QUESTIONS_DONE]);
+    }
+    for (const contact of ['Ana handles bookings. My own email is lee@example.com.', 'Ana: ana@example.test, Lee: lee@example.com']) {
+      expect((await finished(contact)).question, contact).toBe('test_client');
+    }
+  });
+
+  it('a_yes_says_done_and_not_now_says_nothing_and_both_move_to_tools', async () => {
+    for (const [text, said] of [[TEST_CLIENT_YES, [TEST_CLIENT_ADDED]], [TEST_CLIENT_NO, []], ['Sure, go ahead', [TEST_CLIENT_ADDED]], ["don't add me", []]] as const) {
+      const offered = await finished(CONTACT);
+      const state = await setupState('setupAnswer', offered.interview_id, { question: 'test_client', text });
+      expect([state.step, state.question], text).toEqual(['tools', null]);
+      expect(state.messages.slice(-1 - said.length), text).toEqual([
+        { role: 'owner', text, choices: [], card: null }, ...said.map((line) => ({ role: 'claude', text: line, choices: [], card: null })),
+      ]);
+      expect(await mockStore.dispatch('setupAnswer', { params: { id: offered.interview_id }, body: { question: 'test_client', text } }), text).toMatchObject({ status: 409 });
+    }
+  });
+
+  it('an_answer_that_is_neither_yes_nor_no_gets_the_same_offer_again', async () => {
+    // A question or a conditional yes is no yes, whatever words it holds.
+    for (const text of ['What does that mean?', 'What does add me as a test client mean?', 'What happens if I say yes?', "If it's free, yes"]) {
+      const offered = await finished(CONTACT);
+      const state = await setupState('setupAnswer', offered.interview_id, { question: 'test_client', text });
+      expect([state.step, state.question], text).toEqual(['questions', 'test_client']);
+      expect(state.messages.slice(-2), text).toEqual([{ role: 'owner', text, choices: [], card: null }, OFFER]);
+    }
+  });
+
+  it('use_your_suggestions_reaches_the_same_offer_and_using_them_again_moves_on', async () => {
+    const state = await finished(CONTACT, true);
+    expect([state.step, state.question]).toEqual(['questions', 'test_client']);
+    expect(state.messages.at(-2)?.text).toContain('Your plan for Lakeview Accounts:');
+    expect(state.messages.at(-1)).toEqual(OFFER);
+    const moved = await setupState('setupSuggestions', state.interview_id, {});
+    expect([moved.step, moved.question]).toEqual(['tools', null]);
+    expect(moved.messages.slice(-2)).toEqual([OFFER, { role: 'owner', text: 'Use your suggestions', choices: [], card: null }]);
+  });
+});
+
 describe("the business's name, from the description", () => {
   it('a_phrase_like_i_run_names_the_business', async () => {
     // The owner introduces themselves first: the business is the one they say they run, not "I'm Ana".
@@ -847,6 +922,66 @@ describe("setup's examples", () => {
   });
 });
 
+describe('what setup reads once the owner allows it', () => {
+  /** The labels of what setup read after the owner allowed it, for `description`. */
+  async function readsFor(description: string): Promise<string[]> {
+    const id = (await startState(description)).interview_id;
+    const state = await setupState('setupConsent', id, { allow: true });
+    return state.messages.filter(({ role }) => role === 'tool_label').map(({ text }) => text);
+  }
+
+  /** Each starter's two web searches, in `START_EXAMPLES`' order: Juniper Hair Studio's as they always were. */
+  const STARTER_SEARCHES = [
+    ['Searched the web: hair salon deposits and late cancellations', 'Searched the web: salon new client consultation form'],
+    ['Searched the web: emergency plumber call-out fees', 'Searched the web: water heater replacement quotes'],
+    ['Searched the web: rental application fees and deposits', 'Searched the web: tenant maintenance request form'],
+    ['Searched the web: CPA free consultation and engagement letters', 'Searched the web: tax return client intake questions'],
+  ];
+  /** Descriptions no starter describes, as the situations' words try them. */
+  const UNMATCHED = [
+    "I'm Lena, and Lena's Bike Repair fixes bikes in Berkeley, Monday to Saturday.",
+    'Soy Ana. Tengo la Panadería Ana en Oakland: pan de masa madre y pasteles por encargo.',
+    // A word that only starts like "hair" names no salon.
+    'Lake Dental is a dental practice treating cavities, chipped teeth and hairline cracks.',
+  ];
+  /** Words that belong to a salon's work: none of them in another business's searches. */
+  const SALON = /\b(?:salons?|hair\w*|balayage|colou?rs?|cuts?|stylists?)\b/i;
+
+  it('each_starter_searches_the_web_for_its_own_business', async () => {
+    // Its Claude memory first, then two searches about running that business, in either language.
+    for (const language of ['en', 'es'] as const) {
+      for (const [at, { chip, description }] of START_EXAMPLES[language].examples.entries()) {
+        expect(await readsFor(description), chip).toEqual([MEMORY_LABEL, ...(STARTER_SEARCHES[at] ?? [])]);
+      }
+    }
+  });
+
+  it('a_business_no_starter_describes_gets_searches_that_fit_any_business', async () => {
+    for (const description of UNMATCHED) {
+      expect(await readsFor(description), description).toEqual([
+        MEMORY_LABEL,
+        'Searched the web: small business booking and deposit policies',
+        'Searched the web: new customer intake questions',
+      ]);
+    }
+  });
+
+  it('only_the_salon_searches_for_salon_work', async () => {
+    const others = [...START_EXAMPLES.en.examples.slice(1), ...START_EXAMPLES.es.examples.slice(1)].map(({ description }) => description);
+    for (const description of [...others, ...UNMATCHED]) {
+      for (const label of await readsFor(description)) expect(label, description).not.toMatch(SALON);
+    }
+    for (const label of STARTER_SEARCHES[0] ?? []) expect(label).toMatch(SALON);
+  });
+
+  it('a_search_that_fails_says_so_for_any_business', async () => {
+    // The memory read, then the single failure label, whatever the business.
+    for (const description of [START_EXAMPLES.en.examples[0]?.description ?? '', UNMATCHED[0] ?? '']) {
+      expect(await readsFor(`${description} Preview: search fails.`), description).toEqual([MEMORY_LABEL, "Couldn't search the web just now"]);
+    }
+  });
+});
+
 describe("the real situations, in the business's own words", () => {
   /**
    * The situations setup tries on `description`'s draft and the draft itself, every question answered
@@ -1147,6 +1282,26 @@ describe("the real situations, in the business's own words", () => {
   });
 });
 
+describe("the built-in agent's task words on a Desk setup made", () => {
+  it('each_starter_gets_its_business_type_and_the_seed_none', async () => {
+    // As setup's start reads a type in the description: the salon is "other", the plumber a trade,
+    // the rentals a landlord and the CPA firm an office, in either language. The seeded Desk, which
+    // setup didn't make, has none (its set is Turner's).
+    const expected = ['other', 'trade', 'landlord', 'office'];
+    for (const language of ['en', 'es'] as const) {
+      mockStore.reset('rivera');
+      const types = [];
+      for (const { description } of START_EXAMPLES[language].examples) {
+        const desk = await started(description);
+        const made = mockStore.world.desks.find((d) => d.summary.slug === desk.slug);
+        types.push(made === undefined ? undefined : setupTaskSet(mockStore.world, made.summary.desk_id));
+      }
+      expect(types, language).toEqual(expected);
+      expect(setupTaskSet(mockStore.world, mockStore.world.desks[0]?.summary.desk_id ?? '')).toBeNull();
+    }
+  });
+});
+
 describe("a Desk's unfinished setup, in the owner's Desks", () => {
   /** Each of the copy's Desks, by id, with the setup interview the owner's Desks name for it. */
   async function setups(): Promise<Map<string, unknown>> {
@@ -1291,10 +1446,10 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect(await repliesTo(slug, 'Llámame, por favor')).toEqual([callback('Linda te llamará el lunes, entre las 8:00 y las 9:00')]);
 
     expect((await repliesTo(slug, 'Book the first one')).at(-1)).toEqual(
-      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With Linda'] }),
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'Tuesday, November 3', lines: ['2:00 pm to 4:00 pm', 'With Linda'] }),
     );
     expect((await repliesTo(slug, '¿Me reservas la primera?')).at(-1)).toEqual(
-      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'martes 3 de noviembre', lines: ['Llegada de 14:00 a 16:00', 'Con Linda'] }),
+      cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'martes 3 de noviembre', lines: ['De 14:00 a 16:00', 'Con Linda'] }),
     );
     // Turner's Desk books with the fixtures' own card.
     expect((await repliesTo(RIVERA.slug, 'Book the first one')).at(-1)).toEqual(rivera.blocks.booking_confirmed.en);

@@ -164,7 +164,7 @@ export const TEAM_OWNER: VisionOwner = {
   current: 'conversations',
   peopleLabel: 'Teammates',
   counts: { conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
-  answeringDescription: 'Claude answers your team under your rules',
+  answeringDescription: 'Within your rules',
 };
 
 export const TEAM_HEADER = {
@@ -286,12 +286,12 @@ export const CLAUDE_ACCOUNT_TURNS = {
 
 /**
  * Dana's last visit, the drain clearing, as the kernel renders a booking card: the day, then
- * "Arriving {start} to {end}" and "With {owner}", with no booking number.
+ * "{start} to {end}" and "With {owner}", with no booking number.
  */
 const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-61',
   title: 'Tuesday, October 20',
-  lines: ['Arriving 10:00 am to 12:00 pm', 'With Mike Turner'],
+  lines: ['10:00 am to 12:00 pm', 'With Mike Turner'],
 });
 
 /** Claude's welcome back: its words, then her last visit's booking card. */
@@ -341,7 +341,7 @@ export const PHONE_TODAY = {
 const PHONE_BOOKING = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-77',
   title: 'Tuesday, November 3',
-  lines: ['Arriving 2:00 pm to 4:00 pm', 'With Mike Turner'],
+  lines: ['2:00 pm to 4:00 pm', 'With Mike Turner'],
 });
 
 /**

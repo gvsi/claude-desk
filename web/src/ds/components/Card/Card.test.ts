@@ -46,4 +46,16 @@ describe('Card', () => {
       /^<article class="cd-card [^"]*" aria-label="Turner Plumbing">/,
     );
   });
+
+  it('a_card_named_by_text_inside_it', () => {
+    // Named by the element whose words it shows, such as Claude's question rendered from Markdown,
+    // so the name reads as the text does; a div card named this way is a group too.
+    const question = createElement('p', { id: 'question' }, 'Which work comes in most?');
+    expect(renderToStaticMarkup(createElement(Card, { as: 'section', labelledBy: 'question', children: question }))).toMatch(
+      /^<section class="cd-card [^"]*" aria-labelledby="question">/,
+    );
+    expect(renderToStaticMarkup(createElement(Card, { labelledBy: 'question', children: question }))).toMatch(
+      /^<div class="cd-card [^"]*" role="group" aria-labelledby="question">/,
+    );
+  });
 });

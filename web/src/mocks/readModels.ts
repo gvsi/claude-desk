@@ -3,7 +3,8 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
-import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
+import { effectiveBrand } from './brand.ts';
+import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, SseEvent, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -29,6 +30,7 @@ import type {
   Today,
   ToolRow,
   TranscriptKind,
+  Triage,
   VisitorTranscript,
 } from '../api/views.ts';
 import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
@@ -71,6 +73,7 @@ export function businessOut(world: MockWorld): BusinessOut {
     name: BUSINESS.name,
     owner_display_name: BUSINESS.owner_display_name,
     timezone: BUSINESS.timezone,
+    brand: effectiveBrand(world.desks[0]?.brand),
     desks: deskSummaries(world),
   };
 }
@@ -79,22 +82,119 @@ function decisionsOf(world: MockWorld, deskId: string): DecisionRecord[] {
   return [...world.decisions.values()].filter((d) => d.deskId === deskId);
 }
 
-/** The most of a visitor's newest message a conversation summary carries, "…" included. */
-const LATEST_VISITOR_TEXT_MAX = 200;
+/** The most of one visitor message the owner's glimpse of it carries, "…" included. */
+const VISITOR_LINE_MAX = 200;
 
 /**
- * What the visitor typed last in `session`, as the API's summary carries it: whitespace collapsed
- * to single spaces, and cut to 199 characters and "…" past 200, with no space left before the
- * "…". Null for an agent's or the owner's chat, the owner's preview, before the visitor writes,
- * and when what they wrote last is all whitespace.
+ * A visitor's message as the owner's one-line glimpse of it (the API's `visitor_line`): whitespace
+ * collapsed to single spaces, and cut to 199 characters and "…" past 200, with no space left
+ * before the "…". Null when nothing is left.
+ */
+function visitorLine(text: string | null): string | null {
+  const chars = Array.from((text ?? '').split(/\s+/).filter(Boolean).join(' '));
+  if (chars.length === 0) return null;
+  return chars.length > VISITOR_LINE_MAX ? `${chars.slice(0, VISITOR_LINE_MAX - 1).join('').trimEnd()}…` : chars.join('');
+}
+
+/**
+ * What the visitor typed last in `session`, as the API's summary carries it (`visitorLine`). Null
+ * for an agent's or the owner's chat, the owner's preview, before the visitor writes, and when
+ * what they wrote last is all whitespace.
  */
 function latestVisitorText(session: SessionRecord): string | null {
   if (session.state.kind !== 'visitor' || session.ownerPreview) return null;
-  const newest = session.items.findLast((item) => item.kind === 'visitor_text');
-  if (newest?.text == null) return null;
-  const chars = Array.from(newest.text.split(/\s+/).filter(Boolean).join(' '));
-  if (chars.length === 0) return null;
-  return chars.length > LATEST_VISITOR_TEXT_MAX ? `${chars.slice(0, LATEST_VISITOR_TEXT_MAX - 1).join('').trimEnd()}…` : chars.join('');
+  return visitorLine(session.items.findLast((item) => item.kind === 'visitor_text')?.text ?? null);
+}
+
+/** What a visitor, or a visiting agent, wrote in a chat (the API's `VISITOR_TEXT`). */
+const SAID: ReadonlySet<TranscriptKind> = new Set(['visitor_text', 'agent_text']);
+
+/**
+ * What Needs you quotes from a chat, read as it stands, as the API's `recent_texts` and
+ * `visitor_lines` read it: the visitor's (or visiting agent's) previous and last messages, oldest
+ * first, each as its glimpse (`visitorLine`), joined with " · ". Just the last when there's one,
+ * and null when nothing is left.
+ */
+function fromTheVisitor(session: SessionRecord | undefined): string | null {
+  const said = (session?.items ?? []).filter((item) => SAID.has(item.kind)).slice(-2);
+  const lines = said.map((item) => visitorLine(item.text)).filter((line) => line !== null);
+  return lines.length > 0 ? lines.join(' · ') : null;
+}
+
+/** The API's agent-only outcome: matched executed receipts/cards, with later decisive events first. */
+function latestAgentOutcome(world: MockWorld, session: SessionRecord): ConversationSummary['latest_outcome'] {
+  if (session.state.kind !== 'agent') return null;
+  const records = [...world.decisions.values()].filter((d) => d.decision.session_id === session.state.session_id);
+  const decisions = new Map(records.map((d) => [d.decision.decision_id, d.decision]));
+  const desk = world.desk(session.deskId);
+  const atDecision = (decision: Decision) => Date.parse(desk?.ledger[decision.ledger_seq - 1]?.created_at ?? '') ||
+    records.find((r) => r.decision.decision_id === decision.decision_id)?.createdAt || 0;
+  type Outcome = ConversationSummary['latest_outcome'];
+  const events: { at: number; seq: number; priority: number; n: number; outcome: Outcome }[] = [];
+  for (const { decision } of records) {
+    const { state, action } = decision;
+    if (decision.outcome === 'hold' || ['refused', 'refused_at_execution', 'held', 'denied', 'expired', 'cancelled'].includes(state) ||
+      (state === 'executed' && ['native.book', 'native.charge_mandate', 'native.request_callback'].includes(action?.tool ?? ''))) {
+      events.push({ at: atDecision(decision), seq: decision.ledger_seq, priority: 0, n: 0,
+        outcome: state === 'refused' || state === 'refused_at_execution' ? 'turned_down' : null });
+    }
+  }
+  for (const handoff of world.handoffs.values()) {
+    if (handoff.handoff.session_id === session.state.session_id) {
+      const entry = desk?.ledger.find((e) => e.event.kind === 'desk_data' && e.event.summary.kind !== undefined &&
+        Array.isArray(e.event.summary.refs) && e.event.summary.refs.includes(handoff.handoff.handoff_id));
+      events.push({ at: handoff.createdAt, seq: entry?.seq ?? 0, priority: 2, n: 0, outcome: null });
+    }
+  }
+  const done: Partial<Record<string, { tool: string; outcome: Outcome }>> = {
+    booking_confirmed: { tool: 'native.book', outcome: 'visit_booked' },
+    charge_confirmed: { tool: 'native.charge_mandate', outcome: 'deposit_paid' },
+  };
+  // Turn ends live in the stream rather than the transcript. Tag each event with its last end,
+  // just as the API does, so an undelivered turn cannot lend its receipt to a later card.
+  const turnEnds = new Map<SseEvent, number>();
+  let lastEnd = 0;
+  for (const { seq, ev } of session.events) {
+    if (ev.type === 'turn_end') lastEnd = seq;
+    turnEnds.set(ev, lastEnd);
+  }
+  let pending: Decision[] = [];
+  let previousEnd = 0;
+  for (const item of [...session.items].sort((a, b) => a.n - b.n)) {
+    const event = item.event;
+    if (['visitor_text', 'agent_text', 'whisper'].includes(item.kind)) pending = [];
+    if (event && (item.kind === 'status' || item.kind === 'delivered')) {
+      const end = turnEnds.get(event) ?? 0;
+      if (end !== previousEnd) pending = [];
+      previousEnd = end;
+    }
+    if (item.kind === 'status') {
+      const decision = event && 'decision_id' in event ? decisions.get(event.decision_id) : undefined;
+      if (event && 'state' in event && event.state === 'executed' && decision?.state === 'executed') pending.push(decision);
+      continue;
+    }
+    if (item.kind !== 'delivered' || event?.type !== 'message') continue;
+    const receipts = pending;
+    pending = [];
+    const cards = event.blocks.filter((b) => b.kind === 'card').map((b) => b.template ?? '');
+    if (event.handoff || cards.includes('handoff')) {
+      events.push({ at: Date.parse(item.created_at), seq: event.ledger_seq, priority: 2, n: item.n, outcome: null });
+      continue;
+    }
+    for (const card of cards.reverse()) {
+      if (card === 'payment_confirmed' && event.author === 'desk') {
+        events.push({ at: Date.parse(item.created_at), seq: event.ledger_seq, priority: 1, n: item.n, outcome: 'deposit_paid' });
+        break;
+      }
+      const result = done[card];
+      if (!result) continue;
+      const decision = receipts.filter((d) => d.action?.tool === result.tool).sort((a, b) => b.ledger_seq - a.ledger_seq)[0];
+      if (decision) events.push({ at: atDecision(decision), seq: decision.ledger_seq, priority: 1, n: item.n, outcome: result.outcome });
+      break;
+    }
+  }
+  events.sort((a, b) => a.at - b.at || a.seq - b.seq || a.priority - b.priority || a.n - b.n);
+  return events.at(-1)?.outcome ?? null;
 }
 
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {
@@ -112,6 +212,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
     latest_visitor_text: latestVisitorText(session),
+    latest_outcome: latestAgentOutcome(world, session),
   };
 }
 
@@ -125,22 +226,31 @@ function needsYouSession(session: SessionRecord | undefined, sessionId: string):
   };
 }
 
+/**
+ * Every held request and open handoff, oldest first. Each quotes what its visitor wrote most
+ * recently, as of this read (`fromTheVisitor`). A handoff also carries its chat's newest triage
+ * summary (`newestTriageSummary`); a held request never does, as the API sends it, since a visitor
+ * could steer a summary to sway an approval.
+ */
 export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
   const deskId = desk.summary.desk_id;
   const held = decisionsOf(world, deskId)
     .filter((d) => d.decision.state === 'held')
-    .map((d) => ({
-      at: d.createdAt,
-      item: {
-        decision: d.decision,
-        handoff: null,
-        held_by: desk.policy.cards.find((card) => card.card_id === d.decision.card_ids[0])?.reason ?? null,
-        held_at: isoTime(d.createdAt),
-        session: needsYouSession(world.sessions.get(d.decision.session_id), d.decision.session_id),
-        from_the_visitor: d.fromTheVisitor,
-      } satisfies NeedsYouItem,
-    }));
-  // An open handoff quotes what its visitor wrote last, as of this read (the API's `last_texts`).
+    .map((d) => {
+      const session = world.sessions.get(d.decision.session_id);
+      return {
+        at: d.createdAt,
+        item: {
+          decision: d.decision,
+          handoff: null,
+          held_by: desk.policy.cards.find((card) => card.card_id === d.decision.card_ids[0])?.reason ?? null,
+          held_at: isoTime(d.createdAt),
+          session: needsYouSession(session, d.decision.session_id),
+          from_the_visitor: fromTheVisitor(session),
+          claude_summary: null,
+        } satisfies NeedsYouItem,
+      };
+    });
   const callbacks = [...world.handoffs.values()]
     .filter((h) => h.deskId === deskId && h.handoff.status === 'open')
     .map((h) => {
@@ -153,7 +263,8 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
           held_by: null,
           held_at: null,
           session: needsYouSession(session, h.handoff.session_id),
-          from_the_visitor: session?.lastVisitorText ?? null,
+          from_the_visitor: fromTheVisitor(session),
+          claude_summary: newestTriageSummary(world, desk, h.handoff.session_id),
         } satisfies NeedsYouItem,
       };
     });
@@ -551,8 +662,7 @@ export function reports(world: MockWorld, desk: DeskRecord, days: number = REPOR
  * from its deciding policies and its `decide` entry (`refusalCause`); a stopped draft has none.
  */
 export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
-  const stopped: Attempt[] = decisionsOf(world, desk.summary.desk_id)
-    .filter((d) => d.decision.outcome === 'refuse')
+  const stopped: Attempt[] = refusals(world, desk)
     .map((d) => ({
       ref_id: d.decision.decision_id,
       kind: 'refused',
@@ -560,13 +670,7 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
       card_ids: [...d.decision.card_ids],
       origin: 'kernel',
       created_at: isoTime(d.createdAt),
-      // The scripted agent's over-limit receipt identifies this subject in either language.
-      triage: Object.values(VISITOR_PLAIN).some((words) => words.refused_over_mandate === d.decision.visitor_plain)
-        ? {
-            category: 'limits',
-            summary: 'The agent asked to charge more than its signed limit. The Desk refused the charge.',
-          }
-        : null,
+      triage: refusalTriage(d),
       ledger_seq: d.decision.ledger_seq,
       cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null, {
         verified: world.sessions.get(d.decision.session_id)?.state.verified ?? false,
@@ -579,14 +683,54 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
     card_ids: [],
     origin: entry.event.origin,
     created_at: entry.created_at,
-    triage: {
-      category: 'wording',
-      summary: 'The visitor asked for a discount. Claude’s draft stated the discount in its own words, so the Desk stopped the reply.',
-    },
+    triage: stoppedReplyTriage(),
     ledger_seq: entry.seq,
     cause: null,
   }));
   return [...stopped, ...replies].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/** The requests the kernel refused at decide time on `desk`. */
+function refusals(world: MockWorld, desk: DeskRecord): DecisionRecord[] {
+  return decisionsOf(world, desk.summary.desk_id).filter((d) => d.decision.outcome === 'refuse');
+}
+
+/**
+ * The AI-written triage of a refused request, as Safety shows it: the scripted agent's over-limit
+ * charge, whose receipt identifies it in either language, and none for any other.
+ */
+function refusalTriage(d: DecisionRecord): Triage | null {
+  if (!Object.values(VISITOR_PLAIN).some((words) => words.refused_over_mandate === d.decision.visitor_plain)) return null;
+  return { category: 'limits', summary: 'The agent asked to charge more than its signed limit. The Desk refused the charge.' };
+}
+
+/** The AI-written triage of a draft of Claude's the reply check stopped, as Safety shows it. */
+function stoppedReplyTriage(): Triage {
+  return {
+    category: 'wording',
+    summary: 'The visitor asked for a discount. Claude’s draft stated the discount in its own words, so the Desk stopped the reply.',
+  };
+}
+
+/**
+ * The newest AI-written triage summary of a chat's stopped attempts, the one Safety shows for it,
+ * or null when nothing in it was triaged: what Needs you sends on a handoff (the API's
+ * `newest_triage`). Here the ledger's order says which is newest. The API keeps the summary
+ * written last, and its summaries are written by background jobs that can finish out of order, so
+ * with two triaged attempts in one chat the two can pick differently. The mock writes no summary
+ * late, so it doesn't model that.
+ */
+function newestTriageSummary(world: MockWorld, desk: DeskRecord, sessionId: string): string | null {
+  const triaged = [
+    ...refusals(world, desk)
+      .filter((d) => d.decision.session_id === sessionId)
+      .map((d) => ({ seq: d.decision.ledger_seq, triage: refusalTriage(d) })),
+    ...stoppedReplies(desk)
+      .filter((entry) => entry.event.session_id === sessionId)
+      .map((entry) => ({ seq: entry.seq, triage: stoppedReplyTriage() })),
+  ];
+  const newest = triaged.filter((t) => t.triage !== null).sort((a, b) => a.seq - b.seq).at(-1);
+  return newest?.triage?.summary ?? null;
 }
 
 export function ledgerPage(desk: DeskRecord): LedgerPage {
@@ -631,7 +775,7 @@ export function publicDesk(desk: DeskRecord, language: Language): PublicDesk {
   return {
     ...rivera.publicDesk[language],
     desk_name: desk.summary.name,
-    brand: { ...BUSINESS.brand },
+    brand: effectiveBrand(desk.brand),
     agent_card: AGENT_CARD_BLOCKS[language].map((block) => ({ ...block })),
     open_status: desk.openStatus?.[language] ?? null,
   };

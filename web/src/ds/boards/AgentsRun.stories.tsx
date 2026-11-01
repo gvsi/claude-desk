@@ -29,7 +29,7 @@ const OPEN_TIMES = [
 ];
 const BOOKED = [
   proseBlock('Here are the details.'),
-  cardBlock('booking_confirmed', { fact_id: 'booking:B-81', title: 'Thursday, October 29', lines: ['Arriving 2:00 pm to 4:00 pm', 'With Mike Turner'] }),
+  cardBlock('booking_confirmed', { fact_id: 'booking:B-81', title: 'Thursday, October 29', lines: ['2:00 pm to 4:00 pm', 'With Mike Turner'] }),
 ];
 
 /** "Book the earliest visit", sent and finished: two signed requests, each answered with a card. */

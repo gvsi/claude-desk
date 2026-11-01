@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { buildTokensCss, type DesignTokens, type TypeStyle } from '../../scripts/build-tokens.mjs';
-import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast } from './contrast';
+import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast, tokenHex } from './contrast';
 import tokens from './tokens.json' with { type: 'json' };
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
@@ -77,6 +77,19 @@ describe('design tokens', () => {
     };
     const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
     expect(actual).toEqual(expected);
+  });
+
+  test('a_focused_fields_edge_is_the_tertiary_ink', () => {
+    // A text field with focus shows its caret and its own border one step stronger, never a ring and
+    // never blue (owner, 2026-11-01, WCAG 2.4.7): line-field-focus, the tertiary ink.
+    expect(tokenValue('line-field-focus')).toBe('{text-tertiary}');
+  });
+
+  test('focus_ring_is_the_secondary_ink', () => {
+    // Keyboard focus shows a warm ring, never the link blue: the secondary ink, which the About pages' paper
+    // points at its own (owner, 2026-11-01). Text entry draws no ring at all, so no other ring token exists.
+    expect(tokenValue('ring-focus')).toBe('{text-secondary}');
+    expect(colorNames.filter((name) => name.startsWith('ring-'))).toEqual(['ring-focus']);
   });
 
   test('intro_dialog_tokens_match_the_board', () => {
@@ -325,9 +338,12 @@ describe('design tokens', () => {
     add(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'bg-app');
     add(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'bg-surface');
     add(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5);
-    const marks = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'];
+    const marks = ['accent-blue', 'ring-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'];
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
+    // The focus ring on the reviewer bar, and just inside a menu item that has focus.
+    add(['ring-focus'], ['bg-muted'], 3);
+    add(['ring-focus'], ['fill-hover'], 3, 'bg-surface');
     // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
     // top bar, and the intro dialog's surface; its dark ink on the intro illustration's light card.
     add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3);
@@ -358,6 +374,8 @@ describe('design tokens', () => {
     add(['text-primary', 'text-secondary'], ['fill-card'], 4.5, 'fill-card', 'bg-app');
     // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
     add(['line-field'], ['bg-surface', 'bg-app'], 3);
+    // A text field's border while it has focus, one step stronger than its outline.
+    add(['line-field-focus'], ['bg-surface', 'bg-app'], 3);
     // The outlined value of an inline CopyField, in a card on the agents page.
     add(['line-field'], ['fill-card'], 3, 'bg-app');
     // The deny answers in a held request's card: danger at rest and on hover, then danger-ghost,
@@ -493,6 +511,18 @@ describe('design tokens', () => {
     expect(tokenValue('size-touch')).toBe('44px');
   });
 
+  test('qr_tile_tokens_match_the_board', () => {
+    // N-Live-REV-QR-B: the QR code on Share's card, its dark modules on a sand tile with an inset hairline.
+    expect({ tile: tokenValue('qr-tile'), ink: tokenValue('qr-ink'), hairline: tokenValue('qr-hairline') }).toEqual({
+      tile: '#eae6dc',
+      ink: '{bg-app}',
+      hairline: 'rgba(28,27,25,0.13)',
+    });
+    // The code reads no CSS, so it takes them as hex, its ink through its alias; a translucent one has none.
+    expect([tokenHex('qr-ink'), tokenHex('qr-tile')]).toEqual(['#1c1b19', '#eae6dc']);
+    expect(() => tokenHex('qr-hairline')).toThrow();
+  });
+
   test('settings_measures_are_tokens', () => {
     // Settings' section links, 200 px wide beside the content, as the signed Settings boards draw them.
     expect(tokenValue('size-sub-nav')).toBe('200px');
@@ -517,6 +547,7 @@ describe('design tokens', () => {
       'line-control-hover',
       'line-hairline',
       'mark-hairline',
+      'qr-hairline',
       'scrim',
     ]);
     for (const [name, reason] of Object.entries(DECORATIVE_COLORS)) {
@@ -527,6 +558,18 @@ describe('design tokens', () => {
     const paired = new Set(CONTRAST_PAIRS.flatMap((p) => [p.fg, p.ground]));
     const unclassified = colorNames.filter((name) => !paired.has(name) && !(name in DECORATIVE_COLORS));
     expect(unclassified).toEqual([]);
+  });
+
+  test('word_settle_is_a_token', () => {
+    // Each new word of Claude's reply settles in over 150 ms as it streams or is revealed, as the
+    // signed Markdown and streaming boards draw it.
+    expect(tokenValue('motion-settle')).toBe('150ms');
+  });
+
+  test('follow_beat_is_a_token', () => {
+    // After a revealed reply's words, its cards and then their receipts fade in 120 ms apart, as the
+    // signed visitor reveal boards draw it.
+    expect(tokenValue('motion-follow')).toBe('120ms');
   });
 
   test('motion_stays_in_range', () => {

@@ -87,7 +87,9 @@ The exact kernel contract (how a configured tool is stored, pinned, reviewed and
 - Setup publishes text claims to the Desk's charter as `policy:` keys, so the policy card can cite them: `policy:about`, `policy:pricing` ("Pricing is discussed after we understand the work."), `policy:intake`, `policy:after_hours`, `policy:urgent`, and `policy:service_area` (shown as "Service area", #307). They reach the agent through `<desk_context>` and stay untrusted text.
 - The visitor prompt gains a short business-aware section: use the Desk's own words; when there's no price for a request, offer the business's next step (book a consult, take the details) instead of a dead end; qualify a new request with the intake questions; treat what the business calls urgent as urgent. The API owns this prompt change, which must pass the evals gate.
 - The reply check's word list blocks "Your appointment is confirmed." but lets "Your viewing is confirmed." through: the kernel owns this reply-check change under invariant 2, alongside typed bookings.
-- The demo agent's tasks ask every Desk for a water heater visit: draw them from the Desk's own tools and catalog.
+- The demo agent's tasks asked every Desk for a water heater visit. Each task is now a fixed line that code picks by the Desk's setup business type (trade, office, landlord or other), and the seeded Turner Desk keeps its own lines; the owner signed the lines and the agents page's chips on 2026-11-01 (#572). Two other designs were rejected:
+  - (a) Building the lines from the Desk's own tool or catalog names would put the Desk's text into the agent's model, whose requests its launcher sees unchecked, and so widen that recorded exception.
+  - (b) Hiding the agent's words for those tasks would undo the owner's decision to show them.
 
 ## Part D: make today's tools work on any new Desk
 

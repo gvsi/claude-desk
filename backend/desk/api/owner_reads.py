@@ -22,7 +22,9 @@ Recorded history (Plan 01d): a copy may open on a night the kernel replayed into
 counts any of it, and the reports flag themselves when they do (`recorded_history`), from what the API's reads carry:
 its own rows' `replay_id`, and ledger entries the kernel marked `summary.replayed`, which also mark the decisions they
 record (a booking, a refusal; a decision whose entry can't be read counts as replayed, failing closed). Replayed rows
-never count as needing the owner, so "needs you" is never flagged.
+never count as needing the owner, so "needs you" is never flagged. A conversation, its transcript and a lead say
+whether they are recorded history too (`replayed`, from `history_sessions`), so the owner's screens label them and
+offer no take-over on them.
 """
 
 import asyncio
@@ -34,11 +36,12 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import DateTime, cast, func, literal, select, type_coerce, union_all
+from sqlalchemy.dialects.postgresql import JSONB, JSONPATH
 
 from desk.api.deps import OwnerCtx
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
-from desk.api.ro import decision_replayed, replayed
+from desk.api.ro import decision_replayed, replayed, ro_view, set_copy
 from desk.api.schemas import (
     Attempt,
     Briefing,
@@ -46,6 +49,7 @@ from desk.api.schemas import (
     BriefingList,
     BriefingNewest,
     ConversationSummary,
+    Lead,
     DeskSetup,
     Handoff,
     NeedsYouItem,
@@ -59,8 +63,8 @@ from desk.api.schemas import (
 )
 from desk.api.setup import INTERVIEWS
 from desk.api.sse import RUN_EVENTS
-from desk.api.store import MESSAGES, WITH_EVENTS, newest_triage, triaged
-from desk.contracts import Decision, DecisionState
+from desk.api.store import AUDIENCE_KINDS, MESSAGES, WITH_EVENTS, newest_triage, triaged
+from desk.contracts import Decision, DecisionState, is_business_tool
 
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
@@ -80,6 +84,9 @@ BOOKING_CLAIM = "it said a booking was made instead of showing the card"
 REPLY_WHY_BY_RULE = {
     "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
     "soft.jev": "a second check flagged a promise the business's records don't back",
+    # The owner's wording of 2026-11-01: chats render Markdown.
+    "markdown.link": "it linked to a site the business's contact details don't name",
+    "markdown.image": "it included an image",
     # Proposed wording awaiting the owner's sign-off.
     "policy_combined": "it cited a policy line the checkpoint now withholds",
     "soft.unavailable": "the checkpoint wasn't available",
@@ -475,12 +482,12 @@ class Activity:
     entries at `entry_time`, the API's transcript rows at their `created_at`."""
 
     people: People
-    bookings: list[Timed]                      # native or configured typed booking executed, at its ledger entry
+    bookings: list[Timed]                      # native.book or a typed_booking block executed, at its ledger entry
     booked: dict[str, int]                     # each booking's amount, by its decision ID (`booked_amounts`)
     leads: list[Timed]
     stopped: list[Stopped]
     holds: list[Timed]                         # decisions with outcome hold
-    callbacks: list[Timed]                     # native.request_callback executed, at its ledger entry
+    callbacks: list[Timed]                     # native.request_callback or an urgent block executed, at its ledger entry
     stepped: list[Timed]                       # the owner stepping into a session
     texts: list[Timed]                         # visitor and agent text rows
     replies: list[Timed]                       # Claude's delivered events whose handoff flag is false
@@ -522,14 +529,22 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
     return found
 
 
+def from_price_list(quote: dict) -> bool:
+    """Whether a quote was priced from the Desk's price list, not written by a business tool: a purpose payment's
+    quote record names its tool (`desk.<name>`) as its line's item, which no price list item can (`ITEM_ID_PATTERN`
+    has no dot)."""
+    return not any(is_business_tool(line["item_id"]) for line in quote["items"])
+
+
 def booked_amounts(bookings: Iterable[Timed], quotes: Iterable[dict]) -> dict[str, int]:
     """What each booking was booked for, by its decision ID. Taking the bookings in time order, each takes the newest
     quote of its session made at or before it (the latest `created_at`, then the greatest `quote_id`) that no earlier
     booking took, and is booked for its `amount_cents`; with none it is booked for 0, so a quote backs at most one
-    booking. A quote with no `created_at` can't be placed before a booking and backs none."""
+    booking. A quote with no `created_at` can't be placed before a booking and backs none, nor does a purpose
+    payment's quote record, such as a deposit's (`from_price_list`)."""
     by_session: dict[str, list[dict]] = {}
     for quote in quotes:
-        if quote["created_at"] is not None and quote["session_id"] is not None:
+        if quote["created_at"] is not None and quote["session_id"] is not None and from_price_list(quote):
             by_session.setdefault(quote["session_id"], []).append(quote)
     taken: set[str] = set()
     amounts: dict[str, int] = {}
@@ -571,7 +586,8 @@ def _stepped_in(decisions: list[dict], ledger: list[dict]) -> list[Timed]:
 
 async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     """The Desk's activity in its visitor and agent sessions, their transcript rows from `start` on. Decisions are read
-    before the ledger, so every decision's entry is there."""
+    before the ledger, so every decision's entry is there. A business tool's run counts under its tool's current block
+    (wish #465 tracks recording the block each run used)."""
     who = await people(ctx, desk_id)
     leads = [row for row in await ctx.ro.rows("leads", desk_id=desk_id)
              if row["session_id"] is None or row["session_id"] in who.sessions]
@@ -579,8 +595,15 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     entries = {entry["seq"]: entry for entry in ledger}
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
+    tools_by_block = {"urgent": {"native.request_callback"}, "typed_booking": {"native.book"}}
+    for row in await ctx.ro.rows("tools", desk_id=desk_id, source="business"):
+        business = row["business"]
+        config = business.get("config") if isinstance(business, dict) else None
+        block = config.get("block") if isinstance(config, dict) else None
+        if isinstance(block, str) and block in tools_by_block:
+            tools_by_block[block].add(row["tool"])
 
-    def executed(*tools: str) -> list[Timed]:
+    def executed(tools: set[str]) -> list[Timed]:
         return [Timed(at=entry_time(entry), session_id=row["session_id"], ref_id=row["decision_id"],
                       line=row["reason_plain"], replayed=decision_replayed(row, entry))
                 for row in decisions if row["tool"] in tools and row["state"] == "executed"
@@ -609,13 +632,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
                 handoffs.append(at)
             else:
                 replies.append(at)
-    tools = await ctx.ro.rows("tools", desk_id=desk_id, source="business")
-    typed_bookings = [row["tool"] for row in tools if row.get("business") is not None
-                      and row["business"]["config"]["block"] == "typed_booking"]
-    bookings = executed("native.book", *typed_bookings)
+    bookings = executed(tools_by_block["typed_booking"])
     return Activity(
         people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
-        callbacks=executed("native.request_callback"),
+        callbacks=executed(tools_by_block["urgent"]),
         leads=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["lead_id"], line=row["note"])
                for row in leads],
         stopped=_stopped_attempts(decisions, ledger, who.sessions),
@@ -856,6 +876,152 @@ async def reports(ctx: OwnerCtx, desk_id: str, now: datetime, days: int) -> Repo
 # Conversations ------------------------------------------------------------------------------------------------
 
 
+async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decisions: list[dict]) -> dict[str, str | None]:
+    """Read only event metadata for this Desk's agents in one statement, never their transcripts.
+
+    A shown done card needs its matching tool's executed receipt in the same turn. Kernel-authored
+    payment confirmations stand on their own. Current decisions and handoff creation entries provide
+    barriers even before their status/message is delivered. Use the decision's current ledger time,
+    not its creation time: execution can refuse an older decision after a newer success.
+    """
+    if not sessions:
+        return {}
+    by_id = {row["decision_id"]: row for row in decisions if row["session_id"] in sessions}
+    by_seq = {row["ledger_seq"]: row for row in by_id.values()}
+    ledger = ro_view(ctx.ro.schema, "ledger_entries")
+    event = type_coerce(ledger.c.event, JSONB)
+    starts_turn = MESSAGES.c.kind.in_((*VISITOR_TEXT, "whisper", "action_update")) | MESSAGES.c.wake
+    ended = RUN_EVENTS.alias("ended_turn")
+    # Event IDs also order turn metrics (agents need not publish an SSE turn_end).
+    last_end = select(func.max(ended.c.id)).where(
+        ended.c.copy_id == ctx.copy_id, ended.c.desk_id == desk_id,
+        ended.c.session_id == MESSAGES.c.session_id, ended.c.id < RUN_EVENTS.c.id,
+        ((ended.c.kind == "sse") & (ended.c.type == "turn_end"))
+        | ((ended.c.kind == "metric") & (ended.c.type == "turn"))).correlate(MESSAGES, RUN_EVENTS).scalar_subquery()
+    # Keep card template names and receipt identifiers, leaving message text and card contents in SQL.
+    messages = select(
+        MESSAGES.c.session_id, MESSAGES.c.created_at, MESSAGES.c.n, MESSAGES.c.kind,
+        func.jsonb_build_object(
+            "starts_turn", starts_turn, "last_end", last_end,
+            "state", RUN_EVENTS.c.payload["state"], "decision_id", RUN_EVENTS.c.payload["decision_id"],
+            "author", RUN_EVENTS.c.payload["author"], "handoff", RUN_EVENTS.c.payload["handoff"],
+            "ledger_seq", RUN_EVENTS.c.payload["ledger_seq"],
+            "cards", func.jsonb_path_query_array(RUN_EVENTS.c.payload,
+                                                  cast('$.blocks[*] ? (@.kind == "card").template', JSONPATH))).label("payload")
+    ).select_from(WITH_EVENTS).where(
+        MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
+        MESSAGES.c.session_id.in_(sessions), MESSAGES.c.kind.in_(AUDIENCE_KINDS["owner"]) | starts_turn,
+        MESSAGES.c.kind != "stopped_draft")
+    # Handoff creation has a kind; closing/replacing one has no kind and cannot restore a success.
+    entries = select(
+        event["session_id"].astext, cast(ledger.c.created_at, DateTime(timezone=True)),
+        ledger.c.seq, literal("ledger"), event
+    ).where(ledger.c.copy_id == ctx.copy_id, ledger.c.desk_id == desk_id,
+            event["session_id"].astext.in_(sessions),
+            ledger.c.seq.in_(list(by_seq)) | (
+                (event["kind"].astext == "desk_data")
+                & (event["summary"]["part"].astext == "handoffs")
+                & event["summary"]["kind"].astext.in_(("card", "callback"))))
+    rows = (await ctx.ro.conn.execute(union_all(messages, entries))).all()
+    decision_times = {row.n: utc(row.created_at) for row in rows if row.kind == "ledger" and row.n in by_seq}
+    # Ledger sequence orders equal timestamps; a shown card follows its own execution.
+    events: dict[str, list[tuple]] = {session: [] for session in sessions}
+    for decision in by_id.values():
+        state, tool = decision["state"], decision["tool"]
+        if decision["outcome"] == "hold" or state in {"refused", "refused_at_execution", "held", "denied", "expired", "cancelled"} or (
+                state == "executed" and tool in {"native.book", "native.charge_mandate", "native.request_callback"}):
+            outcome = "turned_down" if state in {"refused", "refused_at_execution"} else None
+            events[decision["session_id"]].append((
+                decision_times.get(decision["ledger_seq"], utc(decision["created_at"])),
+                decision["ledger_seq"], 0, 0, outcome))
+    pending: dict[str, list[dict]] = {}
+    turn_ends: dict[str, int | None] = {}
+    tools = {"booking_confirmed": ("native.book", "visit_booked"),
+             "charge_confirmed": ("native.charge_mandate", "deposit_paid")}
+    for row in sorted(rows, key=lambda row: row.n):
+        session, payload = row.session_id, row.payload or {}
+        if row.kind == "ledger":
+            if (payload.get("kind") == "desk_data" and (payload.get("summary") or {}).get("part") == "handoffs"):
+                events[session].append((utc(row.created_at), payload.get("ledger_seq", row.n), 2, row.n, None))
+            continue
+        if payload.get("starts_turn"):
+            pending.pop(session, None)
+        if row.kind in {"status", "delivered"}:
+            last_end = payload.get("last_end")
+            if last_end != turn_ends.get(session):
+                pending.pop(session, None)
+            turn_ends[session] = last_end
+        if row.kind == "status":
+            decision = by_id.get(payload.get("decision_id"))
+            if payload.get("state") == "executed" and decision and decision["state"] == "executed":
+                pending.setdefault(session, []).append(decision)
+            continue
+        if row.kind != "delivered":
+            continue
+        receipts = pending.pop(session, [])
+        cards = payload.get("cards") or []
+        if payload.get("handoff") or "handoff" in cards:
+            events[session].append((utc(row.created_at), payload.get("ledger_seq", row.n), 2, row.n, None))
+            continue
+        for card in reversed(cards):
+            if card == "payment_confirmed" and payload.get("author") == "desk":
+                events[session].append((utc(row.created_at), payload.get("ledger_seq", 0), 1, row.n, "deposit_paid"))
+                break
+            if card not in tools:
+                continue
+            tool, outcome = tools[card]
+            matched = [d for d in receipts if d["tool"] == tool]
+            if matched:
+                decision = max(matched, key=lambda d: d["ledger_seq"])
+                events[session].append((decision_times.get(decision["ledger_seq"], utc(decision["created_at"])),
+                                        decision["ledger_seq"], 1, row.n, outcome))
+            break
+    return {session: max(found)[-1] if found else None for session, found in events.items()}
+
+
+async def history_sessions(ctx: OwnerCtx, desk_id: str) -> tuple[set[str], set[str]]:
+    """The Desk's sessions that are recorded history, and those known to be live. A session is recorded history when
+    the API stored its transcript with a `replay_id` (`store_replayed_night`) or the kernel marked one of its `session`
+    ledger entries replayed (which only the kernel writes, for history it wrote into the copy); it is known live when it
+    has `session` entries, none of them marked, and no stored row with a `replay_id`. A live session is never recorded
+    history: its rows carry no `replay_id`, and the kernel opens it with an unmarked entry."""
+    stored = set((await ctx.ro.conn.scalars(select(MESSAGES.c.session_id).distinct().where(
+        MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.replay_id.is_not(None)))).all())
+    entries = ro_view(ctx.ro.schema, "ledger_entries")
+    try:
+        await set_copy(ctx.ro.conn, ctx.copy_id)
+        events = (await ctx.ro.conn.execute(select(entries.c.event).where(
+            entries.c.copy_id == ctx.copy_id, entries.c.desk_id == desk_id,
+            entries.c.event.op("->>")("kind") == "session"))).scalars().all()
+    finally:
+        await ctx.ro.done()
+    recorded, opened = set(stored), set()
+    for event in events:
+        session_id = event.get("session_id") if isinstance(event, dict) else None
+        if isinstance(session_id, str):
+            opened.add(session_id)
+            if replayed({"event": event}):
+                recorded.add(session_id)
+    return recorded, opened - recorded
+
+
+async def transcript_replayed(ctx: OwnerCtx, desk_id: str, session_id: str) -> bool:
+    """Whether an opened conversation is recorded history (`history_sessions`)."""
+    recorded, _ = await history_sessions(ctx, desk_id)
+    return session_id in recorded
+
+
+async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
+    """The leads visitors left on the Desk, newest first, their names and notes as typed (untrusted text). A lead is
+    recorded history unless the session it was left in is known live (`history_sessions`), failing closed as
+    `decision_replayed` does: one with no session, or a session the ledger doesn't show opening, counts as history."""
+    _, live = await history_sessions(ctx, desk_id)
+    rows = sorted(await ctx.ro.rows("leads", desk_id=desk_id),
+                  key=lambda row: (utc(row["created_at"]), row["lead_id"]), reverse=True)
+    return [Lead(lead_id=row["lead_id"], display_name=row["display_name"], note=row["note"],
+                 created_at=row["created_at"], replayed=row["session_id"] not in live) for row in rows]
+
+
 async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:
     """The Desk's conversations: each visitor or agent session with a transcript row or a decision, the latest
     activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
@@ -875,6 +1041,9 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
     visitors = [session_id for session_id, row in who.sessions.items()
                 if session_id in latest and row["kind"] == "visitor" and not row["preview"]]
     said = await last_texts(ctx, desk_id, visitors, kinds=("visitor_text",))
+    outcomes = await agent_outcomes(ctx, desk_id, [session_id for session_id, row in who.sessions.items()
+                                                   if row["kind"] == "agent" and session_id in latest], decisions)
+    recorded, _ = await history_sessions(ctx, desk_id)
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
@@ -883,7 +1052,8 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
             session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
             mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
-            latest_visitor_text=visitor_line(said.get(session_id))))
+            latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcomes.get(session_id),
+            replayed=session_id in recorded))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found

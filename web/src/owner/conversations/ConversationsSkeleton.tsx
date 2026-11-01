@@ -127,7 +127,7 @@ function HandoffCardShape({ anchor }: { anchor?: string }) {
 }
 
 /**
- * The held request's card, as `ApprovalCard` lays one out: its status line, Claude's summary, the
+ * The held request's card, as `ApprovalCard` lays one out: its status line, the kernel's reason, the
  * visitor's words and the rule that held it beside its icon, each as many lines as its words take,
  * then Allow and Deny at the answers' own heights (`cd-conversation-skeleton__answer`).
  */
@@ -218,7 +218,11 @@ function ControlsRoom() {
   );
 }
 
-/** The transcript's region, opened at its end as the chat's is: at its top when all of it fits. */
+/**
+ * The transcript's region, opened at its end as the chat's is: at its top when all of it fits. In a
+ * window too short for the region, where it takes its own height and the open conversation around
+ * it scrolls instead (as the chat's does, `useEndInView`), that opens at its end.
+ */
 function useOpensAtTheEnd() {
   const region = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -226,6 +230,9 @@ function useOpensAtTheEnd() {
     if (!element) return undefined;
     const toTheEnd = () => {
       element.scrollTop = element.scrollHeight;
+      if (element.scrollHeight > element.clientHeight) return;
+      const open = element.closest<HTMLElement>('.cd-conversations__open');
+      if (open && getComputedStyle(open).overflowY === 'auto') open.scrollTop = open.scrollHeight;
     };
     toTheEnd();
     if (typeof ResizeObserver !== 'function') return undefined;

@@ -22,6 +22,8 @@ import {
 
 import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
+import type { RuleChatOut } from '../api/views.ts';
+import { playReply } from './ownerStreams.ts';
 import { SERVED_KEYS } from './served.ts';
 import { streamAfter, type MockAnswer, type MockStore } from './store.ts';
 
@@ -112,6 +114,45 @@ function frame(seq: number, ev: SseEvent): ServerSentEventMessage<EventMap> {
   return { id: String(seq), event: ev.type, data: ev } as ServerSentEventMessage<EventMap>;
 }
 
+/** One event as an event stream frames it: its name and one line of JSON. */
+function sseFrame(name: string, data: unknown): string {
+  return `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+/**
+ * A 200 event stream answering a post, which `sse()` doesn't (it answers an `EventSource`'s GET):
+ * `start` writes its events with `send`, then `end`s it, or `breakOff` drops the connection. Its
+ * returned function stops it when the browser closes the stream.
+ */
+function postedStream(start: (send: (name: string, data: unknown) => void, end: () => void, breakOff: () => void) => () => void): Response {
+  const encoder = new TextEncoder();
+  let stop = () => {};
+  let open = true;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const once = (close: () => void) => () => {
+        if (!open) return;
+        open = false;
+        close();
+      };
+      stop = start(
+        (name, data) => {
+          if (open) controller.enqueue(encoder.encode(sseFrame(name, data)));
+        },
+        once(() => controller.close()),
+        once(() => controller.error(new Error('the connection broke off'))),
+      );
+    },
+    cancel() {
+      open = false;
+      stop();
+    },
+  });
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' } });
+}
+
+type SetupEventMap = Record<'delta' | 'reset' | 'reading' | 'label' | 'done' | 'error', Record<string, unknown>>;
+
 /** The mock API's handlers over `store`: every served route, the event stream, then the catch-all. */
 export function createHandlers(store: MockStore): HttpHandler[] {
   function served(key: RouteKey): HttpHandler {
@@ -167,6 +208,96 @@ export function createHandlers(store: MockStore): HttpHandler[] {
   ];
 
   /**
+   * Ask Claude's answer as a stream, when the post asks for one (`Accept: text/event-stream`): the
+   * route answers first, as the API admits a request, so a refusal goes back as JSON; then its
+   * answer's words stream at the copy's pace, and the answer itself comes last, as `final`. A post
+   * that asks for JSON goes on to the route's own handler.
+   */
+  const ruleChatStream = http.post(mswPath('ruleChat'), async ({ request, params, cookies }) => {
+    if (!/\btext\/event-stream\b/.test(request.headers.get('accept') ?? '')) return undefined;
+    const { url, epoch } = unstamped(request);
+    const { body, malformed } = await readBody(request);
+    const answer = await store.dispatch('ruleChat', {
+      params: stringParams(params),
+      query: url.searchParams,
+      body,
+      malformed,
+      path: `${url.pathname}${url.search}`,
+      cookies,
+      epoch,
+    });
+    if ('network' in answer) return toResponse(answer);
+    const { wordMs, plan, refusedAnswer } = store.ruleChatStream(cookies);
+    // A change over the payment limit is refused once it is drafted, after the answer has streamed,
+    // with the JSON route's error body; any other refusal comes before any stream, as JSON.
+    const overLimit = answer.status === 422 && refusedAnswer !== null;
+    if (answer.status !== 200 && !overLimit) return toResponse(answer);
+    const out = overLimit ? null : (answer.body as RuleChatOut);
+    const refusal = overLimit ? { status: 422, ...(answer.body as { error: string }) } : undefined;
+    return postedStream((send, end, breakOff) =>
+      playReply(
+        { text: out?.answer ?? refusedAnswer ?? '', wordMs, plan: refusal ? { ...plan, fail: refusal, failAfter: undefined } : plan },
+        {
+          event(ev) {
+            if (ev.name === 'delta') send('delta', { text: ev.text });
+            else if (ev.name === 'reset') send('reset', {});
+            else if (ev.name === 'error') {
+              // The JSON route's error body, with its status.
+              const { name: _event, ...body } = ev;
+              send('error', body);
+            }
+          },
+          end(how) {
+            if (how === 'done' && out !== null) send('final', out);
+            if (how === 'drop') breakOff();
+            else end();
+          },
+        },
+      ),
+    );
+  });
+
+  /**
+   * A setup turn's event stream: answered like any route first (no owner, an interview not in this
+   * copy, a planted fault), then the running turn followed until it lands.
+   */
+  const setupStream: HttpHandler[] = [
+    http.get(mswPath('setupEvents'), async ({ request, params, cookies }) => {
+      const { url, epoch } = unstamped(request);
+      const answer = await store.dispatch('setupEvents', {
+        params: stringParams(params),
+        query: url.searchParams,
+        path: `${url.pathname}${url.search}`,
+        cookies,
+        epoch,
+      });
+      if (!('network' in answer) && answer.status === 200) return undefined;
+      return toResponse(answer);
+    }),
+    sse<SetupEventMap>(mswPath('setupEvents'), ({ request, params, client, cookies }) => {
+      let open = true;
+      const stop = store.followSetup(
+        stringParams(params).id ?? '',
+        {
+          send(name, data) {
+            if (open) client.send({ event: name, data } as ServerSentEventMessage<SetupEventMap>);
+          },
+          close() {
+            if (!open) return;
+            open = false;
+            client.close();
+          },
+        },
+        cookies,
+      );
+      whenClosed(client, request, () => {
+        open = false;
+        stop();
+      });
+    }),
+  ];
+
+  /**
    * A document card's link, which the visitor's browser opens in a tab: none of the app's routes, and
    * answered as the document or the API's refusal, not as JSON.
    */
@@ -181,7 +312,9 @@ export function createHandlers(store: MockStore): HttpHandler[] {
 
   return [
     ...eventStream,
-    ...SERVED_KEYS.filter((key) => key !== 'events').map(served),
+    ...setupStream,
+    ruleChatStream,
+    ...SERVED_KEYS.filter((key) => key !== 'events' && key !== 'setupEvents').map(served),
     ...documentLink,
     http.all('/api/*', ({ request }) => {
       const { url, epoch } = unstamped(request);

@@ -350,7 +350,8 @@ async def test_a_link_for_another_conversations_quote_is_refused_before_anything
     entries = await ledger_rows(app, copy)
     assert [entry.event.summary for entry in entries if entry.event.kind == "decide"
             and entry.event.session_id == later.session_id and entry.event.summary.get("outcome") == "refuse"] == [
-        {"outcome": "refuse", "tool": "native.payment_link", "reason": "adapter_refused", "check": "no_such_quote"}]
+        {"outcome": "refuse", "tool": "native.payment_link", "reason": "adapter_refused", "check": "no_such_quote",
+         "policy_version": 1, "auto_money_cap_cents": 50_000}]      # the Turner seed's rules and money cap
     assert not [entry for entry in entries if "violation" in entry.event.summary]
     assert await rows_of(app, copy.copy_id, select(PaymentLink)) == [] and checkouts(copy) == []
     reviewer.answer = LINK_PASS
