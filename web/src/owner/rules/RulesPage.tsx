@@ -203,7 +203,7 @@ export function RulesPage() {
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const location = useLocation();
-  const { ask, open: asking } = useAskClaude();
+  const { ask, open: asking, busy: answering } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
   // Rivera's fixed examples, less any whose change is already in effect: all of them until the rules are read.
   const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? rulesChipsToOffer(rules.data?.active.cards) : [];
@@ -505,7 +505,7 @@ export function RulesPage() {
       </div>
       {presetSaid === null ? null : <Notice tone={presetSaid.tone}>{presetSaid.line}</Notice>}
       <div ref={askRow} className="cd-rules__ask">
-        <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
+        <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} sendHeld={answering} onSend={ask} />
         {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={pickChip} />}
       </div>
       {readError}
