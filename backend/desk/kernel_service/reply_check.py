@@ -593,7 +593,7 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
                 if (free_reach is not None and free_reach[start] >= end
-                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS, amenities=True)
+                        and _allowed_public_hit(text, start, end, rule_id, FREE_WORDS, amenities=False)
                         and ("(?=" not in pattern.pattern or _Lookahead(
                             reading, origin, pattern, match.start(), match.end()).holds_at(free_reach[start]))):
                     continue
@@ -617,7 +617,8 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
     free-price phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
     "Consultations are complimentary." don't. `text` is the key's own text. `amenities` has no default, so
     every caller states it: charter policy text keeps the amenity exception, while business tool card
-    fields follow the master plan's narrower rule, where only `allow_words` can pass a promise hit."""
+    fields follow the master plan's narrower rule, where only `allow_words` can pass a promise hit, as
+    does a business tool's name in Claude's prose, which lends its free words alone."""
     word = "".join(char for char in unicodedata.normalize("NFKD", text[start:end])
                    if unicodedata.category(char) not in ("Mn", "Me")).casefold()
     promise = rule.startswith("lex.") and rule.endswith(".promise")

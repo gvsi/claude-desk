@@ -2888,6 +2888,7 @@ CONSULTA_GRATUITA = ("Consulta gratuita",)
     ("Your \uff26\uff32\uff25\uff25 CONSULT is ready.", FREE_CONSULT, False, "lex.en.promise"),    # width and case
     ("Tu consulta gratuíta está lista.", CONSULTA_GRATUITA, False, "lex.es.promise"),           # an accent
     ("We offer a Free consultation.", FREE_CONSULT, False, "lex.en.promise"),                   # the name, then more
+    ("Book a free intro call whenever suits you.", ("Book a free intro call",), False, "lex.en.promise"),
 ])
 def test_a_free_word_passes_inside_an_enabled_business_tools_name(prose, names, booking_card, rule_id):
     """The owner's decision of 2026-10-31: a free word in the name the owner gave an enabled business
@@ -2909,6 +2910,9 @@ def test_a_free_word_passes_inside_an_enabled_business_tools_name(prose, names, 
     ("I can book a Guaranteed free consult for you.", ("Guaranteed free consult",),
      [("lex.en.promise", "Guaranteed")]),
     ("I can book a free discount visit for you.", ("free discount visit",), [("lex.en.promise", "discount")]),
+    # Nor does a name lend the amenity allowance of a policy's text ("Free parking."): it lends free words alone.
+    ("Book a Consult with complimentary coffee while you wait.", ("Consult with complimentary coffee",),
+     [("lex.en.promise", "complimentary")]),
     # A name made only of free words backs no free word: it can't tell the name from the word.
     ("Consultations are free.", ("Free",), [("lex.en.promise", "free")]),
     ("Las consultas son gratis.", ("Gratis",), [("lex.es.promise", "gratis")]),
