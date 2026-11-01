@@ -57,8 +57,10 @@ PRESETS: dict[PresetName, list[RuleCard]] = {
     "auto": [*_UTILITY_CARDS, *_AUTO_CARDS],
 }
 
-# "Recommended rules" books weekdays in the Desk's own hours (`preset_cards`): its booking card, and the days it keeps.
+# "Recommended rules" books weekdays in the Desk's own hours (`preset_cards`): its booking card, the reason a card in
+# the Desk's own hours takes (the example Desk's own weekday rule's words; it names no hours), and the days it keeps.
 PRESET_BOOKING_CARD = "preset-book-weekday"
+OPENING_HOURS_REASON = "Weekday bookings in opening hours, checked by the reviewer."
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri")
 
 
@@ -81,12 +83,12 @@ def weekday_windows(hours: list[HoursWindow]) -> list[HoursWindow]:
 def preset_cards(name: PresetName, hours: list[HoursWindow]) -> list[RuleCard]:
     """The preset's cards for a Desk with these opening hours. "Recommended rules" books weekdays in the Desk's own
     hours: its weekday booking card gives way to one card per weekday window (`weekday_windows`), in that order and in
-    its place, each the preset's card in all but its hours (its reason names none) and, for several windows, its ID,
-    numbered `-1`, `-2` and on. A Desk with hours but none on a weekday gets no booking card, so a weekday booking
-    falls to the compiler's default ask. A Desk with no hours at all, or with exactly the card's own (Monday to Friday,
-    09:00 to 17:00), gets the preset's cards as they are, as does "Ask me first", which books nothing: a draft of them
-    hits the proofs shipped for them, and other cards are proved like any owner draft. The preset is read when this
-    runs, never copied."""
+    its place, each the preset's card in all but its hours, its reason (`OPENING_HOURS_REASON`) and, for several
+    windows, its ID, numbered `-1`, `-2` and on. A Desk with hours but none on a weekday gets no booking card, so a
+    weekday booking falls to the compiler's default ask. A Desk with no hours at all, or with exactly the card's own
+    (Monday to Friday, 09:00 to 17:00), gets the preset's cards as they are, as does "Ask me first", which books
+    nothing: a draft of them hits the proofs shipped for them, and other cards are proved like any owner draft. The
+    preset is read when this runs, never copied."""
     cards = list(PRESETS[name])
     booking = next((card for card in cards if card.card_id == PRESET_BOOKING_CARD), None)
     if booking is None or not hours:
@@ -97,5 +99,6 @@ def preset_cards(name: PresetName, hours: list[HoursWindow]) -> list[RuleCard]:
     card_ids = ([booking.card_id] if len(windows) == 1
                 else [f"{booking.card_id}-{number}" for number in range(1, len(windows) + 1)])
     at = cards.index(booking)
-    return [*cards[:at], *(booking.model_copy(update={"card_id": card_id, "hours": window})
-                           for card_id, window in zip(card_ids, windows, strict=True)), *cards[at + 1:]]
+    bookings = [booking.model_copy(update={"card_id": card_id, "hours": window, "reason": OPENING_HOURS_REASON})
+                for card_id, window in zip(card_ids, windows, strict=True)]
+    return [*cards[:at], *bookings, *cards[at + 1:]]

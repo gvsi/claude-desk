@@ -176,6 +176,8 @@ const isWeekday = (day: string): day is Weekday => (WEEKDAYS as readonly string[
 
 /** "Recommended rules"'s weekday booking card, which `presetCards` gives the Desk's own hours. */
 const PRESET_BOOKING_CARD = 'preset-book-weekday';
+/** The reason of a booking card in the Desk's own hours: the example Desk's own weekday rule's words, naming no hours. */
+const OPENING_HOURS_REASON = 'Weekday bookings in opening hours, checked by the reviewer.';
 
 /** Seconds since midnight of a contract time ("08:00:00"); an end at 00:00 is midnight, the day's end. */
 function secondsOf(time: string, end = false): number {
@@ -220,7 +222,8 @@ function sameWindow(a: HoursWindow, b: HoursWindow | null | undefined): boolean 
  * The preset's cards for a Desk with these opening hours, as the API's `preset_cards` drafts them:
  * "Recommended rules" books weekdays in the Desk's own hours, its weekday booking card giving way to
  * one card per weekday window (`weekdayWindows`), in that order and in its place, each the preset's
- * card in all but its hours and, for several windows, its id, numbered `-1`, `-2` and on. Hours with
+ * card in all but its hours, its reason (`OPENING_HOURS_REASON`) and, for several windows, its id,
+ * numbered `-1`, `-2` and on. Hours with
  * none on a weekday give no booking card, so weekday bookings ask first. No hours at all, or exactly
  * the card's own (Monday to Friday, 9 to 5), give the preset's cards as they are, as does "Ask me
  * first", which books nothing.
@@ -237,6 +240,7 @@ export function presetCards(preset: RulesPreset, hours: readonly HoursWindow[]):
     ...booking,
     card_id: windows.length === 1 ? booking.card_id : `${booking.card_id}-${i + 1}`,
     hours: window,
+    reason: OPENING_HOURS_REASON,
   }));
   return [...cards.slice(0, at), ...bookings, ...cards.slice(at + 1)];
 }

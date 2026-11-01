@@ -706,10 +706,11 @@ describe('rule drafts', () => {
     expect(byKey.get('rv-refund')?.after).toMatchObject({ appliesTo: 'Every tool that sends money out', mode: 'ask' });
     expect(byKey.get('rv-refund')?.changed).not.toContain('mode');
 
-    // Weekday bookings from 8:00 am to 6:00 pm stay automatic under the preset's rule in the same hours:
-    // the row changes the reason alone, and no 9-to-5 rule is added. Saturdays lie outside the preset's
-    // weekday bookings, so they fall to the default ask rather than claiming "Automatic".
-    expect(byKey.get('rv-book-wk')).toMatchObject({ change: 'changed', title: 'Book a visit', changed: ['reason'], after: { mode: 'auto' } });
+    // Weekday bookings from 8:00 am to 6:00 pm go to the preset's rule in the same hours and words, Rivera's
+    // own rule in all but its id, so they have no row, and no 9-to-5 rule is added. Saturdays lie outside
+    // the preset's weekday bookings, so they fall to the default ask rather than claiming "Automatic".
+    expect(byKey.has('rv-book-wk')).toBe(false);
+    expect(rows.filter((row) => row.title === 'Book a visit').map((row) => row.key)).toEqual(['rv-book-sat']);
     expect(byKey.get('rv-book-sat')?.after).toEqual(DEFAULT_SIDE);
     expect(byKey.get('rv-book-sat')?.before?.appliesTo).toBeUndefined();
     expect(rows.filter((row) => row.change === 'added')).toEqual([]);

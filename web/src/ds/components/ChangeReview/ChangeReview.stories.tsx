@@ -754,23 +754,18 @@ export const RecommendedRules: Story = {
     await expect(rows.map((item) => [kind(item), title(item)])).toEqual([
       ['Changed', 'Book a visit'],
       ['Changed', 'Book a visit'],
-      ['Changed', 'Book a visit'],
       ['Changed', 'Payment link'],
       ['Changed', 'Charge within a signed limit'],
       ['Changed', 'See charges'],
       ['Changed', 'Refund'],
     ]);
-    // unchanged_rules_are_left_out: the preset quotes at list price and shares documents with
-    // verified customers, as Rivera's rules already do, so neither shows.
+    // unchanged_rules_are_left_out: the preset quotes at list price, books weekdays in Rivera's own
+    // hours and words, and shares documents with verified customers, as her rules already do, so none
+    // shows: the two booking rows are Saturday's and Dana's.
     await expect(rows.map(title)).not.toContain('Quote');
     await expect(rows.map(title)).not.toContain('Share a document');
-    // covered_rules_keep_their_outcome: weekday bookings from 8 to 6 go to the preset's booking rule
-    // in Rivera's own weekday hours, so they stay automatic and only the reason changes.
-    const [weekday, saturday, dana, link, mandate, charges, refund] = rows as HTMLElement[];
-    await expect(side(weekday as HTMLElement, 'After')).toHaveTextContent('Weekdays, 8:00 am to 6:00 pm');
-    await expect(outcome(weekday as HTMLElement)).toHaveTextContent(/^Automatic$/);
-    await expect(side(weekday as HTMLElement, 'After')).toHaveTextContent('Weekday bookings in working hours, checked by the reviewer.');
-    await expect(side(weekday as HTMLElement, 'After')).not.toHaveTextContent(DEFAULT_ASK);
+    const [saturday, dana, link, mandate, charges, refund] = rows as HTMLElement[];
+    for (const item of [saturday, dana] as HTMLElement[]) await expect(side(item, 'Before')).not.toHaveTextContent('Weekdays, 8:00 am to 6:00 pm');
     // uncovered_scopes_ask: no card of the preset covers Saturday mornings, Dana's any-time rule or
     // seeing charges, so each falls to the default ask, its new outcome tagged; none of them reads
     // "Automatic" after.

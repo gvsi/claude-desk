@@ -815,6 +815,8 @@ EIGHT_TO_SIX = HoursWindow(days=WEEKDAYS, start=time(8), end=time(18))
 NINE_TO_FIVE = HoursWindow(days=WEEKDAYS, start=time(9), end=time(17))
 SATURDAY = HoursWindow(days=["sat"], start=time(9), end=time(13))
 PRESET_BOOKING_REASON = "Weekday bookings in working hours, checked by the reviewer."
+# The reason of a booking card in the Desk's own hours: the example Desk's own weekday rule's wording.
+OPENING_HOURS_REASON = "Weekday bookings in opening hours, checked by the reviewer."
 
 
 def booking_cards(cards: list[RuleCard]) -> list[RuleCard]:
@@ -830,14 +832,15 @@ def with_bookings(*bookings: RuleCard) -> list[RuleCard]:
 
 def test_recommended_rules_book_weekdays_in_the_desks_own_hours():
     # An 8 to 6 weekday Desk's "Recommended rules" book weekdays 8 to 6: one booking card, the preset's own in all
-    # but its hours (the reason names none), in its place; every other card is the preset's.
+    # but its hours and its reason (which names no hours, in the example Desk's own words), in its place; every other
+    # card is the preset's.
     (shipped,) = booking_cards(PRESETS["auto"])
     cards = preset_cards("auto", [EIGHT_TO_SIX])
-    assert cards == with_bookings(shipped.model_copy(update={"hours": EIGHT_TO_SIX}))
+    assert cards == with_bookings(shipped.model_copy(update={"hours": EIGHT_TO_SIX, "reason": OPENING_HOURS_REASON}))
     (booking,) = booking_cards(cards)
     assert (booking.card_id, booking.applies_to, booking.mode, booking.who, booking.hours, booking.review,
             booking.reason) == ("preset-book-weekday", "native.book", "auto", "anyone", EIGHT_TO_SIX, True,
-                                PRESET_BOOKING_REASON)
+                                OPENING_HOURS_REASON)
     # Saturday hours drop out ("weekday bookings"), so Saturday bookings ask first.
     assert preset_cards("auto", [EIGHT_TO_SIX, SATURDAY]) == cards
     # A window over the whole week keeps its weekdays; windows with the same hours merge, their days in week order.
@@ -858,8 +861,10 @@ def test_recommended_rules_take_a_card_per_weekday_window():
     mon_to_thu = HoursWindow(days=["mon", "tue", "wed", "thu"], start=time(8), end=time(18))
     friday = HoursWindow(days=["fri"], start=time(8), end=time(16))
     cards = preset_cards("auto", [friday, SATURDAY, mon_to_thu])
-    assert cards == with_bookings(shipped.model_copy(update={"card_id": "preset-book-weekday-1", "hours": mon_to_thu}),
-                                  shipped.model_copy(update={"card_id": "preset-book-weekday-2", "hours": friday}))
+    assert cards == with_bookings(
+        shipped.model_copy(update={"card_id": "preset-book-weekday-1", "hours": mon_to_thu,
+                                   "reason": OPENING_HOURS_REASON}),
+        shipped.model_copy(update={"card_id": "preset-book-weekday-2", "hours": friday, "reason": OPENING_HOURS_REASON}))
     assert preset_cards("auto", [mon_to_thu, friday]) == cards
     # Two windows on one day (a lunch break) are two cards, the morning's first.
     morning = HoursWindow(days=WEEKDAYS, start=time(8), end=time(12))
@@ -970,10 +975,13 @@ async def test_preset_drafts_recommended_rules_in_the_desks_own_hours(app, brows
     (posted,) = fake.called("POST /policy/draft")
     sent = PolicyDraftRequest.model_validate(posted.body).cards
     assert sent == draft.cards == with_bookings(booking_cards(PRESETS["auto"])[0].model_copy(
-        update={"hours": EIGHT_TO_SIX}))
+        update={"hours": EIGHT_TO_SIX, "reason": OPENING_HOURS_REASON}))
     (booking,) = booking_cards(sent)
     assert (booking.card_id, booking.hours, booking.review, booking.reason) == (
-        "preset-book-weekday", EIGHT_TO_SIX, True, PRESET_BOOKING_REASON)
+        "preset-book-weekday", EIGHT_TO_SIX, True, OPENING_HOURS_REASON)
+    # It is Rivera's own weekday rule in everything but its ID.
+    (rivera_weekday,) = [each for each in owner_cards(fake, owner.desk_id) if each.card_id == "rv-book-wk"]
+    assert booking == rivera_weekday.model_copy(update={"card_id": "preset-book-weekday"})
     # Rivera's own 8 to 6 weekday rule goes to the preset's, and her Saturday rule goes, to ask first.
     assert {each.card_id for each in draft.diff.removed} >= {"rv-book-wk", "rv-book-sat"}
     assert booking in draft.diff.added

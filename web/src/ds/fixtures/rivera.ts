@@ -1639,7 +1639,7 @@ const recommendedCards = [
     who: 'anyone',
     hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' },
     review: true,
-    reason: 'Weekday bookings in working hours, checked by the reviewer.',
+    reason: 'Weekday bookings in opening hours, checked by the reviewer.',
   }),
   rule({ card_id: 'preset-documents', applies_to: 'native.release_document', mode: 'auto', who: 'record_owner', reason: "Customers get their own documents after confirming it's them." }),
   rule({ card_id: 'preset-charge-ask', applies_to: 'effect:charge', mode: 'ask', who: 'anyone', reason: 'Taking a payment asks you first.' }),
@@ -1753,11 +1753,11 @@ const sharedChargeReviewRow: ChangeRowView = {
 
 /**
  * Choosing "Recommended rules": the payment link, the signed-limit charge and Refund go to the
- * preset's rules for every tool that charges money or sends it out, which ask. Weekday bookings
- * from 8:00 am to 6:00 pm go to the preset's booking rule in the same hours and stay automatic,
- * only the reason changing. Saturdays, Dana's any-time rule and See charges fall to the default
- * ask, since no card of the preset covers their whole scope. Nothing is added. Quotes and
- * documents have no row: the preset's rules for them enforce what Rivera's already do.
+ * preset's rules for every tool that charges money or sends it out, which ask. Saturdays, Dana's
+ * any-time rule and See charges fall to the default ask, since no card of the preset covers their
+ * whole scope. Nothing is added. Quotes, weekday bookings and documents have no row: the preset's
+ * rules for them are Rivera's own in all but their ids, its weekday booking rule in her hours
+ * (8:00 am to 6:00 pm) and her words.
  */
 const recommendedReview = presetReview(presetSamples.auto);
 

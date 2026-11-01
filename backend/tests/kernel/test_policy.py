@@ -146,6 +146,9 @@ async def test_recommended_rules_in_a_desks_own_hours_prove(desk_prove, app, cli
     cards = preset_cards("auto", [WEEKDAY_HOURS, SATURDAY_HOURS])
     [booking] = [c for c in cards if c.applies_to == "native.book"]
     assert cards != PRESETS["auto"] and (booking.card_id, booking.hours) == ("preset-book-weekday", WEEKDAY_HOURS)
+    # It is Rivera's own weekday rule in everything but its ID, reason included.
+    [own] = [c for c in RIVERA_CARDS if c.card_id == "rv-book-wk"]
+    assert booking == own.model_copy(update={"card_id": "preset-book-weekday"})
     confirmed = await draft_and_confirm(client, copy.owner_token, copy.desk_id, cards)
     proof = confirmed.proof
     assert proof is not None and proof.ok and proof.method == "symcc" and not proof.timed_out, proof

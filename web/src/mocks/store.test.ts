@@ -1496,8 +1496,11 @@ describe('rules and tools', () => {
     const [shipped] = bookings(PRESETS.auto);
     if (shipped === undefined) throw new Error('"Recommended rules" books weekdays');
     const draft = await preset();
-    expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' } }]);
-    expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0] } : card)));
+    // Its weekday card is Rivera's own weekday rule, words included, in all but its id.
+    const reason = 'Weekday bookings in opening hours, checked by the reviewer.';
+    expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' }, reason }]);
+    expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)));
+    expect(bookings(draft.cards)).toEqual([{ ...rivera.ruleCards['rv-book-wk'], card_id: 'preset-book-weekday' }]);
     expect((await confirm(draft.version)).status).toBe(200);
     expect((await rules()).preset).toBe('auto');
 
