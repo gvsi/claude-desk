@@ -259,6 +259,7 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
+from desk.calendar import WEEK, calendar_slots, minute_of_day
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     MCP_TOOLS,
@@ -2515,10 +2516,7 @@ STEP_ORDER: tuple[SetupStep, ...] = ("questions", "tools", "rules", "situations"
 CARD_DRAFT_ROUTE, SITUATIONS_ROUTE = "card_draft", "situations"
 CARD_DRAFT_MAX_TOKENS = 4096
 SITUATIONS_MAX_TOKENS = 4096
-CALENDAR_DAYS = 14
-SLOT_MINUTES = 60
 ITEM_ID_MAX = 40
-WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 # The Ask me first preset's utility cards: in every setup draft, so slots, leads, callbacks, verification and the
 # setup reads never fall to a default ask. Setup drafts no card of its own on these tools.
 UTILITY_CARDS: tuple[RuleCard, ...] = tuple(PRESETS["ask_first"])
@@ -2616,29 +2614,6 @@ def price_items(prices: list[PriceAnswer]) -> list[PriceItem]:
         taken.add(item_id)
         items.append(PriceItem(item_id=item_id, title=price.title, unit_cents=price.unit_cents))
     return items
-
-
-def _minute(moment: time) -> int:
-    return moment.hour * 60 + moment.minute
-
-
-def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list[CalendarSlot]:
-    """60-minute slots inside the opening hours on the 14 days after `today`, each named `S-<yyyymmdd>-<hhmm>` by its
-    start in the business's time zone (a window's end is exclusive; 00:00 is midnight)."""
-    zone = ZoneInfo(timezone)
-    slots: dict[str, CalendarSlot] = {}
-    for offset in range(1, CALENDAR_DAYS + 1):
-        day = today + timedelta(days=offset)
-        for window in hours:
-            if WEEK[day.weekday()] not in window.days:
-                continue
-            end = _minute(window.end) or 24 * 60
-            for start in range(_minute(window.start), end - SLOT_MINUTES + 1, SLOT_MINUTES):
-                local = time(start // 60, start % 60)
-                slot_id = f"S-{day:%Y%m%d}-{local:%H%M}"
-                slots.setdefault(slot_id, CalendarSlot(slot_id=slot_id, starts_at=datetime.combine(day, local, zone),
-                                                       minutes=SLOT_MINUTES))
-    return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
 PUBLIC_LINE_KEYS = {
@@ -3266,9 +3241,10 @@ def _local(moment: datetime, zone: ZoneInfo) -> datetime:
 
 def _open_at(moment: datetime, hours: list[HoursWindow]) -> HoursWindow | None:
     """The window `moment` (local) falls in, if any (a window's end is exclusive; 00:00 is midnight)."""
-    minute = _minute(moment.time())
+    minute = minute_of_day(moment.time())
     for window in hours:
-        if WEEK[moment.weekday()] in window.days and _minute(window.start) <= minute < (_minute(window.end) or 1440):
+        if (WEEK[moment.weekday()] in window.days
+                and minute_of_day(window.start) <= minute < (minute_of_day(window.end) or 1440)):
             return window
     return None
 
@@ -3291,13 +3267,13 @@ def after_hours_start(hours: list[HoursWindow], timezone: str, now: datetime) ->
     if day is None:
         sunday = today + timedelta(days=(6 - today.weekday()) % 7 or 7)
         return datetime.combine(sunday, time(22), zone)
-    ends = [_minute(window.end) or 1440 for window in hours if WEEK[day.weekday()] in window.days]
+    ends = [minute_of_day(window.end) or 1440 for window in hours if WEEK[day.weekday()] in window.days]
     moment = datetime.combine(day, time(0), zone) + timedelta(minutes=max(ends))
     for _ in range(len(hours) * 7):                      # a window that continues past it moves it on
         window = _open_at(moment, hours)
         if window is None:
             break
-        moment = datetime.combine(moment.date(), time(0), zone) + timedelta(minutes=_minute(window.end) or 1440)
+        moment = datetime.combine(moment.date(), time(0), zone) + timedelta(minutes=minute_of_day(window.end) or 1440)
     return moment
 
 
@@ -3308,7 +3284,7 @@ def next_opening(hours: list[HoursWindow], timezone: str, now: datetime) -> date
     day = _next_day_with_hours(hours, _local(now, zone).date())
     if day is None:
         return None
-    start = min(_minute(window.start) for window in hours if WEEK[day.weekday()] in window.days)
+    start = min(minute_of_day(window.start) for window in hours if WEEK[day.weekday()] in window.days)
     return datetime.combine(day, time(start // 60, start % 60), zone)
 
 
