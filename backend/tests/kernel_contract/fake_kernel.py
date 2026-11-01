@@ -297,7 +297,9 @@ SLOT_HOURS = {0: (8, 10, 12, 14, 16), 1: (8, 10, 12, 14, 16), 2: (8, 10, 12, 14,
 RIVERA_PRICES = [PriceItem(item_id="deposit", title="Service call deposit", unit_cents=2000),
                  PriceItem(item_id="drain", title="Drain clearing", unit_cents=18000),
                  PriceItem(item_id="heater", title="Water heater flush", unit_cents=15000),
-                 PriceItem(item_id="leak", title="Leak repair", unit_cents=25000)]
+                 PriceItem(item_id="leak", title="Leak repair", unit_cents=25000),
+                 PriceItem(item_id="pipe", title="Pipe repair (starting price)", unit_cents=10000),
+                 PriceItem(item_id="short-notice", title="Short-notice fee", unit_cents=5000)]
 RIVERA_KNOWLEDGE = [
     KnowledgeItem(item_id="kn-website", source="website",
                   title="Your website, rivera-plumbing.example, read during setup",
@@ -306,7 +308,8 @@ RIVERA_KNOWLEDGE = [
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
                   text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
-                       "water heater flush and leak repair. Each price is given in a quote from this list.",
+                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. Each "
+                       "price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]

@@ -162,7 +162,7 @@ async def test_the_desks_catalog_reaches_claude_in_the_desk_context(api_conn, ca
     assert (catalog["fact_id"], catalog["kind"], catalog["label"]["readers"]) == ("catalog", "charter", ["public"])
     assert [(claim["key"], claim["value"]) for claim in catalog["claims"]] == [
         ("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
-        ("leak", "Leak repair")]
+        ("leak", "Leak repair"), ("pipe", "Pipe repair (starting price)"), ("short-notice", "Short-notice fee")]
     assert {claim["kind"] for claim in catalog["claims"]} == {"text"}            # no price, amount or unit
 
 
