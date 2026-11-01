@@ -9099,6 +9099,22 @@
               }
             ],
             "title": "Latest Visitor Text"
+          },
+          "latest_outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "visit_booked",
+                  "deposit_paid",
+                  "turned_down"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Outcome"
           }
         },
         "type": "object",
@@ -9111,10 +9127,11 @@
           "last_activity",
           "outcome_counts",
           "owner_preview",
-          "latest_visitor_text"
+          "latest_visitor_text",
+          "latest_outcome"
         ],
         "title": "ConversationSummary",
-        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet."
+        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff\nclearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null."
       },
       "CopyOut": {
         "properties": {

@@ -414,7 +414,10 @@ class ConversationSummary(BaseModel):
     preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
     whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
     never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
-    written yet."""
+    written yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,
+    checked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual
+    refusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff
+    clearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null."""
 
     session_id: str
     kind: ActorKind
@@ -425,6 +428,7 @@ class ConversationSummary(BaseModel):
     outcome_counts: dict[DecisionState, int]
     owner_preview: bool
     latest_visitor_text: str | None
+    latest_outcome: Literal["visit_booked", "deposit_paid", "turned_down"] | None
 
 
 class OwnerTranscript(BaseModel):
