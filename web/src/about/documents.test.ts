@@ -272,7 +272,7 @@ describe('the About documents', () => {
         internal: false,
         children: [{ kind: 'text', text: 'github.com/gvsi/claude-desk' }],
       },
-      { kind: 'text', text: expect.stringMatching(/^\. Each visitor acts as Maria/) },
+      { kind: 'text', text: expect.stringMatching(/^\. Each visitor acts as Mike/) },
     ],
   };
 
@@ -307,7 +307,7 @@ describe('the About documents', () => {
 
     // Before the fill: the hosted address goes, the repository link stays, and nothing else changes.
     const page = proposalForThePage(unfilled);
-    expect(page).toContain(`You’re in it. The code is at ${REPO}. Each visitor acts as Maria`);
+    expect(page).toContain(`You’re in it. The code is at ${REPO}. Each visitor acts as Mike`);
     expect(page).not.toContain(HOSTED);
     expect(page).toBe(unfilled.replace(beforeFillSentence, `You’re in it. The code is at ${REPO}.`));
     expect(proposalForThePage(proposal)).toBe(page);

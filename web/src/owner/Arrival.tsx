@@ -12,7 +12,7 @@ import { DESKS_KEY, dropTheOldInbox, forgetReadAhead, invalidateCopy, lastOrFirs
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
-  'You’re Maria Rivera today, owner of Rivera Plumbing. Her Desk answers customers and their agents under her rules. Try it, then try to break it.';
+  'You’re Mike Turner today, owner of Turner Plumbing. His Desk answers customers and their agents under his rules. Try it, then try to break it.';
 const SESSION_ENDED = 'Your demo session ended. Enter the passcode to start a fresh copy.';
 
 /** What the dialog says when a try fails: a wrong passcode, too many tries, or anything else. */
@@ -34,7 +34,7 @@ async function readAhead(queryClient: QueryClient, deskId: string): Promise<void
 }
 
 /**
- * `/`, the first visit (spec "First visit and hosting"): a still preview of Rivera's Today at once,
+ * `/`, the first visit (spec "First visit and hosting"): a still preview of Turner's Today at once,
  * then the copy this browser already has. A copy opens its Today, read ahead, and the dialog never
  * shows; no copy (401), or any other answer, opens the intro dialog over the preview, which only
  * the passcode gets past. After an owner session ends the dialog opens with that news first.

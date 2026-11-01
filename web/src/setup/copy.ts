@@ -85,7 +85,7 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
       {
         chip: 'A plumber in Oakland',
         description:
-          'I’m Maria Rivera. Rivera Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
+          'I’m Mike Turner. Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
       },
       {
         chip: 'Apartments in Sacramento',
@@ -109,9 +109,9 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
           'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage. Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.',
       },
       {
-        chip: 'Una plomera en Oakland',
+        chip: 'Un plomero en Oakland',
         description:
-          'Soy Maria Rivera. Rivera Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
+          'Soy Mike Turner. Turner Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
       },
       {
         chip: 'Departamentos en Sacramento',
@@ -160,7 +160,7 @@ export const SETUP_COPY = {
   },
 
   questions: {
-    title: 'A few questions',
+    title: "Let's set up your Desk",
     suggestions: 'Use your suggestions',
     suggestionsLine: 'Skip the rest. I’ll fill it in from what I’ve proposed, and every limit asks you first.',
     dismiss: 'Dismiss', other: 'Something else…',

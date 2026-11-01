@@ -61,7 +61,7 @@ from evals.usage import UsageRecord, collect_usage, percentile
 Kind = Literal["question", "quote", "booking"]
 KINDS: tuple[Kind, ...] = ("question", "quote", "booking")
 # What the visitor of each kind asks, a turn at a time, in turn: plain questions, quotes, and bookings
-# that may call the reviewer. Rivera Plumbing serves Oakland, Berkeley, Alameda and Emeryville.
+# that may call the reviewer. Turner Plumbing serves Oakland, Berkeley, Alameda and Emeryville.
 MESSAGES: dict[Kind, tuple[str, ...]] = {
     "question": ("Which areas do you cover?", "Are you open on Saturdays?",
                  "Do you handle leaks under the kitchen sink?"),
@@ -632,7 +632,7 @@ def prove_latency(root: Path) -> dict[str, Any]:
 
 
 def proving_spread(proved: Mapping[str, Any]) -> Spread:
-    """The proving latency of the Rivera card set, the one the Desk under test runs."""
+    """The proving latency of the Turner card set, the one the Desk under test runs."""
     rivera = proved["rivera"]
     return Spread(n=PROVE_RUNS, p50=rivera["p50_ms"], p95=rivera["p95_ms"])
 

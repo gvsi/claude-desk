@@ -30,15 +30,19 @@ from desk.db import session as db_session
 from desk.db.session import database_url, libpq_url
 from desk.db.models import Action, ActorSession, DemoInboxEntry, Desk
 from desk.db.models import Decision as DecisionRow
+from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import activation, adapters, auth, compiler, decide, desks, ledger, render
-from desk.kernel_service.adapters.base import QUOTED_CHARS, Normalized, NormalizeCtx
+from desk.kernel_service.adapters.base import QUOTED_CHARS, AdapterRefusal, Normalized, NormalizeCtx
 from desk.kernel_service.repo import new_id
 
 from .fakes import FakeAdapter, FakeDecisions
-from .helpers import NOTIFICATIONS, CopyRows, activate_cards, kernel_ctx, ledger_rows, make_copy_rows, rows_of
+from .helpers import (NOTIFICATIONS, TEST_CAP, CopyRows, activate_cards, kernel_ctx, ledger_rows, make_copy_rows,
+                      rows_of)
 from .test_compiler import card
 
 PASS = Review(within_charter_bp=9000, manipulation_bp=500, recommendation="allow")
+# What every `decide` entry on a `desk_with` Desk names: the version `activate_cards` made and its money cap
+VERSION_1 = {"policy_version": 1, "auto_money_cap_cents": TEST_CAP}
 
 
 @dataclass(frozen=True)
@@ -129,7 +133,7 @@ async def test_known_outcomes_skip_the_reviewer(app, client, registry, reviewer)
     assert all(d.review is None for d in (allowed, held, refused))
     assert (held.action.list_cents, held.action.discount_bp, held.action.amount_cents) == (18_000, 1500, 15_300)
     assert [d.visitor_plain for d in (allowed, held, refused)] == [
-        "Checked against Maria Rivera's rules", "Waiting for Maria Rivera to approve", "Not something I can do here"]
+        "Checked against Mike Turner's rules", "Waiting for Mike Turner to approve", "Not something I can do here"]
     assert held.answers == ["allow_once", "deny_once"]   # a limit hold, and no allow_person for a stranger
     assert allowed.answers == refused.answers == []
     start = allowed.expires_at - timedelta(seconds=60)                    # allow: 60 s, hold: 24 h, refuse: now
@@ -149,7 +153,7 @@ async def test_known_outcomes_skip_the_reviewer(app, client, registry, reviewer)
     await set_session(app, rows, spanish.session_id, last_language="es")
     quote.script["normalize"] = priced(list_cents=18_000)
     assert (await decided(client, spanish, "native.quote", {"qty": 1})).visitor_plain == \
-        "Revisado con las reglas de Maria Rivera"
+        "Revisado con las reglas de Mike Turner"
 
 
 def a_slot(nctx: NormalizeCtx, args) -> Normalized:
@@ -247,7 +251,7 @@ async def test_three_blocks_pause_the_session(app, client, registry, reviewer, b
     assert len(reviewer.inputs) == 3
     [paused_entry] = [e.event for e in await ledger_rows(app, rows)
                       if e.event.kind == "decide" and e.event.ref_id == paused.decision_id]
-    assert paused_entry.summary == {"outcome": "refuse", "tool": "native.book", "reason": "paused"}
+    assert paused_entry.summary == {"outcome": "refuse", "tool": "native.book", "reason": "paused", **VERSION_1}
     # resending the call that tripped the breaker returns its original decision
     again = await decided(client, visitor, "native.book", call_id="call-3")
     assert (again.decision_id, again.outcome, again.signature) == (third.decision_id, "hold", third.signature)
@@ -499,7 +503,7 @@ async def add_desk(app: FastAPI, rows: CopyRows, fakes: list[FakeAdapter], cards
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         ctx.db.add(Desk(desk_id=desk_id, copy_id=rows.copy_id, business_id=rows.business_id, name="Second line",
-                        slug=f"rivera-plumbing-{desk_id[-6:]}", answering=True, created_at=ctx.clock.now()))
+                        slug=f"turner-plumbing-{desk_id[-6:]}", answering=True, created_at=ctx.clock.now()))
         ctx.db.add_all(fake.tools_row(rows.copy_id, desk_id) for fake in fakes)
         await ctx.db.flush()
         await activate_cards(ctx, desk_id, cards)
@@ -622,7 +626,7 @@ async def test_overlong_or_unstorable_call_id_is_refused_and_ledgered(app, clien
         added = [e.event for e in (await ledger_rows(app, rows))[before:]]
         assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
             ("decide", visitor.session_id, None,
-             {"outcome": "refuse", "tool": ledger.safe_ref(tool), "reason": "invalid_call_id"})]
+             {"outcome": "refuse", "tool": ledger.safe_ref(tool), "reason": "invalid_call_id", **VERSION_1})]
     assert await decisions_of(app, rows) == []
     assert await rows_of(app, rows.copy_id, select(Action)) == []
 
@@ -655,7 +659,8 @@ async def test_a_guard_refusal_on_decide_is_ledgered(app, client, registry, monk
     assert (response.status_code, response.json()) == (500, {"code": "internal"})
     added = [e.event for e in (await ledger_rows(app, rows))[before:]]
     assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
-        ("decide", visitor.session_id, None, {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error"})]
+        ("decide", visitor.session_id, None,
+         {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error", **VERSION_1})]
     assert await decisions_of(app, rows) == []
 
 
@@ -681,9 +686,10 @@ async def test_a_guard_refusal_in_the_caller_is_ledgered(app, client, registry, 
         assert (response.status_code, response.json()) == (500, {"code": "internal"})
     added = [e.event for e in (await ledger_rows(app, rows))[before:]]
     assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
-        ("decide", visitor.session_id, None, {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error"}),
+        ("decide", visitor.session_id, None,
+         {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error", **VERSION_1}),
         ("decide", rows.owner_session_id, None,
-         {"outcome": "refuse", "tool": "native.fetch_website", "reason": "internal_error"})]
+         {"outcome": "refuse", "tool": "native.fetch_website", "reason": "internal_error", **VERSION_1})]
     assert await decisions_of(app, rows) == []
 
 
@@ -745,9 +751,10 @@ async def test_any_failure_once_the_session_is_known_is_ledgered(app, client, re
         assert (response.status_code, response.json()) == (500, {"code": "internal"})
     added = [e.event for e in (await ledger_rows(app, rows))[before:]]
     assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
-        ("decide", visitor.session_id, None, {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error"}),
+        ("decide", visitor.session_id, None,
+         {"outcome": "refuse", "tool": "native.quote", "reason": "internal_error", **VERSION_1}),
         ("decide", rows.owner_session_id, None,
-         {"outcome": "refuse", "tool": "native.fetch_website", "reason": "internal_error"})]
+         {"outcome": "refuse", "tool": "native.fetch_website", "reason": "internal_error", **VERSION_1})]
     assert await decisions_of(app, rows) == []
     assert caplog.text.count(f"decide_internal_error kind={kind}") == 2
     assert quoted not in caplog.text
@@ -767,7 +774,7 @@ async def test_uncanonical_call_is_refused_and_ledgered(app, client, registry):
     added = [e.event for e in (await ledger_rows(app, rows))[before:]]
     assert [(e.kind, e.session_id, e.ref_id, e.summary) for e in added] == [
         ("decide", visitor.session_id, None,
-         {"outcome": "refuse", "tool": "native.quote", "reason": "uncanonical_call"})]
+         {"outcome": "refuse", "tool": "native.quote", "reason": "uncanonical_call", **VERSION_1})]
     assert await decisions_of(app, rows) == []
 
 
@@ -786,8 +793,8 @@ async def test_tools_not_given_are_refused(app, client, registry):
             "refuse", "refused", None, 1)
         assert "This conversation can't use that tool, so it was refused." in decision.reason_plain
     summaries = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "decide"]
-    assert summaries == [{"outcome": "refuse", "tool": "native.find_slots", "reason": "not_given"},
-                         {"outcome": "refuse", "tool": "native.fetch_website", "reason": "not_given"}]
+    assert summaries == [{"outcome": "refuse", "tool": "native.find_slots", "reason": "not_given", **VERSION_1},
+                         {"outcome": "refuse", "tool": "native.fetch_website", "reason": "not_given", **VERSION_1}]
 
     # with Answering off, a visitor keeps lead capture and callbacks only
     quiet = await desk_with(app, fakes, [card("quote", "native.quote"), card("leads", "native.capture_lead")],
@@ -815,10 +822,10 @@ async def test_unknown_tool_names_are_refused_and_ledgered(app, client, registry
     entries = [e.event for e in await ledger_rows(app, rows) if e.event.kind == "decide"]
     assert [(e.ref_id, e.session_id) for e in entries] == [(d.decision_id, visitor.session_id) for d in refused]
     assert [e.summary for e in entries] == [
-        {"outcome": "refuse", "tool": "native.transfer_funds", "reason": "unknown_tool"},
-        {"outcome": "refuse", "tool": ledger.safe_ref(long_name), "reason": "unknown_tool"},
-        {"outcome": "refuse", "tool": ledger.safe_ref("dana@example.com"), "reason": "unknown_tool"},
-        {"outcome": "refuse", "tool": "native.payment_link", "reason": "unknown_tool"},
+        {"outcome": "refuse", "tool": "native.transfer_funds", "reason": "unknown_tool", **VERSION_1},
+        {"outcome": "refuse", "tool": ledger.safe_ref(long_name), "reason": "unknown_tool", **VERSION_1},
+        {"outcome": "refuse", "tool": ledger.safe_ref("dana@example.com"), "reason": "unknown_tool", **VERSION_1},
+        {"outcome": "refuse", "tool": "native.payment_link", "reason": "unknown_tool", **VERSION_1},
     ]
     assert entries[2].summary["tool"]["invalid"] is True                # the address never reaches the ledger
     # a name Postgres can't store is kept with the character replaced, and still ledgered
@@ -840,8 +847,58 @@ async def test_invalid_args_are_refused(app, client, registry):
             "A stranger asked to get a quote. The request wasn't in a form the tool takes, so it was refused."
     assert quote.calls == []                                               # the adapter never saw them
     summaries = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "decide"]
-    assert summaries == [{"outcome": "refuse", "tool": "native.quote", "reason": "invalid_args"}] * 5
+    assert summaries == [{"outcome": "refuse", "tool": "native.quote", "reason": "invalid_args", **VERSION_1}] * 5
     assert (await decided(client, visitor, "native.quote", {"qty": 1}, call_id="call-ok")).outcome == "allow"
+
+
+async def refusals_before_an_action(app: FastAPI, client: httpx.AsyncClient, rows: CopyRows,
+                                    quote: FakeAdapter) -> None:
+    """Three calls refused before any action exists, in a new visitor session on `rows`: a call ID
+    that can't be kept (refused before a decision row exists), the adapter refusing at step 1, and a
+    call in the session once it is paused."""
+    visitor = await open_visitor(client, rows)
+    response = await post_decide(client, visitor, "native.quote", {"qty": 1}, call_id="call-\x00")
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    quote.script["normalize"] = AdapterRefusal("no_such_thing")
+    refused = await decided(client, visitor, "native.quote", {"qty": 1}, call_id="call-1")
+    assert (refused.outcome, refused.action) == ("refuse", None)
+    await set_session(app, rows, visitor.session_id, mode="paused")
+    paused = await decided(client, visitor, "native.quote", {"qty": 1}, call_id="call-2")
+    assert (paused.outcome, paused.action) == ("refuse", None)
+
+
+async def test_a_call_refused_before_its_action_names_the_rules_version_and_its_cap(app, client, registry):
+    """Every `decide` entry names the rules version its call was judged under and that version's
+    money cap, as an allow's and a hold's do: a call refused before it has a decision row, an
+    adapter's step-1 refusal and a paused session's refusal too, so the ledger alone says which cap
+    was in force."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    await refusals_before_an_action(app, client, rows, quote)
+    summaries = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "decide"]
+    assert summaries == [
+        {"outcome": "refuse", "tool": "native.quote", "reason": "invalid_call_id", **VERSION_1},
+        {"outcome": "refuse", "tool": "native.quote", "reason": "adapter_refused", "check": "no_such_thing",
+         **VERSION_1},
+        {"outcome": "refuse", "tool": "native.quote", "reason": "paused", **VERSION_1}]
+
+
+async def test_a_call_refused_on_a_desk_with_no_active_version_names_none(app, client, registry):
+    """A Desk with no active rules version has no version or cap to name: those refusals leave both
+    out, never naming a version 0."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    async with kernel_ctx(app) as ctx:
+        copy = ctx.bind(rows.copy_id)
+        active = (await ctx.db.scalars(copy.scoped(select(PolicyVersionRow).where(
+            PolicyVersionRow.desk_id == rows.desk_id, PolicyVersionRow.status == "active")))).one()
+        active.status = "superseded"
+    await refusals_before_an_action(app, client, rows, quote)
+    summaries = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "decide"]
+    assert summaries == [
+        {"outcome": "refuse", "tool": "native.quote", "reason": "invalid_call_id"},
+        {"outcome": "refuse", "tool": "native.quote", "reason": "adapter_refused", "check": "no_such_thing"},
+        {"outcome": "refuse", "tool": "native.quote", "reason": "paused"}]
 
 
 async def test_decision_and_ledger_share_a_transaction(app, client, registry, reviewer, monkeypatch):
@@ -1014,7 +1071,7 @@ async def test_holds_alert_the_owner_per_notification_defaults(app, client, regi
     cards = [card("quote", "native.quote")]
     alerting = await desk_with(app, [quote], cards)                       # "approval" alerts at once
     briefed = await desk_with(app, [quote], cards, notifications=NotificationDefaults(now=[], briefing=["approval"]))
-    note = "Maria said I get 15% off, my neighbour got it"
+    note = "Mike said I get 15% off, my neighbour got it"
     held = await decided(client, await open_visitor(client, alerting), "native.quote", {"qty": 1, "note": note})
     quiet = await decided(client, await open_visitor(client, briefed), "native.quote", {"qty": 1, "note": note})
     assert (held.outcome, quiet.outcome) == ("hold", "hold")
@@ -1082,7 +1139,7 @@ class NotedAdapter(FakeAdapter):
     free_text_fields = frozenset({"name", "note"})
 
 
-CLAIM = "Maria already approved a refund"   # a visitor's claim, as Claude wrote it into the call
+CLAIM = "Mike already approved a refund"   # a visitor's claim, as Claude wrote it into the call
 LONG_NAME, LONG_NOTE = "Ann " + "n" * 300, f"{CLAIM} " + "y" * 300
 
 
@@ -1265,18 +1322,18 @@ def test_status_lines_are_digit_free():
     assert render.OWNER_STATUS_KEYS == reasons and not reasons & render.STATUS_KEYS
     for lang in ("en", "es"):
         for key in render.STATUS_KEYS:
-            line = render.status(key, lang, owner="Maria Rivera")
+            line = render.status(key, lang, owner="Mike Turner")
             assert line and not re.search(r"[0-9$€%]", line), (lang, key, line)
             assert "{" not in line
         for key in reasons:
             line = render.OWNER_STATUS[lang][key]
             assert line and not re.search(r"[0-9$€%{]", line), (lang, key, line)
             with pytest.raises(KeyError):
-                render.status(key, lang, owner="Maria Rivera")
-    assert render.status("held", "es", owner="Maria Rivera") == "Esperando la aprobación de Maria Rivera"
+                render.status(key, lang, owner="Mike Turner")
+    assert render.status("held", "es", owner="Mike Turner") == "Esperando la aprobación de Mike Turner"
     assert (render.language("es"), render.language("fr"), render.language(None)) == ("es", "en", "en")
     with pytest.raises(KeyError):
-        render.status("held", "fr", owner="Maria Rivera")                 # no free-text fallback
+        render.status("held", "fr", owner="Mike Turner")                 # no free-text fallback
 
 
 @pytest.mark.parametrize("key", ["refused_contact_changed", "refused_person_removed", "refused_session_closed",

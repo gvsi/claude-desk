@@ -7,7 +7,8 @@
 - Claude's prose on every chat screen: a delivered reply's prose blocks, the setup consultant's messages, Ask Claude's answers, owner transcripts and Safety's stopped drafts.
 - With `streaming` while an owner chat's reply is still arriving: pass the whole text so far on each `delta`, then the saved text without `streaming` once the turn is done.
 - With `reveal` for a visitor reply that has just arrived live. The kernel has checked the whole reply before the browser has any of it, so the reveal only shows more of text it already holds, in order. Messages from history, a reload or a reopened chat show whole.
-- With `links="inert"` where a link's target hasn't been checked: a stopped draft, which may hold the very link it was stopped for, and, for now, every prose block `ClaudeMessage` draws (its README says why).
+- With `links="open"` for `ClaudeMessage`'s delivered replies, whose Markdown links the kernel's reply check holds to the business's contact, and setup's docked question.
+- With `links="inert"` where a link's target hasn't been checked: a stopped draft, which may hold the very link it was stopped for.
 - Not for agent-to-agent responses, which are for agents, not screens, or for the Vision pages, which keep plain text.
 
 ## What the consumer provides
@@ -55,5 +56,6 @@ Under `prefers-reduced-motion: reduce` a revealed reply shows whole at once and 
 | `text` | `string` | Required. The whole text so far. It may grow between renders and may stop mid-token. |
 | `streaming` | `boolean` | `false` by default. The text is still growing. |
 | `reveal` | `boolean` | `false` by default. The text is whole; reveal it word by word. Only a message that arrives live passes it. |
+| `revealLength` | `number` | With `reveal`, for one of several blocks of a reply revealed one after another: the whole reply's length, which sets the pace, so the reply takes at most about 3 s in all. The text's own length by default. |
 | `onRevealed` | `() => void` | Called once, when everything in `text` is shown: at once when not revealing or under reduced motion. |
 | `links` | `'open' \| 'inert'` | `inert` by default, so a screen that leaves it out never opens an unchecked link: link text then its address as written, nothing clickable. `open`: links are clickable and show their text only. |

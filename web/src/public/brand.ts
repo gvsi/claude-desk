@@ -32,7 +32,7 @@ export const OWNER_NAME_FALLBACK = 'Owner';
 export interface DeskBrand {
   brand: PublicBrand;
   /**
-   * Whom a visitor can ask for: `owner_display_name` ("Maria Rivera"), or null when the owner gave
+   * Whom a visitor can ask for: `owner_display_name` ("Mike Turner"), or null when the owner gave
    * no name and the Desk carries setup's fallback (`OWNER_NAME_FALLBACK`).
    */
   ownerName: string | null;
@@ -53,7 +53,7 @@ function readableField(color: string | null): string {
   }
 }
 
-export function brandFrom(desk: PublicDesk): DeskBrand {
+export function brandFrom(desk: Pick<PublicDesk, 'business_name' | 'desk_name' | 'owner_display_name' | 'brand'>): DeskBrand {
   const name = desk.business_name;
   const brand: Record<string, unknown> = desk.brand ?? {};
   return {

@@ -74,7 +74,7 @@ const EVERY_KIND = [
   '- the tank isn\'t leaking\n- it\'s one worn part',
   '1. rust in the water\n2. past 12 years',
   '| | Repair | Replace |\n| --- | --- | --- |\n| What changes | One worn part | The whole tank |',
-  '> Maria texts before she arrives.',
+  '> Mike texts before she arrives.',
   '---',
   'The [Energy Saver guide](https://www.energy.gov/energysaver/water-heating) explains the options.',
 ].join('\n\n');
@@ -97,7 +97,7 @@ it('each_markdown_kind_renders_as_its_element', () => {
   // An empty corner cell names no column, so it is a plain cell: screen readers skip it.
   expect([...md.querySelectorAll('thead tr > *')].map((cell) => cell.tagName.toLowerCase())).toEqual(['td', 'th', 'th']);
   expect([...md.querySelectorAll('tbody td')].map((td) => td.textContent)).toEqual(['What changes', 'One worn part', 'The whole tank']);
-  expect(md.querySelector('blockquote p')?.textContent).toBe('Maria texts before she arrives.');
+  expect(md.querySelector('blockquote p')?.textContent).toBe('Mike texts before she arrives.');
   expect(md.querySelector('a')?.textContent).toBe('Energy Saver guide');
 });
 
@@ -116,13 +116,13 @@ it('raw_html_renders_as_text_never_as_elements', () => {
 });
 
 it('an_https_link_shows_its_text_only_and_opens_in_a_new_tab', () => {
-  const md = reply(mount(<ChatMarkdown links="open" text={'The [Energy Saver guide](https://www.energy.gov/energysaver/water-heating) explains it. Or [write to Maria](mailto:maria@example.com).'} />));
+  const md = reply(mount(<ChatMarkdown links="open" text={'The [Energy Saver guide](https://www.energy.gov/energysaver/water-heating) explains it. Or [write to Mike](mailto:mike@example.com).'} />));
   const links = [...md.querySelectorAll('a')];
   expect(links.map((link) => [link.textContent, link.getAttribute('href'), link.target, link.rel])).toEqual([
     ['Energy Saver guide', 'https://www.energy.gov/energysaver/water-heating', '_blank', 'noopener noreferrer'],
-    ['write to Maria', 'mailto:maria@example.com', '_blank', 'noopener noreferrer'],
+    ['write to Mike', 'mailto:mike@example.com', '_blank', 'noopener noreferrer'],
   ]);
-  expect(md.textContent).toBe('The Energy Saver guide explains it. Or write to Maria.');
+  expect(md.textContent).toBe('The Energy Saver guide explains it. Or write to Mike.');
 });
 
 it('a_link_to_any_other_scheme_or_place_renders_as_its_text', () => {
@@ -152,11 +152,11 @@ it('links_are_inert_unless_a_screen_asks_for_them_open', () => {
 it('inert_links_show_their_address_as_written', () => {
   // Not as a URL parser rewrites it: no added slash, no percent-encoding, no xn-- domain, and a
   // target that isn't http, https or mailto shows too.
-  const text = '[Pay](https://pay.example.net), [la señal](https://example.com/señal), [el sitio](https://bücher.example/a), [Call Maria](tel:+15550100) and https://example.com.';
+  const text = '[Pay](https://pay.example.net), [la señal](https://example.com/señal), [el sitio](https://bücher.example/a), [Call Mike](tel:+15550100) and https://example.com.';
   const md = reply(mount(<ChatMarkdown text={text} links="inert" />));
   expect(md.querySelectorAll('a')).toHaveLength(0);
   expect(md.textContent).toBe(
-    'Pay (https://pay.example.net), la señal (https://example.com/señal), el sitio (https://bücher.example/a), Call Maria (tel:+15550100) and https://example.com.',
+    'Pay (https://pay.example.net), la señal (https://example.com/señal), el sitio (https://bücher.example/a), Call Mike (tel:+15550100) and https://example.com.',
   );
 });
 

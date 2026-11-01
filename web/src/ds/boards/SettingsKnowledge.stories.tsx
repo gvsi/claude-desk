@@ -9,7 +9,7 @@ import { SPEC, expectFooter, expectOwnerFrame, expectTabOrder } from './spec.ts'
 
 /** What the Desk knows, as the board lists it: fixture data, since the list waits on an API. */
 const ITEMS: KnowledgeRowView[] = [
-  { id: 'website', title: 'Your website', detail: 'rivera-plumbing.example, read during setup', readers: ['public'] },
+  { id: 'website', title: 'Your website', detail: 'turner-plumbing.example, read during setup', readers: ['public'] },
   { id: 'price-list', title: 'Price list', detail: 'From your answers in setup', readers: ['public'] },
   { id: 'note-5c1e', title: null, detail: 'Added Oct 27', readers: ['owner'] },
 ];

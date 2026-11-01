@@ -6,7 +6,7 @@ import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { PersonMessage } from './PersonMessage.tsx';
 
-/** Maria's say during the take-over: author `owner`, one `owner_said` block. */
+/** Mike's say during the take-over: author `owner`, one `owner_said` block. */
 const said = rivera.events.takeOver.find((event: SseEvent): event is EvMessage => event.type === 'message') as EvMessage;
 const saidText = said.blocks[0]?.text ?? '';
 
@@ -23,7 +23,7 @@ type Story = StoryObj<typeof meta>;
 
 export const OwnerSpeaking: Story = {
   parameters: {
-    canvasNote: "The board's words are Maria's from that chat; here they are the fixture's owner_said block, shown verbatim with no card frame.",
+    canvasNote: "The board's words are Mike's from that chat; here they are the fixture's owner_said block, shown verbatim with no card frame.",
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(said.author).toBe('owner');
@@ -38,27 +38,27 @@ export const OwnerSpeaking: Story = {
     expectComputed(words, { backgroundColor: 'rgba(0, 0, 0, 0)', paddingLeft: '0px' });
     await expect(words.closest('[data-copy="user"]')).not.toBeNull();
     // The name and role are text; the initials beside them are hidden from screen readers.
-    await expect(canvasElement.querySelector('.cd-person-message__who')).toHaveTextContent(/^Maria Rivera, owner$/);
+    await expect(canvasElement.querySelector('.cd-person-message__who')).toHaveTextContent(/^Mike Turner, owner$/);
     const avatar = canvasElement.querySelector('.cd-person-message__avatar') as HTMLElement;
     await expect(avatar).toHaveAttribute('aria-hidden', 'true');
-    await expect(avatar.textContent).toBe('MR');
+    await expect(avatar.textContent).toBe('MT');
     expectComputed(avatar, { width: '28px', height: '28px', backgroundColor: 'rgb(60, 57, 47)' });
   },
 };
 
 export const OwnersOwnScreen: Story = {
-  args: { name: 'You', initials: 'MR', role: undefined },
+  args: { name: 'You', initials: 'MT', role: undefined },
   parameters: {
     canvas: 'N-Conv-TakeOver',
-    canvasNote: "Maria's own message on her conversation screen: labelled “You”, beside her own initials; the words are the fixture's owner_said block.",
+    canvasNote: "Mike's own message on his conversation screen: labelled “You”, beside his own initials; the words are the fixture's owner_said block.",
   },
   play: async ({ canvas, canvasElement }) => {
-    // The label is "You", as text; the avatar takes her own initials, never the label's.
+    // The label is "You", as text; the avatar takes his own initials, never the label's.
     await expect(canvasElement.querySelector('.cd-person-message__who')).toHaveTextContent(/^You$/);
     await expect(canvas.getByText('You')).toHaveAttribute('data-copy', 'user');
     const avatar = canvasElement.querySelector('.cd-person-message__avatar') as HTMLElement;
     await expect(avatar).toHaveAttribute('aria-hidden', 'true');
-    await expect(avatar.textContent).toBe('MR');
+    await expect(avatar.textContent).toBe('MT');
     expectComputed(avatar, { width: '28px', height: '28px', backgroundColor: 'rgb(60, 57, 47)' });
     await expect(canvas.getByText(saidText)).toBeVisible();
   },

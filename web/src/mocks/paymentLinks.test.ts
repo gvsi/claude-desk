@@ -10,7 +10,7 @@ it('reads paid and both cancellation paths from the current link record', async 
   const { world } = mockStore;
   const desk = world.desk(RIVERA.deskId);
   const deposit = SCRIPT.find((rule) => rule.name === 'deposit');
-  if (!desk || !deposit) throw new Error('Rivera and the deposit script exist');
+  if (!desk || !deposit) throw new Error('Turner and the deposit script exist');
   const chat = world.addSession(desk);
   const issue = () => {
     const context = world.context(chat, 'en', 'pay the deposit');
@@ -36,7 +36,7 @@ it('gives each link its own fact and cancels only that fact', () => {
   const { world } = mockStore;
   const desk = world.desk(RIVERA.deskId);
   const deposit = SCRIPT.find((rule) => rule.name === 'deposit');
-  if (!desk || !deposit) throw new Error('Rivera and the deposit script exist');
+  if (!desk || !deposit) throw new Error('Turner and the deposit script exist');
   const chat = world.addSession(desk);
   for (let i = 0; i < 2; i += 1) {
     const context = world.context(chat, 'en', 'pay the deposit');

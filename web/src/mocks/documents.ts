@@ -37,7 +37,7 @@ const PRIVATE_HEADERS: Readonly<Record<string, string>> = {
 
 /** What a document says, by its card's title, as the kernel's seed has it (`kernel_service/seed.py`); any other says its title. */
 const DOCUMENT_TEXT: Readonly<Record<string, string>> = {
-  'Invoice, drain clearing': 'Rivera Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
+  'Invoice, drain clearing': 'Turner Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
 };
 
 /** The API's copy for a link that was opened, has expired or names nothing (`DOCUMENT_COPY`'s 404). */

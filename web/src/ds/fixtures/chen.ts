@@ -27,7 +27,7 @@ import { cardBlock, placeholderHex, proseBlock } from './rivera';
 
 const OWNER = 'Linda Chen';
 const DESK_ID = 'desk-chen-main';
-/** The same demo copy as Rivera Plumbing's: one owner with two businesses. */
+/** The same demo copy as Turner Plumbing's: one owner with two businesses. */
 const COPY_ID = 'copy-demo-7f3a';
 
 const business = {

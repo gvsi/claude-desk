@@ -16,7 +16,7 @@ import httpx
 from desk.api.kernel_client import CredentialView
 from desk.api.ratelimit import LIMITS, Limit
 from desk.api.store import Ids, append_message
-from desk.contracts import CopyCreated, Decision, ExecResult, ToolCall
+from desk.contracts import BRAND_PALETTE, CopyCreated, Decision, ExecResult, ToolCall
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DecideRequest, ExecuteRequest
 from tests.kernel_contract.fake_kernel import NOTIFICATIONS, RIVERA_TZ
 from tests.kernel_contract.ro_tables import mark_replayed
@@ -58,7 +58,7 @@ async def new_owner(api, browser, fake, kernel_http) -> Owner:
 
 def new_desk(desk_name: str = "Emergency line", **business) -> dict:
     """A `POST /api/owner/desks` body: the business (or an existing one of the copy) and a Desk with empty parts."""
-    return {"business": {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": TIMEZONE,
+    return {"business": {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": TIMEZONE,
                          **business},
             "desk": {"name": desk_name, "charter": [], "hours": [], "price_items": [], "calendar_slots": [],
                      "people": [], "documents": [], "notifications": NOTIFICATIONS}}
@@ -186,7 +186,8 @@ async def test_people_update_passes_the_masked_contact_rejection_through(api, br
     leads = (await owner.browser.get(people_path)).json()["leads"]
     assert [(lead["display_name"], lead["note"]) for lead in leads] == [("Ana Ruiz", None),
                                                                         ("Sam Ortiz", "Leaky tap <b>soon</b>")]
-    assert set(leads[0]) == {"lead_id", "display_name", "note", "created_at"}
+    assert set(leads[0]) == {"lead_id", "display_name", "note", "created_at", "replayed"}
+    assert [lead["replayed"] for lead in leads] == [False, False]           # left in a live conversation
 
     # Another copy's Desk is 404, and nothing is sent to the kernel for it.
     calls = len(fake.calls)
@@ -318,7 +319,7 @@ async def test_reports_count_bookings_payments_and_who_handled(api, browser, fak
             assert (await checkout(kernel_http, "POST /payment_links/{token}/complete", token)).state == "paid"
             await issue_payment_link(who.kernel, who.session_id, "deposit", next(_CALL_IDS))   # issued, never paid
         if owner_steps_in:
-            await write(engine, db, owner, who.session_id, "owner_say", at, "Maria here, I'll call you.")
+            await write(engine, db, owner, who.session_id, "owner_say", at, "Mike here, I'll call you.")
         return who.session_id
 
     # Before the window (31 local dates back): a booked and paid conversation that doesn't count.
@@ -409,6 +410,41 @@ async def test_reports_flag_a_payment_from_recorded_history(api, browser, fake, 
         marked = (await owner.browser.get(reports_path)).json()
         assert marked == {"bookings": 0, "paid_cents": 2000, "handled_by_claude": 0, "needed_you": 0,
                           "recorded_history": True}, kind
+
+
+async def test_a_brand_palette_pick_goes_to_the_kernel_and_back_on_the_owners_read(api, browser, fake, kernel_http):
+    owner = await new_owner(api, browser, fake, kernel_http)
+    names = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": TIMEZONE}
+    url = f"/api/owner/desks/{owner.desk_id}/business"
+
+    async def brand_read() -> dict:
+        (business,) = (await owner.browser.get("/api/owner/desks")).json()
+        return business["brand"]
+
+    teal = {"palette": "teal", **BRAND_PALETTE["teal"]}
+    assert await brand_read() == teal                                    # the seed's pick
+    updated = await owner.browser.put(url, json=names | {"brand_palette": "plum"})
+    assert updated.status_code == 200, updated.text
+    # passed on as it came: the kernel alone turns the key into colours
+    (call,) = fake.called("PUT /desks/{id}/business")
+    assert (call.body["brand_palette"], call.body["brand"]) == ("plum", {})
+    assert await brand_read() == {"palette": "plum", **BRAND_PALETTE["plum"]}
+    # "none", no colours, is a pick; a Desk that stored nothing reads as teal
+    assert (await owner.browser.put(url, json=names | {"brand_palette": "none"})).status_code == 200
+    assert await brand_read() == {"palette": "none"}
+    assert (await owner.browser.put(url, json=names | {"brand_palette": None, "brand": {}})).status_code == 200
+    assert await brand_read() == teal
+    # a free-form brand from before the palette reads as stored
+    legacy = {"primary": "#0F3D3A", "accent": "#C2410C"}
+    assert (await owner.browser.put(url, json=names | {"brand": legacy})).status_code == 200
+    assert await brand_read() == legacy
+
+    # a key outside the palette, or a pick beside colours of its own, never reaches the kernel
+    for bad in ({"brand_palette": "magenta"}, {"brand_palette": "navy", "brand": {"primary": "#000000"}},
+                {"brand": {"palette": "magenta"}}):
+        refused = await owner.browser.put(url, json=names | bad)
+        assert (refused.status_code, refused.json()) == (422, {"error": "invalid"}), bad
+    assert len(fake.called("PUT /desks/{id}/business")) == 4
 
 
 async def test_each_desk_part_goes_to_the_kernel_as_the_owner(api, browser, fake, kernel_http):

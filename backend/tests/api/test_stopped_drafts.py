@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 
 from desk.api.main import create_app
+from tests.api.conftest import without_call_backs
 from tests.api.fakes import ScriptedModel, response, text
 from tests.api.notes import conversation_notes
 from tests.api.test_approvals import jobs_done
@@ -31,8 +32,8 @@ from tests.api.test_triage import REPLY_TRIAGE, answer
 # A draft the kernel stops on a promise word (the fake's forced `promise_word` matches its first 40 characters), the
 # rewrite that passes, and a rewrite a test has stopped too. None has a digit, so the fake's number rules leave them be.
 DRAFT = "Your booking is confirmed for tomorrow morning, see you then."
-REWRITE = "Maria confirms each visit herself; here are her hours."
-SECOND_DRAFT = "I promise Maria will be there first thing tomorrow."
+REWRITE = "Mike confirms each visit himself; here are his hours."
+SECOND_DRAFT = "I promise Mike will be there first thing tomorrow."
 
 
 @pytest.fixture
@@ -270,6 +271,7 @@ async def test_a_take_over_during_a_sibling_replys_check_isnt_held_up(app, brows
 async def test_a_triage_shows_on_the_draft_claude_rewrote_or_on_the_handoff_in_its_place(
         app, browser, fake, kernel_http, model, engine, jobs_connector):
     chat = await new_chat(app, browser, kernel_http, fake)
+    without_call_backs(fake, fake.sessions[chat.session_id].desk_id)   # so the handoff shows, not the call-back offer
     fake.violation("promise_word", times=2)                    # the draft and its rewrite are both stopped
     model.add(response(reply(DRAFT)), response(reply(SECOND_DRAFT)), response())
     model.jobs["triage"].extend([answer(REPLY_TRIAGE)] * 2)

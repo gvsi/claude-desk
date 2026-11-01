@@ -18,7 +18,7 @@ const HREFS = Object.fromEntries(
 ) as SidebarHrefs;
 
 const PROPS: SidebarProps = {
-  business: 'Rivera Plumbing',
+  business: 'Turner Plumbing',
   onSwitchBusiness: () => {},
   desks: [{ id: 'desk-main', name: 'Main line' }],
   currentDeskId: 'desk-main',
@@ -28,7 +28,7 @@ const PROPS: SidebarProps = {
   peopleLabel: 'Customers',
   answering: true,
   onAnsweringChange: () => {},
-  owner: { name: 'Maria Rivera', status: 'Available for chats' },
+  owner: { name: 'Mike Turner', status: 'Available for chats' },
 };
 
 const ABOUT: NonNullable<SidebarProps['about']> = {

@@ -9,6 +9,7 @@
  * interview and its step. The interviews are kept per copy beside its world, so a start over leaves
  * none behind.
  */
+import { effectiveBrand } from './brand.ts';
 import type { Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   BusinessOut,
@@ -40,6 +41,7 @@ import { formatHours } from '../lib/format.ts';
 import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { appendBusinessTools } from './businessTools.ts';
+import { playReply, type PlayedRead } from './ownerStreams.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
@@ -130,6 +132,31 @@ interface Interview {
   /** Consent runs in the background when a test holds it; its result lands on a later GET. */
   holdConsent: boolean;
   consentResult: 'landed' | 'failed' | null;
+  /**
+   * While a streamed turn runs, the interview as reads see it: busy, with the owner's words. The
+   * turn has landed in `state` already and shows once its stream ends.
+   */
+  view: SetupState | null;
+  /** The turn whose events a stream follows: a streamed turn, or a held one followed while busy. */
+  run: SetupRun | null;
+}
+
+/** What follows a setup turn's events: the events as the API frames them, and the stream's end. */
+export interface SetupFollower {
+  send(name: 'delta' | 'reset' | 'reading' | 'label' | 'done' | 'error', data: Record<string, unknown>): void;
+  close(): void;
+}
+
+/** A running turn as its stream shows it: the reads started and ended so far, and the reply so far. */
+interface SetupRun {
+  id: string;
+  reading: { read: PlayedRead['read']; host: string | null }[];
+  labels: { read: PlayedRead['read']; text: string }[];
+  text: string;
+  followers: Set<SetupFollower>;
+  stop: () => void;
+  /** Answers the turn's held request, if it has one, with the interview as it stands. */
+  land: () => void;
 }
 
 const INTERVIEWS = new WeakMap<MockWorld, Map<string, Interview>>();
@@ -146,11 +173,17 @@ function interviewsOf(world: MockWorld): Map<string, Interview> {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Cards are opt-in per response; filtering never removes the interview's stored proposals. */
-const stateOf = (interview: Interview, query?: URLSearchParams): SetupState => ({
-  ...interview.state,
-  pending_card: query?.get('cards') === '1' ? interview.state.pending_card ?? null : null,
-  messages: interview.state.messages.filter((m) => query?.get('cards') === '1' || m.card === null).map((m) => ({ ...m })),
-});
+const stateOf = (interview: Interview, query?: URLSearchParams): SetupState => {
+  const shown = interview.view ?? interview.state;
+  return {
+    ...shown,
+    pending_card: query?.get('cards') === '1' ? shown.pending_card ?? null : null,
+    messages: shown.messages.filter((m) => query?.get('cards') === '1' || m.card === null).map((m) => ({ ...m })),
+  };
+};
+
+/** A turn is running: a streamed one, or one a test holds. */
+const busyOf = (interview: Interview): boolean => interview.view !== null || interview.state.busy === true;
 
 const ok = <T>(body: T) => ({ status: 200, body }) as const;
 /** A new interview: 201, as the API answers its creation. */
@@ -219,7 +252,7 @@ const SCHEDULE = new RegExp(
 
 /**
  * Where a name in a phrase ends: before " in ", " with ", " since " and the like, or before an "and"
- * that starts a new clause ("and we bake …"); an "and" inside the name stays ("Rivera Plumbing and Heating").
+ * that starts a new clause ("and we bake …"); an "and" inside the name stays ("Turner Plumbing and Heating").
  */
 const NAME_END = /\s(?:in|on|at|near|with|for|since|from|out\s+of)\s|,?\s+and\s+(?:I|[Ww]e|[Mm]y|[Oo]ur)\b/;
 /** The same in Spanish: before " en ", " con ", " desde ", " para " or " cerca ". */
@@ -247,7 +280,7 @@ function namedIn(sentence: string): string | null {
  * reader would, kept as the API keeps it (`nameAsKept`). The sentences are read in order, and the
  * first that names the business gives its name: with a phrase naming it ("I'm Ana. I run Ana's
  * Bakery in Oakland." or "Ana's Bakery is my shop" → "Ana's Bakery"), or as a sentence that is only
- * the name ("Rivera Plumbing. I'm Maria, …" → "Rivera Plumbing"). The owner's introduction and a
+ * the name ("Turner Plumbing. I'm Mike, …" → "Turner Plumbing"). The owner's introduction and a
  * sentence about the owner or the work ("I run a small bakery") name nothing, so "I'm Ana." alone
  * gives "Your business".
  */
@@ -301,7 +334,7 @@ function naming(sentences: readonly string[]): { at: number; name: string } | nu
   return null;
 }
 
-/** The owner's first name, from "I'm Maria", "My name is Maria", "Soy Maria" and the like in the description; null when it gives none. */
+/** The owner's first name, from "I'm Mike", "My name is Mike", "Soy Mike" and the like in the description; null when it gives none. */
 function ownerNameOf(description: string): string | null {
   return OWNER.exec(description)?.[1] ?? null;
 }
@@ -433,7 +466,7 @@ interface SituationWords {
   searches: readonly [string, string];
 }
 
-/** Rivera Plumbing's words: the situations as the mock always told them. */
+/** Turner Plumbing's words: the situations as the mock always told them. */
 const PLUMBER_WORDS: SituationWords = {
   bookingDays: WEEKDAYS,
   bookings: 'Books weekday visits in your hours.',
@@ -927,7 +960,7 @@ const SENTENCE_END = /[;!?\n]|\.(?=\s|$)/g;
 const REJECTED = /\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b/;
 const OWNERS = /\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|mi celular|el mío|el mio)\b/;
 const SOMEONE_ELSE = /\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b/;
-/** A name just before a contact ("Ana at …", "Maria: …") or as a possessive ("Ana's email is …"). */
+/** A name just before a contact ("Ana at …", "Mike: …") or as a possessive ("Ana's email is …"). */
 const NAMED = /(\p{L}[\p{L}'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$/u;
 const POSSESSIVE = /(\p{L}[\p{L}-]*)'s\b/gu;
 /** The capitalized words that are never a person's name: a contact's labels and other common words (setup.py `_NOT_NAMES`). */
@@ -1093,6 +1126,7 @@ export function holdNextDecision(world: MockWorld, interviewId: string): (outcom
     interview.decisionDone();
     interview.decisionDone = null;
     interview.state.busy = false;
+    endRun(interview, 'done');
   };
 }
 
@@ -1208,7 +1242,137 @@ export function holdNextAnswer(world: MockWorld, interviewId: string): () => voi
     interview.running = null;
     applyAnswer(world, interview, turn.text, turn.ownerStored);
     interview.state.busy = false;
+    endRun(interview, 'done');
   };
+}
+
+const runId = () => `r_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+
+/** What a saved read label read, as its stream names it: the owner's Claude memory, a web search, or their site. */
+function readOf(label: string): Pick<PlayedRead, 'read' | 'host'> {
+  if (label === MEMORY_LABEL || label.includes('Claude memory')) return { read: 'memory', host: null };
+  if (/^(?:Searched the web|Couldn't search the web)/.test(label)) return { read: 'web_search', host: null };
+  const host = label.replace(/^(?:Read|Couldn't read) /, '').split(',')[0] ?? null;
+  return { read: 'website', host };
+}
+
+/** Ends the turn its stream follows: `done` (the turn landed) or `error`, then each stream closes. */
+function endRun(interview: Interview, how: 'done' | 'error' | 'drop'): void {
+  const run = interview.run;
+  if (run === null) return;
+  interview.run = null;
+  run.stop();
+  for (const follower of run.followers) {
+    if (how === 'done') follower.send('done', { run: run.id });
+    else if (how === 'error') follower.send('error', { run: run.id, error: 'model_unavailable' });
+    follower.close();
+  }
+}
+
+/**
+ * Runs a turn as a stream: the owner's words are in already; `commit` lands the rest of the turn
+ * now, and reads go on seeing the interview busy, as it was, until the turn's reads and reply have
+ * streamed. Answers 202 at once with the interview busy, as the API does for a turn still running;
+ * with `hold`, its request waits instead (`later`) and answers 200 with the landed turn once the
+ * stream has said `done`, as the API answers a turn that ends within its wait.
+ */
+function streamTurn(
+  sv: Server,
+  interview: Interview,
+  req: Req,
+  commit: () => void,
+  { hold = false } = {},
+): { status: 202; body: SetupState; later?: Promise<{ status: 200; body: SetupState }> } {
+  const view = structuredClone({ ...interview.state, busy: true });
+  const before = interview.state.messages.length;
+  commit();
+  const added = interview.state.messages.slice(before);
+  const reads = added.flatMap((m): PlayedRead[] => (m.role === 'tool_label' ? [{ ...readOf(m.text), text: m.text }] : []));
+  // The reply streams; a question with choices is the next message, which docks once the turn lands.
+  const text = added.filter((m) => m.role === 'claude' && m.card == null && m.text.trim() !== '' && m.choices.length === 0).map((m) => m.text).join('\n\n');
+  interview.view = view;
+  const run: SetupRun = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {}, land: () => {} };
+  interview.run = run;
+  const later = hold
+    ? new Promise<{ status: 200; body: SetupState }>((resolve) => {
+        run.land = () => resolve({ status: 200, body: stateOf(interview, req.query) });
+      })
+    : undefined;
+  const plan = sv.takePlan('setup');
+  // A setup turn that fails is the API's to roll back; the mock's streamed turns only land or break off.
+  const played = plan === null ? null : { ...plan, fail: undefined };
+  run.stop = playReply({ text, wordMs: sv.streams.wordMs, reads, plan: played }, {
+    event(ev) {
+      const at = { run: run.id };
+      if (ev.name === 'delta') {
+        run.text = ev.text;
+        for (const follower of run.followers) follower.send('delta', { ...at, text: ev.text });
+      } else if (ev.name === 'reset') {
+        run.text = '';
+        for (const follower of run.followers) follower.send('reset', at);
+      } else if (ev.name === 'reading') {
+        run.reading.push({ read: ev.read, host: ev.host });
+        for (const follower of run.followers) follower.send('reading', { ...at, read: ev.read, host: ev.host });
+      } else if (ev.name === 'label') {
+        run.labels.push({ read: ev.read, text: ev.text });
+        for (const follower of run.followers) follower.send('label', { ...at, read: ev.read, text: ev.text });
+      }
+    },
+    end(how) {
+      // The turn has landed whatever its stream did: a broken connection loses only the display.
+      interview.view = null;
+      if (plan?.doneAfter) {
+        // The request answers with the landed turn first; the stream says so after.
+        run.land();
+        void plan.doneAfter.finally(() => {
+          if (interview.run === run) endRun(interview, how === 'error' ? 'done' : how);
+        });
+        return;
+      }
+      endRun(interview, how === 'error' ? 'done' : how);
+      if (plan?.landAfter) void plan.landAfter.finally(run.land);
+      else run.land();
+    },
+  });
+  return { status: 202, body: stateOf(interview, req.query), ...(later === undefined ? {} : { later }) };
+}
+
+/**
+ * Follows interview `id`'s running turn for one stream: the reads ended and the reply so far at
+ * once, then each event as it comes, until `done`. A turn a test holds is followed silently until
+ * it lands; with no turn running, `done` with no run at once. Returns the function that stops it.
+ */
+export function followSetupTurn(world: MockWorld, id: string, follower: SetupFollower): () => void {
+  const interview = interviewsOf(world).get(id);
+  if (interview && interview.run === null && busyOf(interview)) {
+    interview.run = { id: runId(), reading: [], labels: [], text: '', followers: new Set(), stop: () => {}, land: () => {} };
+  }
+  const run = interview?.run ?? null;
+  if (run === null) {
+    follower.send('done', { run: null });
+    follower.close();
+    return () => {};
+  }
+  // A stream that comes late hears the turn so far in its order: each read started, each ended, the reply.
+  for (const started of run.reading) follower.send('reading', { run: run.id, ...started });
+  for (const label of run.labels) follower.send('label', { run: run.id, ...label });
+  if (run.text !== '') follower.send('delta', { run: run.id, text: run.text });
+  run.followers.add(follower);
+  return () => {
+    run.followers.delete(follower);
+  };
+}
+
+/** Stops every streamed turn in `world`, its streams closed with nothing more: the copy is going. */
+export function stopSetupRuns(world: MockWorld): void {
+  for (const interview of interviewsOf(world).values()) {
+    const run = interview.run;
+    if (run === null) continue;
+    interview.run = null;
+    run.stop();
+    run.land();
+    for (const follower of run.followers) follower.close();
+  }
 }
 
 /** The interview the path names, and its Desk, or why the request can't have it. */
@@ -1338,6 +1502,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     running: null,
     holdConsent: false,
     consentResult: null,
+    view: null,
+    run: null,
   };
   desk.ownerName = ownerOf(interview);
   interviewsOf(world).set(interview.state.interview_id, interview);
@@ -1427,11 +1593,13 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (interview.consentResult === 'landed') {
       interview.consentResult = null;
       completeConsent(interview);
+      endRun(interview, 'done');
     } else if (interview.consentResult === 'failed') {
       interview.consentResult = null;
       interview.state.busy = false;
       interview.state.consent = null;
       interview.state.messages.pop();
+      endRun(interview, 'error');
     }
     return ok(stateOf(interview, req.query));
   },
@@ -1441,7 +1609,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     const allow = isRecord(req.body) ? req.body.allow : undefined;
     if (req.malformed || typeof allow !== 'boolean') return INVALID;
     const { interview } = found;
-    if (interview.state.busy) return { status: 202, body: stateOf(interview, req.query) };
+    if (busyOf(interview)) return { status: 202, body: stateOf(interview, req.query) };
     if (interview.state.consent != null) return CONFLICT;
     interview.cardsEnabled = req.query?.get('cards') === '1';
     interview.state.consent = allow;
@@ -1452,13 +1620,14 @@ export const SETUP_ROUTES: ServedRoutes = {
       return { status: 202, body: stateOf(interview, req.query) };
     }
     // Without consent, nothing is ever read.
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, () => completeConsent(interview));
     completeConsent(interview);
     return ok(stateOf(interview, req.query));
   },
   setupAnswer(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
-    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
+    if (busyOf(found.interview)) return { status: 202, body: stateOf(found.interview, req.query) };
     const body = isRecord(req.body) ? req.body : {};
     const { text, question, card } = body;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX) return INVALID;
@@ -1482,6 +1651,10 @@ export const SETUP_ROUTES: ServedRoutes = {
       }
       return ok(stateOf(interview, req.query));
     }
+    if (sv.streams.setupTurns) {
+      say(interview, 'owner', text.trim());
+      return streamTurn(sv, interview, req, () => applyAnswer(sv.world, interview, text, true), { hold: sv.streams.answersAtOnce !== true });
+    }
     applyAnswer(sv.world, interview, text);
     return ok(stateOf(interview, req.query));
   },
@@ -1494,7 +1667,7 @@ export const SETUP_ROUTES: ServedRoutes = {
   setupProposal(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
-    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
+    if (busyOf(found.interview)) return { status: 202, body: stateOf(found.interview, req.query) };
     const { interview } = found;
     const proposal = interview.state.messages.find((message) => message.card?.proposal_id === req.params.proposal_id)?.card;
     if (!proposal) return NOT_FOUND;
@@ -1535,13 +1708,14 @@ export const SETUP_ROUTES: ServedRoutes = {
       interview.state.busy = true;
       return { status: 202, body: stateOf(interview, req.query) };
     }
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, apply, { hold: sv.streams.answersAtOnce !== true });
     apply();
     return ok(stateOf(interview, req.query));
   },
   setupSuggestions(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
-    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
+    if (busyOf(found.interview)) return { status: 202, body: stateOf(found.interview, req.query) };
     const { interview } = found;
     if (interview.state.step !== 'questions' || interview.state.consent === null || interview.running !== null) return CONFLICT;
     if (req.malformed || !isRecord(req.body) || Object.keys(req.body).length !== 0) return INVALID;
@@ -1553,9 +1727,18 @@ export const SETUP_ROUTES: ServedRoutes = {
     }
     interview.usedSuggestions = true;
     say(interview, 'owner', 'Use your suggestions');
-    say(interview, 'claude', CPA_COPY.rest);
-    finishQuestions(sv.world, interview, true);
+    const finish = () => {
+      say(interview, 'claude', CPA_COPY.rest);
+      finishQuestions(sv.world, interview, true);
+    };
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, finish);
+    finish();
     return ok(stateOf(interview, req.query));
+  },
+  setupEvents(sv, req) {
+    // A 200 opens the stream (handlers.ts); `followSetupTurn` follows the running turn.
+    const found = interviewOf(sv, req);
+    return isFailure(found) ? found : { status: 200 };
   },
   setupConnect(sv, req) {
     const found = interviewOf(sv, req);
@@ -1646,7 +1829,7 @@ export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
 
 /**
  * Which words the built-in agent's tasks take on the Desk (`GET …/agent_tasks`): its setup business
- * type for a Desk setup made, else null (the copy's own Desk, Rivera's, whose set is `rivera`).
+ * type for a Desk setup made, else null (the copy's own Desk, Turner's, whose set is `rivera`).
  */
 export function setupTaskSet(world: MockWorld, deskId: string): BusinessType | null {
   return interviewForDesk(world, deskId)?.businessType ?? null;
@@ -1664,7 +1847,7 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
     business_name: interview.business,
     desk_name: desk.summary.name,
     owner_display_name: ownerOf(interview),
-    brand: { ...BUSINESS.brand },
+    brand: effectiveBrand(desk.brand),
     charter: publicState ? [
       ...publicState.lines.filter(({ text, source, held }) => source === 'owner' && !held && !publicLineRefused(text)).map(({ key, text }) => cardBlock(key === 'contact' ? 'contact' : 'policy', { fact_id: `charter:${key}`, title: text })),
       ...(publicState.hours?.source === 'owner' && publicState.hours.windows.length ? [cardBlock('hours', {
@@ -1711,6 +1894,7 @@ export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[])
         name: interview.business,
         owner_display_name: ownerOf(interview),
         timezone: interview.timezone,
+        brand: effectiveBrand(desk.brand),
         desks: [{ ...desk.summary, setup: unfinishedSetup(world, desk.summary.desk_id) }],
       },
     ];

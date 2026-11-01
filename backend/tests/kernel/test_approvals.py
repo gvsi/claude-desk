@@ -2,8 +2,8 @@
 a held request once, and an approval runs the exact action it was given for, as the session that
 asked.
 
-Most tests answer the held quote every Rivera Plumbing copy is seeded with (drain clearing at 15%
-off, which `rv-quote` holds for Maria); the rest hold calls on a Desk of scripted adapters
+Most tests answer the held quote every Turner Plumbing copy is seeded with (drain clearing at 15%
+off, which `rv-quote` holds for Mike); the rest hold calls on a Desk of scripted adapters
 (`FakeAdapter`) under `ask` cards. The owner answers with the copy's owner token, as the API
 does, and reads the outcome back through `GET /decisions/{decision_id}` and the safety ledger.
 """
@@ -59,7 +59,7 @@ async def approvals_of(app: FastAPI, copy_id: str) -> list[Approval]:
 
 
 async def seeded_hold(app: FastAPI, client: httpx.AsyncClient) -> tuple[Rivera, DecisionRow]:
-    """A fresh Rivera copy and the held quote it was seeded with."""
+    """A fresh Turner copy and the held quote it was seeded with."""
     copy = await rivera(app, client)
     [held] = await rows_of(app, copy.copy_id, select(DecisionRow))
     assert held.state == "held"
@@ -76,11 +76,11 @@ async def test_allow_once_executes_inside_the_answer(app, client, frozen_clock):
 
     decision, execution = result.decision, result.execution
     assert (decision.decision_id, decision.state, decision.visitor_plain) == (
-        held.decision_id, "executed", "Quoted from Maria Rivera's price list")
+        held.decision_id, "executed", "Quoted from Mike Turner's price list")
     assert result.card_diff is None                                       # allow_once drafts no rule
     [quote] = await rows_of(app, copy.copy_id, select(Quote))
     assert (quote.action_id, quote.session_id, quote.discount_bp, quote.amount_cents) == (
-        held.action_id, held.session_id, 1500, 15_300)                   # the action Maria approved, at its price
+        held.action_id, held.session_id, 1500, 15_300)                   # the action Mike approved, at its price
     [fact] = execution.facts
     assert (execution.action_id, execution.state, fact.fact_id) == (held.action_id, "succeeded",
                                                                     f"quote:{quote.quote_id}")
@@ -129,7 +129,7 @@ async def test_answer_preserves_the_signed_approval_before_the_outcome(app, clie
 
     assert approved is not None
     assert (approved.decision_id, approved.state, approved.visitor_plain, approved.answers) == (
-        held.decision_id, "approved", "Maria Rivera approved this", [])
+        held.decision_id, "approved", "Mike Turner approved this", [])
     verify_signature(await public_key(client), approved)
     assert result.decision.state == "executed" and result.execution.state == "succeeded"
     assert approved.ledger_seq < result.decision.ledger_seq
@@ -252,7 +252,7 @@ async def post_cancel(client: httpx.AsyncClient, visitor: Visitor, decision_id: 
 
 
 async def held_quote(app: FastAPI, client: httpx.AsyncClient) -> tuple[Rivera, Visitor, Decision]:
-    """A fresh Rivera copy, a stranger on it, and their quote at 15% off, which Maria must answer."""
+    """A fresh Turner copy, a stranger on it, and their quote at 15% off, which Mike must answer."""
     copy, visitor = await visitor_of(app, client)
     held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=1500))
     assert held.state == "held"
@@ -285,7 +285,7 @@ async def test_answers_after_cancel_are_409(app, client):
 
 
 async def test_answers_after_a_rule_change_are_re_decided(app, client):
-    # Maria says never to quotes after the request was held: approving it now doesn't run it
+    # Mike says never to quotes after the request was held: approving it now doesn't run it
     copy, held = await seeded_hold(app, client)
     await activate(app, copy, [c for c in RIVERA_CARDS if c.card_id != "rv-quote"]
                    + [card("no-quotes", "native.quote", mode="never")])
@@ -305,7 +305,7 @@ async def test_answers_after_a_rule_change_are_re_decided(app, client):
     response = await post_answer(client, copy.owner, held.decision_id, "allow_once")   # and it stays refused
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
 
-    # a change that still asks Maria about 15% off: her answer runs it under the new rules
+    # a change that still asks Mike about 15% off: his answer runs it under the new rules
     copy, held = await seeded_hold(app, client)
     await activate(app, copy, [c for c in RIVERA_CARDS if c.card_id != "rv-quote"]
                    + [card("quote-10", "native.quote", max_discount_bp=1000)])
@@ -336,15 +336,15 @@ async def test_a_re_check_that_names_no_version_is_refused_as_the_rules(app, cli
 
 async def test_answers_execute_during_a_take_over(app, client):
     copy, visitor, held = await held_quote(app, client)
-    state = await set_mode(client, copy, visitor.session_id, "owner", 0)      # Maria takes the conversation over
+    state = await set_mode(client, copy, visitor.session_id, "owner", 0)      # Mike takes the conversation over
     assert (state["mode"], state["generation"]) == ("owner", 1)
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
-    # a take-over doesn't cancel a held action: her answer still runs it, as the visitor's session
+    # a take-over doesn't cancel a held action: his answer still runs it, as the visitor's session
     assert (result.decision.state, result.execution.state) == ("executed", "succeeded")
     [fact] = result.execution.facts
     assert fact.label.readers == ["owner", f"session:{visitor.session_id}"]
     assert (held.action.generation, len(await rows_of(app, copy.copy_id, select(Quote)))) == (0, 1)
-    # the conversation stays hers
+    # the conversation stays his
     row = (await rows_of(app, copy.copy_id, select(ActorSession).where(
         ActorSession.session_id == visitor.session_id)))[0]
     assert (row.mode, row.generation) == ("owner", 1)
@@ -359,7 +359,7 @@ async def test_answers_execute_during_a_breaker_pause(app, client, reviewer):
         ActorSession.session_id == visitor.session_id)))[0]
     assert (row.mode, row.strikes) == ("paused", 3)
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
-    # the pause stops what Claude proposes next, not what Maria approves
+    # the pause stops what Claude proposes next, not what Mike approves
     assert (result.decision.state, result.execution.state) == ("executed", "succeeded")
     assert len(await rows_of(app, copy.copy_id, select(Quote))) == 1
     assert len(reviewer.inputs) == 3                                           # an approval asks no reviewer
@@ -375,7 +375,7 @@ async def test_allow_person_needs_a_verified_person(app, client):
     assert held.answers == ["allow_once", "deny_once"]
     response = await post_answer(client, copy.owner, held.decision_id, "allow_person")
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
-    assert (await read_id(client, copy.owner, held.decision_id)).state == "held"   # nothing ran, still Maria's
+    assert (await read_id(client, copy.owner, held.decision_id)).state == "held"   # nothing ran, still Mike's
     assert await approvals_of(app, copy.copy_id) == [] and await rows_of(app, copy.copy_id, select(Execution)) == []
     [refusal] = [e.event.summary for e in await ledger_rows(app, copy) if e.event.kind == "approval"]
     assert refusal == {"decision_id": held.decision_id, "answer": "allow_person", "refused": "not_offered"}
@@ -405,7 +405,7 @@ async def test_allow_person_drafts_a_person_card(app, client):
     assert held.answers == ["allow_once", "deny_once", "allow_person"]
     result = await answered(client, copy.owner, held.decision_id, "allow_person")
     assert (result.decision.state, result.execution.state) == ("executed", "succeeded")   # it runs, as allow_once
-    # and drafts a rule for Dana alone, no wider than what Maria just approved
+    # and drafts a rule for Dana alone, no wider than what Mike just approved
     assert result.card_diff == [RuleCard(
         card_id=f"person-{dana_id}-native.quote", applies_to="native.quote", mode="auto", who="person",
         person_id=dana_id, max_amount_cents=15_300, max_discount_bp=1500, hours=None, review=False,
@@ -417,7 +417,7 @@ async def test_allow_person_drafts_a_person_card(app, client):
     assert entry == {"decision_id": held.decision_id, "action_id": held.action.action_id, "answer": "allow_person",
                      "state": "approved"}
 
-    # nothing is live until Maria proves and confirms it: a card /policy/draft takes with the Desk's own
+    # nothing is live until Mike proves and confirms it: a card /policy/draft takes with the Desk's own
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         people = await activation.desk_people(ctx, copy.desk_id)
@@ -433,7 +433,7 @@ async def test_allow_person_drafts_a_person_card(app, client):
     # this kernel runs bounded, so the draft is checked on cases (and never activates); it isn't rejected
     assert (drafted.status, drafted.proof.method, drafted.proof.ok) == ("draft", "bounded", True)
     later = await decided(client, dana, "native.quote", quote_args(("drain", 1), discount_bp=1500), call_id="call-2")
-    assert later.outcome == "hold"                                             # still Maria's until she confirms
+    assert later.outcome == "hold"                                             # still Mike's until he confirms
 
     # a visiting agent's key scopes the card the same way (agent sessions arrive with Plan 01c)
     agent = Principal(kind="agent", session_id="agent-session", copy_id=copy.copy_id, desk_id=copy.desk_id,
@@ -504,7 +504,7 @@ async def test_allow_person_is_capped_for_money(app, client, registry, monkeypat
     with pytest.raises(ValueError, match="money cap"):
         approvals.person_card(charged, principal, auto_money_cap_cents=TEST_CAP)
 
-    # within the cap, Dana can be allowed: the card is capped at what Maria approved
+    # within the cap, Dana can be allowed: the card is capped at what Mike approved
     link.script["normalize"] = payment_link(5_000).script["normalize"]
     _, held = await held_on(client, rows, "native.payment_link", visitor=dana, call_id="call-2")
     assert "allow_person" in held.answers
@@ -516,7 +516,7 @@ async def test_allow_person_is_capped_for_money(app, client, registry, monkeypat
                                    auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == []
 
 
-# Maria's drafted card: every booking asks her first, whatever the booking cards' hours say.
+# Mike's drafted card: every booking asks him first, whatever the booking cards' hours say.
 ASK_BOOKINGS = RuleCard(card_id="ask-bookings", applies_to="native.book", mode="ask", who="anyone",
                         reason="Bookings ask you first.")
 ASK_BOOKING_CARDS = [*RIVERA_CARDS, ASK_BOOKINGS]
@@ -532,7 +532,7 @@ async def test_deny_always_drafts_a_never_card(app, client, frozen_clock):
     assert held.answers == ["allow_once", "deny_once", "deny_always"]
     result = await answered(client, copy.owner, held.decision_id, "deny_always")
     assert (result.decision.state, result.decision.visitor_plain, result.execution) == (
-        "denied", "Maria Rivera decided not to go ahead", None)
+        "denied", "Mike Turner decided not to go ahead", None)
     verify_signature(await public_key(client), result.decision)
     # a never card for the tool; for a stranger it can only name anyone
     assert result.card_diff == [RuleCard(card_id="never-anyone-native.book", applies_to="native.book",
@@ -567,8 +567,8 @@ async def test_deny_always_drafts_a_never_card(app, client, frozen_clock):
 
 
 async def test_a_limit_hold_offers_no_deny_always(app, client):
-    # the seeded quote holds because 15% off is past rv-quote's limit, not because quotes ask Maria:
-    # never quoting again is no answer to a discount, so she is offered the two one-time answers
+    # the seeded quote holds because 15% off is past rv-quote's limit, not because quotes ask Mike:
+    # never quoting again is no answer to a discount, so he is offered the two one-time answers
     copy, held = await seeded_hold(app, client)
     before = await read_id(client, copy.owner, held.decision_id)
     assert (before.policy_ids, before.answers) == (["H.twin.rv-quote"], ["allow_once", "deny_once"])
@@ -580,7 +580,7 @@ async def test_a_limit_hold_offers_no_deny_always(app, client):
     assert refusal == {"decision_id": held.decision_id, "answer": "deny_always", "refused": "not_offered"}
     assert (await answered(client, copy.owner, held.decision_id, "deny_once")).decision.state == "denied"
 
-    # verified Dana's discount is past the same limit: Maria can allow her for good, not refuse for good
+    # verified Dana's discount is past the same limit: Mike can allow her for good, not refuse for good
     dana = await verified_visitor(app, client, copy)
     held = await decided(client, dana, "native.quote", quote_args(("drain", 1), discount_bp=1500))
     assert held.answers == ["allow_once", "deny_once", "allow_person"]
@@ -591,7 +591,7 @@ async def test_a_limit_hold_offers_no_deny_always(app, client):
 
 async def test_a_review_gate_hold_offers_no_deny_always(app, client, reviewer):
     # a weekday booking in opening hours that the reviewer doesn't pass: rv-book-wk's review gate,
-    # a limit like its hours, holds it, so Maria isn't offered never taking bookings again
+    # a limit like its hours, holds it, so Mike isn't offered never taking bookings again
     reviewer.answer = Review(within_charter_bp=4000, manipulation_bp=500, recommendation="hold")
     copy, visitor = await visitor_of(app, client)
     held = await book(client, visitor, "S-20261102-1000")                    # Monday at 10:00
@@ -604,7 +604,7 @@ async def test_a_review_gate_hold_offers_no_deny_always(app, client, reviewer):
     assert await approvals_of(app, copy.copy_id) == []
 
 
-# Maria's drafted card for every change at once; the booking cards are more specific than it.
+# Mike's drafted card for every change at once; the booking cards are more specific than it.
 ASK_CHANGES = RuleCard(card_id="ask-changes", applies_to="effect:change", mode="ask", who="anyone",
                        reason="Changes ask you first.")
 
@@ -612,7 +612,7 @@ ASK_CHANGES = RuleCard(card_id="ask-changes", applies_to="effect:change", mode="
 async def test_an_ask_card_below_the_booking_cards_leaves_a_limit_hold(app, client):
     # a Sunday 22:00 booking is outside both booking cards' hours (the master's limit-hold
     # example). The effect card's ask matches it too, but the tool's own cards decide, so the hold
-    # is their twins' and Maria isn't offered never taking bookings again
+    # is their twins' and Mike isn't offered never taking bookings again
     copy, visitor = await visitor_of(app, client)                            # a stranger
     await activate(app, copy, [*RIVERA_CARDS, ASK_CHANGES])
     await add_slot(app, copy, "S-20261101-2200")                             # Sunday at 22:00
@@ -755,10 +755,10 @@ async def test_the_approved_path_runs_prepare_with_the_intent(app, client, regis
 
 
 async def test_a_desk_deleted_after_the_answer_commits_runs_nothing(app, client, registry, monkeypatch):
-    """Maria approves a held request, and the Desk is deleted after her answer has committed its
+    """Mike approves a held request, and the Desk is deleted after his answer has committed its
     intent and before the side effect. The approved path's T2 holds the session row and reads the
     Desk afresh, so nothing runs: what `prepare` reserved is undone, the intent is `failed`, and
-    the decision `refused_at_execution`, its entry naming the deleted Desk; her answer reads it so."""
+    the decision `refused_at_execution`, its entry naming the deleted Desk; his answer reads it so."""
     quote = FakeAdapter("native.quote")
     rows = await desk_with(app, [quote], ASK_QUOTES)
     visitor, held = await held_on(client, rows)
@@ -800,7 +800,7 @@ async def test_other_copy_cannot_answer_or_read(app, client, caplog):
     ]
     assert [(r.status_code, r.json()) for r, _ in refusals] == [
         (status, {"code": "auth" if status == 401 else "not_found"}) for _, status in refusals]
-    # A's request is untouched and still Maria's to answer
+    # A's request is untouched and still Mike's to answer
     assert (await read_id(client, a.owner, held.decision_id)).state == "held"
     assert await approvals_of(app, a.copy_id) == [] and await rows_of(app, a.copy_id, select(Execution)) == []
     # each refusal is on the ledger of the Desk whose session asked, or logged when no Desk can be named;
@@ -822,7 +822,7 @@ async def test_deny_once_and_cancel(app, client, frozen_clock):
     copy, visitor, held = await held_quote(app, client)
     result = await answered(client, copy.owner, held.decision_id, "deny_once")
     assert (result.decision.state, result.decision.visitor_plain, result.execution, result.card_diff) == (
-        "denied", "Maria Rivera decided not to go ahead", None, None)
+        "denied", "Mike Turner decided not to go ahead", None, None)
     [approval] = await approvals_of(app, copy.copy_id)
     assert (approval.answer, approval.consumed_at, approval.binding_sha256) == ("deny_once", frozen_clock.now(), None)
     assert await rows_of(app, copy.copy_id, select(Execution)) == []

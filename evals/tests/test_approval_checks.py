@@ -36,11 +36,11 @@ def state(session_id: str, kind: str = "visitor") -> SessionState:
 DESK_OF_THE_CASE = GoldenDesk(
     copy=CopyCreated(copy_id=COPY, desk_ids=[DESK], owner_session=state("s-owner-3333", "owner"),
                      owner_token="owner-token-4444"),
-    desk_id=DESK, slug="rivera-plumbing-abc123", prices={}, slots={},
+    desk_id=DESK, slug="turner-plumbing-abc123", prices={}, slots={},
     people={"dana": "p-dana-5555", "bob": "p-bob-6666"}, documents={"dana-invoice": "doc-7777"}, charges={},
 )
 CALLER = Caller("visitor", state(OWN), Auth.raw({"X-Session-Token": "own-token-8888"}))
-DECISION = SimpleNamespace(reason_plain="A visitor asked to book Wednesday. Maria confirms every booking.")
+DECISION = SimpleNamespace(reason_plain="A visitor asked to book Wednesday. Mike confirms every booking.")
 
 
 class Views:

@@ -9,7 +9,7 @@ sees the link's fact, title and amount, and the visitor sees the token only in t
 `payment_link` card. An auto-allowed link is checked again against the rules version active when it
 is issued, so a rule change that lands as it runs applies to it.
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland). A test
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland). A test
 that drafts and confirms cards needs the solver (`solver`): an auto `native.quote` card that allows
 up to 10% off and an auto `native.payment_link` card up to $500, both for anyone.
 """
@@ -30,7 +30,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, Decision, Fact, Label, PolicyVersion, RuleCard
+from desk.contracts import Claim, Decision, Fact, Label, PolicyVersion, Review, RuleCard
 from desk.db.models import PaymentLink, Quote
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import adapters, compiler, execute, payments, render
@@ -72,7 +72,7 @@ async def test_input_schema_takes_only_a_quote(app, client):
     assert adapter.free_text_fields == frozenset()          # a quote ID, never the visitor's words
     assert adapter.model_view_keys == {"fact_id", "title", "amount_cents"}
     # the executed receipt the owner signed off, word for word
-    assert [render.executed_status(TOOL, lang, owner="Maria Rivera") for lang in ("en", "es")] == [
+    assert [render.executed_status(TOOL, lang, owner="Mike Turner") for lang in ("en", "es")] == [
         "Payment link made for this quote", "Enlace de pago creado para esta cotización"]
 
     copy = await rivera(app, client)
@@ -198,6 +198,40 @@ async def test_another_sessions_quote_is_refused(desk_prove, app, client, frozen
     assert await links_of(app, copy) == [] and checkouts(copy) == []
 
 
+async def test_a_quote_named_by_its_fact_id_is_the_same_quote(app, client, reviewer):
+    """Claude's context shows a quote by its fact ID (`quote:<id>`), and the tool takes "the
+    quote_id in your context", so passing the whole fact ID is an honest way to name it: it links
+    exactly the quote the bare ID would, under the Turner seed's `rv-link` with a passing review.
+    Another session still can't name it either way, and no other prefix is read as the quote's."""
+    reviewer.answer = Review(within_charter_bp=9500, manipulation_bp=300, recommendation="allow")
+    copy = await rivera(app, client)
+    visitor, other = await open_visitor(client, copy), await open_visitor(client, copy)
+    quote_id = await quoted(client, visitor, ("deposit", 1))
+    for call_id, (who, named) in enumerate(((other, quote_id), (other, f"quote:{quote_id}"),
+                                            (visitor, f"document:{quote_id}"), (visitor, f"quote:quote:{quote_id}"))):
+        refused = await link_for(client, who, named, call_id=f"call-refused-{call_id}")
+        assert (refused.outcome, refused.action) == ("refuse", None), named
+    checks = [entry.event.summary.get("check") for entry in await ledger_rows(app, copy)
+              if entry.event.kind == "decide" and entry.event.summary.get("reason") == "adapter_refused"]
+    assert checks == ["no_such_quote"] * 4
+
+    decision = await link_for(client, visitor, f"quote:{quote_id}", call_id="call-fact")
+    assert (decision.outcome, decision.card_ids) == ("allow", ["rv-link"]), decision.reason_plain
+    assert (decision.action.resource.kind, decision.action.resource.id, decision.action.amount_cents) == (
+        "quote", quote_id, 2_000)
+    result = await executed(client, visitor, decision)
+    [link] = await links_of(app, copy)
+    assert (link.quote_id, link.action_id, link.session_id, link.amount_cents) == (
+        quote_id, decision.action.action_id, visitor.session_id, 2_000)
+    assert checkouts(copy) == [(decision.action.action_id, 2_000, "Service call deposit",
+                                f"session:{visitor.session_id}", "open")]
+    # the bare ID names the same quote, so it answers with that same link
+    again = await link_for(client, visitor, quote_id, call_id="call-bare")
+    assert (again.outcome, again.action.resource) == ("allow", decision.action.resource)
+    assert (await executed(client, visitor, again)).facts == result.facts
+    assert len(await links_of(app, copy)) == 1 and len(checkouts(copy)) == 1
+
+
 @pytest.mark.solver
 async def test_a_quote_has_one_open_link_and_is_paid_once(desk_prove, app, client):
     """Asking again for a link to a quote that has an open one answers with that link: one checkout,
@@ -233,7 +267,8 @@ async def test_a_quote_has_one_open_link_and_is_paid_once(desk_prove, app, clien
     assert "It didn't match your records, so it was refused." in refused.reason_plain
     refusals = [entry.event.summary for entry in await ledger_rows(app, copy)
                 if entry.event.kind == "decide" and entry.event.summary.get("outcome") == "refuse"]
-    assert refusals == [{"outcome": "refuse", "tool": TOOL, "reason": "adapter_refused", "check": "quote_paid"}]
+    assert refusals == [{"outcome": "refuse", "tool": TOOL, "reason": "adapter_refused", "check": "quote_paid",
+                         "policy_version": 2, "auto_money_cap_cents": 50_000}]
     assert len(await links_of(app, copy)) == 1 and len(checkouts(copy)) == 1
 
 
@@ -428,13 +463,13 @@ async def test_link_view_names_the_desks_business(desk_prove, app, client):
     seen = await view(client, link.token)
     assert seen == PaymentLinkView(title="Drain clearing", amount_cents=18_000, state="issued", language="en",
                                    business_name=public.json()["business_name"], customer_name=None)
-    assert seen.business_name == "Rivera Plumbing"
+    assert seen.business_name == "Turner Plumbing"
     # the business's name as it stands, read from the link's Desk, never from the request
     response = await client.put(f"/desks/{copy.desk_id}/business", headers=copy.owner, json={
-        "name": "Rivera & Daughters Plumbing", "owner_display_name": "Maria Rivera", "timezone": "America/Los_Angeles",
+        "name": "Turner & Daughters Plumbing", "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles",
         "brand": {"primary": "#1F4E4A", "accent": "#B87333"}})
     assert response.status_code == 200, response.text
-    assert (await view(client, link.token)).business_name == "Rivera & Daughters Plumbing"
+    assert (await view(client, link.token)).business_name == "Turner & Daughters Plumbing"
     # the session's language as it last wrote
     assert (await checked(client, visitor, "Hola, ¿qué tal?")).language == "es"
     assert (await view(client, link.token)).language == "es"
@@ -445,7 +480,7 @@ async def test_link_view_names_the_desks_business(desk_prove, app, client):
     # a name holding a document's canary, stored before owner writes checked for one, is withheld
     # here as the public page withholds it
     dana = (await documents(app, copy))["dana-invoice"]
-    await store_business(app, copy, name=f"Rivera Plumbing {dana.canary}")
+    await store_business(app, copy, name=f"Turner Plumbing {dana.canary}")
     response = await client.get(f"/payment_links/{link.token}")
     assert response.status_code == 200, response.text
     assert dana.canary not in response.text

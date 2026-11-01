@@ -142,6 +142,16 @@ def claudes_note(texts: Iterable[str | None]) -> str:
     return f"{CLAUDES_NOTE}: " + ", ".join(quoted(" ".join(text.split())[:QUOTED_CHARS]) for text in texts if text)
 
 
+def fact_ref(value: str, kind: str) -> str:
+    """The row ID an argument names when it may be copied from a fact of `kind`: `value` without
+    one leading `"<kind>:"`, otherwise unchanged. Claude's context shows a document or a quote by
+    its fact ID (`document:<id>`, `quote:<id>`), and passing that whole ID is an honest mistake, so
+    it names the same row as the bare ID. Only that kind's prefix comes off, and only once: any
+    other prefix stays, names no row, and the call is refused as before. Who may act on the row is
+    checked on the row, never on how it was named."""
+    return value.removeprefix(f"{kind}:")
+
+
 async def business_timezone(ctx: KernelCtx, desk_row: Desk) -> ZoneInfo:
     """The time zone of the Desk's business: slots, hours and the dates in facts are read in it."""
     name = (await ctx.db.execute(ctx.repo.scoped(

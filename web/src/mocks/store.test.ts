@@ -68,7 +68,7 @@ async function call(key: RouteKey, init: MockRequestInit = {}): Promise<{ status
   return { status: answer.status, body: answer.body };
 }
 
-/** Opens this browser's chat with Rivera's main Desk and records every event its stream gets. */
+/** Opens this browser's chat with Turner's main Desk and records every event its stream gets. */
 async function openChat(after = 0) {
   const opened = await call('openSession', { params: { slug } });
   expect(opened.status).toBe(200);
@@ -99,6 +99,76 @@ afterEach(() => {
 });
 
 describe('the scripted Desk', () => {
+  it.each(['agent_text', 'visitor_text', 'whisper', 'turn_end', 'ended_agent_text'] as const)(
+    'agent_summary_does_not_reuse_receipts_across_turns_%s', async (boundary) => {
+      const world = mockStore.world;
+      const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+      const ctx = world.context(agent, 'en', 'Book a visit');
+      world.emit(agent, ctx.status('receipt', ctx.decide(DECISIONS.book)));
+      if (boundary === 'turn_end' || boundary === 'ended_agent_text') world.emit(agent, { type: 'turn_end' });
+      if (boundary === 'agent_text' || boundary === 'ended_agent_text') world.agentText(agent, 'New request');
+      else if (boundary === 'visitor_text') world.visitorText(agent, 'New request');
+      else if (boundary === 'whisper') world.whisper(agent, 'New request');
+      world.emit(agent, ctx.reply([rivera.blocks.booking_confirmed.en]));
+      const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+      expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBeNull();
+    },
+  );
+
+  it.each([
+    [false, false], [false, true], [true, false], [true, true],
+  ])('agent_summary_uses_ledger_order_with_newer_refusal_%s_and_reverse_publication_%s', async (newerRefusal, reversePublication) => {
+    const world = mockStore.world;
+    const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+    const ctx = world.context(agent, 'en', 'Book a visit');
+    const refuse = () => ctx.decide({ ...DECISIONS.quote, outcome: 'refuse', executed: false });
+    world.emit(agent, { type: 'turn_end' });
+    world.agentText(agent, 'Book a visit');
+    // Fake time stays fixed: ledger sequence alone decides which result is newer.
+    const decisions = newerRefusal ? [ctx.decide(DECISIONS.book), refuse()] : [refuse(), ctx.decide(DECISIONS.book)];
+    const published = reversePublication ? [...decisions].reverse() : decisions;
+    for (const decision of published) world.emit(agent, ctx.status('receipt', decision));
+    world.emit(agent, ctx.reply([rivera.blocks.booking_confirmed.en]));
+    world.emit(agent, { type: 'turn_end' });
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome)
+      .toBe(newerRefusal ? 'turned_down' : 'visit_booked');
+  });
+
+  it.each([
+    ['book_visit', 'visit_booked'],
+    ['quote_and_deposit', 'deposit_paid'],
+    ['push_the_limit', 'turned_down'],
+  ])('agent_summary_records_%s', async (task, expected) => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task, idempotency_key: task } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBe(expected);
+  });
+
+  it('agent_summary_does_not_restore_success_after_a_hold_is_answered', async () => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'outcome-answered' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    const held = mockStore.world.context(agent, 'en', 'Ask Mike').decide({ ...DECISIONS.quote, outcome: 'hold', executed: false });
+    mockStore.world.answer(mockStore.world.decisions.get(held.decision_id)!, 'allow_once');
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBeNull();
+  });
+
+  it('agent_summary_clears_success_after_a_handoff', async () => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'outcome-handoff' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    mockStore.world.reply(agent, [rivera.blocks.handoff.en], 'en');
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBeNull();
+  });
+
   it('answers_each_first_view_starter_in_its_language', () => {
     const cases = [
       ['How much is drain clearing?', 'price', 'en'],
@@ -120,7 +190,7 @@ describe('the scripted Desk', () => {
     await drain();
     expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
     expect(events.find(([, ev]) => ev.type === 'receipt')?.[1]).toMatchObject({
-      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Maria Rivera'),
+      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Mike Turner'),
     });
     const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
     const ledger = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === session.session_id);
@@ -141,7 +211,7 @@ describe('the scripted Desk', () => {
     await drain();
     expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
     expect(events.find(([, ev]) => ev.type === 'receipt')?.[1]).toMatchObject({
-      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Maria Rivera'),
+      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Mike Turner'),
     });
     const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
     const ledger = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === session.session_id);
@@ -155,7 +225,7 @@ describe('the scripted Desk', () => {
 
   it('passed_handoff_card_sets_the_handoff_flag_and_line', async () => {
     const { session, events } = await openChat();
-    await send('Talk to Maria');
+    await send('Talk to Mike');
     await drain();
     const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
     expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off, blocks: [rivera.blocks.handoff.en] });
@@ -186,7 +256,7 @@ describe('the scripted Desk', () => {
       ['Can you call me back?', 'callback', 'en'],
       ['Please call me tonight', 'callback', 'en'],
       ['Llámame, por favor', 'callback', 'es'],
-      ["I'd like to talk to Maria Rivera.", 'talk', 'en'],
+      ["I'd like to talk to Mike Turner.", 'talk', 'en'],
       ['Quiero hablar con alguien', 'talk', 'es'],
       ['outage', 'outage', 'en'],
       ['Hello there', 'other', 'en'],
@@ -205,13 +275,13 @@ describe('the scripted Desk', () => {
     await drain();
     const replies = events.flatMap(([, ev]) => (ev.type === 'message' ? [[ev.language, ev.blocks.map((b) => [b.kind, b.text])]] : []));
     expect(replies).toEqual([
-      ['en', [['prose', 'Maria can tell you once she sees it. You can ask for her here anytime.']]],
-      ['es', [['prose', 'Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.']]],
+      ['en', [['prose', 'Mike can tell you once he sees it. You can ask for him here anytime.']]],
+      ['es', [['prose', 'Mike te lo puede decir cuando lo vea. Puedes pedir hablar con él aquí cuando quieras.']]],
     ]);
   });
 
   it('held_discount_says_maria_decides', async () => {
-    // A discount past the quote card's limit is held, and Claude's checked reply says Maria decides,
+    // A discount past the quote card's limit is held, and Claude's checked reply says Mike decides,
     // in the turn's language, with the reply's own receipt and the held one: no handoff card.
     const { session, events } = await openChat();
     await send('Can I get 15% off if I pay cash?');
@@ -252,8 +322,8 @@ describe('the scripted Desk', () => {
     ]);
     const codes = mockStore.world.inbox.filter((record) => record.sessionId === session.session_id).map((record) => record.entry.body);
     expect(codes).toEqual([
-      `Your Rivera Plumbing code is ${DEMO_CODE}. It expires in ten minutes. If you didn't ask for it, ignore this message.`,
-      `Tu código de Rivera Plumbing es ${DEMO_CODE}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`,
+      `Your Turner Plumbing code is ${DEMO_CODE}. It expires in ten minutes. If you didn't ask for it, ignore this message.`,
+      `Tu código de Turner Plumbing es ${DEMO_CODE}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`,
     ]);
   });
 
@@ -298,7 +368,7 @@ describe('the scripted Desk', () => {
     ];
     for (const [text, rule] of cases) expect(matchRule(text).name, text).toBe(rule);
 
-    // So asking about an offer starts no held discount: nothing new for Maria, and a plain answer.
+    // So asking about an offer starts no held discount: nothing new for Mike, and a plain answer.
     const before = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     const { events } = await openChat();
     await send('Do you offer weekend service?');
@@ -309,11 +379,11 @@ describe('the scripted Desk', () => {
   });
 
   it('discount_holds_and_reaches_needs_you', async () => {
-    // Rivera's Today greets Maria, counts the seeded hold, and has Dana's chat live (the held
+    // Turner's Today greets Mike, counts the seeded hold, and has Dana's chat live (the held
     // visitor's last word was twelve minutes ago).
     const today = async () => (await call('today', { params: { desk_id: deskId } })).body as Today;
     const seeded = await today();
-    expect(seeded.greeting_name).toBe('Maria');
+    expect(seeded.greeting_name).toBe('Mike');
     expect(seeded.needs_you_count).toBe(1);
     expect(seeded.live.map((c) => [c.session_id, c.display_name])).toEqual([['ses-dana-web', null]]);
 
@@ -327,7 +397,7 @@ describe('the scripted Desk', () => {
 
     mockStore.reset('rivera_quiet');
     expect((await call('needsYou', { params: { desk_id: deskId } })).body).toEqual([]);
-    expect(await today()).toMatchObject({ greeting_name: 'Maria', needs_you_count: 0, live: [] });
+    expect(await today()).toMatchObject({ greeting_name: 'Mike', needs_you_count: 0, live: [] });
 
     const { session, events } = await openChat();
     await send('Can I get 50% off if I pay cash?');
@@ -339,8 +409,8 @@ describe('the scripted Desk', () => {
     expect(typesOf(events)).toEqual(['writing', 'held', 'message', 'turn_end']);
     expect(events.map(([seq]) => seq)).toEqual([1, 2, 3, 4]);
     const [, held] = events[1] ?? [];
-    expect(held).toMatchObject({ type: 'held', state: 'held', visitor_plain: 'Waiting for Maria Rivera to approve' });
-    // Claude says, in checked words, that Maria decides and her answer will show up in the chat.
+    expect(held).toMatchObject({ type: 'held', state: 'held', visitor_plain: 'Waiting for Mike Turner to approve' });
+    // Claude says, in checked words, that Mike decides and his answer will show up in the chat.
     const [, reply] = events[2] ?? [];
     expect(reply).toMatchObject({ type: 'message', handoff: false, language: 'en', visitor_plain: VISITOR_PLAIN.en.reply_checked });
     expect(reply?.type === 'message' && reply.blocks.map((b) => [b.kind, b.text])).toEqual([['prose', HELD_PROSE.en]]);
@@ -380,7 +450,7 @@ describe('the scripted Desk', () => {
   });
 
   it('owner_alert_names_the_held_request', async () => {
-    // Maria's Demo inbox alert for a hold names that held request; the code sent to a visitor names none.
+    // Mike's Demo inbox alert for a hold names that held request; the code sent to a visitor names none.
     const before = mockStore.world.inbox.length;
     const { session } = await openChat();
     await send('Can I get 50% off if I pay cash?');
@@ -430,7 +500,7 @@ describe('the scripted Desk', () => {
     const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } });
     expect(answered.status).toBe(200);
     expect(answered.body).toMatchObject({
-      decision: { decision_id: decisionId, state: 'executed', visitor_plain: executedLine('native.quote', language, 'Maria Rivera') },
+      decision: { decision_id: decisionId, state: 'executed', visitor_plain: executedLine('native.quote', language, 'Mike Turner') },
       execution_state: 'succeeded',
       card_diff: null,
     });
@@ -447,7 +517,7 @@ describe('the scripted Desk', () => {
       type: 'resolved',
       decision_id: decisionId,
       state: 'executed',
-      visitor_plain: executedLine('native.quote', language, 'Maria Rivera'),
+      visitor_plain: executedLine('native.quote', language, 'Mike Turner'),
     });
     if (approved?.type !== 'receipt' || resolved?.type !== 'resolved') throw new Error('approval precedes resolution');
     expect(approved.ledger_seq).toBeLessThan(resolved.ledger_seq);
@@ -531,7 +601,7 @@ describe('the scripted Desk', () => {
 
   it('held_discount_is_the_one_asked_for', async () => {
     // The held quote carries the percent the visitor named, with its price worked out from the
-    // $180.00 list price as the kernel does, and Maria's card says so; once she allows it, the
+    // $180.00 list price as the kernel does, and Mike's card says so; once he allows it, the
     // visitor's quote card has that percent. A discount asked with no percent is the fixtures' 15%.
     const { events } = await openChat();
     const asked = [
@@ -619,12 +689,12 @@ describe('the scripted Desk', () => {
     await drain();
     expect(typesOf(events.slice(before))).toEqual(['writing', 'message', 'turn_end']);
     const help = events.slice(before).flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks.map((b) => b.text) : []));
-    expect(help).toEqual(['Maria can tell you once she sees it. You can ask for her here anytime.']);
+    expect(help).toEqual(['Mike can tell you once he sees it. You can ask for him here anytime.']);
     expect(decided()).toHaveLength(1);
   });
 
   it('verified_discount_names_the_person_and_drafts_its_percent', async () => {
-    // Dana confirms it's her, then asks for 20% off: Maria's card names her, and "Only for Dana
+    // Dana confirms it's her, then asks for 20% off: Mike's card names her, and "Only for Dana
     // Whitfield, always" drafts a rule for her at that percent and its price. Once that rule is
     // active, the same card drafted again changes nothing, and another percent is a change the
     // draft's review shows.
@@ -679,13 +749,13 @@ describe('the scripted Desk', () => {
   it('executed_receipts_say_what_ran', async () => {
     const { events } = await openChat();
     const turns: [text: string, line: string][] = [
-      ['How much is drain clearing?', "Quoted from Maria Rivera's price list"],
-      ['Can I book Tuesday?', "Times read from Maria Rivera's calendar"],
-      ['Book the first one', "Booked on Maria Rivera's calendar"],
+      ['How much is drain clearing?', "Quoted from Mike Turner's price list"],
+      ['Can I book Tuesday?', "Times read from Mike Turner's calendar"],
+      ['Book the first one', "Booked on Mike Turner's calendar"],
       ['How do I pay the deposit?', 'Payment link made for this quote'],
-      ['Can you call me back?', 'Callback request saved for Maria Rivera'],
-      ['¿Cuánto cuesta?', 'Cotizado con la lista de precios de Maria Rivera'],
-      ['Quiero reservar la primera', 'Reservado en el calendario de Maria Rivera'],
+      ['Can you call me back?', 'Callback request saved for Mike Turner'],
+      ['¿Cuánto cuesta?', 'Cotizado con la lista de precios de Mike Turner'],
+      ['Quiero reservar la primera', 'Reservado en el calendario de Mike Turner'],
     ];
     for (const [text] of turns) {
       await send(text);
@@ -697,10 +767,10 @@ describe('the scripted Desk', () => {
     // Each is the design system's signed line for its tool, word for word.
     expect(receipts.map((ev) => ev.visitor_plain)).toEqual([
       ...(['native.quote', 'native.find_slots', 'native.book', 'native.payment_link', 'native.request_callback'] as const).map((tool) =>
-        executedLine(tool, 'en', 'Maria Rivera'),
+        executedLine(tool, 'en', 'Mike Turner'),
       ),
-      executedLine('native.quote', 'es', 'Maria Rivera'),
-      executedLine('native.book', 'es', 'Maria Rivera'),
+      executedLine('native.quote', 'es', 'Mike Turner'),
+      executedLine('native.book', 'es', 'Mike Turner'),
     ]);
 
     // The other status lines are the design system's too: every decision state's, and each reply's.
@@ -721,14 +791,14 @@ describe('the scripted Desk', () => {
         'en',
         [
           ['prose', null, []],
-          ['card', 'Tuesday, November 3', ['2:00 pm to 4:00 pm', 'With Maria Rivera']],
+          ['card', 'Tuesday, November 3', ['2:00 pm to 4:00 pm', 'With Mike Turner']],
         ],
       ],
       [
         'es',
         [
           ['prose', null, []],
-          ['card', 'martes 3 de noviembre', ['De 14:00 a 16:00', 'Con Maria Rivera']],
+          ['card', 'martes 3 de noviembre', ['De 14:00 a 16:00', 'Con Mike Turner']],
         ],
       ],
     ]);
@@ -757,8 +827,8 @@ describe('the scripted Desk', () => {
     ].reduce<ChatState>(chatReducer, initialChatState());
     const replies = chat.rows.flatMap((row) => (row.item.kind === 'message' ? [row.receipts.map((receipt) => receipt.plain)] : []));
     expect(replies).toEqual([
-      [VISITOR_PLAIN.en.reply_checked, executedLine('native.quote', 'en', 'Maria Rivera')],
-      [VISITOR_PLAIN.en.reply_checked, executedLine('native.find_slots', 'en', 'Maria Rivera')],
+      [VISITOR_PLAIN.en.reply_checked, executedLine('native.quote', 'en', 'Mike Turner')],
+      [VISITOR_PLAIN.en.reply_checked, executedLine('native.find_slots', 'en', 'Mike Turner')],
     ]);
 
     // As the API's turn lock has it, the second turn waits for the first to end, and it starts as
@@ -853,7 +923,7 @@ describe('the scripted Desk', () => {
   it('answering_off_leaves_only_callbacks_and_leads', async () => {
     // With the Desk's Answering switch off, a visitor's or agent's turn may only reply, take a lead
     // or file a callback (master plan, "Model-visible tools"): what needs another tool gets the
-    // handoff, as asking for Maria does, and decides nothing. The owner's preview keeps every tool.
+    // handoff, as asking for Mike does, and decides nothing. The owner's preview keeps every tool.
     const setAnswering = async (on: boolean) => {
       expect((await call('setAnswering', { params: { desk_id: deskId }, body: { on } })).status).toBe(200);
     };
@@ -931,7 +1001,7 @@ describe('the scripted Desk', () => {
     expect(toolsDecided(preview.session_id)).toEqual(['native.quote']);
   });
 
-  it.each(['Talk to Maria', 'cards-kept-handoff'])('preview_handoff_opens_no_owner_item_%s', async (text) => {
+  it.each(['Talk to Mike', 'cards-kept-handoff'])('preview_handoff_opens_no_owner_item_%s', async (text) => {
     mockStore.reset('rivera_quiet');
     const opened = await call('openPreview', { params: { desk_id: deskId } });
     expect(opened.status).toBe(200);
@@ -1049,7 +1119,7 @@ describe('the scripted Desk', () => {
     expect(held).toBeDefined();
     const inbox = mockStore.world.inbox.length;
 
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     expect(mine()).toEqual([]);
     expect(mockStore.world.inbox.slice(inbox).map(({ entry }) => entry.body)).not.toContain('A visitor is waiting in a conversation the Desk handed to you.');
@@ -1057,7 +1127,7 @@ describe('the scripted Desk', () => {
     expect((await call('answer', { params: { decision_id: held?.decision.decision_id ?? '' }, body: { answer: 'deny_once' } })).status).toBe(200);
     await drain();
     // Answering it may itself show the card (the mock's reply after a deny does), which now opens one.
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
   });
@@ -1075,7 +1145,7 @@ describe('the scripted Desk', () => {
     const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
     const inbox = mockStore.world.inbox.length;
 
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     expect(mine()).toEqual([
       { handoff_id: expect.any(String), session_id: session.session_id, reason: 'The Desk handed this to you.', callback_window: null, status: 'open', kind: 'card' },
@@ -1089,7 +1159,7 @@ describe('the scripted Desk', () => {
     ]);
 
     // One at a time: the card shown again opens no second handoff while this one is open.
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     expect(mine()).toHaveLength(1);
 
@@ -1101,7 +1171,7 @@ describe('the scripted Desk', () => {
       ['card', 'done', null],
       ['callback', 'open', CALLBACK_WINDOW],
     ]);
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     expect(mine()).toHaveLength(2);
   });
@@ -1115,7 +1185,7 @@ describe('the scripted Desk', () => {
     const desk = mockStore.world.desk(deskId);
     if (!desk) throw new Error('the copy has its main Desk');
     const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     const card = mine()[0]?.handoff_id ?? '';
     expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
@@ -1151,7 +1221,7 @@ describe('the scripted Desk', () => {
     mockStore.world.reply(other, [rivera.blocks.handoff.en], 'en');
     const handoffsOf = (sessionId: string) => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === sessionId);
     expect(handoffsOf(other.state.session_id).map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     const card = handoffsOf(session.session_id)[0]?.handoff_id ?? '';
     await send('Can someone come Tuesday?');
@@ -1200,12 +1270,12 @@ describe('the scripted Desk', () => {
       ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
         .filter((item) => item.handoff?.session_id === session.session_id)
         .map((item) => [item.handoff?.kind, item.from_the_visitor]);
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
-    expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
+    expect(await quoted()).toEqual([['card', 'Can I talk to Mike?']]);
     await send('It is about the leak under my sink.');
     await drain();
-    expect(await quoted()).toEqual([['card', 'Can I talk to Maria? · It is about the leak under my sink.']]);
+    expect(await quoted()).toEqual([['card', 'Can I talk to Mike? · It is about the leak under my sink.']]);
     await send('Is   Tuesday\n\nfine?');
     await drain();
     expect(await quoted()).toEqual([['card', 'It is about the leak under my sink. · Is Tuesday fine?']]);
@@ -1239,7 +1309,7 @@ describe('the scripted Desk', () => {
     const triage = ((await call('safety', { params: { desk_id: deskId } })).body as Attempt[]).find((a) => a.kind === 'reply_blocked')?.triage;
     if (!triage) throw new Error("Safety triages the seeded chat's stopped draft");
 
-    // Denied, the request's follow-up shows the handoff card, which hands the chat to Maria.
+    // Denied, the request's follow-up shows the handoff card, which hands the chat to Mike.
     expect((await call('answer', { params: { decision_id: seeded.decision.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
     await drain();
     const handed = (await read()).find((item) => item.handoff?.session_id === seeded.session.session_id);
@@ -1249,7 +1319,7 @@ describe('the scripted Desk', () => {
 
     // A chat with nothing stopped has no triage to summarise it.
     const { session } = await openChat();
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     const asked = (await read()).find((item) => item.handoff?.session_id === session.session_id);
     expect(asked?.handoff?.kind).toBe('card');
@@ -1289,7 +1359,7 @@ describe('the scripted Desk', () => {
     await openChat();
     const desk = mockStore.world.desk(deskId);
     if (!desk) throw new Error('the copy has its main Desk');
-    for (const text of ['Can I talk to Maria?', 'Can you call me back?']) {
+    for (const text of ['Can I talk to Mike?', 'Can you call me back?']) {
       await send(text);
       await drain();
       const handoff = [...mockStore.world.handoffs.values()].at(-1)?.handoff;
@@ -1308,7 +1378,7 @@ describe('the scripted Desk', () => {
   it('events_replay_after_seq', async () => {
     // No stream without this browser's session for the Desk, and none for a Desk that doesn't exist.
     expect(await call('events', { params: { slug } })).toEqual({ status: 401, body: { error: 'no_session' } });
-    expect((await call('events', { params: { slug: 'rivera-plumbing-nope00' } })).status).toBe(404);
+    expect((await call('events', { params: { slug: 'turner-plumbing-nope00' } })).status).toBe(404);
 
     const { session, stop } = await openChat();
     expect((await call('events', { params: { slug }, query: { after: '0' } })).status).toBe(200);
@@ -1420,7 +1490,7 @@ describe('the scripted Desk', () => {
     ]);
     expect(owner.items[0]).toMatchObject({ owner_translation: null, triage: null });
 
-    // Dana's seeded chat: three actions that ran, and Maria's whisper in it.
+    // Dana's seeded chat: three actions that ran, and Mike's whisper in it.
     const conversations = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
     const dana = conversations.find((c) => c.session_id === 'ses-dana-web');
     expect(dana?.outcome_counts).toEqual({ executed: 3 });
@@ -1525,7 +1595,7 @@ describe("a verified visitor's document link", () => {
     expect(opened).toEqual({
       status: 200,
       headers: { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'inline; filename="Invoice-drain-clearing.txt"', ...PRIVATE },
-      body: 'Rivera Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
+      body: 'Turner Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
     });
   });
 
@@ -1608,7 +1678,7 @@ describe('taking over', () => {
 
   it('takeover_fences_the_turn_in_flight', async () => {
     const { session, events } = await openChat();
-    // The visitor picks a time, and Maria takes the chat over before Claude's turn has done anything.
+    // The visitor picks a time, and Mike takes the chat over before Claude's turn has done anything.
     await send('The first one please');
     const taken = await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } });
     expect(taken).toEqual({ status: 200, body: { ...session, mode: 'owner', generation: session.generation + 1 } });
@@ -1631,7 +1701,7 @@ describe('taking over', () => {
     const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
 
-    // Maria allows the hold, then joins the chat at once. The action ran when she answered, so the
+    // Mike allows the hold, then joins the chat at once. The action ran when he answered, so the
     // visitor still hears that; Claude's follow-up was for the old generation and never comes.
     expect((await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } })).status).toBe(200);
     expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
@@ -1653,13 +1723,13 @@ describe('the owner in the chat', () => {
     const { session, events } = await openChat();
     const sessionId = session.session_id;
 
-    // Not before she has taken the chat over.
-    expect(await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Maria.', kind: 'say' } })).toEqual({
+    // Not before he has taken the chat over.
+    expect(await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Mike.', kind: 'say' } })).toEqual({
       status: 409,
       body: { error: 'take_over_first' },
     });
     expect((await call('takeover', { params: { session_id: sessionId }, body: { generation: session.generation } })).status).toBe(200);
-    const said = await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Maria.', kind: 'say' } });
+    const said = await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Mike.', kind: 'say' } });
     expect(said.status).toBe(200);
     expect(said.body).toMatchObject({ verdict: { ok: true, violations: [] } });
 
@@ -1667,7 +1737,7 @@ describe('the owner in the chat', () => {
     expect(typesOf(events)).toEqual(['owner_joined', 'message']);
     const [, message] = events[1] ?? [];
     expect(message).toMatchObject({ type: 'message', author: 'owner', generation: session.generation + 1, visitor_plain: VISITOR_PLAIN.en.owner_said });
-    expect(message?.type === 'message' && message.blocks.map((b) => [b.template, b.text])).toEqual([['owner_said', 'Hi, it is Maria.']]);
+    expect(message?.type === 'message' && message.blocks.map((b) => [b.template, b.text])).toEqual([['owner_said', 'Hi, it is Mike.']]);
     expect(VISITOR_PLAIN.en.owner_said).toBe(rivera.events.takeOver.find((ev): ev is EvMessage => ev.type === 'message')?.visitor_plain);
 
     // Stored as a delivered item, author owner, in both transcripts.
@@ -1729,7 +1799,7 @@ describe('the owner in the chat', () => {
     expect((await call('takeover', at(session.generation))).status).toBe(200);
     const joined = { type: 'owner_joined', name: rivera.business.ownerName };
     expect((await visitor()).items.map((item) => [item.kind, item.text, item.event])).toEqual([['owner_joined', null, joined]]);
-    expect((await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Maria.', kind: 'say' } })).status).toBe(200);
+    expect((await call('ownerMessage', { params: { session_id: sessionId }, body: { text: 'Hi, it is Mike.', kind: 'say' } })).status).toBe(200);
     expect((await call('handback', at(session.generation + 1))).status).toBe(200);
     const read = await visitor();
     expect(read.items.map((item) => item.kind)).toEqual(['owner_joined', 'delivered', 'owner_left']);
@@ -1809,7 +1879,7 @@ describe('rules and tools', () => {
   const hashOf = async (tool: string) => (await rules()).tools.find((row) => row.tool === tool)?.definition_sha256 ?? '';
 
   it('rule_drafts_read_and_confirm', async () => {
-    // The active rules: version 7, Rivera's $500 limit, every tool on, from no preset.
+    // The active rules: version 7, Turner's $500 limit, every tool on, from no preset.
     const before = await rules();
     expect(before.active).toMatchObject({ version: 7, status: 'active', auto_money_cap_cents: 50_000 });
     expect(before.preset).toBeNull();
@@ -1859,14 +1929,14 @@ describe('rules and tools', () => {
   });
 
   it('preset_drafts_recommended_rules_in_the_desks_own_hours', async () => {
-    // Rivera's Desk keeps 8:00 to 18:00 on weekdays and 9:00 to 13:00 on Saturdays: its "Recommended
+    // Turner's Desk keeps 8:00 to 18:00 on weekdays and 9:00 to 13:00 on Saturdays: its "Recommended
     // rules" book weekdays 8 to 6, as the API drafts them, and Saturday bookings ask first.
     const preset = async () => (await call('draftPreset', { params: { desk_id: deskId }, body: { preset: 'auto' } })).body as RulesDraft;
     const bookings = (cards: readonly RuleCard[]) => cards.filter((card) => card.applies_to === 'native.book');
     const [shipped] = bookings(PRESETS.auto);
     if (shipped === undefined) throw new Error('"Recommended rules" books weekdays');
     const draft = await preset();
-    // Its weekday card is Rivera's own weekday rule, words included, in all but its id.
+    // Its weekday card is Turner's own weekday rule, words included, in all but its id.
     const reason = 'Weekday bookings in opening hours, checked by the reviewer.';
     expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' }, reason }]);
     expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)));
@@ -1877,7 +1947,7 @@ describe('rules and tools', () => {
     // A Desk with no hours books weekdays 9 to 5: the preset's cards as they are.
     mockStore.reset('rivera');
     const desk = mockStore.world.desk(deskId);
-    if (desk === undefined) throw new Error("Rivera's Desk is in the copy");
+    if (desk === undefined) throw new Error("Turner's Desk is in the copy");
     desk.summary.hours = [];
     expect((await rules()).preset).toBeNull();
     const fallback = await preset();
@@ -2122,7 +2192,7 @@ describe('rules and tools', () => {
 
   it('draft_rules_hold_only_money_rules_to_the_payment_limit', async () => {
     const draft = (card: unknown) => call('draftRules', { params: { desk_id: deskId }, body: { add: [card] } });
-    // A $600 limit on an automatic quote rule moves no money, so Rivera's $500 payment limit doesn't hold it back.
+    // A $600 limit on an automatic quote rule moves no money, so Turner's $500 payment limit doesn't hold it back.
     const quote600 = { ...rivera.ruleCards['rv-quote'], max_amount_cents: 60_000 };
     const quoted = await draft(quote600);
     expect(quoted.status).toBe(200);
@@ -2138,7 +2208,7 @@ describe('rules and tools', () => {
 
   it('money_cap_draft_lowers_each_money_rule_above_it_and_says_the_new_limit', async () => {
     // As the API's money-limit route drafts it (desk.api.rules.draft_money_cap through
-    // desk.money_cap.lower_to_cap, in English): Rivera's limit is $500, with an automatic payment
+    // desk.money_cap.lower_to_cap, in English): Turner's limit is $500, with an automatic payment
     // link up to $300 (`rv-link`) and visiting agents' deposits up to $20 (`rv-mandate`).
     const draftCap = (body: unknown) => call('draftMoneyCap', { params: { desk_id: deskId }, body });
     const link = rivera.ruleCards['rv-link'];
@@ -2297,7 +2367,7 @@ describe('rules and tools', () => {
 
 describe('deleting a Desk', () => {
   it('delete_desk_closes_its_page_and_chats', async () => {
-    // Rivera's main Desk, with a chat Claude is writing in when the Desk goes, and the seeded chats idle.
+    // Turner's main Desk, with a chat Claude is writing in when the Desk goes, and the seeded chats idle.
     mockStore.reset('rivera_two_desks');
     const { events } = await openChat();
     await send('How much is drain clearing?');
@@ -2372,7 +2442,7 @@ describe('deleting a Desk', () => {
   });
 
   it('deleted_desk_holds_are_refused_at_execution', async () => {
-    // Dana's refund and the seeded 15% quote are held for Maria when the Desk goes.
+    // Dana's refund and the seeded 15% quote are held for Mike when the Desk goes.
     mockStore.reset('rivera_two_desks');
     const refund = mockStore.world.addHeldRefund();
     const quote = [...mockStore.world.decisions.values()].find(
@@ -2619,8 +2689,8 @@ describe("Today's windows", () => {
     expect('recorded_history' in quiet).toBe(false);
     expect(await list()).toEqual({ since: '2026-10-28T18:00:00-07:00', items: [] });
 
-    // Rivera's seed: Alex Kim's assistant, whose deposit Claude quoted and charged within its signed
-    // limit; the held visitor, whose drafted reply was stopped; and Dana's chat, where Maria
+    // Turner's seed: Alex Kim's assistant, whose deposit Claude quoted and charged within its signed
+    // limit; the held visitor, whose drafted reply was stopped; and Dana's chat, where Mike
     // whispered and Claude booked her at the quoted list price. The stopped draft is no request the
     // kernel refused, so the last 7 days count none stopped, and nothing in the briefing turned down:
     // the draft stays on Safety, out of the briefing.
@@ -2646,13 +2716,13 @@ describe("Today's windows", () => {
     const attempts = (await call('safety', { params: { desk_id: deskId } })).body as { kind: string; ref_id: string }[];
     expect(attempts.find((a) => a.kind === 'reply_blocked')?.ref_id).toBe(String(blockedReply?.seq));
 
-    // Maria allows the seeded hold: she stepped into that chat, and a quote isn't a booking.
+    // Mike allows the seeded hold: he stepped into that chat, and a quote isn't a booking.
     const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])[0]?.decision;
     await call('answer', { params: { decision_id: held?.decision_id ?? '' }, body: { answer: 'allow_once' } });
     await drain();
     expect((await read()).this_week).toMatchObject({ bookings: 1, conversations: 3, handled: 1, stepped_in: 2 });
 
-    // A visitor Claude answers, and Maria's own preview that Claude answers too: both count.
+    // A visitor Claude answers, and Mike's own preview that Claude answers too: both count.
     await openChat();
     await send('Hello there');
     await drain();
@@ -2704,7 +2774,7 @@ describe("Today's windows", () => {
   });
 
   it('week_counts_refused_requests_only', async () => {
-    // Rivera's seed keeps one of Claude's drafts the reply check stopped, which nobody tried; then the
+    // Turner's seed keeps one of Claude's drafts the reply check stopped, which nobody tried; then the
     // built-in agent tries to charge over its signed limit, which the kernel refuses. The last 7 days
     // and the briefing count the refusal alone, as the API does, and Safety keeps both.
     mockStore.reset('rivera');
@@ -2873,13 +2943,13 @@ describe("Today's windows", () => {
     };
     const split = (r: Reports) => [r.handled_by_claude, r.needed_you];
 
-    // The seeded copy as its last 7 days count it: Maria whispered in Dana's chat, and the held
-    // request she hasn't answered is still Claude's.
+    // The seeded copy as its last 7 days count it: Mike whispered in Dana's chat, and the held
+    // request he hasn't answered is still Claude's.
     const week = (await read()).this_week;
     expect([week.handled, week.stepped_in]).toEqual([2, 1]);
     expect(split(await reports('7'))).toEqual([2, 1]);
 
-    // Three days ago Maria whispered in a chat: it needed her in the last 7 days, but not today.
+    // Three days ago Mike whispered in a chat: it needed him in the last 7 days, but not today.
     const desk = mockStore.world.desk(deskId);
     if (!desk) throw new Error('the copy has its Desk');
     const at = NOW.getTime() - 3 * 24 * HOUR;
@@ -2889,9 +2959,9 @@ describe("Today's windows", () => {
     expect(split(await reports('7'))).toEqual([2, 2]);
     expect(split(await reports())).toEqual([2, 2]);
 
-    // Today a visitor asks for her and the handoff card hands her the chat: Claude's, until she takes it over.
+    // Today a visitor asks for him and the handoff card hands him the chat: Claude's, until he takes it over.
     const { session } = await openChat();
-    await send('Can I talk to Maria?');
+    await send('Can I talk to Mike?');
     await drain();
     expect(split(await reports('1'))).toEqual([3, 1]);
     expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
@@ -2907,7 +2977,7 @@ describe('idempotency keys', () => {
     // As the API does (plan 02b): send_agent and setup's start each require the client's key, so a
     // body with none (missing or null) is 422 `invalid`, as a malformed key is, and starts nothing.
     const agentBodies = [{ task: 'book_visit' }, { task: 'book_visit', idempotency_key: null }];
-    const setup = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
+    const setup = { description: 'Turner Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
     const setupBodies = [setup, { ...setup, idempotency_key: null }];
 
     // The session comes first, as the API's session dependencies run before it reads the body: with
@@ -2969,7 +3039,7 @@ describe('idempotency keys', () => {
   it('setup_start_repeat_answers_the_same_interview', async () => {
     // As the API does (plan 02b): a repeat with the same key and body answers the interview the first
     // made (201, as the first) and makes nothing; the same key with another body is 409 `conflict`.
-    const body = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
+    const body = { description: 'Turner Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
     const start = (key: unknown, description = body.description) => call('startSetup', { body: { ...body, description, idempotency_key: key } });
     const first = await start('key-1');
     expect(first.status).toBe(201);
@@ -2988,7 +3058,7 @@ describe('idempotency keys', () => {
     // A start that runs long: its own answer is lost (a 504 from the proxy in front), and a repeat
     // with its key meanwhile is 409 `in_progress` with `retry_after` 2 s. Once it has made the Desk,
     // a repeat answers its interview, and only one Desk was made.
-    const start = (key: string) => call('startSetup', { body: { description: 'Rivera Plumbing. I fix leaks.', timezone: 'UTC', idempotency_key: key } });
+    const start = (key: string) => call('startSetup', { body: { description: 'Turner Plumbing. I fix leaks.', timezone: 'UTC', idempotency_key: key } });
     const desks = mockStore.world.desks.length;
     let end = holdNextStart(mockStore.world);
     expect((await start('key-1')).status).toBe(504);

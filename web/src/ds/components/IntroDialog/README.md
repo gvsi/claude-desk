@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Once, on a first visit before a demo copy exists, over a static preview of Rivera's Today that can't be used yet.
+- Once, on a first visit before a demo copy exists, over a static preview of Turner's Today that can't be used yet.
 - Not for confirming or cancelling something: this dialog has no way out but the passcode.
 
 ## What it does

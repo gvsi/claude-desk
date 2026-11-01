@@ -137,6 +137,29 @@ async def test_concurrent_searches_cannot_both_take_the_third_reservation(app, c
     assert len(reviewer.search_inputs) == 3
 
 
+async def test_a_desks_searches_wait_on_the_model_together(app, client, reviewer, monkeypatch):
+    # The tools row that serializes the cap is held only until each intent commits, never through the model call,
+    # so a slow search (up to the 30 s deadline) never holds up the Desk's other searches.
+    copy, _ = await visitor_of(app, client)
+    owner = await owner_of(client, copy.owner, copy.desk_id)
+    reviewer.search_answer = []
+    search, waiting, both = reviewer.web_search, [], asyncio.Event()
+
+    async def together(query):
+        waiting.append(query)
+        if len(waiting) == 2:
+            both.set()
+        await both.wait()
+        return await search(query)
+
+    monkeypatch.setattr(reviewer, "web_search", together)
+    decisions = [await owner.decide("native.web_search", {"query": f"plumber services {i}"}, f"together-{i}")
+                 for i in range(2)]
+    results = await asyncio.wait_for(asyncio.gather(*(owner.execute(decision) for decision in decisions)), timeout=10)
+    assert [result.state for result in results] == ["succeeded", "succeeded"]
+    assert sorted(reviewer.search_inputs) == ["plumber services 0", "plumber services 1"]
+
+
 async def test_failed_search_stores_nothing_and_ledgers_usage(app, client, reviewer):
     copy, _ = await visitor_of(app, client)
     owner = await owner_of(client, copy.owner, copy.desk_id)

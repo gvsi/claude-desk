@@ -12,7 +12,7 @@ rebuild while the kernel serves; a version not yet rebuilt refuses meanwhile, an
 so before the background starts, at most once an hour.
 
 `fixtures/kernel_core_version.json` is a version exactly as the kernel core stored it, with the
-tools it was compiled over: Rivera's cards plus an auto payment link card up to $100, over the
+tools it was compiled over: Turner's cards plus an auto payment link card up to $100, over the
 kernel core's native tools and a payment link tool, compiled by the kernel core's compiler and
 proved by `desk-prove` on the kernel core's inputs. It is frozen: made again with a later compiler
 it would test nothing.

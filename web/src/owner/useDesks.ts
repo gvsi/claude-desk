@@ -19,7 +19,7 @@ export const DESKS_KEY = ['desks'] as const;
  * from the plumber example.
  * Desk ids and slugs vary per demo copy, and the API has no sample marker.
  */
-export const RIVERA_SAMPLE_BUSINESS_NAME = 'Rivera Plumbing';
+export const RIVERA_SAMPLE_BUSINESS_NAME = 'Turner Plumbing';
 export const ME_KEY = ['me'] as const;
 export const todayKey = (deskId: string) => ['today', deskId] as const;
 export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
@@ -114,8 +114,7 @@ function deadlinesOf(queryClient: QueryClient): Map<string, number> {
 }
 
 /**
- * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you, and the copy's
- * Demo inbox) at once, for up to `capMs`, so a page can open onto a Today that is already drawn,
+ * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you) at once, for up to `capMs`, so a page can open onto a Today that is already drawn,
  * with nothing in it still to come in and push what is under it. A read that fails or runs long is
  * left to Today, which shows and retries it as it always does; this never throws. The Desk's Today,
  * opened next, keeps its own skeleton until its reads settle (`useTodayOpening`).
@@ -136,7 +135,6 @@ async function readTodayUntil(queryClient: QueryClient, deskId: string, deadline
     queryClient.prefetchQuery(desksQuery()),
     queryClient.prefetchQuery(todayQuery(deskId)),
     queryClient.prefetchQuery(needsYouQuery(deskId)),
-    queryClient.prefetchQuery(ownerInboxQuery()),
   ]);
   await Promise.race([reads, cap]);
   clearTimeout(timer);
@@ -189,35 +187,18 @@ export function forgetReadAhead(queryClient: QueryClient, deskId: string): void 
 
 /**
  * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
- * you, and the copy's Demo inbox), so its sections open together rather than one by one, each
+ * you; the copy's Demo inbox is the demo bar's, read as the frame opens), so its sections open together rather than one by one, each
  * pushing the next down, when the owner comes from another Desk or another page. A first visit's page and a
  * reload's loading page read them first (`readTodayAhead`, `useTodayReadAhead`). Reads already in,
- * or failed, open it at once; else its skeleton continues until all three reads settle, even past
+ * or failed, open it at once; else its skeleton continues until both reads settle, even past
  * the frame's `READ_AHEAD_MS` deadline (plan 08c, decision 7). Offline reads paused before a send or
  * retry also settle opening: their sections show the existing error UI. Once open, it stays open.
  */
 export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
-  // Whether this visit's Today was read ahead (a first visit's page, a reload's loading page), whose
-  // deadline Today takes as it opens, past its cap or not: then a failed inbox read is this opening's
-  // own, and Today opens on it without sending it again, as it does with its other reads. A page left
-  // before Today took its deadline forgets it. Otherwise a failed inbox read is an earlier visit's
-  // (the copy's inbox outlives the page, and nothing reads it while its sheet is closed), and this
-  // opening reads it again.
-  const [readAheadForThisVisit] = useState(() => deadlinesOf(queryClient).has(deskId));
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
-  // Read here only as Today opens, unless it was just read: the inbox itself reads it again while its
-  // sheet is open, and never while it is closed, so this observer, which stays mounted with Today,
-  // doesn't read it again on focus or reconnect.
-  const inbox = useQuery({
-    ...ownerInboxQuery(),
-    staleTime: FRESH_MS,
-    retryOnMount: !readAheadForThisVisit,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  });
-  const read = [today, needsYou, inbox].every((query) => query.data !== undefined || query.isError || query.isPaused);
+  const read = [today, needsYou].every((query) => query.data !== undefined || query.isError || query.isPaused);
   const [open, setOpen] = useState(read);
   if (read && !open) setOpen(true);
   // Taken once Today has it: the Desk's next Today is a later visit, with a wait of its own.
@@ -273,7 +254,7 @@ export function deskPath(deskId: string): string {
  * A new copy is taking the old one's place (Start over, or a new passcode): drop the old copy's Demo
  * inbox before anything of the new copy is read, its Today read ahead included. The inbox's key
  * doesn't name a copy, so a read of the old copy's inbox still out would otherwise answer for the
- * new one and count as fresh: it is stopped, and its entries dropped, so the new copy's Today reads
+ * new one and count as fresh: it is stopped, and its entries dropped, so the new copy's demo bar reads
  * its own.
  */
 export async function dropTheOldInbox(queryClient: QueryClient): Promise<void> {
@@ -313,10 +294,8 @@ export function lastOrFirst(desks: readonly { desk_id: string }[]): string | nul
   return desks[0]?.desk_id ?? null;
 }
 
-/** The first word of the owner's name, as the API writes `Today.greeting_name`. */
-export function firstName(displayName: string): string {
-  return displayName.trim().split(/\s+/)[0] ?? displayName;
-}
+/** The first word of the owner's name (`lib/names.ts`), here too for the owner's screens. */
+export { firstName } from '../lib/names.ts';
 
 /** Held requests in `items`, oldest first by when they were held, whatever order the answer lists them in. */
 export function heldOldestFirst(items: readonly NeedsYouItem[]): Extract<NeedsYouItem, { decision: object }>[] {

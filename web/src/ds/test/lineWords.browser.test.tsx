@@ -26,12 +26,12 @@ afterEach(() => {
 
 describe('lineWords', () => {
   it('keeps_one_line_together', () => {
-    expect(lineWords(paragraph('Rivera Plumbing is live', { whiteSpace: 'nowrap' }))).toEqual([['Rivera', 'Plumbing', 'is', 'live']]);
+    expect(lineWords(paragraph('Turner Plumbing is live', { whiteSpace: 'nowrap' }))).toEqual([['Turner', 'Plumbing', 'is', 'live']]);
   });
 
   it('groups_each_line_top_to_bottom', () => {
     // A line as narrow as the longest word, and no two words fit on one: each starts a line of its own.
-    expect(lineWords(paragraph('Rivera Plumbing goes online', { width: 'min-content' }))).toEqual([['Rivera'], ['Plumbing'], ['goes'], ['online']]);
+    expect(lineWords(paragraph('Turner Plumbing goes online', { width: 'min-content' }))).toEqual([['Turner'], ['Plumbing'], ['goes'], ['online']]);
     // Twelve characters a line: the browser's own breaks, read back.
     expect(lineWords(paragraph('aaaa bbbb cccc dddd eeee', { width: '12ch' }))).toEqual([
       ['aaaa', 'bbbb'],
@@ -56,16 +56,16 @@ describe('lineWords', () => {
 
   it('keeps_words_of_different_sizes_on_their_line', () => {
     // A smaller and a larger word sit on the line with the rest, though their boxes start higher or lower.
-    const mixed = 'Rivera <span style="font-size: 10px">Plumbing</span> is <span style="font-size: 30px">live</span>';
-    expect(lineWords(paragraph(mixed, { whiteSpace: 'nowrap', font: '16px/40px monospace' }))).toEqual([['Rivera', 'Plumbing', 'is', 'live']]);
+    const mixed = 'Turner <span style="font-size: 10px">Plumbing</span> is <span style="font-size: 30px">live</span>';
+    expect(lineWords(paragraph(mixed, { whiteSpace: 'nowrap', font: '16px/40px monospace' }))).toEqual([['Turner', 'Plumbing', 'is', 'live']]);
     // Whichever comes first: a small word, then a much larger one whose middle sits above the small
     // word's box, then the line's own size.
-    const smallFirst = '<span style="font-size: 10px">Rivera</span> <span style="font-size: 30px">Plumbing</span> is live';
-    expect(lineWords(paragraph(smallFirst, { whiteSpace: 'nowrap', font: '16px/40px monospace' }))).toEqual([['Rivera', 'Plumbing', 'is', 'live']]);
+    const smallFirst = '<span style="font-size: 10px">Turner</span> <span style="font-size: 30px">Plumbing</span> is live';
+    expect(lineWords(paragraph(smallFirst, { whiteSpace: 'nowrap', font: '16px/40px monospace' }))).toEqual([['Turner', 'Plumbing', 'is', 'live']]);
     // And on two lines, each line keeps its own.
-    const twoLines = '<span style="font-size: 10px">Rivera</span> Plumbing<br>is <span style="font-size: 30px">live</span>';
+    const twoLines = '<span style="font-size: 10px">Turner</span> Plumbing<br>is <span style="font-size: 30px">live</span>';
     expect(lineWords(paragraph(twoLines, { whiteSpace: 'nowrap', font: '16px/40px monospace' }))).toEqual([
-      ['Rivera', 'Plumbing'],
+      ['Turner', 'Plumbing'],
       ['is', 'live'],
     ]);
   });

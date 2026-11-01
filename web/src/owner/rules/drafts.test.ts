@@ -20,7 +20,7 @@ import { PAYMENT_MAX_CENTS, moneyCapWords, moneyLimitHint, moneyLimitLine, ruleW
 const { ruleCards } = rivera;
 const DANA = rivera.people.dana;
 
-/** Rivera's own cards, in the seed's order. */
+/** Turner's own cards, in the seed's order. */
 const RIVERA_CARDS: RuleCard[] = Object.values(ruleCards);
 
 const CHECKED: ProofReport = {
@@ -31,7 +31,7 @@ const CHECKED: ProofReport = {
   checks: [{ name: 'never_errors', ok: true, counterexample_plain: null, counterexample_raw: null }],
 };
 
-/** A rules version of Rivera's main Desk with `cards` and its money cap `cap` (null: the API sends none). */
+/** A rules version of Turner's main Desk with `cards` and its money cap `cap` (null: the API sends none). */
 function version(v: number, cards: readonly RuleCard[], cap: number | null = 50_000): PolicyVersionOut {
   return {
     desk_id: 'desk-rivera-main',
@@ -50,7 +50,7 @@ function version(v: number, cards: readonly RuleCard[], cap: number | null = 50_
   };
 }
 
-/** The active version 7: Rivera's own cards at a $500 limit. */
+/** The active version 7: Turner's own cards at a $500 limit. */
 const ACTIVE = version(7, RIVERA_CARDS);
 
 /** A rules draft as the API answers one, version 8 unless `fields` says otherwise. */
@@ -64,7 +64,7 @@ function rulesDraft(fields: Partial<RulesDraft> & Pick<RulesDraft, 'cards' | 'di
   };
 }
 
-/** A card of Rivera's with `fields` changed. */
+/** A card of Turner's with `fields` changed. */
 function changed(card: RuleCard, fields: Partial<RuleCard>): RuleCard {
   return { ...card, ...fields };
 }
@@ -102,7 +102,7 @@ function toolRow(tool: ToolRow['tool'], fields: Partial<ToolRow> = {}): ToolRow 
   };
 }
 
-/** Rivera's tool rows, every one on. */
+/** Turner's tool rows, every one on. */
 const TOOLS: ToolRow[] = Object.keys(EFFECTS).map((tool) => toolRow(tool as ToolRow['tool']));
 
 const view = (key: string) => {
@@ -111,7 +111,7 @@ const view = (key: string) => {
   return connector.view;
 };
 
-/** Rivera's people on record and one lead, as `people` answers. */
+/** Turner's people on record and one lead, as `people` answers. */
 const PEOPLE: PeopleOut = {
   people: [
     { person_id: DANA.personId, display_name: DANA.name, masked_contact: DANA.maskedContact },
@@ -254,7 +254,7 @@ describe('rule drafts', () => {
   });
 
   it('rule_words_match_the_boards', () => {
-    // Every card of Rivera's, the shared rule for Alex Kim's assistant and Dana's own booking rule,
+    // Every card of Turner's, the shared rule for Alex Kim's assistant and Dana's own booking rule,
     // in the words the design system's fixture renders from the signed boards.
     const agents: AgentNames = new Map([[rivera.demoAgentIssued.agent_key_id, rivera.conversations.alexAgent.name]]);
     const cards = [...RIVERA_CARDS, rivera.sharedChargeCard, rivera.personalBookingCard];
@@ -422,7 +422,7 @@ describe('rule drafts', () => {
   });
 
   it('preset_rows_replace_every_owner_rule', () => {
-    // Rivera's cards, the shared rule for an agent's charges and Dana's own booking rule, drafted to
+    // Turner's cards, the shared rule for an agent's charges and Dana's own booking rule, drafted to
     // "Ask me first": the preset replaces every owner card.
     const owner = [rivera.sharedChargeCard, ...RIVERA_CARDS, rivera.personalBookingCard];
     const preset = PRESETS.ask_first.map((card) => ({ ...card }));
@@ -480,7 +480,7 @@ describe('rule drafts', () => {
     expect(byKey.get('rv-refund')?.changed).toEqual([]);
     expect(byKey.get('rv-dana-book')).toMatchObject({ title: 'Book a visit', before: { words: [{ field: 'who', text: 'Dana Whitfield' }] } });
 
-    // The preset's own cards, which Rivera's rules didn't have here, are added rows.
+    // The preset's own cards, which Turner's rules didn't have here, are added rows.
     const added = rows.filter((row) => row.change === 'added');
     expect(added.map((row) => row.key)).toEqual(ids(preset));
     expect(added.map((row) => row.title)).toEqual(['Find open times', 'Save a lead', 'Request a callback', "Confirm it's them", 'Website reading', 'Memory reading', 'Web search']);
@@ -488,8 +488,8 @@ describe('rule drafts', () => {
   });
 
   it('shared_rule_rows_name_the_tools_they_cover', () => {
-    // Rivera's rules with three shared rules added: never private data, every message sent
-    // automatically, and the agent's charges. Rivera's own quote rule changes too.
+    // Turner's rules with three shared rules added: never private data, every message sent
+    // automatically, and the agent's charges. Turner's own quote rule changes too.
     const neverPrivate: RuleCard = { card_id: 'card-never-private', applies_to: 'effect:private_data', mode: 'never', who: 'anyone', reason: 'Private records never go out.' };
     const autoMessages: RuleCard = { card_id: 'card-auto-messages', applies_to: 'effect:send_message', mode: 'auto', who: 'anyone', reason: 'Messages go out on their own.' };
     const quoteDiscount = changed(ruleCards['rv-quote'], { max_discount_bp: 1000 });
@@ -613,7 +613,7 @@ describe('rule drafts', () => {
     expect(moved[1]?.after?.appliesTo).toBe('Refund');
   });
 
-  /** Rivera's rules with a shared rule on private data changed in place from `was` to `now`, beside a quote and a refund change. */
+  /** Turner's rules with a shared rule on private data changed in place from `was` to `now`, beside a quote and a refund change. */
   function privateDataChange(was: RuleCard, now: RuleCard) {
     const quoteDiscount = changed(ruleCards['rv-quote'], { max_discount_bp: 1000 });
     const refundReworded = changed(ruleCards['rv-refund'], { reason: 'Refunds wait for you.' });
@@ -668,8 +668,8 @@ describe('rule drafts', () => {
   });
 
   it('recommended_preset_keeps_what_it_automates', () => {
-    // Rivera's rules as the seed has them, the starter's cards included, drafted to "Recommended rules"
-    // in her Desk's own hours, as the API drafts it: weekdays 8:00 am to 6:00 pm.
+    // Turner's rules as the seed has them, the starter's cards included, drafted to "Recommended rules"
+    // in his Desk's own hours, as the API drafts it: weekdays 8:00 am to 6:00 pm.
     const owner = [...PRESETS.ask_first, ...RIVERA_CARDS];
     const preset = presetCards('auto', RIVERA_HOURS);
     const presetIds = new Set(ids(preset));
@@ -706,7 +706,7 @@ describe('rule drafts', () => {
     expect(byKey.get('rv-refund')?.after).toMatchObject({ appliesTo: 'Every tool that sends money out', mode: 'ask' });
     expect(byKey.get('rv-refund')?.changed).not.toContain('mode');
 
-    // Weekday bookings from 8:00 am to 6:00 pm go to the preset's rule in the same hours and words, Rivera's
+    // Weekday bookings from 8:00 am to 6:00 pm go to the preset's rule in the same hours and words, Turner's
     // own rule in all but its id, so they have no row, and no 9-to-5 rule is added. Saturdays lie outside
     // the preset's weekday bookings, so they fall to the default ask rather than claiming "Automatic".
     expect(byKey.has('rv-book-wk')).toBe(false);
@@ -743,7 +743,7 @@ describe('rule drafts', () => {
   });
 
   it('cancels_links_follows_the_draft', () => {
-    /** A draft of Rivera's rules with `pairs` changed, `removed` dropped and `added` added, at `cap`. */
+    /** A draft of Turner's rules with `pairs` changed, `removed` dropped and `added` added, at `cap`. */
     const draftOf = ({ pairs = [], removed = [], added = [], cap = 50_000 }: { pairs?: [RuleCard, RuleCard][]; removed?: RuleCard[]; added?: RuleCard[]; cap?: number }) => {
       const touched = new Set(ids([...removed, ...pairs.map(([was]) => was)]));
       const cards = [...RIVERA_CARDS.filter((card) => !touched.has(card.card_id)), ...pairs.map(([, now]) => now), ...added];

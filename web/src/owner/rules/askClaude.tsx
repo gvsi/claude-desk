@@ -6,7 +6,7 @@
  * page. Each change Claude drafts is reviewed inline, and nothing applies until it is confirmed.
  */
 import { useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
 import { clickedControl } from '../../ds/index.ts';
@@ -54,6 +54,10 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [open, setOpen] = useState(false);
   const [waiting, setWaiting] = useState(0);
+  /** Claude's answer so far, while one is written. */
+  const [growing, setGrowing] = useState<string | null>(null);
+  /** The answer being written now: one stream at a time, closed with its conversation. */
+  const stream = useRef<AbortController | null>(null);
   // What opened the panel, which focus goes back to when the panel closes: what had focus, or else
   // the control the click that opened it landed on. Safari focuses no button a click presses, so
   // after a click focus is still on the page's body.
@@ -93,10 +97,20 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
       }
       setWaiting((n) => n + 1);
       queue.current = queue.current.then(async () => {
-        const answered = await chatTurn(deskId, text, queryClient).catch((): Awaited<ReturnType<typeof chatTurn>> => [
-          { kind: 'notice', tone: 'error', line: DRAFT_FAILED },
-        ]);
+        // A conversation closed before its turn came asks nothing more.
         if (conversation.current !== at) return;
+        const controller = new AbortController();
+        stream.current = controller;
+        const answered = await chatTurn(deskId, text, queryClient, {
+          onText: (words) => {
+            if (conversation.current === at) setGrowing(words);
+          },
+          signal: controller.signal,
+        }).catch((): Awaited<ReturnType<typeof chatTurn>> => [{ kind: 'notice', tone: 'error', line: DRAFT_FAILED }]);
+        if (stream.current === controller) stream.current = null;
+        if (conversation.current !== at) return;
+        // The final answer takes the growing one's place in one step.
+        setGrowing(null);
         setTurns((now) => [...now, ...answered.map((turn) => ({ ...turn, id: id() }) as ChatTurn)]);
         setWaiting((n) => Math.max(0, n - 1));
       });
@@ -106,10 +120,24 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
 
   const end = useCallback(() => {
     conversation.current += 1;
+    stream.current?.abort();
+    stream.current = null;
     setOpen(false);
     setTurns([]);
     setWaiting(0);
+    setGrowing(null);
   }, []);
+
+  // Leaving the Desk ends the conversation: the answer being written closes, and nothing it had
+  // queued is asked.
+  useEffect(
+    () => () => {
+      conversation.current += 1;
+      stream.current?.abort();
+      stream.current = null;
+    },
+    [],
+  );
 
   const close = useCallback(() => {
     end();
@@ -142,7 +170,17 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
 
   const value = useMemo(() => ({ ask, open, close }), [ask, open, close]);
   const panel = open ? (
-    <RuleChat ref={panelRoot} deskId={deskId} ownerName={ownerName} turns={turns} busy={waiting > 0} onSend={ask} onClose={close} onSettled={settle} />
+    <RuleChat
+      ref={panelRoot}
+      deskId={deskId}
+      ownerName={ownerName}
+      turns={turns}
+      busy={waiting > 0}
+      growing={growing}
+      onSend={ask}
+      onClose={close}
+      onSettled={settle}
+    />
   ) : null;
   return { value, panel };
 }

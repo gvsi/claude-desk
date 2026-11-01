@@ -1,5 +1,5 @@
 /**
- * The mock API's world: one demo copy of Rivera Plumbing in memory (its Desks, chats, decisions,
+ * The mock API's world: one demo copy of Turner Plumbing in memory (its Desks, chats, decisions,
  * ledger and Demo inbox) and how a turn changes it. The seed (seed.ts) fills a new copy, the read
  * models (readModels.ts) read it, and the routes (served.ts) answer from and into it.
  */
@@ -128,6 +128,8 @@ export interface SessionRecord {
 export type ToolRecord = Omit<ToolProfile, 'tool' | 'source'> & Pick<ToolRow, 'tool' | 'source' | 'business'> & { review_reason: ToolReviewReason | null };
 
 export interface DeskRecord {
+  /** Stored business brand; absent or empty reads as the default teal palette. */
+  brand?: Record<string, string>;
   /** The Desk as the copy lists it, but its setup, which is its interview's (`withSetupDesks`). */
   summary: Omit<DeskSummary, 'setup'>;
   /** The active rules version, with its money cap. */
@@ -145,7 +147,7 @@ export interface DeskRecord {
   suggestions: Suggestion[];
   /**
    * Who the stream names as the owner who takes a chat over and types in it: a Desk setup made
-   * names its own owner; the seeded Desks leave it out and name Rivera's (`BUSINESS`).
+   * names its own owner; the seeded Desks leave it out and name Turner's (`BUSINESS`).
    */
   ownerName?: string;
 }
@@ -350,7 +352,7 @@ export class MockWorld {
     return desk;
   }
 
-  /** The owner's display name on the session's Desk: its own, or Rivera's on a seeded Desk. */
+  /** The owner's display name on the session's Desk: its own, or Turner's on a seeded Desk. */
   ownerNameOf(session: SessionRecord): string {
     return ownerNameOfDesk(this.deskOf(session));
   }
@@ -368,6 +370,7 @@ export class MockWorld {
     const { openStatus, ...summary } = fields;
     const policy = activePolicy(fields.desk_id);
     const desk: DeskRecord = {
+      brand: { ...BUSINESS.brand },
       summary: { ...summary, business_name: BUSINESS.name, answering: true },
       policy,
       ledger: [],
@@ -676,7 +679,7 @@ export class MockWorld {
 
   /**
    * Verified Dana asks for her $180.00 drain clearing payment back, a minute ago, and the refund
-   * card holds it for Maria: the design system's `rivera.heldRefund`, in this copy. Tests add it;
+   * card holds it for Mike: the design system's `rivera.heldRefund`, in this copy. Tests add it;
    * no seed has it. Her verified chat with the Desk is made the first time and kept after.
    */
   addHeldRefund(deskId: string = this.ids.deskId): Decision {
@@ -1445,7 +1448,7 @@ function shortName(name: string): string {
   return initial === '' ? first : `${first} ${initial}.`;
 }
 
-/** The owner's display name on `desk`: its own, or Rivera's on a seeded Desk. */
+/** The owner's display name on `desk`: its own, or Turner's on a seeded Desk. */
 function ownerNameOfDesk(desk: DeskRecord): string {
   return desk.ownerName ?? BUSINESS.owner_display_name;
 }

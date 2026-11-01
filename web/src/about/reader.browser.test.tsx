@@ -573,7 +573,7 @@ describe('ReaderPage', () => {
       // The sentence that gave the hosted prototype's address reads as the page it is on, the repo link kept.
       const sentence = [...(article?.querySelectorAll('p') ?? [])].find((p) => p.textContent?.startsWith('You’re in it.'));
       expect(flat(sentence?.textContent), where).toMatch(
-        /^You’re in it\. The code is at github\.com\/gvsi\/claude-desk\. Each visitor acts as Maria/,
+        /^You’re in it\. The code is at github\.com\/gvsi\/claude-desk\. Each visitor acts as Mike/,
       );
       // The repository is the sentence's one link, a plain text link that opens in a new tab.
       const links = [...(sentence?.querySelectorAll('a') ?? [])];

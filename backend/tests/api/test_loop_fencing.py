@@ -67,7 +67,7 @@ def test_recovered_reply_reads_the_delivered_handoff_flag_and_whether_its_prose_
     # The delivered row's blocks, as stored: the prose Claude drafted shows as a prose block only when it passed.
     blocks = [*([RenderedBlock(kind="prose", text="Here is the quote.")] if prose_shown else []),
               RenderedBlock(kind="card", template="quote", text="Drain clearing"),
-              RenderedBlock(kind="card", template="handoff", text="Let me check with Maria Rivera.")]
+              RenderedBlock(kind="card", template="handoff", text="Let me check with Mike Turner.")]
     shown = SimpleNamespace(ref_id="msg-recovered", handoff=handoff, blocks=blocks)
     outcome = loop._recovered_reply(shown, tool_use("send_reply", {"prose": "Here is the quote.", "clauses": []}))
     assert outcome.delivered == ("handoff" if handoff else "reply")
@@ -76,6 +76,20 @@ def test_recovered_reply_reads_the_delivered_handoff_flag_and_whether_its_prose_
     # a draft with no prose, or input that wasn't a draft, had no prose to leave out
     for tool_input in ({"prose": "", "clauses": []}, {"prose": 7}):
         assert "prose_shown" not in loop._recovered_reply(shown, tool_use("send_reply", tool_input)).result
+
+
+@pytest.mark.parametrize("language", ["en", "es"])
+def test_a_recovered_call_back_offer_is_a_reply_whose_prose_wasnt_shown(language):
+    # The kernel's call-back offer is a prose block it writes in place of a draft blocked only for its prose with no
+    # card to keep: delivered as a reply with no handoff, and Claude's own prose wasn't shown, the offer's words were
+    # (`shown_instead`), unless those were its words (a passing reply that asks the same question shows Claude's prose).
+    offer = prompts.STATUS_LINES["offer_callback"][language]
+    shown = SimpleNamespace(ref_id="msg-recovered", handoff=False, blocks=[RenderedBlock(kind="prose", text=offer)])
+    blocked = loop._recovered_reply(shown, tool_use("send_reply", {"prose": "It's $89.", "clauses": []}))
+    assert (blocked.delivered, blocked.result) == (
+        "reply", {"outcome": "delivered", "message_id": "msg-recovered", "prose_shown": False, "shown_instead": offer})
+    asked = loop._recovered_reply(shown, tool_use("send_reply", {"prose": offer, "clauses": []}))
+    assert asked.result == {"outcome": "delivered", "message_id": "msg-recovered"}
 
 
 @pytest.fixture
@@ -1011,6 +1025,36 @@ async def test_recovered_final_prose_failure_ends_the_request_without_another_ca
     assert item.event.handoff is drafted_handoff and [b.template for b in item.event.blocks] == templates
 
 
+async def test_a_recovered_call_back_offer_reaches_claude_before_the_visitors_yes(api_conn, engine, locks, caller,
+                                                                                  fake):
+    # A turn stopped after its final reply was delivered and before the results row, the reply blocked for its prose
+    # with no card to keep, so the kernel's call-back offer showed in its place. Recovery answers the call from that
+    # delivery with the offer's words (`shown_instead`), so the visitor's "Yes" reaches Claude with its question.
+    await said(api_conn, caller, "Hello")
+    assert await pending(caller, ScriptedModel([response(reply("Hello, how can I help?"))]), engine, locks) == "done"
+    await said(api_conn, caller, "OK, what's the next step?")
+    await prepare_model_input(api_conn, caller.session_id)
+    block = reply("It's $89 to come out.", id="toolu_crashed")
+    await append_assistant(api_conn, caller.ids, [block], generation=0)
+    await api_conn.commit()
+    verdict = await caller.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=caller.session_id, generation=0, prose=block["input"]["prose"]), final=True))
+    offer = prompts.STATUS_LINES["offer_callback"]["en"]
+    assert not verdict.ok and verdict.blocks == [RenderedBlock(kind="prose", text=offer)]
+    await deliver(api_conn, caller.ids, Reply(verdict, "claude", "model", call_id=block["id"]),
+                  ro_schema=caller.ro_schema)
+    await api_conn.commit()
+    assert await pending(caller, ScriptedModel(), engine, locks) == "idle"
+    results = (await rows(api_conn, caller.session_id, "model_tool_results", "model_content"))[-1][0]
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered", "message_id": verdict.message_id,
+                                                 "prose_shown": False, "shown_instead": offer}
+    await said(api_conn, caller, "Yes")
+    later = ScriptedModel([response(reply("What's the best number to reach you?"))])
+    assert await pending(caller, later, engine, locks) == "done"
+    texts = json.dumps(later.requests[-1].messages)
+    assert offer in texts and "Yes" in texts
+
+
 async def test_recovered_replies_answer_from_what_was_delivered(api_conn, engine, locks, caller, fake):
     await said(api_conn, caller, "Hello!")
     assert await pending(caller, ScriptedModel([response(reply("Hi, how can I help?"))]), engine, locks) == "done"
@@ -1196,7 +1240,7 @@ async def test_a_handoff_that_leaves_the_message_waiting_runs_once(api_conn, eng
     await api_conn.execute(text(
         "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
         " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
-        " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+        " 'claude-opus-5-5', 0, 0, 0, 8000000, 900, 'end_turn', :at)"), {"at": clock()})
     await said(api_conn, caller, "Hello!")
     model, busy = ScriptedModel(), []
 
@@ -1223,7 +1267,7 @@ async def test_past_the_budget_reopening_the_stream_hands_off_once(api_conn, eng
     await api_conn.execute(text(
         "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
         " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
-        " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+        " 'claude-opus-5-5', 0, 0, 0, 8000000, 900, 'end_turn', :at)"), {"at": clock()})
     await said(api_conn, caller, "Hello!")
     model = ScriptedModel()
     runner = TurnRunner(model, engine=engine, lock_engine=locks, production=True, clock=clock)
@@ -1452,7 +1496,7 @@ async def test_a_take_over_after_the_turn_read_the_session_shows_no_writing_afte
         async with engine.connect() as conn:
             await run_lock(conn, caller.session_id)
             fake.set_mode(caller.session_id, "owner")
-            await emit(conn, caller.ids, EvOwnerJoined(type="owner_joined", name="Maria Rivera"))
+            await emit(conn, caller.ids, EvOwnerJoined(type="owner_joined", name="Mike Turner"))
             await conn.commit()
 
     await said(api_conn, caller, "Can someone come tomorrow?")

@@ -42,12 +42,12 @@ const SHORT: readonly Size[] = [
   [360, 380],
 ];
 
-const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";
+const DISCLOSURE = "You're chatting with Claude, an AI answering for Turner Plumbing. Ask for Mike Turner anytime.";
 
-/** The chat head's line while Maria is in the chat, in place of the disclosure. */
+/** The chat head's line while Mike is in the chat, in place of the disclosure. */
 const PAUSED = {
-  en: 'Maria Rivera is in this chat. Claude, an AI, is paused until Maria Rivera hands it back.',
-  es: 'Maria Rivera está en este chat. Claude, una IA, está en pausa hasta que Maria Rivera le devuelva el chat.',
+  en: 'Mike Turner is in this chat. Claude, an AI, is paused until Mike Turner hands it back.',
+  es: 'Mike Turner está en este chat. Claude, una IA, está en pausa hasta que Mike Turner le devuelva el chat.',
 } as const;
 
 /** The long draft that once pushed the disclosure off a short window: six lines and a counter. */
@@ -113,7 +113,7 @@ interface LongChatOptions {
   follow?: boolean;
   /** A 64 px line above the brand header, as the vision bar is. */
   banner?: boolean;
-  /** Maria is in the chat: the take-over, from the stream's `owner_joined` until its `owner_left`. */
+  /** Mike is in the chat: the take-over, from the stream's `owner_joined` until its `owner_left`. */
   ownerInChat?: boolean;
   /** The composer is disabled, as the page disables it while it can't send. */
   composerDisabled?: boolean;
@@ -183,8 +183,8 @@ function LongChat({
           {lineAbove ? <div data-testid="line-above" style={{ height: 61 }} /> : null}
           <Composer
             variant="visitor"
-            label="Message Rivera Plumbing"
-            placeholder="Message Rivera Plumbing"
+            label="Message Turner Plumbing"
+            placeholder="Message Turner Plumbing"
             maxLength={2000}
             disabled={composerDisabled}
             onSend={() => {}}
@@ -192,7 +192,7 @@ function LongChat({
         </>
       }
     >
-      <Transcript label="Conversation with Rivera Plumbing">
+      <Transcript label="Conversation with Turner Plumbing">
         {Array.from({ length: rows }, (_, index) => (
           <TranscriptRow key={index}>
             <VisitorMessage
@@ -216,9 +216,9 @@ function ShortChat() {
       language="en"
       onAskForOwner={() => {}}
       about={desk.charter.slice(0, 2)}
-      composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={() => {}} />}
+      composer={<Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={() => {}} />}
     >
-      <Transcript label="Conversation with Rivera Plumbing">
+      <Transcript label="Conversation with Turner Plumbing">
         <TranscriptRow>
           <VisitorMessage text="Is drain clearing the same price on a Saturday?" />
         </TranscriptRow>
@@ -691,7 +691,7 @@ it('about_column_moves_as_the_window_crosses_900_and_the_draft_stays', async () 
   // into the scroll region, and back when it widens, while the rest of the page stays mounted, so
   // an unsent draft is the same text box with the same words.
   await renderLongChat([1440, 900]);
-  const box = page.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+  const box = page.getByRole('textbox', { name: 'Message Turner Plumbing' });
   await userEvent.type(box, 'Keep this draft');
   const textarea = box.element() as HTMLTextAreaElement;
   const inTheRegion = () => scrollRegion()?.contains(one('[aria-labelledby]:is(aside, section)')) ?? false;
@@ -715,17 +715,17 @@ it('about_column_moves_as_the_window_crosses_900_and_the_draft_stays', async () 
 
 it('the_scroll_region_takes_the_keyboard', async () => {
   // A conversation with nothing to focus in it can still be scrolled from the keyboard: the region
-  // is a stop in the tab order after "Ask for Maria Rivera", named by the chat's title, and End
+  // is a stop in the tab order after "Ask for Mike Turner", named by the chat's title, and End
   // takes it to the newest message.
   await renderLongChat([390, 844]);
   const region = scrollRegion();
   if (!region) throw new Error('no scroll region');
-  const ask = page.getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement;
+  const ask = page.getByRole('button', { name: 'Ask for Mike Turner' }).element() as HTMLElement;
   ask.focus();
   await userEvent.tab();
   expect(document.activeElement).toBe(region);
   expect(region.getAttribute('role')).toBe('group');
-  expect(document.getElementById(region.getAttribute('aria-labelledby') ?? '')?.textContent).toBe('Chat with Rivera Plumbing');
+  expect(document.getElementById(region.getAttribute('aria-labelledby') ?? '')?.textContent).toBe('Chat with Turner Plumbing');
   expect(region.scrollTop).toBe(0);
   await userEvent.keyboard('{End}');
   await vi.waitFor(() => expect(region.scrollTop + region.clientHeight).toBeGreaterThanOrEqual(region.scrollHeight - 1));
@@ -926,9 +926,9 @@ it('the_about_column_takes_the_keyboard_only_when_it_scrolls', async () => {
     });
   }
   expect(seen).toEqual([
-    { window: '1024x640', scrolls: true, tabStop: true, named: 'About Rivera Plumbing' },
-    { window: '1440x900', scrolls: false, tabStop: false, named: 'About Rivera Plumbing' },
-    { window: '390x844', scrolls: false, tabStop: false, named: 'About Rivera Plumbing' },
+    { window: '1024x640', scrolls: true, tabStop: true, named: 'About Turner Plumbing' },
+    { window: '1440x900', scrolls: false, tabStop: false, named: 'About Turner Plumbing' },
+    { window: '390x844', scrolls: false, tabStop: false, named: 'About Turner Plumbing' },
   ]);
 });
 
@@ -1076,14 +1076,14 @@ it('kept_composer_room_holds_the_shell_as_a_line_above_the_composer_comes_and_go
 
 it('keyboard_scrolling_on_a_short_shell_skips_nothing', async () => {
   // On a short shell the chat's head and the composer sit over the conversation. Tabbing from
-  // "Ask for Maria Rivera" into the conversation leaves the newest message just above the composer,
+  // "Ask for Mike Turner" into the conversation leaves the newest message just above the composer,
   // and Page Down moves by no more than the conversation that shows, so nothing passes unseen
   // under the chat's head.
   const seen = [];
   for (const size of [[568, 320], [360, 380]] satisfies Size[]) {
     await renderLongChat(size);
     followTheChat();
-    (page.getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement).focus();
+    (page.getByRole('button', { name: 'Ask for Mike Turner' }).element() as HTMLElement).focus();
     await userEvent.tab();
     const tabbed = document.activeElement === one('.cd-public-shell__scroll') && newestAboveTheComposer();
 
@@ -1362,7 +1362,7 @@ it('the_about_column_keeps_focus_when_it_stops_scrolling', async () => {
   await vi.waitFor(() => expect(about.scrollHeight).toBeLessThanOrEqual(about.clientHeight));
   await nextFrames();
   expect(document.activeElement).toBe(about);
-  (page.getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement).focus();
+  (page.getByRole('button', { name: 'Ask for Mike Turner' }).element() as HTMLElement).focus();
   await vi.waitFor(() => expect(about.hasAttribute('tabindex')).toBe(false));
 });
 
@@ -1442,9 +1442,9 @@ it('a_banner_sits_above_the_header_and_counts_in_the_fit', async () => {
 });
 
 it('owner_in_chat_says_so_in_the_chat_head', async () => {
-  // While Maria is in the chat, the chat's head says so on the disclosure's own line, in its type:
-  // Claude is still named as an AI, paused until she hands the chat back. Each of her names is
-  // marked as written by someone, as the shell marks names, and "Ask for Maria Rivera" isn't there.
+  // While Mike is in the chat, the chat's head says so on the disclosure's own line, in its type:
+  // Claude is still named as an AI, paused until he hands the chat back. Each of his names is
+  // marked as written by someone, as the shell marks names, and "Ask for Mike Turner" isn't there.
   const seen = [];
   for (const language of ['en', 'es'] as const) {
     await renderLongChat([1440, 900], { language, ownerInChat: true });
@@ -1459,8 +1459,8 @@ it('owner_in_chat_says_so_in_the_chat_head', async () => {
     });
   }
   expect(seen).toEqual([
-    { language: 'en', lines: [PAUSED.en], meta: true, names: ['Maria Rivera', 'Maria Rivera'], buttons: 0 },
-    { language: 'es', lines: [PAUSED.es], meta: true, names: ['Maria Rivera', 'Maria Rivera'], buttons: 0 },
+    { language: 'en', lines: [PAUSED.en], meta: true, names: ['Mike Turner', 'Mike Turner'], buttons: 0 },
+    { language: 'es', lines: [PAUSED.es], meta: true, names: ['Mike Turner', 'Mike Turner'], buttons: 0 },
   ]);
 });
 
@@ -1470,8 +1470,8 @@ function headButtons(): (string | null)[] {
 }
 
 it('the_disclosure_and_ask_come_back_when_the_owner_hands_back', async () => {
-  // Maria joins and hands back on an open page: the chat's head follows each time, on the same
-  // line. While she is in the chat there is no "Ask for Maria Rivera"; once she hands back, the
+  // Mike joins and hands back on an open page: the chat's head follows each time, on the same
+  // line. While he is in the chat there is no "Ask for Mike Turner"; once he hands back, the
   // usual disclosure and the button are back.
   await renderLongChat([390, 844]);
   const line = disclosureLine();
@@ -1482,18 +1482,18 @@ it('the_disclosure_and_ask_come_back_when_the_owner_hands_back', async () => {
   act(() => root.render(<LongChat />));
   seen.push(state());
   expect(seen).toEqual([
-    { words: DISCLOSURE, sameLine: true, buttons: ['Ask for Maria Rivera'] },
+    { words: DISCLOSURE, sameLine: true, buttons: ['Ask for Mike Turner'] },
     { words: PAUSED.en, sameLine: true, buttons: [] },
-    { words: DISCLOSURE, sameLine: true, buttons: ['Ask for Maria Rivera'] },
+    { words: DISCLOSURE, sameLine: true, buttons: ['Ask for Mike Turner'] },
   ]);
 });
 
 it('the_shell_fits_itself_again_as_the_owner_joins_and_hands_back', async () => {
   // The paused line wraps otherwise than the disclosure, and Ask leaves the chat's head with it, so
-  // the head changes height as Maria joins and hands back, and the shell judges short or tall again
+  // the head changes height as Mike joins and hands back, and the shell judges short or tall again
   // each time. On a phone under a banner, in a window that leaves the conversation a little under
   // 120 px while Ask is shown (short), the head without Ask leaves it more than the 136 px a short
-  // shell needs to turn tall; when she hands back, it is short again.
+  // shell needs to turn tall; when he hands back, it is short again.
   await renderLongChat([390, 844], { banner: true });
   const parts = ['.cd-public-shell__banner', '.cd-public-brand', '.cd-public-shell__chat-head', '.cd-public-shell__composer', '.cd-public-shell__footer'];
   const pinned = parts.reduce((sum, selector) => sum + one(selector).offsetHeight, 0);
@@ -1525,12 +1525,12 @@ it('the_shell_fits_itself_again_as_the_owner_joins_and_hands_back', async () => 
 });
 
 it('focus_on_ask_goes_on_to_the_composer_as_the_owner_joins', async () => {
-  // A keyboard visitor on "Ask for Maria Rivera" as Maria joins: the button leaves the chat's head,
+  // A keyboard visitor on "Ask for Mike Turner" as Mike joins: the button leaves the chat's head,
   // and focus goes on to the composer's text box rather than dropping to the page; with the text box
   // disabled, to the conversation's scroll region, the stop after Ask. Focus anywhere else, or
   // nowhere, stays where it was.
   await renderLongChat([390, 844]);
-  const ask = () => page.getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement;
+  const ask = () => page.getByRole('button', { name: 'Ask for Mike Turner' }).element() as HTMLElement;
   const join = (options: LongChatOptions = {}) => act(() => root.render(<LongChat {...options} ownerInChat />));
   const leave = (options: LongChatOptions = {}) => act(() => root.render(<LongChat {...options} />));
   const focused = () => {
@@ -1569,8 +1569,8 @@ it('focus_on_ask_goes_on_to_the_composer_as_the_owner_joins', async () => {
 });
 
 it('focus_moving_on_from_ask_scrolls_nothing', async () => {
-  // On a short shell, a keyboard visitor reading mid-chat with focus on "Ask for Maria Rivera" as
-  // Maria joins: focus goes on to the composer's text box, or with that disabled to the scroll
+  // On a short shell, a keyboard visitor reading mid-chat with focus on "Ask for Mike Turner" as
+  // Mike joins: focus goes on to the composer's text box, or with that disabled to the scroll
   // region, without scrolling. The message they were reading stays where it was on screen. The
   // shell's scrollTop moves only by what the chat's head lost with Ask, as the browser keeps the
   // conversation in place under a head that got shorter (scroll anchoring).
@@ -1580,7 +1580,7 @@ it('focus_moving_on_from_ask_scrolls_nothing', async () => {
     const shell = one('.cd-public-shell');
     const head = one('.cd-public-shell__chat-head');
     shell.scrollTop = Math.round(shell.scrollHeight / 2);
-    (page.getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement).focus();
+    (page.getByRole('button', { name: 'Ask for Mike Turner' }).element() as HTMLElement).focus();
     await nextFrames();
     const reading = [...container.querySelectorAll<HTMLElement>('.cd-transcript-row')].find(
       (row) => row.getBoundingClientRect().top > head.getBoundingClientRect().bottom,

@@ -1,4 +1,4 @@
-"""Fixtures for the API's tests: the database as desk_api, FakeKernel and a visitor in a fresh Rivera copy.
+"""Fixtures for the API's tests: the database as desk_api, FakeKernel and a visitor in a fresh Turner copy.
 
 - `db`: the database, migrated to the one Alembic head (the run fails with the command to run when it
   isn't) and with every `app.*` table emptied before each test.
@@ -6,7 +6,7 @@
   search_path; nothing commits unless a test does.
 - `fake`: FakeKernel's `FakeKernelState`, mirrored into `fake_kernel_ro`, and `kernel_http`, the API's typed
   client pointed at it.
-- `visitor` / `ids`: a visitor session on a new Rivera copy: its token (memory only, as in the API) and the
+- `visitor` / `ids`: a visitor session on a new Turner copy: its token (memory only, as in the API) and the
   `Ids` its `/whoami` answer names.
 - `clock`: a clock the test moves by hand. `api`: the API app on FakeKernel and `fake_kernel_ro`, its lifespan
   running, with that clock and `PASSCODE`'s hash; `browser(app, ip=...)`: an HTTPS client on it from one address,
@@ -44,7 +44,8 @@ from desk.contracts import CopyCreated
 from desk.db.session import API_CONNECT_OPTIONS, database_url, libpq_url
 from desk.db.tables import APP_TABLES
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
-from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
+from desk.next_steps import next_steps
+from tests.kernel_contract.fake_kernel import CALL_BACK_STEP, FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO, create_fake_ro
 
 BACKEND = Path(__file__).resolve().parents[2]
@@ -116,8 +117,19 @@ class Visitor:
         return f"Visitor({self.ids!r})"
 
 
+def without_call_backs(fake: FakeKernelState, desk_id: str) -> None:
+    """The owner turns off each of the Desk's tools that offers a call back (`desk.next_steps`): the call-back tool
+    Turner's seed enables, and any business tool for urgent requests. A draft blocked only for its prose, with no card
+    to keep, then shows the handoff card rather than the kernel's call-back offer."""
+    desk = fake.desks[desk_id]
+    offering = [profile for profile in desk.tools.values() if CALL_BACK_STEP in next_steps([profile])]
+    assert "native.request_callback" in [profile.tool for profile in offering]
+    for profile in offering:
+        fake._put_tool(desk, profile.model_copy(update={"status": "disabled"}))
+
+
 async def new_visitor(http: KernelHttp, fake: FakeKernelState, copy: CopyCreated | None = None) -> Visitor:
-    """A visitor session on the Desk of `copy`, or of a new Rivera copy."""
+    """A visitor session on the Desk of `copy`, or of a new Turner copy."""
     copy = copy or await http.public().call("POST /copies", CreateCopyRequest())
     slug = fake.desks[copy.desk_ids[0]].slug
     created = await http.public().call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor"))

@@ -22,14 +22,14 @@ function initials(name: string): string {
 }
 
 /**
- * `/vision/team-desk` (N-R2-Vision-TeamDesk): Rivera Plumbing's team asking its own Desk, the
+ * `/vision/team-desk` (N-R2-Vision-TeamDesk): Turner Plumbing's team asking its own Desk, the
  * "Team" Desk in the sidebar's Desk picker. Conversations with Luis's open: what he asked from the
  * van, Claude's answers with their cards and receipts, and what his access lets him open beside it.
  */
 export function TeamDeskPage() {
   const chatId = useId();
   return (
-    <VisionFrame title="Rivera Plumbing team">
+    <VisionFrame title="Turner Plumbing team">
       {(bar) => (
         <VisionOwnerShell bar={bar} {...TEAM_OWNER}>
           <div className="cd-vision-page cd-vision-team">

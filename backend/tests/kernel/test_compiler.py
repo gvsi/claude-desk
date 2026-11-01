@@ -552,7 +552,7 @@ def test_no_card_can_change_verification():
 
 
 def test_the_shipped_verification_card_stays_as_it_is():
-    """Every preset and the Rivera seed carry `preset-start-verification` (auto, for anyone): the
+    """Every preset and the Turner seed carry `preset-start-verification` (auto, for anyone): the
     always-on behaviour itself, which the API drafts back with the rest of a preset. That card is
     the one card on the tool a set may hold, its `reason` reworded or not (the owner's words,
     which compile to nothing, as `lower_to_cap` matches a carried card); any other change to it

@@ -11,7 +11,7 @@ const joined = rivera.events.takeOver.find((event): event is EvOwnerJoined => ev
 const meta = {
   title: 'Conversation/SystemLine',
   component: SystemLine,
-  args: { text: `${joined.name} joined the chat`, initials: 'MR' },
+  args: { text: `${joined.name} joined the chat`, initials: 'MT' },
   parameters: { layout: 'padded', canvas: 'N-Public-Handoff-Run1' },
 } satisfies Meta<typeof SystemLine>;
 
@@ -35,7 +35,7 @@ export const OwnerJoined: Story = {
   parameters: { canvasNote: "The board ends the line with a time; no contract carries one, so the line is EvOwnerJoined's name and nothing else." },
   play: async ({ canvas, canvasElement }) => {
     const line = canvas.getByRole('status');
-    await expectLineReads(line, 'Maria Rivera joined the chat');
+    await expectLineReads(line, 'Mike Turner joined the chat');
     await expect(line.textContent).not.toMatch(CLOCK);
     expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
     // Centered between two hairlines, which screen readers skip.
@@ -50,7 +50,7 @@ export const OwnerJoined: Story = {
     // The initials sit beside the words and are hidden from screen readers.
     const initials = canvasElement.querySelector('.cd-system-line__initials') as HTMLElement;
     await expect(initials).toHaveAttribute('aria-hidden', 'true');
-    await expect(initials.textContent).toBe('MR');
+    await expect(initials.textContent).toBe('MT');
   },
 };
 
@@ -58,7 +58,7 @@ export const OwnerLeft: Story = {
   args: { text: 'Claude is helping again.', initials: undefined },
   parameters: {
     canvas: 'N-Conv-TakeOver',
-    canvasNote: 'The board quotes this line under the composer as what Lucía sees when Maria hands back; here it is the line itself.',
+    canvasNote: 'The board quotes this line under the composer as what Lucía sees when Mike hands back; here it is the line itself.',
   },
   play: async ({ canvas, canvasElement }) => {
     await expectLineReads(canvas.getByRole('status'), 'Claude is helping again.');

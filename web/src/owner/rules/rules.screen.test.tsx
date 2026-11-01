@@ -76,25 +76,26 @@ function inView(el: Element, scroller: Element): boolean {
 }
 
 /**
- * Once the change Claude drafted shows in the Ask Claude conversation `log`, the owner's `words`
- * that asked for it are whole, at the conversation's top or below it, never cut under the panel's
- * header; and the review's "Confirm change" and "Keep my rules" are reachable by scrolling the
- * conversation to its end. `at` names the case.
+ * Once the change Claude drafted shows in the Ask Claude conversation `log`, its review's
+ * "Confirm change" and "Keep my rules" are wholly in view, the one action that applies the change;
+ * and the owner's `words` that asked for it are whole and in view too, never cut under the panel's
+ * header, when the exchange fits. When it doesn't, the buttons win. `at` names the case.
  */
 async function expectTurnOpensAtTheOwnersWords(log: Locator, words: string, at: string): Promise<void> {
   const confirm = log.getByRole('button', { name: 'Confirm change' });
   await expect.element(confirm, { message: at }).toBeEnabled();
   const port = log.element();
-  const bubble = log.getByText(words, { exact: true }).element();
-  expect(Math.round(bubble.getBoundingClientRect().top), at).toBeGreaterThanOrEqual(Math.round(port.getBoundingClientRect().top));
-  expect(inView(bubble, port), at).toBe(true);
-  port.scrollTop = port.scrollHeight;
   for (const name of ['Confirm change', 'Keep my rules']) {
     await expect.poll(() => inView(log.getByRole('button', { name }).element(), port), { message: `${at}: ${name}` }).toBe(true);
   }
+  const bubble = log.getByText(words, { exact: true }).element();
+  const keep = log.getByRole('button', { name: 'Keep my rules' }).element();
+  if (keep.getBoundingClientRect().bottom - bubble.getBoundingClientRect().top <= port.clientHeight) {
+    expect(inView(bubble, port), at).toBe(true);
+  }
 }
 
-/** A rule Maria's answers suggest: Dana's refunds up to $50 without asking. */
+/** A rule Mike's answers suggest: Dana's refunds up to $50 without asking. */
 const DANA_REFUNDS: Suggestion = {
   tool: 'payments.create_refund',
   count: 3,
@@ -115,7 +116,7 @@ const DANA_REFUNDS: Suggestion = {
   },
 };
 
-/** Rivera's suggestions under Ask Claude, in order; a question about a hold may follow them. */
+/** Turner's suggestions under Ask Claude, in order; a question about a hold may follow them. */
 const FIXED_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
 
 /** The words of each suggestion in `group`, in order. */
@@ -163,7 +164,7 @@ function failNeedsYou(): { failed: () => number; recover: () => void } {
   };
 }
 
-/** Rivera's payment limit, atop Payments and Stripe. */
+/** Turner's payment limit, atop Payments and Stripe. */
 const LIMIT_500 = 'No payment over $500 goes through without asking you, whatever the rules below say.';
 
 const CANCELS_LINKS = "Open payment links I made on my own that the new rules don't allow will be cancelled.";
@@ -350,11 +351,12 @@ describe('rules page', () => {
     const reached = await expectTabOrderFromTop([...changes, all.element() as HTMLElement]);
     expect(reached.filter((el) => sections.contains(el))).toEqual(changes);
 
-    // All rules draws each tool's name and line without a link too.
+    // All rules draws each tool's name and line without a link too: Turner's urgent job first, then
+    // the connectors' eleven tools.
     const house = await renderRoute(`${DESK}/rules/all`);
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
     const main = house.screen.getByRole('main').element();
-    expect(main.querySelectorAll('.cd-tool-rules__tool')).toHaveLength(11);
+    expect(main.querySelectorAll('.cd-tool-rules__tool')).toHaveLength(12);
     expect(main.querySelectorAll('a.cd-tool-rules__tool, .cd-tool-rules__chevron')).toHaveLength(0);
     expect(house.screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' }).getByText('Payment link', { exact: true })).toBeVisible();
@@ -407,7 +409,7 @@ describe('rules page', () => {
     expect(router.state.location.pathname).toBe(`${DESK}/rules/drafts/${version}`);
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
-    // Quotes stay automatic: the preset's own quote rule is the same as Rivera's, so no row names
+    // Quotes stay automatic: the preset's own quote rule is the same as Turner's, so no row names
     // Quote, alone or among the tools a shared rule covers, and none moves it to "Ask me first".
     const rows = reviewRows(screen);
     expect(rows.length).toBeGreaterThan(0);
@@ -475,7 +477,7 @@ describe('rules page', () => {
     await expect.element(changes.getByText('Quote', { exact: true })).toBeVisible();
     await expect.element(changes.getByRole('group', { name: 'After' }).getByText(/Weekdays, all day/)).toBeVisible();
     await expect.element(log.getByText('Checked against the always-on rules and your other rules.', { exact: true })).toBeVisible();
-    // The owner's words whole at the top, and the review's buttons reachable by scrolling.
+    // The review's buttons in view, and the owner's words too when both fit.
     await expectTurnOpensAtTheOwnersWords(log, 'Stop quoting on weekends', 'from the page');
     // The page beside it keeps its header: "Start from a preset" stays at the right of the title's line (N-Conn-12-Chat).
     const preset = screen.getByRole('button', { name: 'Start from a preset' }).element().getBoundingClientRect();
@@ -496,8 +498,8 @@ describe('rules page', () => {
   });
 
   it('rule_chat_opens_each_turn_at_the_owners_words', async () => {
-    // From a suggestion beside the page: the owner's words open the turn, whole, and the review's
-    // buttons after Claude's answer are reachable by scrolling.
+    // From a suggestion beside the page: the review's buttons after Claude's answer show whole, and
+    // the owner's words that open the turn too when both fit.
     const { screen } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Stop quoting on weekends' }).click();
     const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
@@ -650,6 +652,9 @@ describe('rules page', () => {
     await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('What if I stop quoting on weekends?');
     await userEvent.keyboard('{Enter}');
     const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
+    // The answer streams in as Markdown; its final form is checked once it has replaced the growing one.
+    await expect.element(log.getByText(items[1] ?? '', { exact: true })).toBeVisible();
+    await expect.poll(() => log.element().querySelector('.cd-rule-chat__growing')).toBeNull();
     const bold = log.getByText('Two things', { exact: true });
     await expect.element(bold).toBeVisible();
     expect(bold.element().tagName).toBe('STRONG');
@@ -746,7 +751,7 @@ describe('rules page', () => {
   });
 
   it('house_rules_show_limits', async () => {
-    // Payment links up to $400, refunds never, and no rule of Maria's on quotes.
+    // Payment links up to $400, refunds never, and no rule of Mike's on quotes.
     desk().policy = {
       ...desk().policy,
       cards: desk()
@@ -938,7 +943,7 @@ describe('rules page', () => {
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 
-  it.each(['Rivera Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
+  it.each(['Turner Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
     renameBusiness(business);
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     const payments = screen.getByRole('region', { name: 'Payments' });
@@ -965,8 +970,10 @@ describe('rules page', () => {
     expect(inView(limit(), main)).toBe(true);
 
     // From the end of Rules, a fresh visit to All rules still opens at its top, and Back from it
-    // returns to the end of Rules.
+    // returns to the end of Rules. The place is kept as the scroll is heard: wait for it before leaving.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
+    await heard;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'See all rules' }).last().click();
@@ -1057,7 +1064,7 @@ describe('rules page', () => {
     expect(reached.filter((el) => el.closest('.cd-connector-section') !== null)).toEqual(changes);
 
     // As the board spaces them: the composer 20 px under the header, its suggestions 10 px under
-    // it, the connectors' summary 20 px under them; the menu at the right of the title's line.
+    // it; the menu at the right of the title's line.
     const top = (el: Element) => Math.round(el.getBoundingClientRect().top);
     const bottom = (el: Element) => Math.round(el.getBoundingClientRect().bottom);
     const box = composer.closest('.cd-composer__box') as HTMLElement;
@@ -1065,7 +1072,11 @@ describe('rules page', () => {
     const row = main.querySelector('.cd-suggestion-chips') as HTMLElement;
     expect(top(box) - bottom(header)).toBe(20);
     expect(top(row) - bottom(box)).toBe(10);
-    expect(top(main.querySelector('.cd-connector-list__summary') as HTMLElement) - bottom(row)).toBe(20);
+    // Then the Desk's own jobs (Turner's urgent callback) 20 px under them, and the connectors'
+    // summary 20 px under those, at the page's own gap.
+    const jobs = main.querySelector('.cd-business-jobs') as HTMLElement;
+    expect(top(jobs) - bottom(row)).toBe(20);
+    expect(top(main.querySelector('.cd-connector-list__summary') as HTMLElement) - bottom(jobs)).toBe(20);
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(menu.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     expect(top(menu) - top(title)).toBe(4);
@@ -1099,7 +1110,7 @@ describe('rules page', () => {
     expectNoHorizontalScroll();
     await expectScreenBasics(phone.screen.container, { owner: true });
 
-    // Ask Claude as a sheet over the page: the owner's words whole, the drafted change's buttons reachable.
+    // Ask Claude as a sheet over the page: the drafted change's buttons in view.
     await phone.screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Stop quoting on weekends');
     await userEvent.keyboard('{Enter}');
     const sheet = phone.screen.getByRole('dialog', { name: 'Ask Claude' }).getByRole('log');
@@ -1436,7 +1447,7 @@ describe("Ask Claude's question about a hold", () => {
 
   it('hold_question_only_while_a_request_is_held', async () => {
     // A copy with no hold: once Needs you has been read and drawn (a second read starts only after
-    // the first one's answer), only Rivera's fixed suggestions remain.
+    // the first one's answer), only Turner's fixed suggestions remain.
     const quiet = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
     const none = quiet.screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(none.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
@@ -1556,11 +1567,11 @@ describe("Ask Claude's question about a hold", () => {
   });
 });
 
-describe("Rivera's fixed suggestions", () => {
+describe("Turner's fixed suggestions", () => {
   type Screen = Awaited<ReturnType<typeof renderRoute>>['screen'];
 
   /**
-   * On Rules, presses Rivera's suggestion `words`, confirms the change Claude drafts from it in Ask
+   * On Rules, presses Turner's suggestion `words`, confirms the change Claude drafts from it in Ask
    * Claude beside the page, and waits for the receipt; returns the suggestions and the panel.
    */
   async function confirmSuggestion(screen: Screen, words: string) {
@@ -1680,7 +1691,7 @@ describe("Rivera's fixed suggestions", () => {
     await expect.element(group.getByRole('button', { name: FIXED_CHIPS[1], exact: true })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
-    // Rivera's rules have neither change, so both stay once they are drawn.
+    // Turner's rules have neither change, so both stay once they are drawn.
     releaseRules();
     await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
@@ -1727,7 +1738,7 @@ describe("Rivera's fixed suggestions", () => {
     expect(main.scrollTop).toBe(place);
   });
 
-  /** Rivera's active rules with both suggestions' changes in effect: quotes on their own only on weekdays, and water heater installs up to $600. */
+  /** Turner's active rules with both suggestions' changes in effect: quotes on their own only on weekdays, and water heater installs up to $600. */
   function bothChangesInEffect(): void {
     const main = desk();
     const weekdays: RuleCard['hours'] = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' };
@@ -1763,7 +1774,7 @@ describe("Rivera's fixed suggestions", () => {
 
     rules.release();
     await expect.poll(() => finished.has('rules')).toBe(true);
-    // The rules leave no suggestion of Rivera's own, so the page waits for Needs you, as another business's does.
+    // The rules leave no suggestion of Turner's own, so the page waits for Needs you, as another business's does.
     await expect.element(group).not.toBeInTheDocument();
     expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
@@ -1833,7 +1844,11 @@ describe("Rivera's fixed suggestions", () => {
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     const main = screen.getByRole('main').element();
+    // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as
+    // the owner's own scrolling would be heard before they leave.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
+    await heard;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await router.navigate(`${DESK}/rules/all`);

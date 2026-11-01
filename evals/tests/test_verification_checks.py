@@ -107,7 +107,7 @@ def code_entry(body: str, kind: str = "verification_code", to: str = MASKED) -> 
 
 
 def test_the_code_is_read_from_one_entry_and_never_printed():
-    assert code_in(code_entry(f"Your Rivera Plumbing code is {CODE}. It expires in ten minutes.")) == CODE
+    assert code_in(code_entry(f"Your Turner Plumbing code is {CODE}. It expires in ten minutes.")) == CODE
     for body, kind in ((f"Codes {CODE} and 111222", "verification_code"), ("No code here", "verification_code"),
                        (f"Your code is {CODE}", "alert")):
         with pytest.raises(AssertionError) as failure:

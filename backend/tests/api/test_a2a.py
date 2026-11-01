@@ -42,7 +42,7 @@ from tests.api.test_secrets_at_rest import at_rest
 from tests.api.test_verification import notes_fail
 from tests.kernel_contract.fake_kernel import FakeKernelState, IDLE_LIMIT, agent_signature, fake_kernel_app, signed_time
 
-DANA = "dana@example.com"               # on record in the Rivera seed
+DANA = "dana@example.com"               # on record in the Turner seed
 CREDENTIALS = ("x-session-token", "x-owner-session")
 AGENT_HEADERS = ("x-agent-key-id", "x-agent-ts", "x-agent-nonce", "x-agent-sig", "x-agent-body-sha256")
 KEEP = object()
@@ -116,7 +116,7 @@ class Agent:
 
 
 async def new_copy(kernel_http, fake) -> tuple[str, str, str]:
-    """A fresh Rivera copy: its owner token, its Desk's ID and slug."""
+    """A fresh Turner copy: its owner token, its Desk's ID and slug."""
     copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
     return copy.owner_token, copy.desk_ids[0], fake.desks[copy.desk_ids[0]].slug
 
@@ -363,7 +363,7 @@ async def test_agent_turn_ends_at_its_reply(app, browser, fake, kernel_http, mod
 async def test_work_woken_during_the_turn_waits_for_the_next_request(app, browser, fake, kernel_http, model, engine,
                                                                       jobs_connector):
     agent = await new_agent(app, browser, fake, kernel_http)
-    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")))
     assert (await agent.send("Can I get a discount on a drain clearing?")).status_code == 200
     (decision,) = [record.decision for record in fake.decisions.values()
                    if record.decision.session_id == agent.session_id]
@@ -394,10 +394,10 @@ async def test_work_woken_during_the_turn_waits_for_the_next_request(app, browse
     assert (again.status_code, again.json()) == (200, replied.json())
 
     # the woken work waits for the agent's next request, whose turn reads it
-    model.add(say("Maria couldn't offer a discount this time."))
+    model.add(say("Mike couldn't offer a discount this time."))
     later = await agent.send("Any news?")
     assert later.status_code == 200 and len(model.requests) == 3
-    assert [block["text"] for block in later.json()["blocks"]] == ["Maria couldn't offer a discount this time."]
+    assert [block["text"] for block in later.json()["blocks"]] == ["Mike couldn't offer a discount this time."]
     assert f'<action_update decision_id="{decision.decision_id}" state="denied">' in model_text(model.requests[-1])
 
 
@@ -465,8 +465,9 @@ async def test_a_first_reply_claude_can_rewrite_never_reaches_the_agent(app, bro
 
 
 async def test_an_agents_first_reply_on_the_turns_last_call_is_final(app, browser, fake, kernel_http, model, engine):
-    # On the turn's last allowed model call there is no rewrite: the first reply is checked as final, and blocked, the
-    # handoff the kernel opened for the owner is what the agent gets, once.
+    # On the turn's last allowed model call there is no rewrite: the first reply is checked as final, and blocked only
+    # for its prose with no card to keep, the kernel's call-back offer is what the agent gets, once, and no owner
+    # handoff opens (the owner's decision of 2026-11-01).
     agent = await new_agent(app, browser, fake, kernel_http)
     model.add(*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(loop.MAX_MODEL_CALLS - 1)),
               say("It's $180."))
@@ -475,16 +476,16 @@ async def test_an_agents_first_reply_on_the_turns_last_call_is_final(app, browse
 
     assert answered.status_code == 200, answered.text
     assert len(model.requests) == loop.MAX_MODEL_CALLS
-    assert [block["template"] for block in answered.json()["blocks"]] == ["handoff"]
+    assert [(block["template"], block["text"]) for block in answered.json()["blocks"]] == [
+        (None, "Would you like me to arrange a callback?")]
     assert finals(fake, agent.session_id) == [True]
-    assert [(row["kind"], row["status"]) for row in fake.handoffs.values()
-            if row["session_id"] == agent.session_id] == [("card", "open")]
+    assert [row for row in fake.handoffs.values() if row["session_id"] == agent.session_id] == []
 
 
 async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, kernel_http, model, engine,
                                                            jobs_connector):
     agent = await new_agent(app, browser, fake, kernel_http)
-    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")))
     held = await agent.send("Can I get a discount on a drain clearing?")
     assert held.status_code == 200
     (decision,) = [record.decision for record in fake.decisions.values()
@@ -492,7 +493,7 @@ async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, k
     signed = {key: getattr(decision, key) for key in ("decision_id", "state", "visitor_plain", "ledger_seq",
                                                       "signature")}
     assert held.json()["receipts"] == [{"type": "held", **signed}]
-    assert [block["text"] for block in held.json()["blocks"]] == ["I've asked Maria to look at this."]
+    assert [block["text"] for block in held.json()["blocks"]] == ["I've asked Mike to look at this."]
 
     owner = browser(app, ip="198.51.100.30")
     owner.cookies.set("desk_owner", agent.owner_token, domain="desk.test", path="/api/owner")
@@ -502,7 +503,7 @@ async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, k
     await jobs_done(jobs_connector)
     await owner_says(engine, fake, agent.session_id, "Sorry, no discounts this month.")
 
-    model.add(say("Maria couldn't offer a discount this time."))
+    model.add(say("Mike couldn't offer a discount this time."))
     later = await agent.send("Any news?")
     assert later.status_code == 200
     assert later.json()["receipts"] == [shown] and shown["state"] == "denied"
@@ -517,7 +518,7 @@ async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, k
 async def test_agent_never_receives_the_owner_refusal_reason(app, browser, fake, kernel_http, model, engine,
                                                             jobs_connector):
     agent = await new_agent(app, browser, fake, kernel_http)
-    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")))
     assert (await agent.send("Can I get a discount on a drain clearing?")).status_code == 200
     (held,) = [record.decision for record in fake.decisions.values()
                if record.decision.session_id == agent.session_id]
@@ -1113,12 +1114,12 @@ async def test_mode_owner_answers_with_the_owners_blocks(app, browser, fake, ker
     model.add(say("Happy to help."))
     assert (await agent.send("Hello")).status_code == 200
     fake.set_mode(agent.session_id, "owner")
-    await owner_says(engine, fake, agent.session_id, "Hi, this is Maria. How can I help?")
+    await owner_says(engine, fake, agent.session_id, "Hi, this is Mike. How can I help?")
 
     taken = await agent.send("Is someone there?")
     assert taken.status_code == 200
     assert [(block["template"], block["title"], block["text"]) for block in taken.json()["blocks"]] == [
-        ("owner_said", "Hi, this is Maria. How can I help?", "Hi, this is Maria. How can I help?")]
+        ("owner_said", "Hi, this is Mike. How can I help?", "Hi, this is Mike. How can I help?")]
     assert taken.json()["receipts"] == [] and len(model.requests) == 1
     assert await messages(engine, agent.session_id, "agent_text") == [("Hello", True), ("Is someone there?", False)]
 
@@ -1155,4 +1156,4 @@ async def test_an_agents_message_starts_its_turn_in_the_kernel(app, browser, fak
     assert routes.index("POST /sessions/{session_id}/turn") < routes.index("GET /context/{session_id}?desk_id=")
     assert routes.index("GET /context/{session_id}?desk_id=") < routes.index("POST /decide")
     (receipt,) = [payload for _, type, payload in await sse(engine, agent.session_id) if type == "receipt"]
-    assert receipt["visitor_plain"] == "Horarios tomados del calendario de Maria Rivera"
+    assert receipt["visitor_plain"] == "Horarios tomados del calendario de Mike Turner"

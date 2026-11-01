@@ -98,7 +98,8 @@ function GreetingWords() {
   const greeting = `${greetingFor(new Date(), 'America/Los_Angeles')}, ${rivera.business.ownerName.split(' ')[0]}`;
   const title = useWordWidth(box, greeting, 'cd-greeting__title cd-type-greeting', true);
   const presence = useWordWidth(box, PRESENCE, 'cd-greeting__presence cd-type-body', true);
-  return <div ref={box} className="cd-greeting__text" style={{ flexBasis: Math.max(title ?? 0, presence ?? 0) }}>
+  // The words' own width: the greeting's basis beside the link from 640 px, and its width on a phone.
+  return <div ref={box} className="cd-greeting__text" style={{ width: Math.max(title ?? 0, presence ?? 0) }}>
     <TextLines words={greeting} text="greeting" probeClassName="cd-greeting__title" anchor="greeting" lastWidth="100%" />
     <TextLines words={PRESENCE} text="body" probeClassName="cd-greeting__presence" lastWidth="80%" lineWidth="80%" singleLineClassName="cd-today-skeleton__presence" />
   </div>;
@@ -188,36 +189,41 @@ function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: b
   );
 }
 
-/** The first view of a fresh copy: four things to try, one held request and the recorded night. */
+/** The first view of a fresh copy: the band (greeting, link, "Chat as a customer" and four things to try), one held request and the recorded night. */
 export function TodaySkeleton() {
   return (
     <div className="cd-today cd-today--skeleton">
-      <div className="cd-today__main">
+      <div className="cd-today__band">
         <div className="cd-today__greeting">
           <div className="cd-greeting">
             <GreetingWords />
-            <Skeleton
-              shape="block"
-              className="cd-today-skeleton__link"
-              radius="full"
-              measure={{
-                label: publicLink('rivera-plumbing-abc123'),
-                className: 'cd-greeting__link cd-type-meta',
-                tagName: 'span',
-                suffix: { className: 'cd-greeting__copy', width: 'calc(var(--size-control) - var(--space-6))' },
-              }}
-              height="var(--size-control)"
-              anchor="link-pill"
-            />
+            <div className="cd-greeting__actions">
+              <Skeleton
+                shape="block"
+                className="cd-today-skeleton__link"
+                radius="full"
+                measure={{
+                  label: publicLink('turner-plumbing-abc123'),
+                  className: 'cd-greeting__link cd-type-meta',
+                  tagName: 'span',
+                  suffix: { className: 'cd-greeting__copy', width: 'calc(var(--size-control) - var(--space-6))' },
+                }}
+                height="var(--size-control)"
+                anchor="link-pill"
+              />
+              <Skeleton shape="block" className="cd-today-skeleton__action" measure={{ label: 'Chat as a customer', className: BUTTON, tagName: 'a' }} height="var(--size-control)" anchor="header-action" />
+            </div>
           </div>
         </div>
         <div className="cd-things">
           <div className="cd-things__head">
-            <TextLines words="Things to try" text="section" className="cd-things__title" anchor="things-title" intrinsic lineWidth={85} lastWidth={85} />
-            <TextLines words={doneCaption(0)} className="cd-things__caption" />
-            <div className="cd-things__hide">
-              <Skeleton shape="block" measure={{ label: 'Hide this list', className: 'cd-button cd-button--ghost cd-button--inline cd-type-control' }} height="var(--size-control)" anchor="things-hide" />
+            <div className="cd-things__head-line">
+              <TextLines words="Things to try" text="section" className="cd-things__title" anchor="things-title" intrinsic lineWidth={85} lastWidth={85} />
+              <div className="cd-things__hide">
+                <Skeleton shape="block" measure={{ label: 'Hide this list', className: 'cd-button cd-button--ghost cd-button--inline cd-type-control' }} height="var(--size-control)" anchor="things-hide" />
+              </div>
             </div>
+            <TextLines words={doneCaption(0)} className="cd-things__caption" />
           </div>
           <SkeletonCard padding={16} anchor="things-card">
             <div className="cd-things__list">
@@ -228,15 +234,21 @@ export function TodaySkeleton() {
                     <TextLines words={THINGS_TO_TRY[i]!.title} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
                     <TextLines words={DETAILS[i]!} className="cd-things__detail" />
                   </div>
+                  {/* From 640 px each card's button at its foot; on a phone each row's chevron. */}
                   <div className="cd-things__action">
                     <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 3 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
                   </div>
+                  <span className="cd-things__go">
+                    <Skeleton shape="block" width={16} height={16} anchor={`thing-go-${i}`} />
+                  </span>
                 </div>
               ))}
             </div>
           </SkeletonCard>
           <TextLines words={TODAY_COPY.vision} className="cd-things__vision" />
         </div>
+      </div>
+      <div className="cd-today__main">
         <div className="cd-today__section">
           <SectionTitle anchor="needs-title" />
           <SkeletonCard anchor="held-card">
@@ -303,53 +315,42 @@ export function TodaySkeleton() {
         </div>
       </div>
       <div className="cd-today-aside">
-        <SkeletonCard padding={16} anchor="public-card">
-          <div className="cd-today-aside__public">
-            <Skeleton shape="line" text="section" width={130} />
-            <TextLines words={publicLink('rivera-plumbing-abc123')} className="cd-today-aside__link" lineWidth="65%" lastWidth="65%" />
-            <TextLines words={TODAY_COPY.publicDescription} className="cd-today-aside__text" />
-            <div className="cd-today-aside__action">
-              <Skeleton shape="block" measure={{ label: 'Chat as a customer', className: BUTTON, tagName: 'a' }} height="var(--size-control)" anchor="public-page-action" />
-            </div>
-          </div>
-        </SkeletonCard>
-        <Skeleton shape="block" measure={{ label: 'Demo inbox', className: BUTTON, contentClassName: 'cd-demo-inbox-sheet__button', suffix: { label: '1', className: 'cd-count-pill cd-type-count' } }} height="var(--size-control)" anchor="inbox" />
-        <SkeletonCard padding={16} anchor="week-card">
-          <div className="cd-week">
-            <div className="cd-week__head">
-              <Skeleton shape="line" text="section" width={110} anchor="week-title" />
-            </div>
-            <div className="cd-week__part">
-              <Skeleton shape="line" text="figure" width="45%" />
-              <Skeleton shape="line" text="meta" width="70%" />
-              <div className="cd-week__bars">
-                {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-                  <div key={i} className="cd-week__day">
-                    <div className="cd-week__bar-room">
-                      <Skeleton
-                        shape="block"
-                        width="var(--space-24)"
-                        height={i === 6 ? 'calc(var(--space-40) + var(--space-16))' : 'var(--space-2)'}
-                        anchor={`week-bar-${i}`}
-                      />
+        <div className="cd-today__section">
+          <SectionTitle anchor="week-title" />
+          <SkeletonCard padding={16} anchor="week-card">
+            <div className="cd-week">
+              <div className="cd-week__part">
+                <Skeleton shape="line" text="figure" width="45%" />
+                <Skeleton shape="line" text="meta" width="70%" />
+                <div className="cd-week__bars">
+                  {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                    <div key={i} className="cd-week__day">
+                      <div className="cd-week__bar-room">
+                        <Skeleton
+                          shape="block"
+                          width="var(--space-24)"
+                          height={i === 6 ? 'calc(var(--space-40) + var(--space-16))' : 'var(--space-2)'}
+                          anchor={`week-bar-${i}`}
+                        />
+                      </div>
+                      <Skeleton shape="line" text="caption" width="50%" />
                     </div>
-                    <Skeleton shape="line" text="caption" width="50%" />
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+              <div className="cd-week__part">
+                <TextLines words={TODAY_COPY.handledTitle} text="control" className="cd-week__title" lineWidth="70%" lastWidth="70%" />
+                <Skeleton shape="block" height="var(--space-6)" />
+                <Legend />
+              </div>
+              <div className="cd-week__part">
+                <Skeleton shape="line" text="control" width="70%" />
+                <TextLines words={TODAY_COPY.turnedDownEmpty} className="cd-week__line" lineWidth="65%" lastWidth="65%" />
+                <Skeleton shape="line" text="meta" width="30%" />
               </div>
             </div>
-            <div className="cd-week__part">
-              <TextLines words={TODAY_COPY.handledTitle} text="control" className="cd-week__title" lineWidth="70%" lastWidth="70%" />
-              <Skeleton shape="block" height="var(--space-6)" />
-              <Legend />
-            </div>
-            <div className="cd-week__part">
-              <Skeleton shape="line" text="control" width="70%" />
-              <TextLines words={TODAY_COPY.turnedDownEmpty} className="cd-week__line" lineWidth="65%" lastWidth="65%" />
-              <Skeleton shape="line" text="meta" width="30%" />
-            </div>
-          </div>
-        </SkeletonCard>
+          </SkeletonCard>
+        </div>
       </div>
     </div>
   );

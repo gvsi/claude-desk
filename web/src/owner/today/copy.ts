@@ -59,8 +59,9 @@ export const TODAY_COPY = {
   breakAfterOwner: "'s home number. Safety shows what was refused and why.",
   waiting: 'A request is waiting for your answer.',
   heldBy: 'Held by your rule: ',
+  /** "Answer a held request" before anything is held. */
+  heldNone: 'When a request waits for your answer, it shows up here.',
   createDetail: 'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',
-  publicDescription: 'Chats on it are real conversations with your Desk. They show up in Conversations.',
   handledTitle: 'Handled by Claude, or by you',
   turnedDownEmpty: 'Nothing turned down in the last 7 days.',
   /** The link to the Desk's Safety page, under Turned down here and under Rules' always-on rules. */

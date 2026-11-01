@@ -4,6 +4,7 @@
  */
 import type { ConversationSummary } from '../../api/views.ts';
 import type { StatusTone } from '../../ds/index.ts';
+import { LATEST_DEPOSIT_PAID, LATEST_VISIT_BOOKED, TURNED_DOWN } from './copy.ts';
 
 export interface ConversationStatus {
   tone: StatusTone;
@@ -67,4 +68,15 @@ export function conversationPath(deskId: string, sessionId: string): string {
  */
 export interface ConversationArrival {
   notice: string;
+}
+
+
+/** Only Conversations appends the stored outcome; Today keeps the shared identity/attention line. */
+export function conversationListStatus(s: ConversationSummary, held: number, openHandoff = false): ConversationStatus | null {
+  const status = conversationStatus(s, held, openHandoff);
+  const words = { visit_booked: LATEST_VISIT_BOOKED, deposit_paid: LATEST_DEPOSIT_PAID, turned_down: TURNED_DOWN };
+  const outcome = s.latest_outcome == null ? undefined : words[s.latest_outcome];
+  return s.kind === 'agent' && (status === null || status.text === 'Agent') && outcome !== undefined
+    ? { tone: 'info', text: `Agent · ${outcome}` }
+    : status;
 }

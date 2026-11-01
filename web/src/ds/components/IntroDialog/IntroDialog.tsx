@@ -308,7 +308,7 @@ interface IllustrationProps {
 }
 
 /**
- * The clay half: Dana asks for a visit on Rivera's public page, and Claude books it within Maria's
+ * The clay half: Dana asks for a visit on Turner's public page, and Claude books it within Mike's
  * rules. Decoration only, so it is `aria-hidden` and holds nothing focusable.
  */
 function Illustration({ played, onPlayed }: IllustrationProps) {
@@ -323,7 +323,7 @@ function Illustration({ played, onPlayed }: IllustrationProps) {
         <span className="cd-intro__avatar">DW</span>
         <div className="cd-intro__card-body">
           <p className="cd-intro__who cd-type-body">
-            Dana Whitfield <span className="cd-intro__where cd-type-caption">on Rivera’s public page</span>
+            Dana Whitfield <span className="cd-intro__where cd-type-caption">on Turner’s public page</span>
           </p>
           <p className="cd-intro__said cd-type-message">My water heater is leaking. Can someone come Tuesday?</p>
         </div>
@@ -334,9 +334,9 @@ function Illustration({ played, onPlayed }: IllustrationProps) {
         <Mark size={32} ground="light" />
         <div className="cd-intro__card-body cd-intro__card-body--reply">
           <p className="cd-intro__who cd-type-body">
-            Rivera Plumbing <span className="cd-intro__where cd-type-caption">Claude, an AI</span>
+            Turner Plumbing <span className="cd-intro__where cd-type-caption">Claude, an AI</span>
           </p>
-          <p className="cd-intro__reply cd-type-illustration-reply">You’re booked, Dana. Maria will text you when she’s on her way.</p>
+          <p className="cd-intro__reply cd-type-illustration-reply">You’re booked, Dana. Mike will text you when he’s on his way.</p>
           <div className="cd-intro__booked">
             <p className="cd-intro__booked-label cd-type-caption">
               <Icon name="check" size={14} className="cd-intro__check" />
@@ -344,12 +344,12 @@ function Illustration({ played, onPlayed }: IllustrationProps) {
             </p>
             <p className="cd-intro__booked-when cd-type-body">Tuesday, November 3</p>
             <p className="cd-intro__booked-with cd-type-meta">2:00 pm to 4:00 pm</p>
-            <p className="cd-intro__booked-with cd-type-meta">With Maria Rivera</p>
+            <p className="cd-intro__booked-with cd-type-meta">With Mike Turner</p>
           </div>
           <div className="cd-intro__receipts cd-type-caption">
             <p className="cd-intro__receipt">
               <span className="cd-intro__dot" />
-              Reply checked against Maria Rivera’s rules
+              Reply checked against Mike Turner’s rules
             </p>
             {/* The story ends as this last receipt ticks in. */}
             <p
@@ -359,7 +359,7 @@ function Illustration({ played, onPlayed }: IllustrationProps) {
               }}
             >
               <span className="cd-intro__dot" />
-              Booked on Maria Rivera’s calendar
+              Booked on Mike Turner’s calendar
             </p>
           </div>
         </div>

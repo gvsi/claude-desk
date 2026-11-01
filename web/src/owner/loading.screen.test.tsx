@@ -23,7 +23,7 @@ import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSk
 import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { needsYouKey, OWNER_INBOX_KEY, todayKey } from './useDesks.ts';
+import { needsYouKey, todayKey } from './useDesks.ts';
 import { publicLink } from './customerLink.ts';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
 import { SUGGESTION_EXAMPLE } from './rules/copy.ts';
@@ -209,18 +209,42 @@ it('unfinished_setup_card_lands_once_after_the_skeleton', async () => {
   expect(card.element().isConnected).toBe(true);
 });
 
-it('reload_waits_for_the_demo_inbox', async () => {
+it('reload_opens_today_without_waiting_for_the_demo_inbox', async () => {
+  // The Demo inbox is the demo bar's: Today opens with its read still out, the bar draws no inbox
+  // button meanwhile (nor a line that it is opening), then draws it once the read is in.
   const inbox = holdReads(ROUTES.ownerInbox.path);
+  onTestFinished(inbox.release);
+  const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+  await vi.waitFor(() => expect(inbox.held()).toBe(1));
+  await expect.element(screen.getByRole('heading', { name: 'Needs you', exact: true })).toBeVisible();
+  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
+  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
+  inbox.release();
+  const button = screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true });
+  await expect.element(button).toBeVisible();
+  expect(button.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
+  expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
+});
+
+/** The demo bar's Demo inbox, which the frame's shapes draw before Start over. */
+const INBOX_ANCHOR: SkeletonAnchor = { name: 'inbox', page: '.cd-reviewer-bar .cd-owner-inbox > .cd-button', size: true };
+
+it.each(['desktop', 'phone'] as const)('reload_lands_the_demo_inbox_in_the_bars_shape at %s', async (viewport) => {
+  // The inbox is read with the Desks, so once it is in before them, the bar draws it with the frame,
+  // where the frame's shapes drew it.
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
-    anchors: [...WIDE_ANCHORS, ...TODAY_ANCHORS],
+    anchors: [...(viewport === 'phone' ? PHONE_ANCHORS : WIDE_ANCHORS), INBOX_ANCHOR],
     open: async () => {
-      await renderRoute(TODAY, { pollScale: 100 });
-      await vi.waitFor(() => expect(inbox.held()).toBe(1));
+      await renderRoute(TODAY, { viewport, pollScale: 100 });
+      await vi.waitFor(() => expect(desks.held()).toBe(1));
+      await vi.waitFor(() => expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1));
+      await new Promise((resolve) => setTimeout(resolve, 200));
     },
-    release: inbox.release,
+    release: desks.release,
   });
-  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
@@ -228,21 +252,21 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'owner-footer', page: '.cd-owner-layout__footer', size: true },
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
+  { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
   { name: 'things-title', page: '.cd-things__title' },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
   { name: 'thing-tile-0', page: '.cd-things__item:first-child .cd-things__icon' },
   { name: 'thing-tile-3', page: '.cd-things__item:last-child .cd-things__icon' },
   { name: 'things-hide', page: '.cd-things__hide > .cd-button', size: true },
   ...[0, 1, 2, 3].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
+  // A phone row's chevron (not drawn from 640 px, as the cards' buttons aren't on a phone).
+  ...[0, 1, 2, 3].map((i) => ({ name: `thing-go-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__go`, size: true })),
   { name: 'needs-title', page: '.cd-today__section[tabindex] .cd-section-header__heading' },
   { name: 'held-card', page: '.cd-needs-you .cd-card', dimensions: ['width'] },
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
   { name: 'since-title', page: '.cd-today__main > .cd-today__section:last-child .cd-section-header__heading' },
   { name: 'since-card', page: '.cd-today__main > .cd-today__section:last-child > .cd-card', size: true },
-  { name: 'public-card', page: '.cd-today-aside > .cd-card:first-child', size: true },
-  { name: 'public-page-action', page: '.cd-today-aside__action > .cd-button', size: true },
-  { name: 'inbox', page: '.cd-owner-inbox > .cd-button', size: true },
-  { name: 'week-title', page: '.cd-week__heading' },
+  { name: 'week-title', page: '.cd-today-aside .cd-section-header__heading' },
   { name: 'week-bar-0', page: '.cd-week__bar' },
 ];
 const TODAY_CONTENT_ANCHORS = TODAY_ANCHORS.filter(({ name }) => name !== 'owner-footer');
@@ -253,7 +277,7 @@ const TODAY_WIDTH_ANCHORS: readonly SkeletonAnchor[] = [
   ...TODAY_ANCHORS,
   { name: 'live-title', page: '.cd-today__section:has(.cd-live) .cd-section-header__heading' },
   { name: 'week-bar-6', page: '.cd-week__day:last-child .cd-week__bar' },
-  { name: 'week-card', page: '.cd-today-aside > .cd-card:last-child', size: true },
+  { name: 'week-card', page: '.cd-today-aside .cd-today__section > .cd-card', size: true },
 ].map((anchor) => ({ ...anchor, dimensions: ['height', ...(anchor.dimensions ?? [])] as const }));
 
 it.each([320, 620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s', async (width) => {
@@ -383,18 +407,19 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
       if (height !== undefined) expect(rect.height).toBe(height);
     });
   };
-  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-today__main', ['100%'], 44);
-  lines('.cd-greeting .cd-skeleton-line--body', '.cd-today__main', ['80%'], 22);
-  expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link)')).toBeNull();
+  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-greeting__text', ['100%'], 44);
+  lines('.cd-greeting .cd-skeleton-line--body', '.cd-greeting__text', ['80%'], 22);
+  expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link, .cd-today-skeleton__action)')).toBeNull();
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
-  [2, 3, 3, 2].forEach((count, i) => {
+  // Each card's line wraps in its quarter of the band on a laptop; each row's beside its tile and chevron on a phone.
+  (viewport === 'phone' ? [2, 3, 3, 3] : [2, 4, 4, 3]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
   });
   lines('.cd-things__vision .cd-skeleton-line', '.cd-things__vision', ['75%']);
-  for (const child of [3, 4, 5]) lines(`.cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
+  for (const child of [1, 2, 3]) lines(`.cd-today__main > .cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__main > .cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
   lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
   lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
@@ -407,14 +432,13 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   }
   lines('.cd-live .cd-skeleton-line--control', '.cd-conversation-item__top', ['55%']);
   lines('.cd-live .cd-skeleton-line--caption', '.cd-conversation-item__top', ['20%']);
-  lines('.cd-today-aside__public .cd-skeleton-line--section', '.cd-today-aside__public', [130]);
-  lines('.cd-today-aside__public .cd-skeleton-line--meta', '.cd-today-aside__public', ['65%', '100%', '75%']);
-  lines('.cd-week__head .cd-skeleton-line', '.cd-week__head', [110]);
-  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--figure', '.cd-week__part:nth-child(2)', ['45%']);
-  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['70%']);
+  // "Last 7 days" is a section title, as Needs you's is.
+  lines('.cd-today-aside .cd-section-header .cd-skeleton-line--section', '.cd-today-aside .cd-section-header__title', [135]);
+  lines('.cd-week__part:nth-child(1) .cd-skeleton-line--figure', '.cd-week__part:nth-child(1)', ['45%']);
+  lines('.cd-week__part:nth-child(1) .cd-skeleton-line--meta', '.cd-week__part:nth-child(1)', ['70%']);
   for (let child = 1; child <= 7; child += 1) lines(`.cd-week__day:nth-child(${child}) .cd-skeleton-line`, `.cd-week__day:nth-child(${child})`, ['50%']);
-  lines('.cd-week__part:nth-child(3) .cd-skeleton-line--control', '.cd-week__part:nth-child(3)', ['70%']);
-  lines('.cd-week__part:nth-child(3) .cd-skeleton-line--meta', '.cd-week__part:nth-child(3)', ['100%']);
+  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--control', '.cd-week__part:nth-child(2)', ['70%']);
+  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['100%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--meta', '.cd-week__part:last-child', ['65%', '30%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--control', '.cd-week__part:last-child', ['70%']);
 });
@@ -454,11 +478,14 @@ it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
  * frame's footer each land once, by exactly that change. Everything else lands where its shape was.
  */
 const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card'];
-const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'public-card', 'public-page-action', 'inbox', 'week-title', 'week-bar-0'];
+const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'week-title', 'week-bar-0'];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
-  const under = new Set(phone ? UNDER_THINGS_ON_A_PHONE : UNDER_THINGS);
-  return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && name !== 'thing-tile-3' && name !== 'thing-action-3').map((anchor) =>
+  const ticked = ['thing-tile-3', 'thing-action-3', 'thing-go-3'];
+  // From 640 px the cards of a row share its height, so the ticked card moves nothing.
+  if (!phone) return TODAY_CONTENT_ANCHORS.filter(({ name }) => !ticked.includes(name));
+  const under = new Set(UNDER_THINGS_ON_A_PHONE);
+  return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && !ticked.includes(name)).map((anchor) =>
     anchor.name === 'things-card' ? { name: anchor.name, page: anchor.page, dimensions: ['width'] as const } : anchor,
   );
 }
@@ -560,7 +587,6 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
-  const ticked = watchTheTickedRow(false);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
     anchors: switchedAnchors(false),
@@ -569,12 +595,11 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
       await screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' }).click();
       await screen.getByRole('button', { name: 'Main line', exact: true }).click();
     },
-    release: () => {
-      ticked.record();
-      reads.forEach((read) => read.release());
-    },
+    release: () => reads.forEach((read) => read.release()),
   });
-  await ticked.expectOneMove();
+  // The last card lands ticked in the shape's place: its row of cards keeps its height.
+  const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
+  expect(last?.textContent).toContain('Done. Your new Desk is live.');
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -646,30 +671,7 @@ it.each(['desktop', 'phone'] as const)('deadline_hands_off_to_todays_skeleton at
   await expectScreenBasics(document.body, { owner: true });
 });
 
-it('deadline_waits_for_the_demo_inbox', { timeout: 10_000 }, async () => {
-  const inbox = holdReads(ROUTES.ownerInbox.path);
-  const sawInboxLoader = watchFor('Opening your Demo inbox');
-  const gaps = watchSkeletonGaps('.cd-greeting__title');
-  const { screen } = await renderRoute(TODAY, { pollScale: 100 });
-  await vi.waitFor(() => expect(document.querySelector('.cd-owner-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-  await nextFrames();
-  await expectSkeletonLoad({
-    status: 'Opening your Desk', continues: true, anchors: TODAY_CONTENT_ANCHORS,
-    open: async () => {
-      await vi.waitFor(() => expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 5_000 });
-      expect(inbox.held()).toBe(1);
-      expect(document.querySelector('.cd-greeting__title')).toBeNull();
-    },
-    release: inbox.release,
-  });
-  await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
-  expect(sawInboxLoader()).toBe(false);
-  expect(gaps()).toBe(0);
-  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
-  await expectScreenBasics(document.body, { owner: true });
-});
-
-it.each(['today', 'needsYou', 'ownerInbox'] as const)('paused_today_reads_land_their_own_errors before %s starts', async (route) => {
+it.each(['today', 'needsYou'] as const)('paused_today_reads_land_their_own_errors before %s starts', async (route) => {
   const mounted = vi.spyOn(QueryClient.prototype, 'mount');
   onTestFinished(() => mounted.mockRestore());
   const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
@@ -678,7 +680,7 @@ it.each(['today', 'needsYou', 'ownerInbox'] as const)('paused_today_reads_land_t
   const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
   await router.navigate(`/app/${RIVERA.deskId}/conversations`);
   await expect.element(screen.getByRole('heading', { name: 'Conversations', exact: true })).toBeVisible();
-  const key = route === 'today' ? todayKey(RIVERA.deskId) : route === 'needsYou' ? needsYouKey(RIVERA.deskId) : OWNER_INBOX_KEY;
+  const key = route === 'today' ? todayKey(RIVERA.deskId) : needsYouKey(RIVERA.deskId);
   queryClient.removeQueries({ queryKey: key });
   const read = holdReads(ROUTES[route].path.replace('{desk_id}', RIVERA.deskId));
   onTestFinished(read.release);
@@ -687,8 +689,8 @@ it.each(['today', 'needsYou', 'ownerInbox'] as const)('paused_today_reads_land_t
   onTestFinished(() => onlineManager.setOnline(true));
   await router.navigate(TODAY);
   await vi.waitFor(() => expect(queryClient.getQueryState(key)?.fetchStatus).toBe('paused'));
-  const section = screen.getByRole('region', { name: route === 'today' ? 'Since last night' : route === 'needsYou' ? 'Needs you' : 'Demo inbox', exact: true });
-  const line = route === 'ownerInbox' ? `Couldn't open your Demo inbox. ${OWNER_ERROR_COPY.network}` : OWNER_ERROR_COPY.network;
+  const section = screen.getByRole('region', { name: route === 'today' ? 'Since last night' : 'Needs you', exact: true });
+  const line = OWNER_ERROR_COPY.network;
   await expect.element(section.getByRole('alert').getByText(line, { exact: true }), { timeout: 2_000 }).toBeVisible();
   const retry = section.getByRole('button', { name: 'Try again', exact: true });
   await expect.element(retry).toBeVisible();
@@ -729,17 +731,15 @@ it('todays_hold_still_under_reduced_motion', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
-  const ticked = watchTheTickedRow(false);
   await expectSkeletonStill({
     status: 'Opening your Desk',
     anchors: switchedAnchors(false),
     open: async () => { await router.navigate(TODAY); },
-    release: () => {
-      ticked.record();
-      needsYou.release();
-    },
+    release: () => needsYou.release(),
   });
-  await ticked.expectOneMove();
+  // From 640 px the ticked card keeps its row's height, so everything lands in its shape's place.
+  const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
+  expect(last?.textContent).toContain('Done. Your new Desk is live.');
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -834,12 +834,14 @@ it.each([390, 620])('reload_opens_on_the_frames_shape at %i', async (width) => {
 });
 
 it('today_link_actions_measure_inherited_font_metrics', async () => {
+  // A laptop's width, where the cards draw their buttons (a phone row draws a chevron instead).
+  await page.viewport(1440, 900);
   const host = document.createElement('div');
   host.style.letterSpacing = '0.2em';
   document.body.append(host);
   const root = createRoot(host);
   onTestFinished(() => { root.unmount(); host.remove(); });
-  flushSync(() => root.render(<><div data-real-control><Button variant="secondary" href="/d/rivera-plumbing-abc123">Open your public page</Button></div><TodaySkeleton /></>));
+  flushSync(() => root.render(<><div data-real-control><Button variant="secondary" href="/d/turner-plumbing-abc123">Open your public page</Button></div><TodaySkeleton /></>));
   const real = host.querySelector('[data-real-control] .cd-button')!;
   const shape = host.querySelector('[data-skeleton-anchor="thing-action-0"]')!;
   expect(shape.textContent).toBe('');
@@ -848,7 +850,7 @@ it('today_link_actions_measure_inherited_font_metrics', async () => {
 
 it('reload_changes_only_the_link_pills_width_once', async () => {
   // The slug comes from the held read, so its width differs from the fresh-copy placeholder.
-  mockStore.world.desk(RIVERA.deskId)!.summary.slug = 'rivera-plumbing-a-new-random-slug';
+  mockStore.world.desk(RIVERA.deskId)!.summary.slug = 'turner-plumbing-a-new-random-slug';
   const desks = holdReads(ROUTES.desks.path);
   const { screen } = await renderRoute(TODAY, { pollScale: 100 });
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
@@ -880,17 +882,19 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
   frame = requestAnimationFrame(sampleFrame);
   try {
     desks.release();
-    await expect.element(screen.getByRole('heading', { name: /Good .*Maria/ })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: /Good .*Mike/ })).toBeVisible();
     await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
     const real = document.querySelector('.cd-greeting__link')!.getBoundingClientRect();
-    for (const edge of ['top', 'left', 'height'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
+    // The pill ends where its shape ended, "Chat as a customer" after it at the band's right: a wider
+    // link grows to the left.
+    for (const edge of ['top', 'right', 'height'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
     const sizing = document.createElement('div');
     Object.assign(sizing.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' });
     sizing.inert = true;
     document.body.append(sizing);
     const reference = createRoot(sizing);
     try {
-      flushSync(() => reference.render(<Greeting text="" link={{ label: publicLink('rivera-plumbing-abc123'), onCopy: () => {} }} />));
+      flushSync(() => reference.render(<Greeting text="" link={{ label: publicLink('turner-plumbing-abc123'), onCopy: () => {} }} />));
       const fresh = sizing.querySelector('.cd-greeting__link')!.getBoundingClientRect();
       expect(Math.abs(shape.width - fresh.width), 'the fresh-copy link uses browser font metrics').toBeLessThanOrEqual(2);
     } finally {
@@ -955,17 +959,28 @@ it('desks_failure_ends_the_skeleton', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
-it('failed_demo_inbox_read_lands_its_own_error_once', async () => {
-  const inbox = holdReads(ROUTES.ownerInbox.path);
+it('failed_demo_inbox_read_says_so_in_its_sheet', async () => {
+  // The first read fails, and so does its one retry: the bar draws the inbox's button with no count,
+  // and its sheet holds the line with Try again, never an inbox that looks empty.
   mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
   const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-  inbox.release();
-  await expect.element(screen.getByText(/Couldn't open your Demo inbox/)).toBeVisible();
+  const button = screen.getByRole('button', { name: 'Demo inbox', exact: true });
+  await expect.element(button).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(2);
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   expect(document.body.textContent).not.toContain('Opening your Demo inbox');
+  // The sheet's own read as it opens fails too.
+  mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+  await button.click();
+  const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+  await expect.element(sheet.getByRole('alert').getByText(/^Couldn't open your Demo inbox\./), { timeout: 4_000 }).toBeVisible();
+  expect(sheet.element().querySelector('.cd-demo-inbox__empty')).toBeNull();
+  await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect.element(sheet.getByRole('alert')).not.toBeInTheDocument();
+  await expect.element(sheet.getByRole('list')).toBeVisible();
+  await sheet.getByRole('button', { name: 'Close' }).click();
+  await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
 });
 
 it('screen_helper_selects_the_region_by_its_status', async () => {
@@ -1188,7 +1203,7 @@ async function withRecordedHistory(now = new Date()): Promise<void> {
   const date = clock.formatToParts(now);
   const part = (type: Intl.DateTimeFormatPartTypes) => Number(date.find(part => part.type === type)!.value);
   const utcNoon = Date.UTC(part('year'), part('month') - 1, part('day'), 12);
-  // At UTC noon, Rivera's clock is already past either daylight-saving change. Its hour tells
+  // At UTC noon, Turner's clock is already past either daylight-saving change. Its hour tells
   // how far forward local noon is, using that day's offset rather than the offset at midnight.
   const hour = Number(clock.formatToParts(new Date(utcNoon)).find(part => part.type === 'hour')!.value);
   const noon = utcNoon + (12 - hour) * 3_600_000;
@@ -1203,7 +1218,7 @@ async function withRecordedHistory(now = new Date()): Promise<void> {
 
 it('recorded_history_stays_on_riveras_day_at_midnight_and_clock_changes', async () => {
   // Explicit inputs exercise day boundaries without changing the browser's real clock. Normal
-  // screen fixtures use the current date, even when the machine's own date differs from Rivera's.
+  // screen fixtures use the current date, even when the machine's own date differs from Turner's.
   for (const [at, noon] of [
     ['2026-11-01T07:00:00.500Z', '2026-11-01T20:00:00.000Z'],
     ['2026-11-01T07:00:01.500Z', '2026-11-01T20:00:00.000Z'],
@@ -1624,6 +1639,16 @@ const APPROVED_REFUND_SUGGESTION: Suggestion = {
 };
 
 const RULES_ANCHORS: readonly SkeletonAnchor[] = [
+  { name: 'rules-jobs-title', page: '.cd-business-jobs__title', size: true },
+  { name: 'rules-job', page: '.cd-business-jobs > .cd-card', size: true },
+  ...[
+    ['rules-job-name', '.cd-tool-rules__tool-name'],
+    ['rules-job-description', '.cd-tool-rules__tool-description'],
+    ['rules-job-reason', '.cd-rule-row__reason'],
+    ['rules-job-words', '.cd-rule-row__words'],
+    ['rules-job-outcome', '.cd-outcome'],
+    ['rules-job-fallback', '.cd-tool-rules__fallback-line'],
+  ].map(([name, selector]) => ({ name: name!, page: `.cd-business-jobs ${selector}`, size: true })),
   ...rivera.connectors.sections.flatMap(({ tools }, i) => [
     { name: `rules-connector-${i}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__header`, dimensions: ['bottom', 'height'] as const },
     ...tools.map((_, j) => ({ name: `rules-tool-${i}-${j}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__tool:nth-child(${j + 1})`, size: true, dimensions: ['bottom'] as const })),
@@ -2213,4 +2238,38 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
     },
     release: held.release,
   });
+});
+
+it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', async (viewport) => {
+  // Decision 15: a fresh Turner copy has an Emergency callback. A Desk without jobs, such as
+  // Acme, loses that section once when its reads settle; its connectors then stay in place.
+  const desk = mockStore.world.desk(RIVERA.deskId)!;
+  desk.summary.business_name = 'Acme Accounting';
+  desk.tools = desk.tools.filter((row) => row.source !== 'business');
+  // Isolate the absent jobs section from Acme's data-dependent question about a held quote.
+  const held = [...mockStore.world.decisions.values()].find((item) => item.decision.reason_plain === rivera.decisions.held.reason_plain)!;
+  await mockStore.dispatch('answer', { params: { decision_id: held.decision.decision_id }, body: { answer: 'deny_once' } });
+  const { screen, router } = await openToday(viewport);
+  const read = holdReads(RULES_READ);
+  await router.navigate(RULES);
+  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  const jobs = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-business-jobs')!;
+  expect(jobs.textContent).toBe('');
+  const height = jobs.getBoundingClientRect().height;
+  const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region > .cd-skeleton-screen__body')!).rowGap);
+  const tops = watchTop(() => {
+    const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
+    return layer && layer.getAttribute('data-state') !== 'leaving'
+      ? layer.querySelector('[data-skeleton-anchor="rules-connector-0"]')
+      : landedElement('.cd-connector-section__header');
+  });
+  read.release();
+  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(landedElement('.cd-business-jobs')).toBeNull();
+  expect(tops()).toHaveLength(2);
+  expect(tops()[1]! - tops()[0]!, 'one upward move, explained by the absent jobs section').toBe(-Math.round(height + gap));
+  for (let frame = 0; frame < 10; frame += 1) await nextFrames();
+  expect(tops()).toHaveLength(2);
+  expectNoHorizontalScroll();
 });

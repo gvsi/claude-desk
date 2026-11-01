@@ -30,9 +30,27 @@ a {
   text-underline-offset: 2px;
 }
 
+/* Keyboard focus on a control: a warm 2 px ring, 2 px out. A click shows none. */
 :focus-visible {
-  outline: 2px solid var(--accent-blue);
+  outline: 2px solid var(--ring-focus);
   outline-offset: 2px;
+}
+
+/* Text entry (a text field, a text area, a composer's text box) with focus, by pointer or keyboard,
+   shows its caret and its own edge one step stronger (below, and Composer.css), never a ring
+   (owner, 2026-11-01, WCAG 2.4.7). Browsers match :focus-visible on a text field even when it was
+   clicked, so the ring is turned off here. Only a field that can be typed in (`:read-write`) has a
+   caret: a held, read-only field, and every checkbox, radio, range or button input, keeps the ring. */
+:is(input, textarea):read-write:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+
+/* Its edge one step stronger: a field's own border (TextField, the intro's passcode, the verify code,
+   the checkout's name) takes line-field-focus. A box that draws its edge another way, as the composer
+   does, says so in its own stylesheet. */
+:is(input, textarea):read-write:focus {
+  border-color: var(--line-field-focus);
 }
 
 ::placeholder {

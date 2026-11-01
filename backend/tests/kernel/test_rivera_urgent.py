@@ -1,7 +1,7 @@
-"""On a fresh Rivera copy an emergency is handled as urgent. The seed gives the Desk an enabled
+"""On a fresh Turner copy an emergency is handled as urgent. The seed gives the Desk an enabled
 urgent business tool, `desk.emergency-callback`, written through the owner's own replacement and
-turned on by the seed's proved rules version, so a stranger's burst pipe at 03:00 alerts Maria at
-once, whatever her notification settings, instead of waiting for a Monday call-back."""
+turned on by the seed's proved rules version, so a stranger's burst pipe at 03:00 alerts Mike at
+once, whatever his notification settings, instead of waiting for a Monday call-back."""
 
 from datetime import datetime
 
@@ -41,7 +41,7 @@ def test_the_seed_configures_an_urgent_emergency_callback_and_a_card_for_it():
     tool = seeded_tool()
     assert tool.model_dump(mode="json") == {
         "tool": TOOL, "title": "Emergency callback",
-        "description": "Asks Maria to call back urgently about an emergency.",
+        "description": "Asks Mike to call back urgently about an emergency.",
         "config": {"block": "urgent",
                    "urgent_when": "A burst or leaking pipe, flooding, a sewage backup, or no water"}}
     [card] = [card for card in seed.RIVERA_CARDS if card.applies_to == TOOL]
@@ -103,7 +103,7 @@ async def test_a_fresh_copy_has_the_emergency_callback_enabled_and_offered_to_a_
 async def test_a_burst_pipe_at_three_in_the_morning_alerts_maria_at_once(app, client, frozen_clock):
     frozen_clock.travel(datetime(2026, 10, 25, 3, 0, tzinfo=TZ))     # a Sunday, 03:00 in Oakland
     copy, visitor = await visitor_of(app, client)
-    # Maria hears of call-backs in her briefing, not at once: the urgent alert mustn't lean on her settings
+    # Mike hears of call-backs in his briefing, not at once: the urgent alert mustn't lean on his settings
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         [settings] = await ctx.db.scalars(ctx.repo.scoped(select(NotificationPref)))
@@ -123,7 +123,7 @@ async def test_a_burst_pipe_at_three_in_the_morning_alerts_maria_at_once(app, cl
     assert (alert.to, alert.kind, alert.created_at) == ("owner", "alert", frozen_clock.now())
     assert alert.body.startswith("Reported as urgent through “Emergency callback”. ")
     receipt = await read(client, visitor.headers, decision)
-    assert receipt.visitor_plain == "“Emergency callback”: urgent request sent to Maria Rivera"
+    assert receipt.visitor_plain == "“Emergency callback”: urgent request sent to Mike Turner"
     [after] = await rows_of(app, copy.copy_id, select(NotificationPref))
     assert (after.now, after.briefing) == (prefs.now, prefs.briefing)
 

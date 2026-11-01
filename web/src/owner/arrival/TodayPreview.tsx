@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { Component, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { AppShell, ReviewerBar } from '../../ds/index.ts';
+import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { OwnerDeskProvider, OwnerSidebar, type OwnerDeskContext } from '../OwnerLayout.tsx';
 import { TodayPage } from '../today/TodayPage.tsx';
 import { stillToday } from './preview.ts';
@@ -13,7 +14,7 @@ import '../today/Today.css';
 const ignore = () => undefined;
 
 /**
- * A still picture of Rivera Plumbing's Today behind the intro dialog, drawn by Today itself in the
+ * A still picture of Turner Plumbing's Today behind the intro dialog, drawn by Today itself in the
  * owner's frame (the reviewer bar, the sidebar), so the page the dialog leaves onto is the one it
  * showed: every part is where Today puts it. Today reads from a client of its own that holds a new
  * copy's reads and never asks the API (`StillQueryClient`): the picture is shown before any copy
@@ -65,7 +66,7 @@ function StillToday() {
         <OwnerDeskProvider value={still.desk}>
           <AppShell
             business={business.name}
-            banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={ignore} />}
+            banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={ignore} actions={<OwnerInbox timezone={business.timezone} />} />}
             sidebar={
               <OwnerSidebar
                 businesses={[business]}

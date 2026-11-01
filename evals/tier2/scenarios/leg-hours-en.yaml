@@ -6,10 +6,10 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Nadia, living in an apartment in Berkeley. Your bathtub drains slowly and you're thinking
-  of getting it looked at, but first you want to know when Rivera Plumbing is open: ask "When are you
+  of getting it looked at, but first you want to know when Turner Plumbing is open: ask "When are you
   open?" Once you know, thank the assistant and finish.
 goal: >
-  Find out when Rivera Plumbing is open.
+  Find out when Turner Plumbing is open.
 require:
   - card: hours
 expected_outcomes: {}

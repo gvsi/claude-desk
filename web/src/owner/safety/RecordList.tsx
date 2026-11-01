@@ -4,6 +4,7 @@ import type { LedgerEntry, LedgerPage } from '../../api/contracts.ts';
 import { EmptyState, FullTrace } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { REPLAYED_LABEL, entryCopy, entryTime, originCopy, replayedOf } from './copy.ts';
+import { focusTrace } from './focusTrace.ts';
 
 export interface RecordListProps {
   page: LedgerPage;
@@ -68,7 +69,7 @@ export function RecordList({ page, devKey, timezone }: RecordListProps) {
     opener.current = el;
     setOpenSeq(seq);
     // The trace takes focus once it is drawn, so a keyboard or screen reader user lands in it.
-    requestAnimationFrame(() => trace.current?.querySelector<HTMLElement>('.cd-full-trace')?.focus());
+    requestAnimationFrame(() => focusTrace(trace.current));
   };
   const close = () => {
     setOpenSeq(null);

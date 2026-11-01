@@ -157,7 +157,7 @@ async def test_agent_client_forwards_the_signature_and_no_token():
         agent = http.agent(auth, body_sha256)
         assert await agent.whoami(session_id="s1") == WHOAMI
         created = await agent.call("POST /sessions",
-                                   CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="agent"))
+                                   CreateSessionRequest(desk_slug="turner-plumbing-abc123", kind="agent"))
         assert created.session_token is None
         with pytest.raises(ValueError):
             http.agent(auth, body_sha256.upper())               # lowercase hex sha256 only

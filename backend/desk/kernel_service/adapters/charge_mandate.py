@@ -1,7 +1,8 @@
 """`native.charge_mandate`: a visiting agent pays one of its session's quotes within its signed mandate.
 
-The call names a quote by its ID and nothing else; `normalize` resolves it as `native.payment_link`
-does (`payment_link.payable_quote`: on this Desk, this session's own, readable by the session,
+The call names a quote by its ID and nothing else, bare or as its fact ID (`quote:<id>`:
+`base.fact_ref`); `normalize` resolves it as `native.payment_link` does
+(`payment_link.payable_quote`: on this Desk, this session's own, readable by the session,
 available and unexpired, and unpaid), so the amount is the quote's, which the kernel priced, and the
 effect is `charge`. A quote is paid once: a second charge of it is refused at step 1 with
 `quote_paid` ledgered (`quote_paying` while another payment of it is unsettled). Only an
@@ -44,7 +45,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_service import labels, mandates, payments
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown, ExecCtx,
-                                               Normalized, NormalizeCtx)
+                                               Normalized, NormalizeCtx, fact_ref)
 from desk.kernel_service.adapters.payment_link import NO_SUCH_QUOTE, payable_quote, stored_quote
 from desk.kernel_service.adapters.quote import items_text
 from desk.kernel_service.repo import KernelCtx
@@ -124,7 +125,8 @@ class ChargeMandateAdapter:
         principal = nctx.principal
         if principal.kind != "agent" or principal.mandate_id is None:
             raise AdapterRefusal("not_an_agent_with_a_mandate")
-        found = await payable_quote(nctx.ctx, nctx.desk_row.desk_id, args.quote_id, principal.session_id)
+        found = await payable_quote(nctx.ctx, nctx.desk_row.desk_id, fact_ref(args.quote_id, "quote"),
+                                    principal.session_id)
         if isinstance(found, str):
             raise AdapterRefusal(found)
         quote, _ = found

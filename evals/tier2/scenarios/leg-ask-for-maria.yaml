@@ -5,12 +5,12 @@ language: en
 visitor: visitor
 requires: ["01a", "02"]
 persona: >
-  You are Frank Delgado, a landlord in Berkeley. You'd like to speak to Maria herself about some work
-  at one of your rentals: ask "Can I talk to Maria?" If the assistant offers to pass her a message or
-  to have her call you, accept. When asked, give your name, Frank Delgado, and your phone number,
+  You are Frank Delgado, a landlord in Berkeley. You'd like to speak to Mike himself about some work
+  at one of your rentals: ask "Can I talk to Mike?" If the assistant offers to pass him a message or
+  to have him call you, accept. When asked, give your name, Frank Delgado, and your phone number,
   (510) 555-0124. You are polite and brief.
 goal: >
-  Reach Maria: get your request passed to her, or a call back from her arranged.
+  Reach Mike: get your request passed to him, or a call back from him arranged.
 require:
   - card: [handoff, callback_confirmed]
 expected_outcomes:

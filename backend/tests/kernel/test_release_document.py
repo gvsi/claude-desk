@@ -7,7 +7,7 @@ within a day (`GET /document_links/{token}`, which the API proxies at `/api/d/{t
 stays in that table: Claude is told only that the link is ready, and the visitor sees it only in
 the `href` of a signed `document_link` card.
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), where
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), where
 `rv-docs` auto-allows a record owner's own documents. Visitors confirm who they are with the code
 from their Demo inbox, as the verify card does.
 """
@@ -43,7 +43,7 @@ from .test_reply_check import assert_handed_off, checked, clause, keep_alive_unt
 from .test_verification import api_rows, check, code_in, entry_of, session_inbox, started
 
 TOOL = "native.release_document"
-DANA, BOB = "dana@example.com", "bob@example.com"      # the contacts on record in the Rivera seed
+DANA, BOB = "dana@example.com", "bob@example.com"      # the contacts on record in the Turner seed
 
 
 async def confirmed(client: httpx.AsyncClient, copy: Rivera, contact: str) -> Visitor:
@@ -211,7 +211,7 @@ async def test_link_opens_once(app, client, frozen_clock):
         (dana.session_id, {"link_id": link.link_id, "opened": True}),
         (dana.session_id, {"link_id": link.link_id, "refused": True})]
 
-    # its fact expired as it opened, so citing the link now hands the reply to Maria
+    # its fact expired as it opened, so citing the link now hands the reply to Mike
     assert (await fact_row(app, copy, fact.fact_id)).status == "expired"
     verdict = await checked(client, dana, "Here is your invoice.", [clause("document_link", fact.fact_id)])
     assert violations(verdict) == [("stale_fact", "not_current", [fact.fact_id])]
@@ -289,7 +289,7 @@ async def test_link_dies_with_its_desk_or_person(app, client, frozen_clock):
     dana_link, bob_link = by_person[docs["dana-invoice"].record_owner_person_id], by_person[
         docs["bob-warranty"].record_owner_person_id]
 
-    # Maria removes Dana: Dana's link is void, and her fact with it; Bob's stands
+    # Mike removes Dana: Dana's link is void, and her fact with it; Bob's stands
     frozen_clock.advance(60)
     await updated(client, copy, "people", {"remove": ["dana"]})
     by_person = {link.person_id: link for link in await links(app, copy)}
@@ -439,6 +439,61 @@ async def test_wrong_person_gets_nothing(app, client):
         decision = await decided(client, bob, TOOL, {"document_id": document_id}, call_id=call_id)
         assert (decision.outcome, decision.action) == ("refuse", None), document_id
     assert await links(app, copy) == []
+
+
+async def test_a_document_named_by_its_fact_id_is_the_same_document(app, client, reviewer):
+    """Claude's context shows a document by its fact ID (`document:<id>`), and the tool takes "the
+    document_id in your context", so passing the whole fact ID is an honest way to name it: it
+    resolves to the same document and record owner as the bare ID, and issues the same link and
+    card. Who may have it doesn't change, and no other prefix is read as the document's."""
+    copy = await rivera(app, client)
+    docs = await documents(app, copy)
+    invoice = docs["dana-invoice"]
+    dana = await confirmed(client, copy, DANA)
+    bare = await decided(client, dana, TOOL, {"document_id": invoice.document_id}, call_id="call-bare")
+    named = await decided(client, dana, TOOL, {"document_id": f"document:{invoice.document_id}"}, call_id="call-fact")
+    assert (named.outcome, named.card_ids) == (bare.outcome, bare.card_ids) == ("allow", ["rv-docs"]), \
+        named.reason_plain
+    assert named.action.resource == bare.action.resource
+    assert (named.action.resource.id, named.action.resource.owner_person_id, named.action.recipient) == (
+        invoice.document_id, invoice.record_owner_person_id, "verified_contact")
+
+    # each executes to a link to the invoice, for Dana, ledgered by the document's own ID
+    results = [await executed(client, dana, decision) for decision in (bare, named)]
+    by_id = {link.link_id: link for link in await links(app, copy)}
+    issued = [by_id[next(c.value for c in result.facts[0].claims if c.key == "ref")] for result in results]
+    assert [(link.document_id, link.person_id, link.session_id) for link in issued] == [
+        (invoice.document_id, invoice.record_owner_person_id, dana.session_id)] * 2
+    assert [summary for _, summary in await link_entries(app, copy)] == [
+        {"link_id": link.link_id, "document_id": invoice.document_id, "issued": True} for link in issued]
+    bare_fact, named_fact = (result.facts[0] for result in results)
+    assert (named_fact.claims[0], named_fact.label) == (bare_fact.claims[0], bare_fact.label)
+    assert results[1].model_view == {"fact_id": named_fact.fact_id, "title": invoice.title, "link_ready": True}
+    # and the same card, its link the new one's
+    verdict = await checked(client, dana, "Here is your invoice.", [clause("document_link", named_fact.fact_id)])
+    assert verdict.ok, verdict.violations
+    [_, card] = verdict.blocks
+    assert (card.template, card.title, card.href) == ("document_link", invoice.title, f"/api/d/{issued[1].token}")
+
+    # Bob, confirmed as himself, naming Dana's invoice by its fact ID is refused as by its bare ID
+    bob = await confirmed(client, copy, BOB)
+    for call_id, document_id in (("call-bob-bare", invoice.document_id),
+                                 ("call-bob-fact", f"document:{invoice.document_id}")):
+        decision = await decided(client, bob, TOOL, {"document_id": document_id}, call_id=call_id)
+        assert (decision.outcome, decision.policy_ids, decision.action.resource.id) == (
+            "refuse", ["B.private_data_record_owner"], invoice.document_id), document_id
+
+    # any other prefix, or the prefix twice, names no document: refused at step 1
+    for n, document_id in enumerate((f"charge:{invoice.document_id}", f"quote:{invoice.document_id}",
+                                     f"invoice:{invoice.document_id}", f"document:document:{invoice.document_id}",
+                                     "document:")):
+        decision = await decided(client, dana, TOOL, {"document_id": document_id}, call_id=f"call-other-{n}")
+        assert (decision.outcome, decision.action) == ("refuse", None), document_id
+    checks = [entry.event.summary.get("check") for entry in await ledger_rows(app, copy)
+              if entry.event.kind == "decide" and entry.event.session_id == dana.session_id
+              and entry.event.summary.get("reason") == "adapter_refused"]
+    assert checks == ["no_such_document"] * 5
+    assert len(await links(app, copy)) == 2
 
 
 async def test_unverified_session_cannot_release(app, client):

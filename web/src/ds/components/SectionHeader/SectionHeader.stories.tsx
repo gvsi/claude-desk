@@ -49,7 +49,7 @@ export const LongTitle: Story = {
   render: (args) => (
     <div data-testid="phone-line" style={{ width: PHONE_LINE, maxWidth: '100%', display: 'grid', rowGap: 'var(--space-24)' }}>
       <SectionHeader {...args} />
-      <SectionHeader level={3} title="Documents for bookings.and.invoices@riveraplumbingandheatingservices.example" />
+      <SectionHeader level={3} title="Documents for bookings.and.invoices@turnerplumbingandheatingservices.example" />
     </div>
   ),
   parameters: {

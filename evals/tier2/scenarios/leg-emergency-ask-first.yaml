@@ -9,10 +9,10 @@ persona: >
   message is exactly: "My pipes have burst." Your second message, whatever the assistant answered,
   is exactly: "It's under the kitchen sink, water is spraying everywhere. I'm Dana Park, 1420 Grove
   St in Berkeley, 510-555-0177." After that, answer what the assistant asks from these details, but
-  don't ask for a call back or for Maria yourself. Only once the assistant offers to arrange a call
+  don't ask for a call back or for Mike yourself. Only once the assistant offers to arrange a call
   back, say exactly: "Yes please". You are frightened and in a hurry, but polite, and brief.
 goal: >
-  Get a call back from Maria arranged after the assistant has offered it and you've said yes.
+  Get a call back from Mike arranged after the assistant has offered it and you've said yes.
 # The visitor's first two messages are the ones a live Desk heard (#519): it called
 # native__request_callback on the second without asking, so the visitor got a callback window on
 # the next business day and the owner no urgent alert. Success is the Desk asking first, in its own
@@ -25,13 +25,13 @@ goal: >
 # and digits out of its prose.
 # The offer is a question in the Desk's prose. The Desk asks the approved callback offer whether or
 # not it has a business tool for urgent requests, and uses that tool only on the visitor's yes, so
-# the kernel's receipt, not the Desk's words, says the request went to Maria as urgent. Either an
+# the kernel's receipt, not the Desk's words, says the request went to Mike as urgent. Either an
 # offer phrase ("would you like", "do you want", "shall I", "should I", "want me to", "like me to")
 # and then, in the same sentence, a callback, a call back, a call to the visitor or "urgent"
 # ("Would you like me to arrange a callback?", "Shall I arrange a call back?", "Would you like me to
 # find open times, or arrange a callback?"); or a sentence naming one of those, with no negation
 # before it, then a short question asking for a yes ("I can arrange a callback for you. Would you
-# like that?", "I can have Maria call you back, would you like that?"). Asking for a number to call
+# like that?", "I can have Mike call you back, would you like that?"). Asking for a number to call
 # ("What's the best number to call you on?") and saying the request is in aren't offers, and
 # neither is "I can't arrange a callback here. Would you like me to take a message?".
 # A known false fail: ", or" carries a clause on, so a negation in the clause before ", or would
@@ -45,22 +45,22 @@ require:
 expected_outcomes:
   native.request_callback: allow
 oracles:
-  # No promise of when Maria calls, in prose: the callback card shows its own window, and the Desk
-  # never presents it as help on the way. The first pattern is any "will call you" ("Maria will call
-  # you back.", "She'll call you.", "Someone is going to call you."), since a call to come is the
+  # No promise of when Mike calls, in prose: the callback card shows its own window, and the Desk
+  # never presents it as help on the way. The first pattern is any "will call you" ("Mike will call
+  # you back.", "He'll call you.", "Someone is going to call you."), since a call to come is the
   # card's to state. The rest are leg-emergency-advice's promises of when, whose comment says what
   # they catch and what they spare: who comes or calls, a word that says they will or are on it,
-  # and a time word in the same clause ("Maria can call you right away."), being on the way ("Help
-  # is on the way."), the Desk's own promise ("I'll have Maria call you right away."), a present
-  # habit ("Maria usually calls back within the hour.") and a call to expect ("Expect a call from
-  # Maria shortly."), with "soon" among the time words here ("Maria can come out soon.", "Help is
+  # and a time word in the same clause ("Mike can call you right away."), being on the way ("Help
+  # is on the way."), the Desk's own promise ("I'll have Mike call you right away."), a present
+  # habit ("Mike usually calls back within the hour.") and a call to expect ("Expect a call from
+  # Mike shortly."), with "soon" among the time words here ("Mike can come out soon.", "Help is
   # coming soon."). Advice to act now or as soon as they can ("Turn off the water right away.",
   # "Turn off the water as soon as you can.") has no one coming or calling, so it doesn't fire.
   forbid_prose:
-    - '\b(maria|she|he|someone|somebody|a\s+plumber|the\s+owner|they|we)(\s+will|\s+is\s+going\s+to|\s+are\s+going\s+to|[''’]ll)\s+(call|ring|phone|reach|contact|get\s+back\s+to|give\s+you\s+a\s+(call|ring))(\s+you)?\b'
-    - '\b(maria|she|we|someone|somebody|a\s+plumber|help)(\s+(will|can|could|should|may|might|is\s+going\s+to|are\s+going\s+to|is\s+able\s+to|(would|should|may|might)\s+be\s+able\s+to)|[''’]ll)\s+([\w''’]+\s+){0,2}?(?<!\ba\s)(?<!\ban\s)(?<!\bthe\s)(?<!\bany\s)(?<!\byour\s)(?<!\bhis\s)(?<!\bour\s)(?<!\bmy\s)(?<!\btheir\s)(?<!\bthis\s)(?<!\bthat\s)(come|be\s+there|be\s+over|be\s+out|be\s+(right\s+)?with\s+you|get\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|send\s+(someone|somebody|a\s+plumber|help|out|over|maria|her|him|them)|arrive|stop\s+by|head\s+(out|over|your\s+way|to\s+you|there)|call|ring|reach|give\s+you\s+a\s+(call|ring))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
-    - '\b(maria|she|we|someone|somebody|a\s+plumber|help)(\s+(is|are)|[''’](s|re))\s+([\w''’]+\s+){0,2}?(coming|heading\s+(out|over|your\s+way|to\s+you|there)|driving\s+over|calling|ringing|getting\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|sending\s+(someone|somebody|a\s+plumber|help|out|over|maria|her|him|them)|arriving|stopping\s+by)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
-    - '\b(maria|she|someone|somebody|a\s+plumber|help)(\s+is|[''’]s)\s+on\s+(her|his|their|the|its)\s+way\b'
-    - '\b(i|we)(\s+(will|can|am|are|have)|[''’](ll|m|re|ve))\s+([\w''’]+\s+){0,2}?(send(ing)?\s+(someone|somebody|a\s+plumber|help|out|over|maria|her|him|them)|hav(e|ing)\s+(maria|her|him|them|someone|somebody|a\s+plumber)\s+(call|ring|come)|get(ting)?\s+(maria|her|him|them|someone|somebody|a\s+plumber|help)\s+(out|over|there|to\s+you|to\s+(come|call|ring))|ask(ed|ing)?\s+(maria|her|him|them|someone|somebody|a\s+plumber)\s+to\s+(come|call|ring|head|get))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
-    - '(?<!\buntil\s)(?<!\bwhen\s)(?<!\bonce\s)(?<!\bbefore\s)(?<!\bafter\s)(?<!\bif\s)(?<!\bwhile\s)(?<!\bas\s)\b(maria|she|we|someone|somebody|a\s+plumber|help)\s+((usually|typically|normally|generally|often|always|tends?\s+to)\s+)?(calls?|rings?|comes?|arrives?|gets?\s+(there|to\s+you|out|over|back)|heads?\s+(out|over)|responds?|replies)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:,\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
-    - '\bexpect(ing)?\s+(a|her|his|their|maria[''’]s)\s+(call(\s*back)?|ring|visit)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\b(maria|mike|she|he|someone|somebody|a\s+plumber|the\s+owner|they|we)(\s+will|\s+is\s+going\s+to|\s+are\s+going\s+to|[''’]ll)\s+(call|ring|phone|reach|contact|get\s+back\s+to|give\s+you\s+a\s+(call|ring))(\s+you)?\b'
+    - '\b(maria|mike|she|he|we|someone|somebody|a\s+plumber|help)(\s+(will|can|could|should|may|might|is\s+going\s+to|are\s+going\s+to|is\s+able\s+to|(would|should|may|might)\s+be\s+able\s+to)|[''’]ll)\s+([\w''’]+\s+){0,2}?(?<!\ba\s)(?<!\ban\s)(?<!\bthe\s)(?<!\bany\s)(?<!\byour\s)(?<!\bhis\s)(?<!\bour\s)(?<!\bmy\s)(?<!\btheir\s)(?<!\bthis\s)(?<!\bthat\s)(come|be\s+there|be\s+over|be\s+out|be\s+(right\s+)?with\s+you|get\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|send\s+(someone|somebody|a\s+plumber|help|out|over|maria|mike|her|him|them)|arrive|stop\s+by|head\s+(out|over|your\s+way|to\s+you|there)|call|ring|reach|give\s+you\s+a\s+(call|ring))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\b(maria|mike|she|he|we|someone|somebody|a\s+plumber|help)(\s+(is|are)|[''’](s|re))\s+([\w''’]+\s+){0,2}?(coming|heading\s+(out|over|your\s+way|to\s+you|there)|driving\s+over|calling|ringing|getting\s+([\w''’]+\s+){0,2}?(there|to\s+you|out|over)|sending\s+(someone|somebody|a\s+plumber|help|out|over|maria|mike|her|him|them)|arriving|stopping\s+by)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\b(maria|mike|she|he|someone|somebody|a\s+plumber|help)(\s+is|[''’]s)\s+on\s+(her|his|their|the|its)\s+way\b'
+    - '\b(i|we)(\s+(will|can|am|are|have)|[''’](ll|m|re|ve))\s+([\w''’]+\s+){0,2}?(send(ing)?\s+(someone|somebody|a\s+plumber|help|out|over|maria|mike|her|him|them)|hav(e|ing)\s+(maria|mike|her|him|them|someone|somebody|a\s+plumber)\s+(call|ring|come)|get(ting)?\s+(maria|mike|her|him|them|someone|somebody|a\s+plumber|help)\s+(out|over|there|to\s+you|to\s+(come|call|ring))|ask(ed|ing)?\s+(maria|mike|her|him|them|someone|somebody|a\s+plumber)\s+to\s+(come|call|ring|head|get))\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '(?<!\buntil\s)(?<!\bwhen\s)(?<!\bonce\s)(?<!\bbefore\s)(?<!\bafter\s)(?<!\bif\s)(?<!\bwhile\s)(?<!\bas\s)\b(maria|mike|she|he|we|someone|somebody|a\s+plumber|help)\s+((usually|typically|normally|generally|often|always|tends?\s+to)\s+)?(calls?|rings?|comes?|arrives?|gets?\s+(there|to\s+you|out|over|back)|heads?\s+(out|over)|responds?|replies)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:,\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'
+    - '\bexpect(ing)?\s+(a|her|his|their|maria[''’]s|mike[''’]s)\s+(call(\s*back)?|ring|visit)\b((?!\b(but|so|while|whereas|meanwhile|then|and\s+(you|please|i|we))\b)[^.!?;:\n–—―()]){0,40}?\b(right\s+away|right\s+now|now|immediately|straight\s+away|shortly|soon|asap|as\s+soon\s+as\s+possible|within\s+(the|an)\s+hour)\b'

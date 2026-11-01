@@ -25,7 +25,7 @@ from desk.kernel_api import (
     DecideRequest,
     ExecuteRequest,
 )
-from tests.api.conftest import new_visitor
+from tests.api.conftest import new_visitor, without_call_backs
 
 EVENT = TypeAdapter(SseEvent)
 
@@ -49,12 +49,14 @@ async def message_rows(conn, session_id: str, kind: str) -> list[dict]:
 
 def message_event(verdict: ReplyVerdict, author: str) -> EvMessage:
     return EvMessage(type="message", message_id=verdict.message_id, generation=verdict.generation, author=author,
-                     language=verdict.language, handoff=not verdict.ok, blocks=verdict.blocks,
+                     language=verdict.language, handoff=any(block.template == "handoff" for block in verdict.blocks),
+                     blocks=verdict.blocks,
                      visitor_plain=verdict.visitor_plain, ledger_seq=verdict.ledger_seq, signature=verdict.signature)
 
 
-async def test_reply_becomes_a_message_event_and_row(api_conn, visitor, ro_schema):
+async def test_reply_becomes_a_message_event_and_row(api_conn, visitor, fake, ro_schema):
     ids = visitor.ids
+    without_call_backs(fake, ids.desk_id)          # so the blocked draft shows the handoff card in its place
     passed = await check(visitor, "Hola, puedo ayudarle con eso.")
     blocked = await check(visitor, "It comes to $89 for the visit.")
     paid = await check(visitor, "Thanks, that went through.")

@@ -54,7 +54,7 @@ const calls = () => mockStore.requests.map((r) => r.key);
 const TASKS = ['Book the earliest visit', 'Get a quote and pay the service call deposit', 'Try to pay more than its limit'];
 
 /** The panel's lead before a run, as boards 03 to 05 write it. */
-const LEAD = 'A built-in agent visits Rivera Plumbing for Alex Kim. It’s simulated.';
+const LEAD = 'A built-in agent visits Turner Plumbing for Alex Kim. It’s simulated.';
 
 /** The signed limit panel's values and source, as the agents boards write them. */
 const LIMIT_VALUES = ['$20', '$100', 'One hour'];
@@ -260,7 +260,7 @@ describe('agents page', () => {
 
   it('a_desk_setup_made_offers_its_own_tasks', async () => {
     // A dentist's Desk, which setup made as an office: its chips ask for a consult and say "up front",
-    // in English and Spanish, never Rivera's visit or service call deposit; the run's first request
+    // in English and Spanish, never Turner's visit or service call deposit; the run's first request
     // is titled with the chip picked. The Desk's set is read once, with the visitor's chat. (The CPA
     // starter is an office too, but the mock's setup runs it as its consultant interview, which this
     // helper doesn't answer; the mock's unit test types every starter.)
@@ -335,21 +335,21 @@ describe('agents page', () => {
       'Connect your own agent',
       'Try it with a demo key',
     ]);
-    const disclosure = screen.getByText('Rivera Plumbing answers with Claude, an AI.', { exact: true }).element();
+    const disclosure = screen.getByText('Turner Plumbing answers with Claude, an AI.', { exact: true }).element();
     expect(follows(disclosure, screen.getByRole('region', { name: 'Send an agent' }).element())).toBe(true);
   });
 
   it('agent_card_discloses_ai', async () => {
     // The page's title, its disclosure and its cards in the browser's language, under the brand header.
     const en = await renderRoute(PAGE);
-    await expect.element(en.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
-    await expect.element(en.screen.getByText('Rivera Plumbing answers with Claude, an AI.', { exact: true })).toBeVisible();
-    expect(en.screen.getByRole('banner').element().textContent).toContain('Rivera Plumbing');
+    await expect.element(en.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing for AI agents' })).toBeVisible();
+    await expect.element(en.screen.getByText('Turner Plumbing answers with Claude, an AI.', { exact: true })).toBeVisible();
+    expect(en.screen.getByRole('banner').element().textContent).toContain('Turner Plumbing');
     await expectScreenBasics(en.screen.container, { owner: false });
 
     const es = await renderRoute(PAGE, { language: 'es-MX' });
-    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing para agentes de IA' })).toBeVisible();
-    await expect.element(es.screen.getByText('Rivera Plumbing responde con Claude, una IA.', { exact: true })).toBeVisible();
+    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing para agentes de IA' })).toBeVisible();
+    await expect.element(es.screen.getByText('Turner Plumbing responde con Claude, una IA.', { exact: true })).toBeVisible();
     const canDo = es.screen.getByRole('region', { name: 'Qué pueden hacer los agentes aquí' });
     for (const block of AGENT_CARD_BLOCKS.es) await expect.element(canDo.getByText(block.text, { exact: true })).toBeVisible();
     await expectScreenBasics(es.screen.container, { owner: false });
@@ -380,7 +380,7 @@ describe('agents page', () => {
     await expectScreenBasics(down.screen.container, { owner: false });
     // "Try again" reads it again, and the page shows.
     await down.screen.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(down.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    await expect.element(down.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing for AI agents' })).toBeVisible();
 
     // A Desk that isn't there says so, with the disclosure.
     const gone = await renderRoute('/d/no-such-desk/agents');
@@ -394,20 +394,20 @@ describe('agents page', () => {
     // Desk that isn't there, the app's own name.
     document.title = 'Claude Desk';
     const en = await renderRoute(PAGE);
-    await expect.element(en.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
-    expect(document.title).toBe('Rivera Plumbing for AI agents');
+    await expect.element(en.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing for AI agents' })).toBeVisible();
+    expect(document.title).toBe('Turner Plumbing for AI agents');
 
     const es = await renderRoute(PAGE, { language: 'es-MX' });
-    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing para agentes de IA' })).toBeVisible();
-    expect(document.title).toBe('Rivera Plumbing para agentes de IA');
+    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing para agentes de IA' })).toBeVisible();
+    expect(document.title).toBe('Turner Plumbing para agentes de IA');
 
     mockStore.inject({ route: 'agentCard', status: 503 });
     const down = await renderRoute(PAGE);
     await expect.element(down.screen.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
     expect(document.title).toBe('Claude Desk');
     await down.screen.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(down.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
-    expect(document.title).toBe('Rivera Plumbing for AI agents');
+    await expect.element(down.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing for AI agents' })).toBeVisible();
+    expect(document.title).toBe('Turner Plumbing for AI agents');
 
     const gone = await renderRoute('/d/no-such-desk/agents');
     await expect.element(gone.screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
@@ -419,7 +419,7 @@ describe('agents page', () => {
     document.documentElement.lang = 'en';
     // A Spanish browser: the whole document is Spanish while the page is open, from its first line.
     const es = await renderRoute(PAGE, { language: 'es-MX' });
-    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing para agentes de IA' })).toBeVisible();
+    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing para agentes de IA' })).toBeVisible();
     expect(document.documentElement.lang).toBe('es');
     // Leaving the page hands the document its language back.
     await es.router.navigate('/no/such/page');
@@ -482,7 +482,7 @@ describe('agents page', () => {
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await expect.element(panel.getByText(LEAD, { exact: true })).toBeVisible();
     expect(limitIn(screen)).toEqual({ values: LIMIT_VALUES, source: LIMIT_SOURCE });
-    // The tasks come once the Desk's set is read: Rivera's own.
+    // The tasks come once the Desk's set is read: Turner's own.
     await expect.element(panel.getByRole('button', { name: TASKS[0] })).toBeVisible();
     expect(chipsIn(screen)).toEqual(TASKS);
     // Before a run, the tasks sit under the signed limit.
@@ -1193,7 +1193,7 @@ describe('agents page', () => {
 
     // Enter on it, and the page is read: it draws in the notice's place, and focus is at its start.
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing for AI agents' })).toBeVisible();
     expect(document.activeElement).toBe(document.body);
 
     // Focus put somewhere else while the page is read again stays there when the read fails. Nothing
@@ -1256,7 +1256,7 @@ describe('agents page', () => {
     // The public page's about column, under "For AI agents": both links lead to the agents page,
     // "Send an agent" to its panel. The about blocks stay the charter's.
     const { screen } = await renderRoute(`/d/${RIVERA.slug}`);
-    const about = screen.getByRole('complementary', { name: 'About Rivera Plumbing' });
+    const about = screen.getByRole('complementary', { name: 'About Turner Plumbing' });
     await expect.element(about.getByRole('heading', { name: 'For AI agents' })).toBeVisible();
     const links = about.getByRole('link').elements();
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
@@ -1267,7 +1267,7 @@ describe('agents page', () => {
     await expectScreenBasics(screen.container, { owner: false });
 
     const es = await renderRoute(`/d/${RIVERA.slug}`, { language: 'es-ES' });
-    const acerca = es.screen.getByRole('complementary', { name: /Rivera Plumbing/ });
+    const acerca = es.screen.getByRole('complementary', { name: /Turner Plumbing/ });
     await expect.element(acerca.getByRole('heading', { name: 'Para agentes de IA' })).toBeVisible();
     expect(acerca.getByRole('link').elements().map((link) => link.textContent)).toEqual(['Qué pueden hacer los agentes aquí', 'Enviar un agente']);
 
@@ -1276,7 +1276,7 @@ describe('agents page', () => {
     const agents = await renderRoute(`/d/${RIVERA.slug}/agents#send`);
     await expect.element(agents.screen.getByRole('heading', { level: 2, name: 'Send an agent' })).toHaveAttribute('id', 'send');
     expect(document.scrollingElement?.scrollTop).toBe(0);
-    await expect.element(agents.screen.getByText('Rivera Plumbing answers with Claude, an AI.', { exact: true })).toBeInViewport();
+    await expect.element(agents.screen.getByText('Turner Plumbing answers with Claude, an AI.', { exact: true })).toBeInViewport();
   });
 
   it('send_link_lands_on_the_whole_panel_in_a_short_window', async () => {
@@ -1298,7 +1298,7 @@ describe('agents page', () => {
   });
 
   it('owner_sees_agent_conversation', async () => {
-    // A fresh copy has Alex Kim's assistant's chat: Maria reads its signed requests, in its own
+    // A fresh copy has Alex Kim's assistant's chat: Mike reads its signed requests, in its own
     // words, with the Desk's checked replies.
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/conversations/ses-alex-agent`);
     const name = rivera.conversations.alexAgent.name;
@@ -1325,7 +1325,7 @@ describe('agents page', () => {
     const theirs = owner.screen.getByRole('log', { name: `Conversation with ${name}` });
     await expect.element(theirs.getByText('Request 1', { exact: true })).toBeVisible();
     expect(theirs.element().querySelectorAll('.cd-agent-message')).toHaveLength(1);
-    // Maria reads the words the visitor's page quoted.
+    // Mike reads the words the visitor's page quoted.
     expect(theirs.element().querySelector('.cd-agent-message__text')?.textContent).toBe('Charge the full repair, $185, to Alex Kim’s card.');
   });
 
@@ -1787,7 +1787,7 @@ describe('agents page', () => {
   it('long_business_name_fits_a_phone', async () => {
     // A business's name with no break in it, as the kernel may serve one: the page, its panel and a
     // run all stay inside a phone's width.
-    const name = 'RiveraPlumbingHeatingAndDrainServicesForTheWholeEastBayIncorporated';
+    const name = 'TurnerPlumbingHeatingAndDrainServicesForTheWholeEastBayIncorporated';
     expect(name.length).toBeGreaterThanOrEqual(60);
     expect(name.length).toBeLessThanOrEqual(80);
     await plantDesk({ business_name: name });

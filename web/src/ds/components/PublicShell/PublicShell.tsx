@@ -18,7 +18,7 @@ import './PublicShell.css';
 
 /** The business's look on its public page, mapped from the Desk the kernel serves (`PublicDesk`). */
 export interface PublicBrand {
-  /** `business_name`: "Rivera Plumbing". */
+  /** `business_name`: "Turner Plumbing". */
   name: string;
   /** One line under the name: the Desk's name, "Main line". */
   tagline: string;
@@ -49,7 +49,7 @@ export type PublicOpenStatus = PublicDesk['open_status'];
 export interface PublicShellProps {
   brand: PublicBrand;
   /**
-   * Whom a visitor can ask for: `owner_display_name`, "Maria Rivera". Null when the owner gave no
+   * Whom a visitor can ask for: `owner_display_name`, "Mike Turner". Null when the owner gave no
    * name: the shell then asks for "a person" in its own words and names no one.
    */
   ownerName: string | null;

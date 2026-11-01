@@ -8,7 +8,7 @@ import { ConnectorSection } from '../ConnectorSection/ConnectorSection.tsx';
 import { MoneyLimit, type MoneyLimitProps } from './MoneyLimit.tsx';
 
 const { line, unset, hint } = rivera.paymentLimit;
-/** Rivera's Payments group on the Rules page, whose line above its tools holds the limit. */
+/** Turner's Payments group on the Rules page, whose line above its tools holds the limit. */
 const payments = rivera.connectors.sections.find((section) => section.connector.id === 'payments');
 if (payments === undefined) throw new Error('No Payments section');
 
@@ -161,7 +161,7 @@ export const TooHigh: Story = {
 
 export const Unset: Story = {
   args: { line: unset },
-  parameters: { canvasNote: 'A Desk with no payment limit set, so every payment asks; the board draws Rivera at $500.' },
+  parameters: { canvasNote: 'A Desk with no payment limit set, so every payment asks; the board draws Turner at $500.' },
   play: async ({ canvas, canvasElement }) => {
     // unset_limit_never_says_zero: no limit reads as what it means, never as an amount of nothing.
     await expect(canvas.getByText(unset)).toBeVisible();

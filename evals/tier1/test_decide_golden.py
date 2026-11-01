@@ -115,7 +115,11 @@ async def test_seed_payment_link_reviewer_evidence(k: KernelHarness, fake: FakeA
         sent = json.loads(message["content"])
         [calibration_case] = [case for case in reviewer.load_cases(reviewer.CASES_FILE)
                               if case.id == "structured-link-deposit"]
-        assert reviewer.call_input(calibration_case).model_dump(mode="json") == sent
+        expected = reviewer.call_input(calibration_case).model_dump(mode="json")
+        # The calibration reads the facts its recorded run saw; the kernel sends the seed's own, which
+        # differ from those only by the reviewed renames test_reviewer_calibration holds them to.
+        expected["facts"] = [fact.model_dump(mode="json") for fact in reviewer.seed_public_facts()]
+        assert expected == sent
         assert sent["action"]["tool"] == "native.payment_link"
         assert sent["action"]["amount_cents"] == 2_000
         assert sent["untrusted_args"] == {}

@@ -34,10 +34,35 @@ def valid_public_contact(value: str) -> bool:
     first, so their own commas and semicolons don't split them. A trailing separator is ignored.
     Phones may end with the fixed "(call or text)" suffix. Contacts over 500 characters are refused
     before parsing."""
+    endpoints = _endpoints(value)
+    return bool(endpoints) and all(_kind(endpoint) is not None for endpoint in endpoints)
+
+
+def contact_endpoints(value: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The website hosts and the email addresses a valid public contact (`valid_public_contact`) names:
+    each host of its HTTPS URLs and bare domains in lowercase, without a leading "www.", and each
+    email casefolded. A contact that isn't valid names none."""
+    endpoints = _endpoints(value)
+    kinds = [(endpoint, _kind(endpoint)) for endpoint in endpoints]
+    if not kinds or any(kind is None for _, kind in kinds):
+        return frozenset(), frozenset()
+    hosts = {bare_host(endpoint.split("/", 1)[0]) for endpoint, kind in kinds if kind == "domain"}
+    hosts |= {bare_host(urlsplit(endpoint).hostname or "") for endpoint, kind in kinds if kind == "url"}
+    emails = {endpoint.casefold() for endpoint, kind in kinds if kind == "email"}
+    return frozenset(hosts), frozenset(emails)
+
+
+def bare_host(host: str) -> str:
+    """A host as the contact's hosts are compared: lowercase, without a leading "www."."""
+    return host.casefold().removeprefix("www.")
+
+
+def _endpoints(value: str) -> list[str]:
+    """The contact's parts, each without its label; none for a contact too long or with a control character."""
     if len(value) > 500:
-        return False
+        return []
     if any(unicodedata.category(ch).startswith("C") and ch not in "\r\n" for ch in value):
-        return False
+        return []
     urls: list[str] = []
 
     def hold(match: re.Match[str]) -> str:
@@ -47,29 +72,30 @@ def valid_public_contact(value: str) -> bool:
     parts = SEPARATOR.split(URL.sub(hold, value))
     if len(parts) > 1 and not parts[-1].strip():
         parts.pop()
-    return bool(parts) and all(_part(HELD.sub(lambda held: urls[int(held[1])], part).strip()) for part in parts)
+    return [_unlabelled(HELD.sub(lambda held: urls[int(held[1])], part).strip()) for part in parts]
 
 
-def _part(value: str) -> bool:
+def _unlabelled(value: str) -> str:
     if label := LABEL.match(value):
         value = value[label.end():]
-    return _endpoint(value)
+    return value
 
 
-def _endpoint(value: str) -> bool:
+def _kind(value: str) -> str | None:
+    """The endpoint `value` is, "email", "phone", "domain" or "url", or None when it is none."""
     if not value:
-        return False
+        return None
     if EMAIL.fullmatch(value) and len(value) <= 254:
-        return True
+        return "email"
     phone = PHONE.fullmatch(CALL_OR_TEXT.sub("", value))
     if phone and 7 <= sum(ch in "0123456789" for ch in phone["phone"]) <= 15:
-        return True
+        return "phone"
     if any(ch.isspace() for ch in value):
-        return False
+        return None
     if DOMAIN.fullmatch(value) and len(value.split("/", 1)[0]) <= 253:
-        return True
+        return "domain"
     try:
         url = urlsplit(value)
-        return url.scheme == "https" and bool(url.hostname) and url.port != 0
+        return "url" if url.scheme == "https" and bool(url.hostname) and url.port != 0 else None
     except ValueError:
-        return False
+        return None

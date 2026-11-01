@@ -24,3 +24,30 @@
 .cd-claude-message__prose + .cd-claude-message__prose {
   margin-top: var(--space-10);
 }
+
+/* A reply revealed as it arrives live (reveal): while its words come in, its cards wait unseen in
+   their places. Then they fade and rise space-4 in, one by one, motion-follow apart, the first a
+   beat after the words (--cd-follow-from, 1), or at once with no words before them (0), each over
+   motion-base, each card on its own beat (--cd-follow-card, its place among the cards, which
+   ClaudeMessage sets). Under reduced motion the reply shows whole, its cards at once. */
+.cd-claude-message--revealing > .cd-reply-card {
+  visibility: hidden;
+}
+
+.cd-claude-message--following > .cd-reply-card {
+  animation: cd-claude-message-follow var(--motion-base) var(--motion-ease) backwards;
+  animation-delay: calc(var(--motion-follow) * (var(--cd-follow-from, 1) + var(--cd-follow-card, 1) - 1));
+}
+
+@keyframes cd-claude-message-follow {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-claude-message--following > .cd-reply-card {
+    animation: none;
+  }
+}

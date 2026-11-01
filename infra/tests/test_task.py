@@ -194,8 +194,10 @@ def test_plain_environment_is_the_seam(desk_stacks):
         "DESK_DB_URLS": "KERNEL,MOCKPAY",
         "KERNEL_DB_USER": "desk_kernel",
         "MOCKPAY_DB_USER": "desk_mockpay",
+        "SAMPLE_WEEK": "1",                # each hosted copy opens on the kernel's sample week
         **database,
     }
+    assert "SAMPLE_WEEK" not in _environment(desk_stacks, "Main")   # the kernel's setting alone
     assert _environment(desk_stacks, "Main") == {
         "DESK_ENV": "production",
         "DESK_DB_URLS": "API",
@@ -204,6 +206,7 @@ def test_plain_environment_is_the_seam(desk_stacks):
         "KERNEL_URL": "http://127.0.0.1:8701",
         "PUBLIC_ORIGIN": "https://d111111abcdef8.cloudfront.net",
         "TRUSTED_PROXY_HOPS": "2",
+        "BUSINESS_TOOLS_ENABLED": "1",
     }
 
 

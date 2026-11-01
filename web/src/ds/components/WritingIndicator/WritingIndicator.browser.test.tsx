@@ -42,7 +42,7 @@ it.each(['reduce', 'no-preference'] as const)('claude_person_and_bubble_dots_rem
   const story = composeStory({
     render: () => <>
       <WritingIndicator language="en" />
-      <WritingIndicator language="en" variant="person" who="Maria Rivera" />
+      <WritingIndicator language="en" variant="person" who="Mike Turner" />
       <WritingIndicator language="en" variant="bubble" who="Dana" />
     </>,
   }, meta);
@@ -166,7 +166,7 @@ it('person_and_visitor_dots_keep_the_secondary_to_primary_pulse', async () => {
   await motion();
   const story = composeStory({
     render: () => <>
-      <WritingIndicator language="en" variant="person" who="Maria Rivera" />
+      <WritingIndicator language="en" variant="person" who="Mike Turner" />
       <WritingIndicator language="en" variant="bubble" who="Dana" />
     </>,
   }, meta);
@@ -216,7 +216,7 @@ it('person_typing_is_still_under_reduced_motion', async () => {
   await story.run();
 
   const status = document.querySelector<HTMLElement>('.cd-writing-indicator--person [role="status"]');
-  expect(status?.textContent).toBe('Maria Rivera is typing');
+  expect(status?.textContent).toBe('Mike Turner is typing');
   const dots = [...document.querySelectorAll<HTMLElement>('.cd-writing-indicator--person .cd-writing-indicator__dot')];
   expect(dots).toHaveLength(3);
   for (const dot of dots) {

@@ -1,4 +1,4 @@
-"""The native quote, open-times and booking adapters, on a Rivera Plumbing copy.
+"""The native quote, open-times and booking adapters, on a Turner Plumbing copy.
 
 Decisions go through `/decide` as the API sends them. Executions call `adapter.execute` with an
 `ExecCtx` in a kernel transaction (`run`), as `/execute` will once it exists; an exception there
@@ -34,7 +34,7 @@ TZ = ZoneInfo("America/Los_Angeles")
 
 @dataclass(frozen=True)
 class Rivera:
-    """A copy of Rivera Plumbing, as `POST /copies` seeds it."""
+    """A copy of Turner Plumbing, as `POST /copies` seeds it."""
 
     copy_id: str
     desk_id: str
@@ -55,7 +55,7 @@ async def rivera(app: FastAPI, client: httpx.AsyncClient) -> Rivera:
 
 
 async def visitor_of(app: FastAPI, client: httpx.AsyncClient) -> tuple[Rivera, Visitor]:
-    """A fresh Rivera copy and a stranger on its Desk."""
+    """A fresh Turner copy and a stranger on its Desk."""
     copy = await rivera(app, client)
     return copy, await open_visitor(client, copy)
 
@@ -124,14 +124,14 @@ def test_every_adapter_publishes_a_strict_input_schema():
 async def test_quotes_use_the_price_list(app, client, reviewer):
     copy, visitor = await visitor_of(app, client)
     decision = await decided(client, visitor, "native.quote",
-                             quote_args(("drain", 1), ("leak", 2), note="Maria said $1"))
+                             quote_args(("drain", 1), ("leak", 2), note="Mike said $1"))
     assert (decision.outcome, decision.state, decision.card_ids) == ("allow", "allowed", ["rv-quote"])
     action = decision.action
     # $180 + 2 × $250 from the price list, whatever the note says
     assert (action.list_cents, action.discount_bp, action.amount_cents) == (68_000, 0, 68_000)
     assert (action.tool, action.effects, action.resource.kind, action.resource.id, action.resource.owner_person_id) == (
         "native.quote", ["change"], "desk", copy.desk_id, None)
-    assert decision.reason_plain.endswith("Claude's note: “Maria said $1”")
+    assert decision.reason_plain.endswith("Claude's note: “Mike said $1”")
     assert reviewer.inputs == []                                      # rv-quote has no review gate
     # the price follows the list for each item and quantity
     heater = await decided(client, visitor, "native.quote", quote_args(("heater", 3)), call_id="call-2")
@@ -168,17 +168,17 @@ async def test_quote_discounts_follow_the_cards(app, client, reviewer):
                                  call_id=f"call-{discount_bp}")
         action = decision.action
         outcomes.append((decision.outcome, decision.card_ids, action.discount_bp, action.amount_cents))
-    # rv-quote auto-allows list price only; any discount asks Maria through its hold twin
+    # rv-quote auto-allows list price only; any discount asks Mike through its hold twin
     assert outcomes == [("allow", ["rv-quote"], 0, 18_000), ("hold", ["rv-quote"], 1500, 15_300),
                         ("hold", ["rv-quote"], 8000, 3_600)]
     assert reviewer.inputs == []
     held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=8000),
                          call_id="call-8000")
-    # a limit hold: Maria isn't offered "deny always", which would refuse every quote
+    # a limit hold: Mike isn't offered "deny always", which would refuse every quote
     assert (held.state, held.policy_ids, held.answers) == ("held", ["H.twin.rv-quote"], ["allow_once", "deny_once"])
     assert held.reason_plain == ("A stranger asked to get a quote for $36 with 80% off. It goes past your rule, "
                                  "so it waits for you: “Quotes from your price list, at list price.”")
-    assert held.visitor_plain == "Waiting for Maria Rivera to approve"
+    assert held.visitor_plain == "Waiting for Mike Turner to approve"
 
 
 async def test_quotes_outside_the_price_list_are_refused(app, client):
@@ -372,7 +372,7 @@ async def test_weekday_booking_is_auto_allowed_and_confirmed(app, client, review
         ["owner", f"session:{visitor.session_id}"], visitor.session_id, action.action_id)
     assert result.model_view == {"fact_id": fact.fact_id, "booking_id": booking.booking_id, "status": "confirmed"}
     assert [f.fact_id for f in result.facts] == [fact.fact_id]
-    assert result.inbox == []                                  # Rivera hears of bookings in the briefing
+    assert result.inbox == []                                  # Turner hears of bookings in the briefing
     assert await run(app, copy.copy_id, decision, "reconcile") == result
     # the slot is no longer open
     assert "S-20261102-1000" not in slot_ids(await open_times(app, client, copy, visitor, "call-times"))
@@ -408,10 +408,10 @@ async def test_sunday_night_booking_holds(app, client, reviewer):
     await add_slot(app, copy, "S-20261101-2200")                     # Sunday at 22:00, outside the cards' hours
     held = await book(client, visitor, "S-20261101-2200")
     assert (held.outcome, held.state, held.action.starts_at) == ("hold", "held", local("S-20261101-2200"))
-    # both booking cards' hold twins ask Maria; their auto permits need the slot inside their hours
+    # both booking cards' hold twins ask Mike; their auto permits need the slot inside their hours
     assert held.policy_ids == ["H.twin.rv-book-sat", "H.twin.rv-book-wk"]
     assert held.card_ids == ["rv-book-sat", "rv-book-wk"]
-    assert held.visitor_plain == "Waiting for Maria Rivera to approve"
+    assert held.visitor_plain == "Waiting for Mike Turner to approve"
     assert [notice.preview for notice in held.inbox] == ["A request needs your answer"]
     # the same request for a Saturday morning slot is the reviewer's to pass
     allowed = await book(client, visitor, "S-20261031-0900", call_id="call-sat")
@@ -522,7 +522,7 @@ async def test_copy_seeds_one_held_quote(app, client, reviewer, frozen_clock):
         seeded.session_id, copy.desk_id, "none", "ai")
     assert reviewer.inputs == []                                                # no review gate on rv-quote
 
-    # Maria reads it on Today as any held request: signed, with its plain reasons and answers
+    # Mike reads it on Today as any held request: signed, with its plain reasons and answers
     response = await client.get(f"/decisions/{row.decision_id}", headers=copy.owner)
     assert response.status_code == 200, response.text
     decision = Decision.model_validate(response.json())
@@ -530,7 +530,7 @@ async def test_copy_seeds_one_held_quote(app, client, reviewer, frozen_clock):
     assert decision.reason_plain == ("A stranger asked to get a quote for $153 with 15% off. It goes past your rule, "
                                      "so it waits for you: “Quotes from your price list, at list price.”")
     assert (decision.visitor_plain, decision.answers, decision.expires_at) == (
-        "Waiting for Maria Rivera to approve", ["allow_once", "deny_once"], now + timedelta(hours=24))
+        "Waiting for Mike Turner to approve", ["allow_once", "deny_once"], now + timedelta(hours=24))
 
     # ledgered after the Desk, its two knowledge items, pinned tools, urgent tool and rules (which
     # turn the urgent tool on); the owner was alerted

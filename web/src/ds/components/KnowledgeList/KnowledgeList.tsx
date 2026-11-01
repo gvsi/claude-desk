@@ -18,7 +18,7 @@ export interface KnowledgeRowView {
   title: string | null;
   /**
    * The line under the title, in the screen's words: where the item came from ("From your answers
-   * in setup", "rivera-plumbing.example, read during setup") or when it was added ("Added Oct 27").
+   * in setup", "turner-plumbing.example, read during setup") or when it was added ("Added Oct 27").
    * Null leaves the line out when the date was not recorded.
    */
   detail: string | null;

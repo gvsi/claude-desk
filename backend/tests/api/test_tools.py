@@ -36,7 +36,7 @@ from desk.api.tools import (
 from desk.contracts import Clause, ClauseTemplate, Decision, ToolCall, ToolName, Violation
 from desk.events import EvHeld, EvReceipt, SseEvent
 from desk.kernel_api import DecideRequest, ExecuteRequest, SessionContext
-from tests.api.conftest import new_visitor
+from tests.api.conftest import new_visitor, without_call_backs
 from tests.api.fakes import ScriptedModel, tool_use
 from tests.kernel_contract.fake_kernel import fake_kernel_app, route_keys
 
@@ -89,8 +89,8 @@ def test_an_outage_beside_a_jev_flag_asks_for_the_flag_to_be_fixed():
     from types import SimpleNamespace
 
     verdict = SimpleNamespace(violations=[
-        Violation(kind="check_unavailable", rule_id="soft.unavailable", span="Maria will call you today."),
-        Violation(kind="soft_promise", rule_id="soft.jev", span="Maria will call you today.")])
+        Violation(kind="check_unavailable", rule_id="soft.unavailable", span="Mike will call you today."),
+        Violation(kind="soft_promise", rule_id="soft.jev", span="Mike will call you today.")])
     feedback = tools._feedback(verdict, [])
     assert feedback == [{"kind": "check_unavailable", "rule_id": "soft.unavailable"},
                         {"kind": "soft_promise", "rule_id": "soft.jev"}]
@@ -687,7 +687,12 @@ async def test_final_prose_failure_delivers_checked_cards_without_handoff(api_co
     assert fake.handoffs == {}
 
 
-async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
+@pytest.mark.parametrize("call_backs", [True, False], ids=["call-back-offer", "no-call-backs"])
+async def test_reply_blocked_once_then_the_offer_or_the_handoff(api_conn, caller, fake, call_backs):
+    # The second block shows what the kernel puts in the draft's place: the call-back offer, a reply that asks the
+    # visitor first, on a Desk that offers call backs (the owner's decision of 2026-11-01), else the handoff.
+    if not call_backs:
+        without_call_backs(fake, caller.desk_id)
     draft = {"prose": "It comes to $89 for the visit.", "clauses": []}
     first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_1")
 
@@ -709,13 +714,22 @@ async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
 
     second = await send_reply(api_conn, caller, 0, draft, 2, call_id="toolu_2")
     (message,) = await events(api_conn, caller.session_id)
-    assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
-    assert message.blocks[0].text == "Let me check with Maria Rivera."
-    assert (second.result, second.is_error, second.delivered) == ({"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
-    assert len(check_drafts(fake)) == 2                                     # the verdict's handoff, no third check
+    if call_backs:
+        assert not message.handoff and [block.template for block in message.blocks] == [None]
+        assert message.blocks[0].text == "Would you like me to arrange a callback?"
+        assert (second.result, second.is_error, second.delivered) == (
+            {"outcome": "delivered", "message_id": message.message_id, "prose_shown": False,
+             "shown_instead": "Would you like me to arrange a callback?"}, False, "reply")
+        assert fake.handoffs == {}
+    else:
+        assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
+        assert message.blocks[0].text == "Let me check with Mike Turner."
+        assert (second.result, second.is_error, second.delivered) == (
+            {"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
+    assert len(check_drafts(fake)) == 2                                     # the verdict's blocks, no third check
     assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_2", message.message_id, 1)]
-    # The second try's draft is kept with the handoff shown in its place, naming that verdict; the handoff, not the
-    # draft, shows its triage (no ledger entry on the row), and the outcome carries nothing more to keep.
+    # The second try's draft is kept with the offer or the handoff shown in its place, naming that verdict; what was
+    # shown, not the draft, shows its triage (no ledger entry on the row), and the outcome carries nothing more to keep.
     ((ref_id, kept),) = await stopped_drafts(api_conn, caller.session_id)
     assert (ref_id, kept["draft"], kept["ledger_seq"], second.kept) == (message.message_id, draft, None, None)
 
@@ -806,7 +820,7 @@ async def test_replayed_ends_the_turn_quietly(api_conn, visitor, fake, ro_schema
 
 async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
     cases = [
-        ({"prose": "Maria says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]},
+        ({"prose": "Mike says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]},
          [{"kind": "unknown_fact", "span": "owner_said"}]),
         ({"prose": "", "clauses": [{"template": "payment_confirmed"}]},
          [{"kind": "unknown_fact", "span": "payment_confirmed"}]),
@@ -843,7 +857,7 @@ async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
 async def test_bad_input_on_the_turns_last_call_hands_off_at_once(api_conn, caller, fake):
     # with no model call left Claude can't rewrite, so input that doesn't fit the tool gets the handoff at once,
     # checked as the API's own (final) draft and recorded as what the call put on screen
-    bad = {"prose": "Maria says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]}
+    bad = {"prose": "Mike says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]}
     outcome = await send_reply(api_conn, caller, 0, bad, 1, call_left=False, call_id="toolu_bad")
     assert (outcome.result, outcome.is_error, outcome.delivered) == (
         {"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")

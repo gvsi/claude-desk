@@ -44,6 +44,8 @@ from evals.tier1.test_labels_and_injection import LANGUAGES, block_text, dumped,
 from evals.tier1.test_reply_golden import (
     CLEAN_EN,
     HANDED_OFF,
+    OFFER,
+    OFFERED,
     STAND_IN_CANARY,
     check_reply,
     handed_off,
@@ -191,7 +193,7 @@ async def test_seeded_copies_share_one_proof_and_stale_drafts_never_confirm(k: K
     find_slots = RuleCard(card_id="t18-auto-find-slots", applies_to="native.find_slots", mode="auto", who="anyone",
                           reason="Anyone can see open times.")
     ask_quote = RuleCard(card_id="t18-ask-quote", applies_to="native.quote", mode="ask", who="anyone",
-                         reason="Maria checks every quote.")
+                         reason="Mike checks every quote.")
     first = await draft_cards(k, a, [find_slots])
     second = await draft_cards(k, a, [find_slots, ask_quote])
     await k.call("POST /policy/confirm", body={"desk_id": a.desk_id, "version": first.version}, auth=a.owner,
@@ -289,7 +291,7 @@ async def test_the_public_desk_shows_no_private_field(k: KernelHarness, records)
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
     pages = {lang: await public_desk(k, desk.slug, lang) for lang in LANGUAGES}
-    await k.call("GET /public/{desk_slug}", path={"desk_slug": "rivera-plumbing-nosuch"}, query={"lang": "en"},
+    await k.call("GET /public/{desk_slug}", path={"desk_slug": "turner-plumbing-nosuch"}, query={"lang": "en"},
                  auth=Auth.none(), expect=NOT_FOUND)
     if k.is_real:
         texts, ids = await private_values(records, desk)
@@ -297,7 +299,7 @@ async def test_the_public_desk_shows_no_private_field(k: KernelHarness, records)
                     "the visitor's session id": visitor.state.session_id,
                     "the visitor's token": session_token(visitor)})
         for lang, page in pages.items():
-            assert (page.business_name, page.owner_display_name) == ("Rivera Plumbing", "Maria Rivera"), lang
+            assert (page.business_name, page.owner_display_name) == ("Turner Plumbing", "Mike Turner"), lang
             assert page.charter, f"the {lang} public page shows no charter"
             shown = shown_of(page, texts, ids)
             assert shown == [], f"the {lang} public page shows {shown}"
@@ -332,19 +334,20 @@ async def test_a_documents_canary_in_a_reply_is_blocked(k: KernelHarness, record
 @pytest.mark.requires("01a")
 @pytest.mark.parametrize("final", [True, False], ids=["final", "rewrite"])
 async def test_an_unmarked_first_reply_gets_one_rewrite(k: KernelHarness, records, final: bool):
-    """Unmarked prose never shows; the first check rewrites and the final one hands off."""
+    """Unmarked prose never shows; the first check rewrites and the final one asks with the call-back offer,
+    which the golden Desk has, so no owner handoff opens (the owner's decision of 2026-11-01)."""
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
     verdict = await check_reply(k, visitor, UNMARKED_PROSE, final=final, expect=Expect(fields={
         "ok": False, "violations": {"$len": 1}, "violations.0.kind": "uncertain_language",
         "violations.0.rule_id": "language_uncertain", "language": "en",
-        **shown_blocks(HANDED_OFF if final else [])}))
+        **shown_blocks(OFFERED if final else []), **({"blocks.0.text": OFFER["en"]} if final else {})}))
     if k.is_real:
         events = [entry.event for entry in await records.ledger_entries(desk.copy.copy_id, desk.desk_id)
                   if entry.event.session_id == visitor.state.session_id]
         hands = [e for e in events if e.kind == "desk_data" and e.summary.get("part") == "handoffs"]
-        assert len(hands) == int(final)
-        assert verdict.blocks == [] if not final else verdict.blocks[0].template == "handoff"
+        assert hands == []
+        assert [(block.kind, block.text) for block in verdict.blocks] == ([("prose", OFFER["en"])] if final else [])
 
 
 @pytest.mark.requires("01a")

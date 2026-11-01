@@ -55,7 +55,7 @@ const meta = {
     canvasNote: [
       'The signed answers, option 2: Allow and Deny, each a plain button when it has one answer or a menu button when it has two, Deny in the soft red fill.',
       'Deny always is offered only when an ask card held the request, never for a limit hold; Allow only for a verified person names them.',
-      'The board compares the earlier answer rows and three explorations; this sheet shows only the signed one, on the Rivera and Chen & Co. fixtures’ held requests, with Deny’s menu opened on the three-answer card.',
+      'The board compares the earlier answer rows and three explorations; this sheet shows only the signed one, on the Turner and Chen & Co. fixtures’ held requests, with Deny’s menu opened on the three-answer card.',
     ].join(' '),
   },
 } satisfies Meta;

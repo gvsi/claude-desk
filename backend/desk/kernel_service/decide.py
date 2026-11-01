@@ -31,7 +31,9 @@ its state and status line (`sign_decision`), and every later state change ledger
 (`set_state`). Expiry is lazy (`expire_if_due`). A call refused before it has a decision (that
 call ID or those args), or failed by anything but a refusal once its session is known (a
 `KernelRepo` refusal, a database error: 500 `internal`), still gets its `decide` entry, written
-after the transaction has rolled back.
+after the transaction has rolled back. Every new decision's `decide` entry, a refusal before any
+action included, names the rules version it was decided under and that version's money cap
+(`policy_version`, `auto_money_cap_cents`), unless the Desk has no active version.
 
 A call's free-text arguments are Claude's wording and untrusted (they may repeat what a visitor
 said, or not), and reach the decision only as data: the reviewer sees them under `untrusted_args`,
@@ -841,7 +843,8 @@ def _named(principal: Principal) -> Named:
 def _refused_call(status: int, code: str, reason: str, named: Named, req: DecideRequest) -> KernelFailure:
     """A call refused before it has a decision row: answered `status` `code`, and ledgered `decide`
     on the Desk of the session it named once the request's transaction has rolled back
-    (`KernelFailure.persist`), from kernel-built values only."""
+    (`KernelFailure.persist`), from kernel-built values only, naming the Desk's active version and
+    its money cap as every `decide` entry does (`_ledger_refused_call`)."""
     summary = {"outcome": "refuse", "tool": ledger.safe_ref(req.call.tool), "reason": reason}
     return KernelFailure(status, code, reason, persist=partial(
         _ledger_refused_call, copy_id=named.copy_id, desk_id=named.desk_id, session_id=named.session_id,
@@ -850,7 +853,14 @@ def _refused_call(status: int, code: str, reason: str, named: Named, req: Decide
 
 async def _ledger_refused_call(ctx: KernelCtx, *, copy_id: str, desk_id: str, session_id: str,
                                summary: dict[str, Any]) -> None:
+    """The refused call's entry, in the fresh transaction `KernelFailure.persist` runs in, with the
+    Desk's active version and its cap read there (left out when the Desk has none). The read takes
+    no lock, so it waits on nothing the lock order puts after the ledger head."""
     ctx.bind(copy_id)
+    version_row = await activation.active_version(ctx, desk_id)
+    if version_row is not None:
+        summary = {**summary, "policy_version": version_row.version,
+                   "auto_money_cap_cents": activation.version_cap(version_row)}
     await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
         kind="decide", origin="kernel", session_id=session_id, summary=summary))
 
@@ -1033,6 +1043,8 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         summary: dict[str, Any] = {"outcome": "refuse", "tool": ledger.safe_ref(call.req.call.tool), "reason": reason}
         if check is not None:
             summary["check"] = ledger.safe_ref(check)
+        if call.version_row is not None:      # the version it was refused under and its cap, as an allow's names
+            summary.update(policy_version=call.policy_version, auto_money_cap_cents=call.auto_money_cap_cents)
     else:
         summary = {"decision_id": row.decision_id, "action_id": action.action_id, "tool": action.tool,
                    "outcome": outcome, "card_ids": row.card_ids, "policy_version": row.policy_version,

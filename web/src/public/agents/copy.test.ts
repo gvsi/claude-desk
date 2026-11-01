@@ -1,6 +1,6 @@
 /**
  * The agents page's own words. The send panel states the built-in agent's spending limit as static
- * copy, never formatted from a number, so this test ties its amounts to the Rivera seed's mandate.
+ * copy, never formatted from a number, so this test ties its amounts to the Turner seed's mandate.
  */
 import { isValidElement, type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
@@ -42,8 +42,8 @@ describe('agents page copy', () => {
       expect(copy.limit.duration.trim(), language).not.toBe('');
       expect(copy.limit.source, language).toContain(mandate.on_behalf_of ?? '');
       // The lead names the business and who the agent visits for, and states no amount.
-      const lead = textOf(copy.sendLead('Rivera Plumbing'));
-      expect(lead, language).toContain('Rivera Plumbing');
+      const lead = textOf(copy.sendLead('Turner Plumbing'));
+      expect(lead, language).toContain('Turner Plumbing');
       expect(lead, language).toContain(mandate.on_behalf_of ?? '');
       expect(centsIn(lead), language).toEqual([]);
     }

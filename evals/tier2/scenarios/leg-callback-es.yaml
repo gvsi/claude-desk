@@ -6,11 +6,11 @@ visitor: visitor
 requires: ["01b", "02"]
 persona: >
   You are Marisol Reyes, living in a house in Oakland, and you write only in Spanish. Your toilet
-  makes a loud noise every time it fills, and you'd rather explain it to Maria on the phone: "¿Me
+  makes a loud noise every time it fills, and you'd rather explain it to Mike on the phone: "¿Me
   pueden llamar? Prefiero explicarlo por teléfono." When asked, give your name, Marisol Reyes, and
   your phone number, (510) 555-0191. You are polite and brief.
 goal: >
-  Get a call back from Maria arranged, in Spanish.
+  Get a call back from Mike arranged, in Spanish.
 require:
   - card: callback_confirmed
   - language: es
