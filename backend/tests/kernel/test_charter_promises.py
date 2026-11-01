@@ -1,5 +1,6 @@
 """Public policy text must pass the reply check's prose scan before a charter write."""
 
+import time
 from datetime import timedelta
 
 import pytest
@@ -574,3 +575,13 @@ async def test_honest_policy_passes_other_commitment_guard_on_all_routes(app, cl
     assert verdict.ok and verdict.violations == []
     assert [block.text for block in verdict.blocks] == [text]
     verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("unit", ["ZIP 94601. ", "Since 1998. ", "I-880. ", "Oakland 24/7. ", "20 miles. "])
+def test_a_long_service_area_is_scanned_in_one_pass(unit):
+    """Each digit's year, ZIP, road or 24/7 context is read near the digit, not from the start of
+    the text, so a long service area, read on every public page view, costs one pass."""
+    text = unit * (32_000 // len(unit))     # four times the charter cap: a quadratic scan takes seconds here
+    started = time.process_time()
+    assert reply_check.scan_public_text(text, policy_key="policy:service_area") == []
+    assert time.process_time() - started < 1

@@ -574,6 +574,11 @@ SERVICE_AREA_POSTAL_PREFIX = re.compile(
     r"\s+(?:[0-9]{5}\s*[-–—]\s*)?$")
 SERVICE_AREA_ROAD_PREFIX = re.compile(r"\b(?:I-\s*|(?:Highway|Hwy)\s+)$", re.IGNORECASE)
 SERVICE_AREA_ALWAYS = re.compile(r"\b24/7\b")
+SERVICE_AREA_PREFIX_REACH = 40   # a year, ZIP or road marker sits right before its number: read only that far back
+
+
+def _service_area_prefix(pattern: re.Pattern[str], text: str, start: int) -> bool:
+    return pattern.search(text, max(0, start - SERVICE_AREA_PREFIX_REACH), start) is not None
 
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
@@ -589,12 +594,13 @@ def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, 
     hit = text[start:end]
     if rule == "digit":
         return ((SERVICE_AREA_YEAR.fullmatch(hit) is not None
-                 and SERVICE_AREA_YEAR_PREFIX.search(text[:start]) is not None)
+                 and _service_area_prefix(SERVICE_AREA_YEAR_PREFIX, text, start))
                 or SERVICE_AREA_AFTER_DIGITS.match(text, end) is not None
                 or (re.fullmatch(r"[0-9]{5}", hit) is not None
-                    and SERVICE_AREA_POSTAL_PREFIX.search(text[:start]) is not None)
-                or (hit.isascii() and hit.isdigit() and SERVICE_AREA_ROAD_PREFIX.search(text[:start]) is not None)
-                or any(match.start() <= start and end <= match.end() for match in SERVICE_AREA_ALWAYS.finditer(text)))
+                    and _service_area_prefix(SERVICE_AREA_POSTAL_PREFIX, text, start))
+                or (hit.isascii() and hit.isdigit() and _service_area_prefix(SERVICE_AREA_ROAD_PREFIX, text, start))
+                or any(match.start() <= start and end <= match.end()
+                       for match in SERVICE_AREA_ALWAYS.finditer(text, max(0, start - 4), end + 4)))
     if rule in ("lex.en.number", "lex.es.number"):
         return (SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
                 or (SERVICE_AREA_HALF_OR_HUNDRED.fullmatch(hit) is not None
@@ -602,7 +608,7 @@ def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, 
     if rule in ("lex.en.date", "lex.es.date"):
         return (SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
                 or (hit.casefold() in {"mañana", "manana"}
-                    and SERVICE_AREA_MORNING.search(text[:start]) is not None))
+                    and _service_area_prefix(SERVICE_AREA_MORNING, text, start)))
     return False
 
 
