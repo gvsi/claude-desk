@@ -2563,7 +2563,7 @@ def test_public_text_allows_only_explicit_owner_words_with_case_width_and_accent
 
 @pytest.mark.parametrize("phrase", ["We offer free consultations. ", "You are free to all clients. "])
 def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phrase):
-    from time import perf_counter
+    from time import process_time   # CPU time: the scan is pure computation, and wall time varies with load
 
     # Forty policies totaling exactly 8,000 characters, with many ordinary lexical hits.
     values = {f"policy:{index:02d}": (phrase * 8)[:200] for index in range(40)}
@@ -2575,9 +2575,9 @@ def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phr
         return scan(text, *args, **kwargs)
 
     monkeypatch.setattr(reply_check, "_prose_hits", counted)
-    start = perf_counter()
+    start = process_time()
     assert reply_check.scan_public_policies(values) == {key: ["lex.en.promise"] for key in values}
-    elapsed = perf_counter() - start
+    elapsed = process_time() - start
     assert len(scanned_lengths) == 41  # one per value and one combined, no growing-prefix scans
     assert elapsed < 0.75
 
