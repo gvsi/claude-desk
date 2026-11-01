@@ -6,10 +6,11 @@ and runs only on the kernel's allow, through `/execute`; a hold returns at once.
 once, as the kernel signed it (`Status`, through `deliver()`), and an execution's Demo inbox notices meant for it (a
 code sent), code-free; a decision's own notices are owner alerts and never reach it. `send_reply` goes to
 `/check_reply`, and only the kernel's checked blocks reach the visitor, through `deliver()`. A
-check is `final` (`CheckReplyRequest.final`) unless it is a first attempt the turn could still rewrite: the kernel
-opens the owner's handoff for a blocked final check, and the API shows that check's handoff at once, so what the
-kernel opens is what the session sees. The kinds a rewrite fixes are `desk.rewrites.REWRITABLE`, which the kernel
-reads too.
+check is `final` (`CheckReplyRequest.final`) unless it is a first attempt the turn could still rewrite. A blocked
+final check shows the checked cards when only the prose failed (with Claude's drafted handoff clause after them,
+when it drafted one), else the handoff clause; the kernel opens the owner's handoff whenever the shown blocks include
+that clause, and the API shows the verdict's blocks at once, so what the kernel opens is what the session sees. The
+kinds a rewrite fixes are `desk.rewrites.REWRITABLE`, which the kernel reads too.
 
 Failures fail closed ("Fail-closed behavior"): nothing is decided twice (a lost `/decide` answer is found by call
 ID, a lost `/execute` answer by polling the decision), an `/execute` answered 409 `conflict` (the kernel has no
