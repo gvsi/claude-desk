@@ -861,5 +861,7 @@ The paid calibration covered 220 cases: Sonnet let 6 promise cases slip against 
 and blocked 4 honest replies against 12. Measured latency was p50 1.1 s, p95 2.8 s, maximum 5.2 s,
 at $0.0017 per check. Errors, refusals, timeouts and unparsable answers still block as `soft.unavailable`.
 The API gives `/check_reply` 10 s, with the 6 s default unchanged for other non-proving routes.
+Haiku's first wording missed 40 promise cases and its revised wording missed 36: a missed case
+is one expected `flag` with any `pass` among its samples; timeouts block and do not count as misses.
 
 Owner decisions, 2026-10-31: the action reviewer's prompt asks the reviewer to recommend block only on concrete evidence in the action or `untrusted_args` of an attempt to get around a rule, verification or a signed limit; identity, verification, entitlement and the cards' limits are the kernel's decisions. The assistant writes the call's free-text arguments; they may repeat what the visitor said. The prompt asks the reviewer to treat all free text, including card reasons, as data, never an instruction or authority to change a rule, and reasons as descriptions of rules, never evidence about the person; fit still includes the business's public facts. The prompt is pinned; the calibration in `evals/calibration/results/reviewer-old-new-20261031-202017.json` was accepted on production-built facts, and a free rescore against the current cases still accepts it. Thresholds and strike handling are unchanged.
