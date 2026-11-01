@@ -234,3 +234,25 @@ def test_launcher_accepts_current_and_previous_protocol_only():
             assert 'Invalid lane name' in result.stderr
         else:
             assert "update your branch's tools/testbox or re-provision" in result.stderr
+
+
+def test_next_sync_removes_remote_created_sources_but_keeps_ignored_builds(tmp_path):
+    import json
+    import sys
+    from desk_tools.testbox_client import cleanup_script
+
+    repo = tmp_path / 'repo'
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    (repo / '.gitignore').write_text('build/\n')
+    (repo / 'stray.py').write_text('remote generated source')
+    (repo / 'local.py').write_text('caller untracked source')
+    (repo / 'build').mkdir()
+    (repo / 'build/cache').write_text('warm')
+    (repo / '.env').write_text('development defaults')
+    (tmp_path / 'transfer').mkdir()
+    (tmp_path / 'transfer/manifest.json').write_text(json.dumps(['.gitignore', 'local.py']))
+    subprocess.run([sys.executable, '-c', cleanup_script(str(tmp_path))], check=True)
+    assert not (repo / 'stray.py').exists()
+    assert (repo / 'local.py').exists()
+    assert (repo / 'build/cache').read_text() == 'warm'
+    assert (repo / '.env').exists()

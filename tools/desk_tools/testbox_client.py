@@ -4,6 +4,7 @@ import base64
 import fcntl
 import hashlib
 import json
+import inspect
 import os
 import re
 from pathlib import Path
@@ -16,7 +17,7 @@ import sys
 import tempfile
 import time
 
-from desk_tools.testbox import Timings, lane_name, selected_files
+from desk_tools.testbox import RESERVED, Timings, lane_name, selected_files
 
 
 PROTOCOL_VERSION = 2
@@ -37,9 +38,11 @@ def capture(cmd, **kwargs):
 
 
 def cleanup_script(base: str) -> str:
-    # Prune only formerly synced sources and now-empty parents. Build directories survive.
-    return """import json
-from pathlib import Path
+    # Reconcile selected nonignored sources; ignored build directories survive.
+    return """import json, subprocess
+from pathlib import Path, PurePosixPath
+RESERVED = RESERVED_VALUE
+SELECTED_FUNCTION
 base = Path(BASE)
 repo = (base / 'repo').resolve()
 previous = json.loads((base / 'manifest.json').read_text()) if (base / 'manifest.json').exists() else []
@@ -52,7 +55,10 @@ def remember(paths):
     temporary.replace(pending)
 # Remember everything before pruning: interruption during cleanup is recoverable too.
 remember(previous | current)
-for name in previous - current:
+untracked = subprocess.run(['git', '-C', str(repo), 'ls-files', '-z', '--others', '--exclude-standard'],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+strays = set(selected_files(untracked.stdout.decode().split('\\0'))) if untracked.returncode == 0 else set()
+for name in (previous | strays) - current:
     relative = Path(name)
     if relative.is_absolute() or '..' in relative.parts:
         continue
@@ -70,7 +76,7 @@ for name in previous - current:
             break
         parent = parent.parent
 remember(current)
-""".replace('BASE', repr(base))
+""".replace('BASE', repr(base)).replace('RESERVED_VALUE', repr(RESERVED)).replace('SELECTED_FUNCTION', inspect.getsource(selected_files))
 
 
 def source_files(root: Path) -> list[str]:
