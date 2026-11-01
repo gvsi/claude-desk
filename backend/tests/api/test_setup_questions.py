@@ -137,13 +137,14 @@ async def consent(owner: Owner, interview_id: str, allow: bool, model: ScriptedM
 
 
 async def landed(owner: Owner, interview_id: str, *, cards: bool = False) -> dict:
-    """The interview once its running turn has landed (polling its state, as the web falls back to) and released the
-    interview, so the next turn isn't refused as one still running."""
-    path = f"/api/owner/setup/{interview_id}?cards={int(cards)}"
+    """The interview once its running turn has ended, as the web learns it: the turn's events stream ends with its
+    `done` (or `error`), or with a `done` at once when no turn is running, and then the state is read."""
+    path = f"/api/owner/setup/{interview_id}"
     async with asyncio.timeout(5):
-        while (state := (await owner.browser.get(path)).json())["busy"] or interview_id in desk_setup._RUNNING:
-            await asyncio.sleep(0.01)
-    return state
+        ended = await owner.browser.get(path + "/events")
+    assert ended.status_code == 200 and ended.text.replace("\r\n", "\n").split("\n\n")[-2].startswith(
+        ("event: done", "event: error")), ended.text
+    return (await owner.browser.get(f"{path}?cards={int(cards)}")).json()
 
 
 def _empty(annotation: object) -> object:

@@ -1428,7 +1428,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     acquisition through the final commit.
     `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
     is logged by type only and returns the landed state. Shutdown cancellation after commit propagates without
-    rolling back the turn.
+    rolling back the turn. The owner's display gets `done` once a committed turn has also run `after`, closed its
+    connections and released the guard; an error is sent after the rollback.
     """
     interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
@@ -1474,7 +1475,6 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                         interview.transcript = [entry for entry in interview.transcript if entry.pending != run_id]
                     await _commit(engine, ctx, interview, busy)
                     committed = True
-                    display.finish("done", {"run": run_id})
                 if after is not None:
                     try:
                         async with asyncio.timeout(TURN_AFTER_TIMEOUT_S):
@@ -1502,6 +1502,10 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
         finally:
             guard.close()
             busy_stored.set()                 # a failed busy commit wakes the request to receive its error
+            if committed:
+                # Only now is the turn's work done and the interview free: a refetch reads the final state, and
+                # the next answer is taken.
+                display.finish("done", {"run": run_id})
 
     try:
         await admit()

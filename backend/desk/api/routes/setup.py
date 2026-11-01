@@ -121,7 +121,8 @@ async def setup_interview(interview_id: InterviewId, request: Request,
             responses={200: {"content": {"text/event-stream": {}}}, **error_responses(401, 404, 422, 503)})
 async def setup_events(interview_id: InterviewId, request: Request,
                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> EventSourceResponse:
-    """One owner turn's whole reply so far, then done after its saved state or error after rollback.
+    """One owner turn's whole reply so far, then done once its state is saved and the interview takes the next turn,
+    or error after rollback.
 
     No running turn sends done with run null immediately. Choices, cards and plans are read only
     from the existing state route. Authentication and interview scoping finish before SSE starts.

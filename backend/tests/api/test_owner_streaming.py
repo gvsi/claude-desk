@@ -682,3 +682,86 @@ async def test_malformed_json_keys_do_not_bypass_the_existing_validation_retry()
     with displaying(Display()):
         answer = await setup.ask_model(fake, record, "test", [], RuleChat, max_tokens=8192, route="rules_chat")
     assert answer == valid and len(fake.requests) == 2
+
+
+async def test_an_answer_sent_the_moment_done_arrives_is_taken(app, browser, kernel_http, model, monkeypatch):
+    """A client that refetches and answers as soon as `done` arrives isn't refused for racing the turn's cleanup."""
+    from tests.api.test_setup_questions import answer as answering
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    detached = setup.detached
+
+    @contextlib.asynccontextmanager
+    async def slow_cleanup(*args):
+        async with detached(*args) as ctx:
+            yield ctx
+        await asyncio.sleep(0.2)                    # the turn's cleanup outlasts its final commit
+
+    monkeypatch.setattr(setup, "detached", slow_cleanup)
+    raw, pieces = opening()
+    gates = [asyncio.Event() for _ in pieces]
+    model.add(streaming(raw, pieces, gates))
+    live = None
+    try:
+        assert (await owner.browser.post(path + "/consent", json={"allow": False})).status_code == 202
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        name, data = await live.next()
+        assert name == "delta"
+        for gate in gates:
+            gate.set()
+        while (frame := await live.next())[0] == "delta":
+            pass
+        assert frame == ("done", {"run": data["run"]})
+        reply = await answering(owner, model, interview_id, "We fix leaks and blocked drains.")
+        assert reply.status_code in (200, 202), reply.text
+    finally:
+        for gate in gates:
+            gate.set()
+        if live is not None:
+            await live.close()
+        await app.state.runtime.turn_runs.wait(interview_id)
+
+
+async def test_done_comes_after_a_slow_after_hook(app, browser, kernel_http, model, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    after_entered, after_release = asyncio.Event(), asyncio.Event()
+
+    async def turn(ctx, interview, staged):
+        interview.transcript.append(setup.Entry(role="claude", text="Committed turn"))
+
+    async def after(ctx, interview):
+        after_entered.set()
+        await after_release.wait()
+
+    async def custom(ctx, engine, model, interview_id, allow, **kwargs):
+        kwargs.pop("cards", None)
+        kwargs.pop("business_tools_enabled", None)
+        return await setup.run_turn(ctx, engine, model, interview_id, **kwargs, check=lambda interview: None,
+                                    stage=lambda interview: [setup.Entry(role="owner", text="")], turn=turn,
+                                    keep_staged=False, after=after)
+
+    monkeypatch.setattr(setup, "consent", custom)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    live = None
+    try:
+        assert (await owner.browser.post(path + "/consent", json={"allow": False})).status_code == 202
+        await asyncio.wait_for(after_entered.wait(), 5)
+        assert (await owner.browser.get(path)).json()["messages"][-1]["text"] == "Committed turn"
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        with pytest.raises(TimeoutError):          # saved, but the after hook still holds the interview
+            await asyncio.wait_for(live.next(), 0.2)
+        after_release.set()
+        name, data = await live.next()
+        assert name == "done" and isinstance(data["run"], str) and data["run"]
+        assert interview_id not in setup._RUNNING
+    finally:
+        after_release.set()
+        if live is not None:
+            await live.close()
+        await app.state.runtime.turn_runs.wait(interview_id)

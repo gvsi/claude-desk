@@ -2815,7 +2815,7 @@
     "/api/owner/setup/{id}/events": {
       "get": {
         "summary": "Setup Events",
-        "description": "One owner turn's whole reply so far, then done after its saved state or error after rollback.\n\nNo running turn sends done with run null immediately. Choices, cards and plans are read only\nfrom the existing state route. Authentication and interview scoping finish before SSE starts.",
+        "description": "One owner turn's whole reply so far, then done once its state is saved and the interview takes the next turn,\nor error after rollback.\n\nNo running turn sends done with run null immediately. Choices, cards and plans are read only\nfrom the existing state route. Authentication and interview scoping finish before SSE starts.",
         "operationId": "owner_setup_events",
         "parameters": [
           {
