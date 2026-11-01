@@ -33,10 +33,12 @@ import type {
   ToolConfirmEntry,
   ToolConfirmedOut,
   ToolReviewReason,
+  ToolRow,
   TranscriptItem,
   TranscriptKind,
 } from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
 import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -79,6 +81,11 @@ export const TYPING_EVERY_MS = 2_000;
 
 export interface SessionRecord {
   state: SessionState;
+  /**
+   * The visitor's chat has ended for good (a seeded scenario: its document waits for the owner
+   * after the chat closed). The visitor's routes no longer find it; the owner's history still does.
+   */
+  ended: boolean;
   deskId: string;
   ownerPreview: boolean;
   /** The verified person on record, once the visitor confirmed it's them; null until then. */
@@ -107,7 +114,7 @@ export interface SessionRecord {
  * it does), which the contract types don't have yet. Every record carries the reason, so the profile
  * a tool confirm answers with always has it.
  */
-export type ToolRecord = ToolProfile & { review_reason: ToolReviewReason | null };
+export type ToolRecord = Omit<ToolProfile, 'tool' | 'source'> & Pick<ToolRow, 'tool' | 'source' | 'business'> & { review_reason: ToolReviewReason | null };
 
 export interface DeskRecord {
   /** The Desk as the copy lists it, but its setup, which is its interview's (`withSetupDesks`). */
@@ -155,7 +162,7 @@ export type ToolConfirmRefusal = 'not_found' | 'conflict';
  * at the draft's confirm (the master plan's `/tools/confirm` and `/policy/confirm`): a changed
  * definition's pending hash while it waits for review, else the pinned one.
  */
-function listedHash(tool: ToolProfile): string | null {
+function listedHash(tool: Pick<ToolProfile, 'pending_sha256' | 'definition_sha256'>): string | null {
   return tool.pending_sha256 != null && tool.pending_sha256 !== '' ? tool.pending_sha256 : (tool.definition_sha256 ?? null);
 }
 
@@ -185,6 +192,8 @@ export function canonicalCard(card: RuleCard): string {
 
 export interface DecisionRecord {
   decision: Decision;
+  /** The signed approval snapshot, kept separately from the execution outcome. */
+  approved?: Decision | null;
   deskId: string;
   createdAt: number;
   fromTheVisitor: string | null;
@@ -264,7 +273,7 @@ export class MockWorld {
    * The Desks deleted from this copy, by id. Their chats, decisions and callback requests stay in
    * the copy, closed: the routes that name one answer 409 `closed` (served.ts), as the kernel does.
    */
-  readonly deletedDesks = new Set<string>();
+  readonly deletedDesks = new Map<string, DeskRecord>();
   /** Each session's open demo code, by session id: the code and who it confirms. Spent once it works. */
   readonly challenges = new Map<string, { code: string; person: { personId: string; name: string } }>();
   private counter = 0;
@@ -355,7 +364,7 @@ export class MockWorld {
     }
     const index = this.desks.indexOf(desk);
     if (index !== -1) this.desks.splice(index, 1);
-    this.deletedDesks.add(desk.summary.desk_id);
+    this.deletedDesks.set(desk.summary.desk_id, desk);
   }
 
   /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */
@@ -364,6 +373,7 @@ export class MockWorld {
     const kind = opts.agent === undefined ? 'visitor' : 'agent';
     const session: SessionRecord = {
       state: { session_id: sessionId, kind, verified: false, assurance: 'none', mode: 'ai', generation: 1 },
+      ended: false,
       deskId: desk.summary.desk_id,
       ownerPreview: opts.ownerPreview ?? false,
       person: null,
@@ -686,13 +696,27 @@ export class MockWorld {
   /**
    * The owner's answer, as the kernel records it: the approval, with the summary `approvals.py`
    * writes as it takes an answer (the decision, its action, the answer, and `approved` or `denied`),
-   * and the run when it allows.
+   * and the run when it allows. Keep the approval snapshot separate from the run's outcome.
    */
   answer(record: DecisionRecord, answer: ApprovalAnswer): Decision {
     const desk = this.desk(record.deskId);
     const session = this.sessions.get(record.decision.session_id);
     if (!desk || !session) throw new Error(`decision ${record.decision.decision_id} has no Desk or session`);
     const { decision_id: decisionId, session_id: sessionId } = record.decision;
+    // Recheck before writing an approval: a refusal is one approval entry, with no execution.
+    const action = record.decision.action;
+    if (allows(answer) && session.ended && action?.effects.includes('private_data')) {
+      return this.refuseAnswer(record, answer, desk, 'session_ended', 'session_closed', 'Not shared: their session ended before your answer');
+    }
+    const rulesRefuse = action != null && rulesForTool(action, desk.policy.cards).some((card) => card.mode === 'never' && (
+      card.who === 'anyone' ||
+      (card.who === 'verified' && session.state.verified) ||
+      (card.who === 'person' && session.person?.personId === card.person_id) ||
+      (card.who === 'record_owner' && session.person != null && session.person.personId === action.resource.owner_person_id)
+    ));
+    if (allows(answer) && rulesRefuse) {
+      return this.refuseAnswer(record, answer, desk, 'rules_changed', 'policy', "Your rules changed before this ran, so it wasn't done.");
+    }
     const approval = this.appendLedger(desk, {
       kind: 'approval',
       origin: 'kernel',
@@ -705,22 +729,31 @@ export class MockWorld {
         state: allows(answer) ? 'approved' : 'denied',
       },
     });
+    record.approved = allows(answer) ? {
+      ...record.decision,
+      state: 'approved',
+      visitor_plain: VISITOR_PLAIN[session.language].approved,
+      inbox: [],
+      ledger_seq: approval.seq,
+      signature: sign(`${decisionId}:approved`),
+    } : null;
     let state: DecisionState = 'denied';
     let ledgerSeq = approval.seq;
     if (allows(answer)) {
+      state = 'executed';
       const ran = this.appendLedger(desk, {
         kind: 'execute',
         origin: 'kernel',
         session_id: sessionId,
         ref_id: decisionId,
-        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state: 'executed' },
+        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state },
       });
-      state = 'executed';
       ledgerSeq = ran.seq;
     }
     record.decision = {
       ...record.decision,
       state,
+      owner_plain: null,
       visitor_plain: statusLine(session.language, state, record.decision.action?.tool ?? null),
       inbox: [],
       ledger_seq: ledgerSeq,
@@ -729,19 +762,41 @@ export class MockWorld {
     return record.decision;
   }
 
+  private refuseAnswer(record: DecisionRecord, answer: ApprovalAnswer, desk: DeskRecord, reason: string, check: string, ownerPlain: string): Decision {
+    const decision = record.decision;
+    const entry = this.appendLedger(desk, {
+      kind: 'approval', origin: 'kernel', session_id: decision.session_id, ref_id: decision.decision_id,
+      summary: { decision_id: decision.decision_id, action_id: decision.action?.action_id ?? null,
+        answer, state: 'refused_at_execution', reason, check },
+    });
+    record.decision = { ...decision, state: 'refused_at_execution', owner_plain: ownerPlain,
+      visitor_plain: statusLine(this.sessions.get(decision.session_id)?.language ?? 'en', 'refused_at_execution', decision.action?.tool ?? null),
+      inbox: [], ledger_seq: entry.seq, signature: sign(`${decision.decision_id}:refused_at_execution`) };
+    return record.decision;
+  }
+
   /**
    * The owner's answer to a held request of a deleted Desk, as the kernel takes it: an allow is
    * re-checked at execution and refused there (`refused_at_execution`), so nothing runs, and a deny
-   * is `denied`. The Desk's chat is closed, so it hears nothing, and its ledger went with the Desk.
+   * is `denied`. The Desk's chat is closed, so it hears nothing. Its retained ledger records the answer.
    */
   answerClosed(record: DecisionRecord, answer: ApprovalAnswer): Decision {
+    const desk = this.deletedDesks.get(record.deskId);
+    if (!desk) throw new Error('the decision has no deleted Desk');
+    if (allows(answer)) return this.refuseAnswer(record, answer, desk, 'rules_changed', 'desk', "This Desk was deleted before this ran, so it wasn't done.");
     const state: DecisionState = allows(answer) ? 'refused_at_execution' : 'denied';
     const language = this.sessions.get(record.decision.session_id)?.language ?? 'en';
+    const entry = this.appendLedger(desk, {
+      kind: 'approval', origin: 'kernel', session_id: record.decision.session_id, ref_id: record.decision.decision_id,
+      summary: { decision_id: record.decision.decision_id, action_id: record.decision.action?.action_id ?? null, answer, state },
+    });
     record.decision = {
       ...record.decision,
       state,
+      owner_plain: null,
       visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null),
       inbox: [],
+      ledger_seq: entry.seq,
       signature: sign(`${record.decision.decision_id}:${state}`),
     };
     return record.decision;
@@ -891,7 +946,7 @@ export class MockWorld {
       ref_id: token,
       summary: { state: 'cancelled', by },
     });
-    if (by === 'rules_changed') this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language)]);
+    if (by === 'rules_changed' && !session.ended) this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language, `payment_link:${token}`)]);
   }
 
   /**
@@ -1230,6 +1285,28 @@ export class MockWorld {
       ref_id: String(version),
       summary: { version, parent_version: record.parent },
     });
+    // A never rule or a deciding ask rule revokes auto-allowed links in the scopes this mock models.
+    // The script issues only auto-allowed links: it has no owner-approved link provenance or
+    // full kernel rule evaluator (limits, hours, reviewer conditions and other principal scopes).
+    const linkRules = rulesForTool({ tool: 'native.payment_link', effects: ['charge'] }, desk.policy.cards);
+    // Match rulesForTool's ordering: personal tool, personal effect, group tool, group effect.
+    const specificity = (card: RuleCard) => (card.who === 'person' || card.who === 'agent' ? 0 : 2)
+      + (card.applies_to.startsWith('effect:') ? 1 : 0);
+    for (const [token, link] of this.links) {
+      if (link.deskId !== desk.summary.desk_id || link.view.state !== 'issued') continue;
+      const session = this.sessions.get(link.sessionId);
+      if (!session) continue;
+      const applicable = linkRules.filter((card) => (
+        card.who === 'anyone' ||
+        (card.who === 'verified' && session.state.verified) ||
+        (card.who === 'person' && session.person?.personId === card.person_id)
+      ));
+      const mostSpecific = applicable[0];
+      // Never always wins; otherwise only the most specific cards decide, with ask winning ties.
+      if (applicable.some((card) => card.mode === 'never') || (mostSpecific && applicable.some(
+        (card) => card.mode === 'ask' && specificity(card) === specificity(mostSpecific),
+      ))) this.cancelLink(token, link, 'rules_changed');
+    }
     return { ...desk.policy, cards: desk.policy.cards.map((card) => ({ ...card })) };
   }
 

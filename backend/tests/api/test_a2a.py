@@ -34,6 +34,7 @@ from desk.api.store import Ids
 from desk.contracts import AgentAuth, DemoAgentIssued, ReplyDraft
 from desk.kernel_api import CheckReplyRequest, CreateCopyRequest, DemoAgentRequest
 from tests.api.fakes import ScriptedModel, gated, response, tool_use
+from tests.api.notes import conversation_notes
 from tests.api.test_approvals import jobs_done, resolved
 from tests.api.test_public_chat import DISCOUNTED_QUOTE, reply
 from tests.api.test_secrets_at_rest import at_rest
@@ -493,6 +494,47 @@ async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, k
     last = await agent.send("Thanks")
     assert last.json()["receipts"] == [] and [block["text"] for block in last.json()["blocks"]] == [
         "Anything else I can help with?"]
+
+
+async def test_agent_never_receives_the_owner_refusal_reason(app, browser, fake, kernel_http, model, engine,
+                                                            jobs_connector):
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
+    assert (await agent.send("Can I get a discount on a drain clearing?")).status_code == 200
+    (held,) = [record.decision for record in fake.decisions.values()
+               if record.decision.session_id == agent.session_id]
+    fake.never(fake.sessions[agent.session_id].desk_id, "native.quote")
+    owner = browser(app, ip="198.51.100.30")
+    owner.cookies.set("desk_owner", agent.owner_token, domain="desk.test", path="/api/owner")
+    answered = await owner.post(f"/api/owner/approvals/{held.decision_id}/answer", json={"answer": "allow_once"})
+    assert answered.status_code == 200
+    owner_line = answered.json()["decision"]["owner_plain"]
+    assert owner_line and answered.json()["decision"]["state"] == "refused_at_execution"
+    await resolved(engine, agent.session_id)
+    queued = await jobs_done(jobs_connector)
+
+    # A fresh signed credential reads the same final decision without the owner's field.
+    sent = agent.sign(agent.body("Any news?"))
+    view = kernel_http.agent(AgentAuth(agent_key_id=agent.issued.agent_key_id, ts=sent.headers["X-Agent-Ts"],
+                                      nonce=sent.headers["X-Agent-Nonce"], sig=sent.headers["X-Agent-Sig"]),
+                            hashlib.sha256(sent.raw).hexdigest())
+    read = await view.call("GET /decisions/{id}", path={"id": held.decision_id})
+    assert read.owner_plain is None and owner_line not in read.model_dump_json()
+    model.add(say("That request couldn't go ahead. Can I help with something else?"))
+    later = await agent.post(sent)
+    assert later.status_code == 200, later.text
+    assert later.json()["receipts"][0]["state"] == "refused_at_execution"
+    assert (await agent.post(sent)).json() == later.json()       # the stored A2A answer is safe on replay too
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT row_to_json(m)::text FROM app.messages m WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(e)::text FROM app.run_events e WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(a)::text FROM app.a2a_turns a WHERE session_id = :s"),
+            {"s": agent.session_id})).scalars().all()
+    for serialized in (later.text, json.dumps(rows), json.dumps([job["args"] for job in queued]),
+                       json.dumps(model.requests[-1].messages)):
+        assert owner_line not in serialized
+        assert "owner_plain" not in serialized
 
 
 async def test_agent_gets_a_pending_decisions_final_state_on_its_next_request(app, browser, fake, kernel_http, model,
@@ -1035,7 +1077,8 @@ async def test_an_agents_verified_note_is_written_once(app, browser, fake, kerne
     # The kernel verifies the session, then the note can't be written: the request answers 500, and nothing is noted.
     with notes_fail(monkeypatch):
         disclosed_error(await agent.send("Here is the code", verify_code=code), 500, "internal")
-    assert fake.sessions[agent.session_id].verified and await messages(engine, agent.session_id, "note") == []
+    assert fake.sessions[agent.session_id].verified and await conversation_notes(
+        engine, agent.session_id, "text", "wake") == []
 
     # Sent again under a new nonce, the kernel answers that the session is verified: the note is written now, and
     # Claude reads it. Once noted, it isn't again.
@@ -1043,7 +1086,7 @@ async def test_an_agents_verified_note_is_written_once(app, browser, fake, kerne
     assert (await agent.send("Here is the code", verify_code=code)).status_code == 200
     assert "The visitor verified as the contact on record." in model_text(model.requests[-1])
     assert (await agent.send("Here it is again", verify_code=code)).status_code == 200
-    assert await messages(engine, agent.session_id, "note") == [
+    assert await conversation_notes(engine, agent.session_id, "text", "wake") == [
         ("The visitor verified as the contact on record.", True)]
 
 

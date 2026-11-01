@@ -20,6 +20,9 @@
   - "Chat with {name}" and, under it, the AI disclosure. It can't be turned off:
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {ownerName} cuando quieras."
+
+    When `{name}` already ends in '.', '!' or '?', the period after it is left out (`afterName`), so 'Chen & Co.' reads 'Chen & Co. Ask for …'.
+
   - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
   - **While the owner is in the chat** (`ownerInChat`, take-over option A, N-R2-TakeOver-A-1512-EN and N-R2-TakeOver-A-390-EN), the disclosure's line says so instead, in the same element, type and place, and "Ask for {ownerName}" isn't shown:
     - "{ownerName} is in this chat. Claude, an AI, is paused until {ownerName} hands it back."
@@ -133,7 +136,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
   - `ink` and `inkSecondary` are `var(--text-primary)` and `var(--text-secondary)`.
   - The mapping keeps both inks at 4.5:1 over the field, falling back to `bg-panel` when they can't.
 - `ownerName` (`owner_display_name`), `language`, `onAskForOwner`.
-- `ownerInChat`, whether the owner is in the chat. Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens or reloads, kept current by the stream's `owner_joined` and `owner_left` (the events the page also draws as the joined and "Claude is helping again." lines). The line tells the visitor a person is in the chat, so it is never set from anything else. The web app is to set it this way; it doesn't yet. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
+- `ownerInChat`, whether the owner is in the chat. Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens or reloads, kept current by the stream's `owner_joined` and `owner_left` (the events the page also draws as the joined and "Claude is helping again." lines). The line tells the visitor a person is in the chat, so it is never set from anything else. `PublicChat` passes `chat.ownerInChat` from `PublicChatProvider`, which derives it through `ownerInChatNow`. The flag is false while the stream is disconnected or catching up, or the session mode is not confirmed. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, pinned at the bottom, and `children`, the conversation, in the scroll region. Whatever the page adds after the conversation (notices, the element it keeps above the composer) goes in `children` too.
@@ -149,7 +152,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
-| `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. The web app is to set it so; it doesn't yet. `false` by default. |
+| `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. `PublicChat` passes `chat.ownerInChat`, derived by `PublicChatProvider` through `ownerInChatNow`; it is false while the stream is disconnected or catching up, or the mode is not confirmed. `false` by default. |
 | `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |

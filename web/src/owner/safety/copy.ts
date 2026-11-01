@@ -31,6 +31,7 @@ export const LEDGER_KIND_COPY = {
   agent_auth: 'Agent signature',
   head_checkpoint: 'Record checkpoint',
   desk_data: 'Desk details changed',
+  web_search: 'Web search',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**
@@ -42,14 +43,14 @@ export const ORIGIN_COPY = {
   api: 'Reported by the chat service, not checked by the checkpoint',
 } as const satisfies Record<LedgerEvent['origin'], string>;
 
-/** What an attempt was about, by its triage category. Two categories share "Money". */
+/** Each checkpoint event's subject, in the owner's words and order, with one filter per category. */
 export const CATEGORY_COPY = {
-  impersonation: 'Posing as you',
-  discount_push: 'Money',
-  over_limit: 'Money',
-  private_data: 'Private data',
-  code_redirect: 'Codes',
-  injection: 'Hidden instructions',
+  prices: 'Prices and discounts',
+  records: "Someone's records",
+  codes: 'Verification codes',
+  instructions: 'Instructions in a message',
+  limits: 'Above a limit',
+  wording: "The AI's wording",
   other: 'Other',
 } as const satisfies Record<TriageCategory, string>;
 
@@ -95,8 +96,8 @@ export function causeLabel(a: Pick<Attempt, 'kind' | 'cause'>): string | null {
 /** An attempt Claude hasn't sorted into a category yet. */
 export const NOT_SORTED = 'Not sorted yet';
 
-/** Each category's words once, in `CATEGORY_COPY`'s order: one filter each. */
-export const CATEGORY_LABELS: readonly string[] = [...new Set(Object.values(CATEGORY_COPY))];
+/** Each category's words in `CATEGORY_COPY`'s order: one filter each. */
+export const CATEGORY_LABELS: readonly string[] = Object.values(CATEGORY_COPY);
 
 /** An entry replayed from the recorded history into this copy. */
 export const REPLAYED_LABEL = 'Recorded history, replayed into your copy';

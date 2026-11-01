@@ -8,6 +8,7 @@ import { PRESET_WORDS } from '../components/OutcomeMenu/outcomeWords.ts';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { PresetMenu } from '../components/PresetMenu/PresetMenu.tsx';
 import { RecentRequests } from '../components/RecentRequests/RecentRequests.tsx';
+import { TextLink } from '../components/TextLink/TextLink.tsx';
 import { ToolPageHeader } from '../components/ToolPageHeader/ToolPageHeader.tsx';
 import { ToolRulesCard } from '../components/ToolRulesCard/ToolRulesCard.tsx';
 import { rivera } from '../fixtures/index.ts';
@@ -29,7 +30,7 @@ import { CONNECTORS_SPEC, SPEC, expectFooter, expectOwnerFrame, expectRulesPage,
 const COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
 
 /** The Rules page's suggestions on Rivera Plumbing's Desk, as the presets board words them. */
-const RIVERA_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600', 'Why was Dana’s refund held?'];
+const RIVERA_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600', 'Why was this quote held?'];
 
 /** Rivera Plumbing's Rules page: its six built-in connectors and Stripe. */
 const RIVERA_HUB: RulesHub = { summary: 'Version 7 of your rules, checked against the always-on rules', sections: rivera.connectors.sections };
@@ -65,6 +66,18 @@ function limit(editing = false) {
   );
 }
 
+/** The Rules header's two actions, in the same order and type as the app. */
+function headerActions() {
+  return (
+    <>
+      <span className="cd-type-control">
+        <TextLink href="#rules/all">See all rules</TextLink>
+      </span>
+      <PresetMenu onPick={fn()} />
+    </>
+  );
+}
+
 const meta = {
   title: 'Boards/Rules presets and payment limit',
   globals: { viewport: { value: 'laptop', isRotated: false } },
@@ -97,13 +110,13 @@ export const Presets: Story = {
   name: 'Rules, with the preset menu',
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
-      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={<PresetMenu onPick={fn()} />} aboveTools={{ payments: limit(), stripe: limit() }} />
+      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={headerActions()} aboveTools={{ payments: limit(), stripe: limit() }} />
     </RiveraFrame>
   ),
   parameters: {
     canvas: 'N-Conn-17-Presets',
     canvasNote: [
-      'The page layout is the web app’s (plan 04): the "Start from a preset" menu in the header’s actions and the payment limit in the Payments and Stripe sections’ line above their tools.',
+      'The page layout is the web app’s (plan 04): the "See all rules" link before "Start from a preset" in the header’s actions and the payment limit in the Payments and Stripe sections’ line above their tools.',
       'The play opens the menu by keyboard, as the board draws it open; the board draws the button’s ring with the first item’s hover.',
       SIDEBAR_ROW_NOTE,
     ].join(' '),
@@ -112,6 +125,7 @@ export const Presets: Story = {
     await expect(window.innerWidth).toBe(1512);
     await expectOwnerFrame(canvasElement, 'Rules');
     const page = await expectRulesPage(canvasElement, RIVERA_CHIPS);
+    await expect(page.chips[2]).toHaveTextContent('Why was this quote held?');
     const main = within(canvasElement).getByRole('main');
     // The menu button in the header, at a screen's main height.
     const header = one(main, '.cd-page-header');
@@ -121,10 +135,10 @@ export const Presets: Story = {
     const payments = await expectLimitLine(section(main, 'Payments'));
     await expectLimitLine(section(main, 'Stripe'));
     await expect(some(main, '.cd-connector-section__above')).toHaveLength(2);
-    // focus_order_is_logical: the menu, the composer and its chips, then the sections, the limit's
+    // focus_order_is_logical: the header link, the menu, the composer and its chips, then the sections, the limit's
     // Change after its section's head.
     const change = within(payments).getByRole('button', { name: 'Change' });
-    await expectTabOrder(userEvent, [menuButton, page.composer, ...page.chips, one(section(main, 'Payments'), '.cd-connector-section__header'), change], 160);
+    await expectTabOrder(userEvent, [within(header).getByRole('link', { name: 'See all rules' }), menuButton, page.composer, ...page.chips, one(section(main, 'Payments'), '.cd-connector-section__header'), change], 160);
     // Opened by keyboard, as the board draws it: two items, the first focused.
     menuButton.focus();
     await userEvent.keyboard('{Enter}');
@@ -191,7 +205,7 @@ export const PaymentLimit: Story = {
   name: 'Rules, the payment limit',
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
-      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={<PresetMenu onPick={fn()} />} aboveTools={{ payments: limit(), stripe: limit() }} />
+      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={headerActions()} aboveTools={{ payments: limit(), stripe: limit() }} />
     </RiveraFrame>
   ),
   parameters: {
@@ -227,7 +241,7 @@ export const PaymentLimitEdit: Story = {
   name: 'Rules, changing the payment limit',
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
-      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={<PresetMenu onPick={fn()} />} aboveTools={{ payments: limit(true), stripe: limit() }} />
+      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={headerActions()} aboveTools={{ payments: limit(true), stripe: limit() }} />
     </RiveraFrame>
   ),
   parameters: {
@@ -350,13 +364,13 @@ export const PhonePresets: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
-      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={<PresetMenu onPick={fn()} />} aboveTools={{ payments: limit(), stripe: limit() }} />
+      <RulesPage hub={RIVERA_HUB} chips={RIVERA_CHIPS} actions={headerActions()} aboveTools={{ payments: limit(), stripe: limit() }} />
     </RiveraFrame>
   ),
   parameters: {
     canvas: 'N-Conn-22-Phone-Presets',
     canvasNote: [
-      'The page as the web app composes it: PageHeader with the preset menu as its action, actionsBelowOnPhone and hideSubtitleOnPhone, so on a phone the menu takes its own line under the title and there is no subtitle, as the board draws it.',
+      'The page as the web app composes it: PageHeader with See all rules before the preset menu, actionsBelowOnPhone and hideSubtitleOnPhone. On a phone both actions share the row under the title without a subtitle; the preset button fills the rest of the row and its open menu spans the column.',
       'The composer reads “Ask Claude to change a rule” at every width, as the board does.',
       'The play opens the menu by keyboard, as the board draws it open.',
     ].join(' '),
@@ -366,12 +380,17 @@ export const PhonePresets: Story = {
     const main = within(canvasElement).getByRole('main');
     const title = within(main).getByRole('heading', { level: 1, name: 'Rules' });
     const menuButton = within(main).getByRole('button', { name: 'Start from a preset' });
-    // The button on its own line 16 px under the title, with no subtitle on a phone, as wide as the
-    // page's column.
+    // The actions share a row 16 px under the title; the preset fills the space after the link.
+    const header = one(main, '.cd-page-header');
+    const all = within(header).getByRole('link', { name: 'See all rules' });
+    const actions = one(header, '.cd-page-header__actions');
     await expect(within(main).getByText('What Claude can do on this Desk, where each tool comes from, and your rules for it.')).not.toBeVisible();
     await expect(menuButton.getBoundingClientRect().top - title.getBoundingClientRect().bottom).toBe(16);
     const column = one(main, '.cd-app-shell__content');
-    await expect(Math.round(menuButton.getBoundingClientRect().width)).toBe(Math.round(column.getBoundingClientRect().width));
+    await expect(Math.round(actions.getBoundingClientRect().width)).toBe(Math.round(column.getBoundingClientRect().width));
+    await expect(menuButton.getBoundingClientRect().top).toBe(all.getBoundingClientRect().top);
+    await expect(menuButton.getBoundingClientRect().left - all.getBoundingClientRect().right).toBe(16);
+    await expect(menuButton.getBoundingClientRect().right).toBe(actions.getBoundingClientRect().right);
     // The payment limit in Payments and Stripe, "Change" under the words.
     for (const name of ['Payments', 'Stripe']) {
       const line = one(section(main, name), '.cd-connector-section__above');
@@ -380,11 +399,13 @@ export const PhonePresets: Story = {
       await expect(within(line).getByRole('button', { name: 'Change' }).getBoundingClientRect().top - words.getBoundingClientRect().bottom).toBe(10);
     }
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
-    // Opened by keyboard, under the button at its width.
+    // Opened by keyboard, 6 px under the actions row at the column's full width.
     menuButton.focus();
     await userEvent.keyboard('{Enter}');
     const menu = within(main).getByRole('menu', { name: 'Start from a preset' });
-    await expect(Math.round(menu.getBoundingClientRect().width)).toBe(Math.round(menuButton.getBoundingClientRect().width));
+    await expect(Math.round(menu.getBoundingClientRect().width)).toBe(Math.round(column.getBoundingClientRect().width));
+    await expect(menu.getBoundingClientRect().left).toBe(actions.getBoundingClientRect().left);
+    await expect(menu.getBoundingClientRect().top - actions.getBoundingClientRect().bottom).toBe(6);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

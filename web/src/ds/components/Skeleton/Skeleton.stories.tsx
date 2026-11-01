@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { expect, fn, userEvent, waitFor } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
+import { ANIMATION_DEADLINE_MS, animationWithin } from '../../test/animationWithin.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { partsOf, regionIn, watchRegion, type LayerState, type RegionParts } from '../../test/skeletonRegion.ts';
 import { Button } from '../Button/Button.tsx';
@@ -368,7 +369,7 @@ function sweepOf(shape: HTMLElement): CSSAnimation {
 export const Sweep: Story = {
   render: () => <SkeletonScreen loading status="Opening your Desk" skeleton={<TodayHead />} />,
   play: async ({ canvasElement }) => {
-    const later = await waitFor(() => anchored(canvasElement, 'later'), { timeout: 2000 });
+    const later = await waitFor(() => anchored(canvasElement, 'later'), { timeout: ANIMATION_DEADLINE_MS });
 
     // skeleton_sweeps_one_band: every shape paints fill-hover under one band, transparent at both
     // ends and fill-secondary at its centre, 900 px wide, moved on the writing loop at an even speed.
@@ -551,7 +552,7 @@ export const FastLoad: Story = {
     try {
       // fast_load_goes_straight_to_the_page: the load ends at 100 ms, inside the wait, so the
       // shapes never show and nothing fades; the people draw in their place.
-      await waitFor(() => landedList(canvasElement), { timeout: 2000 });
+      await waitFor(() => landedList(canvasElement), { timeout: ANIMATION_DEADLINE_MS });
       await pause(SKELETON_DELAY_MS * 2);
       await expect(watch.states.map((entry) => entry.state)).toEqual(['waiting', 'gone']);
       await expect(fades.fades).toEqual([]);
@@ -673,7 +674,7 @@ async function expectLanded(root: HTMLElement) {
 export const Lands: Story = {
   render: () => (
     <Column>
-      <Loads loadsAfter={1600} status="Loading your customers" skeleton={<CustomersShapes />}>
+      <Loads loadsAfter={600} status="Loading your customers" skeleton={<CustomersShapes />}>
         <CustomersLanded>
           <div>
             <Button variant="secondary" onClick={opened}>
@@ -711,11 +712,14 @@ export const Lands: Story = {
       await expect(opened).toHaveBeenCalledTimes(1);
       await expect(watch.states.at(-1)?.state).toBe('leaving');
 
-      // The fade runs to its end, and the layer goes with it, on the fade's own end.
-      moment?.fade.play();
-      const ended = moment?.fade.finished.then(() => performance.now());
-      const gone = await watch.reached('gone', 2000);
-      await expect(gone.at - Number(await ended)).toBeLessThan(PROMPTLY_MS);
+      // Seek to the end rather than waiting for 120 ms of composited frames. The browser still
+      // delivers the fade's own end, which must remove the layer well before the fallback.
+      if (!moment) throw new Error('no leaving frame to finish');
+      const ended = animationWithin(moment.fade.finished.then(() => performance.now()), 'cd-skeleton-leave finish');
+      moment.fade.finish();
+      const endedAt = await ended;
+      const gone = await watch.reached('gone', ANIMATION_DEADLINE_MS);
+      await expect(gone.at - endedAt).toBeLessThan(PROMPTLY_MS);
       await expect(watch.states.map((entry) => entry.state)).toEqual(['waiting', 'shown', 'leaving', 'gone']);
       await expectLanded(canvasElement);
       landedList(canvasElement);
@@ -774,7 +778,7 @@ export const Continues: Story = {
       await watch.reached('leaving');
       await expect(firstFrame).toEqual({ state: 'shown', status: 'Loading your customers', outer: 'leaving' });
       // The outer region lands; the inner one keeps its shapes while the people are read.
-      await watch.reached('gone', 2000);
+      await watch.reached('gone', ANIMATION_DEADLINE_MS);
       const inner = partsOf(canvasElement.querySelectorAll<HTMLElement>('.cd-skeleton-screen')[1] as HTMLElement);
       await expect(inner.layer?.dataset.state).toBe('shown');
       await expect(inner.body).toHaveAttribute('aria-busy', 'true');
@@ -787,7 +791,7 @@ export const Continues: Story = {
 export const Fails: Story = {
   render: () => (
     <Column>
-      <Loads loadsAfter={800} status="Loading your customers" skeleton={<CustomersShapes />}>
+      <Loads loadsAfter={600} status="Loading your customers" skeleton={<CustomersShapes />}>
         <Notice tone="error" action={<Button variant="secondary">Try again</Button>}>
           {UNREACHABLE_COPY.en}
         </Notice>
@@ -807,23 +811,21 @@ export const Fails: Story = {
       const notice = region.querySelector<HTMLElement>('[role="alert"]');
       await expect(notice?.textContent).toBe(`${UNREACHABLE_COPY.en}Try again`);
 
-      // A fade the browser cancels once it has started leaves the layer at its resting opacity, 0,
-      // so it is invisible at once, and the layer goes on the cancel.
-      const layer = moment?.parts.layer as HTMLElement;
-      const started = new Promise<void>((resolve) => {
-        const onStart = (event: AnimationEvent) => {
-          if (event.target !== layer || event.animationName !== 'cd-skeleton-leave') return;
-          layer.removeEventListener('animationstart', onStart);
-          resolve();
-        };
-        layer.addEventListener('animationstart', onStart);
-      });
-      moment?.fade.play();
-      await started;
-      moment?.fade.cancel();
+      // Seek the held fade into its active interval: animationstart can be skipped or delivered
+      // before a listener attaches. Sampling its opacity proves it started without that event or
+      // real-time frames. Cancelling it must reveal opacity 0 and remove it before the fallback.
+      if (!moment) throw new Error('no leaving frame to cancel');
+      const { fade } = moment;
+      const layer = moment.parts.layer as HTMLElement;
+      await animationWithin(fade.ready, 'cd-skeleton-leave pause');
+      fade.currentTime = 60;
+      const fadingOpacity = Number(getComputedStyle(layer).opacity);
+      await expect(fadingOpacity).toBeGreaterThan(0);
+      await expect(fadingOpacity).toBeLessThan(1);
+      fade.cancel();
       const cancelled = performance.now();
       expectComputed(layer, { opacity: '0' });
-      const gone = await watch.reached('gone', 2000);
+      const gone = await watch.reached('gone', ANIMATION_DEADLINE_MS);
       await expect(gone.at - cancelled).toBeLessThan(PROMPTLY_MS);
       await expectLanded(canvasElement);
       await expect(region.contains(notice)).toBe(true);

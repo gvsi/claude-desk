@@ -66,7 +66,9 @@ async def test_policy_phrase_refusal_names_only_the_bad_line_and_guards_legacy_r
     for language in ("en", "es"):
         page = await client.get(f"/public/{copy.slug}", params={"lang": language})
         assert page.status_code == 200
-        assert all(block["template"] != "policy" for block in page.json()["charter"])
+        # The stored line is withheld on its own; the honest lines beside it stay.
+        policies = [block["fact_id"] for block in page.json()["charter"] if block["template"] == "policy"]
+        assert "charter:policy:about" not in policies and "charter:policy:parking" in policies
         assert text not in page.text
     visitor = await open_visitor(client, copy)
     for prose in ("", "Here are the details."):
@@ -76,6 +78,34 @@ async def test_policy_phrase_refusal_names_only_the_bad_line_and_guards_legacy_r
         assert_handed_off(verdict)
         verify_verdict(await public_key(client), visitor.session_id, verdict)
         assert all(block.template != "policy" for block in verdict.blocks)
+
+
+@pytest.mark.parametrize("text", [
+    "Within 25 miles of Oakland.",
+    "We drive a few miles past Oakland.",
+    "The East Bay, seven days a week.",
+    "Serving the East Bay since 1998.",
+    "We do evenings and weekends.",
+    "Trabajamos fines de semana.",
+    "Within a 25-mile radius of Oakland.",
+    "We serve a 30 mile radius around Oakland.",
+    "Within 1 mile of Lake Merritt.",
+    "A 50-km radius.",
+    "Dentro de 1 kilómetro.",
+])
+async def test_service_area_allows_area_and_weekly_availability(app, client, text):
+    copy = await rivera(app, client)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:service_area", "kind": "text", "value": text}]})
+    assert response.status_code == 200, response.text
+    for language in ("en", "es"):
+        page = await client.get(f"/public/{copy.slug}", params={"lang": language})
+        assert [block["text"] for block in page.json()["charter"] if block["template"] == "policy"] == [text]
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:service_area")])
+    assert (verdict.ok, verdict.violations) == (True, [])
+    assert [block.text for block in verdict.blocks] == [text]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
 
 
 @pytest.mark.parametrize(("values", "fields"), PUBLIC_ALLOW_WORD_CASES)
@@ -246,7 +276,12 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     public_before = (await client.get(f"/public/{copy.slug}")).json()["charter"]
     entries = len(await entries_of(app, copy))
     fields = {f"policy:{key}": rules for key in POLICY_KEYS}
-    claims = [{"key": key, "kind": "text", "value": text} for key in fields]
+    area_rules = {"Monday to Friday": []}.get(text, rules)
+    if area_rules:
+        fields["policy:service_area"] = area_rules
+    else:
+        del fields["policy:service_area"]
+    claims = [{"key": f"policy:{key}", "kind": "text", "value": text} for key in POLICY_KEYS]
     claims += [{"key": "policy:other", "kind": "text", "value": "Ask about our services."},
                {"key": "contact", "kind": "text", "value": "(510) 555-0199"}]
     response = await put_part(client, copy, "charter", {"charter": claims})
@@ -298,6 +333,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Pour-over coffee available",
     "Les ofrecemos envío a domicilio",
     "Emergency service available",
+    "Se requiere un garante.",
 ])
 async def test_honest_policy_text_is_written_and_rendered(app, client, text):
     copy = await rivera(app, client)
@@ -339,6 +375,10 @@ async def test_rivera_seed_policies_pass_the_scan_and_charter_write(app, client,
     (("Sin", "costo para consultas aquí."), ("Pregunte por", "nuestros servicios."), "lex.es.promise"),
     (("Your appointment is", "confirmed."), ("Tell us", "what you need."), "lex.en.booking"),
     (("Tu cita está", "confirmada."), ("Cuéntenos", "qué necesita."), "lex.es.booking"),
+    (("Your callback is", "scheduled."), ("Tell us", "what you need."), "lex.en.callback"),
+    (("Tu llamada está", "confirmada."), ("Cuéntenos", "qué necesita."), "lex.es.callback"),
+    # The claim's participle comes before the booking noun it needs, in the next policy.
+    (("Ya quedó hecha", "tu cita."), ("Ya quedó hecha", "la tarea."), "lex.es.booking"),
 ])
 async def test_split_policy_claims_follow_public_order_and_refuse_only_contributors(
         app, client, create, unsafe, honest, rule):
@@ -389,7 +429,7 @@ async def test_split_policy_claims_follow_public_order_and_refuse_only_contribut
     ("Привет мир.", "Ask about our services."),
     ("Portland Beaverton Hillsboro free", "Ask about our services."),
 ])
-async def test_public_withholds_unsafe_legacy_policy_group(app, client, parts):
+async def test_public_withholds_only_unsafe_legacy_policy_lines(app, client, parts):
     copy = await rivera(app, client)
     # Write historical rows directly so the current write guard cannot sanitize this state.
     async with kernel_ctx(app) as ctx:
@@ -403,7 +443,9 @@ async def test_public_withholds_unsafe_legacy_policy_group(app, client, parts):
     for language in ("en", "es"):
         page = await client.get(f"/public/{copy.slug}", params={"lang": language})
         assert page.status_code == 200
-        assert not [block for block in page.json()["charter"] if block["template"] == "policy"]
+        kept = ["charter:policy:first_visit"] if parts[1] == "Ask about our services." else []
+        assert [block["fact_id"] for block in page.json()["charter"] if block["template"] == "policy"] == [
+            *kept, "charter:policy:service_area"]
         assert any(block["template"] == "hours" for block in page.json()["charter"])
 
 
@@ -547,6 +589,8 @@ async def test_policy_limits_accept_the_exact_maximum(app, client, create):
 
 
 @pytest.mark.parametrize("text", [
+    "Garantimos o serviço.",
+    "Consultas sem cobrança.",
     "Nos prestations : la visite, la pose, la réparation sont offertes.",
     "Une garantie pour la pose et la réparation.",
     "Consultas sem custo para todos os clientes.",
@@ -572,7 +616,8 @@ async def test_other_commitment_policy_refused_on_write_public_read_and_reply(ap
     for language in ("en", "es"):
         page = await client.get(f"/public/{copy.slug}", params={"lang": language})
         assert page.status_code == 200
-        assert all(block["template"] != "policy" for block in page.json()["charter"])
+        assert [block["fact_id"] for block in page.json()["charter"] if block["template"] == "policy"] == [
+            "charter:policy:arrival", "charter:policy:first_visit"]
     visitor = await open_visitor(client, copy)
     verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:service_area")])
     assert_handed_off(verdict)
@@ -582,10 +627,15 @@ async def test_other_commitment_policy_refused_on_write_public_read_and_reply(ap
 
 
 @pytest.mark.parametrize("text", [
+    "Contact: info@example.com",
+    "Non-emergency plumbing",
+    "Consultas con cita previa en example.com",
     "Cash, card, Venmo accepted",
     "Service area: Portland, Beaverton, Hillsboro, Tigard",
     "Pour-over coffee available",
     "Les ofrecemos envío a domicilio",
+    "Ask about our services.",
+    "Consultas con cita previa.",
     "Garage parking available",
     "Offering estimates by appointment",
 ])

@@ -55,7 +55,7 @@ from desk.db.models import (ActorSession, Booking, Business, CalendarSlot, Desk,
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCalendarRequest, DeskCharterRequest,
-                             DeskCreated, DeskHoursRequest, DeskNotificationsRequest, DeskPeopleRequest,
+                             DeskCreated, DeskHoursRequest, DeskMemoryRequest, DeskNotificationsRequest, DeskPeopleRequest,
                              DeskPricesRequest, DeskUpdated, DocumentCreated, KernelRequest)
 from desk.kernel_service import adapters, auth, clock, labels, ledger, mcp_pins, payments, reply_check
 from desk.kernel_service.auth import AuthError, Named
@@ -539,6 +539,19 @@ async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) 
     return []
 
 
+async def put_memory(ctx: KernelCtx, desk_row: Desk, body: DeskMemoryRequest) -> list[str]:
+    """Replace the Desk's simulated owner notes. Even private notes must not import document canaries."""
+    if not storable(body.about) or any(not storable(value) for item in body.items
+                                     for value in (item.id, item.title, *item.topics, item.text)):
+        raise KernelFailure(422, "invalid", "memory_text", persist=partial(
+            _ledger_refusal, copy_id=ctx.copy_id, desk_ids=[desk_row.desk_id],
+            summary={"part": "memory", "refused": "invalid"}))
+    await refuse_public_canaries(ctx, "memory", {
+        "about": body.about, "items": [item.model_dump() for item in body.items]}, desk_row.desk_id)
+    desk_row.simulated_memory = body.model_dump(mode="json")
+    return [item.id for item in body.items]
+
+
 async def put_hours(ctx: KernelCtx, desk_row: Desk, body: DeskHoursRequest) -> list[str]:
     """The Desk's hours, and fact `charter:hours` written again from them."""
     desk_row.hours = body.hours
@@ -794,6 +807,7 @@ Writer = Callable[[KernelCtx, Desk, Any], Awaitable[list[str]]]
 PARTS: dict[str, tuple[type[KernelRequest], Writer]] = {   # PUT /desks/{id}/{part}: its body and its writer
     "business": (DeskBusinessRequest, put_business),
     "charter": (DeskCharterRequest, put_charter),
+    "memory": (DeskMemoryRequest, put_memory),
     "hours": (DeskHoursRequest, put_hours),
     "prices": (DeskPricesRequest, put_prices),
     "calendar": (DeskCalendarRequest, put_calendar),

@@ -279,6 +279,7 @@ export const Refund: Story = {
     canvasNote: [
       'The page layout is the web app’s (plan 04), composed from Breadcrumb, ToolPageHeader, ToolRulesCard, Composer, SuggestionChips and RecentRequests.',
       'The recent requests are the fixture’s: the refunded deposit was Lucía Herrera’s, where the board names Lucía Torres. Each time is the screen’s string.',
+      'The tool page’s suggestion chips will follow the Rules page’s newest-held-request pattern once the tool pages are built.',
       SIDEBAR_NOTE,
     ].join(' '),
   },

@@ -266,6 +266,70 @@ async def test_resume_drops_a_snapshot_that_isnt_approved(copy, engine, caplog):
     assert snapshot.visitor_plain not in caplog.text
 
 
+async def test_resume_strips_owner_reason_from_approved_snapshot(copy, engine, monkeypatch):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-private-approved", discount_bp=1500)
+    result = await copy.owner.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+                                   path={"decision_id": held.decision_id})
+    assert result.approved is not None
+    approved = result.approved.model_copy(update={"owner_plain": "Private approved snapshot reason"})
+    outcome = result.decision.model_copy(update={"owner_plain": "Private outcome reason"})
+    connector = InMemoryConnector()
+    app = jobs_app(connector, schedule=False)
+    async with app.open_async():
+        await jobs.defer_resume_after_answer(app, caller.ids, outcome, approved)
+    (job,) = connector.jobs.values()
+    assert "owner_plain" not in job["args"]["approved"]
+    assert "owner_plain" not in job["args"]["decision"]
+    assert job["args"]["approved"] == approved.model_dump(mode="json", exclude={"owner_plain"})
+    assert job["args"]["decision"] == outcome.model_dump(mode="json", exclude={"owner_plain"})
+
+    seen = []
+    deliver = jobs.deliver
+
+    async def checked(conn, ids, item):
+        seen.append((item.phase, item.decision.owner_plain))
+        return await deliver(conn, ids, item)
+
+    monkeypatch.setattr(jobs, "deliver", checked)
+    # Older queued arguments may still contain the field: clear both before building even a Status.
+    status = jobs.Status
+
+    def checked_status(decision, phase):
+        assert decision.owner_plain is None
+        return status(decision, phase)
+
+    monkeypatch.setattr(jobs, "Status", checked_status)
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, outcome, approved)
+    assert seen == [("receipt", None), ("resolved", None)]
+    found = await session_rows(engine, caller.session_id)
+    assert found["sse"] == [("receipt", "approved"), ("resolved", "executed")]
+    assert len(found["action_update"]) == 1
+    assert approved.owner_plain == "Private approved snapshot reason"
+    assert outcome.owner_plain == "Private outcome reason"
+
+
+async def test_direct_resume_clears_the_owner_reason(copy, engine, monkeypatch):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-private-reason", discount_bp=1500)
+    copy.fake.never(caller.desk_id, "native.quote")
+    refused = await copy.answer(held)
+    assert refused.owner_plain
+    seen = []
+    deliver = jobs.deliver
+
+    async def checked(conn, ids, item):
+        seen.append(item.decision.owner_plain)
+        return await deliver(conn, ids, item)
+
+    monkeypatch.setattr(jobs, "deliver", checked)
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, refused)
+    assert seen == [None]
+    assert refused.owner_plain
+
+
 async def test_a_late_resume_job_never_shows_an_older_state(copy, engine, fake, monkeypatch):
     """A resume job that runs late (retried after a deploy, or slow to start) can carry a state the kernel has since
     moved past, which the visitor's next request already showed. It shows nothing: no older status, no action
@@ -391,11 +455,32 @@ async def test_an_abandoned_hold_is_read_once(copy, engine, fake, ro_schema, mon
     assert [decision_ids for decision_ids in asked if decision_ids] == [[held.decision_id]]
 
 
-async def test_the_minute_scan_reads_held_events_through_their_own_index(engine):
+# A run_events table as a running Desk fills it: mostly messages and receipts, a few held events and controls.
+REALISTIC_RUN_EVENTS = """
+INSERT INTO app.run_events (copy_id, desk_id, session_id, kind, seq, type, payload)
+SELECT 'copy', 'desk', 's' || (g % 400), 'sse', g,
+       (ARRAY['message', 'writing', 'turn_end', 'receipt', 'resolved', 'message', 'writing', 'message'])[1 + g % 8],
+       jsonb_build_object('decision_id', 'd' || g, 'ledger_seq', g, 'state', 'allowed')
+FROM generate_series(1, 8000) g;
+INSERT INTO app.run_events (copy_id, desk_id, session_id, kind, seq, type, payload)
+SELECT 'copy', 'desk', 's' || g, 'sse', 100000 + g, 'held', jsonb_build_object('decision_id', 'h' || g, 'ledger_seq', 100000 + g)
+FROM generate_series(1, 20) g;
+INSERT INTO app.run_events (copy_id, desk_id, session_id, kind, seq, type, payload)
+SELECT 'copy', 'desk', 's' || g, 'control', NULL, (ARRAY['decision_due', 'decision_pending'])[1 + g % 2],
+       jsonb_build_object('decision_id', 'c' || g)
+FROM generate_series(1, 20) g;
+ANALYZE app.run_events;
+"""
+
+
+async def test_the_minute_scan_reads_held_events_through_their_own_index(db, engine):
     """`surface_due_decisions` looks, every minute, at each held event ever shown, so it reads them through a partial
     index of their own, never the whole run_events table, and checks each for a final state through the index that
     keeps statuses unique and for a waiting `decision_due` row through the one that keeps those unique. Sequential
-    scans are off, so the plan names an index wherever one serves the query."""
+    scans are off, so the plan names an index wherever one serves the query. The table first holds what a running
+    Desk writes, and is analyzed: on a near-empty table the indexes cost about the same, and the planner's choice
+    hung on the statistics earlier tests happened to leave."""
+    db.execute(REALISTIC_RUN_EVENTS)
     sql = jobs._waiting_decisions().compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
     async with engine.connect() as conn:
         await conn.execute(text("SET LOCAL enable_seqscan = off"))

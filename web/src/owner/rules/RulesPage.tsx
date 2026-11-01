@@ -26,9 +26,10 @@ import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
-import { deskPath, useNeedsYou } from '../useDesks.ts';
+import { deskPath, RIVERA_SAMPLE_BUSINESS_NAME, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
+import { BusinessJobs } from './BusinessJobs.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
 import { holdQuestion, hubSections, parseLimit } from './hub.ts';
 import { draftFailure } from './RuleChat.tsx';
@@ -41,8 +42,8 @@ import './RulesPage.css';
 export const RULES_TITLE = 'Rules';
 
 /**
- * What the owner can ask Claude for on Rules, in her words (the presets board's), then, while a
- * request is held, why the latest one was (`holdQuestion`).
+ * Rivera's examples of what the owner can ask Claude for on Rules, in her words (the presets board's).
+ * While a request is held, any Desk can also ask why the latest one was (`holdQuestion`).
  */
 const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
 
@@ -74,13 +75,15 @@ interface LimitField {
  * `rules` (N-Conn-17-Presets; N-Conn-22-Phone-Presets at 390 px): the Desk's outcomes grouped by
  * connector, each group and tool linking to its page under Connectors once those pages are built
  * (`connectorPageHref`), and drawn without a link until then; Ask Claude under the
- * header; "Start from a preset", which drafts a preset as one change; the payment limit atop
+ * header; the header's "See all rules" link before "Start from a preset", which drafts a preset
+ * as one change; the payment limit atop
  * Payments and Stripe; the always-on rules. Every change opens its proved review first.
  */
 export function RulesPage() {
   const { desk } = useOwnerDesk();
   useDocumentTitle(inApp(RULES_TITLE));
   const deskId = desk.desk_id;
+  const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? RULES_CHIPS : [];
   const navigate = useNavigate();
   const { ask } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
@@ -93,7 +96,7 @@ export function RulesPage() {
   const needsYou = useNeedsYou(deskId, { readOnOpen: true });
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
   const question = current ? holdQuestion(needsYou.data ?? []) : null;
-  const chips = question === null ? RULES_CHIPS : [...RULES_CHIPS, question];
+  const chips = question === null ? fixedChips : [...fixedChips, question];
   const failure = useReadFailure(rules);
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
@@ -178,6 +181,7 @@ export function RulesPage() {
             {failure.line}
           </Notice>
         )}
+        <BusinessJobs view={rules.data} people={people.data ?? null} />
         <ConnectorList summary={`Version ${active.version} of your rules, checked against the always-on rules`}>
           {sections.map((section) => {
             const editing = limit !== null && limit.group === section.connector.id ? limit : null;
@@ -223,7 +227,14 @@ export function RulesPage() {
         <PageHeader
           title={RULES_TITLE}
           subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
-          actions={<PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />}
+          actions={
+            <>
+              <span className="cd-type-control">
+                <TextLink href={`${deskPath(deskId)}/rules/all`}>See all rules</TextLink>
+              </span>
+              <PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />
+            </>
+          }
           actionsBelowOnPhone
           hideSubtitleOnPhone
         />
@@ -231,7 +242,7 @@ export function RulesPage() {
       {presetSaid === null ? null : <Notice tone={presetSaid.tone}>{presetSaid.line}</Notice>}
       <div className="cd-rules__ask">
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
-        <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />
+        {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
       {active === undefined ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
       {body}

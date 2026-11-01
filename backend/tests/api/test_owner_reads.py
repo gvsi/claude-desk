@@ -9,9 +9,11 @@ America/Los_Angeles.
 
 import asyncio
 import itertools
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -21,7 +23,7 @@ from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text as sql
 
 from desk.api import owner_reads
-from desk.api.kernel_client import CredentialView, KernelFailed
+from desk.api.kernel_client import CredentialView, KernelFailed, KernelUnavailable
 from desk.api.main import create_app
 from desk.api.owner_reads import (
     BOOKING_CLAIM,
@@ -379,6 +381,155 @@ async def test_owner_decision_read_is_copy_scoped(app, browser, fake, kernel_htt
     for decision_id in (theirs, "dec-never-made"):
         refused = await owner.get(f"decisions/{decision_id}")
         assert (refused.status_code, refused.json()) == (404, {"error": "kernel", "code": "not_found"})
+
+
+async def refused_statuses(scene, count=2):
+    """Final execution refusals, stored as visitor-safe statuses in one session."""
+    visitor = await scene.visitor(local(2026, 10, 28, 13))
+    held = [await visitor.decide("native.quote", discounted_quote(scene.fake, scene.owner)) for _ in range(count)]
+    scene.fake.never(scene.owner.desk_id, "native.quote")
+    decisions = []
+    for decision in held:
+        await scene.answer(decision.decision_id, local(2026, 10, 28, 13, 1))
+        final = scene.fake.decisions[decision.decision_id].decision
+        assert final.state == "refused_at_execution" and final.owner_plain
+        async with scene.engine.connect() as conn:
+            await deliver(conn, visitor.ids, Status(final, "resolved"))
+            await conn.commit()
+        decisions.append(final)
+    return visitor, decisions
+
+
+@pytest.mark.parametrize("read", ["transcript", "tools"])
+@pytest.mark.parametrize("error", [KernelFailed(404, "not_found"), KernelUnavailable("private visitor content")])
+async def test_refusal_reason_failure_keeps_owner_history(scene, monkeypatch, caplog, read, error):
+    visitor, (failed, other) = await refused_statuses(scene)
+    original = CredentialView.call
+    calls = []
+    failing = True
+
+    async def call(view, route, *args, **kwargs):
+        if route == "GET /decisions/{id}":
+            calls.append(kwargs["path"]["id"])
+            if failing and kwargs["path"]["id"] == failed.decision_id:
+                raise error
+        return await original(view, route, *args, **kwargs)
+
+    monkeypatch.setattr(CredentialView, "call", call)
+    path = (f"conversations/{visitor.session_id}" if read == "transcript" else
+            f"desks/{scene.owner.desk_id}/tools/native.quote/decisions")
+    result = await scene.owner.get(path)
+    assert result.status_code == 200, result.text
+    rows = {((item.get("event") or {}).get("decision_id") if read == "transcript" else item["decision_id"]):
+            item["owner_plain"] for item in result.json()["items"]}
+    assert rows[failed.decision_id] is None
+    assert rows[other.decision_id] == other.owner_plain
+    logs = [record for record in caplog.records if record.name == "desk.api.owner_reads"]
+    assert len(logs) == 1 and type(error).__name__ in logs[0].getMessage()
+    assert "private visitor content" not in logs[0].getMessage()
+    assert logs[0].exc_info is None
+    calls.clear()
+    failing = False
+    retried = await scene.owner.get(path)
+    assert retried.status_code == 200, retried.text
+    assert sum(item["owner_plain"] is not None for item in retried.json()["items"]) == 2
+    assert calls == [failed.decision_id]  # retry the failed read, reuse the successful final reason
+
+
+@pytest.mark.parametrize("first", ["transcript", "tools"])
+async def test_refusal_reasons_are_read_concurrently_and_cached(scene, monkeypatch, first):
+    visitor, decisions = await refused_statuses(scene)
+    paths = {"transcript": f"conversations/{visitor.session_id}",
+             "tools": f"desks/{scene.owner.desk_id}/tools/native.quote/decisions"}
+    original = CredentialView.call
+    started = []
+    together = asyncio.Event()
+
+    async def call(view, route, *args, **kwargs):
+        if route == "GET /decisions/{id}":
+            started.append(kwargs["path"]["id"])
+            if len(started) == len(decisions):
+                together.set()
+            await asyncio.wait_for(together.wait(), timeout=1)
+        return await original(view, route, *args, **kwargs)
+
+    monkeypatch.setattr(CredentialView, "call", call)
+    result = await scene.owner.get(paths[first])
+    assert result.status_code == 200, result.text
+    assert set(started) == {decision.decision_id for decision in decisions}
+    started.clear()
+    for path in paths.values():
+        result = await scene.owner.get(path)
+        assert result.status_code == 200, result.text
+        assert sum(item["owner_plain"] is not None for item in result.json()["items"]) == len(decisions)
+    assert started == []
+
+
+async def test_refusal_reason_cache_evicts_least_recently_used(scene, kernel_http, monkeypatch):
+    from desk.api import owner_reads
+
+    visitor, (first, second, third) = await refused_statuses(scene, count=3)
+    monkeypatch.setattr(owner_reads, "_REFUSAL_REASONS", OrderedDict())
+    monkeypatch.setattr(owner_reads, "REFUSAL_CACHE_SIZE", 2)
+    ctx = SimpleNamespace(kernel=kernel_http.owner(scene.owner.token))
+    scene.fake.calls.clear()
+    for decision in (first, second, first, third, first, second):
+        assert await owner_reads.refusal_reason(ctx, decision.decision_id, visitor.session_id, decision.state,
+                                                decision.ledger_seq) == decision.owner_plain
+    assert [call.path for call in scene.fake.called("GET /decisions/{id}")] == [
+        f"/decisions/{decision.decision_id}" for decision in (first, second, third, second)]
+
+
+@pytest.mark.parametrize("mismatch", ["ledger_seq", "session_id"])
+async def test_refusal_reason_requires_the_exact_stored_status(scene, engine, mismatch):
+    visitor, (decision,) = await refused_statuses(scene, count=1)
+    other = await scene.visitor(local(2026, 10, 28, 14))
+    ids = visitor.ids
+    stale = decision
+    if mismatch == "ledger_seq":
+        stale = decision.model_copy(update={"ledger_seq": decision.ledger_seq + 1})
+    else:
+        ids = other.ids
+        stale = decision.model_copy(update={"session_id": other.session_id})
+    async with engine.connect() as conn:
+        await deliver(conn, ids, Status(stale, "resolved"))
+        await conn.commit()
+    result = await scene.owner.get(f"conversations/{ids.session_id}")
+    assert result.status_code == 200, result.text
+    statuses = [item for item in result.json()["items"] if item["kind"] == "status"]
+    assert statuses[-1]["owner_plain"] is None
+    assert statuses[-1]["event"]["state"] == "refused_at_execution"
+    # A mismatch must not poison the valid final version's cache. A cache hit must still check the session.
+    valid = await scene.owner.get(f"conversations/{visitor.session_id}")
+    assert valid.status_code == 200, valid.text
+    assert valid.json()["items"][0]["owner_plain"] == decision.owner_plain
+    repeated = await scene.owner.get(f"conversations/{ids.session_id}")
+    assert repeated.json()["items"][-1]["owner_plain"] is None
+
+
+async def test_unknown_receipt_keeps_no_reason_after_execution_refusal(scene, engine):
+    visitor = await scene.visitor(local(2026, 10, 28, 13))
+    held = await visitor.decide("native.quote", discounted_quote(scene.fake, scene.owner))
+    unknown = held.model_copy(update={"state": "unknown"})
+    async with engine.connect() as conn:
+        await deliver(conn, visitor.ids, Status(unknown, "receipt"))
+        await conn.commit()
+    scene.fake.never(scene.owner.desk_id, "native.quote")
+    await scene.answer(held.decision_id, local(2026, 10, 28, 13, 1))
+    final = scene.fake.decisions[held.decision_id].decision
+    assert final.state == "refused_at_execution" and final.owner_plain
+    async with engine.connect() as conn:
+        await deliver(conn, visitor.ids, Status(final, "resolved"))
+        await conn.commit()
+    scene.fake.calls.clear()
+    for _ in range(2):
+        result = await scene.owner.get(f"conversations/{visitor.session_id}")
+        assert result.status_code == 200, result.text
+        statuses = [item for item in result.json()["items"] if item["kind"] == "status"]
+        assert [(item["event"]["state"], item["owner_plain"]) for item in statuses] == [
+            ("unknown", None), ("refused_at_execution", final.owner_plain)]
+        assert all("owner_plain" not in item["event"] for item in statuses)
+    assert len(scene.fake.called("GET /decisions/{id}")) == 1
 
 
 async def test_ledger_passes_verification_through(app, browser, fake, kernel_http):
@@ -1171,6 +1322,12 @@ async def test_a_stopped_soft_check_gives_its_actual_cause(scene, clock, rule_id
     assert await stopped_reason(scene, ["soft_promise"], [rule_id]) == f"{STOPPED}{why}."
 
 
+async def test_a_stopped_policy_citation_names_the_withheld_line_cause(scene, clock):
+    clock.now = local(2026, 10, 30, 9)
+    assert await stopped_reason(scene, ["unknown_fact"], ["policy_combined"]) == (
+        f"{STOPPED}it cited a policy line the checkpoint now withholds.")
+
+
 @pytest.mark.parametrize("rule_id", ["lex.en.booking", "lex.es.booking"])
 async def test_a_stopped_booking_claim_says_so(scene, clock, rule_id):
     clock.now = local(2026, 10, 30, 9)
@@ -1222,7 +1379,7 @@ async def test_owner_transcript_adds_whispers_and_translations(app, browser, fak
         await conn.commit()
         await deliver(conn, ids, Reply(verdict, "claude", "api"), ro_schema=ro_schema)
         await deliver(conn, ids, Status(held, "held"), ro_schema=ro_schema)
-        pushed = Triage(summary="Pushed for a discount.", category="discount_push")
+        pushed = Triage(summary="Pushed for a discount.", category="prices")
         await append_message(conn, ids, "triage", ref_id=held.decision_id, text=pushed.model_dump_json())
         await append_message(conn, ids, "whisper", text="Offer a callback instead.")
         await append_message(conn, ids, "note", text="The visitor verified.")

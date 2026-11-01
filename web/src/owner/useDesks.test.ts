@@ -2,11 +2,16 @@
  * `carrySetup`, on a query client of its own: setup's interview written into the copy's Desks only
  * ever moves a Desk's setup forward, so an older interview state never undoes what the API said.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { BusinessOut, DeskSetup, DeskSummary } from '../api/views.ts';
-import { DESKS_KEY, carrySetup } from './useDesks.ts';
+import { rivera } from '../ds/fixtures/index.ts';
+import { DESKS_KEY, RIVERA_SAMPLE_BUSINESS_NAME, carrySetup } from './useDesks.ts';
 
 const DESK = 'desk-okafor';
 const INTERVIEW = 'setup-okafor';
@@ -48,6 +53,16 @@ function readAs(setup: DeskSetup | null): { queryClient: QueryClient; reads: () 
 function named(queryClient: QueryClient): DeskSetup | null | undefined {
   return queryClient.getQueryData<BusinessOut[]>(DESKS_KEY)?.[0]?.desks[0]?.setup;
 }
+
+it('the_sample_business_name_matches_the_backend_seed_and_fixture', () => {
+  const seedPy = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'kernel_service', 'seed.py'), 'utf8');
+  const riveraSeed = /^def rivera_seed\b[^\n]*\n((?:[ \t].*\n|\n)*)/m.exec(seedPy)?.[1] ?? '';
+  const business = /^    business = BusinessSeed\(([\s\S]*?)^    \)/m.exec(riveraSeed)?.[1] ?? '';
+  const name = /^\s+name="([^"]+)"/m.exec(business)?.[1];
+  expect(name).toBeDefined();
+  expect(name).toBe(RIVERA_SAMPLE_BUSINESS_NAME);
+  expect(name).toBe(rivera.business.name);
+});
 
 describe('carrySetup', () => {
   it('a_desk_the_api_named_live_stays_live', async () => {

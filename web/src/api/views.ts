@@ -36,7 +36,7 @@ import type {
   ToolName,
   ToolProfile,
 } from './contracts.ts';
-import type { Attempt as ApiAttempt, DeskSetup, DeskSummary } from './openapi.gen.ts';
+import type { Attempt as ApiAttempt, DeskSetup, DeskSummary, Triage } from './openapi.gen.ts';
 
 // Copy and Desks
 
@@ -271,7 +271,7 @@ export interface VisitorTranscript {
 
 export interface OwnerTranscript {
   state: SessionState;
-  items: TranscriptItem[];
+  items: OwnerTranscriptItem[];
   /**
    * Until when the visitor is typing, while that is in the future, else null (plan 02b Task 1,
    * owner view only). Optional until the API sends it.
@@ -281,23 +281,18 @@ export interface OwnerTranscript {
   replayed?: boolean;
 }
 
+/** Owner-only annotation beside the signed event, absent on older API responses. */
+export interface OwnerTranscriptItem extends TranscriptItem {
+  owner_plain?: import('./openapi.gen.ts').OwnerTranscriptItem['owner_plain'];
+}
+
 // Safety
 
-/** What a stopped attempt was about, as the API owner plan's triage task sorts it (plan 02b, Task 10). */
-export type TriageCategory =
-  | 'impersonation'
-  | 'discount_push'
-  | 'private_data'
-  | 'code_redirect'
-  | 'injection'
-  | 'over_limit'
-  | 'other';
+/** A checkpoint event's subject, as the API's descriptive triage names it. */
+export type TriageCategory = Triage['category'];
 
-/** An attempt's AI-written summary and category: owner-facing only, and labelled as written by Claude. */
-export interface Triage {
-  summary: string;
-  category: TriageCategory;
-}
+/** The API's AI-written summary and category, for the owner alone. */
+export type { Triage };
 
 /**
  * Why the kernel refused a request: a closed code from the API's own document, which the web holds
@@ -345,10 +340,46 @@ export interface PeopleOut {
  */
 export type ToolReviewReason = 'new' | 'changed' | 'delisted';
 
+/**
+ * Business tool definitions, typed here until the kernel's business tools change (branch
+ * `plan/09-blocks-core`) regenerates their types, then imported from `contracts.ts`.
+ * The owner's title, description and configuration are untrusted text.
+ */
+export interface BusinessToolDef {
+  title: string;
+  description: string;
+  config: IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig;
+}
+
+export interface IntakeConfig {
+  block: 'intake';
+  questions: string[];
+}
+
+export interface TypedBookingConfig {
+  block: 'typed_booking';
+  appointment_type: string;
+  minutes: number;
+}
+
+export interface PurposePaymentConfig {
+  block: 'purpose_payment';
+  purpose: string;
+  amount_cents: number;
+}
+
+export interface UrgentConfig {
+  block: 'urgent';
+  urgent_when: string;
+}
+
+/** A catalog tool or a Desk's own tool, whose title comes from its business definition. */
+export type AnyToolName = ToolName | `desk.${string}`;
+
 /** A tool as the owner reviews it: the kernel's tool row (`ToolProfile`'s columns). */
 export interface ToolRow {
-  tool: ToolName;
-  source: ToolProfile['source'];
+  tool: AnyToolName;
+  source: ToolProfile['source'] | 'business';
   effects: ToolProfile['effects'];
   reversible: boolean;
   status: ToolProfile['status'];
@@ -363,6 +394,8 @@ export interface ToolRow {
    * here, and optional, until the regenerated contract types have it: a row without it gives no reason.
    */
   review_reason?: ToolReviewReason | null;
+  /** Typed here and optional until the regenerated contract types carry business definitions. */
+  business?: BusinessToolDef | null;
   /**
    * The active version's cards that cover the tool, in card order, `shared` for a rule on an effect
    * group (plan 02b Task 9; pending, typed here and optional until the API sends it). Screens read
@@ -655,7 +688,7 @@ export interface ConfirmRulesBody {
 
 /** One tool of a `confirmTool` batch, with the hash of the definition the owner confirms. */
 export interface ToolConfirmEntry {
-  tool: ToolName;
+  tool: AnyToolName;
   /**
    * The row's `definition_sha256`, the hash it was listed at; only the changed-tool review sends its
    * `pending_sha256`, the hash of the definition the owner just read.

@@ -20,7 +20,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.cookies import set_owner_cookie, set_visitor_cookie
-from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown
+from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown, visitor_safe
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api import owner_reads
@@ -91,10 +91,12 @@ class CopyRequest(BaseModel):
 async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup]]:
     """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
     unfinished setup interviews by Desk ID, from the API's own rows."""
-    desks = [row for row in await ctx.ro.desks() if row["desk_id"] in ctx.desk_ids]
+    # Deleted Desks still consume pending setup claims; whoami lists only the active Desks to show.
+    all_desks = await ctx.ro.desks()
+    desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    return desks, businesses, await owner_reads.unfinished_setups(ctx)
+    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks)
 
 
 def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup]) -> DeskSummary:
@@ -454,7 +456,9 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
                        after: Annotated[int, Query(ge=0)] = 0) -> OwnerTranscript:
     """A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).
     The cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the
-    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored)."""
+    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored).
+    Status reasons are read concurrently with the owner's kernel credential, with bounded caching for final
+    execution refusals; an unreadable reason is null, so the stored transcript still renders."""
     session = await ctx.ro.session(session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         raise ApiProblem(404, "not_found")
@@ -462,7 +466,13 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
     state = SessionState(session_id=session_id, kind=session["kind"], verified=session["verified"],
                          assurance=session["assurance"], mode=session["mode"], generation=session["generation"])
     process = runtime(request)
-    return OwnerTranscript(state=state, items=await transcript(ctx.ro.conn, ids, "owner", after),
+    items = await transcript(ctx.ro.conn, ids, "owner", after)
+    statuses = [item for item in items if item.kind == "status" and item.event is not None]
+    reasons = await asyncio.gather(*(owner_reads.refusal_reason(
+        ctx, item.event.decision_id, session_id, item.event.state, item.event.ledger_seq) for item in statuses))
+    for item, reason in zip(statuses, reasons, strict=True):
+        item.owner_plain = reason
+    return OwnerTranscript(state=state, items=items,
                            typing_until=process.presence.visitor_typing_until(session_id, process.clock()))
 
 
@@ -583,6 +593,7 @@ async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str,
 
 async def _remember_approval(ctx: OwnerCtx, decision: Decision) -> None:
     """Keep an in-flight approval readable even when its answer's response and resume job were lost."""
+    decision = visitor_safe(decision)
     session = await ctx.ro.session(decision.session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         logger.warning("an answered request's session isn't one of the copy's")
@@ -611,6 +622,8 @@ async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: D
     records and makes no kernel call. Both paths publish the optional approved receipt before the outcome, with
     only the outcome waking Claude. If that fails too, the answer still stands, and the due-decisions job surfaces
     the outcome once it is final."""
+    decision = visitor_safe(decision)
+    approved = visitor_safe(approved) if approved is not None else None
     session = await ctx.ro.session(decision.session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         logger.warning("an answered request's session isn't one of the copy's")

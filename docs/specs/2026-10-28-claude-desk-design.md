@@ -38,7 +38,7 @@ The prototype must show the product is real, not slideware: someone using it can
 
 ## Product
 
-- **Where it lives:** a standalone app, with Claude Design (claude.ai/design) as precedent.
+- **Where it lives:** a standalone app, with Claude Design as precedent.
 - **Desk types:** business, personal, team/internal and public service all appear; only **business** works for real, the rest are mocks.
 - **Owners:** designed for a solo trade (Rivera Plumbing), a small office (Chen & Co. CPA) and a landlord (Maple Street Rentals) equally.
 - **Devices:** desktop and phone equally; phone screens are designed to feel native **(mock design)** over a responsive web app.
@@ -194,6 +194,8 @@ None open.
 - **Languages:** English and Spanish for real (the reply checker is tested on both); other languages fall back to handing off to the owner.
 - **Reply timing:** check, then reveal: a short "Claude is writing" state, then the checked reply appears whole, so nothing unchecked is ever shown. The added delay must be benchmarked (time from model finish to reveal, p50 and p95) and reported; a target is set once measured.
 - **Mock fixes:** the Desk picker shows on every Rivera screen; Settings uses one left sub-nav (General, Knowledge, Notifications, Channels, Billing) with breadcrumbs only on detail pages; connectors have their own tab, Connectors (built in, connected and available, with "Add a connector"), holding the connector and tool pages for connecting, accounts and tool changes, while Rules shows the outcomes grouped by connector, each group linking to its connector page (owner decisions 2026-10-29; the later one replaces connectors under Rules); one sidebar look on every owner page, the panel Today draws (owner decision 2026-10-29); setup shows memory and website reads as claude.ai-style inline tool labels instead of a card.
+
+Updated 2026-10-31 after calibration: the soft-promise check moved to Sonnet 5.5. The historical model list above records the original defaults; the [evals guide](../evals.md) links the measured results.
 
 **Decisions after the pre-implementation design reviews (2026-10-28; reviewers: Claude Opus 5.5, GPT-6 Astra and GPT-6.1 Sol at extra-high reasoning):**
 

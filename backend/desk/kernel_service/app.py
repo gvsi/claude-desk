@@ -35,6 +35,7 @@ import re
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Annotated, Any
 from urllib.parse import urlsplit
@@ -812,5 +813,13 @@ def serve_config() -> uvicorn.Config:
     and a lifespan that fails (a production kernel without its signing seed) stops the process.
     There is no access log: a raw path can hold a single-use link token, so the kernel logs its
     refusals and errors itself, by route template."""
+    log_config = deepcopy(uvicorn.config.LOGGING_CONFIG)
+    log_config["disable_existing_loggers"] = False
+    log_config["formatters"]["desk"] = {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}
+    log_config["handlers"]["desk"] = {
+        "class": "logging.StreamHandler", "formatter": "desk", "stream": "ext://sys.stdout"}
+    # caplog listens at root; production has no root handler, so propagation prints no duplicate.
+    log_config["loggers"]["desk"] = {"handlers": ["desk"], "level": "INFO", "propagate": True}
     return uvicorn.Config("desk.kernel_service.app:create_app", factory=True, host=HOST, port=PORT,
-                          lifespan="on", proxy_headers=False, server_header=False, access_log=False)
+                          lifespan="on", proxy_headers=False, server_header=False, access_log=False,
+                          log_config=log_config)

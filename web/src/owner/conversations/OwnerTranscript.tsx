@@ -13,7 +13,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type K
 
 import type { EvMessage, StatusEvent } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
-import type { TranscriptItem } from '../../api/views.ts';
+import type { OwnerTranscriptItem, TranscriptItem } from '../../api/views.ts';
 import {
   AgentMessage,
   Button,
@@ -36,6 +36,7 @@ import { useOwnerReceipt } from './ownerReceipt.ts';
 interface OwnerReceiptSource {
   event: StatusEvent | EvMessage;
   first: boolean;
+  ownerPlain?: string | null;
 }
 
 type OwnerRowItem =
@@ -47,7 +48,7 @@ type OwnerRowItem =
 type OwnerRow = GroupedRow<OwnerRowItem, OwnerReceiptSource>;
 
 export interface OwnerTranscriptProps {
-  items: readonly TranscriptItem[];
+  items: readonly OwnerTranscriptItem[];
   /** Who an agent's requests come from, as the owner's screens name them. */
   agentName: string;
   /** The owner's display name: Claude's messages name them, and their own messages show their initials. */
@@ -89,11 +90,11 @@ function initialsOf(name: string): string {
  * turn; a delivered message ends it with its receipts under it; a status attaches where its
  * decision's first receipt is, and the first status of each decision is marked as its first.
  */
-function rowsOf(items: readonly TranscriptItem[]) {
+function rowsOf(items: readonly OwnerTranscriptItem[]) {
   const sorted = [...items].sort((a, b) => a.n - b.n);
   const firsts = new Map<string, OwnerReceiptSource>();
   let requests = 0;
-  const partOf = (item: TranscriptItem): RowPart<OwnerRowItem, OwnerReceiptSource> | null => {
+  const partOf = (item: OwnerTranscriptItem): RowPart<OwnerRowItem, OwnerReceiptSource> | null => {
     const { event } = item;
     switch (item.kind) {
       case 'visitor_text':
@@ -109,7 +110,7 @@ function rowsOf(items: readonly TranscriptItem[]) {
       case 'status': {
         if (!isStatus(event)) return null;
         const earlier = firsts.get(event.decision_id);
-        const receipt: OwnerReceiptSource = { event, first: earlier === undefined };
+        const receipt: OwnerReceiptSource = { event, first: earlier === undefined, ownerPlain: item.owner_plain };
         if (earlier === undefined) firsts.set(event.decision_id, receipt);
         return { kind: 'receipt', receipt, beside: earlier };
       }
@@ -188,7 +189,7 @@ interface ReceiptLineProps {
 
 /** One receipt: the owner's line for it, a button that opens its trace. */
 function ReceiptLine({ source, done, cards, shownBefore, onOpenTrace }: ReceiptLineProps) {
-  const view = useOwnerReceipt(source.event, source.first);
+  const view = useOwnerReceipt(source.event, source.first, source.ownerPlain);
   const { event } = source;
   // The hold that reports what the kernel decided, with its card right under the row: the card says why.
   const cardBelow = source.first && event.type === 'held' && cards.includes(event.decision_id);

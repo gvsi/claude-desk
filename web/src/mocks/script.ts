@@ -29,6 +29,7 @@ import {
 } from '../api/contracts.ts';
 import { RIVERA_MONEY_CAP_CENTS, cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine, type ExecutedTool } from '../ds/fixtures/receipts.ts';
+import { afterName } from '../lib/names.ts';
 
 export type Language = 'en' | 'es';
 
@@ -97,6 +98,7 @@ export const VISITOR_PLAIN = {
 const NO_EXECUTED_LINE = {
   'native.fetch_website': true,
   'native.read_memory': true,
+  'native.web_search': true,
 } as const satisfies Record<Exclude<ToolName, ExecutedTool>, true>;
 
 function hasExecutedLine(tool: ToolName): tool is ExecutedTool {
@@ -217,7 +219,7 @@ export const HELD_PROSE: Record<Language, string> = {
  */
 export const LINK_CANCELLED: Record<Language, string> = {
   en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
-  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pídelo de nuevo si todavía quieres pagar.`,
+  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}${afterName(OWNER, '. Pídelo de nuevo si todavía quieres pagar.')}`,
 };
 
 /**
@@ -225,9 +227,9 @@ export const LINK_CANCELLED: Record<Language, string> = {
  * fact, in the chat's language: the link's amount as its title, then what the link was for and the
  * kernel's line. It cites the deposit card's fact, as the script's payment link card does.
  */
-export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language): CardBlock {
+export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language, factId = blocks.payment_link[language].fact_id ?? null): CardBlock {
   return cardBlock('link_cancelled', {
-    fact_id: blocks.payment_link[language].fact_id ?? null,
+    fact_id: factId,
     title: moneyText(link.amount_cents),
     lines: [link.title, LINK_CANCELLED[language]],
   });
@@ -597,7 +599,7 @@ export const SCRIPT: readonly ScriptRule[] = [
         return ctx.status('receipt', decision);
       },
       // The card points at the link this turn issued, by its own token.
-      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], href: `/pay/${ctx.latestLink()}` }]),
+      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], fact_id: `payment_link:${ctx.latestLink()}`, href: `/pay/${ctx.latestLink()}` }]),
     ],
   },
   {
@@ -772,23 +774,36 @@ export function allows(answer: ApprovalAnswer): boolean {
   return answer === 'allow_once' || answer === 'allow_person';
 }
 
+/** The owner annotation never enters a queued visitor turn, even when it is null. */
+export function visitorSafe(decision: Decision): Decision {
+  const { owner_plain: _ownerPlain, ...visitor } = decision;
+  return visitor;
+}
+
 /**
- * What the visitor's chat gets once the owner has answered: the resolved receipt, then Claude's
- * follow-up, which reports what ran (the discounted quote, or the refund) or hands off to Maria.
- * The receipt reports what the answer already did, so a take-over doesn't fence it; the follow-up
+ * What the visitor's chat gets once the owner has answered: the signed approved receipt when
+ * allowed, then the resolved outcome, then Claude's follow-up (the quote, refund or handoff).
+ * The receipts report what the answer already did, so a take-over doesn't fence them; the follow-up
  * is Claude's, so it does.
  */
-export function afterAnswer(answer: ApprovalAnswer, decision: Decision): Step[] {
+export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved: Decision | null): Step[] {
+  decision = visitorSafe(decision);
+  // As in the API's resume_after_answer, only an earlier approval for this decision can precede it.
+  if (approved !== null && (approved.decision_id !== decision.decision_id
+    || approved.state !== 'approved' || approved.ledger_seq >= decision.ledger_seq)) approved = null;
+  if (approved !== null) approved = visitorSafe(approved);
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
+  if (decision.state === 'refused_at_execution') return [resolved];
   if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {
-    return [resolved, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
+    return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
   }
   // The quote at the discount Maria allowed, the one the visitor asked for.
   const listCents = decision.action?.list_cents ?? DECISIONS.heldQuote.listCents;
   const discountBp = decision.action?.discount_bp ?? DEFAULT_DISCOUNT_BP;
   const quote = { listCents, discountBp, amountCents: decision.action?.amount_cents ?? discountedCents(listCents, discountBp) };
-  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
+  return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
 }
 
 /**

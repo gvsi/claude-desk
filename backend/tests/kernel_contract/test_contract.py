@@ -2275,7 +2275,7 @@ async def test_expired_mandate_at_execution_names_no_rule_change(kernel, ro_read
 # Setup: a new Desk and the owner's setup tools (Plans 01b and 01c) ---------------------------------------------------
 
 
-SETUP_TOOLS = {"native.fetch_website", "native.read_memory"}
+SETUP_TOOLS = {"native.fetch_website", "native.read_memory", "native.web_search"}
 # `PRESETS["ask_first"]`: auto for anyone on these, everything else asks (Plan 01a).
 ASK_FIRST_AUTO = {"native.find_slots", "native.capture_lead", "native.request_callback", "native.start_verification",
                   *SETUP_TOOLS}
@@ -2461,6 +2461,18 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     session = (await owner.whoami()).session
     assert tools(await context(owner, session.session_id, created.desk_id)) == (SETUP_TOOLS, SETUP_TOOLS)
 
+    from desk.kernel_api import DeskMemoryRequest
+
+    empty = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="empty-memory", tool="native.read_memory", args={"query": "business hours"})))
+    assert (await execute(owner, empty, session.generation)).model_view == {"simulated": True, "items": []}
+
+    memory = DeskMemoryRequest.model_validate({"about": "Simulated CPA notes.", "items": [
+        {"id": "business", "title": "Chen CPA", "topics": ["business"], "text": "Chen CPA prepares tax returns."}]})
+    updated = await owner.call("PUT /desks/{id}/memory", memory, path={"id": created.desk_id})
+    assert isinstance(updated, DeskUpdated) and updated.desk_id == created.desk_id
+
     call = ToolCall(call_id="setup-memory", tool="native.read_memory", args={"query": "business hours"})
     decision = await owner.call("POST /decide", DecideRequest(session_id=session.session_id,
                                                               generation=session.generation, call=call,
@@ -2468,7 +2480,8 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     assert decision.outcome == "allow" and decision.session_id == session.session_id
     assert decision.action.desk_id == created.desk_id and decision.action.resource.kind == "desk"
     result = await execute(owner, decision, session.generation)
-    assert result.state == "succeeded" and result.model_view["simulated"] is True and result.model_view["items"]
+    assert result.state == "succeeded" and result.model_view == {"simulated": True, "items": [
+        {"title": "Chen CPA", "text": "Chen CPA prepares tax returns."}]}
     knowledge = ro_read(ro_schema, copy.copy_id, "SELECT source, readers FROM {ro}.knowledge_items"
                                                  " WHERE desk_id = %s", (created.desk_id,))
     assert knowledge and all(row == {"source": "memory_import", "readers": ["owner"]} for row in knowledge)
@@ -2487,6 +2500,29 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     elsewhere = stranger.call("POST /decide", DecideRequest(session_id=theirs.session_id, generation=theirs.generation,
                                                             call=call, desk_id=created.desk_id))
     assert await refused(elsewhere) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_memory_nul_item_is_refused(kernel):
+    from desk.kernel_api import DeskMemoryRequest
+
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    memory = DeskMemoryRequest.model_validate({"about": "Simulated CPA notes.", "items": [
+        {"id": "business", "title": "Chen CPA", "topics": ["business"], "text": "before\0after"}]})
+    start = (await ledger_page(owner, created.desk_id)).entries[-1].seq
+    assert await refused(owner.call("PUT /desks/{id}/memory", memory, path={"id": created.desk_id})) == (
+        422, "invalid")
+    assert [(entry.event.kind, entry.event.summary)
+            for entry in (await ledger_page(owner, created.desk_id)).entries if entry.seq > start] == [
+        ("desk_data", {"part": "memory", "refused": "invalid"})]
+    session = (await owner.whoami()).session
+    decision = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="refused-memory", tool="native.read_memory", args={"query": "business"})))
+    assert (await execute(owner, decision, session.generation)).model_view == {"simulated": True, "items": []}
 
 
 # Setup: a new Desk's parts, rules drafts, probes and connected tools (Plans 01a, 01b and 01c) -------------------------
@@ -2577,9 +2613,16 @@ async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel,
 @pytest.mark.parametrize(("text", "rules"), [
     ("20% off for first-time clients", ["digit", "percent_sign"]),
     ("free consultation", ["lex.en.promise"]),
+    ("The East Bay, seven days a week.", ["lex.en.number"]),
+    ("Monday to Friday.", ["lex.en.date"]),
+    ("a few miles past Oakland.", ["lex.es.number"]),
+    *[(f"Consulta {word}.", ["lex.es.promise"]) for word in
+      ("gratis", "gratuito", "gratuita", "gratuitos", "gratuitas")],
+    ("Feel free to all clients.", ["lex.en.promise"]),
     ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
     ("Consultations gratuites pour tous les clients.", ["language"]),
     ("Consultas sem custo para todos os clientes.", ["language"]),
+    ("Garantimos o serviço.", ["language"]),
     ("Services sans frais pour tous les clients.", ["language"]),
     ("Livraison offerte pour tous", ["language"]),
     ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
@@ -2727,6 +2770,10 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("parts", [
     ("Portland Beaverton", "Cash card"),
+    ("Feel free to ask about our services.",),
+    ("You are free to ask about our services.",),
+    ("Puede preguntar por nuestros servicios.",),
+    ("Se requiere un garante.",),
     ("Garage parking available", "Offering estimates by appointment"),
     ("Service area: Portland, Beaverton, Hillsboro, Tigard", "Cash, card, Venmo accepted",
      "Emergency service available"),
@@ -2769,8 +2816,53 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
 
 
 @pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Within 25 miles of Oakland.", []),
+    ("We drive a few miles past Oakland.", []),
+    ("The East Bay, seven days a week.", []),
+    ("Serving the East Bay since 1998.", []),
+    ("We do evenings and weekends.", []),
+    ("Trabajamos fines de semana.", []),
+    ("Within a 25-mile radius of Oakland.", []),
+    ("We serve a 30 mile radius around Oakland.", []),
+    ("Within 1 mile of Lake Merritt.", []),
+    ("A 50-km radius.", []),
+    ("Dentro de 1 kilómetro.", []),
+    ("Within 25 miles, $50 trip fee.", ["currency", "digit"]),
+    ("Outside Oakland, half off.", ["lex.en.number"]),
+    ("Mitad de precio fuera de Oakland.", ["lex.es.number"]),
+    ("Within 25 miles. Trip fee 1500.", ["digit"]),
+    ("Cargo de viaje: cincuenta.", ["lex.es.number"]),
+    ("Service in Oakland within two hours.", ["lex.en.date", "lex.en.number"]),
+    ("Same-day service in Oakland.", ["lex.en.date"]),
+])
+async def test_service_area_policy_contract(kernel, ro_read, text, rules):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    claims = [Claim(key="policy:service_area", kind="text", value=text)]
+    if rules:
+        with pytest.raises(KernelFailed) as refused:
+            await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims),
+                             path={"id": copy.desk_ids[0]})
+        assert (refused.value.code, refused.value.detail) == ("invalid", {"policy:service_area": rules})
+        return
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims),
+                     path={"id": copy.desk_ids[0]})
+    slug = desk_slug(ro_read, schema, copy)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
+    assert [block.text for block in page.charter if block.template == "policy"] == [text]
+    visitor = await new_visitor(http, slug)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+        clauses=[Clause(template="policy", fact_id="charter:policy:service_area")])))
+    assert verdict.ok and verdict.violations == [] and verdict.signature
+    assert [block.text for block in verdict.blocks] == [text]
+
+
+@pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("stored", ["discount", "other_commitment", "private", "expired"])
-async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read, arrange, stored):
+async def test_public_read_withholds_only_unsafe_stored_policy_lines(kernel, ro_read, arrange, stored):
     http, schema, _ = kernel
     copy = await new_copy(http)
     path = {"desk_slug": desk_slug(ro_read, schema, copy)}
@@ -2790,7 +2882,9 @@ async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read,
                               expired=stored == "expired")
     for language in ("en", "es"):
         page = await http.public().call("GET /public/{desk_slug}", path=path, query={"lang": language})
-        assert all(block.template != "policy" for block in page.charter)
+        kept = ["charter:policy:first_visit", "charter:policy:service_area"] if stored in (
+            "discount", "other_commitment") else []
+        assert [block.fact_id for block in page.charter if block.template == "policy"] == kept
         assert {"hours", "contact"} <= {block.template for block in page.charter}
     if stored == "other_commitment":
         visitor = await new_visitor(http, path["desk_slug"])

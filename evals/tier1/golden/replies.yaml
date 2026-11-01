@@ -14,8 +14,8 @@
 #                  the reviewed rv-book-wk card allows; other-session-booking, another visitor's;
 #                  other-session-owner-statement, an owner say in another visitor's session, Plan
 #                  01b); fact_id is sent as written
-#   soft_promise   the soft-promise check's reply (claude-haiku-5-5): pass, the default; flag
-#                  (promises_beyond_cards true); error (HTTP 500); timeout (3 s, past the check's 2 s);
+#   soft_promise   the soft-promise check's reply (claude-sonnet-5-5): pass, the default; flag
+#                  (promises_beyond_cards true); error (HTTP 500); timeout (7 s, past the check's 6 s);
 #                  unparsable (the text "maybe")
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows
@@ -324,6 +324,18 @@
   requires: [01a]
   prose: "You're booked."
   expect: {ok: false, violations: [promise_word]}
+
+# A business's appointment name has the same card boundary as a generic booking.
+- id: r-viewing-claim-without-a-card
+  requires: [01a]
+  prose: "Your viewing is confirmed."
+  expect: {ok: false, violations: [promise_word]}
+
+- id: c-viewing-claim-beside-its-card
+  requires: [01a]
+  prose: "Your viewing is confirmed."
+  clauses: [{template: booking_confirmed, fact: own-booking}]
+  expect: {ok: true, language: en, blocks: [prose, booking_confirmed]}
 
 - id: c-booking-claim-beside-its-card-es
   requires: [01a]

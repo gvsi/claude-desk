@@ -4,7 +4,7 @@
  * a note or a text file added for the owner only, then the "Customers can see this" switch, which
  * shows the readers the kernel returned and never the ones asked for.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
@@ -78,6 +78,7 @@ function held(): { until: Promise<void>; release: () => void } {
   const until = new Promise<void>((resolve) => {
     release = resolve;
   });
+  onTestFinished(() => release());
   return { until, release };
 }
 

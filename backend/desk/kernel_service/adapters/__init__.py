@@ -1,7 +1,7 @@
 """The registry of adapters, one per tool. Each adapter module registers itself at import; the
 native adapters (quote, open times, booking, lead capture, callbacks, verification, document
-release, payment links and mandate charges), the owner's setup tools (website fetch and memory
-reads) and the pinned MCP tools' (`payments_mcp`) are imported at the end of this module.
+release, payment links and mandate charges), the owner's setup tools (website fetch, memory
+reads and web search) and the pinned MCP tools' (`payments_mcp`) are imported at the end of this module.
 
 `register` refuses an adapter whose args model isn't strict and closed, or whose profile's
 `input_schema` isn't exactly that model's JSON Schema, so the schema Claude sees is the one the
@@ -47,6 +47,18 @@ def profile_sha256(profile: ToolProfile) -> str:
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(fields)).encode()).hexdigest()
 
 
+def resolve(tool: str, row: object) -> Adapter | None:
+    """Resolve only a registered adapter with an intact pinned row profile.
+
+    Business adapters can extend this resolver when their tool rows land. Unknown tools
+    and stale profiles grant no callable capability.
+    """
+    profile = getattr(row, "profile", None)
+    if profile is None or profile_sha256(profile) != getattr(row, "profile_sha256", None):
+        return None
+    return ADAPTERS.get(tool)
+
+
 def _check(adapter: Adapter) -> None:
     if not isinstance(adapter, Adapter):
         raise ValueError(f"{adapter!r} doesn't implement the adapter protocol")
@@ -74,5 +86,5 @@ def _check(adapter: Adapter) -> None:
 from desk.kernel_service.adapters import (book, capture_lead, charge_mandate, find_slots,  # noqa: E402, F401
                                          payment_link, payments_mcp, quote, release_document,
                                          request_callback, start_verification)
-# The owner's setup tools: reading the business's website and the owner's (simulated) memory.
-from desk.kernel_service.adapters import fetch_website, read_memory  # noqa: E402, F401
+# The owner's setup tools: website and memory reads, and research about similar businesses.
+from desk.kernel_service.adapters import fetch_website, read_memory, web_search  # noqa: E402, F401
