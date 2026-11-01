@@ -7,6 +7,7 @@ import type {
   Approval,
   Decision,
   DemoInboxEntry,
+  DeskBusinessRequest,
   EvError,
   EvHeld,
   EvReceipt,
@@ -19,6 +20,8 @@ import type {
 } from './contracts.gen';
 
 export type * from './contracts.gen';
+
+export type BrandPalette = NonNullable<DeskBusinessRequest['brand_palette']>;
 
 export type ActorKind = SessionState['kind'];
 export type ClauseTemplate = NonNullable<RenderedBlock['template']>;

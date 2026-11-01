@@ -115,7 +115,7 @@ class NotificationDefaults(BaseModel):    # alerts are delivered to the owner's 
 
 # A Desk's brand colours, picked from a fixed palette: the owner picks a key and the kernel stores it with this
 # table's colours, never colours of the request's, so every pick keeps the public page's header readable
-# (tests/test_brand_palette.py holds each primary to 4.5:1 under both of the header's text tokens).
+# (the web palette tests hold each primary to 4.5:1 under both header text tokens).
 BrandPalette = Literal["none", "teal", "clay", "navy", "forest", "plum", "rust", "slate"]   # in display order
 DEFAULT_BRAND_PALETTE: BrandPalette = "teal"            # what a business that stored no brand reads as
 BRAND_PALETTE: dict[BrandPalette, dict[str, str]] = {   # the one table: the header's field and the rule under it
