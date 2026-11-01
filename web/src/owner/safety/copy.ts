@@ -94,6 +94,23 @@ export function causeLabel(a: Pick<Attempt, 'kind' | 'cause'>): string | null {
   return CAUSE_COPY[cause];
 }
 
+/**
+ * The label beside a stopped reply of Claude's in the list, where a refused request's says why it
+ * was turned down: the API's own line for it. So the list reads as the requests the headline counts,
+ * and the replies, which it doesn't.
+ */
+export const REPLY_STOPPED_LABEL = 'A reply was stopped before it was shown';
+
+/**
+ * The label beside an entry in the list: why a request was turned down, that a reply was stopped, or
+ * null. A stopped reply Claude hasn't sorted yet has none: its row reads the API's reason, which
+ * already starts with the same words.
+ */
+export function rowLabel(a: Pick<Attempt, 'kind' | 'cause' | 'triage'>): string | null {
+  if (a.kind === 'reply_blocked') return triageOf(a) === null ? null : REPLY_STOPPED_LABEL;
+  return causeLabel(a);
+}
+
 /** An attempt Claude hasn't sorted into a category yet. */
 export const NOT_SORTED = 'Not sorted yet';
 

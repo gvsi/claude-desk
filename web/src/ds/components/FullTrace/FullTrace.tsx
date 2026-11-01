@@ -1,6 +1,7 @@
-import { useId, type KeyboardEvent } from 'react';
+import { useId, useState, type KeyboardEvent } from 'react';
 
 import type { Health, LedgerEntry, LedgerPage } from '../../../api/contracts.ts';
+import { Icon } from '../../icons/index.tsx';
 import { IconButton } from '../IconButton/IconButton.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import { traceChainLine, traceLine } from './traceLine.ts';
@@ -29,10 +30,13 @@ function shorten(value: string): string {
 /**
  * One ledger entry in full, for the owner: a plain line saying what it records, then the signed
  * record in mono (the only mono in Claude Desk) and the chain's state. Nothing is computed:
- * values are shown as given, long ones shortened in the middle.
+ * values are shown as given, long ones shortened in the middle. What was recorded, the raw summary,
+ * waits closed under its label until it's asked for.
  */
 export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
   const titleId = useId();
+  const recordId = useId();
+  const [recordOpen, setRecordOpen] = useState(false);
   const status = traceChainLine(chain, entry.seq);
   const fields: readonly [label: string, value: string, full?: string][] = [
     ['Entry', String(entry.seq)],
@@ -68,15 +72,26 @@ export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
             </dd>
           </div>
         ))}
-        <div className="cd-full-trace__field cd-full-trace__field--block">
-          <dt className="cd-full-trace__label cd-type-caption">What was recorded</dt>
-          <dd className="cd-full-trace__value">
+      </dl>
+      <div className="cd-full-trace__record">
+        <button
+          type="button"
+          className="cd-full-trace__record-toggle cd-type-caption"
+          aria-expanded={recordOpen}
+          aria-controls={recordId}
+          onClick={() => setRecordOpen((open) => !open)}
+        >
+          <Icon name="chevron-down" size={16} className="cd-full-trace__chevron" />
+          What was recorded
+        </button>
+        <div id={recordId} hidden={!recordOpen}>
+          {recordOpen ? (
             <pre className="cd-full-trace__summary cd-type-trace" translate="no">
               {JSON.stringify(entry.event.summary, null, 2)}
             </pre>
-          </dd>
+          ) : null}
         </div>
-      </dl>
+      </div>
       <p className="cd-full-trace__chain cd-type-caption">
         <StatusDot tone={status.tone} />
         <span>{status.line}</span>

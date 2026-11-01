@@ -21,8 +21,8 @@ import {
   anythingTurnedDownIn,
   attemptTime,
   categoryLabel,
-  causeLabel,
   originCopy,
+  rowLabel,
   stoppedBy,
   triageOf,
   turnedDownHeadline,
@@ -246,7 +246,7 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
               <li key={a.ref_id} onClick={() => setPicked({ refId: a.ref_id })}>
                 <AttemptRow
                   time={formatWhen(attemptTime(a, page), timezone, now)}
-                  why={causeLabel(a) ?? undefined}
+                  why={rowLabel(a) ?? undefined}
                   title={triageOf(a)?.summary ?? a.reason_plain}
                   who={originCopy(a.origin)}
                   stoppedBy={stoppedBy(a)}

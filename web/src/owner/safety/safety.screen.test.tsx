@@ -433,6 +433,14 @@ describe('Safety', () => {
     expect(refused).toHaveLength(Number.parseInt(/\d+/.exec(headline.element().textContent ?? '')?.[0] ?? '', 10));
     expect(list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()).toHaveLength(1);
     expect(list.getByRole('link').elements()).toHaveLength(refused.length + 1);
+    // So the list reads as the requests the headline counts, and the replies: each stopped reply says
+    // what it is beside it, where a turned-down request says why.
+    for (const row of list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()) {
+      expect(row.querySelector('.cd-attempt-row__why')?.textContent).toBe('A reply was stopped before it was shown');
+    }
+    for (const row of refused) {
+      expect(row.querySelector('.cd-attempt-row__why')?.textContent).not.toBe('A reply was stopped before it was shown');
+    }
 
     // Newest first, by the time each row shows.
     const ledger = await mockLedger();
@@ -471,6 +479,10 @@ describe('Safety', () => {
     const trace = region(screen, 'Full trace of entry 3');
     await expect.element(trace).toBeVisible();
     await expect.poll(() => document.activeElement).toBe(trace.element());
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    expect(main.scrollTop).toBe(before);
+    // Its record opened, the trace is taller than the window, and still the page stays where it was.
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     expect(main.scrollTop).toBe(before);
     const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
@@ -557,7 +569,8 @@ describe('Safety', () => {
 
   it('mock_refusal_says_why', async () => {
     // The built-in agent's charge over its signed limit, refused by the baseline's signed-limit
-    // policy, as the mock decides it: its row says why. The seeded stopped draft says nothing more.
+    // policy, as the mock decides it: its row says why. The seeded stopped draft, which Claude has
+    // sorted, says it's a reply that was stopped.
     await refuseTheAgentsCharge();
     const { screen } = await renderRoute(SAFETY);
     const list = screen.getByRole('list', { name: 'Stopped, newest first' });
@@ -566,7 +579,7 @@ describe('Safety', () => {
     await expect.element(refused.getByText("Outside the agent's spending limit", { exact: true })).toBeVisible();
     const draft = list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ });
     await expect.element(draft).toBeVisible();
-    expect(draft.element().querySelector('.cd-status-label')).toBeNull();
+    expect(draft.element().querySelector('.cd-status-label')?.textContent).toBe('A reply was stopped before it was shown');
   });
 
   it('attempt_detail_tiers', async () => {
@@ -597,6 +610,9 @@ describe('Safety', () => {
     await expect.element(full).toHaveAttribute('aria-expanded', 'true');
     const trace = region(screen, 'Full trace of entry 2');
     await expect.element(trace).toBeVisible();
+    expect(trace.element().textContent).not.toContain('payments.create_refund');
+    // What was recorded opens under its label.
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     const values = [...document.querySelectorAll('.cd-type-trace')].map((el) => el.textContent);
     expect(values).toContain('2');
     expect(values.join('\n')).toContain('payments.create_refund');
@@ -716,7 +732,12 @@ describe('Safety', () => {
     await expectScreenBasics(screen.container, { owner: true });
     await recordRow(screen, returned.seq).click();
     const trace = region(screen, `Full trace of entry ${returned.seq}`);
-    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeVisible();
+    // The raw record waits, closed, under its label: the trace opens on its plain line and the chain.
+    const recorded = trace.getByRole('button', { name: 'What was recorded', exact: true });
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'false');
+    expect(trace.element().textContent).not.toContain('"from"');
+    await recorded.click();
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
     expect(trace.element().textContent).toContain('"from": "owner"');
     expect(trace.element().textContent).toContain('"to": "ai"');
   });
@@ -949,6 +970,7 @@ describe('Safety', () => {
     const values = () => [...trace.element().querySelectorAll('.cd-type-trace')].map((el) => el.textContent ?? '');
     await expect.element(trace.getByText('Recorded at', { exact: true })).toBeVisible();
     expect(values()).toContain(decide.created_at);
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     expect(values().join('\n')).toContain(replayedAt);
 
     // The attempt kept in that entry says the same, at the same time.
