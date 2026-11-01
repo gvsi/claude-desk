@@ -11,6 +11,7 @@ import pytest
 import rfc8785
 
 from desk.contracts import RenderedBlock, ReplyVerdict, Violation
+from desk.markdown_text import blank_list_markers
 from evals.fakes import FakeAnthropic
 from evals.oracles import denies_ai, scan_visible
 from evals.tier1 import test_reply_golden as reply_golden
@@ -27,8 +28,8 @@ def test_timeout_reply_waits_past_the_production_soft_check_deadline():
 
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
-    assert len(rows) == len({row.id for row in rows}) == 68
-    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 62, ("01b",): 1, ("01c",): 5}
+    assert len(rows) == len({row.id for row in rows}) == 73
+    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 67, ("01b",): 1, ("01c",): 5}
     assert [row.id for row in rows if row.requires == ["01b"]] == ["c-owner-only-fact"]
 
 
@@ -89,9 +90,10 @@ def test_rows_pin_the_owners_decision_on_restating_a_card():
 def test_rows_agree_with_the_scanner():
     """Prose the table expects to fail for an amount or a date is flagged by the evals' own scanner
     too, and every other row's prose is clean by it, so the kind a row expects is the only reason
-    it can fail and a passing row's prose is clean by a reading other than the kernel's."""
+    it can fail and a passing row's prose is clean by a reading other than the kernel's. A numbered
+    list's markers are no number (`blank_list_markers`, the owner's decision of 2026-11-01)."""
     for row in load_rows():
-        hits = scan_visible(row.prose)
+        hits = scan_visible(blank_list_markers(row.prose))
         assert bool(hits) == ("number_in_prose" in row.expect.kinds), (row.id, hits)
 
 

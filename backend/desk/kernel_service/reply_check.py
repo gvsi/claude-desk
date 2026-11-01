@@ -104,6 +104,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from desk import markdown_text
 from desk.public_amenity import offers_amenity
 from desk.public_person import future_person_direction
 from desk.public_contact import bare_host, valid_public_contact
@@ -114,8 +115,7 @@ from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Ledge
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import (agents, auth, context, demo_inbox, jev, labels, lang, ledger, markdown_text, render,
-                                 sessions)
+from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims, text_claim

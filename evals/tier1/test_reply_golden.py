@@ -24,6 +24,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
 from desk.contracts import ClauseTemplate, LedgerEntry, OwnerMessageResult, ReplyVerdict, RuleCard, Violation
+from desk.markdown_text import blank_list_markers
 from desk.rewrites import PROSE_ONLY, REWRITABLE
 from evals.fakes import FakeAnthropic, HttpError, Json, Refusal, Reply, Sleep, Text
 from evals.oracles import card_amount_problems, denies_ai, scan_visible, verify_verdict_sig, visible_texts
@@ -406,9 +407,13 @@ async def signing_key(k: KernelHarness) -> str:
     return (await k.call("GET /health", auth=Auth.none())).public_key_hex
 
 
-def visible_hits(payload: Any) -> list[tuple[str, str, str]]:
-    """Every amount, percentage or date the evals' scanner finds in the payload's visible free text."""
-    return [(text, hit.kind, hit.span) for text in visible_texts(payload) for hit in scan_visible(text)]
+def visible_hits(verdict: ReplyVerdict) -> list[tuple[str, str, str]]:
+    """Every amount, percentage or date the evals' scanner finds in the verdict's visible free text,
+    but a numbered list's markers in its prose, as the kernel reads them (`blank_list_markers`: a list
+    from 1 of at most nine items, the owner's decision of 2026-11-01, which covers this check)."""
+    prose = {block.text for block in verdict.blocks if block.kind == "prose"}
+    return [(text, hit.kind, hit.span) for text in visible_texts(verdict)
+            for hit in scan_visible(blank_list_markers(text) if text in prose else text)]
 
 
 async def ledger_head(records: Any, desk: GoldenDesk) -> int:

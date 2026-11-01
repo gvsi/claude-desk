@@ -9,9 +9,9 @@ refused.
 
 import pytest
 
-from desk import public_contact
+from desk import markdown_text, public_contact
 from desk.contracts import RenderedBlock
-from desk.kernel_service import markdown_text, reply_check
+from desk.kernel_service import reply_check
 
 from .test_adapters import visitor_of
 from .test_reply_check import change_fact, checked

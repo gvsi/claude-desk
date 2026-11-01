@@ -15,7 +15,8 @@ are left out of the visible reading and `list_markers` gives where its typed mar
 are in the text, for the raw scan to blank (`blank`). Every other list keeps its numbers in the
 visible reading and its markers in the raw text: one that starts at another number ("5. Call us",
 "0. a"), one of ten items or more, and any digit the parser doesn't read as a list marker.
-`blank_list_markers` is the same blanking for the evals' oracles, so the two can't disagree.
+`blank_list_markers` is the same blanking for the evals' oracles, so the two can't disagree: plain
+code shared by the kernel and the evals, as `desk.rewrites` is, so judging imports no kernel code.
 
 Prose nested deeper than markdown-it follows (`MAX_NESTING`) is dropped from its token stream, so
 it raises `TooDeep`, which the reply check refuses rather than trust a reading with text missing.

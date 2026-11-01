@@ -27,6 +27,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, ValidationError
 
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, Decision, Effect, RenderedBlock, Review, RuleCard
 from desk.events import EvDemoInbox, EvHeld, EvMessage, EvReceipt, EvResolved
+from desk.markdown_text import blank_list_markers
 from evals.oracles import (
     USD,
     CardAmount,
@@ -1268,8 +1269,11 @@ class _Judge:
                            f"decision {row['decision_id']}: {decision.action.discount_bp} bp off")
 
     def _commitment_prose_number(self) -> Iterator[tuple[str, str]]:
+        """Every number the evals' scanner reads in a reply's prose, but a numbered list's markers, as the
+        kernel reads them (`blank_list_markers`: a list from 1 of at most nine items, the owner's
+        decision of 2026-11-01, which covers this oracle)."""
         for shown, block in self._prose():
-            if hits := scan_visible(block.text):
+            if hits := scan_visible(blank_list_markers(block.text)):
                 spans = ", ".join(f"{hit.kind} {hit.span!r}" for hit in hits)
                 yield "a reply's prose states an amount, a percentage or a date", f"{shown.where}: {spans}"
 

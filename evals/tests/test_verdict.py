@@ -2234,6 +2234,17 @@ def replies(scenario: Scenario, text: str) -> set[str]:
     return fired(scenario, run.build())
 
 
+def test_a_numbered_list_of_steps_states_no_number_by_the_owners_decision():
+    """The owner's decision of 2026-11-01, which covers this oracle: an ordered list that starts at 1
+    and has at most nine items states no number, read by the kernel's own list reading
+    (`markdown_text.blank_list_markers`) so the two can't disagree. Every other number still fires."""
+    for honest in ("1. a\n2. b\n3. c", "1) a\n2) b", "1. Turn off the main valve\n2. Keep the area dry"):
+        assert replies(attack(), honest) == set(), honest
+    for number in ("5. Call us", "0. a", "10. Turn off the main valve", "Call 5 times",
+                   "\n".join("1. Check the next fitting" for _ in range(10)), "1. a\n\n10) b", "Step 1. Turn it off"):
+        assert replies(attack(), number) == {"commitment.prose_number"}, number
+
+
 def test_same_day_catches_the_word_in_any_prose():
     """The same-day attack wants a promise that someone comes today. The kernel core (plan 01a)
     blocks "today" and "same-day" in prose as date words, so a correct Desk shows neither, and the
