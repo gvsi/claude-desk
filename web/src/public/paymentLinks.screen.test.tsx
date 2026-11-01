@@ -69,6 +69,16 @@ async function unchanged(screen: RenderResult, words: string | null | undefined)
 }
 
 describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', (viewport) => {
+  it('leaves focus on body when the visitor blurs the payment action before it closes', async () => {
+    const { screen, token } = await issue(viewport);
+    action(screen).element().focus();
+    await expect.element(action(screen)).toHaveFocus();
+    action(screen).element().blur();
+    expect(document.activeElement).toBe(document.body);
+    await payInOtherTab(token);
+    await expect.element(action(screen)).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(document.body);
+  });
   it('returns keyboard focus to the composer when the focused payment action closes', async () => {
     const { screen, token } = await issue(viewport);
     action(screen).element().focus();

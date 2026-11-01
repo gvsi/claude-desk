@@ -72,7 +72,18 @@ export function usePaymentLinks(rows: readonly ChatRow[], memory: PaymentLinkMem
       const token = /^\/pay\/([A-Za-z0-9_-]+)$/.exec(element.getAttribute('href') ?? '')?.[1];
       runtime.focused = token && runtime.tokens.includes(token) ? element : null;
     };
+    const blurred = () => {
+      const anchor = runtime.focused;
+      // Removal also blurs an anchor. Keep that case for the layout effect, but forget an
+      // action the visitor left while it was still present, including a move to body.
+      queueMicrotask(() => {
+        if (runtime.active && runtime.focused === anchor && anchor?.isConnected && document.activeElement !== anchor) {
+          runtime.focused = null;
+        }
+      });
+    };
     document.addEventListener('focusin', focused);
+    document.addEventListener('focusout', blurred);
     let hidden = document.visibilityState === 'hidden';
     const visible = () => {
       if (document.visibilityState === 'hidden') hidden = true;
@@ -89,6 +100,7 @@ export function usePaymentLinks(rows: readonly ChatRow[], memory: PaymentLinkMem
     return () => {
       runtime.active = false;
       document.removeEventListener('focusin', focused);
+      document.removeEventListener('focusout', blurred);
       document.removeEventListener('visibilitychange', visible);
     };
   }, [memory, runtime]);
