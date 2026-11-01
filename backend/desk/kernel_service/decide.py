@@ -59,6 +59,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 from desk.contracts import (
     ApprovalAnswer,
     BusinessToolDef,
+    ToolProfile,
     Decision,
     InboxNotice,
     LedgerEntry,
@@ -214,10 +215,11 @@ def tools_given(principal: Principal, session_row: SessionRow, desk_row: Desk, e
     native = given & set(enabled) & set(adapters.ADAPTERS)
     if hasattr(enabled, "items"):
         from desk.kernel_service.adapters import blocks
-        # Live decisions supply enabled rows; probes supply enabled profile wrappers.
+        # Probe wrappers are already eligible; rows and plain profiles carry their current status.
         for tool, row in enabled.items():
-            profile = row.profile
+            profile = row if isinstance(row, ToolProfile) else row.profile
             if (profile is not None and profile.source == "business" and profile.business is not None
+                    and getattr(row, "status", "enabled") == "enabled"
                     and profile.business.config.block in blocks.SUPPORTED_BLOCKS
                     and blocks.BLOCK_BASE[profile.business.config.block] in given):
                 native.add(tool)

@@ -743,6 +743,12 @@ async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
 
 
 async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if route_template(request) == "PUT /desks/{id}/business_tools":
+        try:
+            async with kernel_transaction(request.app.state.kernel) as ctx:
+                await business_tools.refuse_invalid_request(ctx, request)
+        except KernelFailure as failure:
+            return await _kernel_failure(request, failure)
     return error_response(422, "invalid")
 
 

@@ -2,6 +2,14 @@ import type { BusinessToolDef } from '../../api/views.ts';
 import type { RuleMode } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
 
+/** Owner-signed copy, keyed by the stored block; Claude's kernel descriptions use third person. */
+export const BUSINESS_BLOCK_SENTENCES = {
+  intake: "Saves the person's name, contact details and answers to your questions, so you can follow up.",
+  typed_booking: 'Books one open time on your calendar for this kind of appointment.',
+  purpose_payment: 'Creates a secure payment link for this purpose, for the amount the owner set.',
+  urgent: 'Saves an urgent callback request and alerts the owner right away.',
+} as const satisfies Record<BusinessToolDef['config']['block'], string>;
+
 /** The signed words for the Desk's own jobs, shared by setup and Rules. */
 export const BUSINESS_WORDS = {
   appointment: 'Appointment', length: 'Length', uses: 'Uses', asks: 'Asks', amount: 'Amount',

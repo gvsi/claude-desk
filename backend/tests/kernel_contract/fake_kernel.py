@@ -4005,14 +4005,15 @@ class FakeKernelState:
         from desk.kernel_api import BusinessToolsRequest
         from desk.kernel_service.adapters import profile_sha256
         from desk.kernel_service.adapters.blocks import profile as block_profile
-        from desk.kernel_service.business_tools import config_texts, free_allow_words, public_fields, public_promise_fields
+        from desk.kernel_service.business_tools import (config_texts, free_allow_words, public_fields,
+                                                        public_promise_fields, unindexed_detail)
         from desk.kernel_service.repo import storable
 
         desk = self._owners_desk(request, request.path_params["id"])
 
-        def refuse(reason: str) -> None:
+        def refuse(reason: str, *, detail: dict[str, list[str]] | None = None) -> None:
             self.append(desk, "business_tools", {"tools": [], "refused": reason})
-            raise Refusal(422, "invalid")
+            raise Refusal(422, "invalid", detail=detail)
 
         try:
             batch = BusinessToolsRequest.model_validate(body)
@@ -4027,8 +4028,8 @@ class FakeKernelState:
                                   if each.copy_id == desk.copy_id for document in each.documents.values()):
             refuse("business_tools_canary")
         for tool in batch.tools:
-            if public_promise_fields(public_fields(tool), allow_words=free_allow_words(tool)):
-                refuse("public_promise")
+            if fields := public_promise_fields(public_fields(tool), allow_words=free_allow_words(tool)):
+                refuse("public_promise", detail=unindexed_detail({field: ["public_promise"] for field in fields}))
         # Build the entire batch before changing any row.
         profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
                     for tool in batch.tools]
@@ -4564,7 +4565,7 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if failure is not None:
             return _error(int(failure), FAILURE_CODES[failure])
         try:
-            body = _parse(request_model, raw)
+            body = body_json if key == "PUT /desks/{id}/business_tools" else _parse(request_model, raw)
             state._route = route_template(key)     # handlers don't await, so no other call answers meanwhile
             result = handler(request, body)
         except Refusal as refusal:

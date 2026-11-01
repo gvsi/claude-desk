@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from functools import partial
 
 from fastapi import APIRouter, Request
-from pydantic import ValidationError
 from sqlalchemy import select
 
 from desk.contracts import BusinessTool, BusinessToolDef, LedgerEvent
@@ -48,13 +47,19 @@ def config_texts(value):
 
 def public_fields(tool: BusinessTool) -> dict[str, str]:
     """One tool's visitor-facing fields in render order; never its structured amount."""
-    return {f"{tool.tool}.{field}": getattr(tool if field == "title" else tool.config, field)
-            for field in blocks.CARD_FIELDS[tool.config.block]}
+    return {f"{tool.tool}.{index}-{field}": getattr(tool if field == "title" else tool.config, field)
+            for index, field in enumerate(blocks.CARD_FIELDS[tool.config.block])}
 
 
 def free_allow_words(tool: BusinessTool) -> dict[str, frozenset[str]]:
-    return {f"{tool.tool}.{field}": FREE_WORDS for field in blocks.CARD_FIELDS[tool.config.block]
+    return {f"{tool.tool}.{index}-{field}": FREE_WORDS
+            for index, field in enumerate(blocks.CARD_FIELDS[tool.config.block])
             if field in {"title", "appointment_type"}}
+
+
+def unindexed_detail(detail: Mapping[str, list[str]]) -> dict[str, list[str]]:
+    """Return setup's stable field names; indexes only control the scanner's render order."""
+    return {re.sub(r'\.\d+-([^.]+)$', r'.\1', key): rules for key, rules in detail.items()}
 
 
 def public_promise_fields(values: Mapping[str, str], *,
@@ -66,7 +71,7 @@ def public_promise_fields(values: Mapping[str, str], *,
     if any(reply_check._unseen(ch) for value in values.values() for ch in value):
         return list(values)
     pieces, bounds, offset = [], [], 0
-    for key, value in values.items():
+    for key, value in sorted(values.items()):
         text = reply_check.shown(value)
         pieces.append(text)
         bounds.append((key, offset, offset + len(text)))
@@ -109,8 +114,20 @@ def public_promise_fields(values: Mapping[str, str], *,
 async def refuse_public_promises(ctx, part, values, desk_id=None, *,
                                 allow_words: Mapping[str, frozenset[str]] = {}) -> None:
     # TODO B7: replace this shim with desks.refuse_public_promises and its shared scanner.
-    if public_promise_fields(values, allow_words=allow_words):
-        raise _invalid(ctx, desk_id, "public_promise")
+    if fields := public_promise_fields(values, allow_words=allow_words):
+        failure = _invalid(ctx, desk_id, "public_promise")
+        failure.detail = {field: ["public_promise"] for field in fields}
+        raise failure
+
+
+async def check_public_fields(ctx, desk_id: str, tool: BusinessTool) -> None:
+    try:
+        await refuse_public_promises(ctx, "business_tools", public_fields(tool), desk_id,
+                                     allow_words=free_allow_words(tool))
+    except KernelFailure as failure:
+        if failure.detail is not None:
+            failure.detail = unindexed_detail(failure.detail)
+        raise
 
 
 async def _refusal(ctx: KernelCtx, *, copy_id: str, desk_id: str, reason: str) -> None:
@@ -126,14 +143,10 @@ def _invalid(ctx: KernelCtx, desk_id: str, reason: str) -> KernelFailure:
 
 
 @router.put("/desks/{id}/business_tools", response_model=DeskUpdated)
-async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) -> DeskUpdated:
-    # Parse after authentication so invalid batches also have a copy-scoped refusal ledger entry.
+async def put_business_tools(id: str, body: BusinessToolsRequest, ctx: Ctx, request: Request) -> DeskUpdated:
     owner = await desks.owner_alone(ctx, request)
     desk = await desks.held_desk(ctx, request, owner, id)
-    try:
-        parsed = BusinessToolsRequest.model_validate(body)
-    except ValidationError:
-        raise _invalid(ctx, id, "business_tools_invalid") from None
+    parsed = body
     if len({tool.tool for tool in parsed.tools}) != len(parsed.tools):
         raise _invalid(ctx, id, "business_tools_duplicate")
     shown = parsed.model_dump(mode="json")
@@ -142,8 +155,7 @@ async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) ->
     if labels.canary_fields(shown, await labels.copy_canaries(ctx)):
         raise _invalid(ctx, id, "business_tools_canary")
     for tool in parsed.tools:
-        await refuse_public_promises(ctx, part="business_tools", values=public_fields(tool), desk_id=id,
-                                     allow_words=free_allow_words(tool))
+        await check_public_fields(ctx, id, tool)
     rows = {row.tool: row for row in await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
         Tool.desk_id == id, Tool.source == "business").order_by(Tool.tool).with_for_update()))}
     changes = []
@@ -175,3 +187,11 @@ async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) ->
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=id,
                         event=LedgerEvent(kind="business_tools", origin="kernel", summary={"tools": changes}))
     return DeskUpdated(desk_id=desk.desk_id, updated_at=ctx.clock.now())
+
+
+async def refuse_invalid_request(ctx: KernelCtx, request: Request) -> None:
+    """Authenticate malformed typed batches before recording their code-only refusal."""
+    owner = await desks.owner_alone(ctx, request)
+    desk_id = request.path_params["id"]
+    await desks.held_desk(ctx, request, owner, desk_id)
+    raise _invalid(ctx, desk_id, "business_tools_invalid")

@@ -1527,7 +1527,7 @@ def test_kernel_ro_views_run_as_a_role_bound_by_row_security(admin):
 
 def test_business_tools_view_migration_goes_down_and_up(scratch):
     admin = scratch.conn
-    scratch.migrate(command.downgrade, HANDOFF_KIND_REVISION)
+    scratch.migrate(command.downgrade, "desk_simulated_memory")
     try:
         assert columns(admin, "kernel_ro", "tools")[-1] == "review_reason"
         assert not admin.execute("SELECT has_column_privilege('desk_ro_owner', 'kernel.tools', 'profile', 'SELECT')").fetchone()[0]

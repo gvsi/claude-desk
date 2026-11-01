@@ -10,6 +10,7 @@ import type {
   ActorKind,
   ApprovalAnswer,
   Assurance,
+  BusinessToolDef,
   Decision,
   DecisionState,
   EvHeld,
@@ -340,38 +341,8 @@ export interface PeopleOut {
  */
 export type ToolReviewReason = 'new' | 'changed' | 'delisted';
 
-/**
- * Business tool definitions, typed here until the kernel's business tools change (branch
- * `plan/09-blocks-core`) regenerates their types, then imported from `contracts.ts`.
- * The owner's title, description and configuration are untrusted text.
- */
-export interface BusinessToolDef {
-  title: string;
-  description: string;
-  config: IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig;
-}
-
-export interface IntakeConfig {
-  block: 'intake';
-  questions: string[];
-}
-
-export interface TypedBookingConfig {
-  block: 'typed_booking';
-  appointment_type: string;
-  minutes: number;
-}
-
-export interface PurposePaymentConfig {
-  block: 'purpose_payment';
-  purpose: string;
-  amount_cents: number;
-}
-
-export interface UrgentConfig {
-  block: 'urgent';
-  urgent_when: string;
-}
+/** Owner configuration is untrusted text, with its shape from the kernel's generated contract. */
+export type { BusinessToolDef, IntakeConfig, TypedBookingConfig, PurposePaymentConfig, UrgentConfig } from './contracts.ts';
 
 /** A catalog tool or a Desk's own tool, whose title comes from its business definition. */
 export type AnyToolName = ToolName | `desk.${string}`;

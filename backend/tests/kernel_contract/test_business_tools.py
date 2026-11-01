@@ -29,6 +29,7 @@ from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_
     ('guaran\u200bteed', {'block': 'intake', 'questions': ['What?']}, False),
     ('Consultation gratuite', {'block': 'intake', 'questions': ['What?']}, False),
     ('Kostenlose Beratung', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Intake \u202edeetnaraug\u202c', {'block': 'intake', 'questions': ['What?']}, False),
 ])
 async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read, title, config, accepted):
     http, schema, _ = kernel
@@ -43,6 +44,31 @@ async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read
         assert await refused(call) == (422, 'invalid')
     rows = ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
     assert bool(rows) is accepted
+
+
+@pytest.mark.kernel_plan('01c')
+@pytest.mark.parametrize('title,config,fields', [
+    ('Pay no', {'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000}, ['title', 'purpose']),
+    ('Intake \u202edeetnaraug\u202c', {'block': 'intake', 'questions': ['What?']}, ['title']),
+])
+async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receipt(kernel, ro_read, title, config, fields):
+    from desk.api.kernel_client import KernelFailed
+
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    tool = BusinessTool(tool='desk.intake', title=title, description='Take details.', config=config)
+    with pytest.raises(KernelFailed) as refused_call:
+        await http.owner(copy.owner_token).call('PUT /desks/{id}/business_tools',
+            BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
+    assert (refused_call.value.status, refused_call.value.code) == (422, 'invalid')
+    assert refused_call.value.detail == {f'{tool.tool}.{field}': ['public_promise'] for field in fields}
+    assert ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ()) == []
+    visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
+    blocked = await decide(http.session(visitor.session_token), visitor.state.session_id, visitor.state.generation,
+                           'refused-intake', tool.tool, {'name': 'Dana', 'answers': ['Consult']})
+    assert blocked.outcome == 'refuse' and blocked.action is None
+    assert title not in blocked.visitor_plain
 
 
 @pytest.mark.kernel_plan("01c")
