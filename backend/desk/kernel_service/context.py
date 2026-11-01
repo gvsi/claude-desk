@@ -17,8 +17,10 @@
   `labels.can_read` decides each row in Python, so there is one rule for who reads what; a
   Desk's rows stay few in a demo copy, where a real Desk would filter in SQL first. The facts
   start with the Desk's catalog (`catalog_fact`), so Claude knows the `item_id`s `native.quote`
-  takes. A visitor's or agent's session is never given a row holding one of the copy's document
-  canaries (`labels.find_canaries_in`) anywhere Claude would read it, whatever its label: in a
+  takes. The seed-only public starter questions (`charter:starter:*`) are left out for every
+  session: they are chips on the public page, never business facts for Claude. A visitor's or
+  agent's session is never given a row holding one of the copy's document canaries
+  (`labels.find_canaries_in`) anywhere Claude would read it, whatever its label: in a
   fact's ID or a claim's key or value, or in a knowledge item's ID, title or text
   (`labels.knowledge_canaries`, which doesn't read again an item it found clean against the same
   canaries, at ingest or here). Knowledge holding one in its title or text is stored owner-only
@@ -46,7 +48,7 @@ from desk.db.models import Desk, PriceItem, Tool
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_api import ContextClock, SessionContext
-from desk.kernel_service import adapters, auth, clock, decide, labels
+from desk.kernel_service import adapters, auth, clock, decide, desks, labels
 from desk.kernel_service.adapters.base import business_timezone
 from desk.kernel_service.auth import SessionRow
 from desk.kernel_service.repo import Ctx, KernelCtx
@@ -98,6 +100,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     local = now.astimezone(tz)
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_id, FactRow.status != "expired",
+        desks.not_starter(),
         or_(FactRow.expires_at.is_(None), FactRow.expires_at > now)).order_by(FactRow.created_at, FactRow.fact_id)))
     knowledge = await ctx.db.scalars(ctx.repo.scoped(
         select(KnowledgeRow).where(KnowledgeRow.desk_id == desk_id).order_by(KnowledgeRow.created_at,

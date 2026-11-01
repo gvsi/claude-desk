@@ -38,6 +38,13 @@ def test_openapi_export_is_current():
     assert export_openapi() == json.loads(OPENAPI_PATH.read_text()), "run: cd backend && uv run python scripts/export_openapi.py"
 
 
+def test_public_desk_starters_are_optional_with_an_empty_default():
+    schema = export_openapi()["components"]["schemas"]["PublicDesk"]
+    assert "starters" not in schema["required"]
+    assert schema["properties"]["starters"] == {
+        "default": [], "items": {"type": "string"}, "title": "Starters", "type": "array"}
+
+
 def test_briefing_contract_counts_only_turned_down_requests():
     schemas = json.loads(OPENAPI_PATH.read_text())["components"]["schemas"]
     item = schemas["BriefingItem"]

@@ -1,7 +1,7 @@
 """Copies: every visitor of the demo gets their own Rivera Plumbing.
 
 `POST /copies` (the API checks the passcode first; the kernel is loopback only) writes a copy row,
-the Rivera seed through `desks.create_desk`, the Desk's public knowledge of its website and price
+the Rivera seed through `desks.create_desk`, its seed-only public starter questions, the Desk's public knowledge of its website and price
 list through the owner's own path (`seed.seed_knowledge`), the seed's MCP servers connected with their tools
 enabled at the hashes the seed is proved with (`mcp_pins.connect`), Dana's and Bob's past payments at
 the mock payments server with their facts (`seed.seed_charges`), its rule cards activated from their
@@ -34,6 +34,7 @@ async def create_copy(ctx: KernelCtx) -> CopyCreated:
     ctx.db.add(Copy(copy_id=copy_id, created_at=now))
     business, desk = seed.rivera_seed(now)
     created = await desks.create_desk(ctx, copy_id, business, desk, answering=True)
+    await seed.seed_starters(ctx, created.desk_id)
     await seed.seed_knowledge(ctx, created.desk_id, seed.RIVERA_KNOWLEDGE)
     for server in desk.connections:
         await mcp_pins.connect(ctx, created.desk_id, server, seed_pins=mcp_client.seed_pins())

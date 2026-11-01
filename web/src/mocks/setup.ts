@@ -1280,6 +1280,7 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
     brand: { ...BUSINESS.brand },
     charter: interview.about === null ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })],
     agent_card: [],
+    starters: [],
     open_status: null,
   };
 }

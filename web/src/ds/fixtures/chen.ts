@@ -479,6 +479,7 @@ const publicDesk = {
     owner_display_name: OWNER,
     brand: { ...business.brand },
     charter: [cards.hours.en, cards.contact.en, cards.policy.en],
+    starters: [],
     agent_card: [],
   },
   es: {
@@ -487,6 +488,7 @@ const publicDesk = {
     owner_display_name: OWNER,
     brand: { ...business.brand },
     charter: [cards.hours.es, cards.contact.es, cards.policy.es],
+    starters: [],
     agent_card: [],
   },
 } satisfies Bilingual<PublicDesk>;

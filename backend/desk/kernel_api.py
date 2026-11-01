@@ -379,6 +379,7 @@ class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labe
     charter: list[RenderedBlock]
     agent_card: list[RenderedBlock]
     open_status: OpenStatus | None = None   # None without charter:hours or with no windows in it, or when computing it fails
+    starters: list[str] = []               # the Desk's seed-only starter questions, rendered in ?lang=; [] when it has none
 
 class Health(BaseModel):                  # GET /health (selftest result cached at startup)
     version: str
