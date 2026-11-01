@@ -1533,6 +1533,15 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     return answer
 
 
+# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. One inside a
+# link or mid-word ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
+_ENDS_A_QUESTION = re.compile(r"\?(?=\s|$|[\"'\u201d\u2019)\]])")
+
+
+def _asks(text: str) -> bool:
+    return _ENDS_A_QUESTION.search(text) is not None
+
+
 @dataclass
 class _TurnReplies:
     """Keep reply provenance for the whole answer, including any recursive planning calls."""
@@ -1563,12 +1572,12 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
         reason = "topic_again"
         reply = next((entry for entry, _ in reversed(replies.entries) if entry.text.strip()), None)
         asked = _ask(interview, key)
-        if key in LIMIT_CHOICES and reply is not None and "?" in reply.text:
+        if key in LIMIT_CHOICES and reply is not None and _asks(reply.text):
             reply.question = key
             reply.choices = asked.choices
             return
         if key not in LIMIT_CHOICES:
-            if reply is not None and "?" in reply.text:
+            if reply is not None and _asks(reply.text):
                 reply.question = key
                 return
             question = follow_up.question.strip()
