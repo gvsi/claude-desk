@@ -146,7 +146,7 @@ async def test_failures_are_content_free_and_bounded(monkeypatch, caplog, failur
     assert len(records) == 1
     assert "status=" + result.status in records[0] and "latency_ms=" in records[0]
     if failure == "hang":
-        assert cancelled.is_set()
+        await asyncio.wait_for(cancelled.wait(), 0.2)
 
 
 async def test_no_key_never_builds_a_client_or_logs(monkeypatch, caplog):
@@ -169,3 +169,97 @@ async def test_highest_of_seven_scores_sets_the_block(monkeypatch, top, blocked)
     result = await jev.evaluate("Reply", [], [], api_key="fake-key")
     assert result.status == "ok" and result.scores == scores
     assert result.blocked is blocked and result.top_statement == "unavailable_step"
+
+
+async def test_deadline_does_not_wait_for_stalled_client_shutdown(monkeypatch):
+    closing, release, closed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class StalledShutdown(httpx2.MockTransport):
+        async def aclose(self):
+            closing.set()
+            try:
+                await release.wait()
+            finally:
+                closed.set()
+
+    async def hang(request):
+        await asyncio.Event().wait()
+
+    real_client = httpx2.AsyncClient
+    monkeypatch.setattr(jev.httpx2, "AsyncClient", lambda **kwargs: real_client(
+        transport=StalledShutdown(hang), **kwargs))
+    monkeypatch.setattr(jev, "TIMEOUT_S", 0.02)
+    call = asyncio.create_task(jev.evaluate("Reply", [], [], api_key="fake-key"))
+    try:
+        done, _ = await asyncio.wait({call}, timeout=0.2)
+        assert done, "the caller must return without waiting for client shutdown"
+        result = call.result()
+        assert result.status == "timeout" and result.scores is None and not result.blocked
+        await asyncio.wait_for(closing.wait(), 0.2)
+        assert not closed.is_set()
+    finally:
+        release.set()
+        await call
+        await asyncio.wait_for(closed.wait(), 0.2)
+
+
+async def test_late_response_that_suppresses_cancellation_is_discarded(monkeypatch, caplog):
+    finished = asyncio.Event()
+
+    async def late(request):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
+        finished.set()
+        return httpx2.Response(200, json={"answers": {name: {"noul": 0.99} for name in jev.STATEMENTS}})
+
+    transport(monkeypatch, late)
+    monkeypatch.setattr(jev, "TIMEOUT_S", 0.02)
+    with caplog.at_level(logging.INFO, logger=jev.__name__):
+        result = await jev.evaluate("Reply", [], [], api_key="fake-key")
+        await asyncio.wait_for(finished.wait(), 0.2)
+        await asyncio.sleep(0)
+    assert result.status == "timeout" and result.scores is None and not result.blocked
+    records = [r.getMessage() for r in caplog.records if r.name == jev.__name__]
+    assert len(records) == 1 and "status=timeout" in records[0]
+
+
+async def test_caller_cancellation_propagates_without_waiting_for_late_work(monkeypatch, caplog):
+    started, cancelled, release, finished = (asyncio.Event() for _ in range(4))
+
+    async def late(request):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+        finally:
+            finished.set()
+        raise RuntimeError("late private response")
+
+    transport(monkeypatch, late)
+    call = asyncio.create_task(jev.evaluate("Reply", [], [], api_key="fake-key"))
+    await started.wait()
+    call.cancel()
+    try:
+        done, _ = await asyncio.wait({call}, timeout=0.2)
+        assert done
+        with pytest.raises(asyncio.CancelledError):
+            call.result()
+        await asyncio.wait_for(cancelled.wait(), 0.2)
+        assert not finished.is_set()
+    finally:
+        release.set()
+        await asyncio.wait_for(finished.wait(), 0.2)
+        await asyncio.sleep(0)
+    assert not [r for r in caplog.records if r.name == jev.__name__]
+
+
+@pytest.mark.parametrize("score", [0.00001, 1e-100, 0.95, 1.0, 0.0])
+def test_ledger_scores_are_lossless_fixed_point_decimals(score):
+    result = jev.Result(status="ok", scores={"claims_done": score})
+    encoded = result.ledger_summary()["scores"]["claims_done"]
+    assert "e" not in encoded.lower()
+    assert float(encoded) == score

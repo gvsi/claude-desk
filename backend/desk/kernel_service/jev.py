@@ -4,6 +4,7 @@ import asyncio
 import logging
 import math
 import time
+from decimal import Decimal
 from typing import Literal
 
 import httpx2
@@ -79,7 +80,9 @@ class Result(BaseModel):
     def ledger_summary(self) -> dict:
         """Lossless decimal score strings: the signed ledger's canonical JSON forbids floats."""
         return self.model_dump(mode="json") | {
-            "scores": {name: str(score) for name, score in self.scores.items()} if self.scores is not None else None}
+            "top_statement": self.top_statement,
+            "scores": ({name: format(Decimal(str(score)), "f") for name, score in self.scores.items()}
+                       if self.scores is not None else None)}
 
 
 async def check(prose: str, cards: list[str], next_steps: list[str], *, api_key: str = "") -> dict[str, float] | None:
@@ -87,32 +90,55 @@ async def check(prose: str, cards: list[str], next_steps: list[str], *, api_key:
     return (await evaluate(prose, cards, next_steps, api_key=api_key)).scores
 
 
+# Keep cancelled workers alive until transport cleanup finishes; never await them in the reply path.
+_workers: set[asyncio.Task] = set()
+
+
+def _discard_worker(worker: asyncio.Task) -> None:
+    _workers.discard(worker)
+    if not worker.cancelled():
+        worker.exception()  # consume late failures without logging content or accepting a verdict
+
+
+async def _scores(prose: str, cards: list[str], next_steps: list[str], api_key: str) -> dict[str, float]:
+    async with httpx2.AsyncClient(trust_env=False, follow_redirects=False, timeout=TIMEOUT_S) as http:
+        response = await http.post(URL, headers={"Authorization": f"Bearer {api_key}"}, json={
+            "model": MODEL, "state": {"reply": prose, "cards": cards, "next_steps": next_steps},
+            "questions": Q})
+        response.raise_for_status()
+        answers = response.json()["answers"]
+        parsed = {name: answers[name]["noul"] for name in STATEMENTS}
+        if any(type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 1
+               for score in parsed.values()):
+            raise ValueError("invalid score")
+        return parsed
+
+
 async def evaluate(prose: str, cards: list[str], next_steps: list[str], *, api_key: str = "") -> Result:
-    """The same check with its status for the ledger; no mutable per-checker state."""
+    """Bound the caller's wait independently of cancellation and transport cleanup."""
     if not api_key:
         return Result(status="off")
     started = time.perf_counter()
+    deadline = started + TIMEOUT_S
     scores, status = None, "ok"
+    worker = asyncio.create_task(_scores(prose, cards, next_steps, api_key))
+    _workers.add(worker)
+    worker.add_done_callback(_discard_worker)
     try:
-        # The outer deadline also bounds a stalled connection, response body and client shutdown.
-        async with asyncio.timeout(TIMEOUT_S):
-            async with httpx2.AsyncClient(trust_env=False, follow_redirects=False, timeout=TIMEOUT_S) as http:
-                response = await http.post(URL, headers={"Authorization": f"Bearer {api_key}"}, json={
-                    "model": MODEL, "state": {"reply": prose, "cards": cards, "next_steps": next_steps},
-                    "questions": Q})
-                response.raise_for_status()
-                answers = response.json()["answers"]
-                parsed = {name: answers[name]["noul"] for name in STATEMENTS}
-                if any(type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 1
-                       for score in parsed.values()):
-                    raise ValueError("invalid score")
-                scores = parsed
+        done, _ = await asyncio.wait({worker}, timeout=max(0, deadline - time.perf_counter()))
+        # Even a completed task is too late if the event loop resumed us after the deadline.
+        if not done or time.perf_counter() >= deadline:
+            worker.cancel()
+            status = "timeout"
+        else:
+            scores = worker.result()
+    except asyncio.CancelledError:
+        worker.cancel()
+        raise
     except (TimeoutError, httpx2.TimeoutException):
         status = "timeout"
-        scores = None
     except Exception:  # never log exception text: it may carry credentials or model content
         status = "error"
-        scores = None
     latency_ms = round((time.perf_counter() - started) * 1000)
     log.info("jev_check status=%s latency_ms=%d", status, latency_ms)
     return Result(status=status, scores=scores,

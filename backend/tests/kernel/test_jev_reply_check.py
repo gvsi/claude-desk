@@ -26,14 +26,15 @@ async def test_jev_adds_block_and_both_verdicts_are_ledgered(app, client, review
     verdict = await checked(client, visitor, "Here is the information.")
     assert not verdict.ok
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
-        ("soft_promise", "soft.jev", "claims_done")]
+        ("soft_promise", "soft.jev", "Here is the information.")]
     assert fake.inputs == [("Here is the information.", [], VISITOR_NEXT_STEPS)]
     entry, = await reply_entries(app, copy)
     scores = dict.fromkeys(jev.STATEMENTS, "0.0")
     scores["claims_done"] = "0.95"
     assert entry.event.summary["soft_checks"] == {
         "sonnet": {"flags": {"promises_beyond_cards": False, "denies_being_ai": False}, "blocked": False},
-        "jev": {"status": "ok", "scores": scores, "blocked": True, "latency_ms": 10}}
+        "jev": {"status": "ok", "scores": scores, "blocked": True, "latency_ms": 10,
+                "top_statement": "claims_done"}}
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         assert (await ledger.page(ctx, copy.desk_id)).chain_ok
@@ -86,7 +87,7 @@ async def test_no_key_never_calls_jev_or_logs_a_warning(app, client, monkeypatch
         assert (await checked(client, visitor, "Here is the information.")).ok
     assert not [record for record in caplog.records if record.name == jev.__name__]
     entries = await reply_entries(app, copy)
-    assert all(entry.event.summary["soft_checks"]["jev"] == jev.Result(status="off").model_dump(mode="json")
+    assert all(entry.event.summary["soft_checks"]["jev"] == jev.Result(status="off").ledger_summary()
                for entry in entries)
 
 

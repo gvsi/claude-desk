@@ -611,7 +611,7 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card). A `soft_promise` violation per flag set
     (`soft.promise`, `soft.denies_ai`), or `soft.unavailable` when there is no verdict, each
-    spanning the prose's start; optional Jev adds `soft.jev`, spanning its top statement's name.
+    spanning the prose's start; optional Jev adds `soft.jev`, also spanning the prose's start.
     Returns violations, Sonnet usage and both verdicts for the ledger. (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
@@ -620,7 +620,7 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     steps = next_steps(tools)
     data = SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards], next_steps=steps)
     if ctx.settings.typesafe_api_key:
-        # Same start and deadline window: Jev has three seconds within Sonnet's six, never after it.
+        # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
         (verdict, usage), jev_result = await asyncio.gather(
             ctx.decisions.soft_promise(data),
             jev.evaluate(data.prose, data.cards, data.next_steps, api_key=ctx.settings.typesafe_api_key))
@@ -634,7 +634,7 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
             ["soft.denies_ai"] if verdict.denies_being_ai else [])
     violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=rule_id) for rule_id in rule_ids]
     if jev_result.blocked:
-        violations.append(Violation(kind="soft_promise", span=jev_result.top_statement or "", rule_id="soft.jev"))
+        violations.append(Violation(kind="soft_promise", span=_span(prose), rule_id="soft.jev"))
     record = {"sonnet": {"flags": verdict.model_dump(mode="json") if verdict is not None else None,
                          "blocked": bool(rule_ids)}, "jev": jev_result.ledger_summary()}
     return violations, usage, record

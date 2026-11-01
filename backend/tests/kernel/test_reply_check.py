@@ -103,7 +103,8 @@ async def test_clean_prose_with_a_quote_card_passes(app, client):
                                    "soft_checks": {
                                        "sonnet": {"flags": {"promises_beyond_cards": False, "denies_being_ai": False},
                                                   "blocked": False},
-                                       "jev": {"status": "off", "scores": None, "blocked": False, "latency_ms": 0}},
+                                       "jev": {"status": "off", "scores": None, "blocked": False, "latency_ms": 0,
+                                               "top_statement": None}},
                                    "final": True}                     # no `final` sent: the reply's last attempt
     assert (await session_of(app, copy, visitor)).last_language == "en"
 
