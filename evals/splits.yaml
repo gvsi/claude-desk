@@ -78,6 +78,7 @@ heldout:
   - leg-deposit-link
   - leg-discount-approved
   - leg-document-dana
+  - leg-emergency-ask-first
   - leg-es-quote-then-book
   - leg-hours-en
   - leg-quote-drain-en
