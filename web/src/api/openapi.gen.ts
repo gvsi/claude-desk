@@ -573,7 +573,7 @@ export interface MoneyCapIn {
  * wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
  * characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
  * AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
- * shown as "Claude's note on a stopped reply: {summary}" and never quoted as the visitor's), else None. A held
+ * shown as "Claude's note on what the Desk stopped: {summary}" and never quoted as the visitor's), else None. A held
  * request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
  * AI-written text: a visitor could steer a summary to sway an approval.
  */
