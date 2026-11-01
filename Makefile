@@ -258,9 +258,10 @@ evals-tier1:
 # evals-key prints <inputs>, the hash of the gated inputs. evals-results-check is the one tier 2 check
 # CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
 # rate or results file changed since BASE (renames count both paths), else when the committed file for
-# the head's inputs is complete and its gate passes.
+# the head's inputs is complete and its gate passes, or every head scenario is pending (no recorded rate).
 # evals-merge-ready refuses a merge when both HEAD and origin/main changed results inputs since
-# their merge base. Fetch origin first; rebase and regenerate the results file when it refuses.
+# their merge base and a scenario can run under their combined landed plans or in their merge.
+# Recorded rates also prevent the unarmed shortcut. Fetch origin first; rebase and regenerate when refused.
 .PHONY: evals-tier2 evals-key evals-results-check evals-merge-ready
 RUNS ?= 1
 MAX_USD ?= 40

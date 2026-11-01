@@ -46,9 +46,10 @@ exit 0 when `git diff --no-renames -z --name-only <ref>...HEAD` touches no gated
 old path too; `-z` keeps non-ASCII paths unquoted). When every committed head scenario requires a
 plan its committed `landed.toml` lacks (`unarmed`), no results file is needed or regenerated: the
 head's rate history must be empty, its history must still extend the base's unchanged, its landed
-plans must keep the base's, and any added or edited results JSON must validate. `merge_ready` uses
-the same rule over both sides' scenarios (both requirements for a shared id) against the union of
-their landed plans. Once any scenario can run, the strict check is unchanged: stopping at the first failure, the
+plans must keep the base's, its splits must hold its suite, and any added or edited results JSON
+must validate. `merge_ready` uses the same rule over both sides' scenarios (both requirements for a shared id) against the union of
+their landed plans and over the actual merge tree, with neither side holding a recorded rate.
+Once any scenario can run, the strict check is unchanged: stopping at the first failure, the
 committed file for the head's key exists, validates and is gating evidence, its suite hash,
 held-out hash and recorded rate are the head's (a rate that is gating evidence), it holds exactly
 one row per head scenario and repeat (a scenario that `requires` a plan the head's `landed.toml`
@@ -242,7 +243,7 @@ def unarmed(rev: str = "HEAD", root: Path = REPO_ROOT, *, other_rev: str | None 
 
 
 def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
-    """An unarmed union is ready; otherwise refuse both sides changing results inputs. Git errors propagate."""
+    """An unarmed union and merge with no recorded rates are ready; otherwise apply the both-sides rule."""
     head_commit = git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{head}^{{commit}}").strip()
     main_commit = git(root, "rev-parse", "--verify", "--quiet", "origin/main^{commit}").strip()
     base = git(root, "merge-base", head_commit, main_commit).strip()
@@ -255,11 +256,27 @@ def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
     if pr_paths and main_paths:
         try:
             pending_only = unarmed(head_commit, root, other_rev=main_commit)
+            histories = []
+            if pending_only:
+                for at in (head_commit, main_commit):
+                    raw = show(root, at, RATES_PATH)
+                    histories.append(RecordedRates.model_validate_json(raw).history if raw is not None else [])
         except CheckFailed as error:
             raise GitError(str(error)) from None
-        if pending_only:
-            return True, ("ready: every scenario is pending under both sides' combined landed plans; "
-                          "no results file is needed")
+        except ValueError as error:
+            raise GitError(f"merge readiness {RATES_PATH} doesn't load: {error}") from None
+        if pending_only and not any(histories):
+            try:
+                merged = git(root, "merge-tree", "--write-tree", head_commit, main_commit).strip()
+            except GitError as error:
+                return False, f"not ready: the merge tree couldn't be built: {error}"
+            try:
+                merged_pending_only = unarmed(merged, root)
+            except CheckFailed as error:
+                raise GitError(str(error)) from None
+            if merged_pending_only:
+                return True, ("ready: every scenario is pending under both sides' combined landed plans "
+                              "and in their merge; no results file is needed")
         return False, (f"not ready: PR gated paths: {', '.join(repr(path) for path in pr_paths)}; "
                        f"origin/main gated paths: {', '.join(repr(path) for path in main_paths)}; "
                        "rebase onto origin/main and regenerate the results file")
@@ -267,13 +284,18 @@ def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
 
 
 def show(root: Path, rev: str, path: str) -> bytes | None:
-    """The bytes of `path` at `rev`, or None when it isn't there."""
-    done = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{path}"], capture_output=True)
-    if done.returncode != 0:
-        if subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"],
-                          capture_output=True).returncode != 0:
-            raise GitError(f"{rev} isn't a commit here")
+    """The committed blob's bytes, or None only when its path is absent from the tree.
+    Trees, gitlinks and missing objects are unreadable evidence, never an empty history."""
+    entries = git(root, "ls-tree", "-z", "--full-tree", rev, "--", path).split("\0")
+    entry = next((entry for entry in entries if entry and entry.split("\t", 1)[1] == path), None)
+    if entry is None:
         return None
+    mode, kind, oid = entry.split("\t", 1)[0].split()
+    if kind != "blob" or mode not in ("100644", "100755"):
+        raise GitError(f"git ls-tree lists {path} at {rev}, but it can't be read as a file ({mode} {kind})")
+    done = subprocess.run(["git", "-C", str(root), "cat-file", "blob", oid], capture_output=True)
+    if done.returncode != 0:
+        raise GitError(f"git ls-tree lists {path} at {rev}, but it can't be read as a file (blob {oid})")
     return done.stdout
 
 
@@ -722,21 +744,33 @@ def _check(base: str, root: Path) -> str:
     pending_only = unarmed(root=root)
     name = f"{RESULTS_DIR}/{inputs_key('HEAD', root)}.json"
     if pending_only:
-        for path in changed:
-            if path.startswith(RESULTS_DIR + "/") and path.endswith(".json"):
-                if (raw := show(root, "HEAD", path)) is not None:
-                    try:
-                        file = ResultsFile.model_validate_json(raw)
-                    except ValidationError as error:
-                        raise CheckFailed(f"{path} doesn't validate: {_first_error(error)}") from None
-                    if path == name:
-                        # Supplying evidence for this head still has to describe its suite and pending plans.
-                        reconcile(file, root, "HEAD", name=path)
+        # A directory replacing a JSON file appears in the diff through its children.
+        results_paths = {str(parent) for path in changed if path.startswith(RESULTS_DIR + "/")
+                         for parent in (Path(path), *Path(path).parents) if parent.suffix == ".json"}
+        for path in sorted(results_paths):
+            if (raw := show(root, "HEAD", path)) is not None:
+                try:
+                    file = ResultsFile.model_validate_json(raw)
+                except ValidationError as error:
+                    raise CheckFailed(f"{path} doesn't validate: {_first_error(error)}") from None
+                if path == name:
+                    # Supplying evidence for this head still has to describe its suite and pending plans.
+                    reconcile(file, root, "HEAD", name=path)
         with tempfile.TemporaryDirectory() as tmp:
-            tree = _materialize(root, "HEAD", Path(tmp), only=(RATES_PATH, LANDED_PATH))
-            rates = load_recorded_rates(tree / RATES_PATH) if (tree / RATES_PATH).exists() \
-                else RecordedRates(history=[])
-            landed = load_landed(tree / LANDED_PATH)
+            tree = _materialize(root, "HEAD", Path(tmp))
+            suite = load_suite(tree / SCENARIOS_PATH)
+            try:
+                splits = load_splits(tree / SPLITS_PATH)
+            except (OSError, ValueError) as error:
+                raise CheckFailed(f"the head's splits don't hold its suite: {error}") from None
+            if problems := split_problems(suite, splits):
+                raise CheckFailed("the head's splits don't hold its suite: " + "; ".join(problems))
+            try:
+                rates = load_recorded_rates(tree / RATES_PATH) if (tree / RATES_PATH).exists() \
+                    else RecordedRates(history=[])
+                landed = load_landed(tree / LANDED_PATH)
+            except (OSError, ValueError) as error:
+                raise CheckFailed(f"the head's eval files don't load: {error}") from None
     else:
         raw = show(root, "HEAD", name)
         if raw is None:
@@ -783,8 +817,7 @@ def _materialize(root: Path, rev: str, into: Path, only: tuple[str, ...] | None 
     paths = list(only or (SPLITS_PATH, LANDED_PATH, RATES_PATH))
     scenarios: list[str] = []
     if only is None:
-        listed = git(root, "ls-tree", "-z", "--name-only", f"{rev}:{SCENARIOS_PATH}") if show(
-            root, rev, SCENARIOS_PATH) is not None else ""
+        listed = git(root, "ls-tree", "-z", "--name-only", f"{rev}:{SCENARIOS_PATH}")
         (into / SCENARIOS_PATH).mkdir(parents=True, exist_ok=True)
         scenarios = [f"{SCENARIOS_PATH}/{name}" for name in listed.split("\0") if name]
     for path in paths + scenarios:
