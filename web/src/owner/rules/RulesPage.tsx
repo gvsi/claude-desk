@@ -28,6 +28,7 @@ import { CONNECTORS } from '../connectors/catalog.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
+import { TODAY_COPY } from '../today/copy.ts';
 import { deskPath, RIVERA_SAMPLE_BUSINESS_NAME, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
@@ -177,7 +178,8 @@ interface LimitField {
  * (`connectorPageHref`), and drawn without a link until then; Ask Claude under the
  * header; the header's "See all rules" link before "Start from a preset", which drafts a preset
  * as one change; the payment limit atop
- * Payments and Stripe; the always-on rules. Every change opens its proved review first.
+ * Payments and Stripe; the always-on rules, then "Open Safety", where every attempt is shown. Every
+ * change opens its proved review first.
  */
 export function RulesPage() {
   const { desk, reachPlace } = useOwnerDesk();
@@ -451,7 +453,15 @@ export function RulesPage() {
           <Notice tone="error" action={<Button variant="secondary" busy={peopleFailure.retrying} onClick={peopleFailure.retry}>Try again</Button>}>{peopleFailure.line}</Notice>
         )}
         {body}
-        {waitingForOpening ? null : <AlwaysOnList />}
+        {waitingForOpening ? null : (
+          // Always on, then where its last promise, that every attempt is shown, is kept.
+          <div className="cd-rules__always-on">
+            <AlwaysOnList />
+            <p className="cd-rules__safety cd-type-meta">
+              <TextLink href={`${deskPath(deskId)}/safety`}>{TODAY_COPY.openSafety}</TextLink>
+            </p>
+          </div>
+        )}
       </SkeletonScreen>
     </div>
   );

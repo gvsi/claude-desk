@@ -754,6 +754,24 @@ describe('rules page', () => {
     expect(screen.container.textContent?.split(REVIEWER_LINE)).toHaveLength(2);
   });
 
+  it('always_on_ends_with_a_link_to_safety_where_every_attempt_is_shown', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const always = screen.getByRole('region', { name: 'Always on' });
+    await expect.element(always).toBeVisible();
+    const link = screen.getByRole('link', { name: 'Open Safety' });
+    await expect.element(link).toHaveAttribute('href', `${DESK}/safety`);
+    // Under Always on's rules, in meta type, as the lower "See all rules" is above them.
+    const line = link.element().closest('p');
+    expect(line?.classList.contains('cd-type-meta')).toBe(true);
+    expect(always.element().compareDocumentPosition(line!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const list = always.element().querySelector('.cd-always-on__list')!;
+    expect(Math.round(line!.getBoundingClientRect().top - list.getBoundingClientRect().bottom)).toBe(12);
+    // It opens this Desk's Safety.
+    await userEvent.click(link.element());
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/safety`);
+  });
+
   it('money_cap_shows_and_changes_through_a_draft', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const payments = screen.getByRole('region', { name: 'Payments' });
