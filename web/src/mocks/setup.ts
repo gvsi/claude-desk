@@ -1288,6 +1288,14 @@ function streamTurn(
     end(how) {
       // The turn has landed whatever its stream did: a broken connection loses only the display.
       interview.view = null;
+      if (plan?.doneAfter) {
+        // The request answers with the landed turn first; the stream says so after.
+        run.land();
+        void plan.doneAfter.finally(() => {
+          if (interview.run === run) endRun(interview, how === 'error' ? 'done' : how);
+        });
+        return;
+      }
       endRun(interview, how === 'error' ? 'done' : how);
       if (plan?.landAfter) void plan.landAfter.finally(run.land);
       else run.land();

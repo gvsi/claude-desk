@@ -204,6 +204,28 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     expect(swaps).toEqual({ added: 1, removed: 1 });
   });
 
+  it('shows_one_reply_when_the_answer_lands_before_its_stream_says_done', async () => {
+    const state = await cpaInterview(true);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    mockStore.streamSetupTurns();
+    const writing = gate();
+    const done = gate();
+    mockStore.planStream('setup', { pauseAfter: 3, until: writing.until, doneAfter: done.until });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    await expect.poll(() => growing()?.textContent).toBe(growingWords(CPA_COPY.consult)[1]);
+    writing.release();
+    // The answer's request lands with the saved turn before the stream says done.
+    const log = screen.getByRole('log', { name: 'Setup questions' });
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
+    expect(growing()).toBeNull();
+    expect(log.getByText(CPA_COPY.consult, { exact: true }).elements()).toHaveLength(1);
+    done.release();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(growing()).toBeNull();
+    expect(log.getByText(CPA_COPY.consult, { exact: true }).elements()).toHaveLength(1);
+    expect(log.getByText('Both, about evenly', { exact: true }).elements()).toHaveLength(1);
+  });
+
   it('looks_again_when_its_stream_reaches_the_api_before_the_answer_does', async () => {
     const state = await cpaInterview(true);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });

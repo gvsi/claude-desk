@@ -47,6 +47,8 @@ export interface OwnerStreamPlan {
   quiet?: boolean;
   /** A setup turn whose request is held: it answers only once this settles, after the turn's `done`. */
   landAfter?: Promise<unknown>;
+  /** A setup turn whose request is held: it answers first, and its stream says `done` once this settles. */
+  doneAfter?: Promise<unknown>;
 }
 
 /** A read the turn makes before it writes, and the label it ends with. */
