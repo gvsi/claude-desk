@@ -2,6 +2,8 @@
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from desk_tools.testbox_client import source_files
 
 
@@ -236,7 +238,10 @@ def test_launcher_accepts_current_and_previous_protocol_only():
             assert "update your branch's tools/testbox or re-provision" in result.stderr
 
 
-def test_next_sync_removes_remote_created_sources_but_keeps_ignored_builds(tmp_path):
+@pytest.mark.parametrize('staged', [False, True])
+def test_next_sync_removes_remote_created_sources_but_keeps_ignored_builds(tmp_path, staged):
+    """A source file a remote command created is removed on the next sync, also when the command staged it
+    (git add): the index reset that follows would otherwise leave it behind as an untracked file."""
     import json
     import sys
     from desk_tools.testbox_client import cleanup_script
@@ -245,6 +250,8 @@ def test_next_sync_removes_remote_created_sources_but_keeps_ignored_builds(tmp_p
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
     (repo / '.gitignore').write_text('build/\n')
     (repo / 'stray.py').write_text('remote generated source')
+    if staged:
+        subprocess.run(['git', '-C', str(repo), 'add', 'stray.py'], check=True)
     (repo / 'local.py').write_text('caller untracked source')
     (repo / 'build').mkdir()
     (repo / 'build/cache').write_text('warm')

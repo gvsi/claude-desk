@@ -55,9 +55,11 @@ def remember(paths):
     temporary.replace(pending)
 # Remember everything before pruning: interruption during cleanup is recoverable too.
 remember(previous | current)
-untracked = subprocess.run(['git', '-C', str(repo), 'ls-files', '-z', '--others', '--exclude-standard'],
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-strays = set(selected_files(untracked.stdout.decode().split('\\0'))) if untracked.returncode == 0 else set()
+# Tracked and staged paths too: a file a remote command created and staged (git add) stays in the tree when the
+# worker resets the index, so it must be pruned here like an untracked one.
+listed = subprocess.run(['git', '-C', str(repo), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+strays = set(selected_files(listed.stdout.decode().split('\\0'))) if listed.returncode == 0 else set()
 for name in (previous | strays) - current:
     relative = Path(name)
     if relative.is_absolute() or '..' in relative.parts:

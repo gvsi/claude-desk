@@ -27,8 +27,9 @@ machine removes.
 
 It has termination protection, requires IMDSv2, and has no inbound security group rules.
 Access uses [SSH over SSM](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started-enable-ssh-connections.html).
-Its instance role has no attached managed policies and exactly one inline policy,
-`claude-desk-test-box-session`, allowing only `ssm:UpdateInstanceInformation`,
+Its instance role has no attached managed policies. Its one permission policy is the inline
+`claude-desk-test-box-session` (beside the account's deny-only `chiefy-runtime-secret-write-deny`, described
+below), allowing only `ssm:UpdateInstanceInformation`,
 `ssmmessages:CreateControlChannel`, `CreateDataChannel`, `OpenControlChannel`,
 `OpenDataChannel`, and `ec2messages:AcknowledgeMessage`, `DeleteMessage`, `FailMessage`,
 `GetEndpoint`, `GetMessages`, `SendReply`, all on Resource `"*"`.
