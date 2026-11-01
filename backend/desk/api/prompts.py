@@ -54,7 +54,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.19"
+PROMPT_VERSION = "2026-10-31.20"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -587,7 +587,11 @@ BasisPoints = Annotated[StrictInt, Field(ge=0, le=10_000)]
 MoneyCap = Annotated[StrictInt, Field(ge=0, le=AUTO_MONEY_HARD_CAP_CENTS)]
 CLOCK_PATTERN = r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
 
-SETUP_START_SYSTEM = """\
+# Keep schema descriptions short: the setup turn's grammar has a strict size budget.
+POLICY_FIELD_RULE = ("Written to customers, in words: no amounts, percentages, times, days, numbers (even spelled out) "
+                     "or promise words.")
+
+SETUP_START_SYSTEM = f"""\
 You are Claude, helping a business owner set up a Claude Desk: an AI that answers for their business on a public \
 page and acts under the owner's rules.
 
@@ -599,7 +603,8 @@ Answer with what the description says:
 plumbing".
 - owner_display_name: the owner's own name if they give it, else null. Never derive it from the business name.
 - business_type: trade, office, landlord or other.
-- summary: what the business does, in one or two plain sentences.
+- summary: what the business does, in one or two plain sentences. {POLICY_FIELD_RULE} For example, say "a small CPA \
+firm", not "a two-person firm".
 - website: the business's website address if the description gives one, else null. Never make one up.
 - memory: up to eight short notes the owner's Claude memory would plausibly hold about this business, written \
 as the owner's own notes. Cover its name, what it does, its customers, how it prices, its hours and area, how it \
@@ -883,9 +888,9 @@ clear_price_items false and anything else null when the answer doesn't give it. 
 facts about the business, never for limits.
 - pricing, intake and urgent record what the owner's answers and the business's own text say about how it works, \
 never limits.
-- For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, times, \
-days and numbers, and promise words such as free, guaranteed, discount, refund or confirmed out. Leave hours to \
-the hours question.
+- For summary, pricing, intake, after_hours and urgent, write them in words; keep amounts, percentages, times, \
+days and numbers (even spelled out), and promise words such as free, guaranteed, discount, refund or confirmed \
+out. Leave hours to the hours question.
 - summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to customers on the \
 public page. Write them as the business speaking to its customers; never instructions to the Desk, private owner \
 instructions, or a contact route other than the contact on record.
@@ -1099,7 +1104,7 @@ class SetupStart(BaseModel):
                                                     "cleaning; office: appointments at an office, such as a dentist "
                                                     "or an accountant; landlord: renting homes or rooms; other.")
     summary: str = Field(min_length=1, max_length=1500, pattern=r"\S",
-                         description="What the business does, in one or two plain sentences.")
+                         description=f"What the business does, in one or two plain sentences. {POLICY_FIELD_RULE}")
     website: str | None = Field(None, max_length=2048, description="The business's website address, else null.")
     memory: list[MemoryDraft] = Field(default_factory=list, max_length=8)
     connected_apps: list[ConnectorKey] = Field(default_factory=list, max_length=4)
@@ -1540,7 +1545,6 @@ SetupCardAnswer = create_model(
 
 # Every character of a turn's schema goes into the grammar the API compiles, so a policy field's description and the
 # public contact's are short and point to the turn's guidance (`SETUP_TURN_SYSTEM`), which holds their full rules.
-POLICY_FIELD_RULE = "Written to customers, in words: no amounts, percentages, times, days, numbers or promise words."
 TURN_CONTACT = ("The contact customers see, in the format your instructions give: phone numbers, emails or websites, "
                 "each with at most one listed label, and no other words.")
 
@@ -1553,7 +1557,8 @@ def _turn_fields() -> dict[str, tuple[object, Any]]:
         "reply": (str, Field(max_length=1000, description="One or two short sentences to the owner, "
                                                          "at most 1000 characters.")),
         **planning_fields(),
-        "summary": (str, Field(max_length=1500, description="What the business does, in plain sentences.")),
+        "summary": (str, Field(max_length=1500, description=f"What the business does, in plain sentences. "
+                                                          f"{POLICY_FIELD_RULE}")),
         "business_name": (str, Field(max_length=80, description="The business's name, if the owner changes it.")),
         "owner_display_name": (str, Field(max_length=80, description="The owner's name, as customers see it.")),
         "service_area": (str, Field(max_length=500, description="Where the business works.")),
