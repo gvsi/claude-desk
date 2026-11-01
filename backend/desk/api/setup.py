@@ -185,6 +185,7 @@ from desk.api.prompts import (
     SITUATION_PRICE_REQUIRED,
     SITUATION_TOOLS_BY_WHO,
     TOOLS_TAG,
+    BlockConfig,
     BusinessType,
     Choice,
     ConnectorProposal,
@@ -1148,8 +1149,12 @@ async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs:
                        business_tools_enabled=interview.business_tools_enabled)
 
 
+def _empty_payment_config(title: str) -> PurposePaymentProposalConfig:
+    return PurposePaymentProposalConfig(block="purpose_payment", purpose=title[:60], amount_cents=None)
+
+
 def _check_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn, *,
-                    configs: bool = True) -> tuple[ProposalCard, SetupProposalIn]:
+                    configs: bool = True) -> tuple[ProposalCard, SetupProposalIn, BlockConfig | None]:
     """Validate a waiting-card decision without changing the card or transcript."""
     if interview.step != "questions":
         raise ApiProblem(409, "conflict")
@@ -1167,6 +1172,8 @@ def _check_decision(interview: Interview, proposal_id: str, decision: SetupPropo
     if card.job is None and (decision.title is not None or decision.autonomy is not None):
         raise ApiProblem(422, "invalid")
     config = card.job.config if card.job is not None and configs else None
+    if configs and card.job is not None and card.job.job == "payment" and config is None:
+        config = _empty_payment_config(card.job.title)
     if (decision.accept and card.job is not None and card.job.job == "payment"
             and (not isinstance(config, PurposePaymentProposalConfig)
                  or (decision.amount_cents if decision.amount_cents is not None
@@ -1174,19 +1181,20 @@ def _check_decision(interview: Interview, proposal_id: str, decision: SetupPropo
         raise ApiProblem(422, "amount_required")
     if decision.amount_cents is not None and not isinstance(config, PurposePaymentProposalConfig):
         raise ApiProblem(422, "invalid")
-    return card, decision
+    return card, decision, config
 
 
 def apply_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn) -> None:
     """Validate an answer and change only the waiting card, without I/O or transcript additions."""
-    card, decision = _check_decision(interview, proposal_id, decision, configs=interview.business_tools_enabled)
-    config = card.job.config if card.job is not None else None
+    card, decision, config = _check_decision(interview, proposal_id, decision, configs=interview.business_tools_enabled)
     card.state = "accepted" if decision.accept else "declined"
     if card.connector is not None:
         card.connector.connected = decision.accept and card.connector.app != "stripe"
     if decision.amount_cents is not None:
         config.amount_cents = decision.amount_cents
     if card.job is not None:
+        if card.job.config is None:
+            card.job.config = config
         if decision.title is not None:
             card.job.title = decision.title
         if decision.autonomy is not None:
@@ -1638,8 +1646,7 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
         return None
     fields = draft.model_dump(mode="json")
     if draft.job == "payment" and fields["config"] is None:
-        fields["config"] = PurposePaymentProposalConfig(block="purpose_payment", purpose=draft.title[:60],
-                                                 amount_cents=None).model_dump(mode="json")
+        fields["config"] = _empty_payment_config(draft.title).model_dump(mode="json")
     if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
         fields["config"]["amount_cents"] = None
     if not interview.business_tools_enabled:

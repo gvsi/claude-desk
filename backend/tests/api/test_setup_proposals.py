@@ -1791,6 +1791,31 @@ async def test_disabling_tools_declines_an_already_accepted_payment(proposals, a
     assert "Pay a retainer" not in (interview.answers.how_we_help or "")
 
 
+async def test_payment_accepts_an_amount_after_tools_turn_off_then_on(proposals, app, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
+    response = await owner.browser.post(path + f"/proposals/{ids[0]}?cards=1", json={"accept": True})
+    payment = next(card for card in shown(response) if card["proposal_id"] == ids[1])
+    assert payment["job"]["config"] is None
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    before = await stored(engine, interview_id)
+    refused = await owner.browser.post(path + f"/proposals/{ids[1]}?cards=1", json={"accept": True})
+    assert (refused.status_code, refused.json()) == (422, {"error": "amount_required"})
+    assert await stored(engine, interview_id) == before
+    response = await owner.browser.post(path + f"/proposals/{ids[1]}?cards=1",
+                                        json={"accept": True, "amount_cents": 2500})
+    payment = next(card for card in shown(response) if card["proposal_id"] == ids[1])
+    assert payment["state"] == "accepted"
+    assert payment["job"]["config"] == {
+        "block": "purpose_payment", "purpose": "Pay a retainer", "amount_cents": 2500}
+    saved = await stored(engine, interview_id)
+    payment = next(entry["card"] for entry in reversed(saved["transcript"])
+                   if (entry.get("card") or {}).get("proposal_id") == ids[1])
+    assert payment["job"]["config"]["amount_cents"] == 2500
+
+
 async def test_minted_configless_payment_accepts_an_owner_amount(proposals, engine):
     owner, state, ids = proposals
     interview_id = state["interview_id"]
