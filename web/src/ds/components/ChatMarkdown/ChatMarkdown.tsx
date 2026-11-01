@@ -3,6 +3,7 @@ import { harden } from 'rehype-harden';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { type Components, defaultRemarkPlugins, type ExtraProps, Streamdown, type StreamdownProps } from 'streamdown';
 
+import { everyTableCell } from './everyTableCell.ts';
 import { footnotesAsText } from './footnotesAsText.ts';
 import { useReducedMotion } from './useReducedMotion.ts';
 import { useReveal } from './useReveal.ts';
@@ -29,8 +30,11 @@ const REHYPE_PLUGINS: StreamdownProps['rehypePlugins'] = [
   ],
 ];
 
-/** Streamdown's own Markdown steps (GitHub Markdown and code fences), then footnotes back to their words. */
-const REMARK_PLUGINS: StreamdownProps['remarkPlugins'] = [...Object.values(defaultRemarkPlugins), footnotesAsText];
+/**
+ * Streamdown's own Markdown steps (GitHub Markdown and code fences), then footnotes back to their
+ * words and every table cell kept.
+ */
+const REMARK_PLUGINS: StreamdownProps['remarkPlugins'] = [...Object.values(defaultRemarkPlugins), footnotesAsText, everyTableCell];
 
 /**
  * A hard break is one `<br>`. By default a newline follows it too, which the paragraph's

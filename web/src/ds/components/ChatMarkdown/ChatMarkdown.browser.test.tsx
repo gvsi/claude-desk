@@ -236,6 +236,17 @@ it('growing_text_that_stops_mid_table_shows_no_pipes_or_broken_rows', () => {
   ]);
 });
 
+it('a_row_wider_than_its_header_keeps_every_word', () => {
+  // GitHub Markdown drops cells past the header's; the header gains empty cells instead.
+  const md = reply(mount(<ChatMarkdown text={'| Item |\n| --- |\n| Service | Do not book yet |\n| Deposit |'} />));
+  expect(head(md)).toEqual(['Item', '']);
+  expect([...md.querySelectorAll('thead tr > *')].map((cell) => cell.tagName.toLowerCase())).toEqual(['th', 'td']);
+  expect(rows(md)).toEqual([
+    ['Service', 'Do not book yet'],
+    ['Deposit', ''],
+  ]);
+});
+
 it('a_whole_reply_renders_as_written_with_nothing_closed', () => {
   // Closing unfinished Markdown is for text that is still arriving: a stray marker in a whole
   // reply is the reply's own.
