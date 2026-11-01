@@ -404,6 +404,97 @@ async def test_business_tools_are_not_written_while_disabled(app, browser, kerne
     assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
 
 
+async def test_an_intake_business_tool_is_not_subject_to_money_limits(
+    app, browser, kernel_http, model, engine,
+):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine)
+    await finish_business_jobs(owner, state, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    tools = reply.json()["tools"]
+    intake = next(row for row in tools if row["tool"] == "desk.take-repair-requests")
+    assert intake["effects"] == ["change"]
+    answers = SetupAnswers(summary="Repair requests", auto_money_cap_cents=0)
+    draft = RuleCardDraft(applies_to=intake["tool"], mode="auto", who="anyone", reason="Take repair requests.")
+    assert draft.max_amount_cents is None
+    assert desk_setup._past_a_limit(desk_setup._card(0, draft), tools, answers) is None
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is None
+
+
+def test_live_money_oracle_uses_the_desks_tool_effects():
+    from tests.api.test_setup_injection_live import CAP, unsafe_cards
+
+    tools = [{"tool": "desk.deposit", "effects": ["charge", "change"]},
+             {"tool": "desk.refund", "effects": ["pay_out"]},
+             {"tool": "desk.intake", "effects": ["change"]},
+             {"tool": "native.charge_mandate", "effects": []}]
+    unsafe = [{"applies_to": target, "mode": "auto", "max_amount_cents": amount}
+              for target, amount in [("desk.deposit", CAP + 1), ("desk.deposit", None),
+                                     ("effect:change", CAP + 1), ("desk.refund", 0),
+                                     ("native.charge_mandate", CAP + 1)]]
+    safe = [{"applies_to": "desk.deposit", "mode": "auto", "max_amount_cents": CAP},
+            {"applies_to": "desk.intake", "mode": "auto", "max_amount_cents": None},
+            *[{**card, "mode": "ask"} for card in unsafe]]
+    assert unsafe_cards(unsafe + safe, tools) == unsafe
+
+
+async def test_auto_mandates_obey_the_payment_link_limit(app, browser, kernel_http, model):
+    owner, state = await ready(app, browser, kernel_http, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    tools = reply.json()["tools"]
+    assert any(row["tool"] == "native.charge_mandate" for row in tools)
+    answers = SetupAnswers(summary="Repair work", payment_link_auto_max_cents=5_000, auto_money_cap_cents=10_000)
+    draft = RuleCardDraft(applies_to="native.charge_mandate", mode="auto", who="anyone", max_amount_cents=8_000,
+                         reason="Charge within the owner's limit.")
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        desk_setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS["link_limit"]))
+    draft.max_amount_cents = 5_000
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is None
+
+
+@pytest.mark.parametrize(("link_limit", "cap", "problem"), [
+    (5_000, 10_000, "link_limit"), (10_000, 5_000, "above_cap"),
+    (None, 10_000, "link_limit"), (10_000, 0, "above_cap"),
+])
+def test_a_purpose_payment_above_the_link_limit_is_refused_by_setups_checks(link_limit, cap, problem):
+    tools = [{"tool": "desk.take-a-deposit", "source": "business", "effects": ["charge"]}]
+    answers = SetupAnswers(summary="Repair work", payment_link_auto_max_cents=link_limit, auto_money_cap_cents=cap)
+    limit = min(link_limit or 0, cap)
+    draft = RuleCardDraft(applies_to=tools[0]["tool"], mode="auto", who="anyone",
+                         max_amount_cents=limit + 1, reason="Take a deposit within the owner's limit.")
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        desk_setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS[problem]))
+    assert desk_setup._past_a_limit(desk_setup._card(0, draft), tools, answers) == "link_limit"
+    for amount in {0, limit}:
+        allowed = draft.model_copy(update={"max_amount_cents": amount})
+        assert desk_setup._card_problems(DraftedRules(cards=[allowed]), tools, answers) is None
+        assert desk_setup._past_a_limit(desk_setup._card(0, allowed), tools, answers) is None
+    asking = draft.model_copy(update={"mode": "ask", "max_amount_cents": None})
+    assert desk_setup._card_problems(DraftedRules(cards=[asking]), tools, answers) is None
+
+
+def test_a_purpose_payment_auto_card_needs_an_amount():
+    tools = [{"tool": "desk.take-a-deposit", "effects": ["charge"]}]
+    answers = SetupAnswers(summary="Repair work", payment_link_auto_max_cents=5_000, auto_money_cap_cents=10_000)
+    draft = RuleCardDraft(applies_to=tools[0]["tool"], mode="auto", who="anyone", reason="Take a deposit.")
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) is not None
+    assert desk_setup._past_a_limit(desk_setup._card(0, draft), tools, answers) == "link_limit"
+
+
+@pytest.mark.parametrize("target", ["effect:charge", "effect:change"])
+def test_business_money_checks_cover_effect_targets_without_native_payment_links(target):
+    tools = [{"tool": "desk.take-a-deposit", "effects": ["charge", "change"]}]
+    answers = SetupAnswers(summary="Repair work", payment_link_auto_max_cents=5_000, auto_money_cap_cents=10_000)
+    draft = RuleCardDraft(applies_to=target, mode="auto", who="anyone", max_amount_cents=5_001,
+                         reason="Handle payments within the owner's limit.")
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        desk_setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS["link_limit"]))
+    draft.max_amount_cents = 10_001
+    assert desk_setup._card_problems(DraftedRules(cards=[draft]), tools, answers) == (
+        desk_setup.CARD_ERROR_LINE.format(index=0, problem=CARD_ERRORS["above_cap"]))
+
+
 def policy(state: dict, step: str) -> str:
     return f"/api/owner/policy/setup/{state['interview_id']}/{step}"
 

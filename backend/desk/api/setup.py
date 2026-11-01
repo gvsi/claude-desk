@@ -268,6 +268,7 @@ from desk.api.versions import (
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     MCP_TOOLS,
+    MONEY_EFFECTS,
     MONEY_TOOLS,
     BusinessSeed,
     CalendarSlot,
@@ -284,6 +285,7 @@ from desk.contracts import (
     ProbeResult,
     RuleCard,
     ToolCall,
+    money_tool,
 )
 from desk.db.models import SetupInterview
 from desk.kernel_api import (
@@ -2702,7 +2704,7 @@ WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 UTILITY_CARDS: tuple[RuleCard, ...] = tuple(PRESETS["ask_first"])
 UTILITY_TOOLS = frozenset(card.applies_to for card in UTILITY_CARDS)
 EFFECT_TARGETS = tuple(f"effect:{effect}" for effect in get_args(Effect))
-MONEY_TARGETS = MONEY_TOOLS | {"effect:charge", "effect:pay_out"}
+MONEY_TARGETS = MONEY_TOOLS | {f"effect:{effect}" for effect in MONEY_EFFECTS}
 # Where each tool a situation can call acts (as its profile says), for the probe's stand-in resource.
 RESOURCE_KINDS: dict[str, str] = {
     "native.quote": "desk", "native.find_slots": "desk", "native.book": "slot", "native.release_document": "document",
@@ -3220,10 +3222,16 @@ def _covering(tool: str, tools: list[dict], effects: frozenset[str] | None = Non
     return frozenset({tool, *(f"effect:{effect}" for effect in offered if effects is None or effect in effects)})
 
 
+def _money_targets(tools: list[dict]) -> frozenset[str]:
+    """Money tools offered by this Desk, and effect targets that cover them."""
+    return MONEY_TARGETS | frozenset(target for tool in tools if money_tool(tool["tool"], tool["effects"])
+                                     for target in _covering(tool["tool"], tools))
+
+
 def _past_a_limit(card: RuleCard, tools: list[dict], answers: SetupAnswers) -> str | None:
     """The answered limit an auto card goes past, by the tool it names or an effect the tool has, or None: a quote's
     amount (which it must set) and discount past the answered quote and discount limits, a document going out unless
-    verified owners get their own, or a payment link's amount past the lower of the answered link limit and the money
+    verified owners get their own, or a money tool's amount past the lower of the answered link limit and the money
     cap. An unanswered limit is 0."""
     if card.applies_to in _covering("native.quote", tools):
         if card.max_amount_cents is None or card.max_amount_cents > (answers.quote_auto_max_cents or 0):
@@ -3234,7 +3242,8 @@ def _past_a_limit(card: RuleCard, tools: list[dict], answers: SetupAnswers) -> s
             and answers.documents != "verified_owner"):
         return "documents"
     link_limit = min(answers.payment_link_auto_max_cents or 0, answers.auto_money_cap_cents)
-    if card.applies_to in _covering("native.payment_link", tools) and (card.max_amount_cents or 0) > link_limit:
+    if card.applies_to in _money_targets(tools) and (
+            card.max_amount_cents is None or card.max_amount_cents > link_limit):
         return "link_limit"
     return None
 
@@ -3281,7 +3290,7 @@ def _card_problems(drafted: DraftedRules, tools: list[dict], answers: SetupAnswe
             continue
         if _pays_out(card.applies_to, tools):
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS["pay_out"]))
-        elif card.applies_to in MONEY_TARGETS and (card.max_amount_cents or 0) > cap:
+        elif card.applies_to in _money_targets(tools) and (card.max_amount_cents or 0) > cap:
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS["above_cap"]))
         elif (past := _past_a_limit(card, tools, answers)) is not None:
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS[past]))
