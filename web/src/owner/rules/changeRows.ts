@@ -207,9 +207,10 @@ export function reviewedTools(draft: RuleDraft, tools: ToolEffects): AnyToolName
  * The review's rows: a row per card change (`reviewChanges` over the draft's before and after), each
  * side in words, then a `turned_on` row per tool the draft turns on, at the outcome Rules shows
  * for the draft's rules (`toolOutcome`: the most that runs on its own for some visitor), in the
- * words of the rule that gives it, else the default ask. The changed rows, then the
- * added ones, each go by connector and by tool within one, a shared rule placed by `rowLabel`, or,
- * when it covers other tools after than before, by every tool either side covers (`coverageMove`).
+ * words of the rule that gives it, else the default ask. Every card's row goes by connector and by
+ * tool within one, in one stable pass, so an added rule follows the changed rows of its own tool: a
+ * shared rule is placed by `rowLabel`, or, when it covers other tools after than before, by every
+ * tool either side covers (`coverageMove`).
  * `tools` is this Desk's catalog: each tool's effects, which say which shared rules cover and
  * govern it; the draft's own `turnedOn` rows count too.
  */
@@ -250,10 +251,9 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     };
     return { row, place };
   });
-  const rows: ChangeRowView[] = [
-    ...byPlace(placed.filter(({ row }) => row.change !== 'added'), ({ place }) => place),
-    ...byPlace(placed.filter(({ row }) => row.change === 'added'), ({ place }) => place),
-  ].map(({ row }) => row);
+  // One stable pass by place: rows at one place keep the pairing's order, so an added rule follows
+  // the changed rows of its own tool, and changes to one tool read together.
+  const rows: ChangeRowView[] = byPlace(placed, ({ place }) => place).map(({ row }) => row);
 
   for (const row of [...draft.turnedOn].sort((a, b) => toolPlace(a.tool) - toolPlace(b.tool))) {
     const title = targetWords(row.tool, business);
