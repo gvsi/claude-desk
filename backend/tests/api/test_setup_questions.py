@@ -3693,6 +3693,16 @@ async def test_the_payment_line_follows_the_first_payment_card_once():
     assert sum(entry.role == "claude" and entry.text == line for entry in interview.transcript) == 1
 
 
+@pytest.mark.parametrize("kind", ["payment", "stripe", "revision"])
+async def test_the_first_payment_card_has_no_ask_first_line_after_an_amount_is_set(monkeypatch, kind):
+    interview = runtime_interview()
+    interview.answers.auto_money_cap_cents = 10000
+    card = await show_runtime_card(interview, stripe=kind == "stripe", revised=kind == "revision", monkeypatch=monkeypatch)
+    assert interview.transcript[-1].card.proposal_id == card.proposal_id
+    assert interview.pending_card == card.proposal_id
+    assert not any(entry.text == desk_setup.PAYMENT_LINE for entry in interview.transcript)
+
+
 async def test_the_payment_line_follows_a_stripe_card():
     interview = runtime_interview()
     # An owner's identical text cannot impersonate the Claude transcript marker.
