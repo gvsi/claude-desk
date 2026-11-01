@@ -64,7 +64,7 @@ def test_knowledge_list_has_required_nullable_fields():
     assert schema["properties"]["created_at"]["anyOf"] == [
         {"type": "string", "format": "date-time"}, {"type": "null"}]
     assert schema["properties"]["readers"]["items"] == {"type": "string"}
-    assert schema["properties"]["source"]["enum"] == ["website", "upload", "setup", "memory_import"]
+    assert schema["properties"]["source"]["enum"] == ["website", "upload", "setup", "memory_import", "web_search"]
 
 
 def test_every_route_has_typed_responses():

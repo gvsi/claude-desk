@@ -509,7 +509,7 @@ export interface KnowledgeRow {
   title: string | null;
   text: string | null;
   readers: string[];
-  source: "website" | "upload" | "setup" | "memory_import";
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
   created_at: string | null;
 }
 /**
