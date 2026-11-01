@@ -194,17 +194,38 @@ describe('public chat page', () => {
   });
 
   it('typed_first_message_removes_the_invitation_and_history_never_replays_it', async () => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await reduceMotion(false);
+    onTestFinished(() => reduceMotion(reduced));
     const first = await renderRoute(PAGE);
     await ready(first.screen);
     await expect.element(first.screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
     await say(first.screen, 'How much is drain clearing?');
     await expect.element(first.screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
     await expect.element(first.screen.getByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
+    const mountedWelcome: Element[] = [];
+    const recordMounts = (records: MutationRecord[]) => {
+      for (const record of records) {
+        // Removed nodes also reveal a welcome mounted and removed within one commit.
+        for (const node of [...record.addedNodes, ...record.removedNodes]) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches('.cd-public-shell__welcome')) mountedWelcome.push(node);
+          mountedWelcome.push(...node.querySelectorAll('.cd-public-shell__welcome'));
+        }
+      }
+    };
+    const observer = new MutationObserver(recordMounts);
+    observer.observe(document.body, { childList: true, subtree: true });
+    const animate = vi.spyOn(Element.prototype, 'animate');
+    onTestFinished(() => { observer.disconnect(); animate.mockRestore(); });
     const resumed = await renderRoute(PAGE);
     await ready(resumed.screen);
     await expect.element(resumed.screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
     await expect.element(resumed.screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
     expect(document.querySelector('.cd-public-shell__welcome')).toBeNull();
+    recordMounts(observer.takeRecords());
+    expect(mountedWelcome).toHaveLength(0);
+    expect(animate).not.toHaveBeenCalled();
   });
 
   it('first_send_is_immediate_with_reduced_motion_on_desktop_and_phone', async () => {
@@ -252,6 +273,21 @@ describe('public chat page', () => {
     await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
   });
 
+  it('phone_first_send_fades_without_animating_the_composer_lift', async () => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await reduceMotion(false);
+    onTestFinished(() => reduceMotion(reduced));
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    const animate = vi.spyOn(Element.prototype, 'animate');
+    onTestFinished(() => animate.mockRestore());
+    await type(screen, 'How much is drain clearing?');
+    const targets = animate.mock.contexts as Element[];
+    expect(targets.filter((target) => target.matches('.cd-public-shell__composer-lift'))).toHaveLength(0);
+    expect(targets.filter((target) => target.matches('.cd-public-shell__welcome, .cd-public-shell__starters'))).toHaveLength(2);
+    await turnEnded(0);
+  });
+
   it('first_view_places_the_composer_under_the_invitation_without_overflow', async () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
@@ -269,6 +305,13 @@ describe('public chat page', () => {
       if (viewport === 'phone') {
         expect(document.querySelector('.cd-public-shell__about')!.getBoundingClientRect().top)
           .toBeGreaterThan(document.querySelector('.cd-public-shell__composer')!.getBoundingClientRect().bottom);
+        body.scrollTop = body.scrollHeight;
+        await vi.waitFor(() => expect(body.scrollTop).toBeGreaterThan(0));
+        expect(Math.abs(body.scrollTop - (body.scrollHeight - body.clientHeight))).toBeLessThanOrEqual(1);
+        const disclosure = document.querySelector('.cd-public-shell__disclosure')!.getBoundingClientRect();
+        const bounds = body.getBoundingClientRect();
+        expect(disclosure.top).toBeGreaterThanOrEqual(bounds.top);
+        expect(disclosure.bottom).toBeLessThanOrEqual(bounds.bottom);
       }
     }
   });
@@ -282,10 +325,20 @@ describe('public chat page', () => {
     await starters.getByRole('button', { name: 'How much is drain clearing?', exact: true }).click();
     await expect.element(screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
     await turnEnded(0);
+    expect(requests('sendMessage')).toHaveLength(1);
     expect(requests('sendMessage').at(-1)?.body).toMatchObject({ text: 'How much is drain clearing?' });
     await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
     await expect.element(starters).not.toBeInTheDocument();
     await expect.element(chatBox(screen)).toHaveFocus();
+  });
+
+  it('double_clicking_a_starter_sends_exactly_one_request', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await screen.getByRole('button', { name: 'How much is drain clearing?', exact: true }).dblClick();
+    await turnEnded(0);
+    expect(requests('sendMessage')).toHaveLength(1);
+    expect(requests('sendMessage')[0]?.body).toEqual({ text: 'How much is drain clearing?' });
   });
 
   it('touch_pick_sends_without_focusing_the_composer', async () => {
