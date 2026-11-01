@@ -74,6 +74,7 @@ from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
 from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, log_error,
                                       route_template, storable)
+from desk.kernel_service.settings import MOCKPAY_URL, KernelSettings
 from desk.mockpay.definitions import EXIT_BIND_FAILED, is_placeholder_key
 
 log = logging.getLogger("desk.kernel_service")
@@ -102,26 +103,6 @@ class RedactLinkTokens(logging.Filter):
 
 
 ACCESS_LOG_FILTER = RedactLinkTokens()
-
-
-MOCKPAY_URL = "http://127.0.0.1:8702"
-
-
-@dataclass(frozen=True)
-class KernelSettings:
-    database_url: str = field(repr=False)   # carries the role's password
-    env: str = "dev"                        # DESK_ENV
-    decisions: str = "anthropic"            # DESK_DECISIONS: "anthropic", or "offline" (a test hook)
-    mockpay_url: str = MOCKPAY_URL          # MOCKPAY_URL: the mock payments server the kernel calls
-    mockpay_key: str = field(default="", repr=False)   # MOCKPAY_KEY: the kernel's alone, never the API's
-    mockpay_spawn: bool = False             # MOCKPAY_SPAWN=1: run that server as the kernel's child
-
-    @classmethod
-    def from_env(cls) -> "KernelSettings":
-        return cls(database_url=database_url("KERNEL"), env=os.environ.get("DESK_ENV", "dev"),
-                   decisions=os.environ.get("DESK_DECISIONS", "anthropic"),
-                   mockpay_url=os.environ.get("MOCKPAY_URL") or MOCKPAY_URL,
-                   mockpay_key=os.environ.get("MOCKPAY_KEY", ""), mockpay_spawn=os.environ.get("MOCKPAY_SPAWN") == "1")
 
 
 TEST_HOOK_VARIABLES = ("ANTHROPIC_BASE_URL", "DESK_PROVE")   # a fake model server; a stand-in prover
