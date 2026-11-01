@@ -1,4 +1,5 @@
 import { http } from 'msw';
+import { userEvent } from 'vitest/browser';
 import { expect, it, onTestFinished } from 'vitest';
 
 import type { SetupPublicLines, SetupState } from '../api/views.ts';
@@ -57,7 +58,7 @@ it('opens public lines from Real situations with the signed labels and screen ba
   }
 });
 
-it('edits one line in place, limits it to 500 characters and Cancel restores the saved words', async () => {
+it('edits one line in place, limits About to 1500 characters and Cancel restores the saved words', async () => {
   const { screen } = await openLines('phone');
   const before = screen.container.querySelector('.cd-public-lines__text')?.textContent;
   await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
@@ -66,8 +67,8 @@ it('edits one line in place, limits it to 500 characters and Cancel restores the
   await expect.element(field).toHaveFocus();
   await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
   for (const edit of screen.getByRole('button', { name: 'Edit', exact: true }).elements()) expect((edit as HTMLButtonElement).disabled).toBe(true);
-  await field.fill('x'.repeat(501));
-  expect((field.element() as HTMLTextAreaElement).value).toHaveLength(500);
+  await field.fill('x'.repeat(1501));
+  expect((field.element() as HTMLTextAreaElement).value).toHaveLength(1500);
   expectNoHorizontalScroll();
   await expectScreenBasics(screen.container, { owner: true });
   await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -264,4 +265,44 @@ it.each(['policy:how_we_help', 'policy:unknown', null])('shows the signed Notice
   expect(screen.getByRole('textbox').elements()).toHaveLength(0);
   expect(screen.container.textContent).not.toContain('INTERNAL refusal');
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
+
+it.each([
+  ['policy:about', 'About us', 1500], ['policy:pricing', 'Pricing', 500],
+] as const)('keeps an over-limit %s draft intact when one character is deleted', async (key, label, limit) => {
+  const state = await atSituations();
+  const text = '😀' + 'x'.repeat(limit);
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { lines: [{ key, text, editable: true, source: 'owner' }] } });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).click();
+  const field = screen.getByRole('textbox', { name: label, exact: true });
+  const input = field.element() as HTMLTextAreaElement;
+  expect(input.maxLength).toBe(limit);
+  expect(input.value).toBe(text);
+  const save = screen.getByRole('button', { name: 'Save', exact: true });
+  expect((save.element() as HTMLButtonElement).disabled).toBe(true);
+  input.setSelectionRange(text.length, text.length);
+  await userEvent.keyboard('{Backspace}');
+  expect(input.value).toBe('😀' + 'x'.repeat(limit - 1));
+  expect((save.element() as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.keyboard('{Backspace}');
+  expect(input.value).toBe('😀' + 'x'.repeat(limit - 2));
+  expect((save.element() as HTMLButtonElement).disabled).toBe(false);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine')).toHaveLength(0);
+});
+
+
+it('disables Save for empty and whitespace-only text without sending a write', async () => {
+  const { screen } = await openLines();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  const field = screen.getByRole('textbox', { name: 'About us', exact: true });
+  for (const text of ['', '   ']) {
+    await field.fill(text);
+    expect((screen.getByRole('button', { name: 'Save', exact: true }).element() as HTMLButtonElement).disabled).toBe(true);
+  }
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine')).toHaveLength(0);
+  await field.fill('We help local businesses.');
+  await expect.element(screen.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
 });

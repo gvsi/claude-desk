@@ -5,6 +5,7 @@ import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import type { SetupPublicLine, SetupPublicLines, SetupState, SetupStep } from '../api/views.ts';
 import { Button, Card, cardChrome, LoadingLine, Notice, PageHeader, StatusDot } from '../ds/index.ts';
 import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
+import { publicLineLimit } from './publicLineLimit.ts';
 
 import './PublicLinesStep.css';
 
@@ -40,6 +41,8 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const [busy, setBusy] = useState<'save' | 'confirm' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
+  const limit = publicLineLimit(editingKey ?? '');
+  const invalid = text.trim() === '' || text.length > limit;
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const returnFocus = useRef<string | null>(null);
   useEffect(() => {
@@ -81,7 +84,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     setRefused(false);
   };
   const save = async () => {
-    if (editingKey === null || busy !== null) return;
+    if (editingKey === null || busy !== null || invalid) return;
     setBusy('save');
     setError(null);
     setRefused(false);
@@ -150,12 +153,12 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
                           className="cd-text-field__input cd-type-body"
                           autoFocus
                           rows={4}
-                          maxLength={500}
+                          maxLength={limit}
                           value={text}
                           readOnly={busy !== null}
                           aria-invalid={refused || undefined}
                           aria-describedby={refused ? `${fieldId}-error` : undefined}
-                          onChange={(event) => setText(event.target.value.slice(0, 500))}
+                          onChange={(event) => setText(event.target.value)}
                         />
                         <div className="cd-text-field__error-region" aria-live="polite">
                           {refused ? (
@@ -166,7 +169,9 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
                         </div>
                       </div>
                       <div className="cd-setup-step__actions">
-                        <Button variant="primary" busy={busy === 'save'} onClick={() => void save()}>{copy.save}</Button>
+                        {invalid ? <Button variant="primary" disabled>{copy.save}</Button> : (
+                          <Button variant="primary" busy={busy === 'save'} onClick={() => void save()}>{copy.save}</Button>
+                        )}
                         <Button variant="ghost" waiting={busy !== null} onClick={cancel}>{copy.cancel}</Button>
                       </div>
                     </div>
