@@ -384,6 +384,28 @@ function aboutDrawsItsLine(): boolean {
 /** Each window's name: "390x844". */
 const named = ([width, height]: Size) => `${width}x${height}`;
 
+it('the_english_disclosure_keeps_one_period_after_the_business_name', () => {
+  act(() => root.render(
+    <PublicShell brand={{ ...brandOf(desk), name: 'Chen & Co.' }} ownerName="Linda" language="en" onAskForOwner={() => {}} composer={null}>
+      {null}
+    </PublicShell>,
+  ));
+  const line = disclosureLine();
+  expect(line.textContent).toBe("You're chatting with Claude, an AI answering for Chen & Co. Ask for Linda anytime.");
+  expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual(['Chen & Co.', 'Linda']);
+});
+
+it('the_spanish_disclosure_keeps_one_period_after_the_business_name', () => {
+  act(() => root.render(
+    <PublicShell brand={{ ...brandOf(desk), name: 'Chen & Co.' }} ownerName="Linda" language="es" onAskForOwner={() => {}} composer={null}>
+      {null}
+    </PublicShell>,
+  ));
+  const line = disclosureLine();
+  expect(line.textContent).toBe('Estás hablando con Claude, una IA que responde por Chen & Co. Puedes pedir hablar con Linda cuando quieras.');
+  expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual(['Chen & Co.', 'Linda']);
+});
+
 it('the_document_never_scrolls', async () => {
   // However long the chat, the page is the window's height and width: the conversation scrolls
   // inside the shell, and its screen-reader lines don't stretch the document behind it.

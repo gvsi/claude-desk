@@ -7,6 +7,7 @@ file and `results_check` are the real ones, reading the repository through git a
 import json
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -526,6 +527,173 @@ async def test_check_treats_a_base_without_eval_files_as_empty(tmp_path):
     await results_at_head(repo)
     passed, reason = check(repo, first)
     assert passed, reason
+
+
+def push_repo(tmp_path: Path, *, pending: bool = False) -> tuple[Path, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.email", "evals@example.invalid")
+    git(repo, "config", "user.name", "Evals")
+    git(repo, "config", "commit.gpgsign", "false")
+    write(repo, "README.md", "A root with no eval files.\n")
+    root = commit(repo, "the root commit")
+    if pending:
+        make_repo(repo, landed=("master", "01a"))
+    else:
+        make_repo(repo)
+    return repo, root
+
+
+def test_push_after_an_unchecked_waiver_rewrite_still_fails(tmp_path):
+    from evals.tests.test_waivers import waiver_data
+    from evals.waivers import WAIVERS_PATH, Waiver
+
+    repo, root = push_repo(tmp_path, pending=True)
+    entry = Waiver.model_validate(waiver_data()).model_dump(mode="json")
+    write(repo, WAIVERS_PATH, json.dumps([entry]))
+    original = commit(repo, "an owner-signed waiver")
+    write(repo, WAIVERS_PATH, json.dumps([{**entry, "reason": "A rewritten reason"}]))
+    commit(repo, "push A rewrites it but its run is cancelled")
+    write(repo, "README.md", "An unrelated docs change.\n")
+    commit(repo, "push B")
+
+    assert results_check(root, repo)[0]
+    passed, reason = results_check(root, repo, history_since=root)
+    assert not passed and f"waivers.json rewrites the history {original} holds" in reason, reason
+
+
+def test_push_history_since_keeps_plans_from_an_earlier_commit(tmp_path):
+    repo, root = push_repo(tmp_path, pending=True)
+    set_landed(repo, ("master", "01a", "01b"))
+    original = commit(repo, "land plan 01b")
+    set_landed(repo, ("master", "01a"))
+    commit(repo, "push A drops plan 01b but its run is cancelled")
+    write(repo, "README.md", "Push B must still detect the missing plan.\n")
+    commit(repo, "push B")
+
+    assert results_check(root, repo)[0]
+    passed, reason = results_check(root, repo, history_since=root)
+    assert not passed and f"landed.toml drops plans {original} lists: 01b" in reason, reason
+
+
+@pytest.mark.parametrize("history_since", [None, "previous-commit"])
+@pytest.mark.parametrize("passed", [False, True])
+def test_results_check_cli_forwards_optional_history_since(monkeypatch, capsys, history_since, passed):
+    from evals import results, run
+
+    calls = []
+
+    def check(base, *, history_since=None):
+        calls.append((base, history_since))
+        return passed, "the check's reason"
+
+    monkeypatch.setattr(results, "results_check", check)
+    args = ["results-check", "--base", "root-commit"]
+    if history_since is not None:
+        args.extend(["--history-since", history_since])
+    assert run.main(args) == (0 if passed else 1)
+    assert calls == [("root-commit", history_since)]
+    assert capsys.readouterr().out == "results-check: the check's reason\n"
+
+
+@pytest.mark.parametrize("history, pending", [("rates", False), ("waivers", False), ("waivers", True)])
+async def test_push_history_since_rejects_rewrites_the_root_base_cannot_see(tmp_path, history, pending):
+    from evals.tests.test_waivers import waiver_data
+    from evals.waivers import WAIVERS_PATH, Waiver
+
+    repo, root = push_repo(tmp_path, pending=pending)
+    if history == "rates":
+        first = await run_pass(config(runs=3, results=True), deps(repo))
+        record_rate(first, signed_off_by="The owner", reason="First held-out run", root=repo, now=NOW)
+        path = repo / "evals/recorded_rates.json"
+    else:
+        path = repo / WAIVERS_PATH
+        path.write_text(json.dumps([Waiver.model_validate(waiver_data()).model_dump(mode="json")]))
+    previous = commit(repo, "record the history before the push")
+    data = json.loads(path.read_text())
+    entries = data["history"] if history == "rates" else data
+    entries[0]["reason"] = "A rewritten reason"
+    path.write_text(json.dumps(data))
+    commit(repo, "rewrite earlier history on the push")
+    if not pending:
+        await results_at_head(repo, rates=load_recorded_rates(repo / "evals/recorded_rates.json"))
+    write(repo, "README.md", "Push B follows the unchecked rewrite in push A.\n")
+    commit(repo, "push B after the unchecked rewrite")
+
+    # The root has no earlier entries, so the existing push check accepts this exact head.
+    passed, reason = results_check(root, repo)
+    assert passed, reason
+    passed, reason = results_check(root, repo, history_since=root)
+    assert not passed and f"{path.name} rewrites the history {previous} holds" in reason, reason
+
+
+@pytest.mark.parametrize("pending", [False, True])
+async def test_push_history_since_allows_append_and_keeps_no_base_behavior(tmp_path, pending):
+    from evals.tests.test_waivers import waiver_data
+    from evals.waivers import WAIVERS_PATH, Waiver
+
+    repo, root = push_repo(tmp_path, pending=pending)
+    if not pending:
+        first = await run_pass(config(runs=3, results=True), deps(repo))
+        record_rate(first, signed_off_by="The owner", reason="First held-out run", root=repo, now=NOW)
+    entry = Waiver.model_validate(waiver_data()).model_dump(mode="json")
+    write(repo, WAIVERS_PATH, json.dumps([entry]))
+    commit(repo, "the previous histories")
+    write(repo, WAIVERS_PATH, json.dumps([entry, {**entry, "pass_id": "next-pass"}]))
+    commit(repo, "append a waiver")
+    if not pending:
+        second = await run_pass(config(runs=3, results=True), deps(repo))
+        record_rate(second, signed_off_by="The owner", reason="Next held-out run", root=repo,
+                    now=NOW + timedelta(days=1))
+        commit(repo, "append a rate")
+        await results_at_head(repo, rates=load_recorded_rates(repo / "evals/recorded_rates.json"))
+
+    assert results_check(root, repo) == results_check(root, repo, history_since=None)
+    passed, reason = results_check(root, repo, history_since=root)
+    assert passed and f"histories extend every first-parent commit since {root}" in reason, reason
+
+
+@pytest.mark.parametrize("path", ["evals/recorded_rates.json", "evals/waivers.json", "evals/tier1/landed.toml"])
+@pytest.mark.parametrize("side", ["earlier commit", "head"])
+@pytest.mark.parametrize("kind", ["gitlink", "directory", "invalid syntax"])
+def test_push_history_since_fails_closed_on_unreadable_histories(tmp_path, path, side, kind):
+    repo, root = push_repo(tmp_path, pending=True)
+    contents = ('{"history": []}' if path.endswith("recorded_rates.json") else
+                'plans = ["master", "01a"]\n' if path.endswith("landed.toml") else "[]")
+    write(repo, path, contents)
+    previous = commit(repo, "readable histories")
+    if kind == "gitlink":
+        git(repo, "update-index", "--cacheinfo", f"160000,{previous},{path}")
+        git(repo, "commit", "-q", "-m", "unreadable history")
+    else:
+        if kind == "directory":
+            (repo / path).unlink()
+            write(repo, path + "/child", "a directory is not a history file")
+        else:
+            write(repo, path, "[")
+        commit(repo, "unreadable history")
+    unreadable = git(repo, "rev-parse", "HEAD")
+    if side == "earlier commit":
+        if kind == "directory":
+            (repo / path / "child").unlink()
+            (repo / path).rmdir()
+        write(repo, path, contents)
+        commit(repo, "restore readable histories at head")
+        passed, reason = results_check(root, repo)
+        assert passed, reason
+
+    # The reason names where the unreadable file is: its commit, or the head (which the range
+    # lists too). A primary base with no diff (HEAD) must not bypass the history check either.
+    where = (unreadable,) if side == "earlier commit" else (unreadable, "HEAD", "the head's")
+    for base in (root, "HEAD"):
+        passed, reason = results_check(base, repo, history_since=root)
+        assert not passed, reason
+        assert any(name in reason for name in where), reason
+        if kind == "invalid syntax":
+            assert "doesn't load" in reason or "don't load" in reason, reason
+        else:
+            assert Path(path).name in reason and "can't be read as a file" in reason, reason
 
 
 # atk-held waits for 01b, which isn't landed (and so neither are 01c and 01c-setup, which land after it).
