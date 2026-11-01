@@ -2325,7 +2325,7 @@ POLICY_AI_DENIAL_CASES = [text for text, _ in policy_cases.AI_DENIAL_REFUSALS] +
 ] + [
     "You’re talking to a human.", "YOU’RE CHATTING WITH A HUMAN RECEPTIONIST.",
     "You are talking with an actual human.", "You're not talking to a bot.", "You aren't chatting with an AI.",
-    "I am a human.", "I'm a human.", "I’m a human.", "I'm human.", "I'm a human, not a bot.",
+    "I am a human being.", "I am a human.", "I'm a human.", "I’m a human.", "I'm human.", "I'm a human, not a bot.",
     "I am a real person.", "I'm a real person.",
     "I'm not a bot.", "I am not a robot.", "I'm not an AI.", "I’m not AI.",
     "This is not an AI.", "This is not a bot.", "This isn't a chatbot.",
@@ -2344,6 +2344,7 @@ POLICY_AI_DENIAL_CASES = [text for text, _ in policy_cases.AI_DENIAL_REFUSALS] +
 ]
 # Directions to reach a person, explicit AI disclosures and role words that name no speaker.
 POLICY_HONEST_PERSON_CASES = [
+    *policy_cases.HUMAN_OCCUPATIONS,
     *policy_cases.AI_DENIAL_CONTROLS,
     "Talk to a real person by phone.", "Call to speak with a live agent.",
     "This is an AI assistant, not a real person.", "I'm an AI assistant, not a person.",

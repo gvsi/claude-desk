@@ -336,6 +336,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
 
 
 @pytest.mark.parametrize("text", [
+    *policy_cases.HUMAN_OCCUPATIONS,
     *policy_cases.AI_DENIAL_CONTROLS,
     *policy_cases.AMENITY_ACCEPTED,
     "Human resources consulting",

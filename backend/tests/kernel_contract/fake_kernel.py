@@ -905,7 +905,7 @@ POLICY_AI_DENIAL = (
     r"you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+an?\s+(?:(?:real|live|actual)\s+)?(?:human|person)",
     r"you(?:\s+are\s+not|['’]re\s+not|\s+aren['’]t)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
     r"(?:this\s+is|you(?:['’]ve|\s+have)\s+reached)\s+an?\s+(?:(?:human|real|live|actual)\s+(?:receptionist|agent|assistant|person|human)|human(?=\s*(?:[^\w\s-]|$)))",
-    r"I(?:\s+am|['’]m)\s+(?:a\s+(?:real|live|actual)\s+(?:person|human)|(?:a\s+)?human(?!-|\s+(?:resources|rights)\b))",
+    r"I(?:\s+am|['’]m)\s+(?:a\s+(?:real|live|actual)\s+(?:person|human)|(?:a\s+)?human(?:\s+being)?(?=\s*(?:[^\w\s-]|$)))",
     r"(?:I(?:\s+am|['’]m)\s+not|this\s+(?:is\s+not|isn['’]t))\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
     r"(?<!no\s)esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con\s+(?:una\s+persona|un\s+(?:ser\s+)?humano|una?\s+(?:agente|asistente|recepcionista)\s+human[oa])",
     r"no\s+(?:esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con|soy)\s+(?:un\s+(?:bot|robot|chatbot)|una\s+(?:IA|maquina))(?!-)",
