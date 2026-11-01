@@ -84,5 +84,5 @@ export function VisionOwnerShell({ bar, business, owner, desks, currentDeskId, c
 
 /** Claude's words in a conversation, in serif, as a checked reply's prose block, in English. */
 export function ClaudeWords({ text, ownerName }: { text: string; ownerName: string }) {
-  return <ClaudeMessage blocks={proseOf(text)} language="en" ownerName={ownerName} />;
+  return <ClaudeMessage plainProse blocks={proseOf(text)} language="en" ownerName={ownerName} />;
 }

@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn } from 'storybook/test';
 
+import { Button } from '../Button/Button.tsx';
+
 import { rivera } from '../../fixtures/index.ts';
 import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
@@ -68,7 +70,7 @@ export const ReviewerBarSkeleton: Story = {
     const shapes = canvasElement.querySelector<HTMLElement>('[data-shaped-bar]')!;
     for (const [aSelector, bSelector] of [
       ['.cd-reviewer-bar', '.cd-reviewer-bar'],
-      ['.cd-button', '.cd-reviewer-bar > .cd-skeleton'],
+      ['.cd-button', '.cd-reviewer-bar__actions > .cd-skeleton:last-child'],
     ]) {
       const a = real.querySelector(aSelector!)!.getBoundingClientRect();
       const b = shapes.querySelector(bSelector!)!.getBoundingClientRect();
@@ -81,6 +83,43 @@ export const ReviewerBarSkeleton: Story = {
         await expect(Math.abs(a[edge] - b[edge] - delta), `${aSelector} ${edge}`).toBeLessThanOrEqual(2);
       }
     }
+  },
+};
+
+/** The screen's own control before Start over, as the owner app has its Demo inbox. */
+export const WithActions: Story = {
+  args: { actions: <Button variant="ghost">Demo inbox</Button> },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'TOD-04 (signed 2026-11-01) draws the Demo inbox in the demo bar, just before Start over; no reference board draws it, and the nearest is N-Today-Run1.',
+  },
+  play: async ({ canvas }) => {
+    const bar = canvas.getByRole('note');
+    const action = canvas.getByRole('button', { name: 'Demo inbox' }).getBoundingClientRect();
+    const startOver = canvas.getByRole('button', { name: 'Start over' }).getBoundingClientRect();
+    // One line, the control 16 px before Start over at the bar's right.
+    expectComputed(bar, { height: '36px' });
+    await expect(startOver.left - action.right).toBeCloseTo(16, 0);
+    await expect(action.top).toBeCloseTo(startOver.top, 0);
+  },
+};
+
+export const WithActionsOnAPhone: Story = {
+  name: 'With actions on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: WithActions.args,
+  parameters: {
+    canvas: 'none',
+    canvasNote: "TOD-04's phone board (signed 2026-11-01): the words on the first line, the Demo inbox and Start over on the next, 4 px under them.",
+  },
+  play: async ({ canvas }) => {
+    const words = canvas.getByText(/^You're/).getBoundingClientRect();
+    const action = canvas.getByRole('button', { name: 'Demo inbox' }).getBoundingClientRect();
+    const startOver = canvas.getByRole('button', { name: 'Start over' }).getBoundingClientRect();
+    await expect(action.top - words.bottom).toBeGreaterThanOrEqual(4);
+    await expect(action.top).toBeCloseTo(startOver.top, 0);
+    await expect(startOver.left - action.right).toBeCloseTo(16, 0);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };
 

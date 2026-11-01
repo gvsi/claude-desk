@@ -40,7 +40,7 @@ export function OwnerFrameSkeleton({ pathname }: { pathname: string }) {
     <AppShell
       skeleton
       business=""
-      banner={<ReviewerBarSkeleton />}
+      banner={<ReviewerBarSkeleton inbox />}
       sidebar={<SidebarSkeleton rows={7} about={ABOUT_LINKS.links.length} />}
       fill={fill}
     >

@@ -47,6 +47,7 @@ describe('traceLine', () => {
     ['replaced', { replaced_by: 'h-2' }, 'Chat moved to a call-back.'],
     ['took_over', { closed_by: 'takeover' }, 'Handoff closed when you took over.'],
     ['wrote', { closed_by: 'owner_message' }, 'Handoff closed when you wrote in the chat.'],
+    ['booked', { closed_by: 'booking' }, 'Handoff closed when they booked a time.'],
   ] as const)('names_the_%s_handoff_entry', (_state, details, what) => {
     const event = { kind: 'desk_data', summary: { part: 'handoffs', refs: ['h-1'], ...details } } as const;
     expect(traceLine({ ...event, origin: 'kernel' })).toBe(`${what} ${RECORDED}`);

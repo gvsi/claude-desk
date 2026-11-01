@@ -195,7 +195,7 @@ export const Board: Story = {
     await expectTabOrder(userEvent, [
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(within(column).getByRole('navigation', { name: 'Main' })).getAllByRole('link'),
-      within(column).getByRole('switch', { name: 'Answering' }),
+      within(column).getByRole('switch', { name: 'Claude acts for you' }),
       caption,
       canvas.getByRole('link', { name: '1 held for you, in Today' }),
       canvas.getByRole('radio', { name: 'Attempts' }),

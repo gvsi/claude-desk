@@ -2232,9 +2232,10 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     return answer
 
 
-# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. One inside a
-# link or mid-word ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
-_ENDS_A_QUESTION = re.compile(r"\?(?=\s|$|[\"'\u201d\u2019)\]])")
+# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. It still asks
+# when Markdown emphasis closes right after it ("**When are you open?**"). One inside a link or mid-word
+# ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
+_ENDS_A_QUESTION = re.compile(r"\?[*_]*(?=\s|$|[\"'\u201d\u2019)\]])")
 
 
 def _asks(text: str) -> bool:
@@ -2348,9 +2349,9 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         app = source.next.connector
         existing = [*interview.planned, *(entry.card for entry in interview.transcript if entry.card)]
         if app in get_args(ConnectorKey) and not any(card.connector and card.connector.app == app for card in existing):
+            why = source.question.replace("**", "").replace("__", "").strip()[:200]   # the card shows plain text
             card = ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None,
-                                connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app],
-                                                            why=source.question.strip()[:200],
+                                connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app], why=why,
                                                             connectable=True))
             reply.planned.append(card)
             available.append(card)

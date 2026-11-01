@@ -1,9 +1,12 @@
-/* Today: the page's column (the greeting, "Not live yet" while setup isn't finished, "Things to
-   try", and the sections Today adds) and the right column beside it from 1280 px, 420 px wide;
-   under that the right column stacks under the page. "Things to try" is a heading with its caption
-   and "Hide this list" at the right, then one card of rows divided by hairlines: a 32 px icon
-   tile, the title and its line, and the next step at the right, which drops under the words on a
-   phone. The preview behind the intro dialog is this page, drawn from a new copy's reads. */
+/* Today: a band across the page (the greeting with the link and "Chat as a customer" at its right,
+   "Not live yet" while setup isn't finished, and "Things to try"), then the page's column (the
+   sections Today adds) and the right column beside it from 1280 px, 420 px wide; under that the
+   right column stacks under the page. "Things to try" is a heading with "Hide this list" at the
+   right of its line and its caption under them; from 640 px its four things are cards side by side
+   (two to a row under 1280 px), each with a 32 px icon tile, the title and its line, and its next
+   step at the foot; on a phone they are rows in one card divided by hairlines, each row its next
+   step with a chevron at its right. The preview behind the intro dialog is this page, drawn from a
+   new copy's reads. */
 
 .cd-today {
   display: grid;
@@ -24,6 +27,22 @@
   flex-direction: column;
   gap: var(--space-32);
   min-width: 0;
+}
+
+/* The band spans both columns; the grid's own 32 px gap sets the columns under it. */
+.cd-today__band {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-direction: column;
+  gap: var(--space-32);
+  min-width: 0;
+}
+
+/* From 640 px the greeting has 16 px more over it, inside the page's own padding. */
+@media (min-width: 640px) {
+  .cd-today__greeting {
+    padding-top: var(--space-16);
+  }
 }
 
 .cd-today__section {
@@ -99,13 +118,18 @@
   gap: var(--space-12);
 }
 
-/* The heading, its caption beside it (wrapping in its own column), and "Hide this list" at the right. */
+/* The heading with "Hide this list" at the right of its line, then the caption under them. */
 .cd-things__head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cd-things__head-line {
+  display: flex;
   align-items: center;
-  column-gap: var(--space-8);
-  row-gap: var(--space-4);
+  justify-content: space-between;
+  gap: var(--space-12);
 }
 
 .cd-things__title {
@@ -206,6 +230,57 @@
   justify-content: flex-end;
 }
 
+/* The row's step on a phone: drawn only there. */
+.cd-things__go {
+  display: none;
+}
+
+/* From 640 px: the card around the list goes, and each thing is a card of its own, its next step
+   at the foot, so the steps of a row of cards share a line (grid rows stretch). Two to a row, four
+   from 1280 px, where the band is wide enough for each step's words. */
+@media (min-width: 640px) {
+  .cd-things > .cd-card {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .cd-things__list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-16);
+  }
+
+  .cd-things__item,
+  .cd-things__item:first-child,
+  .cd-things__item:last-child {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-12);
+    padding: var(--space-16);
+    border: 1px solid var(--line-card);
+    border-radius: var(--radius-card);
+    background: var(--fill-card);
+  }
+
+  .cd-things__action {
+    margin-top: auto;
+  }
+
+  /* The words take the card's width (the tile and the step keep their own). */
+  .cd-things__text,
+  .cd-things__below {
+    align-self: stretch;
+  }
+}
+
+@media (min-width: 1280px) {
+  .cd-things__list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 /* One quiet link under the list, to the Vision article. */
 .cd-things__vision {
   margin: 0;
@@ -276,55 +351,51 @@
   min-width: 0;
 }
 
-.cd-today-aside__public {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-8);
-}
-
-.cd-today-aside__title {
-  margin: 0;
-  color: var(--text-primary);
-}
-
-.cd-today-aside__link {
-  margin: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-
-.cd-today-aside__text {
-  margin: 0;
-  color: var(--text-secondary);
-}
-
-.cd-today-aside__action {
-  display: flex;
-  padding-top: var(--space-4);
-}
-
-/* On a phone the caption goes under the heading and "Hide this list" under it at the right; in each
-   row the icon tile sits level with the title, and the next step drops under the words, from the
-   row's left edge. */
+/* On a phone each row is its next step: the icon tile, the title and its line, and a chevron at the
+   right, whose press area covers the row (its ideas, under it, keep their own presses), with the
+   focus ring around the row. The card's button isn't drawn; a done row keeps its pill at the right. */
 @media (max-width: 639.98px) {
-  .cd-things__head {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .cd-things__hide {
-    justify-self: end;
-  }
-
   .cd-things__item {
-    grid-template-columns: var(--size-control) minmax(0, 1fr);
-    align-items: start;
+    position: relative;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: var(--space-12);
   }
 
-  .cd-things__action,
+  .cd-things__action:not(.cd-things__action--done) {
+    display: none;
+  }
+
+  .cd-things__go {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .cd-things__go::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-control);
+  }
+
+  .cd-things__go:focus-visible {
+    outline: none;
+  }
+
+  .cd-things__go:focus-visible::after {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+  }
+
   .cd-things__below {
+    position: relative;
+    z-index: 1;
     grid-column: 1 / -1;
-    justify-content: flex-start;
   }
 }
 
@@ -485,7 +556,8 @@
   max-width: var(--size-content);
 }
 
-/* Last 7 days: the heading and its caption, then three parts divided by hairlines. Bars are layout
+/* Last 7 days: its section title (in a `.cd-today__section`, as Needs you's), then one card of three
+   parts divided by hairlines. Bars are layout
    on tokens: each day's height is its share of the busiest day's, and a day with none keeps a flat
    stub, so the seven days are there before the first booking. Positioned, so its visually hidden
    words sit inside it: with no positioned ancestor they would sit against the window, and below
@@ -497,21 +569,12 @@
   gap: var(--space-16);
 }
 
-.cd-week__head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.cd-week__heading,
-.cd-week__caption,
 .cd-week__title,
 .cd-week__line,
 .cd-week__figure {
   margin: 0;
 }
 
-.cd-week__heading,
 .cd-week__title {
   color: var(--text-primary);
 }
@@ -656,7 +719,7 @@
 @media (max-width: 639.98px) {
   .cd-today--skeleton { --cd-today-approval-last-width: 75%; }
 }
-.cd-today-skeleton__link { flex: none; margin-top: var(--space-6); }
+.cd-today-skeleton__link { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .cd-today-skeleton__rule { flex: 1; min-width: 0; }
 .cd-today-skeleton__text { display: block; min-width: 0; width: 100%; max-width: 100%; }
 .cd-today-skeleton__fixed-line { max-width: none; }

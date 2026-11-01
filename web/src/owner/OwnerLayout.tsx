@@ -39,6 +39,9 @@ import {
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
+import { ANSWERING_CONFIRM_COPY, answeringSaveFailed, answeringSaveUnconfirmed } from './answeringCopy.ts';
+import { InboxOpenContext } from './inbox/inboxOpen.ts';
+import { OwnerInbox } from './inbox/OwnerInbox.tsx';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { useLandingVisit } from './rules/landing.ts';
@@ -47,8 +50,10 @@ import {
   desksQuery,
   dropTheOldInbox,
   findDesk,
+  FRESH_MS,
   invalidateCopy,
   lastOrFirst,
+  ownerInboxQuery,
   todayPath,
   useDesks,
   useToday,
@@ -63,8 +68,8 @@ export interface OwnerDeskContext {
   business: BusinessOut;
   desk: DeskSummary;
   /**
-   * Turns Answering on or off for this Desk: the sidebar's switch, which any other Answering switch
-   * calls too, so they always agree, with its quick change and its lines when a change didn't save.
+   * Asks before changing whether Claude acts for this Desk. The Sidebar and Settings call the
+   * same confirmation, save and notices, so their switches always agree.
    */
   setAnswering: (on: boolean) => void;
   /**
@@ -158,10 +163,9 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
   );
 }
 
-const onOff = (on: boolean) => (on ? 'on' : 'off');
-
 /**
- * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Start over,
+ * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with the Demo
+ * inbox and Start over,
  * the sidebar (the business, which opens the business switcher; the Desk picker; the pages; the
  * About this prototype links; the Answering switch; the owner), the page, and one concept footer
  * under it. A Desk outside the copy is not found.
@@ -182,6 +186,12 @@ export function OwnerLayout() {
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
+  // The demo bar's Demo inbox is read with the Desks, so the bar draws it with the frame: nothing
+  // waits for it, and the bar's own read finds it read, or on its way.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    void queryClient.prefetchQuery({ ...ownerInboxQuery(), staleTime: FRESH_MS });
+  }, [queryClient]);
   const location = useLocation();
   const found = desks.data ? findDesk(desks.data, deskId) : null;
   const [held, setHeld] = useState<ShownDesk | null>(null);
@@ -310,6 +320,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const reachPlace = useOpenPagesAtTop(layout, deskId);
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [answeringChange, setAnsweringChange] = useState<boolean | null>(null);
+  // Whether the bar's Demo inbox sheet is open, as it says each time it opens or closes.
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // The Desk the owner is on is the one to come back to.
@@ -336,20 +349,20 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       }
       if (!isUncertain(err)) {
         putBack();
-        setNotice(`That didn't save, so Answering is still ${onOff(was)}.`);
+        setNotice(answeringSaveFailed(was));
         return;
       }
       // The change may have been applied with its answer lost: the switch shows what the Desk reads now.
       const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
       if (read === null) {
         // Nor could the Desk be read: the switch stays where it was put, and the next read settles it.
-        setNotice(`We couldn't confirm that Answering is now ${onOff(on)}. Reload to see where it stands.`);
+        setNotice(answeringSaveUnconfirmed(on));
         void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
         return;
       }
       // A copy without this Desk (a new one, from Start over) has nothing of this change to show.
       const now = findDesk(read, deskId)?.desk.answering;
-      if (now !== undefined && now !== on) setNotice(`That didn't save, so Answering is still ${onOff(now)}.`);
+      if (now !== undefined && now !== on) setNotice(answeringSaveFailed(now));
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: DESKS_KEY }),
   });
@@ -403,7 +416,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   // What every page under this Desk gets (`useOwnerDesk`), built here only. It stays the same object
   // until the business or the Desk changes, so the pages don't draw again on each of the frame's reads.
   const { mutate: answer } = answering;
-  const setAnswering = useCallback((on: boolean) => answer(on), [answer]);
+  const setAnswering = useCallback((on: boolean) => setAnsweringChange(on), []);
   const holdDesk = useCallback((on: boolean) => onHold(on ? { business, desk } : null), [onHold, business, desk]);
   const deskContext = useMemo<OwnerDeskContext>(
     () => ({ business, desk, setAnswering, holdDesk, reachPlace }),
@@ -429,7 +442,13 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   return (
     <AppShell
       business={business.name}
-      banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={() => setConfirming(true)} />}
+      banner={
+        <ReviewerBar
+          ownerName={business.owner_display_name}
+          onStartOver={() => setConfirming(true)}
+          actions={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />}
+        />
+      }
       sidebar={sidebar}
       fill={fill}
       panel={askClaude.panel}
@@ -442,7 +461,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
         ) : null}
         <AskClaudeProvider value={askClaude.value}>
           <OwnerDeskProvider value={deskContext}>
-            <Outlet />
+            <InboxOpenContext.Provider value={inboxOpen}>
+              <Outlet />
+            </InboxOpenContext.Provider>
           </OwnerDeskProvider>
         </AskClaudeProvider>
         {fill ? null : (
@@ -451,6 +472,16 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
           </footer>
         )}
       </div>
+      {answeringChange !== null ? (
+        <Dialog
+          {...ANSWERING_CONFIRM_COPY[answeringChange ? 'on' : 'off']}
+          onConfirm={() => {
+            setAnsweringChange(null);
+            answer(answeringChange);
+          }}
+          onCancel={() => setAnsweringChange(null)}
+        />
+      ) : null}
       {confirming ? (
         <Dialog
           title="Start over with a fresh copy?"

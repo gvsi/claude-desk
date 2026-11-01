@@ -337,7 +337,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.23"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.24"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -636,6 +636,29 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
         assert "auto_money_cap_cents covers every payment, links included" in system or "money_limit (a limit)" in system
         assert "documents_and_payments (a limit): whether the Desk may send customers their own documents" in system
+
+
+def test_setup_writing_allows_markdown_but_no_exclamation_marks():
+    """The setup chat renders Markdown, so setup's writing rule no longer bans headings, bold or emoji; it keeps the
+    ban on exclamation marks, and keeps card fields, choices and the lines customers read plain text with no emoji.
+    The visitor's and agent's prompt has its own wording and doesn't take setup's rule."""
+    plain = ("Markdown shows only in your replies, questions and the closing plan; card fields, choices and the lines "
+             "customers read stay plain text, with no emoji.")
+    with_writing = {name for name, value in vars(prompts).items()
+                    if name != "_WRITING" and isinstance(value, str) and prompts._WRITING in value}
+    assert with_writing == {"SETUP_UNDERSTAND_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_NEXT_SYSTEM",
+                            "SETUP_CARD_ANSWER_SYSTEM"}
+    for name in with_writing:
+        system = getattr(prompts, name)
+        assert (f'one item per line starting with "- ". No exclamation marks. {plain} The owner reads your messages '
+                'one after another') in system, name
+        assert "No headings, bold or emoji" not in system, name
+    assert "  " not in prompts._WRITING
+    for kind in ("visitor", "agent"):
+        text = conversation_system(RIVERA.model_copy(update={"kind": kind}))[0]["text"]
+        assert "- Write the way you'd talk to them: plain words, no jargon, no exclamation marks. Never scold" in text
+        assert prompts._WRITING not in text and "No exclamation marks." not in text and "How you write" not in text
+        assert plain not in text and "Markdown" not in text
 
 
 @pytest.mark.parametrize("owner", ["Maria Rivera", "June Park"])

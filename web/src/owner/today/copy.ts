@@ -22,27 +22,27 @@ export const CONTINUE_SETUP_COPY = {
 export const CONTINUE_SETUP_LINES: Readonly<Record<UnfinishedSetupStep, { pickUp: string; answeringOff: string }>> = {
   questions: {
     pickUp: 'Your answers are saved. Pick up at the questions.',
-    answeringOff: 'Answering stays off until your Desk is live.',
+    answeringOff: 'Claude takes messages only until your Desk is live.',
   },
   tools: {
     pickUp: 'Your answers are saved. Pick up at your tools.',
-    answeringOff: 'Answering stays off until your Desk is live.',
+    answeringOff: 'Claude takes messages only until your Desk is live.',
   },
   rules: {
     pickUp: "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   situations: {
     pickUp: "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   safety_check: {
     pickUp: "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   preview: {
     pickUp: 'Your answers are saved. Pick up at going live.',
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
 };
 
@@ -59,8 +59,9 @@ export const TODAY_COPY = {
   breakAfterOwner: "'s home number. Safety shows what was refused and why.",
   waiting: 'A request is waiting for your answer.',
   heldBy: 'Held by your rule: ',
+  /** "Answer a held request" before anything is held. */
+  heldNone: 'When a request waits for your answer, it shows up here.',
   createDetail: 'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',
-  publicDescription: 'Chats on it are real conversations with your Desk. They show up in Conversations.',
   handledTitle: 'Handled by Claude, or by you',
   turnedDownEmpty: 'Nothing turned down in the last 7 days.',
   /** The link to the Desk's Safety page, under Turned down here and under Rules' always-on rules. */

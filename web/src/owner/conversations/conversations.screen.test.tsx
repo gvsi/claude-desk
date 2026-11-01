@@ -11,7 +11,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { Decision, StatusEvent } from '../../api/contracts.ts';
 import type { Attempt, ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
 import { ROUTES } from '../../api/routes.ts';
-import { rivera } from '../../ds/fixtures/index.ts';
+import { proseBlock, rivera } from '../../ds/fixtures/index.ts';
 import { typingPingMs } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
 import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, writing } from '../../mocks/script.ts';
@@ -219,6 +219,54 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it('open_conversation_fills_its_pane_at_1512', async () => {
+    // The open conversation takes the pane's width, inside its padding: the status, the transcript,
+    // the controls and the whisper box. Messages keep their own widths, the visitor's at the right.
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width: 1512, height: 982 } });
+    const whisperBox = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    await expect.element(whisperBox).toBeVisible();
+    const chat = log(screen);
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(chat.getByText(first ?? '', { exact: true })).toBeVisible();
+    const pane = document.querySelector<HTMLElement>('.cd-conversations__open');
+    if (!pane) throw new Error('the conversation opens in its pane');
+    const style = getComputedStyle(pane);
+    const inner = {
+      left: pane.getBoundingClientRect().left + Number.parseFloat(style.paddingLeft),
+      right: pane.getBoundingClientRect().right - Number.parseFloat(style.paddingRight),
+    };
+    const fills = (el: Element, name: string) => {
+      const rect = el.getBoundingClientRect();
+      expect(Math.abs(rect.left - inner.left), `${name} left`).toBeLessThanOrEqual(1);
+      expect(Math.abs(rect.right - inner.right), `${name} right`).toBeLessThanOrEqual(1);
+    };
+    expect(inner.right - inner.left).toBeGreaterThan(900);
+    const transcript = chat.element();
+    fills(transcript, 'transcript');
+    fills(whisperBox.element().closest('.cd-composer') ?? whisperBox.element(), 'whisper box');
+    // Her bubble ends at the transcript's right edge, at most 85% of its width.
+    const bubble = chat.getByText(first ?? '', { exact: true }).element().getBoundingClientRect();
+    expect(Math.abs(bubble.right - transcript.getBoundingClientRect().right)).toBeLessThanOrEqual(1);
+    expect(bubble.width).toBeLessThanOrEqual(transcript.getBoundingClientRect().width * 0.85 + 1);
+    // Claude's words keep to the reading width (640 px), from the transcript's left, so their lines
+    // stay around 80 characters while the row is the pane's width.
+    const prose = [...transcript.querySelectorAll<HTMLElement>('.cd-claude-message__prose')];
+    expect(prose.length).toBeGreaterThan(0);
+    expect(prose.some((p) => p.getBoundingClientRect().width > 600), 'a reply long enough to reach the cap').toBe(true);
+    for (const p of prose) {
+      expect(p.getBoundingClientRect().width).toBeLessThanOrEqual(640);
+      expect(Math.abs(p.getBoundingClientRect().left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    }
+    // Take over stays at the left, under the note about whispers, with its own line under it.
+    const takeOver = screen.getByRole('button', { name: 'Take over' }).element().getBoundingClientRect();
+    const note = document.querySelector('.cd-conversation__controls .cd-take-over__lead')!.getBoundingClientRect();
+    expect(Math.abs(takeOver.left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    expect(takeOver.top).toBeGreaterThanOrEqual(note.bottom);
+    const line = document.querySelector('.cd-conversation__controls .cd-take-over__action .cd-take-over__line');
+    if (line) expect(line.getBoundingClientRect().top).toBeGreaterThanOrEqual(takeOver.bottom);
+    expectNoHorizontalScroll();
+  });
+
   it.each(['scroll', 'focus'] as const)('a_first_callback_on_a_later_poll_leaves_her_%s_in_place', async (place) => {
     const chat = named(DANA_LIVE, DANA);
     const last = lengthen(chat);
@@ -566,6 +614,21 @@ describe('Conversations', () => {
       await expectScreenBasics(other.screen.container, { owner: true });
       expectNoHorizontalScroll();
     }
+  });
+
+  it('a_reply_in_markdown_shows_bold_and_a_list', async () => {
+    // A reply of Claude's in Markdown, in Dana's chat: the owner reads it as she did.
+    const items = ['Is the water heater leaking from the top or the bottom?', 'Is the pilot light still on?'];
+    const chat = named(DANA_LIVE, DANA);
+    const text = `We can look at that. **Two things** help me point you the right way:\n\n${items.map((item) => `- ${item}`).join('\n')}`;
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock(text)]));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const bold = log(screen).getByText('Two things', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect([...message.querySelectorAll('li')].map((el) => el.textContent)).toEqual(items);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
   });
 
   it('agent_name_reads_as_its_own_words', async () => {

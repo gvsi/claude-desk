@@ -4,11 +4,11 @@
 
    Two classes, each on a page's root, and no rule on anything inside one:
    - .cd-about-paper declares the palette. Its names keep the article's prefix: these are its colors.
-   - .cd-about-paper--app, beside it on a page drawn with the app's own components (the two reading pages, and the
-     set's error page and wait), points the app's color tokens at the palette inside that page alone, so a card, a
-     pill, a link, a focus ring or the footer draws in ink on paper with no rule of its own; and lays the paper
-     under the page, the window's height at least. The article draws every part in its own rules, so its root takes
-     only the palette. */
+   - .cd-about-paper--app, beside it on a page drawn with the app's own components (the two reading pages, the
+     set's error page and wait, and the Vision article, whose top bar is the reading pages'), points the app's color
+     tokens at the palette inside that page alone, so a card, a pill, a link, a focus ring or the footer draws in ink
+     on paper with no rule of its own; and lays the paper under the page, the window's height at least. The article
+     draws every other part in its own rules, from the palette itself. */
 
 .cd-about-paper {
   /* The page. */

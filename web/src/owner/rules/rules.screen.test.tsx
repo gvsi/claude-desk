@@ -641,6 +641,23 @@ describe('rules page', () => {
     expect(log.getByText("I couldn't draft that just now. Try again.", { exact: true }).elements()).toHaveLength(0);
   });
 
+  it('an_answer_in_markdown_shows_bold_and_a_list', async () => {
+    // Claude's answer in Ask Claude, in Markdown: bold as bold and the list as a list.
+    const items = ['Quotes wait until Monday morning', 'Bookings for the weekend still go through'];
+    const answer = `Here is how that would work. **Two things** change:\n\n${items.map((item) => `- ${item}`).join('\n')}`;
+    mockStore.inject({ route: 'ruleChat', status: 200, body: { answer, draft: null } });
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('What if I stop quoting on weekends?');
+    await userEvent.keyboard('{Enter}');
+    const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
+    const bold = log.getByText('Two things', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect([...message.querySelectorAll('li')].map((el) => el.textContent)).toEqual(items);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
+  });
+
   it('rules_cannot_be_checked_on_rule_chat', async () => {
     mockStore.inject({ route: 'ruleChat', status: 409, body: { error: 'rules_cannot_be_checked' } });
     const { screen } = await renderRoute(`${DESK}/rules`);
@@ -948,8 +965,10 @@ describe('rules page', () => {
     expect(inView(limit(), main)).toBe(true);
 
     // From the end of Rules, a fresh visit to All rules still opens at its top, and Back from it
-    // returns to the end of Rules.
+    // returns to the end of Rules. The place is kept as the scroll is heard: wait for it before leaving.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
+    await heard;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'See all rules' }).last().click();
@@ -1816,7 +1835,11 @@ describe("Rivera's fixed suggestions", () => {
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     const main = screen.getByRole('main').element();
+    // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as
+    // the owner's own scrolling would be heard before they leave.
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
+    await heard;
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await router.navigate(`${DESK}/rules/all`);

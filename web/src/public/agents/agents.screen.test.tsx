@@ -923,6 +923,27 @@ describe('agents page', () => {
     expect(document.body.innerHTML).not.toContain(agentReceipt.visitor_plain);
   });
 
+  it('a_desk_reply_in_markdown_shows_bold_and_a_list', async () => {
+    // The Desk's checked reply to the agent, in Markdown: bold as bold and the list as a list.
+    const items = ['The earliest opening this week', 'A window that suits Alex Kim'];
+    const text = `I can book that. **Two choices** to make first:\n\n${items.map((item) => `- ${item}`).join('\n')}`;
+    const run: DemoAgentRun = {
+      ...plantedRun('done'),
+      turns: [
+        { author: 'agent', n: 1, blocks: [], receipts: [] },
+        { author: 'desk', n: 2, blocks: [proseBlock(text)], receipts: [] },
+      ],
+    };
+    mockStore.inject({ route: 'agentRun', status: 200, body: run, times: 100 });
+    const { screen } = await renderRoute(PAGE);
+    await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
+    const reply = screen.getByRole('region', { name: 'Send an agent' }).getByRole('log').element().querySelector('.cd-claude-message') as HTMLElement;
+    expect([...reply.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Two choices']);
+    expect([...reply.querySelectorAll('li')].map((el) => el.textContent)).toEqual(items);
+    expect(reply.textContent).not.toMatch(/\*|^- /m);
+  });
+
   it('over_limit_run_shows_the_kernel_line', async () => {
     const { screen } = await renderRoute(PAGE);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
