@@ -583,6 +583,69 @@ async def test_off_topic_price_is_the_owners_only_as_a_stated_price(proposals, m
     assert ("price_items" in said["owner_fields"]) is owned
 
 
+@pytest.mark.parametrize("held,whole_patch", [(False, False), (False, True), (True, False), (True, True)])
+async def test_off_topic_price_correction_keeps_other_items_and_provenance(
+    proposals, model, engine, held, whole_patch,
+):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    prices = [{"title": "Repair", "unit_cents": 15000}, {"title": "Install", "unit_cents": 30000},
+              {"title": "Drain", "unit_cents": 9000}]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.answers.price_items = [setup.PriceAnswer(**item) for item in prices]
+        interview.answers.suggested_fields = ["price_items"] if held else []
+        await setup._save(conn, interview)
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    corrected = [{"title": "repair", "unit_cents": 17500}]
+    if whole_patch:
+        corrected += prices[1:]
+    text = "Call 415-555-0118. Repairs are $175 now."
+    if held and whole_patch:
+        text += " Install is $300, Drain is $90."
+    reply = await answer(owner, model, interview_id, text, turn(public_contact="415-555-0118", price_items=corrected),
+                         question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert [(item.title, item.unit_cents) for item in answers.price_items] == [
+        ("Repair", 17500), ("Install", 30000), ("Drain", 9000)]
+    stays_held = held and not whole_patch
+    assert ("price_items" in answers.suggested_fields) is stays_held
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert ("price_items" in said["owner_fields"]) is not stays_held
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert len(parts.prices) == (0 if stays_held else 3)
+
+
+async def test_off_topic_website_price_never_demotes_published_owner_prices(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    prices = [{"title": "Repair", "unit_cents": 15000}, {"title": "Install", "unit_cents": 30000},
+              {"title": "Drain", "unit_cents": 9000}]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.answers.price_items = [setup.PriceAnswer(**item) for item in prices]
+        await setup._save(conn, interview)
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118.", turn(
+        public_contact="415-555-0118", price_items=[*prices, {"title": "Website offer", "unit_cents": 5000}]),
+        question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert [item.model_dump() for item in answers.price_items] == prices
+    assert "price_items" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "price_items" not in said["owner_fields"]
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert len(parts.prices) == 3
+
+
 @pytest.mark.parametrize("field,topic,text,value", [
     ("public_contact", "hours_and_area", "9am to 5pm weekdays.", "Website: bobs-booking.net"),
     ("hours", "contact_and_after_hours", "Call 415-555-0118.",

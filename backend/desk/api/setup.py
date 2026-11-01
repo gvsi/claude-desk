@@ -1683,16 +1683,25 @@ def _fact_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
             and (key not in LIMIT_QUESTIONS.values() or LIMIT_TURN_FACTS.get(name) == key)]
 
 
-def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str) -> set[str]:
+def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: SetupAnswers | None = None) -> set[str]:
     """The facts this turn gave off their own question that the owner's own words this turn (`said`) back: a list they
-    said to clear (`CLEARABLE`), or a structured value `owner_supports` finds in `said`. Each replaces the stored fact
-    as the owner's (`merged`, `_owner_patch_fields`). Such a turn reads the website and memory, so its prices count
-    only as prices the owner stated, never a bare number such as "a 1-person shop"."""
+    said to clear (`CLEARABLE`), or a structured value `owner_supports` finds in
+    `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained suggested
+    item does. Such a turn reads the website and memory, so prices and times need explicit syntax."""
     backed = set()
     for name in _fact_patch_fields(patch, key):
         if name not in FACT_TOPICS or key in (FACT_TOPICS[name], LIMIT_TURN_FACTS.get(name)):
             continue
         value = getattr(patch, name)
+        if name == "price_items" and value and before is not None:
+            if name in before.suggested_fields:
+                # A held list stays held until every retained item is backed, not just this turn's correction.
+                value = [PriceAnswer.model_validate(item)
+                         for item in _priced(before.model_dump()[name], value, key)]
+            else:
+                listed = {_title(item.title): item.unit_cents for item in before.price_items}
+                changed = [item for item in value if listed.get(_title(item.title)) != item.unit_cents]
+                value = changed or value
         if ((name in CLEARABLE and value == [])
                 or (name in {"public_contact", "price_items", "hours"}
                     and owner_supports(name, value, said, stated=True))):
@@ -1731,10 +1740,11 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
     """`answers` with what the patch sets (a blank text sets nothing). Each limit is taken only on the turn answering
     its own question (`LIMIT_QUESTIONS`), a fact in `FIELD_TURNS` only on the turns it lists, and any other fact only
     on a turn answering a question that owns no limit, but for the explicit facts in `LIMIT_TURN_FACTS`: the quote
-    question replaces pricing text and only updates or adds price items (`_priced`). Anything else is dropped and
-    logged (by its label or field name, never its value). An off-topic fact replaces the stored one when the owner's
-    own words this turn back it (`backed`, from `_backed_off_topic`); any other cannot replace owner facts, nor refill
-    a fact the owner set or cleared (`owner_fields`). Names are reduced as the Desk takes them."""
+    question replaces pricing text and only updates or adds price items (`_priced`). Off-topic price patches also
+    update or add by title, except explicit clears. Anything else is dropped and logged (by its label or field name,
+    never its value). An off-topic fact replaces the stored one when the owner's own words this turn back it
+    (`backed`, from `_backed_off_topic`); any other cannot replace owner facts, nor refill a fact the owner set or
+    cleared (`owner_fields`). Names are reduced as the Desk takes them."""
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
     for name, value in patch:
@@ -1766,7 +1776,7 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
                 logger.warning("setup dropped off-topic field %s", name)
             continue
         if value is not None:
-            values[name] = value
+            values[name] = _priced(values[name], value, key) if name == "price_items" and value else value
     return SetupAnswers.model_validate(values)
 
 
@@ -2140,7 +2150,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             else:
                 said.website = site[0]                   # kept as text: nothing is read without consent
         await _rename(ctx, desk_id, patch)
-        backed = _backed_off_topic(patch, key, text)
+        backed = _backed_off_topic(patch, key, text, interview.answers)
         updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields, backed=backed)
         owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
         said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
