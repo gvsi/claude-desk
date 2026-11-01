@@ -22,6 +22,9 @@ import type { CancelReason, RulesDraft } from './views.ts';
 /** How long one request may take: a Claude turn longer, a proving route past the API's 25 s hold. */
 export const TIMEOUT_MS = { default: 10_000, model: 45_000, proving: 30_000 } as const;
 
+/** The consultant client opts in once for all setup state reads and mutations, including rereads. */
+const SETUP_CARD_ROUTES: ReadonlySet<RouteKey> = new Set(['setup', 'setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions']);
+
 /** A proving route's 202 is retried this often, and given up this long after the first send. */
 export const PROVING_RETRY_MS = 3_000;
 export const PROVING_GIVE_UP_MS = 60_000;
@@ -364,13 +367,14 @@ export async function request<K extends RouteKey>(key: K, ...[opts]: RequestArgs
   const route: RouteSpec = ROUTES[key];
   const options = (opts ?? {}) as { params?: RouteParams<K>; query?: RouteQuery; body?: unknown };
   try {
-    const path = apiPath(key, options.params ?? ({} as RouteParams<K>), options.query);
+    const query = SETUP_CARD_ROUTES.has(key) ? { ...options.query, cards: 1 } : options.query;
+    const path = apiPath(key, options.params ?? ({} as RouteParams<K>), query);
     const startedAt = Date.now();
     let answer = await send(key, route.method, path, options.body, timeoutFor(route));
     if (answer.status === 202 && route.proving) answer = await followRetry(key, answer, startedAt);
     if (answer.status < 200 || answer.status > 299) throw errorFrom(key, route.method, answer);
-    // Consent always carries an interview. Other routes may answer an empty 202 or 204.
-    const empty = answer.body === undefined && (key === 'setupConsent' || (answer.status !== 202 && answer.status !== 204));
+    // Setup turns always carry an interview, including background work answered 202.
+    const empty = answer.body === undefined && (['setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions'].includes(key) || (answer.status !== 202 && answer.status !== 204));
     if (answer.unreadable || empty) throw new ApiError('unavailable', { route: key, method: route.method, status: answer.status });
     notify({ key, ok: true });
     return answer.body as RouteResponse<K>;

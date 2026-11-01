@@ -883,8 +883,8 @@ async def test_question_choices_keep_to_the_seams_bounds(app, browser, kernel_ht
 def test_the_seam_models_hold_their_bounds():
     from desk.api.prompts import (
         BLOCK_FOR_JOB, CAPABILITIES, CONNECTOR_LABELS, BlockConfig, Choice, ConnectorKey,
-        ConnectorProposal, IntakeConfig, JobKind, JobProposal, ProposalCard, PurposePaymentConfig,
-        TypedBookingConfig, UrgentConfig, new_proposal_id,
+        ConnectorProposal, IntakeProposalConfig, JobKind, JobProposal, ProposalCard, PurposePaymentProposalConfig,
+        TypedBookingProposalConfig, UrgentProposalConfig, new_proposal_id,
     )
 
     job = JobProposal(job="answer", title="Answer questions", why="Save time", how="Use business facts",
@@ -908,10 +908,10 @@ def test_the_seam_models_hold_their_bounds():
             Choice(text=value, recommended=False)
     configs = TypeAdapter(BlockConfig)
     for value, expected in (
-        ({"block": "intake", "questions": ["What do you need?"]}, IntakeConfig),
-        ({"block": "typed_booking", "appointment_type": "Intro", "minutes": 15}, TypedBookingConfig),
-        ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}, PurposePaymentConfig),
-        ({"block": "urgent", "urgent_when": "A burst pipe"}, UrgentConfig),
+        ({"block": "intake", "questions": ["What do you need?"]}, IntakeProposalConfig),
+        ({"block": "typed_booking", "appointment_type": "Intro", "minutes": 15}, TypedBookingProposalConfig),
+        ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}, PurposePaymentProposalConfig),
+        ({"block": "urgent", "urgent_when": "A burst pipe"}, UrgentProposalConfig),
     ):
         assert isinstance(configs.validate_python(value), expected)
     booking = {"block": "typed_booking", "appointment_type": "Intro", "minutes": 60}
@@ -921,10 +921,10 @@ def test_the_seam_models_hold_their_bounds():
             configs.validate_python({**booking, "minutes": minutes})
     for questions in ([], ["a"] * 6, [""], ["a" * 121]):
         with pytest.raises(ValidationError):
-            IntakeConfig(block="intake", questions=questions)
+            IntakeProposalConfig(block="intake", questions=questions)
     for amount in (-1, 1_000_001, 1.5):
         with pytest.raises(ValidationError):
-            PurposePaymentConfig(block="purpose_payment", purpose="Deposit", amount_cents=amount)
+            PurposePaymentProposalConfig(block="purpose_payment", purpose="Deposit", amount_cents=amount)
     with pytest.raises(ValidationError):
         JobProposal(**{**job.model_dump(), "job": "price", "config": {"block": "intake", "questions": ["Why?"]}})
     for model_type, values in ((Choice, {"text": "A", "recommended": False}),
@@ -965,13 +965,18 @@ def proposal_entries() -> list[dict]:
         {"role": "claude", "text": "", "card": {
             "proposal_id": "p-fedcba543210", "kind": "connector", "state": "proposed", "job": None,
             "superseded_by": None,
-            "connector": {"app": "stripe", "label": "Stripe", "why": "Take payments", "connectable": True}}},
+            "connector": {"app": "stripe", "label": "Stripe", "why": "Take payments", "connectable": True,
+                          "connected": False}}},
         {"role": "claude", "text": "Who do you help?", "question": "what_you_do",
          "choices": [{"text": "Individuals", "recommended": True}, {"text": "Businesses", "recommended": False}]},
     ]
 
 
-async def test_card_messages_reach_the_owner_only_with_cards_1(app, browser, kernel_http, model, engine):
+@pytest.mark.parametrize("business_tools_enabled", [False, True])
+async def test_card_messages_reach_the_owner_only_with_cards_1(
+    app, browser, kernel_http, model, engine, business_tools_enabled,
+):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=business_tools_enabled)
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
@@ -994,6 +999,9 @@ async def test_card_messages_reach_the_owner_only_with_cards_1(app, browser, ker
             ["p-012345abcdef", "p-fedcba543210"] if cards else [])
         assert all(message["role"] == "claude" and message["text"] == "" and message["choices"] == []
                    for message in shown)
+        if cards:
+            assert shown[0]["card"]["job"]["config"] == (proposal_entries()[1]["card"]["job"]["config"]
+                                                        if business_tools_enabled else None)
         if not cards:
             assert all(message["text"] for message in messages)
 
@@ -1934,7 +1942,9 @@ def test_a_scoped_field_is_recorded_only_on_the_questions_that_ask_for_it(name, 
         return
     window = HoursAnswer(days=["mon"], start="08:00", end="17:00")
     stored, changed = ([], [window]) if name == "hours" else ("Stored before.", "Changed.")
-    answers = SetupAnswers(summary="Tax advice.", **{name: stored})
+    # Stored as a held suggestion, which any turn that has the field may replace: an owner's own value is replaced
+    # only on its home question (setup.FACT_HOMES).
+    answers = SetupAnswers(summary="Tax advice.", **{name: stored}, suggested_fields=[name])
     for key in QUESTION_KEYS:
         merged = desk_setup.merged(answers, SetupPatch(**{name: changed}), key)
         if key in turns:
@@ -3652,10 +3662,11 @@ async def test_a_client_without_cards_never_gets_a_card_ask(app, browser, kernel
     assert response.status_code == 200, response.text
     assert response.json()["step"] == "tools"
     row = await stored(engine, interview_id)
-    assert not any(entry.get("card") for entry in row["transcript"])
+    assert not any(message.get("card") for message in response.json()["messages"])
+    assert all(entry["card"]["state"] != "proposed" for entry in row["transcript"] if entry.get("card"))
     async with engine.connect() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)
-    assert not interview.shows_cards and interview.unshown
+    assert not interview.shows_cards and not interview.unshown
     assert proposal_id in model.requests[-1].messages[0]["content"][0]["text"]
 
 
@@ -3947,13 +3958,14 @@ async def test_typing_a_question_keeps_the_card_waiting(app, browser, kernel_htt
 
 
 async def test_typed_text_cant_accept_an_unpriced_payment(app, browser, kernel_http, model, engine):
-    from desk.api.prompts import JobProposal, PurposePaymentConfig
+    from desk.api.prompts import JobProposal, PurposePaymentProposalConfig
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
     async with engine.begin() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)
         interview.latest_ask.card.job = JobProposal(job="payment", title="Take a deposit", why="Reserve work",
             how="Send a secure link", autonomy="ask", can_do_today=True,
-            config=PurposePaymentConfig(block="purpose_payment", purpose="Deposit", amount_cents=None))
+            config=PurposePaymentProposalConfig(block="purpose_payment", purpose="Deposit", amount_cents=None))
         await desk_setup._save(conn, interview)
     model.add(card_answer("accept", reply="Enter the amount on the card before accepting it."))
     response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
@@ -3962,7 +3974,7 @@ async def test_typed_text_cant_accept_an_unpriced_payment(app, browser, kernel_h
     assert response.json()["pending_card"] == proposal_id
     card = next(message["card"] for message in response.json()["messages"] if message["card"])
     assert card["state"] == "proposed" and card["job"]["config"]["amount_cents"] is None
-    assert response.json()["messages"][-1]["text"] == "Enter the amount on the card before accepting it."
+    assert response.json()["messages"][-1]["text"] == desk_setup.AMOUNT_FIRST_LINE
 
 
 async def test_a_typed_answer_must_name_the_pending_card(app, browser, kernel_http, model, engine):
@@ -4057,7 +4069,7 @@ async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, 
     row = await stored(engine, interview_id)
     card = next(entry["card"] for entry in reversed(row["transcript"]) if entry.get("card"))
     assert card is not None and card["connector"] == {
-        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True}
+        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True, "connected": False}
     assert response.json()["pending_card"] == card["proposal_id"]
     assert any(card["proposal_id"] == item["proposal_id"] for entry in row["transcript"]
                for item in entry.get("planned", []))
