@@ -147,6 +147,7 @@ const COPY = {
     forAgents: 'For AI agents',
     greeting: (name: ReactNode) => <>How can {name} help?</>,
     invitation: 'Try one of these, or ask in your own words.',
+    suggestions: 'Suggestions',
   },
   es: {
     chatWith: (name: ReactNode) => <>Chatea con {name}</>,
@@ -174,6 +175,7 @@ const COPY = {
     forAgents: 'Para agentes de IA',
     greeting: (name: ReactNode) => <>¿En qué te puede ayudar {name}?</>,
     invitation: 'Prueba una de estas o pregunta con tus palabras.',
+    suggestions: 'Sugerencias',
   },
 } satisfies Record<CopyLanguage, unknown>;
 
@@ -740,7 +742,7 @@ export function PublicShell({
               <div className="cd-public-shell__composer-lift">{composer}</div>
               {invitationShown && starters && starters.words.length > 0 ? (
                 <div className="cd-public-shell__starters" data-copy="user" aria-hidden={!firstView || undefined}>
-                  <SuggestionChips label={language === 'es' ? 'Sugerencias' : 'Suggestions'} suggestions={starters.words} onPick={starters.onPick} disabled={!firstView || starters.disabled} />
+                  <SuggestionChips label={copy.suggestions} suggestions={starters.words} onPick={starters.onPick} disabled={!firstView || starters.disabled} />
                 </div>
               ) : null}
             </div>
