@@ -40,7 +40,11 @@ from desk.kernel_api import (
     CreateCopyRequest,
     CreateDeskRequest,
     DeskCharterRequest,
+    DeskMemoryRequest,
+    DeskPeopleRequest,
     DeskPricesRequest,
+    MemoryItem,
+    PersonUpsert,
 )
 from tests.api.fakes import JOB_ROUTES, ScriptedModel, response, tool_use, unavailable
 from tests.api.fakes import text as text_block
@@ -481,13 +485,14 @@ async def test_agent_stops_after_six_exchanges(app, browser, fake, kernel_http, 
 # What the agent's model reads ------------------------------------------------------------------------------------
 
 
-async def owner_desk(kernel_http, fake, clock, owner_token: str, name: str) -> tuple[str, str]:
+async def owner_desk(kernel_http, fake, clock, owner_token: str, name: str, *, owner: str = "Sam Okafor",
+                     desk_name: str = "Front desk") -> tuple[str, str]:
     """A Desk the copy's owner makes after the copy's own, a second later: its ID and slug."""
     clock.advance(1)
     fake.now = clock.now
     made = await kernel_http.owner(owner_token).call("POST /desks", CreateDeskRequest(
-        business=BusinessSeed(name=name, owner_display_name="Sam Okafor", timezone="America/Los_Angeles"),
-        desk=DeskSeed(name="Front desk", charter=[], hours=[], price_items=[], calendar_slots=[], people=[],
+        business=BusinessSeed(name=name, owner_display_name=owner, timezone="America/Los_Angeles"),
+        desk=DeskSeed(name=desk_name, charter=[], hours=[], price_items=[], calendar_slots=[], people=[],
                       documents=[], notifications=default_notifications("other"))))
     return made.desk_id, made.slug
 
@@ -513,10 +518,11 @@ async def test_the_task_set_comes_from_the_setup_business_type_alone(kernel_http
     copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
     (seed,) = copy.desk_ids
     made = {kind: (await owner_desk(kernel_http, fake, clock, copy.owner_token, f"A {kind} business"))[0]
-            for kind in ("trade", "office", "landlord", "other", "untyped", "unset")}
+            for kind in ("trade", "office", "landlord", "other", "untyped", "unknown", "unset")}
     for kind in ("trade", "office", "landlord", "other"):
         await setup_row(engine, copy.copy_id, made[kind], kind)
     await setup_row(engine, copy.copy_id, made["untyped"], None)
+    await setup_row(engine, copy.copy_id, made["unknown"], "salon")      # no type setup knows: no set of its own
     # The newest of a Desk's rows names its set; the business's own words in a row's answers and transcript are never
     # read, and a row of another copy for the same Desk ID isn't either.
     await setup_row(engine, copy.copy_id, made["office"], "landlord", created_at="2026-10-29 17:00:00+00",
@@ -527,6 +533,7 @@ async def test_the_task_set_comes_from_the_setup_business_type_alone(kernel_http
     for kind in ("trade", "office", "landlord", "other"):
         assert await task_set_of(engine, ro_schema, copy.copy_id, made[kind]) == kind
     assert await task_set_of(engine, ro_schema, copy.copy_id, made["untyped"]) == "other"
+    assert await task_set_of(engine, ro_schema, copy.copy_id, made["unknown"]) == "other"
     assert await task_set_of(engine, ro_schema, copy.copy_id, made["unset"]) == "other"  # no setup, not the seed
 
 
@@ -547,13 +554,20 @@ async def test_the_agent_reads_its_desks_own_task_lines(app, browser, fake, kern
 
 async def test_no_desk_or_visitor_text_reaches_the_agent_model(app, browser, fake, kernel_http, clock, engine,
                                                               agent_model, desk_model):
-    # A marker in everything the business and its visitors wrote: the business's name, its price list, its charter,
-    # an enabled business tool, its setup interview's answers and transcript, and the launcher's own chat. The Desk's
-    # model reads it; the agent's model reads only fixed text and the Desk's replies, which here don't carry it.
+    # A marker in everything the business, its owner and its visitors wrote: the business's, owner's and Desk's names,
+    # its price list, its charter, an enabled business tool, its sample memory, a person on record, its setup
+    # interview's answers and transcript, the launcher's own chat and the owner's whisper in it. The Desk's model reads
+    # it; the agent's model reads only fixed text and the Desk's replies, which here don't carry it.
     mark = "Quazzlewick"
     copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
-    desk_id, slug = await owner_desk(kernel_http, fake, clock, copy.owner_token, f"{mark} Hair Studio")
+    desk_id, slug = await owner_desk(kernel_http, fake, clock, copy.owner_token, f"{mark} Hair Studio",
+                                     owner=f"{mark} Shah", desk_name=f"{mark} line")
     owner, path = kernel_http.owner(copy.owner_token), {"id": desk_id}
+    await owner.call("PUT /desks/{id}/memory", DeskMemoryRequest(about=f"{mark} notes about the studio", items=[
+        MemoryItem(id="colour-notes", title=f"{mark} colour notes", topics=["colour"], text=f"{mark} we do colour")]),
+        path=path)
+    await owner.call("PUT /desks/{id}/people", DeskPeopleRequest(upsert=[
+        PersonUpsert(ref="pat", display_name=f"{mark} Pat", contact="pat@example.com")]), path=path)
     await owner.call("PUT /desks/{id}/prices", DeskPricesRequest(price_items=[
         PriceItem(item_id="colour", title=f"{mark} colour deposit", unit_cents=1_500),
         PriceItem(item_id="balayage", title=f"{mark} balayage", unit_cents=25_000)]), path=path)
@@ -571,6 +585,14 @@ async def test_no_desk_or_visitor_text_reaches_the_agent_model(app, browser, fak
     desk_model.add(say("Happy to help."))
     said = await client.post(f"/api/public/desks/{slug}/messages", json={"text": f"{mark} my own words"})
     assert said.status_code == 202
+    await app.state.runtime.runner.drain()
+    launcher = (await client.get(f"/api/public/desks/{slug}/session")).json()["state"]["session_id"]
+    owner_browser = browser(app, ip="198.51.100.20")
+    owner_browser.cookies.set("desk_owner", copy.owner_token, domain="desk.test", path="/api/owner")
+    desk_model.add(say("Happy to help with that too."))
+    whispered = await owner_browser.post(f"/api/owner/conversations/{launcher}/messages",
+                                         json={"text": f"{mark} offer her the colour", "kind": "whisper"})
+    assert whispered.status_code == 200, whispered.text
     await app.state.runtime.runner.drain()
 
     for task in ("book_visit", "quote_and_deposit", "push_the_limit"):
