@@ -22,9 +22,9 @@
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows
 #                  in order: "prose" or a card's template. A failed check shows its checked cards, then
-#                  any drafted handoff, when only the prose failed, or with no card to keep the
-#                  kernel's call-back offer as "prose" (the golden Desk offers call backs), else the
-#                  handoff clause, and nothing
+#                  any drafted handoff, when only the prose failed, or with no card at all and no
+#                  checker outage the kernel's call-back offer as "prose" (the golden Desk offers
+#                  call backs), else the handoff clause, and nothing
 #                  on a first draft a rewrite can fix; a passing one its prose when not empty, then a card per clause, each
 #                  carrying its clause's fact and card data.
 #

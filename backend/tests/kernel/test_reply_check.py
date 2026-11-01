@@ -1270,7 +1270,7 @@ async def test_a_real_callback_receipt_does_not_back_a_booking_before_an_imperat
         if clauses:          # a failure only of the prose keeps the checked card alone, never the claim
             assert_kept(verdict, [("callback_confirmed", callback.fact_id)], language)
         else:
-            assert_offered(verdict, language)
+            assert_handed_off(verdict, language)   # the call-back request is open: the handoff card
     assert reviewer.soft_inputs == []
     for clauses in ([], [receipt]):
         verdict = await checked(client, visitor, honest, clauses)
@@ -1314,7 +1314,7 @@ async def test_booking_and_callback_claims_need_their_own_validated_receipt(app,
         if clauses:          # the other receipt passed its checks: kept alone, without the claim
             assert_kept(blocked, [(f"{other}_confirmed", other_fact)], language)
         else:
-            assert_offered(blocked, language)
+            assert_handed_off(blocked, language)   # the call-back request is open: the handoff card
     assert len(reviewer.soft_inputs) == 1  # unbacked claims never reach the model check
 
 
@@ -1704,7 +1704,7 @@ async def test_hyphenated_call_claims_with_a_real_callback_receipt(app, client, 
     reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     blocked = await checked(client, visitor, prose)
     assert [(v.kind, v.rule_id) for v in blocked.violations] == [("promise_word", f"lex.{language}.callback")]
-    assert_offered(blocked, language)
+    assert_handed_off(blocked, language)   # the call-back request is open: the handoff card
     assert reviewer.soft_inputs == []
     backed = await checked(client, visitor, prose, [clause("callback_confirmed", callback.fact_id)])
     assert (backed.ok, backed.violations) == (True, [])

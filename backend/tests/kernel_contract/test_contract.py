@@ -708,24 +708,29 @@ async def without_call_backs(http: KernelHttp, ro_read, ro_schema: str, copy: Co
 @pytest.mark.kernel_plan("01c")
 async def test_a_prose_only_block_with_nothing_to_keep_asks_before_handing_off(kernel, ro_read):
     """Self-serve first (the owner's decision of 2026-11-01): a draft blocked only for its prose, with no checked card
-    to keep, on a Desk that offers call backs (Rivera's seed does), shows the kernel's call-back offer as prose in the
-    reply's language, in place of the handoff card and of one Claude drafted, with the reply receipt, and opens no
-    owner handoff. Another language still hands off, and so does the same draft once the Desk offers no call back."""
+    to keep and none drafted, on a Desk that offers call backs (Rivera's seed does), shows the kernel's call-back offer
+    as prose in the reply's language, in place of the handoff card, with the reply receipt, and opens no owner
+    handoff. A handoff clause Claude drafted is honoured, and once the session has an open handoff the same draft
+    shows the handoff card again, opening nothing new; so does the same draft once the Desk offers no call back."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
     english, spanish = await new_visitor(http, slug), await new_visitor(http, slug)
 
     view, session_id = http.session(english.session_token), english.state.session_id
-    for clauses in ([], [Clause(template="handoff")]):
-        offered = await view.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
-            session_id=session_id, generation=0, prose="It comes to $89 for the visit.", clauses=clauses)))
-        assert not offered.ok and {violation.kind for violation in offered.violations} == {"number_in_prose"}
-        assert offered.blocks == [RenderedBlock(kind="prose", text=OFFER["en"])]
-        assert (offered.language, offered.visitor_plain) == ("en", "Reply checked against Maria Rivera's rules")
+    offered = await check_reply(view, session_id, 0, "It comes to $89 for the visit.")
+    assert not offered.ok and {violation.kind for violation in offered.violations} == {"number_in_prose"}
+    assert offered.blocks == [RenderedBlock(kind="prose", text=OFFER["en"])]
+    assert (offered.language, offered.visitor_plain) == ("en", "Reply checked against Maria Rivera's rules")
     assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
-    french = await check_reply(view, session_id, 0, "Bonjour, je peux vous aider.")
-    assert [block.template for block in french.blocks] == ["handoff"]       # no rewrite fixes another language
+    drafted = await view.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=session_id, generation=0, prose="It comes to $89 for the visit.",
+        clauses=[Clause(template="handoff")])))
+    assert [block.template for block in drafted.blocks] == ["handoff"]      # a drafted handoff is honoured
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, session_id)] == ["card"]
+    again = await check_reply(view, session_id, 0, "It comes to $89 for the visit.")
+    assert [block.template for block in again.blocks] == ["handoff"]        # the open handoff keeps the card
+    assert len(session_handoffs(ro_read, ro_schema, copy, session_id)) == 1
 
     view, session_id = http.session(spanish.session_token), spanish.state.session_id
     assert (await check_reply(view, session_id, 0, "Hola, puedo ayudarle con eso.")).language == "es"
@@ -1516,11 +1521,11 @@ HOURS_CLAUSE = Clause(template="hours", fact_id="charter:hours")
     ("", [Clause(template="handoff")], ["handoff"]),
     (OTHER_LANGUAGE, [], ["handoff"]),
     (BLOCKED_PROSE, [], [None]),                                            # the call-back offer, as prose
-    (BLOCKED_PROSE, [Clause(template="handoff")], [None]),                  # in place of a drafted handoff too
+    (BLOCKED_PROSE, [Clause(template="handoff")], ["handoff"]),             # a drafted handoff is honoured
     (BLOCKED_PROSE, [HOURS_CLAUSE], ["hours"]),
     (BLOCKED_PROSE, [HOURS_CLAUSE, Clause(template="handoff")], ["hours", "handoff"]),
     ("Here are our opening hours.", [HOURS_CLAUSE], [None, "hours"]),
-], ids=["passing-handoff", "final-handoff", "final-offer", "final-offer-for-a-drafted-handoff", "final-kept-card",
+], ids=["passing-handoff", "final-handoff", "final-offer", "final-drafted-handoff", "final-kept-card",
         "final-kept-card-then-drafted-handoff", "passing-checked"])
 async def test_delivered_handoff_flag_matches_the_reply_receipt(kernel, ro_read, prose, clauses, templates):
     """The visitor's delivered event flag and the kernel's signed reply receipt can't disagree about a handoff, and a

@@ -58,8 +58,9 @@ OWNER_SAY = "I'll come and look at the sink myself."
 STAND_IN_CANARY = "cdk-0000000000000000"   # the stub's document canary, shaped like the kernel's
 KEEP_ALIVE_S = 12 * 3600   # a hop well inside the 24 hours a visitor session may sit idle before it closes
 HANDED_OFF = ["handoff"]
-# A failure only of the prose with no card to keep asks the visitor first: the kernel's call-back offer, as prose,
-# since the golden Desk (a Rivera copy) offers visitors a call back (the owner's decision of 2026-11-01).
+# A failure only of the prose with no card at all (none to keep, no drafted handoff) asks the visitor first: the
+# kernel's call-back offer, as prose, since the golden Desk (a Rivera copy) offers visitors a call back (the owner's
+# decision of 2026-11-01). A checker outage (`check_unavailable`) hands off.
 OFFERED = ["prose"]
 OFFER = STATUS_LINES["offer_callback"]
 
@@ -191,17 +192,19 @@ class ReplyRow(BaseModel):
 
     @property
     def blocks(self) -> list[str]:
-        """Prose-only failures keep their cards, then a drafted handoff clause, or with no card to
-        keep show the call-back offer in place of any handoff; other failures hand off. A
-        rewritable first attempt shows nothing, and a passing one its prose and cited cards."""
+        """Prose-only failures keep their cards, then a drafted handoff clause, or with no card at
+        all show the call-back offer, but for a checker outage, which hands off; other failures
+        hand off. A rewritable first attempt shows nothing, and a passing one its prose and cited
+        cards. (Each row is a fresh session, so none has an open handoff, which keeps the card.)"""
         if not self.expect.ok:
             if not self.final and set(self.expect.kinds) <= REWRITABLE:
                 return []
             if set(self.expect.kinds) <= PROSE_ONLY:
-                if not self.kept_clauses:
+                if self.kept_clauses:
+                    drafted = any(clause.template == "handoff" for clause in self.clauses)
+                    return [clause.template for clause in self.kept_clauses] + (HANDED_OFF if drafted else [])
+                if not self.clauses and "check_unavailable" not in self.expect.kinds:
                     return OFFERED
-                drafted = any(clause.template == "handoff" for clause in self.clauses)
-                return [clause.template for clause in self.kept_clauses] + (HANDED_OFF if drafted else [])
             return HANDED_OFF
         return (["prose"] if self.prose else []) + [clause.template for clause in self.clauses]
 

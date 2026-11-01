@@ -195,24 +195,53 @@ async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewe
     (CLEAN, FLAGGED, "soft_promise", "en"),
     ("Perfecto, ya lo reviso.", FLAGGED, "soft_promise", "es"),
 ], ids=["promise-en", "promise-es", "soft-en", "soft-es"])
-@pytest.mark.parametrize("drafted", [False, True], ids=["no-handoff", "drafted-handoff"])
 async def test_a_prose_only_block_with_nothing_to_keep_offers_a_call_back(app, client, reviewer, prose, soft_answer,
-                                                                          kind, language, drafted):
+                                                                          kind, language):
     """Self-serve first: a shown block failing only for its prose, with no checked card to keep,
     asks the visitor before involving the owner. On a Desk that offers call backs (Rivera's seed
     gives visitors `native.request_callback`), the kernel shows its signed call-back offer in the
-    reply's language in place of the handoff card, and of one Claude drafted too, so no owner
-    handoff opens and no alert goes out (the owner's decision of 2026-11-01)."""
+    reply's language in place of the handoff card, so no owner handoff opens and no alert goes out
+    (the owner's decision of 2026-11-01)."""
     copy, visitor = await visitor_of(app, client)
     if soft_answer is not None:
         reviewer.soft_answer = soft_answer
-    verdict = await checked(client, visitor, prose, [clause("handoff")] if drafted else [])
+    verdict = await checked(client, visitor, prose)
     assert {v.kind for v in verdict.violations} == {kind}
     assert_offered(verdict, language)
     assert await handoffs_of(app, copy) == []
     assert await handoff_alerts(app, copy) == []
     assert handoff_entries(await ledger_rows(app, copy)) == []
     verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("session", ["drafted handoff", "call-back open", "card open", "checker outage"])
+async def test_the_offer_never_replaces_a_handoff_the_conversation_has(app, client, reviewer, session):
+    """The call-back offer asks first only where nothing else stands. A handoff clause Claude drafted
+    is honoured, and opens the owner's handoff as the card does. A session with an open handoff of
+    either kind, a call-back request's or a card's, sees the handoff card, which opens nothing new
+    and alerts no one again. A checker outage (`check_unavailable`) hands off."""
+    copy, visitor = await visitor_of(app, client)
+    prose, clauses = BLOCKED, []
+    if session == "drafted handoff":
+        clauses = [clause("handoff")]
+    elif session == "call-back open":
+        await callback(client, visitor)
+    elif session == "card open":
+        await hand_over(client, visitor)
+    else:
+        prose, reviewer.soft_answer = CLEAN, None                 # the soft check gives no verdict
+    before = [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)]
+    alerts_before = len(await handoff_alerts(app, copy))
+    verdict = await checked(client, visitor, prose, clauses)
+    assert {v.kind for v in verdict.violations} == {"check_unavailable" if session == "checker outage"
+                                                    else "number_in_prose"}
+    assert_handed_off(verdict)
+    after = [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)]
+    if before:                                                    # the open one stands, and no alert repeats
+        assert (after, len(await handoff_alerts(app, copy))) == (before, alerts_before)
+    else:                                                         # the card shown opens the owner's handoff
+        assert [(kind, status) for _, kind, status in after] == [("card", "open")]
+        assert len(await handoff_alerts(app, copy)) == 1
 
 
 @pytest.mark.parametrize(("prose", "soft_answer", "language"), [
@@ -403,12 +432,10 @@ async def test_claudes_own_draft_citing_the_handoff_card_opens_one(app, client, 
 
 async def test_an_open_call_back_request_is_the_sessions_handoff(app, client):
     """A session whose call-back request is open gets no second handoff from the card, and its
-    owner no second alert: the call back already puts the conversation in Needs you. A blocked
-    draft there asks with the call-back offer, which opens nothing either."""
+    owner no second alert: the call back already puts the conversation in Needs you."""
     copy, visitor = await visitor_of(app, client)
     requested = (await callback(client, visitor)).model_view["handoff_id"]
-    await hand_over(client, visitor)
-    assert_offered(await checked(client, visitor, BLOCKED))
+    assert_handed_off(await checked(client, visitor, BLOCKED))
     [handoff] = await handoffs_of(app, copy)
     assert (handoff.handoff_id, handoff.kind, handoff.status) == (requested, "callback", "open")
     assert handoff.callback_window is not None                    # it keeps its window and its fact
