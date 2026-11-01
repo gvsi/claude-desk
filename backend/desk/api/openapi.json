@@ -14481,6 +14481,8 @@
               "stale_fact",
               "canary",
               "unsupported_language",
+              "uncertain_language",
+              "check_unavailable",
               "session_paused"
             ],
             "title": "Kind"

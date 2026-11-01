@@ -225,7 +225,7 @@ async def test_each_call_is_one_try_with_its_own_timeout(environ, monkeypatch):
     reviewed = await backend.review(review_input())
     verdict, usage = await backend.soft_promise(REPLY)
     assert (reviewed.review, reviewed.usage.status, verdict, usage.status) == (None, "error", None, "error")
-    assert [request.extensions["timeout"]["read"] for request in requests] == [4.0, 6.0]
+    assert [request.extensions["timeout"]["read"] for request in requests] == [4.0, 8.0]
 
 
 @pytest.mark.parametrize("named_by", ["settings", "process"])

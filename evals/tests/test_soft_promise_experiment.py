@@ -73,7 +73,7 @@ def test_sonnet_request_and_identity_are_distinct_from_new(deps, tmp_path):
     assert request["model"] == "claude-sonnet-5-5"
     assert request["thinking"] == {"type": "adaptive"}
     assert request["output_config"]["effort"] == "low"
-    assert request["timeout"] == 6.0
+    assert request["timeout"] == exp.sp.decisions.SOFT_PROMISE_TIMEOUT_S
     assert request["system"] == exp.sp.decisions.SOFT_PROMISE_SYSTEM
     assert "next_steps" in json.loads(request["messages"][0]["content"])
     data = exp.sp.call_input(exp.sp.load_cases(deps.cases)[0])

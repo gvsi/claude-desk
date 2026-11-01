@@ -18,6 +18,7 @@ import pytest
 
 from tests import public_policy_cases as policy_cases
 
+from desk.api.deliver import Reply
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
 from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
@@ -698,6 +699,35 @@ async def test_check_reply_hands_off_other_languages(kernel, ro_read):
     assert hola.ok and hola.language == "es"
     french = await check_reply(view, session_id, 0, "Bonjour, je peux vous aider.")
     assert not french.ok and french.language == "es" and [block.template for block in french.blocks] == ["handoff"]
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_payment_caption_rewrites_and_prose_failure_keeps_its_card(kernel, ro_read):
+    """One unchanged payment action, one checked correction; final prose failures keep the checked link alone."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    _, issued = await issue_payment_link(view, session_id,
+        item_id(ro_read, ro_schema, copy, "Service call deposit"), 1,
+        owner=http.owner(copy.owner_token) if state is None else None)
+    clause = Clause(template="payment_link", fact_id=issued.facts[0].fact_id)
+
+    async def caption(prose: str, final: bool):
+        return await view.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+            session_id=session_id, generation=0, prose=prose, clauses=[clause]), final=final))
+
+    blocked = await caption("Absolutely. Payment link below.", False)
+    assert not blocked.ok and blocked.blocks == []
+    assert [(v.kind, v.rule_id) for v in blocked.violations] == [("uncertain_language", "language_uncertain")]
+    corrected = await caption("Here is the link to pay.", True)
+    assert corrected.ok and [b.template for b in corrected.blocks] == [None, "payment_link"]
+    for prose in ("Absolutely. Payment link below.", "Here is $20."):
+        kept = await caption(prose, True)
+        assert not kept.ok and [b.template for b in kept.blocks] == ["payment_link"]
+        assert kept.blocks[0].href == corrected.blocks[1].href
+    french = await caption("Bonjour, je peux vous aider.", False)
+    assert not french.ok and [b.template for b in french.blocks] == ["handoff"]
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1392,6 +1422,62 @@ async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_r
 
 BLOCKED_PROSE = "It comes to $89 for the visit."           # a number in prose: a kind a rewrite fixes
 OTHER_LANGUAGE = "Bonjour, je peux vous aider."             # unsupported_language: no rewrite fixes it
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
+    ("", [Clause(template="handoff")], True, True, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED_PROSE, [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED_PROSE, [Clause(template="hours", fact_id="charter:hours")], True, False, ["hours"],
+     "Reply checked against Maria Rivera's rules"),
+    (BLOCKED_PROSE, [], False, False, [], "Passed to Maria Rivera to answer"),
+], ids=["passing-handoff", "final-handoff", "final-kept-card", "unshown-first-attempt"])
+async def test_check_reply_receipt_follows_the_shown_handoff_clause(kernel, ro_read, prose, clauses, final, ok,
+                                                                  templates, receipt):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=0, prose=prose, clauses=clauses)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply",
+                                                            CheckReplyRequest(draft=draft, final=final))
+    assert verdict.ok is ok
+    assert [block.template for block in verdict.blocks] == templates
+    assert verdict.visitor_plain == receipt
+
+
+HOURS_CLAUSE = Clause(template="hours", fact_id="charter:hours")
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("prose", "clauses", "templates"), [
+    ("", [Clause(template="handoff")], ["handoff"]),
+    (BLOCKED_PROSE, [], ["handoff"]),
+    (BLOCKED_PROSE, [HOURS_CLAUSE], ["hours"]),
+    (BLOCKED_PROSE, [HOURS_CLAUSE, Clause(template="handoff")], ["hours", "handoff"]),
+    ("Here are our opening hours.", [HOURS_CLAUSE], [None, "hours"]),
+], ids=["passing-handoff", "final-handoff", "final-kept-card", "final-kept-card-then-drafted-handoff",
+        "passing-checked"])
+async def test_delivered_handoff_flag_matches_the_reply_receipt(kernel, ro_read, prose, clauses, templates):
+    """The visitor's delivered event flag and the kernel's signed reply receipt can't disagree about a handoff, and a
+    shown handoff clause opens the owner's handoff: Claude's cited one, the kernel's in a blocked draft's place, or
+    Claude's drafted one kept after the cards a prose-only failure keeps."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    session_id = visitor.state.session_id
+    draft = ReplyDraft(session_id=session_id, generation=0, prose=prose, clauses=clauses)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply",
+                                                            CheckReplyRequest(draft=draft, final=True))
+    reply = Reply(verdict, "claude", "api")
+    assert [block.template for block in verdict.blocks] == templates
+    assert reply.handoff is ("handoff" in templates)
+    assert reply.handoff is (verdict.visitor_plain == "Passed to Maria Rivera to answer")
+    assert verdict.visitor_plain in ("Passed to Maria Rivera to answer", "Reply checked against Maria Rivera's rules")
+    assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == (
+        [("card", "open")] if reply.handoff else [])
+    (entry,) = [entry for entry in (await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])).entries
+                if entry.event.kind == "reply" and entry.event.session_id == session_id]
+    assert entry.event.summary["dropped"] == []                 # no card was refused at signing
 
 
 async def checked(http: KernelHttp, created: SessionCreated, prose: str, *, final: bool) -> ReplyVerdict:

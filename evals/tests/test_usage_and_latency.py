@@ -901,3 +901,20 @@ async def test_latency_command_names_a_failed_call_without_its_body(tmp_path, ca
         assert await run.latency_command(["--max-usd", "3", "--base-url", "https://desk.example.com"], deps) == 1
         out = capsys.readouterr().out
         assert out == said
+
+
+@pytest.mark.parametrize("status", ["ok", "invalid", "timeout"])
+def test_soft_check_try_is_one_cost_record_including_unavailable(status):
+    """The reply ledger's soft-check summary is its one try's usage, priced once whether or not it
+    gave a verdict."""
+    from evals.latency import spend_usd
+    from evals.usage import collect_usage
+
+    call = call_usage(SONNET, input_tokens=900, cached=100, write=50, output=40, ms=420, status=status)
+    event = {"kind": "reply", "session_id": SESSION,
+             "summary": {"soft_promise": call, "violations": [] if status == "ok" else ["check_unavailable"]}}
+    records = collect_usage({"ledger_entries": [{"event": event}]}, [SESSION])
+    [record] = records
+    assert (record.route, record.model, record.ms) == ("soft_promise", SONNET, 420)
+    assert record.cost_usd("anthropic") == pytest.approx(priced(call))
+    assert spend_usd(records, "anthropic").kernel_usd == pytest.approx(priced(call))

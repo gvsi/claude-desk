@@ -389,6 +389,21 @@ async def test_a_reply_check_keeps_the_lock_order(app, client, frozen_clock):
     assert log.transactions == [["sessions", "ledger_heads"]]
 
 
+@pytest.mark.parametrize("prose", ["Here is your quote.", "Here is $20."])
+async def test_a_reply_with_rechecked_cards_keeps_the_lock_order(app, client, prose):
+    from .test_reply_check import clause, own_quote
+
+    _, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    # No clock advance: the explicit session lock must work even without a last-seen UPDATE.
+    with lock_log(app) as log:
+        verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
+    assert [b.template for b in verdict.blocks if b.kind == "card"] == ["quote"]
+    # Handoffs are held before facts even if the refresh later drops the last card.
+    assert log.transactions == [["sessions", "handoffs", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
 async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, client, frozen_clock):
     _, visitor = await visitor_of(app, client)
     frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written

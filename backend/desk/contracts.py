@@ -429,7 +429,7 @@ class ReplyDraft(BaseModel):              # send_reply input: Claude's schema ha
 
 class Violation(BaseModel):
     kind: Literal["number_in_prose", "promise_word", "soft_promise", "unknown_fact", "unentitled_fact",
-                  "stale_fact", "canary", "unsupported_language", "session_paused"]
+                  "stale_fact", "canary", "unsupported_language", "uncertain_language", "check_unavailable", "session_paused"]
     span: str
     fact_ids: list[str] = []
     rule_id: str
@@ -452,9 +452,10 @@ class RenderedBlock(BaseModel):           # every field is kernel-rendered and c
 class ReplyVerdict(BaseModel):
     ok: bool
     language: Literal["en", "es"]         # the blocks' language: detected, else the fallback ("Language" row)
-    blocks: list[RenderedBlock]           # exactly what may be shown; a failed check of Claude's draft gives the handoff clause,
-                                          # but none on a first attempt the API rewrites (CheckReplyRequest.final false, every
-                                          # violation rewritable); a blocked owner say none
+    blocks: list[RenderedBlock]           # exactly what may be shown; a failed check of Claude's draft keeps its checked cards,
+                                          # then any drafted handoff, when only its prose failed (desk.rewrites.PROSE_ONLY),
+                                          # else gives the handoff clause, but none on a first attempt the API rewrites (CheckReplyRequest.final false,
+                                          # every violation rewritable); a blocked owner say none
     violations: list[Violation]
     message_id: str
     generation: int                       # the session generation it was checked at; deliver() drops it once stale

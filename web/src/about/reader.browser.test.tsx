@@ -14,6 +14,7 @@ import { render } from 'vitest-browser-react';
 
 import { Icon } from '../ds/index.ts';
 import { CONCEPT_FOOTER_TEXT, assertCleanCopy } from '../ds/test/copy.ts';
+import { FONT_SHEET_URL, loadWebFonts } from '../ds/test/fonts.ts';
 import { writeLocal } from '../lib/storage.ts';
 import { AXE_TAGS, assertNoJargon, tokenColor } from '../test/screen.ts';
 import { ABOUT_DOCUMENTS, documentText } from './documents.ts';
@@ -422,6 +423,41 @@ describe('ReaderPage', () => {
     const bar = screen.container.querySelector('header');
     expect(bar?.querySelector<HTMLElement>('.cd-type-wordmark')?.getBoundingClientRect().height).toBe(22);
     expect(bar?.querySelector('.cd-pill')?.textContent).toBe('Preview');
+    await screen.unmount();
+  });
+
+  it('phone_switch_keeps_the_three_pages_on_one_row', async () => {
+    // Under the phone bar, the set's three pages sit on one row at 390 and 375 px: "Vision" never drops to a
+    // line of its own and pushes the page down, and nothing runs past the window's width. The laptop switch
+    // keeps its 12 px either side of each name. Measured in the interface's web font, as the page ships, which the
+    // other tests here don't load; the sheet goes again after, so they keep measuring as before.
+    onTestFinished(() => {
+      const want = new URL(FONT_SHEET_URL).href;
+      for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) if (link.href === want) link.remove();
+    });
+    await loadWebFonts();
+    for (const size of [PHONE, { width: 375, height: 667 }]) {
+      for (const id of IDS) {
+        const where = `${id} at ${size.width}`;
+        const screen = await renderReader(id, { size });
+        const nav = screen.container.querySelector<HTMLElement>('nav[aria-label="About this prototype"]');
+        const links = [...(nav?.querySelectorAll<HTMLElement>('a') ?? [])];
+        expect(links.map((link) => flat(link.textContent)).sort(), where).toEqual(['Capability prediction', 'Product proposal', 'Vision']);
+        const tops = links.map((link) => link.getBoundingClientRect().top);
+        expect(new Set(tops).size, `${where}: tops ${tops.join(', ')}`).toBe(1);
+        // One row: the switch is as tall as its space above and one 32 px link.
+        const box = (nav as HTMLElement).getBoundingClientRect();
+        expect(box.height - parseFloat(getComputedStyle(nav as HTMLElement).paddingTop), where).toBe(32);
+        expect(Math.max(...links.map((link) => link.getBoundingClientRect().right)), where).toBeLessThanOrEqual(size.width - 16);
+        expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
+        await screen.unmount();
+      }
+    }
+    const screen = await renderReader('proposal', { size: DESKTOP });
+    for (const link of screen.container.querySelectorAll<HTMLElement>('nav[aria-label="About this prototype"] a')) {
+      const style = getComputedStyle(link);
+      expect([style.paddingLeft, style.paddingRight], flat(link.textContent)).toEqual(['12px', '12px']);
+    }
     await screen.unmount();
   });
 
