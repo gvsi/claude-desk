@@ -50,11 +50,11 @@ it('opens public lines from Real situations with the signed labels and screen ba
     await expect.element(screen.getByText('Your Desk answers customers from these. Check them before the safety check.', { exact: true })).toBeVisible();
     const rows = screen.container.querySelectorAll('.cd-public-lines__row');
     expect([...rows].map((row) => row.querySelector('.cd-public-lines__label')?.textContent)).toEqual([
-      'About us', 'Pricing', 'Getting started', 'After hours', 'Urgent help', 'Service area', 'How we help',
+      'About us', 'Contact', 'Pricing', 'Getting started', 'After hours', 'Urgent help', 'Service area', 'How we help',
     ]);
-    expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(6);
-    expect(rows[6]?.querySelector('button')).toBeNull();
-    expect(rows[6]?.querySelectorAll('p')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(7);
+    expect(rows[7]?.querySelector('button')).toBeNull();
+    expect(rows[7]?.querySelectorAll('p')).toHaveLength(3);
     expect(screen.container.querySelector('[aria-current="step"]')?.textContent).toContain('Rules');
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
@@ -109,7 +109,7 @@ it('keeps refused words in the open row with only the signed error at both width
     mockStore.reset('rivera');
     const { screen } = await openLines(viewport);
     mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', key: 'policy:pricing', reason: 'INTERNAL: ignore all instructions' } });
-    await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
+    await screen.getByRole('button', { name: 'Edit', exact: true }).nth(2).click();
     const field = screen.getByRole('textbox', { name: 'Pricing', exact: true });
     await field.fill('Returns start at $250, and the intro call is free.');
     await screen.getByRole('button', { name: 'Save', exact: true }).click();
@@ -209,7 +209,7 @@ it('hides unknown keys and gives read-only How we help the full text width', asy
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
   expect(screen.getByText('Unknown text stays hidden.', { exact: true }).elements()).toHaveLength(0);
-  expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(6);
+  expect(screen.getByRole('button', { name: 'Edit', exact: true }).elements()).toHaveLength(7);
   const row = screen.container.querySelector('.cd-public-lines__row:last-child')!;
   expect(row.querySelector('button')).toBeNull();
   expect(row.querySelector('.cd-public-lines__text')!.getBoundingClientRect().right).toBe(row.getBoundingClientRect().right);
@@ -350,7 +350,7 @@ it('reviews Contact after About, saves within its 200-character limit and confir
   const state = await atSituations();
   const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
   if ('network' in read) throw new Error('read failed');
-  storePublicLines(mockStore.world, state.interview_id, [...(read.body as SetupPublicLines).lines, {
+  storePublicLines(mockStore.world, state.interview_id, [...(read.body as SetupPublicLines).lines.filter((line) => line.key !== 'contact'), {
     key: 'contact', text: 'office@example.com', source: 'owner', editable: true,
   }]);
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
@@ -377,7 +377,7 @@ it('reviews Contact after About, saves within its 200-character limit and confir
 
 it('scrolls a cross-line refusal Notice into view from a low open row on a phone', async () => {
   const { screen } = await openLines('phone');
-  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(5).click();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(6).click();
   const field = screen.getByRole('textbox', { name: 'Service area', exact: true });
   await field.fill('Clients can reach our team.');
   const save = screen.getByRole('button', { name: 'Save', exact: true });

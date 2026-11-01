@@ -10,6 +10,7 @@ import { SETUP_PUBLIC_LINE_KEYS } from '../api/views.ts';
 /** The signed Chen & Co. starter lines, including the approved public-text revisions. */
 const CPA_LINES = [
   ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
+  ['contact', '(408) 555-0199, linda@chenandco.com'],
   ['pricing', 'We price each engagement after the intro consult, and new work starts with a retainer.'],
   ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
   ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
@@ -31,7 +32,7 @@ function seed(sv: Server, state: SetupState): SetupPublicLine[] {
   const desk = sv.world.desk(state.desk_id);
   if (/^Chen & Co\.?(?: CPA)?$/i.test(desk?.summary.business_name ?? '')) {
     return CPA_LINES.map(([key, text]): SetupPublicLine => ({
-      key: `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help',
+      key: key === 'contact' ? key : `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help',
     }));
   }
   const about = desk ? setupAbout(sv.world, desk) : null;

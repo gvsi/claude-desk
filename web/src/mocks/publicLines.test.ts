@@ -1,11 +1,12 @@
 import { beforeEach, expect, it } from 'vitest';
 
-import type { SetupPublicLines, QuestionKey, SetupState } from '../api/views.ts';
+import type { PublicDesk, SetupPublicLines, QuestionKey, SetupState } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { SETUP_QUESTIONS } from './setup.ts';
 import { mockStore } from './store.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import { storePublicLines, storePublicState } from './publicLineStore.ts';
+import { cardChrome } from '../ds/components/ReplyCard/chrome.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
 
@@ -34,14 +35,32 @@ async function confirmListed(params: { id: string }) {
   return mockStore.dispatch('setupPublicLinesConfirm', { params, body: { keys: state.lines.map((line) => line.key), revision: state.revision } });
 }
 
-it('reads the seven public lines in order without moving the interview', async () => {
+it('holds the signed CPA Contact until confirmation and projects its Contact label', async () => {
+  const params = await atRules();
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  const lines = (read.body as SetupPublicLines).lines;
+  expect(lines[1]).toEqual({ key: 'contact', text: '(408) 555-0199, linda@chenandco.com', source: 'suggested', editable: true });
+  const setup = await mockStore.dispatch('setup', { params });
+  if ('network' in setup) throw new Error('setup failed');
+  const publicParams = { slug: (setup.body as SetupState).slug };
+  expect(await mockStore.dispatch('publicDesk', { params: publicParams })).toMatchObject({ status: 200, body: { charter: [] } });
+  expect(await confirmListed(params)).toMatchObject({ status: 200 });
+  const published = await mockStore.dispatch('publicDesk', { params: publicParams });
+  if ('network' in published) throw new Error('public read failed');
+  const contact = (published.body as PublicDesk).charter.find((card) => card.fact_id === 'charter:contact')!;
+  expect(contact).toMatchObject({ template: 'contact', title: '(408) 555-0199, linda@chenandco.com' });
+  expect(cardChrome(contact.template!, 'en', contact.fact_id)?.label).toBe('Contact');
+});
+
+it('reads the eight public lines in order without moving the interview', async () => {
   const params = await atRules();
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
   expect(read.status).toBe(200);
   const lines = (read.body as SetupPublicLines).lines;
   expect(lines.map((line) => line.key)).toEqual([
-    'policy:about', 'policy:pricing', 'policy:intake', 'policy:after_hours',
+    'policy:about', 'contact', 'policy:pricing', 'policy:intake', 'policy:after_hours',
     'policy:urgent', 'policy:service_area', 'policy:how_we_help',
   ]);
   expect(lines.at(-1)).toMatchObject({ editable: false });
@@ -64,6 +83,7 @@ it('seeds the signed CPA starter lines and keeps limit answers out of every line
   });
   const board = [
     ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
+    ['contact', '(408) 555-0199, linda@chenandco.com'],
     ['pricing', 'We price each engagement after the intro consult, and new work starts with a retainer.'],
     ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
     ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
@@ -71,7 +91,7 @@ it('seeds the signed CPA starter lines and keeps limit answers out of every line
     ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
     ['how_we_help', 'New clients book a short introductory call.\nBefore their call, new clients answer three short questions.\nClients get a secure link to pay a retainer before work starts.'],
   ];
-  const expected = { lines: board.map(([key, text]) => ({ key: `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help' })) };
+  const expected = { lines: board.map(([key, text]) => ({ key: key === 'contact' ? key : `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help' })) };
   const read = await mockStore.dispatch('setupPublicLines', { params });
   expect(read).toMatchObject({ status: 200, body: expected });
   if ('network' in read) throw new Error('read failed');
@@ -431,6 +451,9 @@ it('seeds held CPA hours and prices with a stable revision that changes on PUT',
 
 it('refuses missing, empty, unknown or unlisted confirmation keys and revisions without changing state', async () => {
   const params = await atRules();
+  const seed = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in seed) throw new Error('read failed');
+  storePublicLines(mockStore.world, params.id, (seed.body as SetupPublicLines).lines.filter((line) => line.key !== 'contact'));
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
   const { revision } = read.body as SetupPublicLines;
