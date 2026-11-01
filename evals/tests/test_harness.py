@@ -315,6 +315,18 @@ async def test_stub_honours_the_expected_status():
         assert error == KernelError(code="internal"), status
 
 
+async def test_stub_omits_unrequested_details_and_preserves_public_field_refusals():
+    k = ContractStub()
+    error = await k.call("POST /decide", body=decide_body(), auth=Auth.none(), expect=Expect(status=422))
+    assert error == KernelError(code="invalid")
+    assert k.responses[-1].body == {"code": "invalid"}
+    details = {"desk.intake.title": ["public_promise"]}
+    detailed = await k.call("POST /decide", body=decide_body(), auth=Auth.none(),
+                            expect=Expect(status=422, fields={"detail": details}))
+    assert detailed == KernelError(code="invalid", detail=details)
+    assert k.responses[-1].body == {"code": "invalid", "detail": details}
+
+
 async def test_public_desk_takes_a_language():
     """`GET /public/{desk_slug}` takes `?lang=` ("Kernel HTTP API v2"), which its route key leaves
     out because a caller may; any other query parameter is still refused."""

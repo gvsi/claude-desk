@@ -6,12 +6,13 @@ import pytest
 from sqlalchemy import select
 
 from desk.next_steps import BUSINESS_BLOCK_STEPS, NEXT_STEPS, next_steps
-from desk.kernel_service import adapters, decide
+from desk.kernel_service import adapters
 from desk.db.models import Person, Tool
 
 from .helpers import kernel_ctx, rows_of, verify_session
 from .test_adapters import visitor_of
 from .test_agent_auth import mint, open_agent, turn
+from .test_business_tools import intake, put
 from .test_context import context_of
 from .test_reply_check import checked
 
@@ -33,6 +34,9 @@ def test_business_blocks_are_fixed_and_unknown_blocks_offer_nothing():
     for block, phrase in BUSINESS_BLOCK_STEPS.items():
         assert next_steps([profile(block)]) == [phrase]
     assert next_steps([profile("purpose_payment"), profile("unknown")]) == []
+    # an urgent tool beside the native call-back offers the same step once
+    callback = SimpleNamespace(tool="native.request_callback")
+    assert next_steps([profile("urgent"), callback]) == [NEXT_STEPS["native.request_callback"]]
 
 
 @pytest.mark.parametrize("standing", ["visitor", "verified", "agent", "answering_off"])
@@ -56,29 +60,35 @@ async def test_soft_check_gets_exactly_the_resolved_session_steps(app, client, r
     assert set(data.model_dump()) == {"language", "prose", "cards", "next_steps"}
 
 
-@pytest.mark.parametrize("failure", ["stale", "unresolved"])
-async def test_stale_business_intake_and_disabled_capture_grant_no_message_step(
-        app, client, reviewer, monkeypatch, failure):
+@pytest.mark.parametrize("tool,state", [
+    ("native.capture_lead", "intact"), ("native.capture_lead", "stale"),
+    ("desk.new-enquiry", "intact"), ("desk.new-enquiry", "stale"),
+    ("desk.new-enquiry", "unresolved"),
+])
+async def test_only_intact_resolved_rows_grant_the_message_step(
+        app, client, reviewer, monkeypatch, tool, state):
     copy, visitor = await visitor_of(app, client)
+    # Store a real configured intake so both readers exercise its row and adapter.
+    assert (await put(client, copy, [intake()])).status_code == 200
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
-        row = (await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
-            Tool.desk_id == copy.desk_id, Tool.tool == "native.capture_lead")))).one()
-        row.status = "disabled"
-    # Business rows have not landed yet. Simulate the candidate returned by their
-    # tools_given extension; it must still pass adapter resolution in BOTH readers.
-    source = adapters.ADAPTERS["native.capture_lead"].profile
-    profile = source.model_copy(update={"tool": "desk.intake"})
-    candidate = SimpleNamespace(profile=profile, profile_sha256=("0" * 64 if failure == "stale"
-                                else adapters.profile_sha256(profile)), status="enabled")
-    enabled_tools, tools_given = decide.enabled_tools, decide.tools_given
+        rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == copy.desk_id, Tool.tool.in_(["native.capture_lead", "desk.new-enquiry"]))))
+        for row in rows:
+            row.status = "enabled" if row.tool == tool else "disabled"
+            row.review_reason = None
+            if row.tool == tool and state == "stale":
+                row.profile_sha256 = "0" * 64
+    if state == "unresolved":
+        resolve = adapters.resolve
 
-    async def enabled(ctx, desk_id):
-        return {**await enabled_tools(ctx, desk_id), "desk.intake": candidate}
+        async def unresolved(ctx, desk_id, name):
+            return None if name == tool else await resolve(ctx, desk_id, name)
 
-    monkeypatch.setattr(decide, "enabled_tools", enabled)
-    monkeypatch.setattr(decide, "tools_given", lambda *args: tools_given(*args) | {"desk.intake"})
+        monkeypatch.setattr(adapters, "resolve", unresolved)
+    present = state == "intact"
     seen = await context_of(client, visitor.session_id, visitor.headers)
-    assert "taking a message" not in next_steps(seen.tools)
+    assert (tool in {profile.tool for profile in seen.tools}) == present
+    assert ("taking a message" in next_steps(seen.tools)) == present
     assert (await checked(client, visitor, "How can I help?")).ok
-    assert "taking a message" not in reviewer.soft_inputs[-1].next_steps
+    assert ("taking a message" in reviewer.soft_inputs[-1].next_steps) == present

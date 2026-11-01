@@ -119,6 +119,10 @@ interface LongChatOptions {
   composerDisabled?: boolean;
   /** The message, counted from 1, written long: several lines on a phone, fewer on a wider window. */
   longMessage?: number;
+  /** A 61 px line above the composer, in its area, as the public chat shows one for a waiting request. */
+  lineAbove?: boolean;
+  /** The shell's `keepComposerRoom`. */
+  keepComposerRoom?: boolean;
 }
 
 /** A long message's words: five lines or so on a phone. */
@@ -150,6 +154,8 @@ function LongChat({
   ownerInChat = false,
   composerDisabled = false,
   longMessage,
+  lineAbove = false,
+  keepComposerRoom = false,
 }: LongChatOptions) {
   const page = rivera.publicDesk[language];
   const end = useRef<HTMLDivElement>(null);
@@ -168,18 +174,22 @@ function LongChat({
       openStatus={language === 'es' ? CLOSED_ES_LONGEST : OPEN_EN}
       banner={banner ? <div data-testid="banner" style={{ height: 96 }} /> : undefined}
       ownerInChat={ownerInChat}
+      keepComposerRoom={keepComposerRoom}
       onAskForOwner={() => {}}
       about={page.charter}
       aboutLinks={links ? [{ label: 'What agents can do here', href: `/d/${rivera.business.slug}/agents` }] : undefined}
       composer={
-        <Composer
-          variant="visitor"
-          label="Message Rivera Plumbing"
-          placeholder="Message Rivera Plumbing"
-          maxLength={2000}
-          disabled={composerDisabled}
-          onSend={() => {}}
-        />
+        <>
+          {lineAbove ? <div data-testid="line-above" style={{ height: 61 }} /> : null}
+          <Composer
+            variant="visitor"
+            label="Message Rivera Plumbing"
+            placeholder="Message Rivera Plumbing"
+            maxLength={2000}
+            disabled={composerDisabled}
+            onSend={() => {}}
+          />
+        </>
       }
     >
       <Transcript label="Conversation with Rivera Plumbing">
@@ -1018,6 +1028,50 @@ it('short_mode_leaves_only_with_room_to_spare', async () => {
   expect(isShort()).toBe(true);
   await userEvent.clear(input);
   await vi.waitFor(() => expect(isShort()).toBe(false));
+});
+
+it('kept_composer_room_holds_the_shell_as_a_line_above_the_composer_comes_and_goes', async () => {
+  // A line the page shows above the composer at times (the public chat's, for a waiting request)
+  // can tip a shell at the edge into short, and taking it away turns it tall again. Each switch
+  // moves the conversation, which can bring the reason for the line into view and out of it again,
+  // so the page and the shell would answer each other for ever. While the page asks the shell to
+  // keep the composer's room, it counts the composer area at the tallest it has been since, and the
+  // line coming and going switches nothing; once the page lets the room go, the shell fits itself
+  // again at once.
+  // With the banner pinned too, so the window that leaves the conversation that much room is over
+  // the 520 px under which a shell is short whatever it holds.
+  await renderLongChat([390, 844], { banner: true });
+  const region = one('.cd-public-shell__scroll');
+  // Tall, with 150 px of conversation: more than the 136 a short shell needs to turn tall again, and
+  // less than the 181 the line's 61 px leaves the 120 a tall one keeps.
+  const height = 844 - region.clientHeight + 150;
+  expect(height).toBeGreaterThanOrEqual(520);
+  const seen: { keep: boolean; step: string; short: boolean }[] = [];
+  for (const keep of [false, true]) {
+    await renderLongChat([390, height], { banner: true, follow: true, keepComposerRoom: keep });
+    await nextFrames();
+    seen.push({ keep, step: 'no line', short: isShort() });
+    act(() => root.render(<LongChat banner follow keepComposerRoom={keep} lineAbove />));
+    await nextFrames();
+    seen.push({ keep, step: 'line', short: isShort() });
+    act(() => root.render(<LongChat banner follow keepComposerRoom={keep} />));
+    await nextFrames();
+    seen.push({ keep, step: 'line gone', short: isShort() });
+    if (keep) {
+      act(() => root.render(<LongChat banner follow />));
+      await nextFrames();
+      seen.push({ keep, step: 'room let go', short: isShort() });
+    }
+  }
+  expect(seen).toEqual([
+    { keep: false, step: 'no line', short: false },
+    { keep: false, step: 'line', short: true },
+    { keep: false, step: 'line gone', short: false },
+    { keep: true, step: 'no line', short: false },
+    { keep: true, step: 'line', short: true },
+    { keep: true, step: 'line gone', short: true },
+    { keep: true, step: 'room let go', short: false },
+  ]);
 });
 
 it('keyboard_scrolling_on_a_short_shell_skips_nothing', async () => {

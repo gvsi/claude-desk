@@ -190,7 +190,7 @@ function stoppedDraft(seq: number, at: string): { entry: LedgerEntry; attempt: A
 }
 
 /**
- * The built-in agent tries to charge $250 in one go, over its signed limit, and the kernel refuses
+ * The built-in agent tries to charge $185 in one go, over its signed limit, and the kernel refuses
  * it: a request this week's count takes in, unlike a draft of Claude's the reply check stopped.
  */
 async function refuseTheAgentsCharge(): Promise<void> {
