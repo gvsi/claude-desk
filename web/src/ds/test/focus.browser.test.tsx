@@ -129,6 +129,33 @@ describe('focus', () => {
     expect(document.activeElement).toBe(field);
     const style = getComputedStyle(field);
     expect([style.outlineStyle, style.outlineWidth, style.outlineOffset, style.outlineColor]).toEqual(['solid', '2px', '2px', tokenColor('--ring-focus')]);
+    // Clicked into, to copy its words, it rings too: browsers match :focus-visible on a text field
+    // clicked, and with no caret the ring is its only cue.
+    start.focus();
+    await userEvent.click(field);
+    expect(document.activeElement).toBe(field);
+    expect(getComputedStyle(field).outlineStyle).toBe('solid');
+    await screen.unmount();
+  });
+
+  it('a_button_inside_the_composer_rings_and_the_box_goes_back_to_rest', async () => {
+    // The box's stronger edge belongs to its text box: when a button inside the composer takes focus,
+    // that button rings and the box's edge goes back to the hairline.
+    const screen = await render(<AfterStart><Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" onSend={noop} onAttach={noop} /></AfterStart>);
+    const field = screen.container.querySelector<HTMLElement>('[data-focus-probe] textarea');
+    const box = field?.closest<HTMLElement>('.cd-composer__box');
+    if (!field || !box) throw new Error('no composer');
+    await userEvent.click(field);
+    expect(getComputedStyle(box).boxShadow).toContain(tokenColor('--line-field'));
+    await userEvent.tab();
+    const button = document.activeElement as HTMLElement;
+    expect(button.tagName).toBe('BUTTON');
+    expect(box.contains(button)).toBe(true);
+    expect(getComputedStyle(button).outlineColor).toBe(tokenColor('--ring-focus'));
+    expect(getComputedStyle(box).boxShadow).toContain(tokenColor('--line-hairline'));
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(field);
+    expect(getComputedStyle(box).boxShadow).toContain(tokenColor('--line-field'));
     await screen.unmount();
   });
 });

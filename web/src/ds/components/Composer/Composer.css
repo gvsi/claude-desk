@@ -1,7 +1,7 @@
 /* Composer: a raised surface at the composer radius, an inset hairline and the composer's shadow.
    Its text box with focus shows its caret, never a ring (base.css), and the box's edge goes one step
    stronger, from the hairline to the field outline, so focus shows while the caret blinks off (owner,
-   2026-11-01, WCAG 2.4.7). A button inside it shows its own ring on keyboard focus, and the edge stays. */
+   2026-11-01, WCAG 2.4.7). A button inside it shows its own ring on keyboard focus, and the box's edge goes back to the hairline. */
 
 .cd-composer {
   display: flex;

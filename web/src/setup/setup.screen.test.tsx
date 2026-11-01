@@ -3686,6 +3686,24 @@ describe('consultant setup', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('the_other_answer_shows_a_stronger_edge_with_focus', async () => {
+    // Text entry shows its caret and a stronger edge with focus, never a ring (owner, 2026-11-01). The
+    // "Something else" input draws no border of its own, so its row takes the field's focused edge.
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const other = screen.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toBeVisible();
+    const row = other.element().closest<HTMLElement>('.cd-setup-q3__row--other');
+    if (!row) throw new Error('the "Something else" input sits in its row');
+    const edge = tokenColor('--line-field-focus');
+    expect(getComputedStyle(row).boxShadow).not.toContain(edge);
+    await other.click();
+    expect(getComputedStyle(row).boxShadow).toContain(edge);
+    expect(getComputedStyle(other.element()).outlineStyle).toBe('none');
+    (other.element() as HTMLInputElement).blur();
+    expect(getComputedStyle(row).boxShadow).not.toContain(edge);
+  });
+
   it('keeps_the_other_answer_within_the_existing_answer_limit', async () => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);

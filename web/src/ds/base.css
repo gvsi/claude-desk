@@ -37,7 +37,7 @@ a {
 }
 
 /* Text entry (a text field, a text area, a composer's text box) with focus, by pointer or keyboard,
-   shows its caret and its own edge one step stronger (TextField.css, Composer.css), never a ring
+   shows its caret and its own edge one step stronger (below, and Composer.css), never a ring
    (owner, 2026-11-01, WCAG 2.4.7). Browsers match :focus-visible on a text field even when it was
    clicked, so the ring is turned off here. Only a field that can be typed in (`:read-write`) has a
    caret: a held, read-only field, and every checkbox, radio, range or button input, keeps the ring. */
