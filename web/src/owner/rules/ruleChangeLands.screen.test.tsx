@@ -8,7 +8,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { cdp, userEvent } from 'vitest/browser';
+import { cdp, userEvent, type Locator } from 'vitest/browser';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { apiPath } from '../../api/routes.ts';
@@ -367,7 +367,68 @@ describe('under reduced motion', () => {
   });
 });
 
+/** Asks in Ask Claude's own composer, with Claude answering `answer` with `card` drafted, and waits for its review. */
+async function askAgain(panel: Locator, log: Locator, words: string, card: RuleCard, answer: string): Promise<void> {
+  answerWith(card, answer);
+  await panel.getByRole('textbox', { name: 'Ask Claude' }).fill(words);
+  await userEvent.keyboard('{Enter}');
+  await expect.element(log.getByText(answer, { exact: true })).toBeVisible();
+  await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+}
+
+/** Refunds that never go through, as `answerWithNoRefunds` drafts them. */
+const NO_REFUNDS: RuleCard = { ...rivera.ruleCards['rv-refund'], mode: 'never', reason: 'Refunds never go through.' };
+
+/** Documents that are never shared, as `answerWithNoDocuments` drafts them. */
+const NO_DOCUMENTS: RuleCard = { ...rivera.ruleCards['rv-docs'], mode: 'never', reason: 'Documents are never shared.' };
+
 describe('on a phone', () => {
+  it('two_changes_confirmed_in_one_sheet_both_land_once_it_closes', async () => {
+    answerWithNoRefunds();
+    const { screen, log, panel } = await askForTheWeekdayChange({ viewport: 'phone' }, STOP_REFUNDS);
+    const root = screen.container;
+    const first = desk().lastVersion;
+    await log.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(log.getByText(receiptWords(first), { exact: true })).toBeVisible();
+    // A second change in the same sheet, confirmed before it closes.
+    await askAgain(panel, log, STOP_DOCUMENTS, NO_DOCUMENTS, STOP_DOCUMENTS_ANSWER);
+    const second = desk().lastVersion;
+    await log.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(log.getByText(receiptWords(second), { exact: true })).toBeVisible();
+    expect(updatedRows(root)).toEqual([]);
+
+    // Closed, both rows land.
+    await panel.getByRole('button', { name: 'Close' }).click();
+    await expect.poll(() => updatedRows(root)).toEqual(['Share a document', 'Refund']);
+  });
+
+  it('a_change_left_behind_with_back_never_lands_on_a_later_visit', async () => {
+    // From All rules to Rules, so Back has somewhere to go.
+    const rendered = await renderRoute(`${DESK}/rules/all`, { viewport: 'phone' });
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await rendered.router.navigate(`${DESK}/rules`);
+    answerWithNoRefunds();
+    const composer = rendered.screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    await composer.fill(STOP_REFUNDS);
+    await userEvent.keyboard('{Enter}');
+    const log = rendered.screen.getByRole('dialog', { name: 'Ask Claude' }).getByRole('log');
+    await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+    const version = desk().lastVersion;
+    await log.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+
+    // Back with the sheet still open, then Forward to Rules: a new visit, where nothing says it was updated.
+    await rendered.router.navigate(-1);
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await rendered.router.navigate(1);
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    const root = rendered.screen.container;
+    await expect.poll(() => wordsOf(toolRow(root, 'Refund'))).not.toBe('');
+    await pause(500);
+    expect(updatedRows(root)).toEqual([]);
+    expect(root.querySelectorAll('.cd-connector-section__glow')).toHaveLength(0);
+  });
+
   it('the_sheet_shows_the_receipt_and_closing_it_brings_rules_to_the_row', async () => {
     // A change to the Refund row, far down Rules on a phone, under the composer that opened the sheet.
     answerWithNoRefunds();
