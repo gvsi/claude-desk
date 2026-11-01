@@ -1214,6 +1214,35 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect((await repliesTo(RIVERA.slug, '¿Me reservas la primera?')).at(-1)).toEqual(rivera.blocks.booking_confirmed.es);
   });
 
+  /** The Desk's card for the newest payment link once a change to the rules cancels it, as the visitor's chat gets it. */
+  async function linkCancelledOn(slug: string): Promise<SseEvent[]> {
+    const newest = [...mockStore.world.links].at(-1);
+    if (newest === undefined) throw new Error('the Desk issued a payment link');
+    const [token, link] = newest;
+    return eventsWhile(slug, async () => mockStore.world.cancelLink(token, link, 'rules_changed'));
+  }
+
+  it('the_owner_in_the_chat_and_a_cancelled_link_name_that_owner', async () => {
+    // A deposit link Linda's rules cancelled says so in the kernel's words, and her own words in
+    // the chat she took over are marked as hers.
+    const slug = await liveDesk(CPA);
+    await turnOn(slug, 'Can I pay the deposit?');
+    const cancelled = await linkCancelledOn(slug);
+    expect(linesOf(cancelled)).toEqual(["Reply checked against Linda's rules"]);
+    expect(cancelled.flatMap((ev) => (ev.type === 'message' ? ev.blocks.map((b) => b.lines?.at(-1)) : []))).toEqual([
+      "This payment link was cancelled because Linda's rules changed. Ask again if you still want to pay.",
+    ]);
+
+    const chat = mockStore.visitorSession(slug);
+    if (!chat) throw new Error('the visitor has a chat');
+    const { session_id, generation } = chat.state;
+    const said = await eventsWhile(slug, async () => {
+      await mockStore.dispatch('takeover', { params: { session_id }, body: { generation } });
+      await mockStore.dispatch('ownerMessage', { params: { session_id }, body: { text: 'Hi, it is Linda.', kind: 'say' } });
+    });
+    expect(linesOf(said)).toEqual(['Written by Linda']);
+  });
+
   it('what_only_the_owner_can_answer_names_that_owner', async () => {
     // Claude's plain answer when nothing more specific fits: Linda can tell, and the visitor can ask
     // for her by name, as the page's "Ask for Linda" does.

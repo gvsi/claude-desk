@@ -353,22 +353,38 @@ function helpProse(language: Language, owner: DeskOwner): RenderedBlock {
  * The kernel's `link_cancelled` line, rendered from the owner's name (master plan, "Payment links";
  * kernel plan 01c), which only the kernel issues.
  */
-const OWNER = rivera.business.ownerName;
+const LINK_CANCELLED_TEMPLATES: Record<Language, string> = {
+  en: "This payment link was cancelled because {owner}'s rules changed. Ask again if you still want to pay.",
+  es: 'Este enlace de pago se canceló porque cambiaron las reglas de {owner}. Pídelo de nuevo si todavía quieres pagar.',
+};
+
+/** The kernel's `link_cancelled` line on a Desk whose owner is `owner`, in `language`. */
+function linkCancelledLine(language: Language, owner: DeskOwner): string {
+  return naming(LINK_CANCELLED_TEMPLATES[language], ownerIn(language, owner), language);
+}
+
+/** The kernel's `link_cancelled` line on Rivera's Desk. */
 export const LINK_CANCELLED: Record<Language, string> = {
-  en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
-  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}${afterName(OWNER, '. Pídelo de nuevo si todavía quieres pagar.')}`,
+  en: linkCancelledLine('en', RIVERA_OWNER),
+  es: linkCancelledLine('es', RIVERA_OWNER),
 };
 
 /**
  * The `link_cancelled` card as the kernel renders it from the cancelled link's own `payment_link`
- * fact, in the chat's language: the link's amount as its title, then what the link was for and the
- * kernel's line. It cites the deposit card's fact, as the script's payment link card does.
+ * fact, in the chat's language, on a Desk whose owner is `owner` (Rivera's unless given): the
+ * link's amount as its title, then what the link was for and the kernel's line. It cites the
+ * deposit card's fact, as the script's payment link card does.
  */
-export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language, factId = blocks.payment_link[language].fact_id ?? null): CardBlock {
+export function linkCancelledBlock(
+  link: Pick<PaymentLinkView, 'title' | 'amount_cents'>,
+  language: Language,
+  factId = blocks.payment_link[language].fact_id ?? null,
+  owner: DeskOwner = RIVERA_OWNER,
+): CardBlock {
   return cardBlock('link_cancelled', {
     fact_id: factId,
     title: moneyText(link.amount_cents),
-    lines: [link.title, LINK_CANCELLED[language]],
+    lines: [link.title, linkCancelledLine(language, owner)],
   });
 }
 

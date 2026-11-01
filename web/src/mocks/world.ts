@@ -972,7 +972,7 @@ export class MockWorld {
       ref_id: token,
       summary: { state: 'cancelled', by },
     });
-    if (by === 'rules_changed' && !session.ended) this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language, `payment_link:${token}`)]);
+    if (by === 'rules_changed' && !session.ended) this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language, `payment_link:${token}`, this.ownerOf(session))]);
   }
 
   /**
