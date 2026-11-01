@@ -35,7 +35,7 @@ it('uses_the_supplied_deadline_for_a_longer_sequence', async () => {
 it.each([
   { end: 5000, current: 1000, rate: 2, deadline: 3500 },
   { end: 5000, current: 1000, rate: 0.5, deadline: 9500 },
-  { end: 5000, current: 1000, rate: -2, deadline: 2000 },
+  { end: 5000, current: 1000, rate: -2, deadline: ANIMATION_DEADLINE_MS },
   { end: 5000, current: 5000, rate: 1, deadline: 1500 },
   { end: 5000, current: 1000, rate: 0, deadline: ANIMATION_DEADLINE_MS },
   { end: Infinity, current: 1000, rate: 1, deadline: ANIMATION_DEADLINE_MS },

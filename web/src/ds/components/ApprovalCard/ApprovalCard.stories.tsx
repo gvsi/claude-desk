@@ -4,7 +4,7 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
 import { chen, rivera } from '../../fixtures/index.ts';
-import { animationLabel, animationWithin } from '../../test/animationWithin.ts';
+import { ANIMATION_DEADLINE_MS, animationLabel, animationWithin } from '../../test/animationWithin.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
 import { Notice } from '../Notice/Notice.tsx';
@@ -1553,7 +1553,7 @@ export const EnterLands: Story = {
         animationWithin(animation.finished.catch(() => undefined), animationLabel(animation)),
       ),
     );
-    await waitFor(() => expect(card.querySelector('.cd-approval-card__layer--leaving'), 'cd-approval-card leaving layer is removed').toBeNull(), { timeout: 2000 });
+    await waitFor(() => expect(card.querySelector('.cd-approval-card__layer--leaving'), 'cd-approval-card leaving layer is removed').toBeNull(), { timeout: ANIMATION_DEADLINE_MS });
     let frame = 0;
     try {
       await animationWithin(new Promise((resolve) => {

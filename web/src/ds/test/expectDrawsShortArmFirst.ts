@@ -1,6 +1,6 @@
 import { expect, waitFor } from 'storybook/test';
 
-import { animationLabel, animationWithin } from './animationWithin.ts';
+import { ANIMATION_DEADLINE_MS, animationLabel, animationWithin } from './animationWithin.ts';
 
 /**
  * check_draws_short_arm_first: a check that draws once draws as a hand writes one, short arm first.
@@ -44,5 +44,5 @@ export async function expectDrawsShortArmFirst(stroke: SVGPathElement): Promise<
   await expect(tip(length)).toEqual([4, 12]);
 
   await animationWithin(draw.finished, animationLabel(draw));
-  await waitFor(() => expect(getComputedStyle(stroke).strokeDashoffset, `${animationLabel(draw)} ends with the check whole`).toBe('0px'), { timeout: 2000 });
+  await waitFor(() => expect(getComputedStyle(stroke).strokeDashoffset, `${animationLabel(draw)} ends with the check whole`).toBe('0px'), { timeout: ANIMATION_DEADLINE_MS });
 }
