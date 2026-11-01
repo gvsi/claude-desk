@@ -258,9 +258,10 @@ PUBLIC_KEY_HEX = "00" * 32           # no real key: fake signatures verify again
 class Refusal(Exception):
     """A non-2xx answer: its status and `KernelError.code`."""
 
-    def __init__(self, status: int, code: str):
+    def __init__(self, status: int, code: str, detail: dict[str, list[str]] | None = None):
         super().__init__(f"{status} {code}")
         self.status, self.code = status, code
+        self.detail = detail
 
 
 class AdapterCheckRefused(Exception):
@@ -893,6 +894,142 @@ def scan_prose(prose: str, canaries: dict[str, str]) -> list[Violation]:
 
 def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
+
+
+PUBLIC_POLICY_PATTERNS = (
+    ("lex.en.number", r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+     r"(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty|half|halves)\b"),
+    ("lex.es.number", r"\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mil|miles|"
+     r"veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|mitad)\b"),
+    ("lex.en.date", r"\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekends?|"
+     r"same[\s-]{0,3}day|(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?))\b"),
+    ("lex.es.date", r"\b(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?|fin(?:es)?\s+de\s+semana)\b"),
+    ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
+     r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|garant(?:o|imos|em)|"
+     r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
+     r"kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)\b"),
+    ("lex.en.promise", r"\b(?:(?<!feel )free(?! to\b))\b"),
+    ("lex.en.promise", r"\b(?:(?<!feel )(?<!you['’]re )(?<!you are )(?<!you['’]ll be )(?<!you will be )free(?= to\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:all|any(?:one|body)?|every(?:one|body)?|each|both|some|most|several|many|no|unlimited)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:the|an?|this|that|these|those|our|your|my|his|her|its|their|you|them)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:new|existing|first[\s-]?time|current|returning|regular|local)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b))\b"),
+    ("lex.en.promise", r"\b(?:discounts?|refunds?|guarantees?|no\s+charge)\b"),
+    ("lex.es.promise", r"\b(?:gratis|gratuit[oa]s?|descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
+    ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
+    ("lex.es.booking", r"\btu\s+cita\s+está\s+confirmada\b"),
+)
+
+
+def unsupported_public_policy_language(text: str) -> bool:
+    """Mirror positive other-language evidence; unmarked names and lists keep passing."""
+    text = unicodedata.normalize("NFKC", text)
+    letters = [char for char in text if char.isalpha()]
+    non_latin = sum(not unicodedata.name(char, "").startswith("LATIN ") for char in letters)
+    return non_latin > 0.3 * len(letters) or detect_language(text) == "other"
+
+
+def public_commitment_reading(text: str) -> tuple[str, list[int]]:
+    """Fold accents for the fake's examples, retaining original offsets for attribution."""
+    chars, origin = [], []
+    for index, char in enumerate(text):
+        for part in unicodedata.normalize("NFKD", char):
+            if unicodedata.category(part) not in ("Mn", "Me"):
+                chars.append(part)
+                origin.append(index)
+    return "".join(chars), origin
+
+
+SERVICE_AREA_BLANK = r"[\s\-‐‑]"
+SERVICE_AREA_UNIT = r"(?:miles?|mi|kms?|kilomet(?:er|re)s?|kil[oó]metros?|millas?)\b"
+SERVICE_AREA_CARDINAL = (
+    r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+    r"|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty"
+    r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
+    r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
+SERVICE_AREA_AFTER_CARDINAL = (
+    rf"(?:{SERVICE_AREA_BLANK}+(?:y{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_CARDINAL}\b){{0,2}}"
+    rf"(?:{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}|{SERVICE_AREA_BLANK}+(?:days?{SERVICE_AREA_BLANK}+a"
+    rf"{SERVICE_AREA_BLANK}+week|d[ií]as?{SERVICE_AREA_BLANK}+a{SERVICE_AREA_BLANK}+la{SERVICE_AREA_BLANK}+semana)\b)")
+SERVICE_AREA_DAY_WORDS = (
+    r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
+    rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{SERVICE_AREA_BLANK}+de"
+    rf"{SERVICE_AREA_BLANK}+semana|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches")
+
+
+def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
+    """Mirror the service-area allowance on the hit `text[start:end]`, read in that policy's own text: a
+    number before a distance unit or a year, a cardinal word before a unit or "days a week", "miles" as the
+    unit, and weekdays, weekends and parts of the day."""
+    if key not in {"policy:service_area", "charter:policy:service_area"}:
+        return False
+    hit, after = text[start:end], text[end:]
+    if rule == "digit":
+        return (re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
+                or re.match(rf"{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}", after, re.IGNORECASE) is not None)
+    if rule in ("lex.en.number", "lex.es.number"):
+        return re.fullmatch(r"miles|millas", hit, re.IGNORECASE) is not None or (
+            re.fullmatch(SERVICE_AREA_CARDINAL, hit, re.IGNORECASE) is not None
+            and re.match(SERVICE_AREA_AFTER_CARDINAL, after, re.IGNORECASE) is not None)
+    if rule in ("lex.en.date", "lex.es.date"):
+        return re.fullmatch(SERVICE_AREA_DAY_WORDS, hit, re.IGNORECASE) is not None
+    return False
+
+
+def public_policy_rules(text: str, key: str | None = None) -> list[str]:
+    """Mirror the contract's numeric and English/Spanish promise examples, not the full scan.
+
+    The real scan imports kernel-service modules; this API test fake stays outside that boundary.
+    Exhaustive lexicon behavior is covered by the real kernel's own tests.
+    """
+    text = unicodedata.normalize("NFKC", text)
+    rules = {"percent_sign" if hit.rule_id == "percent" else hit.rule_id
+             for hit in scan_prose(text, {}) if hit.rule_id != "digit"}
+    for match in re.finditer(r"\d+(?:[.,:]\d+)*", text):
+        if not allowed_service_area_hit(key, text, match.start(), match.end(), "digit"):
+            rules.add("digit")
+    if unsupported_public_policy_language(text):
+        rules.add("language")
+    if any(unicodedata.category(char) == "Cf" for char in text):
+        rules.add("format_control")
+    for rule, pattern in PUBLIC_POLICY_PATTERNS:
+        reading, origin = (public_commitment_reading(text) if rule == "language"
+                           else (text, list(range(len(text)))))
+        if any(not allowed_service_area_hit(key, text, origin[match.start()], origin[match.end() - 1] + 1, rule)
+               for match in re.finditer(pattern, reading, re.IGNORECASE)):
+            rules.add(rule)
+    if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
+        rules.add("language")
+    return sorted(rules)
+
+
+def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[str]]:
+    """Attribute the contract's policy examples in the actual public or reply order."""
+    fields = {key: set(public_policy_rules(value, key)) for key, value in parts if key is not None}
+    ranges, pieces, offset = [], [], 0
+    for key, value in parts:
+        value = unicodedata.normalize("NFKC", value)
+        ranges.append((key, offset, offset + len(value)))
+        pieces.append(value)
+        offset += len(value) + 1
+    combined = "\n".join(pieces)
+    if unsupported_public_policy_language(combined):
+        for key in fields:
+            fields[key].add("language")
+    for rule, pattern in (*PUBLIC_POLICY_PATTERNS, ("language", r"\bgrátis\b")):
+        reading, origin = (public_commitment_reading(combined) if rule == "language" and "grátis" not in pattern
+                           else (combined, list(range(len(combined)))))
+        for match in re.finditer(pattern, reading, re.IGNORECASE):
+            start, end = origin[match.start()], origin[match.end() - 1] + 1
+            if any(key is not None and low <= start and end <= high
+                   and allowed_service_area_hit(key, combined[low:high], start - low, end - low, rule)
+                   for key, low, high in ranges):
+                continue
+            for key, low, high in ranges:
+                if key is not None and low < end and start < high:
+                    fields[key].add(rule)
+    return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
 
 
 # Signed agents ---------------------------------------------------------------------------------------
@@ -2073,6 +2210,13 @@ class FakeKernelState:
                 if (named and fact.kind == "charter" and "public" in fact.label.readers and self._current(fact)
                         and (template != "hours" or desk.hours)):
                     charter.append(self._render(desk, template, fact, language))
+        # Scan the final rendered group: filtering can bring separate promise fragments together.
+        refused = {key for block in charter if block.template == "policy"
+                   for key in public_policy_fields([(block.fact_id, block.text)])}
+        charter = [block for block in charter if block.fact_id not in refused]
+        while refused := public_policy_fields([
+                (block.fact_id, block.text) for block in charter if block.template == "policy"]):
+            charter = [block for block in charter if block.fact_id not in refused]
         card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
@@ -2861,6 +3005,14 @@ class FakeKernelState:
             card = self._clause(session, desk, clause, language, violations)
             if card is not None:
                 cards.append(card)
+        policies = [(card.fact_id, card.text) for card in cards if card.template == "policy"
+                    and card.fact_id is not None and card.fact_id.startswith("charter:policy:")]
+        if policies:
+            refused = public_policy_fields([(None, draft.prose), *policies])
+            fact_ids = list(dict.fromkeys(fact_id for fact_id, _ in policies if fact_id in refused))
+            if fact_ids:
+                violations.append(Violation(kind="unknown_fact", span="policy", rule_id="policy_combined",
+                                            fact_ids=fact_ids))
         prose = [RenderedBlock(kind="prose", text=draft.prose)] if draft.prose else []
         return self._verdict(session, desk, language, prose + cards, violations,
                              [clause.fact_id for clause in draft.clauses if clause.fact_id], final=final)
@@ -3104,6 +3256,7 @@ class FakeKernelState:
         if body.desk.connections or body.desk.auto_money_cap_cents != 0:
             raise Refusal(422, "invalid")
         self._check_business(body.business.owner_display_name, body.business.timezone)
+        self._refuse_policy_promises(copy.copy_id, body.desk.charter, "desk")
         native = tuple(tool for tool in TOOL_FACTS if tool_profile(tool).source == "native")
         desk = self._create_desk(copy.copy_id, body.business, body.desk, tools=native, cards=ASK_FIRST_CARDS)
         copy.desk_ids.append(desk.desk_id)
@@ -3176,13 +3329,30 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": part, "refs": []})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
+    def _refuse_policy_promises(self, copy_id: str, charter: list[Claim], part: str,
+                                desk: Desk | None = None) -> None:
+        keys = [claim.key for claim in charter]
+        if len(set(keys)) != len(keys):
+            raise Refusal(422, "invalid")
+        values = {claim.key: claim.value for claim in charter
+                  if claim.key.startswith("policy:") and claim.kind == "text"}
+        if len(values) > 40:
+            raise Refusal(422, "invalid", {"charter": ["policy_count_limit"]})
+        if sum(map(len, values.values())) > 8_000:
+            raise Refusal(422, "invalid", {"charter": ["policy_text_limit"]})
+        fields = public_policy_fields(sorted(values.items()))
+        if fields:
+            targets = [desk] if desk is not None else sorted(
+                (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
+            for target in targets:
+                self.append(target, "desk_data", {"part": part, "refused": "promise", "fields": fields})
+            raise Refusal(422, "invalid", fields)
+
     def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
         """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
         stays, since the hours write it); a key given twice is 422."""
         desk = self._owners_desk(request, request.path_params["id"])
-        keys = [claim.key for claim in body.charter]
-        if len(set(keys)) != len(keys):
-            raise Refusal(422, "invalid")
+        self._refuse_policy_promises(desk.copy_id, body.charter, "charter", desk)
         for fact_id in [fact_id for fact_id, fact in desk.facts.items()
                         if fact.kind == "charter" and fact_id != "charter:hours"]:
             del desk.facts[fact_id]
@@ -4058,8 +4228,9 @@ FAKE_ROUTES: dict[str, str] = {
 }
 
 
-def _error(status: int, code: str) -> Response:
-    return Response(KernelError(code=code).model_dump_json(), status_code=status, media_type="application/json")
+def _error(status: int, code: str, detail: dict[str, list[str]] | None = None) -> Response:
+    return Response(KernelError(code=code, detail=detail).model_dump_json(exclude_none=True),
+                    status_code=status, media_type="application/json")
 
 
 def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any], Any]):
@@ -4095,7 +4266,7 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if state._take_drop(key):
             raise httpx.ReadTimeout("the fake kernel committed, then timed out")
         if isinstance(result, Refusal):
-            return _error(result.status, result.code)
+            return _error(result.status, result.code, result.detail)
         if isinstance(result, Response):                # a document's bytes
             return result
         if response_adapter is None:

@@ -826,6 +826,9 @@ export interface KernelError {
     | "rate_limited"
     | "seed_unproved"
     | "internal";
+  detail?: {
+    [k: string]: string[];
+  } | null;
 }
 export interface KnowledgeItem {
   item_id: string;
