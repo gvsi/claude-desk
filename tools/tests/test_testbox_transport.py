@@ -284,3 +284,37 @@ def test_authenticated_host_key_replaces_all_old_entries_for_the_instance(tmp_pa
     replace_host_key(known, 'i-test', ['ssh-ed25519', 'new'])
     replace_host_key(known, 'i-test', ['ssh-ed25519', 'new'])
     assert known.read_text().splitlines() == ['i-other ssh-ed25519 keep', 'i-test ssh-ed25519 new']
+
+
+def run_prepare(tmp_path, *, lock=True, flock_status=0, ready=True):
+    """Run the client's remote shell prefix against a stand-in /opt/testbox; flock is replaced by a recorder."""
+    import os
+    import shlex
+    from desk_tools.testbox_client import prepare_script
+
+    opt, tools = tmp_path / 'opt', tmp_path / 'bin'
+    opt.mkdir()
+    tools.mkdir()
+    if ready:
+        (opt / 'ready').write_text('ready\n')
+    if lock:
+        (opt / 'bootstrap.lock').touch()
+    (tools / 'flock').write_text(f'#!/bin/sh\necho "$@" >> {tmp_path / "flock-args"}\nexit {flock_status}\n')
+    (tools / 'flock').chmod(0o755)
+    script = prepare_script(str(tmp_path / 'lane')).replace('/opt/testbox', str(opt)) + shlex.quote('print("continued")')
+    return subprocess.run(['bash', '-c', script], env={**os.environ, 'PATH': f'{tools}:{os.environ["PATH"]}'},
+                          capture_output=True, text=True)
+
+
+def test_a_ready_machine_admits_the_run_under_the_shared_bootstrap_lock(tmp_path):
+    result = run_prepare(tmp_path)
+    assert (result.returncode, result.stdout) == (0, 'continued\n')
+    assert (tmp_path / 'flock-args').read_text().split()[0] == '-s'
+
+
+@pytest.mark.parametrize('failure', ['missing-lock', 'lock-not-taken'])
+def test_a_run_never_starts_without_the_shared_bootstrap_lock(tmp_path, failure):
+    # A missing lock file must stop the run on its own, even where flock itself would succeed.
+    result = run_prepare(tmp_path, lock=failure != 'missing-lock', flock_status=0 if failure == 'missing-lock' else 1)
+    assert result.returncode == 75
+    assert 'continued' not in result.stdout

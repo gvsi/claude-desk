@@ -189,6 +189,14 @@ with (base / 'lock').open('w') as lock:
 """.replace('BASE', repr(base)).replace('STATE', repr(lane_state_script(base))).replace('COMMAND', repr(command)).replace('CANCEL', repr(cancel))
 
 
+def prepare_script(base: str) -> str:
+    """Remote shell prefix: admit a run only on a ready machine, holding the bootstrap lock shared for its whole life.
+    The transaction script follows, quoted, after `python3 -c`. Bash carries on after a failed `exec` redirection,
+    so each step fails closed explicitly: without the lock, bootstrap could change the machine under the run."""
+    return (f"test -f /opt/testbox/ready || exit 75; exec 8</opt/testbox/bootstrap.lock || exit 75; flock -s 8 || exit 75; "
+            f"test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c ")
+
+
 def replace_host_key(known_hosts: Path, instance: str, host_key: list[str]):
     if known_hosts.exists():
         subprocess.run(["ssh-keygen", "-R", instance, "-f", str(known_hosts)],
@@ -366,8 +374,7 @@ def run(args, root, lane, cache):
     # stop is idempotent even if cancellation happens before the service was created.
     cancel = ["sudo", "sh", "-c", f"systemctl stop {unit}.service 2>/dev/null || ! systemctl is-active --quiet {unit}.service"]
     transaction = transaction_script(base, ["sudo", "env", f"TESTBOX_PROTOCOL={PROTOCOL_VERSION}", f"TESTBOX_TIMING={int(os.environ.get('TESTBOX_TIMING') == '1')}", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/transfer/tools/testbox/worker.py", base], cancel)
-    prepare = f"test -f /opt/testbox/ready || exit 75; exec 8</opt/testbox/bootstrap.lock; flock -s 8; test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c "
-    holder = start_holder(ssh + [prepare + shlex.quote(transaction)])
+    holder = start_holder(ssh + [prepare_script(base) + shlex.quote(transaction)])
     try:
         remote = read_remote_state(holder)
         if remote is None:
