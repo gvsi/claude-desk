@@ -35,7 +35,6 @@ from .helpers import rows_of
 from .test_adapters import Rivera, book, rivera
 from .test_decide import open_visitor
 from .test_desk_writes import LOPEZ_DESK, answered, entries_of, new_desk, post_desk, put_part, slot_body
-from .test_verification import api_rows
 
 TIMEZONE = "America/Chicago"                 # Lopez Electric's
 ZONE = ZoneInfo(TIMEZONE)
@@ -102,6 +101,27 @@ async def setup_desk(app: FastAPI, client: httpx.AsyncClient, copy: Rivera, slot
         response = await put_part(client, copy, part, body, desk_id=desk_id)
         assert response.status_code == 200, (part, response.text)
     return SetupDesk(copy=copy, desk_id=desk_id, slug=slug)
+
+
+NOW = datetime(2026, 10, 30, 17, 4, 5, tzinfo=UTC)   # the frozen clock: Friday 12:04 in Chicago
+WINDOW = calendar_slots(HOURS, TIMEZONE, TODAY)      # the 14 days from tomorrow
+
+
+def slot_at(slot_id: str, day: date) -> CalendarSlot:
+    return CalendarSlot(slot_id=slot_id, starts_at=datetime.combine(day, time(9), ZONE), minutes=60)
+
+
+@pytest.mark.parametrize(("rows", "expected"), [
+    ([], WINDOW),                                                             # none: 14 days from tomorrow
+    ([slot_at("S-20261020-0900", TODAY - timedelta(days=10))], WINDOW),       # only past ones: 14 days too
+    ([slot_at("S-20261119-0900", TODAY + timedelta(days=20))], []),           # already past 14 days: none
+    ([slot_at("S-20261110-0900", TODAY - timedelta(days=1))],                 # an ID it has, on another day
+     [slot for slot in WINDOW if slot.slot_id != "S-20261110-0900"]),
+], ids=["no_slots", "only_past_slots", "beyond_the_window", "id_taken"])
+def test_later_slots(rows, expected):
+    assert desks.later_slots(HOURS, TIMEZONE, NOW, rows) == expected
+    assert {local_day(slot) for slot in WINDOW} == {TODAY + timedelta(days=n) for n in range(1, 15)
+                                                    if (TODAY + timedelta(days=n)).weekday() < 5}
 
 
 async def test_the_calendar_is_refreshed_from_the_hours(app, client):
@@ -224,10 +244,14 @@ async def test_every_copys_desks_are_refreshed_in_their_own_copy(app, client):
 
     later = after(calendar_slots(HOURS, TIMEZONE, TODAY), TODAY + timedelta(days=3))
     assert added == {desk.desk_id: [slot.slot_id for slot in later] for desk in (first, second)}
-    for desk in (first, second):             # each slot under its own Desk's copy, and only there
+    for desk in (first, second):
         assert await slots_of(app, desk) == as_rows(made + later, desk.copy.copy_id)
-        assert api_rows(desk.copy.copy_id, "SELECT DISTINCT copy_id FROM kernel_ro.calendar_slots") == [
-            (desk.copy.copy_id,)]
+    # read across every copy: each Desk's slots, old and new, are all under its own copy
+    with psycopg.connect(libpq_url(database_url("ADMIN"))) as admin:
+        found = admin.execute("SELECT desk_id, copy_id, count(*) FROM kernel.calendar_slots"
+                              " WHERE desk_id = ANY(%s) GROUP BY desk_id, copy_id ORDER BY desk_id",
+                              ([first.desk_id, second.desk_id],)).fetchall()
+    assert found == sorted((desk.desk_id, desk.copy.copy_id, len(made + later)) for desk in (first, second))
 
 
 async def test_the_refresh_runs_beside_the_kernel_and_stops_with_it(app, frozen_clock, reviewer, monkeypatch):
@@ -264,23 +288,21 @@ async def test_a_failed_pass_is_logged_and_the_next_one_runs(monkeypatch, caplog
     assert "calendar_refresh_failed kind=RuntimeError" in caplog.text
 
 
-async def test_a_desk_that_fails_leaves_the_others_refreshed(app, client, monkeypatch, caplog):
+async def test_a_desk_another_write_holds_is_left_to_the_next_pass(app, client, monkeypatch, caplog):
+    monkeypatch.setattr(desks, "CALENDAR_REFRESH_LOCK_S", 0.3)
+    copy = await rivera(app, client)
     made = setup_calendar(days_ago=11)
-    failing = await setup_desk(app, client, await rivera(app, client), made)
-    other = await setup_desk(app, client, await rivera(app, client), made)
-    extend = desks.extend_calendar
-
-    async def fails_for_one(ctx, desk_id):
-        if desk_id == failing.desk_id:
-            raise RuntimeError("one Desk's write failed")
-        return await extend(ctx, desk_id)
-
-    monkeypatch.setattr(desks, "extend_calendar", fails_for_one)
-    with caplog.at_level(logging.INFO, logger="desk.kernel_service"):
-        assert list(await desks.extend_calendars(app.state.kernel)) == [other.desk_id]
-    assert (f"calendar_extend_failed copy_id={failing.copy.copy_id} desk_id={failing.desk_id} kind=RuntimeError"
-            in caplog.text)
-    assert await slots_of(app, failing) == as_rows(made, failing.copy.copy_id)   # rolled back, left to the next pass
+    busy, other = await setup_desk(app, client, copy, made), await setup_desk(app, client, copy, made)
+    # an owner's write holds the Desk row past the pass's wait
+    async with held(copy.copy_id, "SELECT 1 FROM kernel.desks WHERE desk_id = %(desk_id)s FOR UPDATE",
+                    desk_id=busy.desk_id):
+        with caplog.at_level(logging.INFO, logger="desk.kernel_service"):
+            added = await asyncio.wait_for(desks.extend_calendars(app.state.kernel), timeout=5)
+    assert list(added) == [other.desk_id]
+    assert (f"calendar_extend_failed copy_id={copy.copy_id} desk_id={busy.desk_id} kind=OperationalError "
+            "sqlstate=55P03" in caplog.text)
+    assert await slots_of(app, busy) == as_rows(made, copy.copy_id)   # rolled back, left to the next pass
+    assert (await desks.extend_calendars(app.state.kernel)).keys() == {busy.desk_id}   # and taken then
 
 
 async def test_a_stuck_lookup_leaves_the_other_copies_refreshed(app, client, monkeypatch, caplog):
