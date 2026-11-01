@@ -729,7 +729,7 @@ export function PublicShell({
               {invitationShown ? (
                 <div className="cd-public-shell__welcome" aria-hidden={!firstView || undefined}>
                   <h2 className="cd-public-shell__greeting cd-type-greeting">{copy.greeting(name)}</h2>
-                  <p className="cd-public-shell__invitation cd-type-meta">{copy.invitation}</p>
+                  {starters && starters.words.length > 0 ? <p className="cd-public-shell__invitation cd-type-meta">{copy.invitation}</p> : null}
                 </div>
               ) : null}
               {children}

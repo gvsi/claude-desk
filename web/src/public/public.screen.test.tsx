@@ -180,7 +180,10 @@ describe('public chat page', () => {
     const noStarters = await renderRoute(PAGE);
     await ready(noStarters.screen);
     await expect.element(noStarters.screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
-    await expect.element(noStarters.screen.getByText('Try one of these, or ask in your own words.')).toBeVisible();
+    await expect.element(noStarters.screen.getByText('Try one of these, or ask in your own words.')).not.toBeInTheDocument();
+    const welcome = document.querySelector('.cd-public-shell__welcome')!.getBoundingClientRect();
+    const composer = document.querySelector('.cd-composer')!.getBoundingClientRect();
+    expect(Math.round(composer.top - welcome.bottom)).toBe(20);
     await expect.element(noStarters.screen.getByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
 
     mockStore.inject({ route: 'publicDesk', status: 200, body: { ...without, starters: ['One', 'Two', 'Three', 'Four'] } });

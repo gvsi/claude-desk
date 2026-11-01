@@ -1148,7 +1148,7 @@ export const FirstViewWithoutStarters: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).toBeVisible();
-    await expect(canvas.getByText('Try one of these, or ask in your own words.')).toBeVisible();
+    await expect(canvas.queryByText('Try one of these, or ask in your own words.')).not.toBeInTheDocument();
     await expect(canvas.queryByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
   },
 };
