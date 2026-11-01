@@ -3,8 +3,8 @@
 # Run this worktree's tests/builds on the isolated SSM test machine (docs/testbox.md).
 .PHONY: remote
 remote:
-	$(if $(strip $(CMD)),,$(error remote: give CMD="make kernel"))
-	tools/testbox/run sh -c '$(subst ','"'"',$(CMD))'
+	$(if $(strip $(value CMD)),,$(error remote: give CMD="make kernel"))
+	tools/testbox/run sh -c '$(subst ','"'"',$(value CMD))'
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through

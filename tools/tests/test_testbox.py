@@ -37,3 +37,13 @@ def test_timings_are_opt_in_and_use_stderr(monkeypatch, capsys):
     output = capsys.readouterr()
     assert output.out == ''
     assert 'testbox timing: fixture.visible=' in output.err
+
+
+def test_make_remote_preserves_dollars_quotes_and_argument_boundaries():
+    import shlex
+    import subprocess
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    command = "printf '%s\\n' \"$HOME\" 'literal $VALUE'"
+    result = subprocess.check_output(['make', '-n', 'remote', 'CMD=' + command], cwd=root, text=True)
+    assert shlex.split(result) == ['tools/testbox/run', 'sh', '-c', command]
