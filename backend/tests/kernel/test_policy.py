@@ -151,6 +151,16 @@ async def test_recommended_rules_in_a_desks_own_hours_prove(desk_prove, app, cli
     assert proof is not None and proof.ok and proof.method == "symcc" and not proof.timed_out, proof
     assert [(c.name, c.ok) for c in proof.checks] == [(name, True) for name in activation.PROOF_CHECKS]
     assert confirmed.status == "active" and booking in confirmed.cards
+    # A Desk open only on Saturdays drafts no booking card: weekday bookings fall to the default ask, and that
+    # proves too.
+    weekend = preset_cards("auto", [SATURDAY_HOURS])
+    assert [c for c in weekend if c.applies_to == "native.book"] == []
+    confirmed = await draft_and_confirm(client, copy.owner_token, copy.desk_id, weekend)
+    proof = confirmed.proof
+    assert proof is not None and proof.ok and proof.method == "symcc", proof
+    assert [(c.name, c.ok) for c in proof.checks] == [(name, True) for name in activation.PROOF_CHECKS]
+    assert [(c.card_id, c.mode) for c in confirmed.cards if c.applies_to == "native.book"] == [
+        ("default:native.book", "ask")]
 
 
 def use_prover(monkeypatch: pytest.MonkeyPatch, stub: str, *, sleep: float = 0) -> None:

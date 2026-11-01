@@ -1515,8 +1515,8 @@ describe('rules and tools', () => {
 
   it('preset_cards_match_the_apis', () => {
     // The mock drafts a preset as the API does (`desk.api.rules.preset_cards`): a booking card per
-    // weekday window, numbered by first day and then hours, and the presets' cards as they are for
-    // no weekday hours or exactly 9 to 5.
+    // weekday window, numbered by first day and then hours, none for hours only at weekends, and the
+    // presets' cards as they are for no hours at all or exactly 9 to 5.
     const window = (days: HoursWindow['days'], start: string, end: string): HoursWindow => ({ days, start, end });
     const bookings = (hours: HoursWindow[]) => presetCards('auto', hours).filter((card) => card.applies_to === 'native.book').map((card) => [card.card_id, card.hours]);
     const monToThu = window(['mon', 'tue', 'wed', 'thu'], '08:00:00', '18:00:00');
@@ -1531,8 +1531,12 @@ describe('rules and tools', () => {
     expect(bookings([window(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')])).toEqual([
       ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '00:00:00', '00:00:00')],
     ]);
-    for (const hours of [[], [window(['sat'], '09:00:00', '13:00:00')], [window(['mon', 'tue'], '09:00:00', '17:00:00'), window(['wed', 'thu', 'fri', 'sat'], '09:00:00', '17:00:00')]]) {
+    for (const hours of [[], [window(['mon', 'tue'], '09:00:00', '17:00:00'), window(['wed', 'thu', 'fri', 'sat'], '09:00:00', '17:00:00')]]) {
       expect(presetCards('auto', hours)).toEqual(PRESETS.auto);
+    }
+    // Hours at weekends alone: no booking card, so weekday bookings ask first.
+    for (const hours of [[window(['sat'], '09:00:00', '13:00:00')], [window(['sat', 'sun'], '10:00:00', '16:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto.filter((card) => card.applies_to !== 'native.book'));
     }
     expect(presetCards('ask_first', RIVERA_HOURS)).toEqual(PRESETS.ask_first);
   });

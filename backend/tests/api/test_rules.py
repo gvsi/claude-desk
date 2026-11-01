@@ -869,10 +869,10 @@ def test_recommended_rules_take_a_card_per_weekday_window():
 
 
 def test_recommended_rules_fall_back_to_the_shipped_cards():
-    # No hours, no weekday hours, or weekday hours of exactly 9 to 5: the shipped cards byte for byte, so the draft
-    # hits the proofs shipped for them.
+    # No hours at all, or weekday hours of exactly 9 to 5: the shipped cards byte for byte, so the draft hits the
+    # proofs shipped for them.
     shipped = [each.model_dump_json() for each in PRESETS["auto"]]
-    for hours in ([], [SATURDAY], [NINE_TO_FIVE], [NINE_TO_FIVE, SATURDAY],
+    for hours in ([], [NINE_TO_FIVE], [NINE_TO_FIVE, SATURDAY],
                   [HoursWindow(days=["mon", "tue"], start=time(9), end=time(17)),
                    HoursWindow(days=["wed", "thu", "fri", "sat"], start=time(9), end=time(17))]):
         assert [each.model_dump_json() for each in preset_cards("auto", hours)] == shipped, hours
@@ -882,6 +882,18 @@ def test_recommended_rules_fall_back_to_the_shipped_cards():
     assert (fewer.card_id, fewer.hours.days) == ("preset-book-weekday", ["mon", "tue", "wed", "thu"])
     # "Ask me first" books nothing: its cards whatever the hours.
     assert preset_cards("ask_first", [EIGHT_TO_SIX]) == PRESETS["ask_first"]
+
+
+def test_recommended_rules_leave_weekday_bookings_to_ask_without_weekday_hours():
+    # A Desk open only at weekends has no weekday hours to book in: the booking card is left out, so a weekday
+    # booking falls to the compiler's default ask, and every other card is the preset's.
+    (shipped,) = booking_cards(PRESETS["auto"])
+    weekend = HoursWindow(days=["sat", "sun"], start=time(10), end=time(16))
+    without = [each for each in PRESETS["auto"] if each != shipped]
+    for hours in ([SATURDAY], [weekend], [SATURDAY, weekend]):
+        assert preset_cards("auto", hours) == without, hours
+        assert preset_of(without, hours) == "auto"
+    assert preset_of(PRESETS["auto"], [SATURDAY]) is None
 
 
 def test_preset_of_reads_the_desks_own_recommended_rules():
@@ -976,6 +988,17 @@ async def test_preset_drafts_recommended_rules_in_the_desks_own_hours(app, brows
     again = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
     assert PolicyDraftRequest.model_validate(fake.called("POST /policy/draft")[-1].body).cards == PRESETS["auto"]
     assert again.diff == CardDiff(added=[], removed=[], changed=[(booking, booking_cards(PRESETS["auto"])[0])])
+
+    assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": again.version})).status_code == 200
+    assert await preset() == "auto"
+
+    # Hours at weekends alone draft no booking card: weekday bookings ask first.
+    await kernel_http.owner(owner.token).call("PUT /desks/{id}/hours", DeskHoursRequest(hours=[SATURDAY]),
+                                              path={"id": owner.desk_id})
+    assert await preset() is None
+    weekend = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
+    assert booking_cards(PolicyDraftRequest.model_validate(fake.called("POST /policy/draft")[-1].body).cards) == []
+    assert booking_cards(weekend.cards) == [] and weekend.diff.removed == booking_cards(PRESETS["auto"])
 
 
 async def approved_link(kernel_http, owner: Owner, items: list[dict], n: int) -> None:

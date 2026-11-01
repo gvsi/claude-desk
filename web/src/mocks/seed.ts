@@ -161,8 +161,8 @@ const RECOMMENDED_CARDS: RuleCard[] = [
  * "Ask me first" lets Claude show open times, take leads and callbacks, start verifications and read
  * the owner's material on its own; "Recommended rules" adds quotes at list price, weekday bookings,
  * customers' own documents and an ask before money moves. Its booking card here books Monday to
- * Friday, 9 to 5, the fallback: a draft of the preset gives it the Desk's own weekday hours
- * (`presetCards`). Read-only: copy a card before changing it.
+ * Friday, 9 to 5, the fallback for a Desk with no hours: a draft of the preset gives it the Desk's
+ * own weekday hours (`presetCards`). Read-only: copy a card before changing it.
  */
 export const PRESETS: Readonly<Record<RulesPreset, readonly RuleCard[]>> = {
   ask_first: STARTER_CARDS,
@@ -218,19 +218,21 @@ function sameWindow(a: HoursWindow, b: HoursWindow | null | undefined): boolean 
 
 /**
  * The preset's cards for a Desk with these opening hours, as the API's `preset_cards` drafts them:
- * "Recommended rules" books weekdays in the Desk's own hours, its weekday booking card taking the
- * Desk's weekday windows (`weekdayWindows`), one card per window in that order, in the card's place,
- * each the preset's card in all but its hours and, for several windows, its id, numbered `-1`, `-2`
- * and on. With no weekday hours, or exactly the card's own (Monday to Friday, 9 to 5), and for "Ask
- * me first", which books nothing, they are the preset's cards as they are.
+ * "Recommended rules" books weekdays in the Desk's own hours, its weekday booking card giving way to
+ * one card per weekday window (`weekdayWindows`), in that order and in its place, each the preset's
+ * card in all but its hours and, for several windows, its id, numbered `-1`, `-2` and on. Hours with
+ * none on a weekday give no booking card, so weekday bookings ask first. No hours at all, or exactly
+ * the card's own (Monday to Friday, 9 to 5), give the preset's cards as they are, as does "Ask me
+ * first", which books nothing.
  */
 export function presetCards(preset: RulesPreset, hours: readonly HoursWindow[]): RuleCard[] {
   const cards = [...PRESETS[preset]];
   const at = cards.findIndex((card) => card.card_id === PRESET_BOOKING_CARD);
   const booking = cards[at];
+  if (booking === undefined || hours.length === 0) return cards;
   const windows = weekdayWindows(hours);
   const [only] = windows;
-  if (booking === undefined || only === undefined || (windows.length === 1 && sameWindow(only, booking.hours))) return cards;
+  if (only !== undefined && windows.length === 1 && sameWindow(only, booking.hours)) return cards;
   const bookings = windows.map((window, i) => ({
     ...booking,
     card_id: windows.length === 1 ? booking.card_id : `${booking.card_id}-${i + 1}`,
