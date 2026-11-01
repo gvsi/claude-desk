@@ -13,6 +13,7 @@ executed through `/decide` and `/execute`.
 import asyncio
 import hashlib
 import json
+import re
 import sys
 import time
 import unicodedata
@@ -1055,6 +1056,133 @@ async def test_a_booking_card_the_checks_refuse_lets_no_booking_claim_through(ap
     assert entry.event.summary["rule_ids"] == ["lex.en.booking", rule_id]
 
 
+async def own_callback(client: httpx.AsyncClient, visitor: Visitor) -> Fact:
+    """A real callback fact, issued only after its request was allowed and executed."""
+    decision = await decided(client, visitor, "native.request_callback", {
+        "name": "Sam Lee", "contact": "sam@example.com", "reason": "Please call me back"},
+        call_id="request-callback")
+    assert decision.outcome == "allow", decision.reason_plain
+    result = await executed(client, visitor, decision)
+    assert result.state == "succeeded"
+    [fact] = result.facts
+    return fact
+
+
+@pytest.mark.parametrize(("prose", "callback_pattern"), [
+    ("We've booked your appointment—call us for details.", r"We've booked your appointment-call"),
+    ("Once your call is confirmed, your appointment is booked.",
+     r"your call is confirmed, your appointment is booked"),
+])
+def test_booking_matches_survive_callback_containment(monkeypatch, prose, callback_pattern):
+    # Keep the category boundary enforced even if a callback pattern is too broad.
+    monkeypatch.setattr(reply_check, "CALLBACK_LINES", [
+        ("lex.en.callback", re.compile(callback_pattern, re.IGNORECASE))])
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == [
+        ("promise_word", "lex.en.booking")]
+
+
+BOOKING_THEN_CALL_CASES = [
+    (f"We've booked your {noun}{separator}call us for details.", "en",
+     f"Call us to book your {noun}.")
+    for noun in ("appointment", "table", "viewing")
+    for separator in ("—", "–", " - ", ", ", ": ", "; ")
+] + [
+    (f"Hemos reservado su {noun}{separator}llámenos para más detalles.", "es",
+     f"Llámenos para reservar su {noun}.")
+    for noun in ("cita", "mesa", "visita")
+    for separator in ("—", "–", " - ", ", ", ": ", "; ")
+]
+
+
+def test_a_spanish_booking_subject_ending_in_llamada_still_needs_a_booking_card():
+    prose = "Tu cita de llamada está confirmada."
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == [
+        ("promise_word", "lex.es.booking")]
+
+
+@pytest.mark.parametrize(("prose", "language", "honest"), BOOKING_THEN_CALL_CASES)
+def test_an_imperative_call_after_a_booking_is_not_a_callback_claim(prose, language, honest):
+    expected = [("promise_word", f"lex.{language}.booking")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+    assert reply_check.scan_prose(honest) == []
+
+
+@pytest.mark.parametrize(("prose", "language", "honest"), BOOKING_THEN_CALL_CASES)
+async def test_a_real_callback_receipt_does_not_back_a_booking_before_an_imperative(
+        app, client, reviewer, prose, language, honest):
+    _, visitor = await visitor_of(app, client)
+    callback = await own_callback(client, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    receipt = clause("callback_confirmed", callback.fact_id)
+    for clauses in ([], [receipt]):
+        verdict = await checked(client, visitor, prose, clauses)
+        assert [(v.kind, v.rule_id) for v in verdict.violations] == [
+            ("promise_word", f"lex.{language}.booking")]
+        assert_handed_off(verdict, language)
+    assert reviewer.soft_inputs == []
+    for clauses in ([], [receipt]):
+        verdict = await checked(client, visitor, honest, clauses)
+        assert (verdict.ok, verdict.violations) == (True, [])
+    acknowledgment = "Your call is confirmed." if language == "en" else "Su llamada está confirmada."
+    verdict = await checked(client, visitor, acknowledgment, [receipt])
+    assert (verdict.ok, verdict.violations) == (True, [])
+    assert [block.template for block in verdict.blocks] == [None, "callback_confirmed"]
+
+
+@pytest.mark.parametrize(("prose", "language", "category"), [
+    ("Your call is confirmed.", "en", "callback"),
+    ("Your intro call is confirmed.", "en", "callback"),
+    ("Tu llamada está confirmada.", "es", "callback"),
+    ("Tu devolución de llamada está confirmada.", "es", "callback"),
+    ("Your viewing is confirmed.", "en", "booking"),
+    ("Your meeting is booked.", "en", "booking"),
+    ("Tu visita está confirmada.", "es", "booking"),
+    ("Tu reunión está confirmada.", "es", "booking"),
+])
+async def test_booking_and_callback_claims_need_their_own_validated_receipt(app, client, reviewer,
+                                                                          prose, language, category):
+    _, visitor = await visitor_of(app, client)
+    callback = await own_callback(client, visitor)
+    booking = await own_booking(client, reviewer, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    receipts = {"callback": clause("callback_confirmed", callback.fact_id),
+                "booking": clause("booking_confirmed", booking.fact_id)}
+    verdict = await checked(client, visitor, prose, [receipts[category]])
+    assert (verdict.ok, verdict.language, verdict.violations) == (True, language, [])
+    assert [(block.kind, block.template) for block in verdict.blocks] == [
+        ("prose", None), ("card", f"{category}_confirmed")]
+    assert verdict.blocks[0].text == prose
+    assert len(reviewer.soft_inputs) == 1
+    other = "booking" if category == "callback" else "callback"
+    for clauses in ([], [receipts[other]]):
+        blocked = await checked(client, visitor, prose, clauses)
+        assert [(v.kind, v.rule_id) for v in blocked.violations] == [
+            ("promise_word", f"lex.{language}.{category}")]
+        assert_handed_off(blocked, language)
+    assert len(reviewer.soft_inputs) == 1  # unbacked claims never reach the model check
+
+
+@pytest.mark.parametrize(("case", "kind", "rule_id"), [
+    ("another session", "unentitled_fact", "not_a_reader"),
+    ("expired", "stale_fact", "not_current"),
+    ("wrong template", "unknown_fact", "template_mismatch"),
+])
+async def test_a_rejected_callback_card_cannot_exempt_a_call_claim(app, client, reviewer, case, kind, rule_id):
+    copy, visitor = await visitor_of(app, client)
+    owner = await open_visitor(client, copy) if case == "another session" else visitor
+    callback = await own_callback(client, owner)
+    if case == "expired":
+        await change_fact(app, copy, callback.fact_id, status="expired")
+    template = "booking_confirmed" if case == "wrong template" else "callback_confirmed"
+    verdict = await checked(client, visitor, "Your call is confirmed.", [clause(template, callback.fact_id)])
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [
+        ("promise_word", "lex.en.callback"), (kind, rule_id)]
+    assert_handed_off(verdict)
+    assert reviewer.soft_inputs == []
+
+
 async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
     """Prose that points at the booking card, and claims nothing itself, is shown with it."""
     copy, visitor = await visitor_of(app, client)
@@ -1206,6 +1334,396 @@ def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
     promise word, in English and Spanish; beside one, it passes (the owner's decision, below)."""
     assert [(v.kind, v.rule_id, v.span) for v in reply_check.scan_prose(prose)] == [("promise_word", rule_id, span)]
     assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+# Business appointment names need the same card boundary as a booking or a visit.
+BUSINESS_BOOKINGS_EN = [
+    ("booking", "bookings"), ("appointment", "appointments"), ("visit", "visits"),
+    ("reservation", "reservations"), ("slot", "slots"), ("spot", "spots"),
+    ("viewing", "viewings"), ("showing", "showings"), ("tour", "tours"),
+    ("class", "classes"), ("lesson", "lessons"), ("session", "sessions"),
+    ("table", "tables"), ("room", "rooms"), ("stay", "stays"),
+    ("consultation", "consultations"), ("consult", "consults"), ("fitting", "fittings"),
+    ("tasting", "tastings"), ("treatment", "treatments"), ("massage", "massages"),
+    ("haircut", "haircuts"), ("trial", "trials"), ("demo", "demos"), ("pickup", "pickups"),
+]
+
+
+@pytest.mark.parametrize("prose", [
+    "Your viewing is confirmed.", "Your class is confirmed.", "Your lesson is confirmed.",
+    "Your tour is set.", "Your spot is saved.", "We've reserved your table.",
+    "Your session is confirmed.", "Your table is confirmed.", "Your consultation is confirmed.",
+    "Your stay is confirmed.", "Your fitting is booked in.", "Your tasting is all set.",
+    "Your service call is confirmed.", "Your service call is set.",
+    *(f"The {noun} is confirmed." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"The {plural} are confirmed." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"{noun}: confirmed." for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"Your {noun}: all set." for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"Your {noun} is saved." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"We've {verb} your {noun}." for pair in BUSINESS_BOOKINGS_EN for noun in pair
+      for verb in ("reserved", "booked", "confirmed", "scheduled")),
+])
+def test_business_booking_claims_en_need_a_card(prose):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == [
+        ("promise_word", "lex.en.booking")]
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+@pytest.mark.parametrize("prose", [
+    "Viewing times are below.", "Would you like to book a viewing?", "Pick a time for your class.",
+    "Your details are saved.", "Here are the open times for a tasting.",
+    "Is your table for the patio?", "Have you booked your lesson yet?",
+    "Once your tour is set, you'll get a card.",
+    *(f"Once your {noun} is confirmed, you'll get a card." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"Once your {plural} are saved, you'll get a card." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"Have you booked your {noun} yet?" for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"All scheduled {plural} include a reminder." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"Once we've reserved your {noun}, you'll get a card." for noun, _ in BUSINESS_BOOKINGS_EN),
+])
+def test_business_booking_words_en_without_a_claim_pass(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
+BUSINESS_BOOKINGS_ES = [
+    ("cita", "citas", "a"), ("reserva", "reservas", "a"), ("visita", "visitas", "a"),
+    ("turno", "turnos", "o"), ("hora", "horas", "a"), ("plaza", "plazas", "a"),
+    ("visita guiada", "visitas guiadas", "a"), ("recorrido", "recorridos", "o"),
+    ("clase", "clases", "a"), ("lección", "lecciones", "a"), ("sesión", "sesiones", "a"),
+    ("mesa", "mesas", "a"), ("habitación", "habitaciones", "a"), ("estancia", "estancias", "a"),
+    ("estadía", "estadías", "a"), ("alojamiento", "alojamientos", "o"),
+    ("consulta", "consultas", "a"), ("prueba", "pruebas", "a"),
+    ("degustación", "degustaciones", "a"), ("tratamiento", "tratamientos", "o"),
+    ("masaje", "masajes", "o"), ("corte de pelo", "cortes de pelo", "o"),
+    ("demostración", "demostraciones", "a"), ("recogida", "recogidas", "a"),
+]
+
+
+@pytest.mark.parametrize("prose", [
+    "Tu visita está confirmada.", "Tu clase está confirmada.", "Tu lección está confirmada.",
+    "Tu visita guiada está lista.", "Tu plaza está guardada.", "Hemos reservado tu mesa.",
+    "Tu sesión está confirmada.", "Tu mesa está confirmada.", "Tu consulta está confirmada.",
+    "Tu estancia está confirmada.", "Tu prueba está agendada.", "Tu degustación está lista.",
+    *(f"Tu {noun} está confirmad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tus {plural} están confirmad{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"{noun}: confirmad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"{plural}: confirmad{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tu {noun} está guardad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tus {plural} están list{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Hemos {verb} tu {noun}." for noun, _, _ in BUSINESS_BOOKINGS_ES
+      for verb in ("reservado", "agendado", "confirmado", "programado")),
+    *(f"He reservado tus {plural}." for _, plural, _ in BUSINESS_BOOKINGS_ES),
+])
+def test_business_booking_claims_es_need_a_card(prose):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == [
+        ("promise_word", "lex.es.booking")]
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+@pytest.mark.parametrize("prose", [
+    "Los horarios de visita están abajo.", "¿Quieres reservar una visita?",
+    "Elige un horario para tu clase.", "Tus datos están guardados.",
+    "Aquí están los horarios disponibles para una degustación.", "¿Tu mesa es para el patio?",
+    "¿Ya has reservado tu lección?", "Cuando tu visita guiada esté lista, recibirás una tarjeta.",
+    *(f"Cuando tu {noun} está confirmad{gender}, recibirás una tarjeta."
+      for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando tus {plural} están list{gender}s, recibirás una tarjeta."
+      for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando tu {noun} está guardad{gender}, recibirás una tarjeta."
+      for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando hemos reservado tu {noun}, recibirás una tarjeta."
+      for noun, _, _ in BUSINESS_BOOKINGS_ES),
+    *(f"¿Has reservado tu {noun}?" for noun, _, _ in BUSINESS_BOOKINGS_ES),
+    *(f"No hemos reservado tu {noun}." for noun, _, _ in BUSINESS_BOOKINGS_ES),
+])
+def test_business_booking_words_es_without_a_claim_pass(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
+@pytest.mark.parametrize(("prose", "honest", "language", "category"), [
+    (prose, f"Have you booked your {noun} yet?", "en", category)
+    for noun, category in (("call", "callback"), ("calls", "callback"),
+                           ("callback", "callback"), ("callbacks", "callback"),
+                           ("call back", "callback"), ("call backs", "callback"),
+                           ("intro call", "callback"), ("intro calls", "callback"),
+                           ("meeting", "booking"), ("meetings", "booking"))
+    for prose in (f"Your {noun} is confirmed.", f"The {noun} is booked.",
+                  f"{noun.capitalize()}: confirmed.", f"{noun.capitalize()} confirmed.",
+                  f"Your {noun}: all set.", f"Your {noun} is saved.",
+                  *(f"We've {verb} your {noun}." for verb in ("booked", "reserved", "confirmed", "scheduled")),
+                  f"Maria booked your {noun}.")
+] + [
+    (prose, f"¿Has reservado tu {noun}?", "es", category)
+    for noun, category in (("llamada", "callback"), ("llamadas", "callback"),
+                           ("devolución de llamada", "callback"), ("devoluciones de llamada", "callback"),
+                           ("devolucion de llamada", "callback"), ("devoluciones de llamadas", "callback"),
+                           ("reunión", "booking"), ("reuniones", "booking"), ("reunion", "booking"))
+    for prose in (f"Tu {noun} está confirmada.", f"Tus {noun} están confirmadas.",
+                  f"{noun.capitalize()}: confirmada.", f"{noun.capitalize()} confirmada.",
+                  f"Tu {noun} está guardada.", f"Tu {noun} está lista.",
+                  *(f"Hemos {verb} tu {noun}." for verb in ("reservado", "confirmado", "agendado", "programado")),
+                  f"He reservado tu {noun}.")
+] + [
+    ("Your glow-up is confirmed.", "Once your glow-up is confirmed, you'll get a card.", "en", "booking"),
+    ("Your glow-up is set.", "Your details are saved.", "en", "booking"),
+    ("The next call is booked.", "Once the next call is booked, you'll get a card.", "en", "callback"),
+    ("Your next intro call is confirmed.", "Have you booked your next intro call?", "en", "callback"),
+    ("Your calls are confirmed.", "All scheduled calls include a reminder.", "en", "callback"),
+    ("Your intro calls are confirmed.", "All scheduled intro calls include a reminder.", "en", "callback"),
+    ("Your service call is confirmed.", "Have you booked your service call?", "en", "booking"),
+    ("Your SERVICE CALL is confirmed.", "Have you booked your service call?", "en", "booking"),
+    ("Tu próxima llamada está confirmada.", "Cuando tu próxima llamada está confirmada, recibirás una tarjeta.",
+     "es", "callback"),
+    ("Hemos reservado tu próxima llamada.", "No te hemos reservado tu próxima llamada.", "es", "callback"),
+    ("Quedó confirmada tu llamada.", "¿Has reservado tu llamada?", "es", "callback"),
+])
+def test_call_and_meeting_claims_require_the_matching_card(prose, honest, language, category):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == [
+        ("promise_word", f"lex.{language}.{category}")]
+    assert reply_check.scan_prose(honest) == []
+    assert reply_check.scan_prose(prose, **{f"{category}_card": True}) == []
+    other = "booking" if category == "callback" else "callback"
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, **{f"{other}_card": True})] == [
+        ("promise_word", f"lex.{language}.{category}")]
+
+
+@pytest.mark.parametrize("prose", [
+    "Your viewing is confirmed call is booked.",
+    "Your viewing IS confirmed call is booked.",
+    "Your viewing is-confirmed call is booked.",
+    "Your ritual is set call is confirmed.",
+    "Your glow-up is set call is confirmed.",
+    "Your viewing is confirmed. Your call is confirmed.",
+])
+def test_a_callback_card_cannot_hide_a_separate_booking_claim_in_a_modifier(prose):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == [
+        ("promise_word", "lex.en.booking")]
+
+
+@pytest.mark.parametrize(("prose", "honest", "language"), [
+    (prose, f"Have you booked your {noun}?", "en")
+    for noun in ("phone-call", "follow-up-call")
+    for verb in ("booked", "reserved", "confirmed", "scheduled")
+    for prose in (f"We've {verb} your {noun}.", f"{verb.capitalize()} your {noun}.")
+] + [
+    ("Hemos reservado tu llamada.", "¿Has reservado tu llamada?", "es"),
+    ("He confirmado tu llamada.", "No he confirmado tu llamada.", "es"),
+])
+def test_completed_hyphenated_call_claims_need_a_callback_card(prose, honest, language):
+    expected = [("promise_word", f"lex.{language}.callback")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, booking_card=True)] == expected
+    assert reply_check.scan_prose(prose, callback_card=True) == []
+    assert reply_check.scan_prose(honest) == []
+
+
+@pytest.mark.parametrize(("prose", "conditioned", "language"), [
+    (prose, f"{condition} {prose[0].lower() + prose[1:-1]}, we can discuss access.", "en")
+    for noun in ("phone-call", "follow-up-call")
+    for prose, condition in ((f"Your {noun} is confirmed.", "Once"),
+                             (f"Your {noun} is booked.", "When"),
+                             (f"The {noun} is confirmed.", "Once"),
+                             (f"Your {noun}: confirmed.", "Once"))
+] + [
+    ("Tu llamada está confirmada.", "Si tu llamada está confirmada, podemos hablar del acceso.", "es"),
+    ("Tu llamada está reservada.", "Cuando tu llamada está reservada, podemos hablar del acceso.", "es"),
+])
+def test_conditions_reach_the_whole_hyphenated_call_noun(prose, conditioned, language):
+    assert reply_check.scan_prose(conditioned) == []
+    expected = [("promise_word", f"lex.{language}.callback")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, booking_card=True)] == expected
+    assert reply_check.scan_prose(prose, callback_card=True) == []
+
+
+@pytest.mark.parametrize(("prose", "honest", "language"), [
+    ("We've booked your follow-up-call.", "Have you booked your follow-up-call?", "en"),
+    ("We've booked your phone-call.", "Have you booked your phone-call?", "en"),
+    ("Booked your follow-up-call.", "We haven't booked your follow-up-call.", "en"),
+    ("Your follow-up-call is confirmed.",
+     "Once your follow-up-call is confirmed, we can discuss access.", "en"),
+    ("Your phone-call is booked.", "When your phone-call is booked, we can discuss access.", "en"),
+    ("Tu llamada está confirmada.", "Si tu llamada está confirmada, podemos hablar del acceso.", "es"),
+])
+async def test_hyphenated_call_claims_with_a_real_callback_receipt(app, client, reviewer, prose, honest, language):
+    _, visitor = await visitor_of(app, client)
+    callback = await own_callback(client, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    blocked = await checked(client, visitor, prose)
+    assert [(v.kind, v.rule_id) for v in blocked.violations] == [("promise_word", f"lex.{language}.callback")]
+    assert_handed_off(blocked, language)
+    assert reviewer.soft_inputs == []
+    backed = await checked(client, visitor, prose, [clause("callback_confirmed", callback.fact_id)])
+    assert (backed.ok, backed.violations) == (True, [])
+    assert [block.template for block in backed.blocks] == [None, "callback_confirmed"]
+    harmless = await checked(client, visitor, honest)
+    assert (harmless.ok, harmless.violations) == (True, [])
+    assert len(reviewer.soft_inputs) == 2
+
+
+@pytest.mark.parametrize("clitics", ["me", "te", "le", "lo", "la", "nos", "os", "les", "los", "las", "se",
+                                     "se lo", "se la", "te lo", "nos la"])
+@pytest.mark.parametrize(("noun", "category"), [("mesa", "booking"), ("llamada", "callback")])
+def test_spanish_booking_negation_reaches_across_bounded_clitics(clitics, noun, category):
+    for auxiliary in ("he", "hemos"):
+        affirmative = f"{clitics.capitalize()} {auxiliary} reservado una {noun}."
+        assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(affirmative)] == [
+            ("promise_word", f"lex.es.{category}")]
+        for negation in ("No", "Nunca"):
+            assert reply_check.scan_prose(f"{negation} {clitics} {auxiliary} reservado una {noun}.") == []
+        # A sentence break cannot attach a preceding denial to a fresh claim.
+        assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(
+            f"No {clitics}. Hemos reservado una {noun}.")] == [("promise_word", f"lex.es.{category}")]
+
+
+@pytest.mark.parametrize(("noun", "category"), [("mesa", "booking"), ("llamada", "callback")])
+def test_spanish_negation_cannot_start_inside_a_name(noun, category):
+    for clitics in ("", "te ", "nos la "):
+        assert reply_check.scan_prose(f"No {clitics}hemos reservado una {noun}.") == []
+        assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(
+            f"Con Bruno {clitics}hemos reservado una {noun}.")] == [("promise_word", f"lex.es.{category}")]
+
+
+@pytest.mark.parametrize("denial", ["We haven't", "We have not", "We've never", "We have never"])
+@pytest.mark.parametrize(("noun", "category"), [("table", "booking"), ("call", "callback")])
+def test_english_booking_negation_still_passes(denial, noun, category):
+    assert reply_check.scan_prose(f"{denial} booked your {noun}.") == []
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(f"We've booked your {noun}.")] == [
+        ("promise_word", f"lex.en.{category}")]
+
+
+@pytest.mark.parametrize(("prose", "language"), [
+    ("Your appointment and call are booked.", "en"),
+    ("Your visit and call are booked.", "en"),
+    ("Your class and call are scheduled.", "en"),
+    ("Your appointment and call have been booked.", "en"),
+    ("Your appointment and your call are booked.", "en"),
+    ("Your table and call are confirmed.", "en"),
+    ("Your call and appointment are confirmed.", "en"),
+    ("Your appointment or call is confirmed.", "en"),
+    ("Your appointment plus call is confirmed.", "en"),
+    ("Your appointment & call are confirmed.", "en"),
+    ("Tu cita y tu llamada están confirmadas.", "es"),
+    ("Tu mesa y tu llamada están confirmadas.", "es"),
+    ("Tu reserva y la llamada quedaron confirmadas.", "es"),
+    ("Ya están confirmadas tu llamada y tu cita.", "es"),
+    ("Quedaron confirmadas la llamada y la reserva.", "es"),
+    ("Tu cita e llamada están confirmadas.", "es"),
+    ("Tu cita o llamada están confirmadas.", "es"),
+    ("Tu cita u llamada están confirmadas.", "es"),
+])
+def test_coordinated_booking_and_call_subjects_need_both_receipts(prose, language):
+    for booking_card, callback_card in ((False, False), (True, False), (False, True), (True, True)):
+        expected = {f"lex.{language}.{category}" for category, backed in
+                    (("booking", booking_card), ("callback", callback_card)) if not backed}
+        assert {v.rule_id for v in reply_check.scan_prose(
+            prose, booking_card=booking_card, callback_card=callback_card)} == expected
+    honest = "Your call is confirmed." if language == "en" else "Tu llamada está confirmada."
+    assert reply_check.scan_prose(honest, callback_card=True) == []
+
+
+@pytest.mark.parametrize("subject", ["call with Maria", "callback request", "intro call with Maria",
+                                    "follow-up-call with Maria Rivera", "phone-call request"])
+def test_modified_callback_subjects_keep_their_receipt_category(subject):
+    prose = f"Your {subject} is confirmed."
+    assert {v.rule_id for v in reply_check.scan_prose(prose)} == {"lex.en.callback"}
+    assert {v.rule_id for v in reply_check.scan_prose(prose, booking_card=True)} == {"lex.en.callback"}
+    assert reply_check.scan_prose(prose, callback_card=True) == []
+    assert reply_check.scan_prose(f"Once your {subject} is confirmed, we can discuss access.") == []
+    for booking_subject in (f"appointment {subject}", f"{subject} appointment", "service call"):
+        assert "lex.en.booking" in {v.rule_id for v in reply_check.scan_prose(
+            f"Your {booking_subject} is confirmed.", callback_card=True)}
+
+
+@pytest.mark.parametrize("subject", [
+    "identity", "details", "contact", "contact details", "email", "phone", "number", "address", "account",
+    "information", "info", "name", "code", "verification", "payment method", "preferences", "message", "request",
+])
+def test_nonbooking_success_subjects_do_not_need_a_booking_receipt(subject):
+    for predicate in ("confirmed", "set"):
+        assert reply_check.scan_prose(f"Your {subject} is {predicate}.") == []
+        prose = f"Your {subject} appointment is {predicate}."
+        assert {v.rule_id for v in reply_check.scan_prose(prose)} == {"lex.en.booking"}
+        assert reply_check.scan_prose(prose, booking_card=True) == []
+    # Existing completed-booking predicates retain their conservative interpretation.
+    assert {v.rule_id for v in reply_check.scan_prose(f"Your {subject} is booked.")} == {"lex.en.booking"}
+
+
+@pytest.mark.parametrize("honest", ["Your IDENTITY is confirmed.", "Your contact DETAILS are confirmed.",
+                                   "Your call WITH Maria is confirmed."])
+def test_honest_subject_exclusions_cover_capital_stroke_readings(honest):
+    assert reply_check.scan_prose(honest, callback_card=True) == []
+    assert {v.rule_id for v in reply_check.scan_prose(
+        f"{honest} Your appointment is confirmed.", callback_card=True)} == {"lex.en.booking"}
+
+
+@pytest.mark.parametrize("tail", ["up", "to receive messages"])
+def test_phrasal_set_is_not_a_custom_booking(tail):
+    assert reply_check.scan_prose(f"Your account is set {tail}.") == []
+    assert reply_check.scan_prose(f"Your custom workspace is set {tail}.") == []
+    assert {v.rule_id for v in reply_check.scan_prose(f"Your appointment is set {tail}.")} == {"lex.en.booking"}
+    assert {v.rule_id for v in reply_check.scan_prose("Your glow-up is set.")} == {"lex.en.booking"}
+
+
+@pytest.mark.parametrize("subject", ["appointment with Maria", "contact details appointment", "call appointment request"])
+def test_a_booking_noun_in_a_modified_subject_keeps_its_claim(subject):
+    for tail in ("up", "to receive messages"):
+        prose = f"Your {subject} is set {tail}."
+        assert {v.rule_id for v in reply_check.scan_prose(prose, callback_card=True)} == {"lex.en.booking"}
+        assert reply_check.scan_prose(prose, booking_card=True, callback_card=True) == []
+
+
+@pytest.mark.parametrize("subject", ["service call", "service-call", "emergency service call",
+                                    "emergency service-call", "service call with Maria"])
+@pytest.mark.parametrize("tail", ["up", "to proceed"])
+def test_phrasal_set_service_calls_still_need_a_booking_receipt(subject, tail):
+    prose = f"Your {subject} is set {tail}."
+    for booking_card, callback_card in ((False, False), (False, True), (True, False), (True, True)):
+        expected = set() if booking_card else {"lex.en.booking"}
+        assert {v.rule_id for v in reply_check.scan_prose(
+            prose, booking_card=booking_card, callback_card=callback_card)} == expected
+    for honest in ("Your account is set up.", "Your workspace is set up."):
+        assert reply_check.scan_prose(honest) == []
+
+
+@pytest.mark.parametrize("honest", [
+    "Have you previously booked a consultation with us?",
+    "You said you'd booked a consultation with us before.",
+    "You said you’d booked a consultation with us before.",
+    "If you have already booked a consultation, I can help with it.",
+    "Customers who have previously booked a consultation can request a receipt.",
+    "Have you already previously booked a consultation with us?",
+    "Have you previously booked a callback with us?",
+    "If you have already booked a callback, I can help with it.",
+    "You said you'd booked a callback with us before.",
+    "Si te hemos reservado una mesa, puedo buscar la confirmación.",
+    "Si ya hemos reservado tu mesa, puedo buscar la confirmación.",
+    "Si ya te hemos reservado tu mesa, puedo buscar la confirmación.",
+    "Si nos la hemos reservado una mesa, puedo buscar la confirmación.",
+    "Si te hemos reservado una llamada, puedo buscar la confirmación.",
+    "Si ya hemos reservado tu llamada, puedo buscar la confirmación.",
+])
+def test_visitor_booking_context_does_not_hide_an_independent_claim(honest):
+    assert reply_check.scan_prose(honest) == []
+    if honest.startswith("Si"):
+        claim, rule = "Hemos reservado tu mesa.", "lex.es.booking"
+    else:
+        claim, rule = "We've booked your consultation.", "lex.en.booking"
+    assert {v.rule_id for v in reply_check.scan_prose(claim)} == {rule}
+    assert {v.rule_id for v in reply_check.scan_prose(f"{honest} {claim}", callback_card=True)} == {rule}
+    assert reply_check.scan_prose(claim, booking_card=True) == []
+
+
+@pytest.mark.parametrize("history", ["consultation", "callback"])
+@pytest.mark.parametrize(("noun", "category"), [("appointment", "booking"), ("call", "callback")])
+@pytest.mark.parametrize("separator", ["—", "–", "-", " - ", "\n- ", "\n* ", "\n", "; ", ": ", ", ", "/ "])
+def test_visitor_history_stops_before_a_later_completed_claim(history, noun, category, separator):
+    prefix = "- " if "\n" in separator else ""
+    prose = f"{prefix}You said you'd booked a {history}{separator}Booked your {noun}."
+    for booking_card, callback_card in ((False, False), (True, False), (False, True), (True, True)):
+        backed = booking_card if category == "booking" else callback_card
+        expected = set() if backed else {f"lex.en.{category}"}
+        assert {v.rule_id for v in reply_check.scan_prose(
+            prose, booking_card=booking_card, callback_card=callback_card)} == expected
 
 
 def test_a_booking_card_lets_only_the_booking_claim_through():
