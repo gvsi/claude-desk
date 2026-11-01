@@ -35,6 +35,55 @@ def test_unarmed_gated_head_needs_no_results_file(tmp_path: Path):
     assert "strict check applies once any scenario can run" in reason
 
 
+@pytest.mark.parametrize("change", ["reason", "signer", "timestamp", "reorder", "delete entry", "delete file",
+                                   "append", "unreadable head", "unreadable base"])
+def test_unarmed_head_keeps_waiver_history(tmp_path: Path, change: str):
+    from evals.tests.test_waivers import waiver_data
+    from evals.waivers import WAIVERS_PATH, Waiver
+
+    repo = make_repo(tmp_path / "repo", landed=("master", "01a"))
+    history = [Waiver.model_validate(waiver_data(pass_id=f"older-pass-{n}")).model_dump(mode="json")
+               for n in (1, 2)]
+    write(repo, WAIVERS_PATH, json.dumps(history))
+    base = commit(repo, "the waiver history to preserve")
+    if change.startswith("unreadable"):
+        git(repo, "update-index", "--cacheinfo", f"160000,{base},{WAIVERS_PATH}")
+        git(repo, "commit", "-q", "-m", "unreadable waiver registry")
+        if change == "unreadable base":
+            base = git(repo, "rev-parse", "HEAD")
+            # The readable working-tree file must not conceal unreadable committed evidence.
+            write(repo, "kernel/src/lib.rs", "// changed after restoring readable waivers\n")
+            commit(repo, "restore readable waivers at head")
+    else:
+        altered = json.loads(json.dumps(history))
+        if change == "reason":
+            altered[0]["reason"] = "A rewritten reason."
+        elif change == "signer":
+            altered[0]["signed_off_by"] = "Another signer"
+        elif change == "timestamp":
+            altered[0]["signed_at"] = altered[0]["signed_at"].replace("Z", "+00:00")
+        elif change == "reorder":
+            altered.reverse()
+        elif change == "delete entry":
+            altered.pop()
+        elif change == "append":
+            altered.append({**history[0], "pass_id": "newer-pass"})
+        if change == "delete file":
+            (repo / WAIVERS_PATH).unlink()
+        else:
+            write(repo, WAIVERS_PATH, json.dumps(altered))
+        commit(repo, "change waiver history while every scenario is pending")
+
+    passed, reason = results.results_check(base, repo)
+
+    if change == "append":
+        assert passed and "no results file is needed" in reason, reason
+    elif change.startswith("unreadable"):
+        assert not passed and WAIVERS_PATH in reason and "can't be read as a file" in reason, reason
+    else:
+        assert not passed and "waivers.json rewrites the history" in reason, reason
+
+
 def test_one_runnable_scenario_restores_the_exact_missing_file_failure(tmp_path: Path):
     repo = make_repo(tmp_path / "repo", landed=("master", "01a"), scenarios={
         "atk-held": {"requires": ["02"]},
@@ -120,6 +169,41 @@ def test_merge_ready_accepts_two_unarmed_sides_with_gated_changes(tmp_path: Path
 
     assert ready, reason
     assert "every scenario is pending" in reason
+
+
+@pytest.mark.parametrize("side", ["pr", "main"])
+@pytest.mark.parametrize("change", ["rewrite", "delete", "append"])
+def test_unarmed_merge_preserves_waiver_history(tmp_path: Path, side: str, change: str):
+    from evals.tests.test_waivers import waiver_data
+    from evals.waivers import WAIVERS_PATH, Waiver
+
+    repo = make_repo(tmp_path / "repo", landed=("master", "01a"))
+    entry = Waiver.model_validate(waiver_data(pass_id="older-pass")).model_dump(mode="json")
+    write(repo, WAIVERS_PATH, json.dumps([entry]))
+    commit(repo, "the shared waiver history")
+    git(repo, "checkout", "-q", "-b", "plan/change")
+    for current in ("pr", "main"):
+        if current == "main":
+            git(repo, "checkout", "-q", "main")
+        write(repo, "kernel/src/lib.rs" if current == "pr" else "backend/desk/api/prompts.py", current)
+        if current == side:
+            if change == "rewrite":
+                history = [{**entry, "reason": "A rewritten attestation."}]
+            elif change == "delete":
+                history = []
+            else:
+                history = [entry, {**entry, "pass_id": "newer-pass"}]
+            write(repo, WAIVERS_PATH, json.dumps(history))
+        commit(repo, f"{current} changes inputs while pending")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "plan/change")
+
+    ready, reason = results.merge_ready(root=repo)
+
+    if change == "append":
+        assert ready and "no results file is needed" in reason, reason
+    else:
+        assert not ready and "waivers.json rewrites the history" in reason, reason
 
 
 def test_merge_ready_refuses_pending_merge_with_a_scenario_in_both_splits(tmp_path: Path):

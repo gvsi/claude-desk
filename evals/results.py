@@ -50,7 +50,7 @@ plans must keep the base's, its splits must hold its suite, and any added or edi
 must validate. `merge_ready` uses the same rule over both sides' scenarios (both requirements for a shared id) against the union of
 their landed plans and over the actual merge tree, with neither side holding a recorded rate. The
 merge tree must also pass the checks that need no runs: suite and splits loading and consistency,
-empty recorded-rate history, history growth and kept landed plans.
+empty recorded-rate history, append-only rate and waiver histories, and kept landed plans.
 Once any scenario can run, the strict check is unchanged: stopping at the first failure, the
 committed file for the head's key exists, validates and is gating evidence, its suite hash,
 held-out hash and recorded rate are the head's (a rate that is gating evidence), it holds exactly
@@ -72,8 +72,9 @@ run and message with its exact text hash and transcript-derived hit count. The g
 oracle only when distinct messages' waiver hit counts sum exactly to the scored row's count;
 partial sets retain the violations and mismatches fail closed.
 The head's committed waivers are read from git, never the working tree. Waivers are outside
-`GATED_PATHS`: signing leaves a pass's inputs key unchanged, but a waivers-only change still needs
-a results file and gate recomputation. Every waived result names its count and signers.
+`GATED_PATHS`: signing leaves a pass's inputs key unchanged. Once any scenario can run, a waivers-only
+change needs a results file and gate recomputation; while every scenario is pending, results-check
+still holds the waivers history append-only. Every waived result names its count and signers.
 
 **Limits.** Results files are self-attested: CI recomputes their rows but cannot prove they came
 from a real run, since it holds no model credentials. CI checks summed waiver hits against rows but
@@ -836,12 +837,7 @@ def _check(base: str, root: Path) -> str:
         head = reconcile(file, root, "HEAD", name=name)
         rates, landed = head.rates, head.landed
     before = _check_history(rates, landed, base, root)
-    base_waivers = json.loads(show(root, base, WAIVERS_PATH) or "[]")
-    head_waivers = json.loads(show(root, "HEAD", WAIVERS_PATH) or "[]")
-    if not isinstance(base_waivers, list):
-        raise CheckFailed(f"{base}'s waivers.json isn't a list")
-    if head_waivers[:len(base_waivers)] != base_waivers:
-        raise CheckFailed(f"waivers.json rewrites the history {base} holds; it only grows at its end")
+    _check_waiver_history("HEAD", base, root)
     result = gate_of(file, rates, waivers=head.waivers)
     if not result.passed:
         notice = f"; {waiver_summary(result)}" if result.waived_violations else ""
@@ -874,10 +870,28 @@ def _check_unarmed(rev: str, base: str, root: Path) -> None:
         if problems := split_problems(suite, splits):
             raise CheckFailed(f"{whose} splits don't hold its suite: " + "; ".join(problems))
     _check_history(rates, landed, base, root)
+    _check_waiver_history(rev, base, root)
     if rates.history:
         subject = "the head" if rev == "HEAD" else rev
         raise CheckFailed(f"recorded_rates.json has a recorded rate, so {subject} cannot pass as unarmed; "
                           "a recorded rate means the gate was armed once")
+
+
+def _check_waiver_history(rev: str, base: str, root: Path) -> None:
+    """Preserve raw attestations, including timestamp spelling, even without results rows."""
+    histories = []
+    for at in (base, rev):
+        raw = show(root, at, WAIVERS_PATH)
+        try:
+            entries = json.loads(raw) if raw is not None else []
+        except ValueError as error:
+            raise CheckFailed(f"{at}'s {WAIVERS_PATH} doesn't load: {error}") from None
+        if not isinstance(entries, list):
+            raise CheckFailed(f"{at}'s waivers.json isn't a list")
+        histories.append(entries)
+    before, after = histories
+    if after[:len(before)] != before:
+        raise CheckFailed(f"waivers.json rewrites the history {base} holds; it only grows at its end")
 
 
 def _check_history(rates: RecordedRates, landed: tuple[str, ...], base: str, root: Path) -> list[dict[str, Any]]:
