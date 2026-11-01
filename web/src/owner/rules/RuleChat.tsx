@@ -112,14 +112,16 @@ function scrollMargin(turn: Element, side: 'top' | 'bottom'): number {
  * when both can't show, the owner's words win. Words too long to be whole give their place to the
  * newest turn's start. Each keeps its turn's scroll margin from the log's edge.
  */
-function revealExchange(log: HTMLElement, lead: HTMLElement, turn: HTMLElement, end: Element): void {
+function revealExchange(log: HTMLElement, lead: HTMLElement, turn: HTMLElement, end: Element, { upward = true } = {}): void {
   const port = log.getBoundingClientRect();
   const whole = (el: HTMLElement) => el.getBoundingClientRect().height + scrollMargin(el, 'top') + scrollMargin(el, 'bottom') <= port.height;
   const start = whole(lead) ? lead : turn;
   // How far down the log may go before the start passes its top, and how far it must go to show the end.
   const room = start.getBoundingClientRect().top - scrollMargin(start, 'top') - port.top;
   const short = end.getBoundingClientRect().bottom + scrollMargin(turn, 'bottom') - port.bottom;
-  log.scrollTop += Math.min(Math.max(0, short), room);
+  const by = Math.min(Math.max(0, short), room);
+  if (by < 0 && !upward) return;
+  log.scrollTop += by;
 }
 
 /**
@@ -163,17 +165,48 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
 
 /**
  * Keeps the end of the answer being written in view as it grows, as a new turn is brought into
- * view, never taking the owner's words that lead the exchange above the conversation's top.
+ * view, never taking the owner's words that lead the exchange above the conversation's top, and
+ * never scrolling up. Once the owner scrolls the conversation themselves, it stays where they put
+ * it, until they scroll back to its end (from then it keeps to the end) or ask something new.
  */
 function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly ChatTurn[], growing: string | null): void {
   const leadId = turns.findLast((turn) => turn.kind === 'owner')?.id;
+  /** How the growing answer is followed, for which question, and where it last left the conversation. */
+  const follow = useRef<{ lead: number | undefined; mode: 'reveal' | 'end' | 'off'; at: number | null }>({ lead: undefined, mode: 'reveal', at: null });
+
   useEffect(() => {
-    if (growing === null) return;
+    const log = root.current?.querySelector<HTMLElement>('[role="log"]');
+    if (!log) return undefined;
+    const onScroll = () => {
+      const now = follow.current;
+      // Its own scrolling lands where it left the conversation; anything else is the owner's.
+      if (now.at !== null && Math.abs(log.scrollTop - now.at) <= 1) return;
+      now.at = null;
+      now.mode = log.scrollHeight - log.clientHeight - log.scrollTop <= 1 ? 'end' : 'off';
+    };
+    log.addEventListener('scroll', onScroll, { passive: true });
+    return () => log.removeEventListener('scroll', onScroll);
+  }, [root]);
+
+  useEffect(() => {
+    const now = follow.current;
+    if (now.lead !== leadId) {
+      // A new question: its answer is followed from the start.
+      now.lead = leadId;
+      now.mode = 'reveal';
+      now.at = null;
+    }
+    if (growing === null || now.mode === 'off') return;
     const answer = root.current?.querySelector<HTMLElement>('.cd-rule-chat__growing');
     const log = answer?.closest<HTMLElement>('[role="log"]');
     if (!answer || !log) return;
-    const lead = leadId === undefined ? answer : (root.current?.querySelector<HTMLElement>(`[data-turn="${leadId}"]`) ?? answer);
-    revealExchange(log, lead, answer, answer);
+    if (now.mode === 'end') {
+      log.scrollTop = log.scrollHeight - log.clientHeight;
+    } else {
+      const lead = leadId === undefined ? answer : (root.current?.querySelector<HTMLElement>(`[data-turn="${leadId}"]`) ?? answer);
+      revealExchange(log, lead, answer, answer, { upward: false });
+    }
+    now.at = log.scrollTop;
   }, [root, leadId, growing]);
 }
 

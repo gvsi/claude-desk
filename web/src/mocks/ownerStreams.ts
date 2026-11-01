@@ -30,6 +30,8 @@ export interface OwnerStreamPlan {
   /** Holds the stream after this many deltas until `until` settles. */
   pauseAfter?: number;
   until?: Promise<unknown>;
+  /** More holds, each after its count of deltas until its promise settles. */
+  holds?: readonly { after: number; until: Promise<unknown> }[];
   /** Sends a reset after this many deltas, once, and writes the reply again from its start. */
   resetAfter?: number;
   /** Ends with this error instead, after `failAfter` deltas (all of them when absent): the route's error body and status. */
@@ -104,6 +106,7 @@ function stepsOf({ text, wordMs, reads = [], plan }: Reply): Step[] {
     steps.push({ wait: wordMs, ev: { name: 'delta', text: words[at] ?? '' } });
     sent += 1;
     if (plan?.pauseAfter === sent && plan.until) steps.push({ hold: plan.until });
+    for (const hold of plan?.holds ?? []) if (hold.after === sent) steps.push({ hold: hold.until });
     ending = endingAt(sent);
     if (ending === null && !reset && plan?.resetAfter === sent) {
       reset = true;

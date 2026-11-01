@@ -101,6 +101,26 @@ describe('playReply', () => {
     expect(out.played).toEqual([{ name: 'error', status: 422, error: 'above_money_cap', cap_cents: 0 }]);
   });
 
+  it('holds_wherever_a_test_plans', async () => {
+    const out = record();
+    let first: () => void = () => {};
+    let second: () => void = () => {};
+    const holds = [
+      { after: 1, until: new Promise<void>((resolve) => (first = resolve)) },
+      { after: 2, until: new Promise<void>((resolve) => (second = resolve)) },
+    ];
+    playReply({ text: 'one two three', wordMs: 10, plan: { holds } }, out.sink);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(out.played).toHaveLength(1);
+    first();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(out.played).toHaveLength(2);
+    second();
+    await vi.runAllTimersAsync();
+    expect(out.played).toHaveLength(3);
+    expect(out.ended()).toBe('done');
+  });
+
   it('starts_again_after_a_reset', async () => {
     const out = record();
     playReply({ text: 'one two', wordMs: 10, plan: { resetAfter: 1 } }, out.sink);
