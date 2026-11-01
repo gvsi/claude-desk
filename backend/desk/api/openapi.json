@@ -3653,7 +3653,7 @@
     "/api/owner/setup/{id}/public_lines/confirm": {
       "post": {
         "summary": "Setup Confirm Public Lines",
-        "description": "Confirm only the listed keys at the displayed revision; publish before saving without changing the step.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A refused charter is 422 `line_refused`, naming\nthe refused key and reason codes when available; a charter cap names no key. A failed save restores the stored\nparts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed.",
+        "description": "Confirm only the listed keys at the displayed revision; publish before saving without changing the step.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A stale revision is 409 `conflict`, checked before\nthe keys, so a key removed since the owner's view isn't an invalid request. A refused charter is 422\n`line_refused`, naming the refused key and reason codes when available; a charter cap names no key. A failed save\nrestores the stored parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed.",
         "operationId": "owner_setup_confirm_public_lines",
         "parameters": [
           {
@@ -13121,6 +13121,10 @@
           "editable": {
             "type": "boolean",
             "title": "Editable"
+          },
+          "held": {
+            "type": "boolean",
+            "title": "Held"
           }
         },
         "type": "object",
@@ -13128,10 +13132,11 @@
           "key",
           "text",
           "source",
-          "editable"
+          "editable",
+          "held"
         ],
         "title": "SetupPublicLine",
-        "description": "A nonblank setup charter line and whether the owner has confirmed its text."
+        "description": "A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a policy line the\nkernel's public-text checks held back (the setup state's `held_policy_keys`, never the contact): its stored words\nstay off the charter until the owner rewords it."
       },
       "SetupPublicLineError": {
         "properties": {

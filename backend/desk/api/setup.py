@@ -2686,11 +2686,14 @@ def _line_refused(failure: KernelFailed, edited_key: str | None = None) -> Publi
     return PublicLineProblem("line_refused")
 
 
-def _public_lines(answers: SetupAnswers) -> SetupPublicLines:
+def _public_lines(interview: Interview) -> SetupPublicLines:
+    """The board's projection of the stored answers. A line the kernel held at the latest charter write keeps its
+    stored words and source, marked `held` (never the contact); the revision covers that mark too."""
+    answers, held = interview.answers, set(interview.held_policy_keys)
     public = SetupPublicLines(revision="", lines=[
         SetupPublicLine(key=key, text=value.strip(),
                         source="suggested" if field in answers.suggested_fields else "owner",
-                        editable=field != "how_we_help")
+                        editable=field != "how_we_help", held=key in held and key != "contact")
         for field, key in PUBLIC_LINE_KEYS.items() if (value := getattr(answers, field)) and value.strip()
     ], hours=SetupPublicHours(source="suggested" if "hours" in answers.suggested_fields else "owner",
                              windows=answers.hours) if answers.hours else None,
@@ -2714,15 +2717,16 @@ async def public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
     await _read(engine, owner, interview_id)  # ownership before exposing the process's turn guard
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
-        return _public_lines(interview.answers)
+        return _public_lines(interview)
 
 
-async def _put_public_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts, *,
+async def _put_public_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts, held: list[str], *,
                            selected: frozenset[str], sent: set[str] | None = None,
                            edited_key: str | None = None) -> None:
-    """Writes the `selected` parts of `parts` (`seed_parts`, which holds back every suggested field). The charter is
+    """Writes the `selected` parts of `parts` (`seed_parts`, which holds back every suggested field). The charter
+    leaves out the `held` keys (`held_policy_keys`), so a line the kernel held never blocks another write, and is
     written strictly (`_put_charter` without `drop_refused`): an owner's edit is never dropped to save the rest."""
-    charter = parts.charter
+    charter = [claim for claim in parts.charter if claim.key not in held]
     for attempt in range(2) if "charter" in selected else ():
         try:
             if sent is not None:
@@ -2780,6 +2784,8 @@ async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
             })
         except ValidationError:
             raise ApiProblem(422, "invalid") from None
+        if key in interview.held_policy_keys:   # the rewording is published in its place, or nothing is saved
+            interview.hold_policies([held for held in interview.held_policy_keys if held != key])
         return await _commit_public_lines(owner, engine, interview, seen, now, key=key,
                                           setup_policy_claims_enabled=setup_policy_claims_enabled)
 
@@ -2852,8 +2858,8 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
         try:
             async with asyncio.timeout(PUBLIC_PARTS_REPAIR_TIMEOUT_S * (1 + len(sent))):
                 stored = await _read(engine, owner, interview.interview_id)
-                await _put_public_parts(owner, stored.desk_id, published(stored.answers), selected=frozenset(sent),
-                                        edited_key=key)
+                await _put_public_parts(owner, stored.desk_id, published(stored.answers), stored.held_policy_keys,
+                                        selected=frozenset(sent), edited_key=key)
         except Exception as restore_failed:
             logger.error("setup public parts restore failed (%s, key=%s)", type(restore_failed).__name__, key)
         else:
@@ -2861,7 +2867,8 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
 
     async def settle() -> SetupPublicLines:
         try:
-            await _put_public_parts(owner, interview.desk_id, after, selected=selected, sent=sent, edited_key=key)
+            await _put_public_parts(owner, interview.desk_id, after, interview.held_policy_keys, selected=selected,
+                                    sent=sent, edited_key=key)
         except Exception:
             if sent:
                 await repair()
@@ -2872,7 +2879,7 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
             logger.warning("setup public lines save failed (%s)", type(failed).__name__)
             await repair()
             raise ApiProblem(409, "conflict") from None
-        return _public_lines(interview.answers)
+        return _public_lines(interview)
 
     task = asyncio.create_task(settle())
     try:
@@ -2899,7 +2906,7 @@ async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_i
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         seen = _stored(interview)
-        public = _public_lines(interview.answers)
+        public = _public_lines(interview)
         listed = {line.key for line in public.lines}
         listed.update(key for key in ("hours", "prices") if getattr(public, key) is not None)
         if not keys or not revision.strip():
@@ -2908,6 +2915,8 @@ async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_i
             raise ApiProblem(409, "conflict")
         if not set(keys) <= listed:
             raise ApiProblem(422, "invalid")
+        if held := [line.key for line in public.lines if line.key in keys and line.key in interview.held_policy_keys]:
+            raise PublicLineProblem("line_refused", key=held[0])   # only a rewording can publish a held line
         confirmed = {field for field, key in PUBLIC_LINE_KEYS.items() if key in keys}
         confirmed.update(field for key, field in (("hours", "hours"), ("prices", "price_items")) if key in keys)
         republish = frozenset(part for field, part in (("hours", "hours"), ("price_items", "prices"))

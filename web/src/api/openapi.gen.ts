@@ -858,13 +858,16 @@ export interface SetupPublicHours {
   windows: HoursWindow[];
 }
 /**
- * A nonblank setup charter line and whether the owner has confirmed its text.
+ * A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a policy line the
+ * kernel's public-text checks held back (the setup state's `held_policy_keys`, never the contact): its stored words
+ * stay off the charter until the owner rewords it.
  */
 export interface SetupPublicLine {
   key: string;
   text: string;
   source: "owner" | "suggested";
   editable: boolean;
+  held: boolean;
 }
 export interface SetupPublicLineError {
   error: "line_refused" | "not_editable" | "not_suggested";

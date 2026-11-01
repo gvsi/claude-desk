@@ -50,14 +50,14 @@ async def test_get_lists_nonblank_lines_in_board_order(lines_setup, engine):
     assert reply.status_code == 200, reply.text
     public = reply.json()
     assert public.pop("revision")
-    assert public == {"lines": [
+    assert public == {"lines": [{**line, "held": False} for line in [
         {"key": "policy:about", "text": "Local plumbing help.", "source": "owner", "editable": True},
         {"key": "contact", "text": "hello@example.test", "source": "suggested", "editable": True},
         {"key": "policy:pricing", "text": "Written quotes before work.", "source": "suggested", "editable": True},
         {"key": "policy:intake", "text": "Tell us what needs fixing.", "source": "suggested", "editable": True},
         {"key": "policy:service_area", "text": "Oakland and Berkeley.", "source": "owner", "editable": True},
         {"key": "policy:how_we_help", "text": "We answer questions.", "source": "owner", "editable": False},
-    ], "hours": None, "prices": None}
+    ]], "hours": None, "prices": None}
     assert await stored(engine, state["interview_id"]) == before
 
 
@@ -100,7 +100,7 @@ async def test_get_lists_hours_and_prices_with_source(lines_setup, engine, sugge
     assert reply.json()["prices"] == {"source": source, "items": [
         {"item_id": item_id, **PRICES[0]} for item_id in ("visit", "visit-2", "visit-3")]}
     assert reply.json()["lines"][1] == {
-        "key": "contact", "text": "hello@example.test", "source": "owner", "editable": True}
+        "key": "contact", "text": "hello@example.test", "source": "owner", "editable": True, "held": False}
 
 
 def received_parts(monkeypatch):
@@ -497,7 +497,8 @@ async def test_contact_edit_confirms_and_publishes_with_a_200_character_limit(li
     text = "a" * 200
     reply = await owner.browser.put(path, json={"key": "contact", "text": f"  {text}  "})
     assert reply.status_code == 200, reply.text
-    assert reply.json()["lines"][1] == {"key": "contact", "text": text, "source": "owner", "editable": True}
+    assert reply.json()["lines"][1] == {"key": "contact", "text": text, "source": "owner", "editable": True,
+                                        "held": False}
     answers = (await stored(engine, state["interview_id"]))["answers"]
     assert answers["public_contact"] == text
     assert "public_contact" not in answers["suggested_fields"]
@@ -902,7 +903,7 @@ async def test_put_saves_owner_text_and_publishes_whole_charter(lines_setup, eng
         "policy:service_area", "policy:how_we_help",
     ]
     assert reply.json()["lines"][2] == {"key": "policy:pricing", "text": "Quotes before repairs.",
-                                        "source": "owner", "editable": True}
+                                        "source": "owner", "editable": True, "held": False}
 
 
 def refuse_charter(monkeypatch, detail):
@@ -1008,6 +1009,123 @@ async def test_kernel_scan_refuses_the_owners_edit_strictly(lines_setup, engine,
     assert charter(fake, state["desk_id"]) == published
     assert_public_parts_logs(caplog, "setup public parts refused (key=policy:pricing)")
     assert "private marker" not in caplog.text
+
+
+async def hold_keys(engine, owner, state, keys):
+    """The charter keys the kernel held at the first rules draft, as that write records them."""
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, state["interview_id"])
+        interview.hold_policies(keys)
+        await setup._save(conn, interview)
+
+
+async def held_keys(owner, state):
+    return (await owner.browser.get(f'/api/owner/setup/{state["interview_id"]}')).json()["held_policy_keys"]
+
+
+async def test_held_lines_are_marked_and_part_of_the_revision(lines_setup, engine):
+    owner, state, path = lines_setup
+    shown = (await owner.browser.get(path)).json()
+    assert [line["held"] for line in shown["lines"]] == [False] * len(shown["lines"])
+    await hold_keys(engine, owner, state, ["policy:after_hours", "contact"])
+    before = await stored(engine, state["interview_id"])
+    held = (await owner.browser.get(path)).json()
+    assert held["revision"] != shown["revision"]
+    # The stored words and their source stay as they were; the contact is never marked held.
+    assert held["lines"] == [{**line, "held": line["key"] == "policy:after_hours"} for line in shown["lines"]]
+    assert await stored(engine, state["interview_id"]) == before
+
+
+@pytest.mark.parametrize("method", ["put", "confirm", "delete"])
+async def test_every_write_leaves_held_lines_out_of_the_charter(lines_setup, engine, fake, monkeypatch, method):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, suggested_fields=["pricing", "intake"])
+    await hold_keys(engine, owner, state, ["policy:after_hours", "contact"])
+    calls = received_parts(monkeypatch)
+    if method == "put":
+        reply = await owner.browser.put(path, json={"key": "policy:intake", "text": "Describe the problem."})
+    elif method == "confirm":
+        reply = await confirm_shown(owner.browser, path, ["policy:pricing"])
+    else:
+        reply = await owner.browser.delete(f"{path}/policy:intake")
+    assert reply.status_code == 200, reply.text
+    (sent,) = [body["charter"] for part, body in calls if part == "charter"]
+    # Pricing is still suggested unless confirmed; after hours and the contact are held.
+    assert {claim["key"] for claim in sent} == {
+        "policy:about", "policy:urgent", "policy:service_area", "policy:how_we_help",
+        *({"put": ["policy:intake"], "confirm": ["policy:pricing"]}.get(method, []))}
+    assert "charter:policy:after_hours" not in charter(fake, state["desk_id"])
+    assert "charter:contact" not in charter(fake, state["desk_id"])
+    assert await held_keys(owner, state) == ["policy:after_hours", "contact"]
+    assert [line["key"] for line in reply.json()["lines"] if line["held"]] == ["policy:after_hours"]
+
+
+async def test_rewording_a_held_line_publishes_it_and_clears_its_hold(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await hold_keys(engine, owner, state, ["policy:after_hours", "policy:urgent"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.put(path, json={"key": "policy:after_hours", "text": "Leave a voicemail."})
+    assert reply.status_code == 200, reply.text
+    (sent,) = [body["charter"] for part, body in calls if part == "charter"]
+    claims = {claim["key"]: claim["value"] for claim in sent}
+    assert claims["policy:after_hours"] == "Leave a voicemail."
+    assert "policy:urgent" not in claims
+    assert charter(fake, state["desk_id"])["charter:policy:after_hours"]["claims"][0]["value"] == "Leave a voicemail."
+    assert await held_keys(owner, state) == ["policy:urgent"]
+    assert {line["key"]: line["held"] for line in reply.json()["lines"]
+            if line["key"] in ("policy:after_hours", "policy:urgent")} == {
+        "policy:after_hours": False, "policy:urgent": True}
+
+
+async def test_a_refused_rewording_stays_held(lines_setup, engine, fake):
+    owner, state, path = lines_setup
+    await hold_keys(engine, owner, state, ["policy:after_hours"])
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    reply = await owner.browser.put(path, json={"key": "policy:after_hours", "text": "Call after 6 tonight."})
+    assert reply.status_code == 422, reply.text
+    assert reply.json()["key"] == "policy:after_hours"
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+    assert await held_keys(owner, state) == ["policy:after_hours"]
+
+
+async def test_a_repair_after_rewording_a_held_line_leaves_it_out(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await hold_keys(engine, owner, state, ["policy:after_hours"])
+    calls = []
+    original = CredentialView.call
+
+    async def record(self, route, body=None, **kwargs):
+        result = await original(self, route, body, **kwargs)
+        if route == "PUT /desks/{id}/charter":
+            calls.append({claim.key: claim.value for claim in body.charter})
+            if len(calls) == 1:
+                await patch_answers(engine, state, summary="Updated by another request.")
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", record)
+    reply = await owner.browser.put(path, json={"key": "policy:after_hours", "text": "Leave a voicemail."})
+    assert reply.status_code == 409, reply.text
+    assert [claims.get("policy:after_hours") for claims in calls] == ["Leave a voicemail.", None]
+    assert calls[1]["policy:about"] == "Updated by another request."
+    assert "charter:policy:after_hours" not in charter(fake, state["desk_id"])
+    assert await held_keys(owner, state) == ["policy:after_hours"]
+
+
+@pytest.mark.parametrize("held", ["policy:pricing", "contact"])
+async def test_confirm_with_a_held_key_is_refused_without_writing(lines_setup, engine, monkeypatch, held):
+    owner, state, path = lines_setup
+    await hold_keys(engine, owner, state, [held])
+    shown = (await owner.browser.get(path)).json()
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", json={
+        "keys": ["policy:intake", held], "revision": shown["revision"]})
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "line_refused", "key": held}
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
 
 
 async def test_writes_follow_the_policy_claim_switch(app, lines_setup, engine, fake, monkeypatch):
