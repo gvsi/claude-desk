@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Decision, DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { Decision, DecisionState, EvMessage, HoursWindow, KnowledgeItem, LedgerPage, PublicDesk, RuleCard, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -51,7 +51,7 @@ import {
   turnLanguage,
   type RuleName,
 } from './script.ts';
-import { RIVERA } from './seed.ts';
+import { PRESETS, RIVERA, RIVERA_HOURS, presetCards } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 import { validateContract } from './validate.ts';
@@ -1614,6 +1614,62 @@ describe('rules and tools', () => {
     for (const key of ['rules', 'people'] as const) expect((await call(key, { params: { desk_id: deskId } })).status).toBe(401);
     expect((await draftOf(8)).status).toBe(401);
     expect((await confirm(8)).status).toBe(401);
+  });
+
+  it('preset_drafts_recommended_rules_in_the_desks_own_hours', async () => {
+    // Rivera's Desk keeps 8:00 to 18:00 on weekdays and 9:00 to 13:00 on Saturdays: its "Recommended
+    // rules" book weekdays 8 to 6, as the API drafts them, and Saturday bookings ask first.
+    const preset = async () => (await call('draftPreset', { params: { desk_id: deskId }, body: { preset: 'auto' } })).body as RulesDraft;
+    const bookings = (cards: readonly RuleCard[]) => cards.filter((card) => card.applies_to === 'native.book');
+    const [shipped] = bookings(PRESETS.auto);
+    if (shipped === undefined) throw new Error('"Recommended rules" books weekdays');
+    const draft = await preset();
+    // Its weekday card is Rivera's own weekday rule, words included, in all but its id.
+    const reason = 'Weekday bookings in opening hours, checked by the reviewer.';
+    expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' }, reason }]);
+    expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)));
+    expect(bookings(draft.cards)).toEqual([{ ...rivera.ruleCards['rv-book-wk'], card_id: 'preset-book-weekday' }]);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe('auto');
+
+    // A Desk with no hours books weekdays 9 to 5: the preset's cards as they are.
+    mockStore.reset('rivera');
+    const desk = mockStore.world.desk(deskId);
+    if (desk === undefined) throw new Error("Rivera's Desk is in the copy");
+    desk.summary.hours = [];
+    expect((await rules()).preset).toBeNull();
+    const fallback = await preset();
+    expect(fallback.cards).toEqual(PRESETS.auto);
+    expect((await confirm(fallback.version)).status).toBe(200);
+    expect((await rules()).preset).toBe('auto');
+  });
+
+  it('preset_cards_match_the_apis', () => {
+    // The mock drafts a preset as the API does (`desk.api.rules.preset_cards`): a booking card per
+    // weekday window, numbered by first day and then hours, none for hours only at weekends, and the
+    // presets' cards as they are for no hours at all or exactly 9 to 5.
+    const window = (days: HoursWindow['days'], start: string, end: string): HoursWindow => ({ days, start, end });
+    const bookings = (hours: HoursWindow[]) => presetCards('auto', hours).filter((card) => card.applies_to === 'native.book').map((card) => [card.card_id, card.hours]);
+    const monToThu = window(['mon', 'tue', 'wed', 'thu'], '08:00:00', '18:00:00');
+    const friday = window(['fri'], '08:00:00', '16:00:00');
+    expect(bookings([friday, window(['sat'], '09:00:00', '13:00:00'), monToThu])).toEqual([
+      ['preset-book-weekday-1', monToThu],
+      ['preset-book-weekday-2', friday],
+    ]);
+    expect(bookings([window(['thu', 'fri'], '08:00:00', '18:00:00'), window(['sun', 'wed', 'tue', 'mon'], '08:00:00', '18:00:00')])).toEqual([
+      ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '08:00:00', '18:00:00')],
+    ]);
+    expect(bookings([window(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')])).toEqual([
+      ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '00:00:00', '00:00:00')],
+    ]);
+    for (const hours of [[], [window(['mon', 'tue'], '09:00:00', '17:00:00'), window(['wed', 'thu', 'fri', 'sat'], '09:00:00', '17:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto);
+    }
+    // Hours at weekends alone: no booking card, so weekday bookings ask first.
+    for (const hours of [[window(['sat'], '09:00:00', '13:00:00')], [window(['sat', 'sun'], '10:00:00', '16:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto.filter((card) => card.applies_to !== 'native.book'));
+    }
+    expect(presetCards('ask_first', RIVERA_HOURS)).toEqual(PRESETS.ask_first);
   });
 
   it('rule_chat_answers_about_the_hold_a_question_names', async () => {
