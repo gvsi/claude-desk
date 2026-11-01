@@ -993,6 +993,8 @@ async def test_conversations_carry_the_visitors_latest_words(scene, clock):
     await scene.text(long, at, "Leak " + "x" * 245)                    # 250 characters
     exact = await scene.visitor(at)
     await scene.text(exact, at, "y" * 200)
+    spaced = await scene.visitor(at)                                    # the cut falls on a space
+    await scene.text(spaced, at, "x" * 198 + " " + "y" * 51)
     preview = await scene.visitor(at, preview=True)                     # the owner's own preview
     await scene.text(preview, at, "Testing my own Desk")
     quiet = await scene.visitor(at)                                     # only Claude has written
@@ -1012,6 +1014,7 @@ async def test_conversations_carry_the_visitors_latest_words(scene, clock):
 
     expected = {chat.session_id: "My water heater is leaking, can someone come today?",
                 long.session_id: ("Leak " + "x" * 245)[:199] + "…", exact.session_id: "y" * 200,
+                spaced.session_id: "x" * 198 + "…",
                 preview.session_id: None, quiet.session_id: None, agent.session_id: None}
     assert {session_id: listed[session_id]["latest_visitor_text"] for session_id in expected} == expected
     assert len(listed[long.session_id]["latest_visitor_text"]) == 200

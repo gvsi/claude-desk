@@ -155,11 +155,11 @@ async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str],
 
 def visitor_line(text: str | None) -> str | None:
     """A visitor's message as the owner's one-line glimpse of it: whitespace runs collapsed to single spaces and
-    trimmed, and past `VISITOR_LINE_MAX` characters cut to the first 199 and "…". Nothing else is changed: it stays
-    the visitor's untrusted text. None when nothing is left."""
+    trimmed, and past `VISITOR_LINE_MAX` characters cut to the first 199, trimmed again, and "…". Nothing else is
+    changed: it stays the visitor's untrusted text. None when nothing is left."""
     line = " ".join((text or "").split())
     if len(line) > VISITOR_LINE_MAX:
-        return line[:VISITOR_LINE_MAX - 1] + "…"
+        return line[:VISITOR_LINE_MAX - 1].rstrip() + "…"
     return line or None
 
 
