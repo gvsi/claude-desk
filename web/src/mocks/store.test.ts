@@ -117,7 +117,14 @@ describe('the scripted Desk', () => {
     const { session, events } = await openChat();
     await send('cards-kept-handoff');
     await drain();
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(events.find(([, ev]) => ev.type === 'receipt')?.[1]).toMatchObject({
+      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Maria Rivera'),
+    });
     const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    const ledger = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === session.session_id);
+    expect(ledger?.map((e) => e.event.kind)).toEqual(['session', 'decide', 'execute', 'desk_data', 'reply']);
+    expect(ledger?.find((e) => e.event.kind === 'decide')?.event.summary).toMatchObject({ tool: 'native.quote', outcome: 'allow' });
     const entry = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
     expect(entry?.event.summary).toMatchObject({ ok: false, violations: ['number_in_prose'] });
     expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off, blocks: [rivera.blocks.quote.en, rivera.blocks.handoff.en] });
@@ -131,7 +138,14 @@ describe('the scripted Desk', () => {
     const { session, events } = await openChat();
     await send('cards-only');
     await drain();
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(events.find(([, ev]) => ev.type === 'receipt')?.[1]).toMatchObject({
+      state: 'executed', visitor_plain: executedLine('native.quote', 'en', 'Maria Rivera'),
+    });
     const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    const ledger = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === session.session_id);
+    expect(ledger?.map((e) => e.event.kind)).toEqual(['session', 'decide', 'execute', 'reply']);
+    expect(ledger?.find((e) => e.event.kind === 'decide')?.event.summary).toMatchObject({ tool: 'native.quote', outcome: 'allow' });
     const entry = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.session_id === session.session_id);
     expect(entry?.event.summary).toMatchObject({ ok: false, violations: ['number_in_prose'] });
     expect(reply).toMatchObject({ handoff: false, visitor_plain: VISITOR_PLAIN.en.reply_checked, blocks: [rivera.blocks.quote.en] });

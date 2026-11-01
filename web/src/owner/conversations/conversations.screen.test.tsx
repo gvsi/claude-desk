@@ -1327,6 +1327,11 @@ describe('Conversations', () => {
     await expect.element(line).toBeVisible();
     expect(line.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
     expect(log(screen).getByRole('article', { name: 'Handed to a person', exact: true }).elements()).toHaveLength(0);
+    const row = line.element().closest('.cd-transcript-row');
+    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
+      `${VISITOR_PLAIN.en.reply_checked} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+    ]);
   });
 
   it('kept_cards_with_drafted_handoff_show_the_held_line_in_the_owner_transcript', async () => {
@@ -1348,6 +1353,10 @@ describe('Conversations', () => {
     expect([...row!.querySelectorAll('article')].map((card) => card.getAttribute('aria-label'))).toEqual(['Quote', 'Handed to a person']);
     expect(line.element().querySelector('.cd-status-dot--held')).not.toBeNull();
     await expect.element(screen.getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
+    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
+      `${VISITOR_PLAIN.en.reply_handed_off} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+    ]);
   });
 
   it('owner_receipts_show_the_kernel_reason', async () => {

@@ -665,10 +665,11 @@ describe('public chat page', () => {
     const card = screen.getByRole('article', { name: 'Quote', exact: true });
     await expect.element(card).toBeVisible();
     const row = rowOf(card.element());
-    expect(receiptsOf(row)).toEqual(ownerPreview ? [VISITOR_PLAIN.en.reply_checked] : []);
+    const quoted = "Quoted from Maria Rivera's price list";
+    expect(receiptsOf(row)).toEqual(ownerPreview ? [VISITOR_PLAIN.en.reply_checked, quoted] : [quoted]);
     expect(row.querySelectorAll('.cd-reply-card')).toHaveLength(1);
     expect(row.querySelector('.cd-claude-message__prose')).toBeNull();
-    expect(row.querySelectorAll('.cd-status-dot--handled')).toHaveLength(ownerPreview ? 1 : 0);
+    expect(row.querySelectorAll('.cd-status-dot--handled')).toHaveLength(ownerPreview ? 2 : 1);
   });
 
   it('kept_cards_with_drafted_handoff_show_the_held_line_to_a_stranger', async () => {
@@ -683,7 +684,7 @@ describe('public chat page', () => {
     expect(rowOf(handoff.element())).toBe(row);
     expect([...row.querySelectorAll('article')].map((card) => card.getAttribute('aria-label'))).toEqual(['Quote', 'Handed to a person']);
     expect(row.querySelector('.cd-claude-message__prose')).toBeNull();
-    expect(receiptsOf(row)).toEqual([VISITOR_PLAIN.en.reply_handed_off]);
+    expect(receiptsOf(row)).toEqual([VISITOR_PLAIN.en.reply_handed_off, "Quoted from Maria Rivera's price list"]);
     expect(row.querySelector('.cd-status-dot--held')).not.toBeNull();
   });
 

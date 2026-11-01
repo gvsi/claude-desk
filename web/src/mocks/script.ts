@@ -565,7 +565,11 @@ export const SCRIPT: readonly ScriptRule[] = [
     words: ['cards-only', 'solo-tarjetas'],
     command: true,
     tools: ['native.quote'],
-    steps: [writing, (ctx) => ctx.reply([blocks.quote[ctx.language]], { blocked: true })],
+    steps: [
+      writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+      (ctx) => ctx.reply([blocks.quote[ctx.language]], { blocked: true }),
+    ],
   },
   {
     // The same failure with Claude's drafted handoff kept after the checked card.
@@ -573,7 +577,11 @@ export const SCRIPT: readonly ScriptRule[] = [
     words: ['cards-kept-handoff', 'tarjetas-con-traspaso'],
     command: true,
     tools: ['native.quote'],
-    steps: [writing, (ctx) => ctx.reply([blocks.quote[ctx.language], blocks.handoff[ctx.language]], { blocked: true })],
+    steps: [
+      writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+      (ctx) => ctx.reply([blocks.quote[ctx.language], blocks.handoff[ctx.language]], { blocked: true }),
+    ],
   },
   {
     name: 'discount',
