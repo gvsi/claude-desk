@@ -6,7 +6,7 @@ import secrets
 from collections.abc import Coroutine
 from typing import Any
 
-from desk.api.owner_streaming import Display, displaying
+from desk.api.owner_streaming import Display, displaying, failure
 
 
 class TurnRuns:
@@ -31,7 +31,9 @@ class TurnRuns:
     def _settled(self, interview_id: str, task: asyncio.Task) -> None:
         if self._tasks.get(interview_id) is task:
             del self._tasks[interview_id]
-            self._displays.pop(interview_id, None)
+            display = self._displays.pop(interview_id, None)
+            if display is not None and not display.finished:     # cancelled before the turn could say how it ended
+                display.finish("error", {"run": display.run, "error": failure(asyncio.CancelledError())["error"]})
         if not task.cancelled():
             error = task.exception()       # retrieve failures even after the request answered 202
             if error is not None:

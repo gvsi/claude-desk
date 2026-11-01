@@ -127,6 +127,8 @@ class Proving:
         if task.cancelled():
             if self._entries.get(key) is entry:
                 del self._entries[key]
+            if entry.display is not None:                 # its subscribers stop waiting
+                entry.display.finish("error", failure(asyncio.CancelledError()))
             return
         error = task.exception()                          # reading the error marks it retrieved
         if error is None:

@@ -178,6 +178,10 @@ class Display:
         self._terminal = (event, data)
         self._wake()
 
+    @property
+    def finished(self) -> bool:
+        return self._terminal is not None
+
     async def events(self) -> AsyncIterator[dict]:
         waiter = asyncio.Event()
         self._waiters.add(waiter)

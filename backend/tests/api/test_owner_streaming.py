@@ -981,3 +981,36 @@ async def test_a_streamed_rules_error_is_the_json_error_and_its_status(
         if live is not None:
             await live.close()
         await plain.aclose()
+
+
+async def test_cancelled_work_ends_its_streams_with_an_error():
+    from desk.api.proving import Proving
+    from desk.api.turn_runs import TurnRuns
+
+    # A setup turn cancelled (the process shutting down) before it ever ran.
+    runs = TurnRuns()
+
+    async def never_runs():
+        pytest.fail("the turn was cancelled before it started")
+
+    runs.start("interview-1", never_runs())
+    display = runs.display("interview-1")
+    events = display.events()
+    await runs.close()
+    assert await asyncio.wait_for(anext(events), 1) == {
+        "event": "error", "data": json.dumps({"run": display.run, "error": "internal"}, separators=(",", ":"))}
+
+    # Ask Claude's work cancelled while it runs.
+    proving, started = Proving(), asyncio.Event()
+
+    async def chat():
+        started.set()
+        await asyncio.Event().wait()
+
+    async def admit():
+        pass
+
+    events = await proving.stream(("desk-1", "/chat", "body"), chat, admit=admit)
+    await asyncio.wait_for(started.wait(), 1)
+    await proving.close()
+    assert await asyncio.wait_for(anext(events), 1) == {"event": "error", "data": '{"status":500,"error":"internal"}'}
