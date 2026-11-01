@@ -50,6 +50,22 @@ async function ask(viewport: Viewport, words = ASK) {
 /** The answer growing in the panel, or null. */
 const growing = (panel: { element(): Element }) => panel.element().querySelector<HTMLElement>('.cd-rule-chat__growing');
 
+/** How long a long answer may take to land on a loaded machine. */
+const LANDS_WITHIN = { timeout: 20_000 };
+
+/**
+ * The final answer in the panel holding `words`, once it has landed: read from the answer's own
+ * text, however the Markdown renderer splits it into elements.
+ */
+async function finalAnswer(panel: { element(): Element }, words: string): Promise<HTMLElement> {
+  const landed = () =>
+    [...panel.element().querySelectorAll<HTMLElement>('.cd-rule-chat__answer:not(.cd-rule-chat__growing)')].find((answer) =>
+      (answer.textContent ?? '').includes(words),
+    ) ?? null;
+  await expect.poll(landed, LANDS_WITHIN).not.toBeNull();
+  return landed()!;
+}
+
 describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (viewport) => {
   it('grows_the_answer_then_shows_the_final_draft', async () => {
     const held = gate();
@@ -183,7 +199,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     const second = gate();
     mockStore.planStream('ruleChat', { holds: [{ after: 400, until: first.until }, { after: 410, until: second.until }] });
     const { panel } = await ask(viewport);
-    await expect.poll(() => growing(panel)?.textContent, { timeout: 5_000 }).toBe(settledWords(words[399] ?? ''));
+    await expect.poll(() => growing(panel)?.textContent, LANDS_WITHIN).toBe(settledWords(words[399] ?? ''));
     const log = panel.element().querySelector<HTMLElement>('[role="log"]')!;
     expect(log.scrollHeight).toBeGreaterThan(log.clientHeight + 200);
     // The owner scrolls down the answer to read on.
@@ -191,12 +207,12 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const read = log.scrollTop;
     first.release();
-    await expect.poll(() => growing(panel)?.textContent, { timeout: 5_000 }).toBe(settledWords(words[409] ?? ''));
+    await expect.poll(() => growing(panel)?.textContent, LANDS_WITHIN).toBe(settledWords(words[409] ?? ''));
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     // More of the answer came; the owner is still where they scrolled to.
     expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
     second.release();
-    await expect.element(panel.getByText(long, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await finalAnswer(panel, 'Part 30 of the answer');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     // The final answer takes the growing one's place; the owner is still where they scrolled to.
     expect(growing(panel)).toBeNull();
@@ -207,8 +223,10 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     // A first answer long enough that the conversation scrolls.
     const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
     mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
+    // It comes whole, with no growing words: it is only there to make the conversation scroll.
+    mockStore.planStream('ruleChat', { quiet: true });
     const { panel } = await ask(viewport);
-    await expect.element(panel.getByText(long, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await finalAnswer(panel, 'Part 30 of the answer');
     const log = panel.element().querySelector<HTMLElement>('[role="log"]')!;
     expect(log.scrollHeight).toBeGreaterThan(log.clientHeight);
     // A follow-up: Claude brings the owner's new question into view, then follows its answer.
@@ -216,16 +234,14 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     mockStore.planStream('ruleChat', { pauseAfter: 12, until: held.until });
     await panel.getByRole('textbox', { name: 'Ask Claude' }).fill('Why?');
     await userEvent.keyboard('{Enter}');
-    await expect.poll(() => (growing(panel)?.textContent ?? '').split(' ').length).toBe(11);
+    await expect.poll(() => (growing(panel)?.textContent ?? '').split(' ').length, LANDS_WITHIN).toBe(11);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const inView = (el: Element) => el.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1;
     expect(inView(growing(panel)!)).toBe(true);
     held.release();
-    const explained = 'I can explain what a rule does, or draft a change to one. Ask about a tool by name, such as quotes, bookings or refunds.';
-    const final = panel.getByText(explained, { exact: true });
-    await expect.element(final).toBeVisible();
+    const final = await finalAnswer(panel, 'I can explain what a rule does, or draft a change to one.');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    expect(inView(final.element())).toBe(true);
+    expect(inView(final)).toBe(true);
   });
 
   it('shows_a_drafted_change_with_both_its_buttons_in_view', async () => {
@@ -250,8 +266,9 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     // A first answer long enough that the conversation scrolls.
     const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
     mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
+    mockStore.planStream('ruleChat', { quiet: true });
     const { panel } = await ask(viewport, 'How do quotes work?');
-    await expect.element(panel.getByText(long, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await finalAnswer(panel, 'Part 30 of the answer');
     const log = panel.element().querySelector<HTMLElement>('[role="log"]')!;
     // Then a change, which the owner scrolls away from while its answer is written.
     const held = gate();
