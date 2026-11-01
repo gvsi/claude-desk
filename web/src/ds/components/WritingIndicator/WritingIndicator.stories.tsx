@@ -208,6 +208,10 @@ export const VisitorTyping: Story = {
   play: async ({ canvas, canvasElement }) => {
     const status = canvas.getByRole('status');
     await expectOnlyLabel(canvasElement, status, 'Dana is typing');
+    expectComputed(status, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px' });
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      expectComputed(status, { animationName: 'cd-writing-pulse', animationDuration: '1.6s' });
+    }
     // The name came from a person, so it is set off as their words; the rest is interface copy.
     await expectSetOffName(status, 'Dana');
   },

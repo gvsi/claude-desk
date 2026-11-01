@@ -337,8 +337,9 @@ describe('design tokens', () => {
     add(['mark-tile'], ['bg-app'], 3);
     add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
     add(['mark-ink'], ['mark-clay'], 3);
-    // The About pages' app icon: its clay field, the icon's edge, on the page.
-    add(['clay'], ['bg-app'], 3);
+    // Claude's writing dots carry the waiting status on the page and in the Ask Claude panel;
+    // the About pages' app icon has its clay field, the icon's edge, on the page too.
+    add(['clay'], ['bg-app', 'bg-panel'], 3);
     // The switch: its track when on, its knob on the track, on or off.
     add(['button-primary'], ['bg-app', 'bg-panel'], 3);
     add(['bg-app'], ['button-primary'], 3);

@@ -5,7 +5,8 @@
  * a person's in text-secondary, and who is typing is still said.
  */
 import { composeStory } from '@storybook/react-vite';
-import { expect, it } from 'vitest';
+import { expect, it, onTestFinished } from 'vitest';
+import { cdp } from 'vitest/browser';
 
 import { motion } from '../../test/reducedMotion.ts';
 import { WritingIndicator } from './WritingIndicator.tsx';
@@ -20,6 +21,48 @@ function tokenColor(name: string): string {
   probe.remove();
   return color;
 }
+
+/** Force the visitor's high-contrast colors, restoring the project's reduced-motion setting after. */
+async function forceColors(reducedMotion: 'reduce' | 'no-preference'): Promise<void> {
+  const emulate = async (forced: 'active' | 'none'): Promise<void> => {
+    await cdp().send('Emulation.setEmulatedMedia', {
+      features: [
+        { name: 'forced-colors', value: forced },
+        { name: 'prefers-reduced-motion', value: forced === 'active' ? reducedMotion : 'reduce' },
+      ],
+    });
+  };
+  await emulate('active');
+  onTestFinished(() => emulate('none'));
+  expect(window.matchMedia('(forced-colors: active)').matches).toBe(true);
+}
+
+it.each(['reduce', 'no-preference'] as const)('claude_person_and_bubble_dots_remain_visible_in_forced_colors_with_motion_%s', async (reducedMotion) => {
+  await forceColors(reducedMotion);
+  const story = composeStory({
+    render: () => <>
+      <WritingIndicator language="en" />
+      <WritingIndicator language="en" variant="person" who="Maria Rivera" />
+      <WritingIndicator language="en" variant="bubble" who="Dana" />
+    </>,
+  }, meta);
+  await story.run();
+
+  const pageBackground = getComputedStyle(document.body).backgroundColor;
+  for (const variant of ['claude', 'person', 'bubble']) {
+    const dots = [...document.querySelectorAll<HTMLElement>(`.cd-writing-indicator--${variant} .cd-writing-indicator__dot`)];
+    expect(dots).toHaveLength(3);
+    for (const [index, dot] of dots.entries()) {
+      // Check the color pulse's peak too: keyframes must not turn the dots back into Canvas.
+      const animation = dot.getAnimations()[0];
+      if (animation) {
+        animation.pause();
+        animation.currentTime = 800 + index * 150;
+      }
+      expect(getComputedStyle(dot).backgroundColor).not.toBe(pageBackground);
+    }
+  }
+});
 
 it('claude_dots_bounce_in_clay_with_stagger_without_changing_the_reply_box', async () => {
   await motion();

@@ -57,7 +57,10 @@ function personTyping(person: string, language: CopyLanguage) {
   );
 }
 
-/** Three dots, drawn only: the pulse is the stylesheet's, so the live region never changes. */
+/**
+ * Claude's writing dots, or a person's typing dots, show with the words for screen readers.
+ * The stylesheet animates them, so the live region never changes.
+ */
 function Dots() {
   return (
     <>

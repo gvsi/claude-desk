@@ -108,3 +108,10 @@
     animation: none;
   }
 }
+
+@media (forced-colors: active) {
+  .cd-writing-indicator__dot,
+  .cd-writing-indicator--claude .cd-writing-indicator__dot {
+    background: CanvasText;
+  }
+}
