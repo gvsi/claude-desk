@@ -63,6 +63,31 @@ def digest(repo, paths):
     return h.hexdigest()
 
 
+def exit_status(exc):
+    return exc.returncode if exc.returncode >= 0 else 128 - exc.returncode
+
+
+def install_web_dependencies(base, repo, env):
+    """Run npm ci in web/ when this lane has no finished install of its current package files, so narrow web
+    commands work without `make web-test`'s own install. Returns an exit status that stops the call, or None."""
+    if not (repo / "web/package-lock.json").is_file():
+        return None
+    wanted = digest(repo, ["web/package.json", "web/package-lock.json"])
+    stamp = base / "web-deps-hash"
+    # npm ci removes node_modules first and writes its hidden lockfile last: it marks a finished install.
+    if stamp.exists() and stamp.read_text() == wanted and (repo / "web/node_modules/.package-lock.json").is_file():
+        return None
+    print("testbox: installing web dependencies (npm ci in web/)", file=sys.stderr, flush=True)
+    stamp.unlink(missing_ok=True)  # An install that stops part way must not pass for the recorded one.
+    try:
+        run(["npm", "ci", "--prefer-offline", "--no-audit", "--no-fund"], cwd=repo / "web", env=env)
+    except subprocess.CalledProcessError as exc:
+        print(f"testbox: npm ci in web/ failed (exit {exc.returncode}); the command did not run", file=sys.stderr, flush=True)
+        return exit_status(exc)
+    stamp.write_text(wanted)
+    return None
+
+
 def main():
     timing = Timings("worker")
     for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
@@ -119,6 +144,10 @@ def main():
     timing.mark("kernel_setup")
     run(["uv", "sync", "--project", "backend", "--group", "evals"], env=env)
     timing.mark("uv_sync")
+    failed = install_web_dependencies(base, repo, env)
+    timing.mark("web_setup")
+    if failed:
+        return failed
     # Templates are keyed by migration inputs. Global lock also serializes role creation/ALTERs.
     schema = digest(repo, ["backend/alembic", "backend/desk/db"])
     template = "template_" + schema[:24]
@@ -140,7 +169,7 @@ def main():
         timing.mark("command")
         return 0
     except subprocess.CalledProcessError as exc:
-        return exc.returncode if exc.returncode >= 0 else 128 - exc.returncode
+        return exit_status(exc)
 
 
 
