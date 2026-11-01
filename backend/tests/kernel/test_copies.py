@@ -234,6 +234,14 @@ async def test_a_copy_prices_a_plumbing_emergency(app, client):
     assert prices["pipe"] == ("Pipe repair (starting price)", 10_000)
 
 
+def test_the_price_list_knowledge_says_when_the_short_notice_fee_applies():
+    """The owner's sentence (2026-11-01) tells Claude when to add the fee, with no amount: an amount
+    reaches a visitor only on a quote card."""
+    from desk.kernel_service import seed
+    [price_list] = [item for item in seed.RIVERA_KNOWLEDGE if item.item_id == "kn-price-list"]
+    assert "The short-notice fee is added to an urgent visit that Maria fits in at short notice." in price_list.text
+
+
 async def test_copies_are_isolated(app, client):
     add_owner_desk_probe(app)
     a, b = await create_copy(client), await create_copy(client)
