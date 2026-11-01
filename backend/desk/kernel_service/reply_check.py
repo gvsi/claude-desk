@@ -34,7 +34,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    no card. The clauses are checked before the prose is scanned, so the scan knows which cards
    pass; their refusals follow the scan's.
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Sonnet 5.5
-   reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
+   reads the prose and the cards, each as its kind's label and its text (`render.check_text`,
+   "Payment link card: ..."; never the visitor's words), and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
    (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (6 s), with no recheck and no
    fallback (the owner's decision of 2026-10-31), inside the API's 10 s for the route: no
@@ -49,8 +50,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reply here, and once its window has passed nothing promises a call. That handoff is read
    without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
    each check one pooled connection, across the try. A reply that passes with the handoff's
-   card is checked again in step 7. When configured, TypeSafe Jev evaluates the same prose, card
-   texts and fixed next steps concurrently, within three seconds of Sonnet's six-second window.
+   card is checked again in step 7. When configured, TypeSafe Jev evaluates the same prose, labelled
+   cards and fixed next steps concurrently, within three seconds of Sonnet's six-second window.
    Its top score at or above 0.95 adds `soft.jev`; its failure leaves Sonnet's verdict standing.
    No key means no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not
    ledger floats.
@@ -713,7 +714,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None, dict]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
-    rendered for it, and an open handoff's card), with the session's fixed next steps from its
+    rendered for it, and an open handoff's card), each shown to Sonnet and Jev alike as its kind's
+    label and its text (`render.check_text`), with the session's fixed next steps from its
     resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
     no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
     (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
@@ -725,7 +727,7 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
         Desk.desk_id == session_row.desk_id)))).one()
     tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
-    data = SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards],
+    data = SoftPromiseInput(language=language, prose=prose, cards=[render.check_text(card) for card in cards],
                             next_steps=next_steps(tools))
     if ctx.settings.typesafe_api_key:
         # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.

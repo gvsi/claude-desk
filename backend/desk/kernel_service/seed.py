@@ -161,8 +161,8 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
                               "Water heater flush. Parts and labor are covered for 12 months from the service date."),
         ],
         # a handoff the card opens alerts at once, as a held request does (the owner's decision of 2026-10-30)
-        notifications=NotificationDefaults(now=["approval", "emergency", "breaker", "lockout", "handoff"],
-                                           briefing=["lead", "callback", "booking"]),
+        notifications=NotificationDefaults(now=["approval", "callback", "breaker", "lockout", "handoff"],
+                                           briefing=["lead", "booking"]),
         connections=["mock_payments"],
     )
     return business, desk

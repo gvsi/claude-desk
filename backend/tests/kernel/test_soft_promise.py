@@ -14,7 +14,7 @@ import anthropic
 import httpx
 import pytest
 
-from desk.kernel_service import decisions, ledger
+from desk.kernel_service import decisions, ledger, render
 from desk.next_steps import NEXT_STEPS
 from desk.kernel_service.decisions import (SOFT_PROMISE_SCHEMA, SOFT_PROMISE_SYSTEM, AnthropicDecisions, CallUsage,
                                            SoftPromiseInput, SoftPromiseVerdict)
@@ -36,6 +36,8 @@ SONNET = "claude-sonnet-5-5"
 PASSES = '{"promises_beyond_cards": false, "denies_being_ai": false}'
 # the visitor's quote (drain clearing at list price), as its card reads
 QUOTE_CARD = "$180.00\nDrain clearing\nGood until Monday, November 2, 9:04 am"
+# the handoff card as the check reads it: its kind, then its text
+HANDOFF_SEEN = {language: f"Handed to a person card: {text}" for language, text in HANDOFF_CARD.items()}
 
 
 async def cancellation_during_signing(app, client, reviewer, monkeypatch, *, prose, cancel_first):
@@ -424,7 +426,9 @@ async def test_prose_restating_its_own_card_is_shown_with_it_by_the_owners_decis
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", prose), ("card", QUOTE_CARD)]
     [request] = model.requests
     assert request["system"] == SOFT_PROMISE_SYSTEM
-    assert json.loads(request["messages"][0]["content"]) == {"language": "en", "prose": prose, "cards": [QUOTE_CARD], "next_steps": VISITOR_NEXT_STEPS}
+    assert json.loads(request["messages"][0]["content"]) == {"language": "en", "prose": prose,
+                                                             "cards": [f"Quote card: {QUOTE_CARD}"],
+                                                             "next_steps": VISITOR_NEXT_STEPS}
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
@@ -447,7 +451,8 @@ async def test_prose_pointing_at_its_card_passes(app, client, reviewer, prose, l
     assert (prose_block.text, card.template) == (prose, "booking_confirmed")
     [request] = model.requests
     assert json.loads(request["messages"][0]["content"]) == {"language": language, "prose": prose,
-                                                             "cards": [card.text], "next_steps": VISITOR_NEXT_STEPS}
+                                                             "cards": [f"Booking confirmed card: {card.text}"],
+                                                             "next_steps": VISITOR_NEXT_STEPS}
 
 
 async def test_a_promise_beyond_the_cards_is_blocked(app, client, reviewer):
@@ -461,7 +466,8 @@ async def test_a_promise_beyond_the_cards_is_blocked(app, client, reviewer):
     assert not verdict.ok
     assert [(b.template, b.fact_id) for b in verdict.blocks] == [("quote", quote.fact_id)]
     # the check read the prose and the card's text, and nothing else
-    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=prose, cards=[QUOTE_CARD], next_steps=VISITOR_NEXT_STEPS)]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=prose, cards=[f"Quote card: {QUOTE_CARD}"],
+                                                     next_steps=VISITOR_NEXT_STEPS)]
     # its usage is on the reply's ledger entry
     [entry] = await reply_entries(app, copy)
     summary = entry.event.summary
@@ -600,12 +606,12 @@ async def test_the_soft_promise_check_reads_an_open_handoffs_card(app, client, r
     verdict = await checked(client, visitor, clean)
     assert len(reviewer.soft_inputs) == asked + 1
     seen = reviewer.soft_inputs[-1]
-    assert (seen.language, seen.prose, seen.cards) == (language, clean, [HANDOFF_CARD[language]])
+    assert (seen.language, seen.prose, seen.cards) == (language, clean, [HANDOFF_SEEN[language]])
     assert verdict.ok and [(block.kind, block.text) for block in verdict.blocks] == [("prose", clean)]
 
     # a reply that shows the card itself is shown it once
     assert (await checked(client, visitor, clean, [clause("handoff")])).ok
-    assert reviewer.soft_inputs[-1].cards == [HANDOFF_CARD[language]]
+    assert reviewer.soft_inputs[-1].cards == [HANDOFF_SEEN[language]]
 
     assert (await handoff_done(client, handoff.handoff_id, copy.owner)).status_code == 200
     assert (await checked(client, visitor, clean)).ok
@@ -622,7 +628,7 @@ async def test_an_open_call_back_request_backs_nothing(app, client, reviewer, fr
     [fact] = (await callback(client, visitor)).facts
     verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
     assert verdict.ok, verdict.violations
-    assert reviewer.soft_inputs[-1].cards == [verdict.blocks[-1].text]          # its own card, alone
+    assert reviewer.soft_inputs[-1].cards == [f"Callback set card: {verdict.blocks[-1].text}"]   # its own card, alone
     for moment in (None, fact.expires_at):                                      # before and after its window
         if moment is not None:
             frozen_clock.travel(moment)
@@ -655,7 +661,7 @@ async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, cl
     from .test_handoff_card import quote_and_payment
     clauses = ([c for c in await quote_and_payment(client, reviewer, visitor) if c["template"] == card_template]
                if card_template else [])
-    card_texts = [b.text for b in (await checked(client, visitor, "", clauses)).blocks] if clauses else []
+    card_texts = [render.check_text(b) for b in (await checked(client, visitor, "", clauses)).blocks] if clauses else []
     assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
     [first] = await handoffs_of(app, copy)
     asked, answer, shown = asyncio.Event(), asyncio.Event(), []
@@ -671,7 +677,7 @@ async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, cl
     checking = asyncio.create_task(checked(client, visitor, REPLY_HERE, clauses))
     try:
         await asyncio.wait_for(asked.wait(), 5)
-        assert shown == [[*card_texts, HANDOFF_CARD["en"]]]       # its own card plus the open handoff's backing
+        assert shown == [[*card_texts, HANDOFF_SEEN["en"]]]       # its own card plus the open handoff's backing
         response = await asyncio.wait_for(handoff_done(client, first.handoff_id, copy.owner), 5)
         assert response.status_code == 200, response.text       # the check holds nothing the owner waits for
     finally:
