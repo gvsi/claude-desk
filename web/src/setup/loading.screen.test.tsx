@@ -3,6 +3,7 @@
  * for as its own shapes, then lands where the shapes were. A reload draws the header as shapes
  * until the interview is read, and hands off to the step's own shapes with no blank between.
  */
+import { QueryClient } from '@tanstack/react-query';
 import { http } from 'msw';
 import { beforeAll, expect, it, onTestFinished, vi } from 'vitest';
 
@@ -38,13 +39,23 @@ async function interviewAt(step: Step): Promise<SetupState> {
     const text = question.key === 'money_limit' ? '$500 is fine. Anything bigger, ask me.' : 'Yes, that works.';
     await mockStore.dispatch('setupAnswer', { params, body: { question: question.key, text } });
   }
-  if (step === 'tools') return state;
-  await mockStore.dispatch('setupRules', { params });
-  if (step === 'rules') return state;
-  await mockStore.dispatch('setupSituations', { params });
-  if (step === 'situations') return state;
-  await mockStore.dispatch('setupSafetyCheck', { params });
-  return state;
+  if (step !== 'tools') await mockStore.dispatch('setupRules', { params });
+  if (step === 'situations' || step === 'safety_check') await mockStore.dispatch('setupSituations', { params });
+  if (step === 'safety_check') await mockStore.dispatch('setupSafetyCheck', { params });
+  const current = await mockStore.dispatch('setup', { params });
+  if ('network' in current || current.status !== 200) throw new Error('the mock reads the current setup');
+  return current.body as SetupState;
+}
+
+/** Start from the loaded setup entry page, with this interview cached before its step mounts. */
+async function loadedSetup(state: SetupState, viewport: Viewport = 'desktop') {
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { router } = await renderRoute('/app/setup', { viewport });
+  const client = mounted.mock.contexts.at(-1) as QueryClient;
+  mounted.mockRestore();
+  client.setQueryData(['setup', state.interview_id], state);
+  return () => router.navigate(`/app/setup/${state.interview_id}`);
 }
 
 /** Holds every post to `path` until the test lets them through to the mock, as `holdReads` does reads. */
@@ -344,14 +355,17 @@ for (const viewport of ['desktop', 'phone'] as const) {
     it(`setup_steps_load_in_place: ${step} at ${viewport}`, async () => {
       const state = await interviewAt(step);
       const read = load.hold(state);
-      const watched = watchPlaces([...(load.estimated ?? []), ...(load.moved?.(viewport) ?? [])]);
+      const open = await loadedSetup(state, viewport);
+      let watched!: ReturnType<typeof watchPlaces>;
       await expectSkeletonLoad({
         status: load.status,
         anchors: load.anchors,
         stays: load.stays,
         open: async () => {
-          await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+          await open();
           await vi.waitFor(() => expect(read.held()).toBe(1));
+          // Watch this step, after the entry page's own main button has left.
+          watched = watchPlaces([...(load.estimated ?? []), ...(load.moved?.(viewport) ?? [])]);
         },
         release: read.release,
       });
@@ -520,13 +534,14 @@ it('long_draft_keeps_one_status', async () => {
 it('setup_steps_still_under_reduced_motion', async () => {
   const state = await interviewAt('rules');
   const draft = holdPosts(path('setupRules', state));
+  const open = await loadedSetup(state);
   const rules = STEPS.rules;
   await expectSkeletonStill({
     status: rules.status,
     anchors: rules.anchors,
     stays: rules.stays,
     open: async () => {
-      await renderRoute(`/app/setup/${state.interview_id}`);
+      await open();
       await vi.waitFor(() => expect(draft.held()).toBe(1));
     },
     release: draft.release,
@@ -541,13 +556,14 @@ it('draft_waits_for_the_people_read', async () => {
   // read out, the draft keeps its shapes, then lands where they were.
   const state = await interviewAt('rules');
   const people = holdReads(peoplePath(state));
+  const open = await loadedSetup(state, 'phone');
   const rules = STEPS.rules;
   await expectSkeletonLoad({
     status: rules.status,
     anchors: rules.anchors,
     stays: rules.stays,
     open: async () => {
-      await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+      await open();
       await vi.waitFor(() => expect(people.held()).toBe(1));
       await vi.waitFor(() => expect(mockStore.requests.some((r) => r.key === 'setupRules')).toBe(true));
     },
