@@ -165,6 +165,16 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const ownerTyping = useOwnerTyping(sessionId);
   const typing = useTypingBubble(chat.data);
   const endInView = useEndInView();
+  const [handoffCards, setHandoffCards] = useState<HTMLDivElement | null>(null);
+  const shownHandoff = useRef<string | null>(null);
+  const { ready, reveal } = endInView;
+  // The first handoff shown in this open chat leads, if she is still where the chat opened.
+  // Later polls and cards never move her back, even after she marks the first one done.
+  useEffect(() => {
+    if (!ready || !handoffCards || shownHandoff.current === sessionId) return;
+    shownHandoff.current = sessionId;
+    reveal(handoffCards);
+  }, [ready, handoffCards, sessionId, reveal]);
   const mode = chat.data?.state.mode;
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
@@ -307,10 +317,10 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
-      {/* The transcript, its end in view as a chat's: it scrolls on its own between the head and the owner's controls, or in a short window with them, as one. */}
+      {/* The transcript and its handoff cards scroll between the head and the owner's controls, or in a short window with them, as one. */}
       <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
         {callbacks.length > 0 ? (
-          <div className="cd-conversation__handoffs">
+          <div ref={setHandoffCards} className="cd-conversation__handoffs">
             {callbacks.map((item) => (
               <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
             ))}

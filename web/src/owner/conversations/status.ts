@@ -11,17 +11,17 @@ export interface ConversationStatus {
 }
 
 /**
- * A conversation's state, first match: something held for the owner, an open handoff, the owner
- * in the chat, a chat paused after blocked attempts, the owner's own preview, then what they are: an agent, a
+ * A conversation's state, first match: something held for the owner, a chat paused after blocked
+ * attempts, an open handoff, the owner in the chat, the owner's own preview, then what they are: an agent, a
  * verified customer, a visitor. `held` is how many of its requests are held now. With no name on
  * record or given, the name line (`whoLabel`) already says what they are, so the status is left
  * out (null) rather than say it twice.
  */
 export function conversationStatus(s: ConversationSummary, held: number, openHandoff = false): ConversationStatus | null {
   if (held > 0) return { tone: 'held', text: 'Needs you' };
+  if (s.mode === 'paused') return { tone: 'held', text: 'Paused after blocked attempts' };
   if (openHandoff) return { tone: 'held', text: 'Wants you' };
   if (s.mode === 'owner') return { tone: 'info', text: "You're in this chat" };
-  if (s.mode === 'paused') return { tone: 'held', text: 'Paused after blocked attempts' };
   if (s.owner_preview) return { tone: 'info', text: 'Your own preview' };
   if (!hasName(s)) return null;
   if (s.kind === 'agent') return { tone: 'info', text: 'Agent' };
