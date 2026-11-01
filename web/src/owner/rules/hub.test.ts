@@ -8,13 +8,14 @@ import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 import type { RuleCard, ToolName } from '../../api/contracts.ts';
 import type { NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
-import type { ToolSummaryView } from '../../ds/index.ts';
+import { chenBusinessTools } from '../../mocks/businessTools.ts';
+import { describeEffects, type ToolSummaryView } from '../../ds/index.ts';
 import { needsYou, peopleOut, rulesView } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { validateContract } from '../../mocks/validate.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
-import { governingRules, holdQuestion, hubSections, parseLimit, toolFallback, toolRuleRows, withOutcome } from './hub.ts';
+import { governingRules, holdQuestion, hubSections, parseLimit, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
 
 /** The mock's main Desk, a fresh Rivera copy for every test. */
 function desk(): DeskRecord {
@@ -59,6 +60,28 @@ beforeEach(() => {
 });
 
 describe('the Rules hub', () => {
+  it('uses a business description followed by its effects', () => {
+    for (const tool of chenBusinessTools) {
+      expect(toolLine(tool)).toBe(`${tool.business?.description} ${describeEffects(tool.effects, tool.reversible)}`);
+    }
+    const intro = chenBusinessTools[0];
+    if (!intro?.business) throw new Error('Chen has an intro call tool');
+    const effects = describeEffects(intro.effects, intro.reversible);
+    expect(toolLine({ ...intro, business: null })).toBe(`A connected tool ${effects}`);
+    expect(toolLine({ ...intro, business: { ...intro.business, title: '  ' } })).toBe(`A connected tool ${effects}`);
+    expect(toolLine({ ...intro, tool: 'desk.unknown', business: null })).toBe(`A connected tool ${effects}`);
+  });
+
+  it('names listed business tools in shared rules without adding connector rows', () => {
+    const shared = card({ card_id: 'changes', applies_to: 'effect:change', mode: 'never', reason: 'Changes never run.' });
+    const rules = view([shared]);
+    const tools = [...rules.tools, ...chenBusinessTools];
+    expect(() => hubSections({ ...rules, tools }, people())).not.toThrow();
+    expect(hubSections({ ...rules, tools }, people()).flatMap((section) => section.tools).some((tool) => tool.key.startsWith('desk.'))).toBe(false);
+    const rows = toolRuleRows(rowOf(rules, 'native.book'), rules.active, people(), tools);
+    expect(rows.find((row) => row.rule.card_id === 'changes')?.shared?.appliesTo).toContain('New client intake');
+  });
+
   it('tools_group_by_connector', () => {
     const sections = hubSections(view([rivera.sharedChargeCard]), people());
 
@@ -76,6 +99,7 @@ describe('the Rules hub', () => {
     const keys = sections.flatMap((s) => s.tools.map((t) => t.key));
     expect(keys).not.toContain('native.fetch_website');
     expect(keys).not.toContain('native.read_memory');
+    expect(keys).not.toContain('native.web_search');
     expect(sections.map((s) => s.connector.id)).not.toContain('google_calendar');
     // The payment limit's line sits atop Payments and Stripe only.
     expect(sections.filter((s) => s.moneyLimit).map((s) => s.connector.id)).toEqual(['payments', 'stripe']);

@@ -14,7 +14,7 @@
   - "Ask me first": "Quotes, bookings, documents and payments wait for your answer."
   - "Recommended rules": "Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."
 - No item is checked or current: the Desk's rules are its own, whichever preset they started from.
-- Under 640 px of the window (a phone) the button fills its line, its words at the left and the chevron at the right, and the menu opens under it at the same width. The consumer gives it the whole line.
+- Under 640 px of the window (a phone) the button fills its line, its words at the left and the chevron at the right, and the menu opens under it at the same width. The consumer may give it the rest of a line beside another action. In the Rules header, the open menu spans the full actions row.
 
 ## Keyboard and pointer
 

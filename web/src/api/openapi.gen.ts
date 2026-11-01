@@ -509,7 +509,7 @@ export interface KnowledgeRow {
   title: string | null;
   text: string | null;
   readers: string[];
-  source: "website" | "upload" | "setup" | "memory_import";
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
   created_at: string | null;
 }
 /**
@@ -907,6 +907,7 @@ export interface SimulateChangeIn {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }
@@ -1028,7 +1029,7 @@ export interface ToolDecisions {
 export interface ToolsConfirmIn {
   /**
    * @minItems 1
-   * @maxItems 13
+   * @maxItems 14
    */
   tools:
     | [ToolPin]
@@ -1044,6 +1045,22 @@ export interface ToolsConfirmIn {
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
         ToolPin,
         ToolPin,
         ToolPin,

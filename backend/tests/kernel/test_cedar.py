@@ -50,6 +50,7 @@ TOOL_TABLE: dict[str, tuple[list[str], str, list[str]]] = {
     "native.start_verification": (["send_message"], "Desk", ["Visitor", "Agent"]),
     "native.fetch_website": (["read"], "Desk", ["Owner"]),
     "native.read_memory": (["read"], "Desk", ["Owner"]),
+    "native.web_search": (["read"], "Desk", ["Owner"]),
 }
 
 # The master plan's "Cedar request shape": attribute -> (type, required).

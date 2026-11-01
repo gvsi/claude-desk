@@ -64,6 +64,44 @@
   list-style: none;
 }
 
+.cd-connector-review__setup-title {
+  margin: 0 0 var(--space-10);
+  color: var(--text-primary);
+}
+
+.cd-connector-review__setup {
+  container: cd-job-setup / inline-size;
+  margin: 0;
+}
+
+.cd-connector-review__setup-row {
+  display: grid;
+  grid-template-columns: calc(var(--space-24) * 4) minmax(0, 1fr);
+  gap: var(--space-16);
+  padding: var(--space-10) 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-review__setup-row + .cd-connector-review__setup-row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-connector-review__setup-row dt {
+  color: var(--text-secondary);
+}
+
+.cd-connector-review__setup-row dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+@container cd-job-setup (max-width: 479.98px) {
+  .cd-connector-review__setup-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-8);
+  }
+}
+
 .cd-connector-review__tool {
   container: cd-connector-review-tool / inline-size;
   padding: var(--space-14) 0;

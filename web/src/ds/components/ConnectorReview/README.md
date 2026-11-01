@@ -9,6 +9,8 @@
 
 ## What it shows
 
+For a business job, pass `job` instead of `connector`: `{ title, glyph, rows: { label, value }[] }`. The job tile and title replace the connector heading; the setup-question lead replaces both connector leads. A "How it’s set up" card shows the supplied rows above the existing tool card. Rows with empty values are omitted. At phone widths, each label sits above its value. Setup supplies the current starting outcome's rows and the kernel's confirmed description. The tool card, outcomes, waiting state, errors and turn-on controls are shared, so the job follows the same rules-draft review before it can run.
+
 - The connector's `ConnectorIcon`, drawn 44 px here and centered on the title and its lead line, beside the page's `h1`, "Review what Claude could do with {name}" in serif `.cd-type-page-title`, with "Built in" or the Mock badge (`ConnectorName`). The title balances its lines when it wraps (see Long names).
 - Under the title, in secondary body type: "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on." for a built-in connector, or "Nothing runs until you turn it on." followed by `intro` (the connector's promise) for an app.
 - A `Card` named "Tools" with a row per tool, separated by hairlines only between rows and padded 14 px above and below: its name at weight 520, its `description` in secondary meta, then a line per rule that covers it, in secondary meta:
@@ -33,7 +35,8 @@ A title that wraps balances its lines (`text-wrap: balance`), as `PageHeader`'s 
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `connector` | `ConnectorView` | Required. |
+| `connector` | `ConnectorView` | Required for a connector review; mutually exclusive with `job`. |
+| `job` | `ReviewJobView` | Required for a business job review; mutually exclusive with `connector`. |
 | `intro` | `string` | An app's promise, after "Nothing runs until you turn it on." |
 | `tools` | `ReviewToolView[]` | Required. `{ key; name; description; mode: RuleMode; coveredBy: { text; mode: RuleMode \| 'always_on'; limit? }[] }`. |
 | `onChangeOutcome` | `(key: string, mode: RuleMode) => void` | Makes each outcome a menu. |

@@ -22,6 +22,7 @@ const KIND_LINES = {
   agent_auth: "A check of a visiting agent's signature.",
   head_checkpoint: 'A signed checkpoint of the record so far.',
   desk_data: "A change to your Desk's details.",
+  web_search: 'Web search.',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /** Who wrote the entry: the checkpoint, or the chat service, whose report is recorded as it arrived, unchecked. */

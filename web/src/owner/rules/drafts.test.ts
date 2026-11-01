@@ -483,7 +483,7 @@ describe('rule drafts', () => {
     // The preset's own cards, which Rivera's rules didn't have here, are added rows.
     const added = rows.filter((row) => row.change === 'added');
     expect(added.map((row) => row.key)).toEqual(ids(preset));
-    expect(added.map((row) => row.title)).toEqual(['Find open times', 'Save a lead', 'Request a callback', "Confirm it's them", 'Website reading', 'Memory reading']);
+    expect(added.map((row) => row.title)).toEqual(['Find open times', 'Save a lead', 'Request a callback', "Confirm it's them", 'Website reading', 'Memory reading', 'Web search']);
     expect(rows).toHaveLength(owner.length + preset.length);
   });
 
