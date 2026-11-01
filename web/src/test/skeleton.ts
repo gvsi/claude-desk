@@ -128,9 +128,9 @@ function watchLoad(load: SkeletonLoad) {
       // A page can commit its anchors separately during the fade. Never backfill a leaving
       // position from a later commit after the layer has gone.
       load.anchors.forEach((anchor, i) => {
-        const rect = findLanded(anchor.page)?.getBoundingClientRect();
-        if (state === 'leaving' && leaving) leaving.anchors[i] ??= rect;
-        if (replaced && !replacementPainted) replaced[i] ??= rect;
+        const positions = state === 'leaving' ? leaving?.anchors : replacementPainted ? undefined : replaced;
+        if (!positions || positions[i]) return;
+        positions[i] = findLanded(anchor.page)?.getBoundingClientRect();
       });
     }
   };
@@ -258,7 +258,9 @@ async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: Retur
   for (const [i, anchor] of load.anchors.entries()) {
     const moment = still ? watch.replaced() : watch.leaving()?.anchors;
     compare(anchors[i]!, moment![i]!, anchor.name, anchor.size, anchor.dimensions);
-    compare(anchors[i]!, watch.replaced()![i]!, anchor.name, anchor.size, anchor.dimensions);
+    if (!still) compare(anchors[i]!, watch.replaced()![i]!, anchor.name, anchor.size, anchor.dimensions);
+    // The tables allow data-dependent sizes relative to the shape. After replacement, the
+    // landed anchor's own top, left, width and height must all stay stable.
     compare(watch.replaced()![i]!, final[i]!, `${anchor.name} after gone`, true);
     compare(anchors[i]!, final[i]!, anchor.name, anchor.size, anchor.dimensions);
   }

@@ -77,3 +77,32 @@ it('names_the_skipped_fade_before_checking_anchors', async () => {
   };
   await expect(expectSkeletonLoad(load)).rejects.toThrow('the layer never started leaving');
 });
+
+it('does_not_remeasure_recorded_anchors_for_unrelated_mutations', async () => {
+  const measurements = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
+  onTestFinished(() => measurements.mockRestore());
+  const noise = document.createElement('div');
+  document.body.append(noise);
+  const observer = new MutationObserver(() => {
+    if (document.querySelector('.cd-skeleton-screen__layer')) return;
+    observer.disconnect();
+    // Separate observer deliveries after both transition positions have been recorded.
+    queueMicrotask(() => {
+      noise.textContent = 'First unrelated change';
+      queueMicrotask(() => { noise.textContent = 'Second unrelated change'; });
+    });
+  });
+  onTestFinished(() => { observer.disconnect(); noise.remove(); });
+
+  const load = footerLoad('during-fade');
+  const release = load.release;
+  load.release = () => {
+    observer.observe(document.body, { childList: true, subtree: true });
+    release();
+  };
+  await expectSkeletonLoad(load);
+
+  expect(noise.textContent).toBe('Second unrelated change');
+  const footerReads = measurements.mock.contexts.filter((element) => element instanceof HTMLElement && element.classList.contains('helper-footer'));
+  expect(footerReads, 'one measurement during the fade, one at replacement, and one final measurement').toHaveLength(3);
+});
