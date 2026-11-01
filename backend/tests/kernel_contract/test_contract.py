@@ -89,6 +89,8 @@ from desk.kernel_api import (
     PublicDesk,
     SessionContext,
     ToolsConnectRequest,
+    ToolsConfirmRequest,
+    ToolPin,
     ToolsSimulateChangeRequest,
     TurnRequest,
     TurnStarted,
@@ -448,6 +450,31 @@ async def test_discounted_quote_holds_and_answers_once(kernel, ro_read):
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
     assert await refused(answer(owner, held.decision_id, "deny_once")) == (409, "conflict")
     assert (await read_decision(view, held.decision_id)).state == "executed"
+
+
+@pytest.mark.kernel_plan("01a")
+@pytest.mark.parametrize("choice", ["allow_once", "deny_once"])
+async def test_answer_includes_the_approved_snapshot_only_for_an_allow(kernel, ro_read, choice):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    held = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    result = await answer(http.owner(copy.owner_token), held.decision_id, choice)
+    assert "approved" in result.model_dump(mode="json")
+    if choice == "deny_once":
+        assert result.approved is None and result.decision.state == "denied"
+        assert result.execution is None
+        return
+
+    assert result.approved is not None
+    assert (result.approved.decision_id, result.approved.state, result.approved.visitor_plain) == (
+        held.decision_id, "approved", "Maria Rivera approved this")
+    assert result.approved.signature and result.approved.signature != result.decision.signature
+    assert result.approved.ledger_seq < result.decision.ledger_seq
+    assert result.decision.state == "executed" and result.execution.state == "succeeded"
 
 
 @pytest.mark.kernel_plan("01a")
@@ -2417,7 +2444,7 @@ HOURS = [HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), en
 
 
 def active_version(ro_read, ro_schema: str, copy_id: str, desk_id: str) -> dict:
-    (active,) = ro_read(ro_schema, copy_id, "SELECT version, cards FROM {ro}.policy_versions"
+    (active,) = ro_read(ro_schema, copy_id, "SELECT version, cards, auto_money_cap_cents FROM {ro}.policy_versions"
                                             " WHERE desk_id = %s AND status = 'active'", (desk_id,))
     return active
 
@@ -2899,6 +2926,115 @@ async def test_connecting_payments_pins_its_tools_for_review(kernel, ro_read):
     visitor = await new_visitor(http, created.slug)
     given, declared = tools(await context(http.session(visitor.session_token), visitor.state.session_id))
     assert not {"payments.list_charges", "payments.create_refund"} & given
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_confirming_payments_drafts_enables_until_policy_confirmation(kernel, ro_read):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    configured = await owner.call("POST /policy/draft", PolicyDraftRequest(
+        desk_id=created.desk_id, cards=[*owner_cards(active), quote_card(max_amount_cents=1_000)],
+        expected_parent=active["version"], auto_money_cap_cents=2_300))
+    proved_or_skip(configured)
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id, version=configured.version))
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    body = ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles])
+    reviewed = await owner.call("POST /tools/confirm", body)
+    assert reviewed.profiles == profiles
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    assert reviewed.draft.parent_version == active["version"]
+    assert [card for card in reviewed.draft.cards if not card.is_default] == owner_cards(active)
+    assert reviewed.draft.auto_money_cap_cents == active["auto_money_cap_cents"]
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+    assert (await owner.call("POST /tools/confirm", body)).draft == reviewed.draft
+    probe = PolicyProbeRequest(desk_id=created.desk_id, probes=[Probe(
+        actor="visitor", who="record_owner", resource_kind="charge", resource_owner="caller",
+        call=ToolCall(call_id="review-charges", tool="payments.list_charges", args={}))])
+    result = await owner.call("POST /policy/{version}/probe", probe, path={"version": reviewed.draft.version})
+    assert result[0].outcome == "hold"
+    result = await owner.call("POST /policy/{version}/probe", probe, path={"version": active["version"]})
+    assert result[0].outcome == "refuse"
+
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    assert {row["tool"]: row["status"] for row in rows} == {profile.tool: "enabled" for profile in profiles}
+    assert (await owner.call("POST /tools/confirm", body)).draft is None
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_tool_review_refusals_and_disable_are_atomic(kernel, ro_read):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    unknown = ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool="payments.create_refund", definition_sha256="0" * 64)])
+    assert await refused(owner.call("POST /tools/confirm", unknown)) == (404, "not_found")
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    pins = [ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles]
+    for enable in (True, False):
+        stale = ToolsConfirmRequest(desk_id=created.desk_id, enable=enable, tools=[
+            pins[0], pins[1].model_copy(update={"definition_sha256": "0" * 64})])
+        assert await refused(owner.call("POST /tools/confirm", stale)) == (409, "conflict")
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    assert [row["status"] for row in rows] == ["needs_review", "needs_review"]
+    disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=False, tools=pins))
+    assert disabled.draft is None and all(profile.status == "disabled" for profile in disabled.profiles)
+    reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=True, tools=pins))
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    await owner.call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
+        desk_id=created.desk_id, tool=pins[-1].tool))
+    assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    # a drift on a disabled tool leaves it disabled, its changed definition pending (`mcp_pins.check_pin`)
+    assert {row["tool"]: row["status"] for row in rows} == {
+        pins[0].tool: "disabled", pins[-1].tool: "disabled"}
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_a_tool_review_draft_is_refused_once_the_desks_tools_change(kernel, ro_read):
+    # The draft was proved against the tools enabled then plus its own enables; turning another tool off before it is
+    # confirmed changes what it would enable, so the confirm is refused and nothing it enables is turned on.
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles]))
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    (book,) = ro_read(ro_schema, copy.copy_id, "SELECT tool, definition_sha256 FROM {ro}.tools"
+                                               " WHERE desk_id = %s AND tool = 'native.book'", (created.desk_id,))
+    disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=False,
+        tools=[ToolPin(tool=book["tool"], definition_sha256=book["definition_sha256"])]))
+    assert disabled.draft is None and disabled.profiles[0].status == "disabled"
+    assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+    rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s"
+                                            " AND (source = 'mcp' OR tool = 'native.book')", (created.desk_id,))
+    assert {row["tool"]: row["status"] for row in rows} == {
+        **{profile.tool: "needs_review" for profile in profiles}, "native.book": "disabled"}
 
 
 # The owner's knowledge, documents and tool changes (Plans 01b and 01c) ---------------------------------------

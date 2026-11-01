@@ -10,6 +10,7 @@ import type {
   DemoInboxEntry,
   EvDemoInbox,
   EvMessage,
+  KnowledgeItem,
   LedgerEntry,
   LedgerEvent,
   OpenStatus,
@@ -246,6 +247,17 @@ export class MockWorld {
   readonly decisions = new Map<string, DecisionRecord>();
   readonly handoffs = new Map<string, HandoffRecord>();
   readonly leads: LeadRecord[] = [];
+  /**
+   * What the owner told each Desk, by Desk and `item_id`, as the kernel stored it: when it was first
+   * added, and whether the kernel forces it owner-only, which withholds its title and text when listed.
+   */
+  readonly knowledge = new Map<string, { deskId: string; item: KnowledgeItem; createdAt: number | null; forced: boolean }>();
+  /**
+   * Whether the kernel keeps an item to the owner whatever readers it's posted with, as it does one
+   * holding a customer's private data (kernel verification fixes, plan 01b Task 6c). It never does
+   * unless a test says so.
+   */
+  keepsKnowledgeOwnerOnly: (item: KnowledgeItem) => boolean = () => false;
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
   /**
@@ -1029,13 +1041,14 @@ export class MockWorld {
    * the visitor is told.
    */
   takeOver(session: SessionRecord): SessionState {
+    const previous = session.state.mode;
     session.state = { ...session.state, mode: 'owner', generation: session.state.generation + 1 };
     this.appendLedger(this.deskOf(session), {
       kind: 'takeover',
       origin: 'kernel',
       session_id: session.state.session_id,
       ref_id: null,
-      summary: { mode: 'owner', generation: session.state.generation },
+      summary: { from: previous, to: 'owner', generation: session.state.generation },
     });
     this.emit(session, { type: 'owner_joined', name: BUSINESS.owner_display_name });
     return session.state;
@@ -1043,13 +1056,14 @@ export class MockWorld {
 
   /** The owner hands the chat back to Claude, at the next generation, and the visitor is told. */
   handBack(session: SessionRecord): SessionState {
+    const previous = session.state.mode;
     session.state = { ...session.state, mode: 'ai', generation: session.state.generation + 1 };
     this.appendLedger(this.deskOf(session), {
       kind: 'takeover',
       origin: 'kernel',
       session_id: session.state.session_id,
       ref_id: null,
-      summary: { mode: 'ai', generation: session.state.generation },
+      summary: { from: previous, to: 'ai', generation: session.state.generation },
     });
     this.emit(session, { type: 'owner_left' });
     return session.state;

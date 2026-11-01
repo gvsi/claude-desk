@@ -58,7 +58,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 - Keep transitions between 60 and 200 ms: `motion-instant` for color, `motion-fast` for press feedback, `motion-base` for a check that draws once or a reveal. Ease with `motion-ease`, or `motion-ease-emphasis` for a screen's one small moment. Results that arrive one by one are `motion-stagger` apart.
 - A drawn check goes short arm first, as a hand writes one. The check icon's path starts at the long arm's tip, so its dash offset runs from minus its dash length to 0. `expectDrawsShortArmFirst` (`test/`) pins it in a story.
-- The only loops are `motion-breathe` for presence glyphs, `motion-writing` for a person's typing dots and line, `motion-dots` for Claude's writing dots, and `motion-spin` for a busy button's spinner.
+- The only loops are `motion-breathe` for presence glyphs, `motion-writing` for a person's typing dots and line and for the skeleton's sweep while a page loads, `motion-dots` for Claude's writing dots, and `motion-spin` for a busy button's spinner.
 - Allow at most one small moment per screen. Motion explains a change; it never decorates.
 - Under `prefers-reduced-motion: reduce` nothing animates or transitions; the base stylesheet enforces it on every element.
 
@@ -152,12 +152,13 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 
 - Empty: say what will appear and what to do next. "No conversations yet. Share your Desk link to get the first one."
 - Waiting: show it, don't say it, when Claude is writing: three clay dots that bounce gently where its reply will appear, with "Claude is writing" for screen readers only. Other waits say what is happening in plain words, "Sending your answer". Never show draft text.
+- Loading: a page, or a part of one, whose first read is out draws its own shapes (`SkeletonScreen`). For 200 ms it shows nothing, so a fast load goes straight to the page; then its shapes sweep under one band of light while a visually hidden status says the existing loading words; then the page fades in over them on `motion-fast`, where they were. A skeleton draws no words and states nothing: no prices, dates, names, messages or statuses. A few loaders keep `LoadingLine` (its README lists them), and an action at work stays a busy `Button`.
 - Error: say what happened and the next step, never a code. "We couldn't confirm your answer. Try again, or reload to see where it stands."
 - Refusal: be kind and specific, and offer a way forward. "I can't share that here, but I can ask Maria to get back to you." Never scold or lecture.
 
 ## What not to do
 
-- No glows, gradients, orbs, shimmer or gradient washes.
+- No glows, gradients, orbs, shimmer or gradient washes. The one exception is the skeleton's one synced sweep while a page loads (owner, 2026-10-31): a single band of `fill-secondary` light, transparent at its ends, moving in step across every shape (`Skeleton`).
 - No all-caps eyebrows or labels, and no letter-spaced capitals. The one exception is the "Preview" badge in the Claude Desk lockup, which the `Wordmark` draws with `preview` (`Pill caps`, `.cd-type-badge-caps`): its word is written in sentence case and drawn in capitals, and the copy check allows capitals on that badge alone, for that word alone. It shows in the owner app's sidebar, the first-visit intro dialog's brand row, and the top bars of the About pages and the setup board from 1100 px up. A phone's top bar carries no badge (owner, 2026-10-30), so below 1100 px those bars show the bell and the name alone. Two guards keep it there: `caps_badge_only_in_the_lockup` (`web/src/ds/guards.test.ts`) allows the style and its marker only in the Pill, the Mark's folder, the token sources, the Foundations type specimens and the tests, and `caps_pill_only_in_the_wordmark` (`web/src/app/guards.test.ts`) allows a `Pill` with `caps` only in the Wordmark's file.
 - No card on card (the agents page's "Send an agent" card, `holdsCards`, is the one exception), no colored tiles and no colored left borders on cards.
 - No large areas of status color: dots and thin bars only.

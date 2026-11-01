@@ -47,6 +47,7 @@ from desk.contracts import (
     SessionCreated,
     SessionMode,
     SessionState,
+    SignedTime,
     ToolCall,
     ToolName,
     ToolProfile,
@@ -200,6 +201,12 @@ class ToolPin(BaseModel):                  # a tool and the hash the owner revie
     tool: ToolName
     definition_sha256: Sha256Hex
 
+def each_tool_once(tools: list[ToolPin]) -> list[ToolPin]:
+    """The batch rule /tools/confirm and the owner API's body share: a batch names each tool once."""
+    if len({pin.tool for pin in tools}) != len(tools):
+        raise ValueError("a batch names each tool once")
+    return tools
+
 class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole connector in one batch, one tool a list of one
     desk_id: str
     tools: list[ToolPin] = Field(min_length=1, max_length=len(get_args(ToolName)))
@@ -207,8 +214,7 @@ class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole con
 
     @model_validator(mode="after")
     def _each_tool_once(self) -> Self:
-        if len({pin.tool for pin in self.tools}) != len(self.tools):
-            raise ValueError("a batch names each tool once")
+        each_tool_once(self.tools)
         return self
 
 class ToolsSimulateChangeRequest(KernelRequest):   # POST /tools/simulate_change (demo)
@@ -269,7 +275,15 @@ class WhoAmI(BaseModel):                  # GET /whoami: the API's only source f
     desk_ids: list[str]
     session: SessionState | None
 
+class ContextClock(BaseModel):            # public kernel time, with no data label
+    as_of_utc: SignedTime
+    local_now: str                        # ISO 8601 with the business's offset, to the minute
+    local_date: str                       # YYYY-MM-DD in the business's time zone
+    weekday: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    timezone: str                        # the business's IANA time zone
+
 class SessionContext(BaseModel):          # GET /context/{session_id}; facts and knowledge filtered by labels
+    clock: ContextClock
     tools: list[ToolProfile]              # the profiles this session may call now
     tools_declared: list[ToolProfile]     # every profile a session of its kind could ever be given
     facts: list[Fact]

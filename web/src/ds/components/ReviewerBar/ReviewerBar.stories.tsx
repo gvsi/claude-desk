@@ -2,7 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
+import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { ReviewerBarSkeleton as ReviewerShapes } from './ReviewerBarSkeleton.tsx';
 import { ReviewerBar } from './ReviewerBar.tsx';
 
 const meta = {
@@ -44,5 +46,49 @@ export const Default: Story = {
     await expect(startOver).toHaveFocus();
     await userEvent.keyboard('{Enter}');
     await expect(args.onStartOver).toHaveBeenCalledTimes(1);
+  },
+};
+
+export const ReviewerBarSkeleton: Story = {
+  beforeEach: loadWebFonts,
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'P12-01, UXC-P1201-After (#artboard-dec46cf506e4): the demo bar uses its real line boxes.' },
+  render: (args) => (
+    <div>
+      <div data-real-bar>
+        <ReviewerBar {...args} />
+      </div>
+      <div data-shaped-bar aria-hidden="true">
+        <ReviewerShapes />
+      </div>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const real = canvasElement.querySelector<HTMLElement>('[data-real-bar]')!;
+    const shapes = canvasElement.querySelector<HTMLElement>('[data-shaped-bar]')!;
+    for (const [aSelector, bSelector] of [
+      ['.cd-reviewer-bar', '.cd-reviewer-bar'],
+      ['.cd-button', '.cd-reviewer-bar > .cd-skeleton'],
+    ]) {
+      const a = real.querySelector(aSelector!)!.getBoundingClientRect();
+      const b = shapes.querySelector(bSelector!)!.getBoundingClientRect();
+      for (const [edge, delta] of [
+        ['top', real.getBoundingClientRect().top - shapes.getBoundingClientRect().top],
+        ['left', 0],
+        ['width', 0],
+        ['height', 0],
+      ] as const) {
+        await expect(Math.abs(a[edge] - b[edge] - delta), `${aSelector} ${edge}`).toBeLessThanOrEqual(2);
+      }
+    }
+  },
+};
+
+export const ReviewerBarSkeletonPhone: Story = {
+  ...ReviewerBarSkeleton,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'P12-01 phone, UXC-P1201-After-Phone (#artboard-1a93c5a1f31f): two lines keep the real demo bar height.',
   },
 };

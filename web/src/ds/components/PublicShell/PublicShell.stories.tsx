@@ -7,6 +7,7 @@ import { contrastRatio } from '../../contrast.ts';
 import { rivera, type TranscriptTurn } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { FollowTheChat } from '../../test/followTheChat.tsx';
+import { loadWebFonts } from '../../test/fonts.ts';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { Composer } from '../Composer/Composer.tsx';
 import { MarginReceipt } from '../MarginReceipt/MarginReceipt.tsx';
@@ -19,6 +20,7 @@ import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
 import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
 import { PublicShell, type PublicBrand } from './PublicShell.tsx';
+import { PublicShellSkeleton } from './PublicShellSkeleton.tsx';
 
 const ownerName = rivera.business.ownerName;
 const desk = rivera.publicDesk;
@@ -954,5 +956,65 @@ export const OwnerInChatEs: Story = {
     await expectOwnerInChat(canvas.getByRole('main'), 'es');
     await expect(canvas.queryByRole('button', { name: 'Pedir hablar con Maria Rivera' })).toBeNull();
     await expect(canvasElement).not.toHaveTextContent('is in this chat');
+  },
+};
+
+export const Skeleton: Story = {
+  beforeEach: loadWebFonts,
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'P12-02, UXC-P1202-After (#artboard-d122e70134a0). The shapes follow the current shell; greeting and starter chips have not shipped.',
+  },
+  render: (args) => (
+    <div>
+      <div data-real-shell>
+        <PublicShell {...args} openStatus={OPEN_EN} children={null} aboutLinks={[
+          { label: 'What agents can do here', href: '/d/rivera/agents' },
+          { label: 'Send an agent', href: '/d/rivera/agents#send' },
+        ]} />
+      </div>
+      <div data-shaped-shell aria-hidden="true">
+        <PublicShellSkeleton language={args.language} footer />
+      </div>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const real = canvasElement.querySelector<HTMLElement>('[data-real-shell]')!;
+    const shapes = canvasElement.querySelector<HTMLElement>('[data-shaped-shell]')!;
+    await expect(shapes.querySelector('button, a[href], input, textarea, [tabindex]')).toBeNull();
+    const pairs = [
+      ['brand-header', '.cd-public-brand', true],
+      ['chat-title', '.cd-public-shell__chat-title > h2', false],
+      ['disclosure', '.cd-public-shell__disclosure', false],
+      ['chat-head', '.cd-public-shell__chat-head', true],
+      ['ask-owner', '.cd-public-shell__chat-head > button', true],
+      ['conversation', '.cd-public-shell__conversation', true],
+      ['composer', '.cd-composer__box', true],
+      ['concept-footer', '.cd-concept-footer', true],
+      ['about-title', '.cd-public-shell__about > h2', false],
+      ['about-column', '.cd-public-shell__about', true],
+    ] as const;
+    for (const [anchor, selector, size] of pairs) {
+      const a = real.querySelector(selector)!.getBoundingClientRect();
+      const b = shapes.querySelector(`[data-skeleton-anchor="${anchor}"]`)!.getBoundingClientRect();
+      const offset = real.getBoundingClientRect().top - shapes.getBoundingClientRect().top;
+      for (const edge of size ? ['top', 'left', 'width', 'height'] as const : ['top', 'left', 'height'] as const) {
+        await expect(Math.abs(a[edge] - b[edge] - (edge === 'top' ? offset : 0)), `${anchor} ${edge}: real ${a[edge]}, shape ${b[edge]}, offset ${offset}`).toBeLessThanOrEqual(2);
+      }
+    }
+  },
+};
+
+export const SkeletonPhone: Story = {
+  ...Skeleton,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+};
+
+export const SkeletonShort: Story = {
+  ...Skeleton,
+  globals: { viewport: { value: 'skeleton-short', isRotated: false } },
+  parameters: {
+    ...Skeleton.parameters,
+    viewport: { options: { 'skeleton-short': { name: 'Short phone', styles: { width: '390px', height: '480px' }, type: 'mobile' } } },
   },
 };

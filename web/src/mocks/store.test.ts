@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -17,6 +17,7 @@ import type {
   ConversationSummary,
   CopyOut,
   DemoAgentRun,
+  KnowledgeRow,
   NeedsYouItem,
   OwnerTranscript,
   PeopleOut,
@@ -52,6 +53,7 @@ import {
 import { RIVERA } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
+import { validateContract } from './validate.ts';
 import type { ReplayTurn } from './world.ts';
 
 const slug = RIVERA.slug;
@@ -1461,6 +1463,176 @@ describe('rules and tools', () => {
     expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} Not covered by a rule yet, so it asks you.`);
     record.decision.card_ids = ['rv-refund'];
     expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} It was held by your rule: Refunds to a customer wait for your answer.`);
+  });
+
+  it('knowledge_seed_returns_every_generated_row_field', async () => {
+    const answer = await call('knowledge', { params: { desk_id: deskId } });
+    expect(answer.status).toBe(200);
+    const rows = answer.body as KnowledgeRow[];
+    expect(rows.map((row) => row.item_id)).toEqual(['kn-website', 'kn-price-list']);
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(['created_at', 'item_id', 'readers', 'source', 'text', 'title']);
+      expect(row.readers).toEqual(['public']);
+      expect(row.title).toEqual(expect.any(String));
+      expect(row.text).toEqual(expect.any(String));
+      expect(row.created_at).toEqual(expect.any(String));
+    }
+    expect(rows.map((row) => row.source)).toEqual(['website', 'setup']);
+    expect(Date.parse(rows[0]!.created_at!)).toBeLessThan(Date.parse(rows[1]!.created_at!));
+  });
+
+  it('knowledge_lists_legacy_items_first_then_timestamp_and_item_id', async () => {
+    mockStore.world.knowledge.clear();
+    const item: KnowledgeItem = { item_id: 'kn-legacy', source: 'setup', title: 'An older note', text: 'An older note', label: { readers: ['owner'] } };
+    const at = Date.parse('2026-10-30T19:30:00Z');
+    // Insert out of order, including a pre-epoch date, so null cannot sort as zero. Ties use the
+    // item's id rather than the host locale's collation.
+    for (const [itemId, createdAt] of [['kn-a', at], ['kn-legacy', null], ['kn-Z', at], ['kn-oldest', -1], ['kn-A-legacy', null]] as const) {
+      mockStore.world.knowledge.set(`${deskId}:${itemId}`, { deskId, item: { ...item, item_id: itemId }, createdAt, forced: false });
+    }
+    const list = () => call('knowledge', { params: { desk_id: deskId } });
+    const rows = (await list()).body as KnowledgeRow[];
+    expect(rows.map((row) => row.item_id)).toEqual(['kn-A-legacy', 'kn-legacy', 'kn-oldest', 'kn-Z', 'kn-a']);
+    expect(rows.map((row) => row.created_at)).toEqual([null, null, '1969-12-31T23:59:59.999000Z', '2026-10-30T19:30:00.000000Z', '2026-10-30T19:30:00.000000Z']);
+
+    // Updating readers preserves the original timestamp, including an unknown one.
+    await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers: ['public'] } } } });
+    expect(((await list()).body as typeof rows).find((row) => row.item_id === item.item_id)?.created_at).toBeNull();
+  });
+
+  it('knowledge_refuses_invalid_readers', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const readers of [[], ['public', 'owner'], ['owner', 'owner'], ['person:p-1'], ['session:s-1'], ['stranger']]) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers } } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+    for (const readers of [['owner'], ['public']]) {
+      expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers } } } })).status).toBe(200);
+    }
+  });
+
+  it('knowledge_refuses_a_record_owner', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'], record_owner: 'person-1' } };
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+  });
+
+  it('knowledge_refuses_invalid_item_ids', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const item_id of ['', 'bad.id', 'bad/id', 'é', 'a'.repeat(65), 'note\n']) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id: 'A_0-'.repeat(16) } } })).status).toBe(200);
+  });
+
+  it('knowledge_caps_titles_at_200_characters', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: '🔧'.repeat(201), text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, title: '🔧'.repeat(200) } } })).status).toBe(200);
+  });
+
+  it('knowledge_caps_text_at_100_kib_utf8', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: '🔧'.repeat(25 * 1024 + 1), label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    const refused = await call('addKnowledge', { params: { desk_id: deskId }, body: { item } });
+    expect({ status: refused.status, body: refused.status === 422 ? refused.body : undefined }).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, text: '🔧'.repeat(25 * 1024) } } })).status).toBe(200);
+  });
+
+  it('knowledge_refuses_nul_in_title_or_text', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const field of ['title', 'text']) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, [field]: 'Parking\0' } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+  });
+
+  it('knowledge_refuses_unpaired_surrogates', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const field of ['title', 'text']) {
+      for (const text of ['\ud800', '\udc00']) {
+        expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, [field]: text } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+        expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+      }
+    }
+  });
+
+  it('knowledge_validates_title_and_text_utf8_separately', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: '\ud800', text: '\udc00', label: { readers: ['owner'] } };
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+  });
+
+  it('knowledge_caps_each_desk_at_200_items_but_allows_replacements', async () => {
+    mockStore.world.knowledge.clear();
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    for (let i = 0; i < 200; i++) {
+      mockStore.world.knowledge.set(`${deskId}:note-${i}`, { deskId, item: { ...item, item_id: `note-${i}` }, createdAt: i, forced: false });
+    }
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id: 'note-0', label: { readers: ['public'] } } } })).status).toBe(200);
+    expect(mockStore.world.knowledge.size).toBe(200);
+    // A different Desk's items do not count against this Desk.
+    const first = mockStore.world.knowledge.get(`${deskId}:note-0`)!;
+    mockStore.world.knowledge.delete(`${deskId}:note-0`);
+    mockStore.world.knowledge.set('desk-other:note-0', { ...first, deskId: 'desk-other' });
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).status).toBe(200);
+  });
+
+  it('knowledge_answers_what_the_kernel_keeps', async () => {
+    mockStore.world.knowledge.clear();
+    const note: KnowledgeItem = {
+      item_id: 'note-0f2c',
+      source: 'setup',
+      title: 'We don’t service tankless water heaters older than 15 years.',
+      text: 'We don’t service tankless water heaters older than 15 years. Suggest a replacement quote instead.',
+      label: { readers: ['owner'] },
+    };
+    const add = (item: unknown) => call('addKnowledge', { params: { desk_id: deskId }, body: { item } });
+
+    // Stored as posted, and answered with the stored item, which is a contract KnowledgeItem: its
+    // label with every field, as the API sends it.
+    const labelled = (readers: string[]) => ({ ...note, label: { readers, record_owner: null } });
+    const kept = await add(note);
+    expect(kept).toEqual({ status: 200, body: labelled(['owner']) });
+    expect(validateContract('KnowledgeItem', kept.body)).toEqual([]);
+    // Posted again under its id with the public label: it replaces the item, and says so.
+    expect((await add({ ...note, label: { readers: ['public'] } })).body).toEqual(labelled(['public']));
+    expect([...mockStore.world.knowledge.values()].map((stored) => stored.item.label.readers)).toEqual([['public']]);
+
+    // The kernel keeps an item to the owner whatever it's posted with, when a test says it does.
+    mockStore.world.keepsKnowledgeOwnerOnly = (item) => item.item_id === note.item_id;
+    const forced = await add({ ...note, label: { readers: ['public'] } });
+    expect(forced.body).toEqual(labelled(['owner']));
+    expect(validateContract('KnowledgeItem', forced.body)).toEqual([]);
+
+    // Listed, with when it was first added: one the kernel keeps to the owner has its words withheld.
+    const listed = await call('knowledge', { params: { desk_id: deskId } });
+    const { label: _label, ...words } = note;
+    expect(listed).toEqual({ status: 200, body: [{ ...words, readers: ['owner'], title: null, text: null, created_at: expect.any(String) }] });
+    mockStore.world.keepsKnowledgeOwnerOnly = () => false;
+    await add({ ...note, label: { readers: ['public'] } });
+    expect((await call('knowledge', { params: { desk_id: deskId } })).body).toEqual([{ ...words, readers: ['public'], created_at: (listed.body as KnowledgeRow[])[0]?.created_at }]);
+
+    // Not an item: refused, nothing stored.
+    for (const bad of [undefined, { ...note, title: 3 }, { ...note, label: { readers: 'public' } }, { ...note, source: 'gossip' }, { ...note, item_id: '' }]) {
+      expect((await add(bad)).status).toBe(422);
+    }
+    expect(mockStore.world.knowledge.size).toBe(1);
+
+    // Another copy's owner reaches none of it.
+    mockStore.reset('rivera', { signedIn: false });
+    expect((await add(note)).status).toBe(401);
   });
 
   it('people_mark_replayed_leads', async () => {
