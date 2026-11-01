@@ -684,7 +684,7 @@ async def test_pass_without_prices_for_its_provider_refuses(repo):
     with pytest.raises(PassRefused, match="no list prices for anthropic claude-haiku-5-5"):
         await run_pass(config(), deps(repo, run_one, prices={}))
     # A Bedrock pass still needs the Claude API's prices for the kernel's checks.
-    with pytest.raises(PassRefused, match="anthropic claude-haiku-5-5, anthropic claude-sonnet-5-5"):
+    with pytest.raises(PassRefused, match="no list prices for anthropic claude-sonnet-5-5 in evals.pricing.PRICES"):
         await run_pass(config(provider="bedrock"), deps(repo, run_one, prices={"bedrock": ALL_MODELS}))
     assert run_one.calls == []
     dry = await run_pass(config(dry_run=True, max_usd=0), deps(repo, run_one, prices={}, keys={}))
