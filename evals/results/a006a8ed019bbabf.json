@@ -1,13 +1,13 @@
 {
  "schema": 1,
- "inputs": "b9cc8cc6c8fda9b2",
+ "inputs": "a006a8ed019bbabf",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
    "backend/desk/api/model.py"
   ],
   [
-   "f624bf7fe96707471be83841c485fbb07cc9e7cc",
+   "67147af90f25bd50784960a03b33bf401a915751",
    "backend/desk/api/prompts.py"
   ],
   [
@@ -15,15 +15,15 @@
    "backend/desk/api/setup_templates.py"
   ],
   [
-   "ad2252f50a5f90c3325fb8b95ac90af0daf8e6d3",
+   "ede19d474ad405bd5ef187d265cd937f49b4b680",
    "backend/desk/contracts.py"
   ],
   [
-   "c2639e4f7054087af080328b0a97d5c712f666a1",
+   "d5a8348145beb88c920b3ab36f49196e452b5ce8",
    "backend/desk/kernel_api.py"
   ],
   [
-   "03a83da66a9c61aacaa15d08d516f156de1df29d",
+   "9c97f65da7f88be81a9c9d6e3ba107232b62e78c",
    "backend/desk/kernel_service"
   ],
   [
@@ -83,9 +83,9 @@
    "kernel"
   ]
  ],
- "git_sha": "bdb75152ab398a7d73a19fb9a2f4bbdf9872bc2a",
- "created_at": "2026-11-01T00:34:05.627114Z",
- "pass_id": "20261101-003405-110dcf",
+ "git_sha": "ff424847ea5dea48de95ebd3f33a561fad59de0d",
+ "created_at": "2026-11-01T00:45:23.224059Z",
+ "pass_id": "20261101-004523-28449c",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
