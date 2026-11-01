@@ -106,6 +106,8 @@ same development role passwords as `make db-roles`. A schema change recreates th
 throwaway database. The dedicated Postgres 16 server disables fsync, synchronous_commit
 and full_page_writes: its data is disposable. It never connects to a laptop database.
 
+Another project in this AWS account adds a deny-only inline policy, `chiefy-runtime-secret-write-deny`, to every IAM role. Provisioning accepts it beside the session policy when every statement in it denies, and never removes it. Before deleting the role by hand, delete that inline policy first, or `delete-role` fails; provisioning's own rollback does this for a role it created.
+
 ## Re-create or move
 
 ```sh

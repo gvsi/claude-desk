@@ -14,6 +14,9 @@ SPEC.loader.exec_module(provision)
 ROLE_ARN = "arn:aws:iam::123456789012:role/claude-desk-test-box"
 PROFILE_ARN = "arn:aws:iam::123456789012:instance-profile/claude-desk-test-box"
 POLICY_NAME = "claude-desk-test-box-session"
+# The deny-only inline policy another project in the account adds to every IAM role.
+ACCOUNT_DENY = "chiefy-runtime-secret-write-deny"
+DENY_DOCUMENT = {"Version": "2012-10-17", "Statement": [{"Effect": "Deny", "Action": ["secretsmanager:PutSecretValue"], "Resource": "*"}]}
 POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManagerAndRunCommandOnly", "Effect": "Allow", "Action": [
     "ssm:UpdateInstanceInformation", "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel",
     "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel", "ec2messages:AcknowledgeMessage",
@@ -27,6 +30,8 @@ class AWS:
         self.role = {"Arn": ROLE_ARN, "RoleName": provision.NAME, "Tags": provision.TAGS}
         self.profile = {"Arn": PROFILE_ARN, "Tags": provision.TAGS, "Roles": [self.role]}
         self.attached, self.inline, self.document = [], [POLICY_NAME], copy.deepcopy(POLICY)
+        self.documents = {}            # other inline policies by name
+        self.deleted_policies = []     # policy names delete-role-policy was called with
         self.instance = {"InstanceId": "i-0123456789abcdef0", "InstanceType": "c8g.24xlarge",
                          "IamInstanceProfile": {"Arn": PROFILE_ARN}, "MetadataOptions": {"HttpTokens": "required"},
                          "SecurityGroups": [{"GroupId": "sg-test"}], "State": {"Name": "stopped"}}
@@ -34,6 +39,9 @@ class AWS:
     def __call__(self, command, **kwargs):
         service, op = command[3:5]
         self.calls.append(op)
+        policy_name = command[command.index("--policy-name") + 1] if "--policy-name" in command else None
+        if op == "delete-role-policy":
+            self.deleted_policies.append(policy_name)
         if op == self.fail:
             return SimpleNamespace(returncode=1, stderr="Injected failure", stdout="")
         data = {}
@@ -55,7 +63,7 @@ class AWS:
         elif op == "list-role-policies":
             data = {"PolicyNames": self.inline}
         elif op == "get-role-policy":
-            data = {"PolicyDocument": self.document}
+            data = {"PolicyDocument": self.documents.get(policy_name, self.document)}
         elif op == "describe-vpcs":
             data = {"Vpcs": [{"VpcId": "vpc-test"}]}
         elif op == "describe-security-groups":
@@ -131,7 +139,7 @@ def test_partial_creation_rolls_back_every_created_resource(monkeypatch, failure
         if create in calls and create != failure:
             assert delete in calls, (failure, calls)
     if failure == 'put-role-policy':
-        assert 'delete-role-policy' not in calls
+        assert POLICY_NAME not in fixture.deleted_policies
     if failure == 'add-role-to-instance-profile':
         assert 'remove-role-from-instance-profile' not in calls
 
@@ -215,3 +223,42 @@ def test_rebootstrap_restarts_postgres_only_when_configuration_changes(tmp_path)
     (pg / 'conf.d/testbox.conf').write_text('old configuration')
     subprocess.run(['bash', '-e', '-c', commands], check=True, env=env)
     assert log.read_text().splitlines() == ['restart postgresql', 'start postgresql', 'restart postgresql']
+
+
+def test_the_accounts_deny_only_policy_on_the_role_is_accepted_and_left_alone(monkeypatch):
+    """Another project in the account adds a deny-only inline policy to every IAM role; the check accepts it
+    beside the session policy and never removes it."""
+    fixture = AWS()
+    fixture.inline = [POLICY_NAME, ACCOUNT_DENY]
+    fixture.documents[ACCOUNT_DENY] = copy.deepcopy(DENY_DOCUMENT)
+    invoke(monkeypatch, fixture, "--check")
+    assert fixture.deleted_policies == []
+    assert "put-role-policy" not in fixture.calls
+
+
+@pytest.mark.parametrize("statement", [
+    {"Effect": "Allow", "Action": ["ssm:GetParameter"], "Resource": "*"},
+    {"Effect": "Deny", "Action": ["s3:PutObject"], "Resource": "*"},
+])
+def test_the_accounts_policy_is_refused_unless_every_statement_denies(monkeypatch, statement):
+    fixture = AWS()
+    fixture.inline = [POLICY_NAME, ACCOUNT_DENY]
+    document = copy.deepcopy(DENY_DOCUMENT)
+    document["Statement"].append(statement)
+    fixture.documents[ACCOUNT_DENY] = document
+    if statement["Effect"] == "Deny":
+        invoke(monkeypatch, fixture, "--check")      # more denials are still deny-only
+    else:
+        with pytest.raises(RuntimeError, match="only deny"):
+            invoke(monkeypatch, fixture, "--check")
+    assert fixture.deleted_policies == []
+
+
+def test_rolling_back_a_created_role_removes_the_accounts_policy_before_deleting_it(monkeypatch):
+    """The account's deny policy can land on a role between its creation and a rollback; delete-role fails
+    while any inline policy remains, so rollback removes it first."""
+    fixture = AWS(fresh=True, fail="describe-vpcs")
+    with pytest.raises(RuntimeError, match="Injected failure"):
+        invoke(monkeypatch, fixture)
+    assert ACCOUNT_DENY in fixture.deleted_policies
+    assert fixture.calls.index("delete-role") > max(i for i, op in enumerate(fixture.calls) if op == "delete-role-policy")

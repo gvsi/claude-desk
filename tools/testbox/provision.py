@@ -16,6 +16,10 @@ HERE = pathlib.Path(__file__).resolve().parent
 TAGS = [{"Key": "Project", "Value": "claude-desk"}, {"Key": "Purpose", "Value": "agent-test-box"}]
 NAME = "claude-desk-test-box"
 SESSION_POLICY_NAME = NAME + "-session"
+# Another project in this account adds this deny-only inline policy to every IAM role. The check accepts it
+# beside the session policy when every statement denies, and provisioning never removes it; rollback removes
+# it only from a role this run created and is deleting, since delete-role fails while any inline policy remains.
+ACCOUNT_DENY_POLICIES = ("chiefy-runtime-secret-write-deny",)
 SESSION_POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManagerAndRunCommandOnly", "Effect": "Allow", "Action": [
     "ssm:UpdateInstanceInformation", "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel",
     "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel", "ec2messages:AcknowledgeMessage",
@@ -113,8 +117,15 @@ def main():
             created.append("policy")
         policies = aws("iam", "list-attached-role-policies", role_name=role)["AttachedPolicies"]
         inline = aws("iam", "list-role-policies", role_name=role)["PolicyNames"]
-        if policies or inline != [SESSION_POLICY_NAME]:
-            raise RuntimeError("Test box role must have only the inline session policy and no managed policies")
+        extra = [name for name in inline if name != SESSION_POLICY_NAME]
+        if policies or inline.count(SESSION_POLICY_NAME) != 1 or any(name not in ACCOUNT_DENY_POLICIES for name in extra):
+            raise RuntimeError("Test box role must have only the inline session policy (beside the account's deny-only "
+                               "policies) and no managed policies")
+        for name in extra:
+            statements = aws("iam", "get-role-policy", role_name=role, policy_name=name)["PolicyDocument"].get("Statement", [])
+            statements = statements if isinstance(statements, list) else [statements]
+            if not statements or any(statement.get("Effect") != "Deny" for statement in statements):
+                raise RuntimeError(f"The account's {name} policy on the test box role must only deny")
         document = aws("iam", "get-role-policy", role_name=role, policy_name=SESSION_POLICY_NAME)["PolicyDocument"]
         # IAM may reorder actions, but no extra action, statement, condition or resource is accepted.
         def canonical(value):
@@ -222,7 +233,8 @@ def main():
             "profile-role": [("iam", "remove-role-from-instance-profile", {"instance_profile_name": profile, "role_name": role})],
             "profile": [("iam", "delete-instance-profile", {"instance_profile_name": profile})],
             "policy": [("iam", "delete-role-policy", {"role_name": role, "policy_name": SESSION_POLICY_NAME})],
-            "role": [("iam", "delete-role", {"role_name": role})],
+            "role": [*(("iam", "delete-role-policy", {"role_name": role, "policy_name": name}) for name in ACCOUNT_DENY_POLICIES),
+                     ("iam", "delete-role", {"role_name": role})],
         }
         # Association creation can fail. Track it separately and attempt every cleanup even
         # if an earlier cleanup fails; an absent association must not prevent deletion.
