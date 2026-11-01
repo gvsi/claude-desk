@@ -108,18 +108,18 @@ export const PUBLIC_LINES_ROUTES = {
   removePublicPrice(sv, req) {
     const found = read(sv, req);
     if ('status' in found) return found;
-    if (found.prices?.source === 'owner') return { status: 422, body: { error: 'not_suggested', key: 'prices' } };
-    const index = found.prices?.items.findIndex((item) => item.item_id === req.params.item_id) ?? -1;
-    if (!found.prices || index === -1) return { status: 409, body: { error: 'conflict' } };
-    const item = found.prices.items[index]!;
     const title = req.query.get('title');
     const amount = req.query.get('unit_cents');
     if (title === null || amount === null || !amount.trim() || !Number.isSafeInteger(Number(amount))) {
       return { status: 422, body: { error: 'invalid' } };
     }
+    const index = found.prices?.items.findIndex((item) => item.item_id === req.params.item_id) ?? -1;
+    if (!found.prices || index === -1) return { status: 409, body: { error: 'conflict' } };
+    const item = found.prices.items[index]!;
     if (title !== item.title || Number(amount) !== item.unit_cents) {
       return { status: 409, body: { error: 'conflict' } };
     }
+    if (found.prices?.source === 'owner') return { status: 422, body: { error: 'not_suggested', key: 'prices' } };
     const items = found.prices.items.filter((_, position) => position !== index);
     found.prices = items.length ? { source: 'suggested', items: priceItems(items) } : null;
     return { status: 200, body: structuredClone(storePublicState(sv.world, req.params.id!, found)) };
@@ -128,6 +128,8 @@ export const PUBLIC_LINES_ROUTES = {
     const found = read(sv, req);
     if ('status' in found) return found;
     const key = req.params.key;
+    if (key !== 'hours' && key !== 'prices' && !SETUP_PUBLIC_LINE_KEYS.some((known) => known === key)) return { status: 422, body: { error: 'invalid' } };
+    if (key === 'policy:how_we_help') return { status: 422, body: { error: 'not_editable', key } };
     const item = key === 'hours' || key === 'prices' ? found[key] : found.lines.find((line) => line.key === key);
     if (!item || item.source !== 'suggested') return { status: 422, body: { error: 'not_suggested', key } };
     if (key === 'hours' || key === 'prices') found[key] = null;

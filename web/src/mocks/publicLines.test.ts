@@ -11,6 +11,31 @@ import { cardChrome } from '../ds/components/ReplyCard/chrome.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
 
+it('checks price deletion query and current item before rejecting owner prices', async () => {
+  const params = await atRules();
+  expect(await confirmShown(params)).toMatchObject({ status: 200 });
+  const before = await mockStore.dispatch('setupPublicLines', { params });
+  const cases: { item_id: string; query: Record<string, string>; status: number; error: string }[] = [
+    { item_id: 'missing', query: {}, status: 422, error: 'invalid' },
+    { item_id: 'missing', query: { title: 'Tax return review', unit_cents: '25000' }, status: 409, error: 'conflict' },
+    { item_id: 'tax-return-review', query: { title: 'Old title', unit_cents: '25000' }, status: 409, error: 'conflict' },
+    { item_id: 'tax-return-review', query: { title: 'Tax return review', unit_cents: '1' }, status: 409, error: 'conflict' },
+    { item_id: 'tax-return-review', query: { title: 'Tax return review', unit_cents: '25000' }, status: 422, error: 'not_suggested' },
+  ];
+  for (const { item_id, query, status, error } of cases) {
+    expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id }, query })).toMatchObject({ status, body: { error } });
+    expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(before);
+  }
+});
+
+it('refuses unknown and read-only DELETE keys with the API errors', async () => {
+  const params = await atRules();
+  const before = await mockStore.dispatch('setupPublicLines', { params });
+  expect(await mockStore.dispatch('removePublicLine', { params: { ...params, key: 'policy:unknown' } })).toMatchObject({ status: 422, body: { error: 'invalid' } });
+  expect(await mockStore.dispatch('removePublicLine', { params: { ...params, key: 'policy:how_we_help' } })).toMatchObject({ status: 422, body: { error: 'not_editable', key: 'policy:how_we_help' } });
+  expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(before);
+});
+
 it('serializes hours with seconds on public-lines reads and writes', async () => {
   const params = await atRules();
   const read = await mockStore.dispatch('setupPublicLines', { params });
