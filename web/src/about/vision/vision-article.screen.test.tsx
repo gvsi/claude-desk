@@ -278,7 +278,7 @@ describe('The Vision article', () => {
     const article = screen.getByRole('article').element();
     const paper = getComputedStyle(article.closest('.vision-article') as Element).backgroundColor;
     expect(paper).toBe('rgb(244, 242, 236)');
-    const inBar = document.querySelector<HTMLElement>('.va-bar a');
+    const inBar = document.querySelector<HTMLElement>('.cd-about-top a');
     const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
     const next = document.querySelector<HTMLElement>('.va-next__link');
     for (const [name, link, ring] of [
