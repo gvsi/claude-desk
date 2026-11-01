@@ -150,7 +150,7 @@ def test_system_prompt_prioritizes_urgent_requests_over_intake():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.9"                     # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.10"                    # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
