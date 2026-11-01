@@ -16,7 +16,7 @@ const onAddDocuments = fn();
 const onAddPayments = fn();
 const onConnectStripe = fn();
 
-/** Rivera Plumbing's tools step as N-R2-Setup-05-Tools draws it: four built in, two to add, Stripe to connect. */
+/** Turner Plumbing's tools step as N-R2-Setup-05-Tools draws it: four built in, two to add, Stripe to connect. */
 const BUILT_IN: SetupToolsRow[] = [
   { connector: views.quotes, state: 'on' },
   { connector: views.bookings, state: 'on' },

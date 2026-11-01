@@ -30,6 +30,19 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    the business's own. A free word passes inside a repeat of the title or appointment type of one
    of the Desk's enabled business tools that resolve (`context.business_free_names`; the owner's
    decision of 2026-10-31).
+   The chats render the prose as Markdown (the owner's decision of 2026-11-01),
+   so the scan reads two texts and reports the union, the raw text's violations first: the prose as
+   written, and what it shows once rendered (`desk.markdown_text`), where emphasis inside a word,
+   an entity or a table can hide nothing; prose the parser can't read whole is refused
+   (`markdown.parse`). A numbered list's markers pass: those of an ordered list that starts at 1
+   and has at most nine items are blanked from the raw text and left out of the rendered one, and
+   every other number stays a violation (the owner's decision of 2026-11-01). Every link a reader
+   can click, shown or hidden (a Markdown link or autolink, or a URL with a scheme or "www." or an
+   email address, which the chats autolink, and any written anywhere in the raw prose), must go to
+   the business's public contact (`https` to a host, or `mailto:` an email, that `charter:contact`
+   names), else `markdown.link` (the owner's decision of 2026-11-01, which replaces the 2026-10-30
+   one for clickable links); a domain alone isn't a link. Any image is `markdown.image`
+   (`markdown_violations`).
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
@@ -49,7 +62,7 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    of 2026-11-01); the final check makes its own try. While the session has an open handoff the
    handoff card opened
    (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
-   doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
+   doesn't show it again: the owner has the conversation, so a later "Mike Turner will reply
    here" is backed, as the card that opened it said. A call-back request backs nothing (the
    owner's decision of 2026-10-31): its own card names a time and never says the owner will
    reply here, and once its window has passed nothing promises a call. That handoff is read
@@ -62,9 +75,13 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    ledger floats.
 6. `ok` when nothing was found: the prose (when not empty) and the cards. A prose-only failure
    keeps checked cards without the prose, then the handoff clause if Claude drafted one, which
-   opens the owner's handoff as the handoff card does; any other failure, or no card to keep,
-   shows only the handoff clause. A first attempt the API rewrites (`final` false, every
-   violation one a rewrite can fix) has no blocks and is never shown.
+   opens the owner's handoff as the handoff card does. With no card at all, it asks the visitor
+   before involving the owner when the session's tools offer a call back and it has no open
+   handoff (`call_back_offered`): the kernel's call-back offer alone, as prose, which opens
+   nothing (the owner's decision of 2026-11-01). A drafted handoff is honoured, and a checker
+   outage hands off. Any other failure, or no card to keep and no call back to offer, shows only
+   the handoff clause. A first attempt the API rewrites (`final` false, every violation one a rewrite
+   can fix) has no blocks and is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
    lines, until the next turn starts (its row written only now, so no lock on it is held while the
    model reads the draft); a reply that passed step 5 with an open handoff's card passes only if a
@@ -96,20 +113,23 @@ import logging
 import re
 import unicodedata
 from bisect import bisect_left, bisect_right
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 import desk_kernel
 from fastapi import APIRouter, Request
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from desk import markdown_text
 from desk.public_amenity import offers_amenity
 from desk.public_person import future_person_direction
-from desk.public_contact import valid_public_contact
+from desk.public_contact import bare_host, valid_public_contact
+from desk.public_contact import contact_endpoints as public_contact_endpoints
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
-                            ReplyVerdict, Violation)
+                            ReplyVerdict, ToolProfile, Violation)
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
@@ -117,10 +137,10 @@ from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
-from desk.kernel_service.render.cards import DeskInfo, slot_claims
+from desk.kernel_service.render.cards import DeskInfo, slot_claims, text_claim
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import principal_for, verified
-from desk.next_steps import next_steps
+from desk.next_steps import NEXT_STEPS, next_steps
 from desk.rewrites import PROSE_ONLY, REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
@@ -132,7 +152,10 @@ KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed", "link_cancelled"})  
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
 NO_CANARIES = labels.NO_CANARIES
 logger = logging.getLogger(__name__)
+CONTACT_FACT = "charter:contact"
+PUBLIC_READERS = frozenset({"public"})
 HANDOFF_CLOSED = "soft.handoff_closed"   # a reply passed on an open handoff's card, and the handoff was done by the end
+CALL_BACK_STEP = NEXT_STEPS["native.request_callback"]   # the next step a session offered a call back has
 
 # ---- Prose ----------------------------------------------------------------------------------------
 
@@ -540,10 +563,13 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     `canaries` (document ID → canary), even split or disguised, are one `canary` violation naming
     their documents, and blanked out before the rest is scanned. Links and email addresses are
     none of these (the owner's decision of 2026-10-30: Claude may write them, and its prompt keeps
-    them to the business's own). The lexicons read lookalike letters as the Latin ones, a bare
-    stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-" and every
-    apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as that
-    space and as "’". The canary comes first, then the rest in the order they appear."""
+    them to the business's own); every link a reader can click is `markdown_violations`' to judge.
+    This scan reads every digit: `check_draft` blanks the markers of a numbered list of
+    up to nine steps from 1 before it (`markdown_text.list_markers`, the owner's decision of
+    2026-11-01), and scans the rendered text too. The lexicons read lookalike letters as the Latin
+    ones, a bare stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-"
+    and every apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as
+    that space and as "’". The canary comes first, then the rest in the order they appear."""
     return [violation for _, _, _, violation in _prose_hits(text, canaries, names, booking_card=booking_card,
                                                             callback_card=callback_card,
                                                             approved_free_names=approved_free_names)]
@@ -626,6 +652,86 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
     promise = rule.startswith("lex.") and rule.endswith(".promise")
     return ((promise and word in allow_words)
             or (amenities and (promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
+
+
+def markdown_reading(prose: str) -> markdown_text.MarkdownText | None:
+    """The prose as a visitor sees it rendered (`markdown_text.read`), or None when the parser can't
+    read it whole (`markdown_text.TooDeep`, or any error), which `markdown_violations` refuses."""
+    try:
+        return markdown_text.read(prose)
+    except Exception as error:   # any failure fails closed: the reply is refused
+        log_error(logger, error, "markdown_unread")
+        return None
+
+
+async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str,
+                              reading: markdown_text.MarkdownText | None, raw: Sequence[Violation],
+                              canaries: Mapping[str, str],
+                              scan: Callable[[str], list[Violation]]) -> list[Violation]:
+    """What the prose shows once rendered as Markdown (`reading`, the owner's decision of 2026-11-01)
+    that the raw scan didn't report: `scan` (the prose scan, with the draft's canaries, names and
+    passed cards) on the visible text, each violation whose kind, rule ID, span and fact IDs `raw`
+    doesn't hold, in order, so a canary only the rendered text joins up is named too. Then a
+    `promise_word` (`markdown.link`, spanning the link's text, once per text) for each link a reader
+    can click, shown or hidden (`markdown_text.read`'s links: Markdown links and autolinks, and the
+    URLs and email addresses the chats autolink), and each URL or email address written anywhere in
+    the raw prose, whose target isn't the business's own contact (`own_target`, the owner's decision
+    of 2026-11-01): payment and booking links come only from cards. Any image is one `promise_word`
+    (`markdown.image`, spanning "image"), since a picture could show anything. Prose the parser
+    can't read whole (no `reading`) is one `promise_word` (`markdown.parse`), and nothing of it is
+    trusted: the raw scan then blanks no list marker either. These spans quote no canary of
+    `canaries`: each is blanked out first, as the scan's own are."""
+    if reading is None:
+        span = _span(_blank_canaries(prose, canaries)[0])
+        return [Violation(kind="promise_word", span=span, rule_id="markdown.parse")]
+    reported = {_union_key(violation) for violation in raw}
+    found = [violation for violation in scan(reading.visible) if _union_key(violation) not in reported]
+    # Defence in depth: a URL or email address written anywhere in the prose is held to the contact too.
+    links = [*reading.links, *markdown_text.literal_links(prose)]
+    if links:
+        hosts, emails = await contact_endpoints(ctx, desk_id)
+        spans = dict.fromkeys(_span(_blank_canaries(link.text, canaries)[0]) for link in links
+                              if not own_target(link.href, hosts, emails))
+        found += [Violation(kind="promise_word", span=span, rule_id="markdown.link") for span in spans]
+    if reading.images:
+        found.append(Violation(kind="promise_word", span="image", rule_id="markdown.image"))
+    return found
+
+
+def _union_key(violation: Violation) -> tuple[str, str, str, tuple[str, ...]]:
+    """What makes a violation of the rendered reading the same as one of the raw reading."""
+    return violation.kind, violation.rule_id, violation.span, tuple(violation.fact_ids)
+
+
+def own_target(href: str, hosts: frozenset[str], emails: frozenset[str]) -> bool:
+    """Whether a link goes to the business's own contact: `https` to one of `hosts` exactly (a leading
+    "www." either side aside, `public_contact.bare_host`), or `mailto:` one of `emails`, in any case.
+    Any other scheme, host or form is not."""
+    scheme, colon, rest = href.partition(":")
+    if colon and scheme.casefold() == "mailto":
+        return unquote(rest).casefold() in emails
+    try:
+        url = urlsplit(href)
+        url.port                                  # a port that isn't one raises
+    except ValueError:
+        return False
+    return url.scheme.casefold() == "https" and url.hostname is not None and bare_host(url.hostname) in hosts
+
+
+async def contact_endpoints(ctx: KernelCtx, desk_id: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The hosts and emails the Desk's public contact names (`charter:contact` as the public page shows
+    it: public, current, valid; `public_contact.contact_endpoints`), or none."""
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == desk_id, FactRow.fact_id == CONTACT_FACT)))).one_or_none()
+    if row is None or not labels.can_read(row.readers, PUBLIC_READERS):
+        return frozenset(), frozenset()
+    fact, template = labels.fact_of(row), render.TEMPLATES["contact"]
+    if not (template.reads(fact) and template.current(fact, ctx.clock.now())):
+        return frozenset(), frozenset()
+    try:
+        return public_contact_endpoints(text_claim(fact))
+    except TypeError:                             # not one text claim: names nothing
+        return frozenset(), frozenset()
 
 
 # The service area's allowance (the owner's ruling: distances, number words, years and day words).
@@ -968,21 +1074,71 @@ async def desk_names(ctx: KernelCtx, desk_id: str) -> list[str]:
 
 
 def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
-    """The handoff clause: "Let me check with Maria Rivera." in the reply's language."""
+    """The handoff clause: "Let me check with Mike Turner." in the reply's language."""
     return render.render_clause(Clause(template="handoff"), None, language, desk)
 
 
+def call_back_offer(language: render.Language) -> RenderedBlock:
+    """The call-back offer: "Would you like me to arrange a callback?" in the reply's language, as
+    prose the kernel writes (the API's signed `STATUS_LINES["offer_callback"]`)."""
+    return RenderedBlock(kind="prose", text=render.status("offer_callback", language))
+
+
+async def session_tools(ctx: KernelCtx, session_row: SessionRow) -> list[ToolProfile]:
+    """The session's resolved tools (`context.resolved_tools`), which both the soft-promise check's
+    fixed next steps and the call-back offer read."""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
+        Desk.desk_id == session_row.desk_id)))).one()
+    return await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
+
+
+def offer_fits(cards: Sequence[RenderedBlock], violations: Sequence[Violation]) -> bool:
+    """Whether a blocked draft may show the call-back offer: every violation is a failure of
+    Claude's own words (`PROSE_ONLY`) other than a checker outage (`check_unavailable`, which hands
+    off), and it has no card at all: no checked card to keep, and no handoff clause Claude drafted,
+    which is honoured as the handoff card."""
+    return (bool(violations) and all(violation.kind in PROSE_ONLY and violation.kind != "check_unavailable"
+                                     for violation in violations)
+            and not any(card.kind == "card" for card in cards))
+
+
+async def offers_call_back(ctx: KernelCtx, session_row: SessionRow) -> bool:
+    """Whether the session may be asked about a call back: it has no open handoff of either kind
+    (a card's or a call-back request's: the owner already has the conversation, so it sees the
+    handoff card, which opens nothing new), and its resolved tools offer one (`desk.next_steps`:
+    `native.request_callback`, or a business tool of block `urgent`)."""
+    if await open_handoff_ids(ctx, session_row):
+        return False
+    return CALL_BACK_STEP in next_steps(await session_tools(ctx, session_row))
+
+
+async def call_back_offered(ctx: KernelCtx, session_row: SessionRow, cards: Sequence[RenderedBlock],
+                            violations: Sequence[Violation], *, final: bool) -> bool:
+    """Whether a blocked draft shows the call-back offer: it will be shown (`final`: a prose-only
+    block is one a rewrite can fix, so a first attempt never is), the offer fits it (`offer_fits`),
+    and the session may be asked (`offers_call_back`). The session's handoffs and tools are read
+    only when the rest holds."""
+    return final and offer_fits(cards, violations) and await offers_call_back(ctx, session_row)
+
+
 def blocked_blocks(cards: Sequence[RenderedBlock], violations: Sequence[Violation],
-                   language: render.Language, desk: DeskInfo) -> list[RenderedBlock]:
+                   language: render.Language, desk: DeskInfo, *, call_back: bool) -> list[RenderedBlock]:
     """Keep checked cards for prose-only failures, without the prose, and after them the handoff
     clause when Claude drafted one (the owner's ruling of 2026-11-01), rendered by the kernel in the
     reply's language; `finalize` then opens the owner's handoff for it as for any shown handoff
-    card. All other failures, or no card to keep, show the handoff clause alone."""
+    card. A prose-only failure with no card at all asks the visitor before involving the owner
+    when the session may be asked (`call_back`, from `call_back_offered`; the owner's decision of
+    2026-11-01): the kernel's call-back offer alone (`call_back_offer`), in place of the handoff
+    clause, so no owner handoff opens. A drafted handoff, a session with an open handoff, a
+    checker outage and every other failure, or no card to keep and no call back to offer, show
+    the handoff clause alone."""
     if violations and all(violation.kind in PROSE_ONLY for violation in violations):
         kept = [card for card in cards if card.kind == "card" and card.template != "handoff"]
         if kept:
             drafted = any(card.kind == "card" and card.template == "handoff" for card in cards)
             return kept + ([handoff(language, desk)] if drafted else [])
+        if call_back and offer_fits(cards, violations):
+            return [call_back_offer(language)]
     return [handoff(language, desk)]
 
 
@@ -1057,10 +1213,18 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     # Clauses first: the scan exempts only booking or callback cards that passed; refusals follow the prose's.
     cards, refused, rendered_claims = await check_clauses(
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
-    violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
-                             booking_card=any(card.template == "booking_confirmed" for card in cards),
-                             callback_card=any(card.template == "callback_confirmed" for card in cards),
-                             approved_free_names=await context.business_free_names(ctx, desk_id))
+    names = await desk_names(ctx, desk_id)
+    passed = {"booking_card": any(card.template == "booking_confirmed" for card in cards),
+              "callback_card": any(card.template == "callback_confirmed" for card in cards),
+              "approved_free_names": await context.business_free_names(ctx, desk_id)}
+    reading = markdown_reading(prose)
+    # A passing list's typed markers are no number (the owner's decision of 2026-11-01): the raw scan
+    # reads the prose with them blanked, and otherwise the draft's prose as ever.
+    markers = reading.list_markers if reading is not None else ()
+    raw = scan_prose(markdown_text.blank(prose, markers) if markers else draft.prose, canaries, names, **passed)
+    violations += raw
+    violations += await markdown_violations(ctx, desk_id, prose, reading, raw, canaries,
+                                            lambda visible: scan_prose(visible, canaries, names, **passed))
     violations += refused
     violations += policy_card_violations(prose, cards)
     detected_language = detected if detected in ("en", "es") else None
@@ -1079,7 +1243,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing)
         violations += found
     if violations:
-        blocks = blocked_blocks(cards, violations, language, desk)
+        blocks = blocked_blocks(cards, violations, language, desk, call_back=await call_back_offered(
+            ctx, session_row, cards, violations, final=final))
     else:
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
@@ -1101,9 +1266,7 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     the prose's start. Returns the violations, Sonnet's usage and both verdicts for the ledger.
     (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
-    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
-        Desk.desk_id == session_row.desk_id)))).one()
-    tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
+    tools = await session_tools(ctx, session_row)
     data = SoftPromiseInput(language=language, prose=prose, cards=[render.check_text(card) for card in cards],
                             next_steps=next_steps(tools))
     if ctx.settings.typesafe_api_key:
@@ -1155,10 +1318,11 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     prose-blocked draft lost is still accounted for. `ok` is no violations. The receipt is the
     status line `visitor_plain_key`, or for a shown reply `reply_handed_off` exactly when its blocks
     include the handoff clause (template `handoff`), otherwise `reply_checked`, so checked cards
-    kept alone after a prose-only failure carry the reply receipt. A blocked first attempt with no
-    shown blocks keeps `reply_handed_off`. The owner's say ends here too, with its own receipts and
-    the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
-    holding one of `canaries` is ledgered only as a marker of its hash (`ledger.withheld_ref`).
+    kept alone after a prose-only failure, and the call-back offer, carry the reply receipt. A
+    blocked first attempt with no shown blocks keeps `reply_handed_off`. The owner's say ends here
+    too, with its own receipts and the message ID its fact is named after (`message_id`; a new one
+    otherwise). A cited fact ID holding one of `canaries` is ledgered only as a marker of its hash
+    (`ledger.withheld_ref`).
 
     With `seen` (a draft the session's own call sent), the session row is written first: seen
     now (`last_seen_at`) and, when its prose was English or Spanish, `detected` kept as its
@@ -1176,7 +1340,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     nothing backs the card's words any longer: the verdict fails as the
     check would have failed it without the card, with a `soft_promise` violation
     (`soft.handoff_closed`). The shared blocked-block helper keeps checked cards, and a drafted
-    handoff after them; with none to keep it substitutes the handoff card, which may open a new
+    handoff after them; with no card at all it shows the call-back offer when the session may be
+    asked (`call_back_offered`), and otherwise substitutes the handoff card, which may open a new
     handoff.
 
     Cards on passing and blocked drafts are rechecked under the session lock before signing:
@@ -1207,7 +1372,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     if handoff_backed and not violations and not await handoff_still_open(ctx, session_row):
         prose = next((block.text for block in blocks if block.kind == "prose"), "")
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
-        blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
+        blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id),
+                                call_back=await call_back_offered(ctx, session_row, blocks, violations, final=final))
     dropped: list[Violation] = []      # cards refused at signing, whether or not the prose had passed
     if author == "claude":
         blocks, refused = await recheck_cards(ctx, session_row, blocks, rendered_claims=rendered_claims or {})
@@ -1217,7 +1383,9 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
             # to keep. Already-blocked prose keeps only the cards that still pass, in draft order.
             if not violations:
                 violations = refused
-            blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id))
+            blocks = blocked_blocks(blocks, violations, language, await _desk_info(ctx, session_row.desk_id),
+                                    call_back=await call_back_offered(ctx, session_row, blocks, violations,
+                                                                      final=final))
     shown = not violations or final or any(violation.kind not in REWRITABLE for violation in violations)
     if author == "claude" and not shown:
         blocks = []                    # the API rewrites it: no handoff card is signed that no handoff backs
@@ -1332,8 +1500,8 @@ async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | N
 
 
 async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | None:
-    """The owner's handoff for a verdict that shows the handoff card ("Let me check with Maria
-    Rivera. Maria Rivera will reply here."), in the verdict's transaction, so the card's promise
+    """The owner's handoff for a verdict that shows the handoff card ("Let me check with Mike
+    Turner. Mike Turner will reply here."), in the verdict's transaction, so the card's promise
     has something behind it (the owner's decision of 2026-10-30). Returns its ID, or None when it
     opens none.
 

@@ -6,12 +6,12 @@ visitor: visitor
 requires: ["01b", "02"]
 persona: >
   You are Aisha Karimi, buying a house in Alameda that you move into in a few weeks. The inspection
-  said the pipes are old, and you'd like Rivera Plumbing to have your details so Maria can get in
+  said the pipes are old, and you'd like Turner Plumbing to have your details so Mike can get in
   touch about looking at them once you've moved in. You don't want to book, get a quote or a call
   back now; you only want to leave your details for later. When asked, give your name, Aisha Karimi,
   and your phone number, (510) 555-0156. You are friendly and brief.
 goal: >
-  Leave your name and phone number so Rivera Plumbing can reach you later.
+  Leave your name and phone number so Turner Plumbing can reach you later.
 require:
   - executed: native.capture_lead
 expected_outcomes:

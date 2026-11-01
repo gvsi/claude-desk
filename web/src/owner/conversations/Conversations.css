@@ -136,16 +136,20 @@
   padding: var(--space-24) var(--cd-open-gutter) var(--space-20);
 }
 
-.cd-conversations__open > * {
-  max-width: var(--size-reading);
-}
-
 /* The open conversation's region fills the column's height, never less than its head, the
    transcript's least height and its controls, and the column's width, so the transcript can scroll
-   from the column's edge; what it holds keeps to the reading column: the conversation's own parts,
-   or the page that says it isn't here or couldn't be read. */
-.cd-conversations__open > .cd-conversation-pane {
-  max-width: none;
+   from the column's edge. What it holds takes the column's width too (CNV-01): the conversation's
+   own parts, or the page that says it isn't here or couldn't be read. Messages and cards keep their
+   own widths, and the take-over bar its own reading column. */
+/* The transcript's rows take the pane's width too, so a visitor's bubble sits at its right edge.
+   Claude's words keep to the reading width from the row's left, so their lines stay around 80
+   characters; its cards keep their own widths. */
+.cd-conversation-pane {
+  --cd-row-max: 100%;
+}
+
+.cd-conversation-pane .cd-claude-message__prose {
+  max-width: var(--size-reading);
 }
 
 .cd-conversation-pane,
@@ -156,10 +160,6 @@
   flex: 1 0 auto;
   flex-direction: column;
   min-width: 0;
-}
-
-.cd-conversation-pane > .cd-skeleton-screen__body > :not(.cd-conversation, .cd-skeleton-screen__layer) {
-  max-width: var(--size-reading);
 }
 
 .cd-conversations__quiet {
@@ -217,10 +217,6 @@
   min-width: 0;
 }
 
-.cd-conversation > :not(.cd-conversation__scroll) {
-  max-width: var(--size-reading);
-}
-
 /* The transcript's scroll region: the height left between the head and the controls, at least
    about four lines of the chat, and as wide as the column from edge to edge, across its gutter,
    so its scroll bar sits at the column's right edge and a focus ring at its sides isn't cut off.
@@ -233,10 +229,6 @@
   margin: calc(-1 * var(--space-4)) calc(-1 * var(--cd-open-gutter));
   padding: var(--space-4) var(--cd-open-gutter);
   scroll-padding-block: var(--space-4);
-}
-
-.cd-conversation__scroll > * {
-  max-width: var(--size-reading);
 }
 
 /* A column too short to leave the transcript room for a held request's card under the head and
@@ -313,6 +305,12 @@
   flex-direction: column;
   gap: var(--space-12);
   min-width: 0;
+}
+
+/* Take over and its line stay at the left, under the take-over bar's own lines, at every width
+   (CNV-01): the pane is wide enough to set them side by side, as the bar does elsewhere. */
+.cd-conversation__controls .cd-take-over__action {
+  flex-basis: 100%;
 }
 
 /* Today's handoff cards, in Needs you order, above the transcript. */

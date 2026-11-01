@@ -65,15 +65,15 @@ async def make_copy_rows(app: FastAPI, *, notifications: NotificationDefaults = 
     """A committed copy with a business, one Desk, its notification defaults and the copy's owner
     session (as `POST /copies` opens it), whose token the rows carry."""
     copy_id, desk_id = new_id("copy"), new_id("desk")
-    rows = CopyRows(copy_id=copy_id, business_id=new_id("biz"), desk_id=desk_id, slug=f"rivera-plumbing-{desk_id[-6:]}",
+    rows = CopyRows(copy_id=copy_id, business_id=new_id("biz"), desk_id=desk_id, slug=f"turner-plumbing-{desk_id[-6:]}",
                     owner_session_id=auth.new_session_id(), owner_token=auth.new_token())
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         now = ctx.clock.now()
         ctx.db.add_all([
             Copy(copy_id=rows.copy_id, created_at=now),
-            Business(business_id=rows.business_id, copy_id=rows.copy_id, name="Rivera Plumbing",
-                     owner_display_name="Maria Rivera", timezone="America/Los_Angeles"),
+            Business(business_id=rows.business_id, copy_id=rows.copy_id, name="Turner Plumbing",
+                     owner_display_name="Mike Turner", timezone="America/Los_Angeles"),
             Desk(desk_id=rows.desk_id, copy_id=rows.copy_id, business_id=rows.business_id, name="Main line",
                  slug=rows.slug, created_at=now),
             NotificationPref(desk_id=rows.desk_id, copy_id=rows.copy_id, now=notifications.now,

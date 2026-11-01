@@ -6,7 +6,7 @@ visitor: visitor
 requires: ["01c", "02"]
 persona: >
   You are Ingrid, living in a house in Berkeley. Your kitchen garbage disposal is jammed and you'd
-  like Maria to come and look at it. You've heard Rivera Plumbing takes a service call deposit and
+  like Mike to come and look at it. You've heard Turner Plumbing takes a service call deposit and
   you'd like a link to pay the deposit later: ask for one, and once you have it, thank the
   assistant and finish. You are brief and answer questions plainly.
 goal: >

@@ -1,7 +1,7 @@
 """FakeKernel: the kernel HTTP API v2 in this process, for the API's tests (never in an image).
 
 `fake_kernel_app(state)` is an ASGI app that answers the master plan's "Kernel HTTP API v2" routes the
-API uses, with the behavior Plan 02a relies on: a Rivera Plumbing copy, sessions with hashed tokens,
+API uses, with the behavior Plan 02a relies on: a Turner Plumbing copy, sessions with hashed tokens,
 "Session state responses" in order, decisions, executions, approvals, reply checks and the ledger.
 tests/kernel_contract/test_contract.py runs the same tests against it and the real kernel, so the
 API's tests can't lean on a behavior the kernel doesn't have. Later tasks add routes here, each with a
@@ -31,6 +31,9 @@ contract test, before the task that first uses them.
   owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is waiting, and
   ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's blocked draft. A
   non-final draft blocked only for rewritable kinds gets no blocks at all (still signed, its violations kept). A
+  shown draft blocked only for its prose, with no card at all (none to keep, no drafted handoff) and no checker
+  outage, asks first: the kernel's call-back offer, as prose, when the session's tools offer a call back and it has
+  no open handoff, and no handoff card, so it opens none. A
   call-back request first closes the session's open handoffs, the card's or an earlier call-back's, as the
   owner's mark of done does (`done`, a call-back's fact expired, `desk_data` naming it with `replaced_by`, the
   call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
@@ -80,7 +83,7 @@ contract test, before the task that first uses them.
   a `charge` fact rendered `charge_confirmed`. Keys stay in memory; the mirror has the sessions' `agent_key_id` and
   `mandate_id` and the mandates' amounts.
 - The owner's Desks and setup (Plans 01b and 01c): `POST /desks` makes a Desk in the owner's copy through the same
-  seed path as the Rivera copy (native tools only, the `ask_first` preset's auto cards active), and
+  seed path as the Turner copy (native tools only, the `ask_first` preset's auto cards active), and
   `PUT /desks/{id}/business` renames its business; each refuses an owner name outside Plan 01a's pattern or an
   unknown time zone. `PUT /desks/{id}/people` (Plan 01b) upserts and removes people by `ref`, refusing a contact that
   looks masked (422). `DELETE /desks/{id}` (Plan 01b) closes the Desk's sessions; then its public page is 404, the
@@ -88,7 +91,7 @@ contract test, before the task that first uses them.
   its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy; its
   call-back writes its handoff already `done`, keeping its fact but leaving no Needs-you item. An owner
   session is given the setup tools alone, on any Desk of its copy, and executes its own setup decisions:
-  `native.read_memory` answers from the Desk's stored simulated memory (only the Rivera seed falls back to
+  `native.read_memory` answers from the Desk's stored simulated memory (only the Turner seed falls back to
   `MEMORY_ITEMS`; other unwritten Desks read nothing) and `native.fetch_website` reads any
   `.example` site as `WEBSITE_TEXT` (the fetch guard refuses every other address, so the call fails), each storing
   owner-only knowledge; `/context` serves the knowledge a session's labels read.
@@ -147,6 +150,7 @@ from desk.public_person import future_person_direction
 from desk.public_contact import valid_public_contact
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
+    BRAND_PALETTE,
     ITEM_ID_PATTERN,
     MCP_TOOLS,
     MONEY_TOOLS,
@@ -198,7 +202,9 @@ from desk.contracts import (
     Violation,
     money_tool,
     money_tools_of,
+    effective_brand,
     moves_money,
+    stored_brand,
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
@@ -254,6 +260,7 @@ from desk.kernel_api import (
     WhoAmI,
 )
 from desk.presets import PRESETS
+from desk.next_steps import NEXT_STEPS, next_steps
 from desk.rewrites import PROSE_ONLY, REWRITABLE
 from tests.kernel_contract.ro_tables import FakeRO
 
@@ -296,7 +303,7 @@ def new_id(prefix: str) -> str:
     return f"{prefix}-{secrets.token_hex(5)}"
 
 
-# The master plan's "Rivera seed", with Plan 01a's specifics.
+# The master plan's "Turner seed", with Plan 01a's specifics.
 RIVERA_TZ = ZoneInfo("America/Los_Angeles")
 RIVERA_HOURS = [HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), end=time(18)),
                 HoursWindow(days=["sat"], start=time(9), end=time(13))]
@@ -310,28 +317,28 @@ RIVERA_PRICES = [PriceItem(item_id="deposit", title="Service call deposit", unit
                  PriceItem(item_id="short-notice", title="Short-notice fee", unit_cents=5000)]
 RIVERA_KNOWLEDGE = [
     KnowledgeItem(item_id="kn-website", source="website",
-                  title="Your website, rivera-plumbing.example, read during setup",
-                  text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                  title="Your website, turner-plumbing.example, read during setup",
+                  text="Turner Plumbing is Mike Turner's home plumbing business: drain clearing, leak repair and "
                        "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
-                  text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                  text="The price list Mike gave in setup covers the service call deposit, drain clearing, a "
                        "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
-                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
+                       "The short-notice fee is added to an urgent visit that Mike fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]
 RIVERA_DOCUMENTS = [  # (ref, title, record owner, body): the kernel ends each body with a fresh canary
     ("dana-invoice", "Invoice, drain clearing", "dana",
-     "Rivera Plumbing\nInvoice, drain clearing\nBilled to Dana Whitfield\nDrain clearing: $180.00\n"),
+     "Turner Plumbing\nInvoice, drain clearing\nBilled to Dana Whitfield\nDrain clearing: $180.00\n"),
     ("bob-warranty", "Warranty, water heater flush", "bob",
-     "Rivera Plumbing\nWarranty, water heater flush\nIssued to Bob Okafor\nCovers the flush for a year.\n")]
+     "Turner Plumbing\nWarranty, water heater flush\nIssued to Bob Okafor\nCovers the flush for a year.\n")]
 RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:service_area", kind="text",
                         value="We work in Oakland, Berkeley, Alameda and Emeryville."),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
-                  Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
+                  Claim(key="policy:arrival", kind="text", value="Mike texts before he arrives.")]
 RIVERA_STARTERS = {
     "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
     "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
@@ -347,17 +354,17 @@ def is_starter_fact(fact_id: str) -> bool:
 NOTIFICATIONS = {"now": ["approval", "callback", "breaker", "lockout", "handoff"],
                  "briefing": ["lead", "booking"]}
 # The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
-MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Rivera notes.", "items": [
+MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Turner notes.", "items": [
     {"id": "business", "title": "Business", "topics": ["business", "name", "owner", "company"],
-     "text": "Maria Rivera owns Rivera Plumbing in Oakland, California, and answers its phone herself between jobs."},
+     "text": "Mike Turner owns Turner Plumbing in Oakland, California, and answers its phone himself between jobs."},
     {"id": "trade", "title": "Trade", "topics": ["trade", "services", "work", "plumbing"],
-     "text": "Rivera Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."},
+     "text": "Turner Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."},
     {"id": "service-area", "title": "Service area", "topics": ["area", "cities", "where"],
-     "text": "Rivera Plumbing works in Oakland, Berkeley, Alameda and Emeryville."},
+     "text": "Turner Plumbing works in Oakland, Berkeley, Alameda and Emeryville."},
     {"id": "hours", "title": "Hours", "topics": ["hours", "open", "opening", "schedule", "when"],
      "text": "Open Monday to Friday, 8 am to 6 pm, and Saturday, 9 am to 1 pm. Closed on Sundays."},
     {"id": "website", "title": "Website", "topics": ["website", "site", "web", "online"],
-     "text": "The business's website is https://rivera-plumbing.example."}]})
+     "text": "The business's website is https://turner-plumbing.example."}]})
 OWNER_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")   # Plan 01a's owner_display_name pattern
 # A fetched page (the kernel's fetch guard reads the real one): here any `.example` site reads as this, and any
 # other address is refused.
@@ -395,7 +402,7 @@ RIVERA_CARDS = [
 # by the seed's rules version, so `rv-urgent` allows it for anyone given the native callback.
 RIVERA_BUSINESS_TOOLS = [
     {"tool": "desk.emergency-callback", "title": "Emergency callback",
-     "description": "Asks Maria to call back urgently about an emergency.",
+     "description": "Asks Mike to call back urgently about an emergency.",
      "config": {"block": "urgent", "urgent_when": "A burst or leaking pipe, flooding, a sewage backup, or no water"}},
 ]
 
@@ -541,7 +548,7 @@ BOUNDED_CASES = 1_200
 COUNTEREXAMPLE = "A visitor could get something done without asking you that your cards don't allow."
 DEFAULT_REASON = "Anything your rules don't cover waits for you."
 # Verification is always on (Plan 01b): no owner card may change starting one. The tools of the always-on baseline,
-# and the presets' own card for each (auto, for anyone, on the tool), which every preset and the Rivera seed carry.
+# and the presets' own card for each (auto, for anyone, on the tool), which every preset and the Turner seed carry.
 ALWAYS_ON_TOOLS = ("native.start_verification",)
 ALWAYS_ON_CARDS = tuple(card for card in PRESETS["ask_first"] if card.applies_to in ALWAYS_ON_TOOLS)
 
@@ -856,18 +863,23 @@ ENGLISH_WORDS = frozenset("""
     now until after before than too
 """.split())
 # The cards the fake renders plainly, and a verdict's status lines in the kernel's own words (its `reply_checked`,
-# `reply_handed_off`, `owner_said` and `owner_say_blocked` lines).
+# `reply_handed_off`, `owner_said` and `owner_say_blocked` lines), and its call-back offer.
 REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply checked against {owner}'s rules",
                      "handed_off": "Passed to {owner} to answer",
                      "verify": "Enter the code sent to the contact on record.", "hours": "Opening hours",
                      "owner_said": "Written by {owner}",
-                     "owner_say_blocked": "Not sent: it included text from a private document"},
+                     "owner_say_blocked": "Not sent: it included text from a private document",
+                     "offer_callback": "Would you like me to arrange a callback?"},
               "es": {"handoff": "Déjame consultarlo con {owner}.",
                      "checked": "Respuesta revisada con las reglas de {owner}",
                      "handed_off": "Pasado a {owner} para responder",
                      "verify": "Escribe el código enviado al contacto registrado.", "hours": "Horario",
                      "owner_said": "Escrito por {owner}",
-                     "owner_say_blocked": "No se envió: incluía texto de un documento privado"}}
+                     "owner_say_blocked": "No se envió: incluía texto de un documento privado",
+                     "offer_callback": "¿Quiere que solicite una llamada?"}}
+# A session's tools offer a call back when they offer this next step (`native.request_callback`, or a business tool
+# of block `urgent`), as the kernel's `reply_check.offers_call_back` reads them.
+CALL_BACK_STEP = NEXT_STEPS["native.request_callback"]
 # The reason of a handoff the handoff card opens (#96), the kernel's own words, never the draft's or the visitor's.
 CARD_HANDOFF_REASON = "The Desk handed this to you."
 OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
@@ -1863,11 +1875,11 @@ class FakeKernelState:
             **envelope, "hash": entry.hash, "signature": entry.signature, "key_id": entry.key_id})
         return entry
 
-    # The Rivera seed -----------------------------------------------------------------------------
+    # The Turner seed -----------------------------------------------------------------------------
 
     def _seed_rivera(self, copy_id: str) -> Desk:
-        business = BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera", timezone=RIVERA_TZ.key,
-                                brand={"primary": "#1F4E4A", "accent": "#B87333"})
+        business = BusinessSeed(name="Turner Plumbing", owner_display_name="Mike Turner", timezone=RIVERA_TZ.key,
+                                brand={"palette": "teal", **BRAND_PALETTE["teal"]})
         seed = DeskSeed(
             name="Main line", charter=list(RIVERA_CHARTER), hours=list(RIVERA_HOURS), price_items=list(RIVERA_PRICES),
             calendar_slots=rivera_slots(self.now),
@@ -1929,7 +1941,7 @@ class FakeKernelState:
         suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
         desk = Desk(desk_id=new_id("desk"), copy_id=copy_id, business_id=business.existing_business_id or new_id("biz"),
                     business_name=business.name, owner_display_name=business.owner_display_name,
-                    brand=dict(business.brand), timezone=business.timezone, name=seed.name,
+                    brand=stored_brand(business.brand), timezone=business.timezone, name=seed.name,
                     slug=f"{slugify(business.name)}-{suffix}", hours=list(seed.hours), created_at=self.now,
                     auto_money_cap_cents=seed.auto_money_cap_cents)
         self.desks[desk.desk_id] = desk
@@ -2255,7 +2267,7 @@ class FakeKernelState:
                       key_id=KEY_ID, unproved_seeds=[])
 
     def create_copy(self, request: Request, body: CreateCopyRequest) -> CopyCreated:
-        """A Rivera Plumbing copy with its seeded hold and, when it asks and a night is recorded, the night replayed
+        """A Turner Plumbing copy with its seeded hold and, when it asks and a night is recorded, the night replayed
         into it (`_replay`)."""
         if self._no_seeded_night and "replay_night" in body.model_fields_set:
             raise Refusal(422, "invalid")
@@ -2372,7 +2384,7 @@ class FakeKernelState:
         card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
-                          owner_display_name=desk.owner_display_name, brand=dict(desk.brand), charter=charter,
+                          owner_display_name=desk.owner_display_name, brand=effective_brand(desk.brand), charter=charter,
                           agent_card=card, open_status=self._open_status(desk, language),
                           starters=self._starters(desk, language))
 
@@ -2629,7 +2641,8 @@ class FakeKernelState:
                 raise AdapterCheckRefused("no_such_slot")
             resource, starts_at = ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None), slot.starts_at
         elif tool == "native.release_document":
-            document = desk.documents.get(args["document_id"])
+            # named bare or by its fact ID, as Claude's context shows it (`adapters.base.fact_ref`)
+            document = desk.documents.get(args["document_id"].removeprefix("document:"))
             if document is None:
                 raise AdapterCheckRefused("no_such_document")
             resource = ResourceRef(kind="document", id=document.document_id,
@@ -2640,8 +2653,9 @@ class FakeKernelState:
         elif tool == "payments.list_charges":
             resource = ResourceRef(kind="charge", id=f"person:{session.person_id}", owner_person_id=session.person_id)
         elif tool in ("native.payment_link", "native.charge_mandate"):
-            quote = self.quotes.get(args["quote_id"])
-            fact = desk.facts.get(f"quote:{args['quote_id']}")
+            quote_id = args["quote_id"].removeprefix("quote:")     # bare or by its fact ID, as for documents
+            quote = self.quotes.get(quote_id)
+            fact = desk.facts.get(f"quote:{quote_id}")
             # this conversation's own quote, unpaid: a quote is paid once (Plan 01c)
             if (quote is None or quote["desk_id"] != desk.desk_id or quote["session_id"] != session.session_id
                     or quote["status"] != "available" or fact is None or not self._current(fact)
@@ -2668,7 +2682,7 @@ class FakeKernelState:
             recipient=recipient, starts_at=starts_at)
 
     def _rule(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[str, list[str], str | None]:
-        """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
+        """The Turner cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
         a refusal by the always-on baseline the `@id` of its forbid in `kernel/cedar/baseline.cedar`."""
         tool = action.tool
         if not tool.startswith('desk.') and self._never(desk, tool):
@@ -2754,8 +2768,12 @@ class FakeKernelState:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
+        # every decide entry names the rules version and its money cap, a refusal before any action too (the
+        # kernel's `decide._store`)
         summary = {"decision_id": decision_id, "action_id": action.action_id if action else None, "tool": tool,
-                   "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version, "reviewed": False}
+                   "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version,
+                   "auto_money_cap_cents": min(desk.auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS),
+                   "reviewed": False}
         if why is not None:
             summary["reason"] = why
         if check is not None:
@@ -3506,7 +3524,8 @@ class FakeKernelState:
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
                  message_id: str | None = None, final: bool = True) -> ReplyVerdict:
         """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) the checked cards, then the handoff
-        clause when the draft has one, else the handoff alone, ledgered and signed. An
+        clause when the draft has one; with no card at all, the kernel's call-back offer as prose when
+        `_offers_call_back` (the owner's decision of 2026-11-01); else the handoff alone, ledgered and signed. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
@@ -3519,9 +3538,12 @@ class FakeKernelState:
             kept = [block for block in blocks if block.kind == "card" and block.template != "handoff"]
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             handoff = RenderedBlock(kind="card", template="handoff", text=text, title=text)
-            if kept and all(violation.kind in PROSE_ONLY for violation in violations):
+            prose_only = all(violation.kind in PROSE_ONLY for violation in violations)
+            if kept and prose_only:
                 drafted = any(block.kind == "card" and block.template == "handoff" for block in blocks)
                 blocks = kept + ([handoff] if drafted else [])   # a drafted handoff follows the kept cards
+            elif prose_only and self._offers_call_back(session, desk, blocks, violations):
+                blocks = [RenderedBlock(kind="prose", text=REPLY_TEXT[language]["offer_callback"])]   # ask first
             else:
                 blocks = [handoff]
         shown = ok or final or any(violation.kind not in REWRITABLE for violation in violations)
@@ -3549,6 +3571,17 @@ class FakeKernelState:
             signature=fake_signature({"session_id": session.session_id, "generation": session.generation,
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
+
+    def _offers_call_back(self, session: Session, desk: Desk, blocks: list[RenderedBlock],
+                          violations: list[Violation]) -> bool:
+        """Whether a draft blocked only for its prose shows the kernel's call-back offer, as the kernel's
+        `reply_check.call_back_offered` decides: no card at all (no checked card to keep, and no handoff clause Claude
+        drafted, which is honoured), no checker outage (`check_unavailable`, which hands off), no open handoff of
+        either kind on the session, and a call back among the session's tools' next steps."""
+        return (not any(block.kind == "card" for block in blocks)
+                and not any(violation.kind == "check_unavailable" for violation in violations)
+                and self._open_handoff(session) is None
+                and CALL_BACK_STEP in next_steps(desk.tools[tool] for tool in self.tools_given(session, desk)))
 
     def _open_card_handoff(self, session: Session, desk: Desk) -> str | None:
         """The owner's handoff for a verdict that shows the handoff card (#96), as the kernel's
@@ -3694,15 +3727,18 @@ class FakeKernelState:
             raise Refusal(422, "invalid") from None
 
     def put_business(self, request: Request, body: DeskBusinessRequest) -> DeskUpdated:
-        """The Desk's business: its name, owner name, time zone and brand, for every Desk of that business."""
+        """The Desk's business: its name, owner name, time zone and brand, for every Desk of that business; a palette
+        pick is stored as its key and the table's colours, and the ledger names the key."""
         desk = self._owners_desk(request, request.path_params["id"])
         self._check_business(body.owner_display_name, body.timezone)
+        brand = stored_brand(body.brand, body.brand_palette)
         for each in self.desks.values():
             if each.business_id == desk.business_id:
                 each.business_name, each.owner_display_name = body.name, body.owner_display_name
-                each.timezone, each.brand = body.timezone, dict(body.brand)
+                each.timezone, each.brand = body.timezone, dict(brand)
         self._put_business(desk)
-        self.append(desk, "desk_data", {"part": "business", "refs": []})
+        palette = {"palette": brand["palette"]} if "palette" in brand else {}
+        self.append(desk, "desk_data", {"part": "business", "refs": [], **palette})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
     def answering(self, request: Request, body: DeskAnsweringRequest) -> DeskUpdated:

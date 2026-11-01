@@ -249,6 +249,9 @@ export interface BusinessOut {
   name: string;
   owner_display_name: string;
   timezone: string;
+  brand: {
+    [k: string]: string;
+  };
   desks: DeskSummary[];
 }
 /**
@@ -332,7 +335,10 @@ export interface ConnectorProposal {
  * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
  * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
  * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
- * written yet.
+ * written yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,
+ * checked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual
+ * refusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff
+ * clearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -346,6 +352,8 @@ export interface ConversationSummary {
   };
   owner_preview: boolean;
   latest_visitor_text: string | null;
+  latest_outcome: ("visit_booked" | "deposit_paid" | "turned_down") | null;
+  replayed?: boolean;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -543,6 +551,7 @@ export interface Lead {
   display_name: string | null;
   note: string | null;
   created_at: string;
+  replayed?: boolean;
 }
 /**
  * 202: the visitor's message is stored; Claude's answer arrives on the event stream.
@@ -569,7 +578,7 @@ export interface MoneyCapIn {
  * wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
  * characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
  * AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
- * shown as "Claude's note on a stopped reply: {summary}" and never quoted as the visitor's), else None. A held
+ * shown as "Claude's note on what the Desk stopped: {summary}" and never quoted as the visitor's), else None. A held
  * request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
  * AI-written text: a visitor could steer a summary to sway an approval.
  */
@@ -611,6 +620,7 @@ export interface OwnerTranscript {
   state: SessionState;
   items: OwnerTranscriptItem[];
   typing_until: string | null;
+  replayed?: boolean;
 }
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each

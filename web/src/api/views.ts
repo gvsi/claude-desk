@@ -61,12 +61,19 @@ export interface BusinessOut {
   owner_display_name: string;
   /** IANA time zone; owner times are formatted in it. */
   timezone: string;
+  /**
+   * The brand as the public page serves it: a palette pick's key and colours, teal when none was
+   * stored. Sent by the API and typed optional, so a reply without it draws as before.
+   */
+  brand?: Record<string, string>;
   desks: DeskSummary[];
 }
 
 // Today
 
 export interface ConversationSummary {
+  /** Confirmed agent result from stored decisions/cards; a later hold or handoff clears it. */
+  latest_outcome?: import('./openapi.gen.ts').ConversationSummary['latest_outcome'];
   session_id: string;
   kind: ActorKind;
   /** The verified person's name, else the session's lead's, else null. Untrusted. */

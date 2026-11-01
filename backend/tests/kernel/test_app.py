@@ -289,7 +289,7 @@ async def test_error_answers_commit_their_ledger_entry(app, client):
         KernelFailure(409, "busy")                                              # only KernelError codes
 
 
-NOTE = "Call me back at maria@riverapl.example"     # what a request carried, which no log may carry
+NOTE = "Call me back at mike@riverapl.example"     # what a request carried, which no log may carry
 
 
 async def test_prover_stderr_logs_only_its_size(caplog):
@@ -352,7 +352,7 @@ async def test_error_logs_carry_no_request_text(app, client, caplog):
     assert "internal_error route=POST /test/raises kind=RuntimeError\n" in caplog.text
     assert ("kernel_failure_unrecorded route=POST /test/unrecorded code=conflict reason=conflict kind=RuntimeError\n"
             in caplog.text)
-    assert "maria@riverapl.example" not in caplog.text
+    assert "mike@riverapl.example" not in caplog.text
 
 
 PRINTS_ERROR_TEXT = {"exception", "format_exc", "print_exc", "format_exception", "print_exception"}

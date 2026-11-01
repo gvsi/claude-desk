@@ -537,7 +537,7 @@ async def test_closed_session_after_desk_delete(k: KernelHarness, records):
 
 
 # With Answering off a visitor keeps lead capture and callback requests: the native ones, and the
-# Rivera seed's urgent callback, `desk.emergency-callback`, which is given on `native.request_callback`.
+# Turner seed's urgent callback, `desk.emergency-callback`, which is given on `native.request_callback`.
 ANSWERING_OFF_TOOLS = {"native.capture_lead", "native.request_callback", "desk.emergency-callback"}
 
 

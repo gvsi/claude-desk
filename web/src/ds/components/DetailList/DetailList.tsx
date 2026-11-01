@@ -2,7 +2,7 @@ import { Card } from '../Card/Card.tsx';
 
 import './DetailList.css';
 
-/** One detail, in the screen's words: "Business", "Rivera Plumbing". */
+/** One detail, in the screen's words: "Business", "Turner Plumbing". */
 export interface DetailItem {
   /** What the detail is: "Business", "Customers see you as", "Hours". */
   label: string;

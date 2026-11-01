@@ -9,6 +9,7 @@ import type { RuleCard, ToolName } from '../../api/contracts.ts';
 import type { NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { chenBusinessTools } from '../../mocks/businessTools.ts';
+import { businessTools } from '../connectors/catalog.ts';
 import { describeEffects, type ToolSummaryView } from '../../ds/index.ts';
 import { needsYou, peopleOut, rulesView } from '../../mocks/readModels.ts';
 import { PRESETS, RIVERA } from '../../mocks/seed.ts';
@@ -20,14 +21,14 @@ import { draftFromDiff, type RuleDraft } from './drafts.ts';
 import { governingRules, holdQuestion, hubSections, parseLimit, rowsChangedBy, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
 import { targetWords } from './ruleWords.ts';
 
-/** The mock's main Desk, a fresh Rivera copy for every test. */
+/** The mock's main Desk, a fresh Turner copy for every test. */
 function desk(): DeskRecord {
   const found = mockStore.world.desk(RIVERA.deskId);
   if (!found) throw new Error('the mock has the main Desk');
   return found;
 }
 
-/** Rivera's rules as the owner reads them, with `extra` cards active beside the seed's. */
+/** Turner's rules as the owner reads them, with `extra` cards active beside the seed's. */
 function view(extra: readonly RuleCard[] = []): RulesView {
   desk().policy.cards = [...desk().policy.cards, ...extra.map((card) => ({ ...card }))];
   return rulesView(desk());
@@ -37,10 +38,10 @@ function people(): PeopleOut {
   return peopleOut(mockStore.world, desk());
 }
 
-/** The tool row for `tool`, which every Rivera copy has. */
+/** The tool row for `tool`, which every Turner copy has. */
 function rowOf(rules: RulesView, tool: ToolName): ToolRow {
   const row = rules.tools.find((r) => r.tool === tool);
-  if (!row) throw new Error(`Rivera has ${tool}`);
+  if (!row) throw new Error(`Turner has ${tool}`);
   return row;
 }
 
@@ -49,7 +50,7 @@ function card(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'reason
   return { who: 'anyone', person_id: null, agent_key_id: null, max_amount_cents: null, max_discount_bp: 0, hours: null, review: false, is_default: false, ...fields };
 }
 
-/** `tool`'s row on the hub, which every Rivera copy lists. */
+/** `tool`'s row on the hub, which every Turner copy lists. */
 function hubTool(rules: RulesView, tool: ToolName): ToolSummaryView {
   const found = hubSections(rules, people())
     .flatMap((s) => s.tools)
@@ -535,7 +536,7 @@ describe('the Rules hub', () => {
 });
 
 describe('the rows a confirmed change lands on', () => {
-  /** A draft of Rivera's rules with `add` in place of the cards of the same id, as the review builds it. */
+  /** A draft of Turner's rules with `add` in place of the cards of the same id, as the review builds it. */
   function drafted(add: readonly RuleCard[], opts: { cap?: number } = {}) {
     const stored = opts.cap === undefined ? mockStore.world.draft(desk(), add) : mockStore.world.draftCards(desk(), desk().policy.cards, opts);
     return draftFromDiff(stored, desk().policy);
@@ -548,23 +549,27 @@ describe('the rows a confirmed change lands on', () => {
   });
 
   it('a_preset_lands_on_every_tool_whose_rules_it_changes', () => {
-    // "Ask me first" drops each of Rivera's own rules: every tool one of them governed changes, and
-    // the tools only the starter's cards govern (open times, leads, callbacks, identity checks) don't.
+    // "Ask me first" drops each of Turner's own rules: every tool one of them governed changes, the
+    // urgent callback among them, and the tools only the starter's cards govern (open times, leads,
+    // callbacks, identity checks) don't.
     const stored = mockStore.world.draftCards(desk(), PRESETS.ask_first);
     const changed = rowsChangedBy(draftFromDiff(stored, desk().policy, 'ask_first'), view().tools);
     expect([...changed.tools].sort()).toEqual(
-      ['native.book', 'native.charge_mandate', 'native.payment_link', 'native.quote', 'native.release_document', 'payments.create_refund', 'payments.list_charges'].sort(),
+      ['desk.emergency-callback', 'native.book', 'native.charge_mandate', 'native.payment_link', 'native.quote', 'native.release_document', 'payments.create_refund', 'payments.list_charges'].sort(),
     );
     expect(changed.moneyLimit).toBe(false);
   });
 
-  /** The names of the tools a change lands on, which the review's row titles name. */
-  const namesOf = (tools: readonly string[]) => new Set(tools.map((tool) => targetWords(tool)));
+  /**
+   * The names of the tools a change lands on, as the review's row titles name them: a Desk's own
+   * job by its title, from the Desk's tool rows.
+   */
+  const namesOf = (tools: readonly string[]) => new Set(tools.map((tool) => targetWords(tool, businessTools(view().tools))));
   /** The titles of the review's rows, each once. */
   const titlesOf = (draft: RuleDraft) => new Set(changeRows(draft, people(), view().tools).map((row) => row.title));
 
   it('a_rule_replaced_by_one_that_differs_only_in_its_id_lands_nowhere', () => {
-    // Quote and documents go to new cards that differ from Rivera's only in their ids, and refunds
+    // Quote and documents go to new cards that differ from Turner's only in their ids, and refunds
     // never go through: the review lists only Refund, and only Refund lands.
     const cards = desk().policy.cards.map((c) => {
       if (c.card_id === 'rv-quote' || c.card_id === 'rv-docs') return { ...c, card_id: `${c.card_id}-again` };
@@ -576,11 +581,14 @@ describe('the rows a confirmed change lands on', () => {
   });
 
   it('a_preset_lands_on_exactly_the_tools_its_review_lists', () => {
-    // "Recommended rules" in place of Rivera's own: its quote and document rules replace Rivera's
-    // with ones that differ only in their ids, so its review lists neither, and neither lands.
+    // "Recommended rules" in place of Turner's own: its quote and document rules replace Turner's
+    // with ones that differ only in their ids, so its review lists neither, and neither lands. Its
+    // urgent callback job loses its own rule, so the review lists it by its title, and it lands.
     const draft = draftFromDiff(mockStore.world.draftCards(desk(), PRESETS.auto), desk().policy, 'auto');
     const changed = rowsChangedBy(draft, view().tools);
     expect(namesOf(changed.tools)).toEqual(titlesOf(draft));
+    expect(changed.tools).toContain('desk.emergency-callback');
+    expect(titlesOf(draft)).toContain('Emergency callback');
     expect(changed.tools).not.toContain('native.quote');
     expect(changed.tools).not.toContain('native.release_document');
     expect(changed.moneyLimit).toBe(false);

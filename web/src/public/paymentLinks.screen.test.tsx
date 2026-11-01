@@ -52,7 +52,7 @@ function visibility(state: 'hidden' | 'visible') {
 
 async function issue(viewport: Viewport, path: string = CHAT) {
   const view = await renderRoute(path, { viewport, strict: true, pollScale: 100 });
-  await expect.element(view.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+  await expect.element(view.screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
   await view.screen.getByRole('textbox').fill('How do I pay the deposit?');
   await view.screen.getByRole('button', { name: 'Send', exact: true }).click();
   await expect.element(action(view.screen)).toBeVisible();
@@ -86,12 +86,12 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     await expect.element(action(screen)).toHaveFocus();
     await payInOtherTab(token);
     await expect.element(action(screen)).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toHaveFocus();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toHaveFocus();
   });
   it('removes a rule-cancelled action live and from history without reading the cancelled token', async () => {
     const { screen, token, words } = await issue(viewport);
     const desk = mockStore.world.desk(RIVERA.deskId);
-    if (!desk) throw new Error('Rivera exists');
+    if (!desk) throw new Error('Turner exists');
     const params = { desk_id: RIVERA.deskId };
     const draft = await request('draftRules', { params, body: { add: [{ ...desk.policy.cards[0]!, card_id: 'stop-links', applies_to: 'native.payment_link', mode: 'never', who: 'anyone' }] } });
     await request('confirmRules', { params, body: { version: draft.version } });

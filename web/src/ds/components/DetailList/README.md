@@ -9,7 +9,7 @@
 
 ## What the consumer provides
 
-- `items`, in order: each detail's `label` ("Customers see you as") and its `value` in words ("Maria Rivera"). The screen writes the values: the time zone's name and the Desk's hours ("Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm"); nothing here formats a time.
+- `items`, in order: each detail's `label` ("Customers see you as") and its `value` in words ("Mike Turner"). The screen writes the values: the time zone's name and the Desk's hours ("Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm"); nothing here formats a time.
 - The heading over the card and the section that holds it: a `section` `aria-labelledby` its `SectionHeader`, 8 px over the card.
 
 ## What it shows

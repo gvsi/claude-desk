@@ -37,7 +37,7 @@
     "/api/owner/copies": {
       "post": {
         "summary": "Create Copy",
-        "description": "A fresh copy of the Rivera seed for whoever holds the passcode, and the owner cookie for it.",
+        "description": "A fresh copy of the Turner seed for whoever holds the passcode, and the owner cookie for it.",
         "operationId": "owner_create_copy",
         "requestBody": {
           "content": {
@@ -4952,7 +4952,7 @@
     "/api/public/desks/{slug}/agent_tasks": {
       "get": {
         "summary": "Agent Tasks",
-        "description": "Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from\n(`agents.demo_task_set`): the business type setup stored for the Desk, or Rivera's on the copy's own Desk. A key\nthe page words its task chips by, never text of the Desk's. Read with the visitor's session; never cached.",
+        "description": "Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from\n(`agents.demo_task_set`): the business type setup stored for the Desk, or Turner's on the copy's own Desk. A key\nthe page words its task chips by, never text of the Desk's. Read with the visitor's session; never cached.",
         "operationId": "public_agent_tasks",
         "parameters": [
           {
@@ -5012,7 +5012,7 @@
     "/api/public/desks/{slug}/send_agent": {
       "post": {
         "summary": "Send Agent",
-        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.\n\nThe agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Rivera's\nfor the copy's own Desk), read before anything is claimed.",
+        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.\n\nThe agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Turner's\nfor the copy's own Desk), read before anything is claimed.",
         "operationId": "public_send_agent",
         "parameters": [
           {
@@ -8603,6 +8603,13 @@
             "type": "string",
             "title": "Timezone"
           },
+          "brand": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Brand"
+          },
           "desks": {
             "items": {
               "$ref": "#/components/schemas/DeskSummary"
@@ -8617,6 +8624,7 @@
           "name",
           "owner_display_name",
           "timezone",
+          "brand",
           "desks"
         ],
         "title": "BusinessOut",
@@ -9099,6 +9107,27 @@
               }
             ],
             "title": "Latest Visitor Text"
+          },
+          "latest_outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "visit_booked",
+                  "deposit_paid",
+                  "turned_down"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Outcome"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed",
+            "default": false
           }
         },
         "type": "object",
@@ -9111,10 +9140,11 @@
           "last_activity",
           "outcome_counts",
           "owner_preview",
-          "latest_visitor_text"
+          "latest_visitor_text",
+          "latest_outcome"
         ],
         "title": "ConversationSummary",
-        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet."
+        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff\nclearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null."
       },
       "CopyOut": {
         "properties": {
@@ -9502,6 +9532,27 @@
             "type": "object",
             "title": "Brand",
             "default": {}
+          },
+          "brand_palette": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "teal",
+                  "clay",
+                  "navy",
+                  "forest",
+                  "plum",
+                  "rust",
+                  "slate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Palette"
           }
         },
         "additionalProperties": false,
@@ -10685,6 +10736,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed",
+            "default": false
           }
         },
         "type": "object",
@@ -11079,7 +11135,7 @@
           "claude_summary"
         ],
         "title": "NeedsYouItem",
-        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200\ncharacters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff only, the conversation's newest\nAI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,\nshown as \"Claude's note on a stopped reply: {summary}\" and never quoted as the visitor's), else None. A held\nrequest asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries\nAI-written text: a visitor could steer a summary to sway an approval."
+        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200\ncharacters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff only, the conversation's newest\nAI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,\nshown as \"Claude's note on what the Desk stopped: {summary}\" and never quoted as the visitor's), else None. A held\nrequest asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries\nAI-written text: a visitor could steer a summary to sway an approval."
       },
       "NeedsYouSession": {
         "properties": {
@@ -11447,6 +11503,11 @@
               }
             ],
             "title": "Typing Until"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed",
+            "default": false
           }
         },
         "type": "object",

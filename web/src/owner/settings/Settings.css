@@ -57,6 +57,100 @@
   color: var(--text-secondary);
 }
 
+.cd-header-colour {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16) var(--space-20);
+}
+
+.cd-header-colour__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cd-header-colour__swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  --cd-touch-reach-inline: calc(var(--space-12) / 2);
+}
+
+.cd-header-colour__swatch {
+  --swatch-border: 0px;
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: var(--size-control);
+  height: var(--size-control);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--swatch-field);
+  cursor: pointer;
+}
+
+.cd-header-colour__swatch[aria-checked='true'] {
+  box-shadow: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--text-primary);
+}
+
+.cd-header-colour__swatch:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: var(--space-6);
+}
+
+.cd-header-colour__swatch--none {
+  --swatch-border: 1px;
+  border: 1px solid var(--line-card);
+}
+
+/* Clip only the diagonal, leaving the button's invisible touch area free to extend. */
+.cd-header-colour__none-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.cd-header-colour__none-clip::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  border-top: 1.5px solid var(--text-secondary);
+  transform: rotate(-45deg);
+  content: '';
+}
+
+.cd-header-colour__preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+  min-width: 0;
+  padding: var(--space-12) var(--space-16);
+  border-bottom: 2px solid;
+  border-radius: var(--radius-control);
+}
+
+.cd-header-colour__monogram {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--size-control);
+  height: var(--size-control);
+  border: 1.5px solid var(--text-secondary);
+  border-radius: var(--radius-control);
+}
+
+.cd-header-colour__names {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Answering's card: the switch row pads itself 8 px, so 8 px more at the sides puts its words 16 px
    in, where the details' words start in the card above, and its track as far in on the right. */
 .cd-settings__answering {
@@ -122,5 +216,28 @@
 
   .cd-settings__footer {
     margin-top: 0;
+  }
+}
+
+/* The same invisible target as Chip and IconButton, capped at half the swatch gap.
+   The border correction keeps No colour's padding-box target equal to its neighbours'. */
+@media (pointer: coarse) {
+  .cd-header-colour__swatch::after {
+    position: absolute;
+    inset-block: max(-1 * (var(--cd-touch-reach-block, var(--size-touch)) + var(--swatch-border)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * (var(--cd-touch-reach-inline, var(--size-touch)) + var(--swatch-border)), min(0px, (100% - var(--size-touch)) / 2));
+    content: '';
+  }
+}
+
+@media (max-width: 639.98px) {
+  .cd-header-colour__swatches {
+    --cd-touch-reach-inline: calc(var(--space-10) / 2);
+    gap: var(--space-10);
+  }
+
+  .cd-header-colour__swatch {
+    width: var(--space-28);
+    height: var(--space-28);
   }
 }

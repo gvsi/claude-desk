@@ -1,7 +1,7 @@
 /**
  * What the demo suggests trying: the four things the intro dialog lists (and Today's own list
- * titles, with the line each row says once it's done). "Show me ideas" offers `BREAK_IT_IDEAS`
- * (`web/src/lib/breakItIdeas.ts`), which the public page shares.
+ * titles, with the line each row says once it's done). "Show me ideas" offers `breakItIdeas`
+ * (`web/src/lib/breakItIdeas.ts`), in the Desk's own owner's name, which the public page shares.
  */
 import type { IconName } from '../../ds/index.ts';
 import type { UncountedAnswer } from './doneSignals.ts';
@@ -16,7 +16,7 @@ export interface ThingToTry {
 
 /** In order: the intro dialog's list, and the titles of Today's "Things to try". */
 export const THINGS_TO_TRY = [
-  { title: 'Chat as a customer', detail: 'Rivera’s public page opens in a new tab.', icon: 'person', done: 'Done. You chatted as a customer.' },
+  { title: 'Chat as a customer', detail: 'Turner’s public page opens in a new tab.', icon: 'person', done: 'Done. You chatted as a customer.' },
   { title: 'Try to break it', detail: 'Ask for a discount or someone else’s details.', icon: 'safety', done: 'Done. Safety shows what was stopped.' },
   { title: 'Answer a held request', detail: 'One is waiting for you on Today.', icon: 'check', done: "Done. Your answer went to the visitor's chat." },
   { title: 'Create your own Desk', detail: 'It gets a live link you can share.', icon: 'plus', done: 'Done. Your new Desk is live.' },

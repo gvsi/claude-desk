@@ -47,6 +47,8 @@ export interface DoneSignals {
   done: Readonly<Partial<Record<Thing, Done>>>;
   /** How many of the four are done. */
   count: number;
+  /** Whether the list shows the Desk the copy started with. */
+  onStartingDesk: boolean;
   /** How the answer given on this page last ended, when "Answer a held request" doesn't count it. */
   uncounted: UncountedAnswer | null;
 }
@@ -198,6 +200,7 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
   return {
     done: remembered.done,
     count: THINGS.filter((thing) => remembered.done[thing] !== undefined).length,
+    onStartingDesk: deskId === seeded,
     uncounted: uncountedAnswer(latest, reading && deskId === seeded),
   };
 }

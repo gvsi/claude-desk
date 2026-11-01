@@ -43,7 +43,6 @@ from desk.api.schemas import (
     DeskSetup,
     DeskSummary,
     GenerationIn,
-    Lead,
     NeedsYouItem,
     OwnerMessageIn,
     OwnerTranscript,
@@ -57,7 +56,8 @@ from desk.api.schemas import (
 )
 from desk.api.sse import RUN_EVENTS, append_control, emit
 from desk.api.store import MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending, transcript
-from desk.contracts import CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState
+from desk.contracts import (CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState,
+                            effective_brand)
 from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
 from desk.kernel_api import (
     AnswerRequest,
@@ -228,7 +228,7 @@ async def _create_copy(state: Runtime) -> CopyCreated:
 
 
 async def _new_copy(state: Runtime, response: Response) -> CopyOut:
-    """A new copy of the Rivera seed, read back through its own owner token, which goes only into the cookie. It asks
+    """A new copy of the Turner seed, read back through its own owner token, which goes only into the cookie. It asks
     for the recorded night when the settings do (`replay_night`). The seeded hold's chat commits first, then the
     replayed night in its own transaction, so either can be stored even if the other fails."""
     created = await _create_copy(state)
@@ -242,7 +242,7 @@ async def _new_copy(state: Runtime, response: Response) -> CopyOut:
 
 @router.post("/copies", status_code=201, response_model=CopyOut, responses=error_responses(401, 422, 429, 503))
 async def create_copy(body: CopyRequest, request: Request, response: Response) -> CopyOut:
-    """A fresh copy of the Rivera seed for whoever holds the passcode, and the owner cookie for it."""
+    """A fresh copy of the Turner seed for whoever holds the passcode, and the owner cookie for it."""
     state = runtime(request).started()
     ip = client_ip(request)
     await state.limiter.enforce("passcode", ip)          # counts the attempt; a right passcode gives it back
@@ -281,7 +281,8 @@ async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOu
         if business["business_id"] not in listed:
             listed[business["business_id"]] = BusinessOut(
                 business_id=business["business_id"], name=business["name"],
-                owner_display_name=business["owner_display_name"], timezone=business["timezone"], desks=[])
+                owner_display_name=business["owner_display_name"], timezone=business["timezone"],
+                brand=effective_brand(business["brand"] or {}), desks=[])
         listed[business["business_id"]].desks.append(_summary(desk, business, setups))
     return list(listed.values())
 
@@ -409,13 +410,10 @@ async def people(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) 
     desk_id = ctx.desk(desk_id)
     on_record = sorted(await ctx.ro.rows("people", desk_id=desk_id),
                        key=lambda row: (owner_reads.utc(row["created_at"]), row["person_id"]))
-    leads = sorted(await ctx.ro.rows("leads", desk_id=desk_id),
-                   key=lambda row: (owner_reads.utc(row["created_at"]), row["lead_id"]), reverse=True)
     return PeopleOut(
         people=[PersonOnRecord(person_id=row["person_id"], display_name=row["display_name"],
                                masked_contact=row["masked_contact"]) for row in on_record],
-        leads=[Lead(lead_id=row["lead_id"], display_name=row["display_name"], note=row["note"],
-                    created_at=row["created_at"]) for row in leads])
+        leads=await owner_reads.leads(ctx, desk_id))
 
 
 @router.get("/desks/{desk_id}/today", response_model=Today, responses=error_responses(401, 404, 422, 503))
@@ -473,7 +471,8 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
     for item, reason in zip(statuses, reasons, strict=True):
         item.owner_plain = reason
     return OwnerTranscript(state=state, items=items,
-                           typing_until=process.presence.visitor_typing_until(session_id, process.clock()))
+                           typing_until=process.presence.visitor_typing_until(session_id, process.clock()),
+                           replayed=await owner_reads.transcript_replayed(ctx, session["desk_id"], session_id))
 
 
 @router.get("/desks/{desk_id}/safety", response_model=list[Attempt], responses=error_responses(401, 404, 422, 503))

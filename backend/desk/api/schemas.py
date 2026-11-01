@@ -333,6 +333,7 @@ class BusinessOut(BaseModel):
     name: str
     owner_display_name: str
     timezone: str                         # IANA name: Today's windows are in it
+    brand: dict[str, str]                 # as the public page serves it (`effective_brand`): teal when none is stored
     desks: list[DeskSummary]
 
 
@@ -385,7 +386,7 @@ class NeedsYouItem(BaseModel):
     wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
     characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
     AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
-    shown as "Claude's note on a stopped reply: {summary}" and never quoted as the visitor's), else None. A held
+    shown as "Claude's note on what the Desk stopped: {summary}" and never quoted as the visitor's), else None. A held
     request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
     AI-written text: a visitor could steer a summary to sway an approval."""
 
@@ -414,7 +415,10 @@ class ConversationSummary(BaseModel):
     preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
     whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
     never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
-    written yet."""
+    written yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,
+    checked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual
+    refusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff
+    clearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null."""
 
     session_id: str
     kind: ActorKind
@@ -425,6 +429,8 @@ class ConversationSummary(BaseModel):
     outcome_counts: dict[DecisionState, int]
     owner_preview: bool
     latest_visitor_text: str | None
+    latest_outcome: Literal["visit_booked", "deposit_paid", "turned_down"] | None
+    replayed: bool = False                  # recorded history written into the copy (`owner_reads.history_sessions`)
 
 
 class OwnerTranscript(BaseModel):
@@ -436,6 +442,7 @@ class OwnerTranscript(BaseModel):
     state: SessionState
     items: list[OwnerTranscriptItem]
     typing_until: AwareDatetime | None
+    replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
 
 
 # The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------
@@ -948,6 +955,7 @@ class Lead(BaseModel):
     display_name: str | None
     note: str | None
     created_at: AwareDatetime
+    replayed: bool = False                  # recorded history: left in a session written into the copy, not a live one
 
 
 class PeopleOut(BaseModel):

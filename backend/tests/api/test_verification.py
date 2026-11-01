@@ -42,7 +42,7 @@ from tests.api.test_public_chat import (
 from tests.api.test_secrets_at_rest import at_rest
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
-DANA = "dana@example.com"               # on record in the Rivera seed
+DANA = "dana@example.com"               # on record in the Turner seed
 SIX_DIGITS = re.compile(r"[0-9]{6}")
 
 
@@ -200,7 +200,7 @@ async def test_owner_alerts_stay_off_the_visitor_stream(app, browser, fake, kern
     # Claude asks for a discount (held: the decision alerts the owner) and for open times (whose execution carries an
     # owner alert beside a notice for the visitor), then replies.
     model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), tool_use("native__find_slots", {}),
-                       reply("I've asked Maria about the discount.")))
+                       reply("I've asked Mike about the discount.")))
     assert (await client.post(f"/api/public/desks/{slug}/messages", json={"text": "Any discount?"})).status_code == 202
     await app.state.runtime.runner.drain()
 

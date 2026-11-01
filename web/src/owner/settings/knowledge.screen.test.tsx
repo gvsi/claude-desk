@@ -105,7 +105,7 @@ describe('knowledge', () => {
     await expect.element(list).toBeVisible();
     // Oldest first: the kernel stores the website read, then the price list.
     expect(list.getByRole('listitem').elements().map((row) => row.textContent)).toEqual([
-      'Your website, rivera-plumbing.example, read during setupAdded Oct 30Customers can see this',
+      'Your website, turner-plumbing.example, read during setupAdded Oct 30Customers can see this',
       'Price list, from your answers in setupAdded Oct 30Customers can see this',
     ]);
     await expectScreenBasics(screen.container, { owner: true });
@@ -602,7 +602,7 @@ describe('knowledge', () => {
     mockStore.world.knowledge.clear();
     // What the Desk knows, oldest first: one customers can see, one the owner keeps private, and one
     // the kernel keeps to the owner, whose title and words the list withholds.
-    know({ item_id: 'website', source: 'website', title: 'Your website', text: 'Rivera Plumbing fixes leaks and drains around Oakland.' }, ['public'], 4);
+    know({ item_id: 'website', source: 'website', title: 'Your website', text: 'Turner Plumbing fixes leaks and drains around Oakland.' }, ['public'], 4);
     know({ item_id: 'note-kept', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.' }, ['owner'], 3);
     know({ item_id: 'note-forced', source: 'setup', title: 'Dana’s gate code', text: 'Dana’s gate code is 4471.' }, ['owner'], 2, true);
     const { screen } = await renderRoute(KNOWLEDGE);

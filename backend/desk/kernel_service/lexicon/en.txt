@@ -40,7 +40,9 @@ date	mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?
 date	january|february|march|april|june|july|august|september|october|november|december
 date	(?:(?<=[^\W\d_] )|(?<=[^\W\d_], )|(?:in|on|by|until|till|next|this|early|late|mid|last)[\s-]+)(?-i:May)
 date	today|tonight|tomorrow|yesterday|weekends?|noon|midnight|o['’]?clock
-date	(?:next|this|last)[\s-]+(?:week|month|year)|this[\s-]+(?:morning|afternoon|evening)
+# "Last year" is no date, and a year's possessive ("this year's return") names a thing, not a time (the
+# owner's decision of 2026-11-01): "this year" and "next year" are dates otherwise.
+date	(?:next|this|last)[\s-]+(?:week|month)|(?:next|this)[\s-]+year(?![’']s\b)|this[\s-]+(?:morning|afternoon|evening)
 date	[ap]\.\s?m\.?|pm
 date	same[\s-]{0,3}day
 # A time soon: "in" or "within" and up to three words before minutes or hours ("in an hour",
@@ -97,7 +99,7 @@ promise	no[\s-]+(?:[^\W\d_]+[\s-]+){0,2}fees?
 # noun, so "most visits are booked ahead" passes. "Saved" claims a place only after a booking
 # noun: "your spot is saved", while "your details are saved" passes. Anything of yours booked,
 # scheduled, reserved, confirmed or set is a claim too, up to seven words after "your" but not past
-# a condition ("your appointment with Maria is booked", not "your reminder after it is booked").
+# a condition ("your appointment with Mike is booked", not "your reminder after it is booked").
 booking	(?:(?:your|the|this|that|my|our|[^\W\d_]+['’]s)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}|(?<![^\W_] ))(?:bookings?|appointments?|visits?|reservations?|slots?|spots?|viewings?|showings?|tours?|class(?:es)?|lessons?|sessions?|tables?|rooms?|stays?|consultations?|consults?|fittings?|tastings?|treatments?|massages?|haircuts?|trials?|demos?|pickups?|meetings?)(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|['’]re|[\s-]+(?:is|are|was|were|ha(?:s|ve)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set|saved)
 # Known nonbooking acknowledgments are exempt only for confirmed/set, preserving
 # existing booked/reserved/scheduled claims. Set up and set to are phrasal uses.
@@ -112,8 +114,8 @@ booking	(?:it|that|everything)(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also
 booking	(?:[il]|we)(?:[\s-]+(?:all|now|already|just|also|officially|successfully|finally))?(?:(?:['’]ve|[\s-]+have)(?:[\s-]+(?:all|now|already|just|also|officially|successfully|finally))?(?:[\s-]+got)?|[\s-]+got)[\s-]+you[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set|down)
 # The verb with an object claims it as well: "I've booked you", "we reserved it", "she's confirmed
 # your reservation", "I've already reserved a time slot", and with no subject the line names
-# ("Booked you in.", "Maria booked you", "Maria booked your drain cleaning visit"), but "you" not
-# before "you're" or "it's" ("Maria confirmed you're in our area", "I've confirmed it's covered"),
+# ("Booked you in.", "Mike booked you", "Mike booked your drain cleaning visit"), but "you" not
+# before "you're" or "it's" ("Mike confirmed you're in our area", "I've confirmed it's covered"),
 # where the object starts a clause of its own, and a booking noun not after "you", "who" or a
 # negation, where the booking is the visitor's own or none ("Have you booked your appointment
 # yet?", "Customers who booked a visit got a reminder.", "We haven't booked your visit yet.").

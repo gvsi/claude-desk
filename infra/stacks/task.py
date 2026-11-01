@@ -104,6 +104,9 @@ def desk_task_definition(scope: Construct, data: DeskData, config: DeskConfig) -
             "DESK_DB_URLS": "KERNEL,MOCKPAY",
             "KERNEL_DB_USER": KERNEL_ROLE,
             "MOCKPAY_DB_USER": MOCKPAY_ROLE,
+            # Each new copy opens on the kernel's sample week of finished conversations, every one of them
+            # marked as sample history in the ledger. The kernel's setting alone; unset, copies start empty.
+            "SAMPLE_WEEK": "1",
             **database,
         },
         secrets=_kernel_secrets(data.secrets),
@@ -134,6 +137,8 @@ def desk_task_definition(scope: Construct, data: DeskData, config: DeskConfig) -
             # Every absolute link the API builds starts here; no request header sets it.
             "PUBLIC_ORIGIN": config.public_origin,
             "TRUSTED_PROXY_HOPS": TRUSTED_PROXY_HOPS,
+            # Setup's proposal cards carry block configurations, so an accepted job becomes a business tool.
+            "BUSINESS_TOOLS_ENABLED": "1",
         },
         secrets=_api_secrets(data.secrets),
         port_mappings=[ecs.PortMapping(container_port=API_PORT, name=API_PORT_NAME, protocol=ecs.Protocol.TCP)],

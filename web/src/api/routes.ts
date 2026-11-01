@@ -10,6 +10,7 @@
 import type {
   Decision,
   DeskUpdated,
+  DeskBusinessRequest,
   DemoAgentIssued,
   DemoInboxEntry,
   KnowledgeItem,
@@ -100,6 +101,7 @@ export const ROUTES = {
   me: { method: 'GET', path: '/api/owner/me', owner: true },
   desks: { method: 'GET', path: '/api/owner/desks', owner: true },
   setAnswering: { method: 'PUT', path: '/api/owner/desks/{desk_id}/answering', owner: true },
+  setBusiness: { method: 'PUT', path: '/api/owner/desks/{desk_id}/business', owner: true },
   deleteDesk: { method: 'DELETE', path: '/api/owner/desks/{desk_id}', owner: true },
   openPreview: { method: 'POST', path: '/api/owner/desks/{desk_id}/preview_session', owner: true },
 
@@ -157,6 +159,7 @@ export const ROUTES = {
   setupAnswer: { method: 'POST', path: '/api/owner/setup/{id}/answer', owner: true, model: true },
   setupProposal: { method: 'POST', path: '/api/owner/setup/{id}/proposals/{proposal_id}', owner: true, model: true },
   setupSuggestions: { method: 'POST', path: '/api/owner/setup/{id}/suggestions', owner: true, model: true },
+  setupEvents: { method: 'GET', path: '/api/owner/setup/{id}/events', owner: true },
   setupTools: { method: 'GET', path: '/api/owner/setup/{id}/tools', owner: true },
   setupConnect: { method: 'POST', path: '/api/owner/setup/{id}/tools/connect', owner: true },
   setupPublicLines: { method: 'GET', path: '/api/owner/setup/{id}/public_lines', owner: true },
@@ -196,6 +199,7 @@ interface RouteShapes {
   me: { body: undefined; response: CopyOut };
   desks: { body: undefined; response: BusinessOut[] };
   setAnswering: { body: AnsweringBody; response: DeskUpdated };
+  setBusiness: { body: DeskBusinessRequest; response: DeskUpdated };
   deleteDesk: { body: undefined; response: undefined };
   openPreview: { body: undefined; response: VisitorSession };
 
@@ -247,6 +251,8 @@ interface RouteShapes {
   setupAnswer: { body: SetupAnswerBody; response: SetupState };
   setupProposal: { body: SetupProposalBody; response: SetupState };
   setupSuggestions: { body: SetupSuggestionsBody; response: SetupState };
+  /** Read with `openSetupEvents`, never with `request`. */
+  setupEvents: { body: undefined; response: never };
   setupTools: { body: undefined; response: SetupTools };
   setupConnect: { body: ConnectBody; response: ToolRow[] };
   setupPublicLines: { body: undefined; response: SetupPublicLines };

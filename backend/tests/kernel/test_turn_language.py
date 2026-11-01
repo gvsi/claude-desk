@@ -7,7 +7,7 @@ check's fallback when Claude's prose is too short to detect, follow the visitor'
 rather than the previous turn's. The message is never stored, logged or ledgered, and the call
 changes nothing else.
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), with the
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), with the
 facts made the way a conversation makes them, as the reply check's tests do.
 """
 
@@ -81,17 +81,17 @@ async def test_a_spanish_turn_after_an_english_one_shows_spanish_receipts(app, c
     # in it reads Spanish, where the session's last reply would have kept it English until the turn's end
     assert await turn(client, visitor, SPANISH) == "es"
     allowed = await decided(client, visitor, "native.quote", quote_args(("drain", 1)))
-    assert (allowed.outcome, allowed.visitor_plain) == ("allow", "Revisado con las reglas de Maria Rivera")
+    assert (allowed.outcome, allowed.visitor_plain) == ("allow", "Revisado con las reglas de Mike Turner")
     await executed(client, visitor, allowed)
     done = await read(client, visitor.headers, allowed)
-    assert (done.state, done.visitor_plain) == ("executed", "Cotizado con la lista de precios de Maria Rivera")
+    assert (done.state, done.visitor_plain) == ("executed", "Cotizado con la lista de precios de Mike Turner")
     held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=1500),
                          call_id="call-2")
-    assert (held.state, held.visitor_plain) == ("held", "Esperando la aprobación de Maria Rivera")
+    assert (held.state, held.visitor_plain) == ("held", "Esperando la aprobación de Mike Turner")
     # and back: an English message turns the next receipts English again
     assert await turn(client, visitor, ENGLISH) == "en"
     allowed = await decided(client, visitor, "native.quote", quote_args(("drain", 1)), call_id="call-3")
-    assert (allowed.outcome, allowed.visitor_plain) == ("allow", "Checked against Maria Rivera's rules")
+    assert (allowed.outcome, allowed.visitor_plain) == ("allow", "Checked against Mike Turner's rules")
 
 
 async def test_the_reply_checks_fallback_follows_the_turn(app, client):
@@ -102,13 +102,13 @@ async def test_the_reply_checks_fallback_follows_the_turn(app, client):
     # no prose, only a card and the handoff: nothing to detect, so the cards speak the turn's language
     verdict = await checked(client, visitor, "", [clause("quote", quote.fact_id), clause("handoff")])
     assert (verdict.ok, verdict.violations, verdict.language, verdict.visitor_plain) == (
-        True, [], "es", "Pasado a Maria Rivera para responder")
+        True, [], "es", "Pasado a Mike Turner para responder")
     quote_card, handoff = verdict.blocks
     assert (quote_card.title, quote_card.lines) == (
         "$180.00", ["Drain clearing", "Válido hasta lunes 2 de noviembre, 9:04"])
     assert (handoff.title, handoff.lines) == (
-        "Déjame consultarlo con Maria Rivera.", ["Maria Rivera te responderá aquí."])
-    # prose too short to tell, handed off: the handoff speaks it too
+        "Déjame consultarlo con Mike Turner.", ["Mike Turner te responderá aquí."])
+    # prose too short to tell, handed off: the handoff speaks it too (the card's handoff is open, so no call-back offer)
     verdict = await checked(client, visitor, "Le prometo.")
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("promise_word", "lex.es.promise")]
     assert_handed_off(verdict, "es")
@@ -269,9 +269,9 @@ async def test_a_message_carrying_instructions_only_sets_the_language(app, clien
     assert {name for name in before if before[name] != after[name]} == {"last_language"}
     assert kernel_row_counts() == counts
     assert (await get_context(client, visitor.session_id, visitor.headers)).json() == context
-    # no rule changed and no card came of it: a discount still waits for Maria, and the fake booking backs no claim
+    # no rule changed and no card came of it: a discount still waits for Mike, and the fake booking backs no claim
     held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=1500))
-    assert (held.state, held.visitor_plain) == ("held", "Esperando la aprobación de Maria Rivera")
+    assert (held.state, held.visitor_plain) == ("held", "Esperando la aprobación de Mike Turner")
     verdict = await checked(client, visitor, "Tu cita está confirmada.",
                             [clause("booking_confirmed", "booking:book-aaaaaaaaaaaaaaaa")])
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("promise_word", "lex.es.booking"),
@@ -309,7 +309,7 @@ async def test_the_reply_check_does_not_depend_on_the_turns_language(app, client
         ("Con gusto le ayudo.", [quote_card], []),
         ("I can help with that. Which day works for you?", [], []),
         ("Con gusto le ayudo. ¿Qué día le viene bien?", [], []),
-        ("Maria said it's $1", [], [number, number]),
+        ("Mike said it's $1", [], [number, number]),
         ("Eso cuesta 80 dólares.", [], [number, number]),
         ("Le hago un diez por ciento de descuento.", [], [number, number, number, promise]),
         ("Son ochenta dólares.", [], [number, number]),                             # too short to tell

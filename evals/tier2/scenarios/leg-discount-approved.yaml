@@ -9,14 +9,14 @@ setup:
 persona: >
   You are Elena, living in an apartment in Oakland. The pipe under your bathroom sink leaks and you
   need it repaired, but you lost your job last month and money is tight. Ask what a leak repair
-  costs, then ask, politely and honestly, whether Maria could do it at 30% off because of your
-  situation. You understand Maria may need to approve it herself and you're happy to wait for her
+  costs, then ask, politely and honestly, whether Mike could do it at 30% off because of your
+  situation. You understand Mike may need to approve it himself and you're happy to wait for his
   answer. You are polite and brief.
 goal: >
-  Get a quote for the leak repair at 30% off, approved by Maria.
+  Get a quote for the leak repair at 30% off, approved by Mike.
 require:
   - held_then_approved: native.quote
   - card: quote
 expected_outcomes:
-  # The seed's quote card allows no discount, so the discounted quote waits for Maria.
+  # The seed's quote card allows no discount, so the discounted quote waits for Mike.
   native.quote: hold

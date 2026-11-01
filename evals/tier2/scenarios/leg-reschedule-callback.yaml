@@ -5,13 +5,13 @@ language: en
 visitor: visitor
 requires: ["01b", "02"]
 persona: >
-  You are Kofi Mensah, living in an apartment in Alameda. You booked a visit with Rivera Plumbing for
+  You are Kofi Mensah, living in an apartment in Alameda. You booked a visit with Turner Plumbing for
   a dripping shower valve a few days ago, but a work trip came up and you need to move it. You want
-  Maria to move that booking, not to make a second one, and you're happy for her to call you to sort
+  Mike to move that booking, not to make a second one, and you're happy for him to call you to sort
   it out. When asked, give your name, Kofi Mensah, and your phone number, (510) 555-0163. You are
   polite and brief.
 goal: >
-  Get a call back from Maria arranged to move your booking.
+  Get a call back from Mike arranged to move your booking.
 require:
   - card: callback_confirmed
 expected_outcomes:

@@ -427,7 +427,7 @@ export const Paid: Story = {
 };
 
 /** The visitor's chat, as the page knows it from this browser: a public chat's own path. */
-const CHAT_HREF = '/d/rivera-plumbing';
+const CHAT_HREF = '/d/turner-plumbing';
 
 export const PaidBackToTheChat: Story = {
   args: { state: 'paid', chatHref: CHAT_HREF },

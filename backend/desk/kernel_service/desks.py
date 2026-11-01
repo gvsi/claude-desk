@@ -1,7 +1,7 @@
 """Desks: the one path that turns a `DeskSeed` into kernel rows, the owner's writes to them, and
 contacts on record.
 
-`create_desk` serves `POST /copies` (the Rivera seed) and `POST /desks`. It runs in the caller's
+`create_desk` serves `POST /copies` (the Turner seed) and `POST /desks`. It runs in the caller's
 transaction and never commits, so a Desk and its `desk_data` ledger entry exist together or not at
 all. The owner then replaces a Desk's parts (`put_part`, `PUT /desks/{id}/{part}`), uploads
 documents (`upload_document`) and deletes it (`delete_desk`), each under the Desk row's lock and
@@ -54,7 +54,7 @@ from sqlalchemy.sql import ColumnElement
 from desk.calendar import calendar_slots
 from desk.public_contact import valid_public_contact
 from desk.contracts import (BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, SeedDocument,
-                            ToolProfile)
+                            ToolProfile, stored_brand)
 from desk.contracts import CalendarSlot as CalendarSlotSeed
 from desk.contracts import PriceItem as PriceItemSeed
 from desk.db.models import Action as ActionRow
@@ -221,7 +221,7 @@ def mask_contact(contact: str) -> str:
 
 
 def slugify(name: str) -> str:
-    """Lowercase ASCII words joined by hyphens ("Rivera Plumbing" → "rivera-plumbing")."""
+    """Lowercase ASCII words joined by hyphens ("Turner Plumbing" → "turner-plumbing")."""
     ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
     return slug[:SLUG_NAME_LENGTH].rstrip("-") or "desk"
@@ -324,7 +324,7 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     fact holding the title), notification preferences, an enabled `tools` row per registered
     native profile, a public `charter:<key>` fact per charter claim plus `charter:hours`, and a
     `desk_data` ledger entry. A new Desk starts with Answering off unless `answering` is set (the
-    Rivera seed is live at once). MCP tools come only through a pinned connect (Plan 01c).
+    Turner seed is live at once). MCP tools come only through a pinned connect (Plan 01c).
 
     What the public page and the Desk's public address (its slug, made from the business's name)
     would show is checked for the copy's document canaries first (`refuse_public_canaries`, part
@@ -362,7 +362,7 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
         business_id = new_id("biz")
         ctx.db.add(Business(business_id=business_id, copy_id=copy_id, name=business.name,
                             owner_display_name=business.owner_display_name, timezone=business.timezone,
-                            brand=business.brand))
+                            brand=stored_brand(business.brand)))
     desk_id = new_id("desk")
     ctx.db.add(Desk(desk_id=desk_id, copy_id=copy_id, business_id=business_id, name=desk.name, slug=slug,
                     hours=desk.hours, answering=answering, created_at=now))
@@ -524,14 +524,16 @@ async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_ids: Sequence[st
 async def put_business(ctx: KernelCtx, desk_row: Desk, body: DeskBusinessRequest) -> list[str]:
     """The Desk's business, replaced: its name, the owner's display name, time zone and brand. The
     public page shows all but the time zone, so a document's canary in them is refused first
-    (`refuse_public_canaries`)."""
+    (`refuse_public_canaries`). A palette pick (`brand_palette`, or a `palette` key in a brand
+    passed back as it was read) is stored as its key and the table's colours (`stored_brand`),
+    never colours of the request's."""
     await refuse_public_canaries(ctx, "business", {"name": body.name, "owner_display_name": body.owner_display_name,
                                                    "brand": body.brand}, desk_row.desk_id)
     validate_business(BusinessSeed(**body.model_dump()))
     business = (await ctx.db.scalars(ctx.repo.scoped(select(Business).where(
         Business.business_id == desk_row.business_id).with_for_update()))).one()
     business.name, business.owner_display_name = body.name, body.owner_display_name
-    business.timezone, business.brand = body.timezone, body.brand
+    business.timezone, business.brand = body.timezone, stored_brand(body.brand, body.brand_palette)
     return [business.business_id]
 
 
@@ -677,7 +679,7 @@ CALENDAR_REFRESH_LOCK_S = 5.0             # how long a pass waits for a row anot
 CALENDAR_LOOKUP_S = 10.0                  # the pass's limit on listing the copies or one copy's Desks, as
                                           # the background rebuild's (`activation.BACKGROUND_LOOKUP_S`)
 # The shipped rule set `POST /desks`, the route setup makes a Desk through, activates as a new Desk's
-# version 1. Rivera's seed (`POST /copies`) starts from "rivera" instead and builds its own two-hour
+# version 1. Turner's seed (`POST /copies`) starts from "rivera" instead and builds its own two-hour
 # slots for each copy, so a Desk whose version 1 came from this preset is one setup made. Every
 # Desk has had a version 1 since it was created, and nothing writes a version's `preset` after
 # that: a confirm only changes `status`, and a rebuild only `_REBUILT_COLUMNS`
@@ -718,7 +720,7 @@ async def _made_in_setup(ctx: KernelCtx, desk_id: str) -> bool:
 async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
     """Adds to Desk `desk_id`'s calendar the slots its hours give for the days after its latest
     slot, up to 14 days ahead (`later_slots`), when it is a Desk whose calendar the kernel keeps
-    open: live, not deleted, with hours, and made in setup (`NEW_DESK_PRESET`), never Rivera's
+    open: live, not deleted, with hours, and made in setup (`NEW_DESK_PRESET`), never Turner's
     seed. Returns their IDs, in order; [] when it adds none, and then writes nothing.
 
     It only inserts: a booked slot, one a request still names, and every change the owner made
@@ -1000,12 +1002,16 @@ PARTS: dict[str, tuple[type[KernelRequest], Writer]] = {   # PUT /desks/{id}/{pa
 
 async def put_part(ctx: KernelCtx, request: Request, desk_id: str, part: str, body: KernelRequest) -> DeskUpdated:
     """`PUT /desks/{id}/{part}`: the part replaced (people upserted and removed) and ledgered
-    `desk_data` `{part, refs}`, in one transaction."""
+    `desk_data` `{part, refs}`, in one transaction; a business write that stored a palette pick
+    adds its key, `palette` (a closed identifier, never a colour)."""
     desk_row = await owner_desk(ctx, request, desk_id)
     _, write = PARTS[part]
     refs = await write(ctx, desk_row, body)
     await ctx.db.flush()
-    await ledger_desk_data(ctx, desk_row, {"part": part, "refs": refs})
+    summary: dict[str, Any] = {"part": part, "refs": refs}
+    if isinstance(body, DeskBusinessRequest) and "palette" in (brand := stored_brand(body.brand, body.brand_palette)):
+        summary["palette"] = brand["palette"]
+    await ledger_desk_data(ctx, desk_row, summary)
     return DeskUpdated(desk_id=desk_row.desk_id, updated_at=ctx.clock.now())
 
 

@@ -80,12 +80,12 @@ def test_intake_receipt_uses_block_and_quoted_title_in_both_languages():
 
     definition = contracts.BusinessToolDef(title='Customer enquiry', description='Take details.',
                                           config={'block': 'intake', 'questions': ['What do you need?']})
-    assert render.executed_status('desk.enquiry', 'en', owner='Maria Rivera', business=definition) == (
-        '“Customer enquiry”: details saved for Maria Rivera')
-    assert render.executed_status('desk.enquiry', 'es', owner='Maria Rivera', business=definition) == (
-        '“Customer enquiry”: datos guardados para Maria Rivera')
+    assert render.executed_status('desk.enquiry', 'en', owner='Mike Turner', business=definition) == (
+        '“Customer enquiry”: details saved for Mike Turner')
+    assert render.executed_status('desk.enquiry', 'es', owner='Mike Turner', business=definition) == (
+        '“Customer enquiry”: datos guardados para Mike Turner')
     with pytest.raises(KeyError):
-        render.executed_status('desk.missing', 'en', owner='Maria Rivera')
+        render.executed_status('desk.missing', 'en', owner='Mike Turner')
 
 
 def test_api_model_tools_and_owner_row_accept_an_enabled_business_tool():

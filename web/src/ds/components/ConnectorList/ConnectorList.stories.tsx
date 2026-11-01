@@ -31,7 +31,7 @@ type Story = StoryObj<typeof meta>;
 const NAMES = ['Quotes', 'Bookings', 'Leads and callbacks', 'Verification', 'Documents', 'Payments', 'Stripe'];
 
 export const RiveraHub: Story = {
-  parameters: { canvasNote: 'Rivera keeps Documents, so the hub has six built-in connectors.' },
+  parameters: { canvasNote: 'Turner keeps Documents, so the hub has six built-in connectors.' },
   play: async ({ args, canvas, canvasElement }) => {
     // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
     await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);

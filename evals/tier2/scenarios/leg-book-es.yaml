@@ -6,7 +6,7 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Tomás, living in a house in Oakland, and you write only in Spanish. Your water heater has
-  started making knocking noises and you want Maria to come and check it: "Quisiera reservar una
+  started making knocking noises and you want Mike to come and check it: "Quisiera reservar una
   visita para que revisen el calentador." Any weekday suits you. Ask what's open, pick one of the
   times shown and book it. You are polite and brief.
 goal: >

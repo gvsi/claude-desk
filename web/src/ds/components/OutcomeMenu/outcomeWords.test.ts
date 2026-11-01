@@ -338,12 +338,12 @@ describe('outcome words', () => {
   });
 
   test('preset_descriptions_hold_in_the_desks_own_hours', () => {
-    // A Desk's draft of each preset keeps its description's promises in that Desk's hours: Rivera's,
+    // A Desk's draft of each preset keeps its description's promises in that Desk's hours: Turner's,
     // a split week, all day every day, weekends only (no booking card) and none (the presets' 9 to 5).
     const window = (days: HoursWindow['days'], start: string, end: string): HoursWindow => ({ days, start, end });
     const drafted = (hours: readonly HoursWindow[]): PresetCards => ({ ask_first: presetCards('ask_first', hours), auto: presetCards('auto', hours) });
     const desks: [string, HoursWindow[]][] = [
-      ["Rivera's", RIVERA_HOURS],
+      ["Turner's", RIVERA_HOURS],
       ['a split week', [window(['mon', 'tue', 'wed', 'thu'], '08:00:00', '18:00:00'), window(['fri'], '08:00:00', '16:00:00')]],
       ['all day every day', [window(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')]],
       ['weekends only', [window(['sat', 'sun'], '10:00:00', '16:00:00')]],
@@ -351,7 +351,7 @@ describe('outcome words', () => {
     ];
     for (const [what, hours] of desks) expect({ what, problems: descriptionProblems(drafted(hours), hours) }).toEqual({ what, problems: [] });
     expect(presetCards('auto', [window(['sat', 'sun'], '10:00:00', '16:00:00')]).some((card) => card.applies_to === 'native.book')).toBe(false);
-    // Another Desk's hours break the promise: Rivera's 8 to 6 for a 9 to 5 Desk, and the presets'
+    // Another Desk's hours break the promise: Turner's 8 to 6 for a 9 to 5 Desk, and the presets'
     // 9 to 5 for a Desk open only at weekends.
     expect(descriptionProblems(drafted(RIVERA_HOURS), [FALLBACK_HOURS])).not.toEqual([]);
     expect(descriptionProblems(drafted([]), [window(['sat'], '09:00:00', '13:00:00')])).not.toEqual([]);

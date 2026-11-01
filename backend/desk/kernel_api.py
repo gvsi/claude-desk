@@ -16,6 +16,8 @@ from desk.contracts import (
     AnyToolName,
     BusinessTool,
     ApprovalAnswer,
+    Brand,
+    BrandPalette,
     ApprovalResult,
     BusinessSeed,
     CalendarSlot,
@@ -77,7 +79,16 @@ class DeskBusinessRequest(KernelRequest):     # PUT /desks/{id}/business
     name: str
     owner_display_name: str
     timezone: str
-    brand: dict[str, str] = {}
+    brand: Brand = {}
+    brand_palette: BrandPalette | None = None   # a pick: the kernel stores its key and BRAND_PALETTE's colours, so
+                                                # brand stays {}; "none" is the pick of no colours; None writes brand
+                                                # as before ({} stores nothing, which reads as the default pick)
+
+    @model_validator(mode="after")
+    def _one_source_of_colours(self) -> Self:
+        if self.brand_palette is not None and self.brand:
+            raise ValueError("a palette pick takes its colours from BRAND_PALETTE, so brand stays empty")
+        return self
 
 class DeskCharterRequest(KernelRequest):      # PUT /desks/{id}/charter
     charter: list[Claim]

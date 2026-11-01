@@ -94,7 +94,7 @@ async def test_copy_sets_the_scoped_owner_cookie(api, browser, fake):
     assert token not in response.text
     desk = fake.desks[copy.desk_ids[0]]
     assert CopyOut.model_validate(body) == CopyOut(copy_id=copy.copy_id, desks=[DeskSummary(
-        desk_id=desk.desk_id, slug=desk.slug, name="Main line", business_name="Rivera Plumbing", hours=desk.hours,
+        desk_id=desk.desk_id, slug=desk.slug, name="Main line", business_name="Turner Plumbing", hours=desk.hours,
         answering=True, setup=None)])
     assert [call.headers.get("x-owner-session") for call in fake.called("GET /whoami")] == [token]
     assert all("x-owner-session" not in call.headers for call in fake.called("POST /copies"))
@@ -206,7 +206,7 @@ async def test_start_over_issues_a_new_copy(api, browser, fake):
     second = response.json()
     assert second["copy_id"] != first["copy_id"] and set(fake.copies) == {first["copy_id"], second["copy_id"]}
     assert second["desks"][0]["desk_id"] not in {desk["desk_id"] for desk in first["desks"]}
-    assert second["desks"][0]["business_name"] == "Rivera Plumbing"
+    assert second["desks"][0]["business_name"] == "Turner Plumbing"
 
     (header,) = response.headers.get_list("set-cookie")
     assert header.startswith("desk_owner=") and "Path=/api/owner;" in header
@@ -388,14 +388,14 @@ async def test_model_routes_stop_past_the_daily_budget(passcode_hash, engine):
         async with engine.begin() as conn:             # Opus output at $20 per million tokens
             await record_model_call(conn, "copy-budget", None, "setup", usage_row(output_tokens, at))
 
-    await spend(3_999_000, now)                        # $79.98 today
+    await spend(7_499_000, now)                        # $149.98 today
     await spend(4_000_000, now - timedelta(days=1))    # yesterday's spend doesn't count
     await require_model_budget(request_to(production, "203.0.113.7"))
-    await spend(1_000, now)                            # $80.00: the budget is reached
+    await spend(1_000, now)                            # $150.00: the budget is reached
     with pytest.raises(ApiProblem) as refused:
         await require_model_budget(request_to(production, "203.0.113.7"))
     assert (refused.value.status, refused.value.error) == (503, "demo_budget")
-    assert DAILY_MODEL_BUDGET_CENTS == 8000
+    assert DAILY_MODEL_BUDGET_CENTS == 15000
     await require_model_budget(request_to(local, "127.0.0.1"))   # only production spends the shared monthly limit
 
 
@@ -414,12 +414,12 @@ def test_hash_passcode_script_reads_stdin_and_prints_only_the_hash():
 def test_visitor_cookie_is_scoped_to_its_desk():
     token = "T" * 43
     response = Response()
-    set_visitor_cookie(response, "rivera-plumbing-a1b2c3", token)
-    clear_visitor_cookie(response, "rivera-plumbing-a1b2c3")
+    set_visitor_cookie(response, "turner-plumbing-a1b2c3", token)
+    clear_visitor_cookie(response, "turner-plumbing-a1b2c3")
     set_visitor_cookie(response, "a/b", token)                       # a slug can't widen the path
     assert response.headers.getlist("set-cookie") == [
-        f"desk_visitor={token}; HttpOnly; Secure; SameSite=Strict; Path=/api/public/desks/rivera-plumbing-a1b2c3; Max-Age=86400",
-        "desk_visitor=; HttpOnly; Secure; SameSite=Strict; Path=/api/public/desks/rivera-plumbing-a1b2c3; Max-Age=0",
+        f"desk_visitor={token}; HttpOnly; Secure; SameSite=Strict; Path=/api/public/desks/turner-plumbing-a1b2c3; Max-Age=86400",
+        "desk_visitor=; HttpOnly; Secure; SameSite=Strict; Path=/api/public/desks/turner-plumbing-a1b2c3; Max-Age=0",
         f"desk_visitor={token}; HttpOnly; Secure; SameSite=Strict; Path=/api/public/desks/a%2Fb; Max-Age=86400"]
     for bad in ("short", "x" * 40 + ";Path=/", "x" * 40 + " y", ""):
         with pytest.raises(ValueError) as refused:

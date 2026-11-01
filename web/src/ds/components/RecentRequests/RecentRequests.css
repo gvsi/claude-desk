@@ -71,7 +71,7 @@
 /* The row's focus ring: the base 2 px ring at its 2 px offset, drawn around the whole row. */
 .cd-recent-requests__link:focus-visible::after {
   border-radius: var(--radius-control);
-  outline: 2px solid var(--accent-blue);
+  outline: 2px solid var(--ring-focus);
   outline-offset: 2px;
 }
 

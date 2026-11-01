@@ -24,7 +24,7 @@ const ownerFirstName = rivera.business.ownerName.split(' ')[0] ?? '';
 
 /** A fixture part the stories need, or a thrown error naming what the fixture lost. */
 function required<T>(value: T | undefined, what: string): T {
-  if (value === undefined) throw new Error(`the Rivera fixture has no ${what}`);
+  if (value === undefined) throw new Error(`the Turner fixture has no ${what}`);
   return value;
 }
 
@@ -301,23 +301,23 @@ export const ReducedMotion: Story = {
   },
 };
 
-/** The owner, as the public page names her when she takes over. */
+/** The owner, as the public page names him when he takes over. */
 const OWNER = rivera.business.ownerName;
-/** Maria's say once it lands: author `owner`, one `owner_said` block. */
+/** Mike's say once it lands: author `owner`, one `owner_said` block. */
 const said = required(
   rivera.events.takeOver.find((event: SseEvent): event is EvMessage => event.type === 'message'),
   'owner message',
 );
 
 const PERSON_NOTE =
-  'The signed owner-typing board (N-Typing-Owner-Busy): after Maria takes over, the visitor sees her initials and name, as on her messages, and three dots where her words will start, with no fill and no bubble.';
+  'The signed owner-typing board (N-Typing-Owner-Busy): after Mike takes over, the visitor sees his initials and name, as on his messages, and three dots where his words will start, with no fill and no bubble.';
 
-/** The event a story sends to deliver Maria's message in place of her typing. */
+/** The event a story sends to deliver Mike's message in place of his typing. */
 const MARIA_SENDS = 'cd-story:maria-sends';
 
 /**
- * Dana's chat on Rivera's public page after she asked for Maria: Maria joined and is typing, until
- * a story sends MARIA_SENDS and her message takes the typing's place.
+ * Dana's chat on Turner's public page after she asked for Mike: Mike joined and is typing, until
+ * a story sends MARIA_SENDS and his message takes the typing's place.
  */
 function MariaTakesOver({ language }: { language: 'en' | 'es' }) {
   const [sent, setSent] = useState(false);
@@ -340,13 +340,13 @@ function MariaTakesOver({ language }: { language: 'en' | 'es' }) {
       ownerName={OWNER}
       language={language}
       onAskForOwner={fn()}
-      composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />}
+      composer={<Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={fn()} />}
     >
-      <Transcript label="Conversation with Rivera Plumbing">
+      <Transcript label="Conversation with Turner Plumbing">
         <TranscriptRow>
           <VisitorMessage text={`I'd like to talk to ${OWNER}.`} />
         </TranscriptRow>
-        <SystemLine text={`${OWNER} joined the chat`} initials="MR" />
+        <SystemLine text={`${OWNER} joined the chat`} initials="MT" />
         <TranscriptRow>
           {sent ? (
             <PersonMessage name={OWNER} blocks={said.blocks} language={said.language} />
@@ -380,7 +380,7 @@ async function expectPersonTyping(root: HTMLElement, label: string, name: string
   const parts = personParts(root, label);
   await expectSetOffName(parts.status, name);
   await expect(parts.avatar).toHaveAttribute('aria-hidden', 'true');
-  await expect(parts.avatar.textContent).toBe('MR');
+  await expect(parts.avatar.textContent).toBe('MT');
   expectComputed(parts.avatar, { width: '28px', height: '28px', borderTopLeftRadius: '999px', backgroundColor: 'rgb(60, 57, 47)' });
   // The words after the name are for screen readers only; the name is what shows.
   const hidden = parts.status.querySelector<HTMLElement>('.cd-sr-only');
@@ -409,7 +409,7 @@ export const MariaTyping: Story = {
   render: () => <MariaTakesOver language="en" />,
   parameters: { layout: 'fullscreen', canvas: 'N-Typing-Owner-Busy', canvasNote: PERSON_NOTE },
   play: async ({ canvasElement }) => {
-    // The public page at 1280: in the log, under "Maria Rivera joined the chat".
+    // The public page at 1280: in the log, under "Mike Turner joined the chat".
     await expect(document.documentElement.clientWidth).toBe(1280);
     const parts = await expectPersonTyping(canvasElement, `${OWNER} is typing`, OWNER);
     await expect(parts.frame.closest('[role="log"]')).not.toBeNull();
@@ -500,7 +500,7 @@ export const PersonReducedMotion: Story = {
   args: { variant: 'person', who: OWNER },
   render: (args) => (
     <div style={{ maxWidth: 'var(--size-reading)' }}>
-      <Transcript label="Conversation with Rivera Plumbing">
+      <Transcript label="Conversation with Turner Plumbing">
         <TranscriptRow>
           <WritingIndicator {...args} />
         </TranscriptRow>

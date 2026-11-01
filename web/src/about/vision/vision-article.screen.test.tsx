@@ -4,7 +4,9 @@
  * page's code.
  */
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { userEvent } from 'vitest/browser';
 
+import { contrastRatio } from '../../ds/contrast.ts';
 import { FONT_SHEET_URL, loadWebFonts } from '../../ds/test/fonts.ts';
 import { writeLocal } from '../../lib/storage.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -36,16 +38,16 @@ const FIGURES = [
   {
     label: 'A plumber’s phone: the team Desk shows his job card with the gate code and declines to share a colleague’s pay.',
     lead: 'Luis, between jobs.',
-    ai: 'Claude, an AI, answers the team under Maria’s rules.',
+    ai: 'Claude, an AI, answers the team under Mike’s rules.',
   },
   {
     label: 'A returning customer’s phone: she confirms it’s her with her Claude account, for this visit only, and her invoice opens.',
     lead: 'Dana comes back for her invoice.',
-    ai: 'You’re chatting with Claude, an AI answering for Rivera Plumbing.',
+    ai: 'You’re chatting with Claude, an AI answering for Turner Plumbing.',
   },
   {
-    label: 'The owner’s phone: a held discount request waits for her answer, with Allow this time and Deny this time.',
-    lead: 'A request waits for Maria.',
+    label: 'The owner’s phone: a held discount request waits for his answer, with Allow this time and Deny this time.',
+    lead: 'A request waits for Mike.',
     ai: null,
   },
 ] as const;
@@ -55,9 +57,9 @@ const CARDS_HEADING = 'See each one up close';
 const CARDS_LEAD = 'Each idea has its own page, drawn as it would work.';
 const CARDS = [
   { name: 'A city office that answers after hours', line: 'Meridian Bay Permits, after five', href: '/vision/city-office' },
-  { name: 'A Desk for the team', line: 'Rivera Plumbing’s plumbers, from the van', href: '/vision/team-desk' },
+  { name: 'A Desk for the team', line: 'Turner Plumbing’s plumbers, from the van', href: '/vision/team-desk' },
   { name: 'Recognized, with your permission', line: 'Dana, signed in with her Claude account', href: '/vision/claude-account' },
-  { name: 'In your pocket', line: 'Maria’s requests on her phone', href: '/vision/phone' },
+  { name: 'In your pocket', line: 'Mike’s requests on his phone', href: '/vision/phone' },
 ] as const;
 
 /**
@@ -266,6 +268,32 @@ describe('The Vision article', () => {
     await screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).click();
     await expect.poll(() => router.state.location.pathname).toBe(CARDS[0].href);
     await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
+  });
+
+  it('keyboard_focus_rings_in_the_papers_secondary_ink', async () => {
+    // No blue focus ring on the paper either: keyboard focus on a link in the bar, a picture card and the way to the
+    // next page shows the 2 px ring in the paper's secondary ink, 3:1 and more against the paper.
+    const { screen } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    const article = screen.getByRole('article').element();
+    const paper = getComputedStyle(article.closest('.vision-article') as Element).backgroundColor;
+    expect(paper).toBe('rgb(244, 242, 236)');
+    const inBar = document.querySelector<HTMLElement>('.cd-about-top a');
+    const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
+    const next = document.querySelector<HTMLElement>('.va-next__link');
+    for (const [name, link, ring] of [
+      ['a link in the bar', inBar, (el: Element) => getComputedStyle(el)],
+      ['a picture card', card, (el: Element) => getComputedStyle(el)],
+      ['the next page', next, (el: Element) => getComputedStyle(el, '::after')],
+    ] as const) {
+      if (link === null) throw new Error(`no ${name}`);
+      await userEvent.keyboard('{Shift}');
+      link.focus();
+      expect(link.matches(':focus-visible'), name).toBe(true);
+      const style = ring(link);
+      expect([style.outlineStyle, style.outlineWidth, style.outlineColor], name).toEqual(['solid', '2px', 'rgb(92, 88, 80)']);
+      expect(contrastRatio(style.outlineColor, paper), name).toBeGreaterThanOrEqual(3);
+    }
   });
 
   it('the_picture_cards_draw_their_phones_with_an_even_bezel_and_a_clean_crop', async () => {

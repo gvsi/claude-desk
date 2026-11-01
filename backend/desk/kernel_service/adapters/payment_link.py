@@ -1,10 +1,12 @@
 """`native.payment_link`: a single-use link to the mock checkout for one of the session's quotes.
 
-The call names a quote by its ID and nothing else. `normalize` resolves it from `quotes`
-(`payable_quote`): it must be on this Desk (and so in this copy), this session's own, readable by
-the session (its fact's readers), `available` and unexpired, and unpaid, else the call is refused at
-step 1 with the reason ledgered (`no_such_quote`, or `quote_paid` / `quote_paying`). The resource is
-`ResourceRef(kind="quote")` with no record owner. The amount is the quote's, which the kernel
+The call names a quote by its ID and nothing else, bare or as its fact ID (`quote:<id>`, as Claude's
+context shows it: `base.fact_ref`). `normalize` resolves it from `quotes` (`payable_quote`): it must
+be on this Desk (and so in this copy), this session's own, readable by the session (its fact's
+readers), `available` and unexpired, and unpaid, else the call is refused at step 1 with the reason
+ledgered (`no_such_quote`, or `quote_paid` / `quote_paying`). The resource is
+`ResourceRef(kind="quote")`, the row's own ID with no record owner, and everything after `normalize`
+names the quote by it (`action.resource.id`). The amount is the quote's, which the kernel
 priced; the effect is `charge`. No argument can name an amount, a title or a customer.
 
 `execute` runs once the intent row has committed. For an auto-allowed link (not one the owner
@@ -67,7 +69,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_service import desks, labels, ledger, mandates, payments, render
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown, ExecCtx,
-                                               Normalized, NormalizeCtx)
+                                               Normalized, NormalizeCtx, fact_ref)
 from desk.kernel_service.adapters.quote import items_text
 from desk.kernel_service.repo import KernelCtx, new_id
 
@@ -322,7 +324,8 @@ class PaymentLinkAdapter:
     releases_private_data = False         # a link to pay the session's own quote, labelled for the session too
 
     async def normalize(self, nctx: NormalizeCtx, args: PaymentLinkArgs) -> Normalized:
-        found = await payable_quote(nctx.ctx, nctx.desk_row.desk_id, args.quote_id, nctx.principal.session_id)
+        found = await payable_quote(nctx.ctx, nctx.desk_row.desk_id, fact_ref(args.quote_id, "quote"),
+                                    nctx.principal.session_id)
         if isinstance(found, str):
             raise AdapterRefusal(found)
         quote, _ = found

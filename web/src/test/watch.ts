@@ -12,7 +12,7 @@ const NOT_FOUND = "This page doesn't exist";
 /**
  * The page drawn now, by name: the preview behind the intro dialog; the owner's loading page or its
  * error; the not-found page, or another page outside the app's frame (an error); Today while its
- * own skeleton is mounted, then named for what it lacks until it holds Rivera's held request
+ * own skeleton is mounted, then named for what it lacks until it holds Turner's held request
  * and its briefing; any other page; or nothing.
  */
 export function pageNow(): string {

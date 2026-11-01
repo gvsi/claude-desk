@@ -156,7 +156,9 @@ it('seeds a Desk with independent business rows whose definitions reach the tool
   const desk = [...mockStore.world.desks.values()][0];
   if (!desk) throw new Error('The mock has a Desk');
   seedBusinessTools(desk);
-  const rows = rulesView(desk).tools.filter((row) => row.source === 'business');
+  // Chen's rows, beside the urgent tool every Turner copy already has.
+  const chen = new Set(chenBusinessTools.map((row) => row.tool));
+  const rows = rulesView(desk).tools.filter((row) => row.source === 'business' && chen.has(row.tool));
   expect(rows.map((row) => row.business)).toEqual(chenBusinessTools.map((row) => row.business));
   expect(rows[0]?.description_confirmed).toBe("Books one open time on the business's calendar for this kind of appointment.");
   const intake = rows[1]?.business;

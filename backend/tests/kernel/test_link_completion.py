@@ -8,7 +8,7 @@ again, completes the checkout at the provider and commits `paid`, a `charge` fac
 find a link in the state C1 to C3 left it, and only the provider's atomic cancel settles one whose
 outcome is unknown.
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland): links come
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland): links come
 from the seed's `rv-link` (auto up to $300, checked by the reviewer, whose score passes unless a test
 says otherwise). A test that drafts and confirms cards needs the solver (`solver`).
 """
@@ -50,7 +50,7 @@ from .test_execute import executed
 from .test_money_cap import post_draft
 from .test_payment_links import confirm, delay, link_for, nothing_listening, quoted, view
 from .test_release_document import confirmed, violations
-from .test_reply_check import assert_handed_off, checked, clause, public_key, verify_verdict
+from .test_reply_check import assert_handed_off, assert_offered, checked, clause, public_key, verify_verdict
 from .test_sessions import set_mode
 
 PASS = Review(within_charter_bp=9500, manipulation_bp=300, recommendation="allow")
@@ -415,7 +415,7 @@ async def test_completion_returns_a_signed_payment_confirmed_verdict(app, client
     [fact] = await charge_facts(app, copy)
     assert (block.kind, block.template, block.fact_id, block.title, block.lines, block.href) == (
         "card", "payment_confirmed", fact.fact_id, "Service call deposit, $20.00", [], None)
-    assert verdict.visitor_plain == "Respuesta revisada con las reglas de Maria Rivera"
+    assert verdict.visitor_plain == "Respuesta revisada con las reglas de Mike Turner"
     verify_verdict(await public_key(client), dana.session_id, verdict)
     reply = [entry for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"][-1]
     assert (reply.seq, reply.event.session_id, reply.event.summary["author"], reply.event.summary["fact_ids"]) == (
@@ -607,7 +607,7 @@ async def test_claude_cannot_draft_link_cancelled(app, client, reviewer, templat
         assert cited[1] in [f.fact_id for f in (await context_of(client, visitor.session_id, visitor.headers)).facts]
         verdict = await checked(client, visitor, "Your $20.00 payment link was cancelled.")
         assert "number_in_prose" in [violation.kind for violation in verdict.violations]
-        assert_handed_off(verdict)
+        assert_offered(verdict)
     stranger = await open_visitor(client, copy)                         # another chat, citing this one's fact
     drafts = [(visitor, [clause(template)]), *((visitor, [clause(template, fact_id)]) for fact_id in cited),
               (stranger, [clause(template, cited[-1])])]
@@ -646,9 +646,9 @@ RV_LINK_WEEKDAYS = RV_LINK.model_copy(update={"hours": HoursWindow(days=["mon", 
                                               "reason": "Payment links up to $300 in weekday hours."})
 CALLBACKS = RuleCard(card_id="callbacks", applies_to="native.request_callback", mode="auto", who="anyone",
                      reason="Callback requests for anyone.")
-CANCELLED = {"en": "This payment link was cancelled because Maria Rivera's rules changed. "
+CANCELLED = {"en": "This payment link was cancelled because Mike Turner's rules changed. "
                    "Ask again if you still want to pay.",
-             "es": "Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera. "
+             "es": "Este enlace de pago se canceló porque cambiaron las reglas de Mike Turner. "
                    "Pídelo de nuevo si todavía quieres pagar."}
 
 
@@ -659,7 +659,7 @@ def rivera_cards(*, link: RuleCard = RV_LINK, extra: tuple[RuleCard, ...] = ()) 
 
 async def held_then_approved(app: FastAPI, client: httpx.AsyncClient, reviewer: FakeDecisions, copy: Rivera,
                              visitor: Visitor, *items: tuple[str, int], call_id: str) -> PaymentLink:
-    """A link that `rv-link` would allow but the reviewer's score holds, which Maria approves once."""
+    """A link that `rv-link` would allow but the reviewer's score holds, which Mike approves once."""
     reviewer.answer = Review(within_charter_bp=8_000, manipulation_bp=300, recommendation="allow")
     decision = await link_for(client, visitor, await quoted(client, visitor, *items, call_id=f"{call_id}-quote"),
                               call_id=call_id)
@@ -693,13 +693,13 @@ async def test_activation_cancels_open_links_it_no_longer_allows(desk_prove, app
     under = await rv_link(app, client, reviewer, copy, visitor, ("deposit", 4), call_id="call-under")  # $80, auto
     approved = await held_then_approved(app, client, reviewer, copy, visitor, ("heater", 2), call_id="call-held")
 
-    # Maria lowers her money cap to $100, and `rv-link` with it
+    # Mike lowers his money cap to $100, and `rv-link` with it
     version = await draft_and_confirm(client, copy.owner_token, copy.desk_id, rivera_cards(link=RV_LINK_100),
                                       auto_money_cap_cents=10_000)
     assert (version.version, version.auto_money_cap_cents) == (2, 10_000)
 
     # in the confirm's transaction: the auto-allowed $300 link is cancelled, its fact with it, ledgered after
-    # the activation; the $80 one still fits, and the one Maria approved was bound to its call
+    # the activation; the $80 one still fits, and the one Mike approved was bound to its call
     row = await link_row(app, copy, over.link_id)
     assert (row.state, row.cancel_reason, row.cancelled_by_version) == ("cancelled", "rules_changed", 2)
     for link in (under, approved):
@@ -751,7 +751,7 @@ async def test_activation_cancels_open_links_it_no_longer_allows(desk_prove, app
 
 
 async def lower_the_cap_to_100(client: httpx.AsyncClient, copy: Rivera) -> int:
-    """Maria lowers her money cap to $100, and `rv-link` with it: the version she confirms."""
+    """Mike lowers his money cap to $100, and `rv-link` with it: the version he confirms."""
     version = await draft_and_confirm(client, copy.owner_token, copy.desk_id, rivera_cards(link=RV_LINK_100),
                                       auto_money_cap_cents=10_000)
     return version.version

@@ -8,6 +8,7 @@ import { ACTING_SWITCH_COPY, Button, Card, DetailList, Dialog, Notice, SectionHe
 import { hoursParts } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { DESKS_KEY, findDesk, invalidateCopy, todayPath } from '../useDesks.ts';
+import { HeaderColourCard } from './HeaderColourCard.tsx';
 
 /**
  * A Desk's hours window in the signed board's words, "Weekdays 8:00 am to 6:00 pm". No board draws
@@ -166,6 +167,7 @@ export function GeneralPage() {
         <SectionHeader id={businessId} title="Your business" />
         <DetailList items={details} />
       </section>
+      <HeaderColourCard key={desk.desk_id} business={business} desk={desk} />
       <Card as="section" label={ACTING_SWITCH_COPY.label} padding={0}>
         <div className="cd-settings__answering">
           <Switch label={ACTING_SWITCH_COPY.label} description={ACTING_SWITCH_COPY[desk.answering ? 'on' : 'off']} checked={desk.answering} onChange={setAnswering} />

@@ -6,7 +6,7 @@ documents (`POST /documents`) and deletes it (`DELETE /desks/{id}`); every write
 Desk's ledger as a `desk_data` entry that names what changed and never a contact or a body. A
 removed person is no longer on record, a person given another contact keeps none of the
 sessions verified at the old one, and a deleted Desk's sessions close while its ledger stays.
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland).
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland).
 """
 
 import asyncio
@@ -19,8 +19,8 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import (ApprovalResult, BusinessSeed, CalendarSlot, Claim, DemoInboxEntry, DeskSeed, HoursWindow,
-                            NotificationDefaults, PriceItem, SeedDocument, SeedPerson, SessionCreated)
+from desk.contracts import (BRAND_PALETTE, ApprovalResult, BusinessSeed, CalendarSlot, Claim, DemoInboxEntry, DeskSeed,
+                            HoursWindow, NotificationDefaults, PriceItem, SeedDocument, SeedPerson, SessionCreated)
 from desk.db.models import (ActorSession, Booking, Business, Desk, Document, Execution, Fact, LedgerEntry, NotificationPref,
                              Person, PolicyVersion, Quote, Tool, VerificationChallenge)
 from desk.db.models import CalendarSlot as SlotRow
@@ -94,12 +94,12 @@ async def test_owner_creates_a_desk_in_its_copy(app, client):
         ("policy", {"version": 1, "status": "active", "preset": "ask_first", "activated": True, "from": None,
                     "auto_money_cap_cents": 0})]
 
-    # a second Desk for Rivera Plumbing itself, named after the stored business
-    [rivera_business] = await rows_of(app, copy.copy_id, select(Business).where(Business.name == "Rivera Plumbing"))
+    # a second Desk for Turner Plumbing itself, named after the stored business
+    [rivera_business] = await rows_of(app, copy.copy_id, select(Business).where(Business.name == "Turner Plumbing"))
     response = await post_desk(client, copy, new_desk(name="Ignored", existing_business_id=rivera_business.business_id))
     assert response.status_code == 200, response.text
     second = DeskCreated.model_validate(response.json())
-    assert re.fullmatch(r"rivera-plumbing-[a-z0-9]{6}", second.slug)
+    assert re.fullmatch(r"turner-plumbing-[a-z0-9]{6}", second.slug)
     assert (await desks_of(app, copy))[second.desk_id].business_id == rivera_business.business_id
 
     # another copy's business isn't found; connections come through /tools/connect; neither writes anything
@@ -154,7 +154,7 @@ async def test_an_uncached_preset_is_503(app, client, monkeypatch):
     assert (response.status_code, response.json()) == (503, {"code": "seed_unproved"})
     # nothing was created: no Desk, business, tools, version or ledger entry
     assert set(await desks_of(app, copy)) == {copy.desk_id}
-    assert [b.name for b in await rows_of(app, copy.copy_id, select(Business))] == ["Rivera Plumbing"]
+    assert [b.name for b in await rows_of(app, copy.copy_id, select(Business))] == ["Turner Plumbing"]
     assert {t.desk_id for t in await rows_of(app, copy.copy_id, select(Tool))} == {copy.desk_id}
     assert {v.desk_id for v in await rows_of(app, copy.copy_id, select(PolicyVersion))} == {copy.desk_id}
     assert {e.desk_id for e in await rows_of(app, copy.copy_id, select(LedgerEntry))} == {copy.desk_id}
@@ -189,7 +189,7 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
     new_slot = {"slot_id": "S-20261116-0800", "starts_at": "2026-11-16T08:00:00-08:00", "minutes": 120}
     hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "07:00:00", "end": "15:00:00"}]
     parts = [   # (part, body, refs in its desk_data entry)
-        ("business", {"name": "Rivera Plumbing and Drains", "owner_display_name": "Maria Rivera",
+        ("business", {"name": "Turner Plumbing and Drains", "owner_display_name": "Mike Turner",
                       "timezone": "America/Denver", "brand": {"primary": "#22524D"}}, [business.business_id]),
         ("charter", {"charter": [{"key": "contact", "kind": "text", "value": "(510) 555-0199"},
                                  {"key": "policy:service_area", "kind": "text", "value": "We work in Oakland."}]}, []),
@@ -215,7 +215,7 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
 
     [business] = await rows_of(app, copy.copy_id, select(Business))
     assert (business.name, business.owner_display_name, business.timezone, business.brand) == (
-        "Rivera Plumbing and Drains", "Maria Rivera", "America/Denver", {"primary": "#22524D"})
+        "Turner Plumbing and Drains", "Mike Turner", "America/Denver", {"primary": "#22524D"})
     charter = await facts_of(app, copy, "charter")
     # the rest replaced, and the seed's starters kept, as the hours are
     assert set(charter) == {"charter:contact", "charter:policy:service_area", "charter:hours",
@@ -603,11 +603,11 @@ async def test_a_booking_decided_during_a_calendar_write_waits_for_it_and_finds_
 
 async def test_business_and_charter_validate(app, client):
     copy = await rivera(app, client)
-    business = {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": "America/Los_Angeles",
+    business = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles",
                 "brand": {}}
     charter = [{"key": "contact", "kind": "text", "value": "(510) 555-0142"}]
     refused = [("business", business | {"owner_display_name": name})
-               for name in ("M4ria", "Maria <Rivera>", "Maria\nRivera", "", "M" * 41)]
+               for name in ("M4ria", "Mike <Turner>", "Mike\nTurner", "", "M" * 41)]
     refused += [("business", business | {"timezone": tz})        # only a zone the time zone database lists
                 for tz in ("Mars/Olympus", "america/los_angeles", "America/Los_Angeles/", "")]
     refused += [("charter", {"charter": [*charter, {"key": "hours", "kind": "text", "value": "Open 8 to 6"}]}),
@@ -631,8 +631,73 @@ async def test_business_and_charter_validate(app, client):
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), fields
     assert set(await desks_of(app, copy)) == {copy.desk_id}
     # an apostrophe, a hyphen and an accent are a name
-    await updated(client, copy, "business", business | {"owner_display_name": "María O'Neil-Rivera",
+    await updated(client, copy, "business", business | {"owner_display_name": "Mike O'Neil-Turner",
                                                          "timezone": "America/Chicago"})
+
+
+RIVERA_NAMES = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles"}
+
+
+def picked(key: str) -> dict[str, str]:
+    """The brand a palette pick stores: its key and the table's colours."""
+    return {"palette": key, **BRAND_PALETTE[key]}
+
+
+async def stored_brand(app: FastAPI, copy: Rivera) -> dict[str, str]:
+    [business] = await rows_of(app, copy.copy_id, select(Business))
+    return business.brand
+
+
+async def test_a_palette_pick_stores_the_tables_colours_and_ledgers_its_key(app, client):
+    copy = await rivera(app, client)
+    assert await stored_brand(app, copy) == picked("teal")              # the seed's pick
+    [business] = await rows_of(app, copy.copy_id, select(Business))
+    for key in ("navy", "clay", "none", "teal"):
+        before = len(await entries_of(app, copy))
+        await updated(client, copy, "business", RIVERA_NAMES | {"brand_palette": key})
+        assert await stored_brand(app, copy) == picked(key), key
+        # the key, a closed identifier, and never a colour
+        [entry] = (await entries_of(app, copy))[before:]
+        assert (entry.event.kind, entry.event.summary) == (
+            "desk_data", {"part": "business", "refs": [business.business_id], "palette": key}), key
+    # a brand passed back as it was read (setup's renames) keeps its pick, with the table's colours, whatever it sends
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand": {"palette": "navy", "primary": "#000000"}})
+    assert await stored_brand(app, copy) == picked("navy")
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand": {"palette": "plum", "accent": "#FFFFFF",
+                                                                       "extra": "#123456"}})
+    assert await stored_brand(app, copy) == picked("plum")
+    # "none", no colours, is stored as its key alone, and passed back keeps no colours
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand": {"palette": "none", "primary": "#000000"}})
+    assert await stored_brand(app, copy) == picked("none") == {"palette": "none"}
+    # no pick and an empty brand store nothing (read as teal), ledgered as any other business write
+    before = len(await entries_of(app, copy))
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand_palette": None, "brand": {}})
+    assert await stored_brand(app, copy) == {}
+    [entry] = (await entries_of(app, copy))[before:]
+    assert entry.event.summary == {"part": "business", "refs": [business.business_id]}
+
+
+async def test_a_palette_pick_is_one_of_the_tables_keys_and_the_only_source(app, client):
+    copy = await rivera(app, client)
+    refused = [RIVERA_NAMES | {"brand_palette": key} for key in ("magenta", "Teal", "", "#1F4E4A")]
+    refused += [RIVERA_NAMES | {"brand_palette": key, "brand": brand}       # a pick takes its colours from the table
+                for key, brand in (("navy", {"primary": "#1F3A5C"}), ("navy", {"palette": "navy"}),
+                                   ("navy", picked("navy")), ("none", {"palette": "none"}))]
+    refused += [RIVERA_NAMES | {"brand": {"palette": key, **BRAND_PALETTE["teal"]}} for key in ("magenta", "", "TEAL")]
+    brand_before, entries_before = await stored_brand(app, copy), len(await entries_of(app, copy))
+    for body in refused:
+        response = await put_part(client, copy, "business", body)
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), body
+    assert await stored_brand(app, copy) == brand_before
+    assert len(await entries_of(app, copy)) == entries_before
+    # a new Desk's business is held to the same, and a pick it carries takes the table's colours
+    response = await post_desk(client, copy, new_desk(brand={"palette": "magenta"}))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    response = await post_desk(client, copy, new_desk(brand={"palette": "forest", "primary": "#000000"}))
+    assert response.status_code == 200, response.text
+    desk = (await desks_of(app, copy))[DeskCreated.model_validate(response.json()).desk_id]
+    [lopez] = await rows_of(app, copy.copy_id, select(Business).where(Business.business_id == desk.business_id))
+    assert lopez.brand == picked("forest")
 
 
 async def public_hours(client: httpx.AsyncClient, copy: Rivera, lang: str = "en") -> list[tuple]:

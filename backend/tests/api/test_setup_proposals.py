@@ -21,8 +21,8 @@ PAYMENT_HOW = "Sends a retainer payment link"
 
 @pytest.mark.parametrize("contact,owner_text,supported", [
     ("Call 415-555-0118 for a free estimate, same-day service guaranteed", "Call 415-555-0118", False),
-    ("Call 415-555-0118, ask for Maria", "Call 415-555-0118, ask for Maria", True),
-    ("Call 415-555-0118, ask for Maria", "Call 415-555-0118", False),
+    ("Call 415-555-0118, ask for Mike", "Call 415-555-0118, ask for Mike", True),
+    ("Call 415-555-0118, ask for Mike", "Call 415-555-0118", False),
     ("415-555-0118 or hello@bobs.com", "415-555-0118 or hello@bobs.com", True),
 ])
 def test_contact_leftover_words_must_be_the_owners(contact, owner_text, supported):

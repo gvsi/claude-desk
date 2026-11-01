@@ -15,7 +15,7 @@
   - `what` in body type, `text-primary`: the decision's `reason_plain`;
   - `why` under it in secondary caption type: the rule that decided it ("Held by your rule: Refunds to a customer wait for your answer.") or what happened ("Refunded to the original payment.");
   - at the right, the outcome in words with its dot (`StatusLabel` in meta type): "Automatic", "Waiting for your answer", "Stopped", "You allowed it".
-- With `href`, the row opens its Safety record: `what` is the link, its overlay covers the row and draws the base focus ring (2 px of `accent-blue`, 2 px outside the row), and when, why and the outcome describe it (`aria-describedby`). Without `href`, the row is words only. Nothing around the rows may clip that ring.
+- With `href`, the row opens its Safety record: `what` is the link, its overlay covers the row and draws the base focus ring (2 px of `ring-focus`, 2 px outside the row), and when, why and the outcome describe it (`aria-describedby`). Without `href`, the row is words only. Nothing around the rows may clip that ring.
 - Empty: "No requests under these rules yet." in secondary body type.
 - It lays out by its own width (a container query): under 640 px each part sits on its own line, the outcome last.
 

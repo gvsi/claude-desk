@@ -83,7 +83,7 @@ const meta = {
     canvas: 'N-Safety-Record-Run1',
     canvasNote: [
       'Every entry: the ledger as a table, newest first, and one entry’s full trace beside it.',
-      'The ledger is the Rivera fixture’s three entries, with the held quote’s decision open, where the board lists entries 48 to 39 and opens the refused refund; the times are the screen’s strings.',
+      'The ledger is the Turner fixture’s three entries, with the held quote’s decision open, where the board lists entries 48 to 39 and opens the refused refund; the times are the screen’s strings.',
       'The table is page layout the web app (plan 04) owns, composed on the tokens; every entry is “Recorded by the checkpoint”, signed at sign-off, as is FullTrace’s own line.',
       'The board’s open questions are canvas notes.',
     ].join(' '),

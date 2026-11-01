@@ -3,7 +3,7 @@ owner, conversations and their transcripts, Safety's attempts, the verified ledg
 
 The app runs on FakeKernel. Activity is made the way the kernel makes it, through a visitor's own kernel calls at a
 time the test sets on the fake's clock; the transcript rows the API writes are appended through the store and then
-dated, as desk_admin, to the moment they stand for. Times are the business's: Rivera Plumbing is in
+dated, as desk_admin, to the moment they stand for. Times are the business's: Turner Plumbing is in
 America/Los_Angeles.
 """
 
@@ -82,7 +82,19 @@ def test_reply_reason_distinguishes_checker_outage_from_unclear_language():
     assert owner_reads.reply_reason([("uncertain_language", "language_uncertain")]) == (
         "A reply was stopped before it was shown, because it didn't read clearly as English or Spanish.")
 
+@pytest.mark.parametrize(("rule_id", "why"), [
+    ("markdown.link", "it linked to a site the business's contact details don't name"),
+    ("markdown.image", "it included an image"),
+])
+def test_reply_reason_names_a_markdown_cause(rule_id, why):
+    assert owner_reads.reply_reason([("promise_word", rule_id)]) == (
+        f"A reply was stopped before it was shown, because {why}.")
+
+
 OWNER = "x-owner-session"
+# A reply in another language: blocked for what no rewrite fixes, so the kernel shows the handoff card in its place
+# (a reply blocked only for its prose, with no card to keep, shows the call-back offer instead).
+OTHER_LANGUAGE = "Bonjour, je peux vous aider."
 
 
 @pytest.fixture
@@ -180,7 +192,7 @@ RIVERA = ZoneInfo("America/Los_Angeles")
 
 
 def local(year: int, month: int, day: int, hour: int, minute: int = 0, second: int = 0, *, fold: int = 0) -> datetime:
-    """A wall-clock time at Rivera Plumbing, as a UTC instant (`fold=1`: the second of a repeated hour)."""
+    """A wall-clock time at Turner Plumbing, as a UTC instant (`fold=1`: the second of a repeated hour)."""
     return datetime(year, month, day, hour, minute, second, tzinfo=RIVERA, fold=fold).astimezone(UTC)
 
 
@@ -212,7 +224,7 @@ class Scene:
             self.fake.now = when
             verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
                 session_id=who.session_id, generation=who.generation,
-                prose="That's 180 dollars." if blocked else "", clauses=[Clause(template="handoff")])))
+                prose=OTHER_LANGUAGE if blocked else "", clauses=[Clause(template="handoff")])))
             assert verdict.ok is not blocked
         else:
             verdict = ReplyVerdict(ok=True, language="en", blocks=[
@@ -326,7 +338,7 @@ class Scene:
 
 
 async def new_scene(app, browser, fake, kernel_http, engine, db, made: datetime) -> Scene:
-    """A Rivera Plumbing copy made at `made` (its calendar runs two weeks on from there)."""
+    """A Turner Plumbing copy made at `made` (its calendar runs two weeks on from there)."""
     fake.now = made
     return Scene(owner=await new_owner(app, browser, fake, kernel_http), fake=fake, kernel_http=kernel_http,
                  engine=engine, admin=db)
@@ -334,7 +346,7 @@ async def new_scene(app, browser, fake, kernel_http, engine, db, made: datetime)
 
 @pytest.fixture
 async def scene(app, browser, fake, kernel_http, engine, db) -> Scene:
-    """Rivera Plumbing's copy, made on 2026-10-28 at noon, Rivera time."""
+    """Turner Plumbing's copy, made on 2026-10-28 at noon, Turner time."""
     return await new_scene(app, browser, fake, kernel_http, engine, db, local(2026, 10, 28, 12))
 
 
@@ -355,10 +367,10 @@ async def test_switcher_lists_only_this_copys_businesses(app, browser, fake, ker
     assert listed.status_code == 200, listed.text
     desk = fake.desks[owner.desk_id]
     assert listed.json() == [{
-        "business_id": desk.business_id, "name": "Rivera Plumbing", "owner_display_name": "Maria Rivera",
-        "timezone": "America/Los_Angeles",
+        "business_id": desk.business_id, "name": "Turner Plumbing", "owner_display_name": "Mike Turner",
+        "timezone": "America/Los_Angeles", "brand": {"palette": "teal", "primary": "#1F4E4A", "accent": "#B87333"},
         "desks": [{"desk_id": owner.desk_id, "slug": owner.slug, "name": "Main line",
-                   "business_name": "Rivera Plumbing",
+                   "business_name": "Turner Plumbing",
                    "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True,
                    "setup": None}]}]
     assert other.desk_id not in listed.text and fake.desks[other.desk_id].business_id not in listed.text
@@ -662,8 +674,8 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     garbled = await guest(kernel_http, fake, owner)
     await write(engine, db, garbled.ids, "visitor_text", text="x" * 250)
     await write(engine, db, garbled.ids, "triage", text="not json")
-    for who in (handed, garbled):
-        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose="That's 1,400 dollars.")
+    for who in (handed, garbled):              # another language: the handoff card, which opens a handoff
+        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose=OTHER_LANGUAGE)
         verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
         assert not verdict.ok
     held = await guest(kernel_http, fake, owner)
@@ -692,7 +704,8 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
     """A conversation the kernel's handoff card handed to the owner (#96) is in Needs you as a handoff of kind `card`:
     no call-back window, since none was promised, and the kernel's reason, never the draft's words. A call-back
     request is kind `callback`, so the owner's screens can tell the two apart though neither has a window here, and a
-    session whose call-back request is open gets no second handoff from a blocked reply."""
+    session whose call-back request is open gets no second handoff from a blocked reply. (A reply blocked for what no
+    rewrite fixes, another language, shows the handoff card: one blocked only for its prose would ask first.)"""
     owner = await new_owner(app, browser, fake, kernel_http)
     caller = await guest(kernel_http, fake, owner)
     await caller.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
@@ -701,7 +714,7 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
     handed = await guest(kernel_http, fake, owner)
     await write(engine, db, handed.ids, "visitor_text", text="How much is a new water heater?")
     for who in (handed, caller):
-        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose="That's 1,400 dollars.")
+        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose=OTHER_LANGUAGE)
         verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
         assert not verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
     # one handoff each: the caller's is its call back
@@ -817,7 +830,9 @@ async def test_briefing_uses_event_flag_for_cards_and_a_handoff_clause(scene, cl
     await scene.text(who, when)
     clauses = [] if blocked and handoff else [Clause(template="hours", fact_id="charter:hours")]
     verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
-        session_id=who.session_id, generation=0, prose="That's 180 dollars." if blocked else "Here is the information.",
+        session_id=who.session_id, generation=0,
+        prose=(OTHER_LANGUAGE if handoff and not clauses else "That's 180 dollars.") if blocked
+        else "Here is the information.",
         clauses=[*clauses, *([Clause(template="handoff")] if handoff else [])])))
     assert verdict.ok is not blocked
     assert any(block.template == "handoff" for block in verdict.blocks) is handoff
@@ -930,7 +945,7 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
 
     assert read.status_code == 200, read.text
     today = read.json()
-    assert today["greeting_name"] == "Maria"
+    assert today["greeting_name"] == "Mike"
     assert [summary["session_id"] for summary in today["live"]] == [handed_off.session_id]
     brief = today["briefing"]
     assert brief["since"] == stamp(local(2026, 10, 29, 18)) == "2026-10-30T01:00:00Z"

@@ -3,7 +3,7 @@
 `native.capture_lead` saves a visitor's name, contact and note for the owner; `native.request_callback`
 saves a handoff with the next open hour of the Desk's hours as its window, never one the call
 names; `native.start_verification` runs `/verify/start` for an unverified session and tells Claude
-nothing about whether the contact is on record. Tests run on Rivera Plumbing copies as `POST
+nothing about whether the contact is on record. Tests run on Turner Plumbing copies as `POST
 /copies` seeds them (Friday 10:04 in Oakland), with calls decided and executed through `/decide`
 and `/execute` as the API sends them; the starter preset's cards auto-allow all three tools.
 """
@@ -121,7 +121,7 @@ async def callback(client: httpx.AsyncClient, visitor: Visitor, call_id: str = "
 
 
 async def test_callback_window_comes_from_the_hours(app, client, frozen_clock):
-    # Saturday at 19:00 in Oakland: Rivera is closed until Monday at 08:00, after the clocks go back
+    # Saturday at 19:00 in Oakland: Turner is closed until Monday at 08:00, after the clocks go back
     frozen_clock.travel(datetime(2026, 10, 31, 19, 0, tzinfo=TZ))
     copy, visitor = await visitor_of(app, client)
     await alert_now(app, copy, "callback")
@@ -205,7 +205,7 @@ async def set_hours(app: FastAPI, copy: Rivera, hours: list[HoursWindow]) -> Non
 
 
 async def test_a_fresh_rivera_copy_alerts_the_owner_at_once_for_a_callback(app, client):
-    """A burst pipe at night is asked for as a call-back, so the Rivera seed alerts Maria at once for one,
+    """A burst pipe at night is asked for as a call-back, so the Turner seed alerts Mike at once for one,
     with no change to the copy's notification settings (#519)."""
     copy, visitor = await visitor_of(app, client)
     await callback(client, visitor)
@@ -235,7 +235,7 @@ async def test_callback_without_an_open_hour_has_no_window(app, client):
     assert verdict.ok, verdict.violations
     card = verdict.blocks[-1]
     assert (card.template, card.title, card.lines, card.text) == (
-        "callback_confirmed", "Maria Rivera will call you back", [], "Maria Rivera will call you back")
+        "callback_confirmed", "Mike Turner will call you back", [], "Mike Turner will call you back")
 
 
 async def test_card_and_alert_agree_on_a_window_the_clocks_cut_short(app, client, frozen_clock):
@@ -251,14 +251,14 @@ async def test_card_and_alert_agree_on_a_window_the_clocks_cut_short(app, client
     verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
     assert verdict.ok, verdict.violations
     assert verdict.blocks[-1].title == (
-        "Maria Rivera will call you back on Sunday, March 14, between 1:00 am and 3:00 am")
+        "Mike Turner will call you back on Sunday, March 14, between 1:00 am and 3:00 am")
 
 
 @pytest.mark.parametrize("language, prose, title", [
     ("en", "I passed your request on.",
-     "Maria Rivera will call you back on Friday, October 30, between 11:00 am and 12:00 pm"),
-    ("es", "Le pasé su solicitud a la dueña.",
-     "Maria Rivera te llamará el viernes 30 de octubre, entre las 11:00 y las 12:00"),
+     "Mike Turner will call you back on Friday, October 30, between 11:00 am and 12:00 pm"),
+    ("es", "Le pasé su solicitud al dueño.",
+     "Mike Turner te llamará el viernes 30 de octubre, entre las 11:00 y las 12:00"),
 ], ids=["en", "es"])
 async def test_callback_clause_renders(app, client, language, prose, title):
     copy, visitor = await visitor_of(app, client)                    # Friday at 10:04 in Oakland
@@ -489,7 +489,7 @@ async def test_a_start_whose_desk_is_deleted_after_its_intent_sends_no_code(app,
     allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
     assert allowed.outcome == "allow", allowed.reason_plain
 
-    async def delete_the_desk() -> None:                 # Maria deletes the Desk as the intent commits
+    async def delete_the_desk() -> None:                 # Mike deletes the Desk as the intent commits
         response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
         assert response.status_code == 204, response.text
 
@@ -580,7 +580,7 @@ async def test_owner_closes_a_handoff_once(app, client, frozen_clock):
         assert (response.status_code, response.json()) == (401, {"code": "auth"})
     assert api_rows(copy.copy_id, "SELECT status FROM kernel_ro.handoffs") == [("open",)]
 
-    frozen_clock.advance(3600)                                       # Maria calls back an hour later
+    frozen_clock.advance(3600)                                       # Mike calls back an hour later
     response = await handoff_done(client, handoff_id, copy.owner)
     assert response.status_code == 200, response.text
     assert DeskUpdated.model_validate(response.json()) == DeskUpdated(desk_id=copy.desk_id,

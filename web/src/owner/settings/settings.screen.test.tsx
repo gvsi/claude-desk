@@ -128,9 +128,9 @@ describe('Settings', () => {
     const terms = business.getByRole('term').elements().map((term) => term.textContent);
     const values = business.getByRole('definition').elements().map((value) => value.textContent);
     expect(terms.map((term, index) => [term, values[index]])).toEqual([
-      ['Business', 'Rivera Plumbing'],
+      ['Business', 'Turner Plumbing'],
       ['This Desk', 'Main line'],
-      ['Customers see you as', 'Maria Rivera'],
+      ['Customers see you as', 'Mike Turner'],
       ['Time zone', 'Pacific Time (Los Angeles)'],
       // In the signed board's words, pinned here rather than worked out from the formatter.
       ['Hours', 'Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm'],
@@ -145,9 +145,9 @@ describe('Settings', () => {
     const other = main(emergencies.screen).getByRole('region', { name: 'Your business' });
     await expect.element(other.getByText('Emergencies', { exact: true })).toBeVisible();
     expect(other.getByRole('definition').elements().map((value) => value.textContent)).toEqual([
-      'Rivera Plumbing',
+      'Turner Plumbing',
       'Emergencies',
-      'Maria Rivera',
+      'Mike Turner',
       'Pacific Time (Los Angeles)',
       'Every day, all day',
     ]);
@@ -191,7 +191,7 @@ describe('Settings', () => {
 
   it('answering_off_hands_a_price_question_to_maria', async () => {
     // Turned off here, Answering is what a visitor's chat goes by: a price question gets the
-    // handoff card, as asking for Maria does, with no quote and nothing decided for it.
+    // handoff card, as asking for Mike does, with no quote and nothing decided for it.
     const { screen } = await renderRoute(GENERAL);
     await main(screen).getByRole('switch', { name: 'Claude acts for you' }).click();
     await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
@@ -263,7 +263,7 @@ describe('Settings', () => {
     expect(requests('deleteDesk').map((r) => r.path)).toEqual([0, 1, 2, 3].map(() => `/api/owner/desks/${RIVERA.deskId}`));
     expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
     await expect.element(screen.getByRole('button', { name: /^Switch Desk/ })).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(sawNotFound()).toBe(false);
 
     // A delete whose answer was lost but which went through is never reported as failed: the copy
@@ -275,7 +275,7 @@ describe('Settings', () => {
     await main(lost.screen).getByRole('button', { name: 'Delete this Desk' }).click();
     await lost.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => lost.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    await expect.element(lost.screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(lost.screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(lost.screen.getByText(UNAVAILABLE).elements()).toEqual([]);
     expect(lostSawNotFound()).toBe(false);
 
@@ -312,7 +312,7 @@ describe('Settings', () => {
     const before = requests('desks').length;
     await unconfirmed.getByRole('button', { name: 'Reload' }).click();
     await expect.poll(() => unsure.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    await expect.element(unsure.screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(unsure.screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(requests('desks').length).toBeGreaterThan(before);
     expect(requests('deleteDesk')).toHaveLength(1);
     expect(unsureSawNotFound()).toBe(false);
@@ -388,7 +388,7 @@ describe('Settings', () => {
     await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => requests('desks').length).toBeGreaterThan(reads);
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
 
     // The early read's answer, let through now, puts nothing back: one Desk, no alert, never "not found".
     early.release();
@@ -402,7 +402,7 @@ describe('Settings', () => {
   });
 
   it('deleted_desk_closes_its_chats_holds_and_links', async () => {
-    // Main line, when Maria deletes it here, has Dana's chat with her refund held for Maria and a
+    // Main line, when Mike deletes it here, has Dana's chat with her refund held for Mike and a
     // payment link open in it.
     const { screen, router } = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
     const refund = mockStore.world.addHeldRefund();
@@ -436,7 +436,7 @@ describe('Settings', () => {
 describe('Settings against its boards', () => {
   it('settings_match_their_boards', async () => {
     // General as N-Run2-Settings-General draws it, at 1440 px: the page fills the main area and
-    // centers its column, and Tab goes through SubNav, then Answering, then Delete this Desk.
+    // centers its column, and Tab goes through SubNav, then the selected header colour, Answering and Delete this Desk.
     const { screen } = await renderRoute(GENERAL);
     const business = main(screen).getByRole('region', { name: 'Your business' });
     await expect.element(business).toBeVisible();
@@ -445,12 +445,14 @@ describe('Settings against its boards', () => {
     await expectOwnerBoard(screen.container, {
       current: 'Settings',
       fill: true,
-      tabStops: [...links(screen), answering.element() as HTMLElement, remove.element() as HTMLElement],
+      tabStops: [...links(screen), main(screen).getByRole('radio', { name: 'Teal', exact: true }).element() as HTMLElement, answering.element() as HTMLElement, remove.element() as HTMLElement],
     });
+    // Tabbing to Delete scrolls the now-longer General page. Measure its opening position.
+    main(screen).element().scrollTop = 0;
     let content = await expectSettingsColumns(screen, 'General');
 
     // The details 8 px under their heading, as wide as the column, with no Change; Answering in its
-    // own card 20 px under them, the card's look with its switch row 20 px in from its top and
+    // own card below Header colour, the card's look with its switch row 20 px in from its top and
     // bottom (the row pads its own sides, so its words line up with the details'); Delete this
     // Desk's heading 28 px under that, its neutral button at the column's right.
     const card = one(business.element(), '.cd-card');
@@ -461,11 +463,14 @@ describe('Settings against its boards', () => {
     const switchRow = answering.element();
     expect(round(top(switchRow) - top(answeringCard))).toBe(21);
     expect(round(bottom(answeringCard) - bottom(switchRow))).toBe(21);
-    expect(round(top(answeringCard) - bottom(card))).toBe(20);
+    const colourCard = main(screen).getByRole('region', { name: 'Header colour', exact: true }).element();
+    expect(round(top(colourCard) - bottom(card))).toBe(20);
+    expect(round(top(answeringCard) - bottom(colourCard))).toBe(20);
     const removal = main(screen).getByRole('region', { name: 'Delete this Desk' }).element();
     expect(round(top(one(removal, 'h2')) - bottom(answeringCard))).toBe(28);
     expectComputed(remove.element(), SPEC.secondaryMain);
     expect(round(remove.element().getBoundingClientRect().right)).toBe(round(content.getBoundingClientRect().right));
+    main(screen).element().scrollTop = main(screen).element().scrollHeight;
     await expectFooterAtFoot(screen.container);
 
     // Its dialog is the general one (owner decision, 2026-10-30): no refused dot, Delete Desk the
@@ -533,7 +538,9 @@ describe('Settings against its boards', () => {
     const detailCard = one(details, '.cd-card');
     expect([round(detailCard.getBoundingClientRect().left), round(detailCard.getBoundingClientRect().width)]).toEqual([16, 358]);
     const switchCard = main(phone.screen).getByRole('region', { name: 'Claude acts for you' }).element();
-    expect(round(top(switchCard) - bottom(detailCard))).toBe(16);
+    const phoneColour = main(phone.screen).getByRole('region', { name: 'Header colour', exact: true }).element();
+    expect(round(top(phoneColour) - bottom(detailCard))).toBe(16);
+    expect(round(top(switchCard) - bottom(phoneColour))).toBe(16);
     const deleting = main(phone.screen).getByRole('region', { name: 'Delete this Desk' });
     const heading = deleting.getByRole('heading', { name: 'Delete this Desk' }).element();
     const line = deleting.getByText(DELETE_LINE, { exact: true }).element();
@@ -548,7 +555,7 @@ describe('Settings against its boards', () => {
 
   it('answering_lines_up_with_the_details', async () => {
     // Answering's words start where the details' do, on a laptop and on a phone: its label under
-    // "Business", its line under "Rivera Plumbing", and the switch's track as far in from the card's
+    // "Business", its line under "Turner Plumbing", and the switch's track as far in from the card's
     // right edge as the words are from its left.
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(GENERAL, { viewport });

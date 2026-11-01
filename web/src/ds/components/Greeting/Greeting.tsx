@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { Icon } from '../../icons/index.tsx';
 import { IconButton } from '../IconButton/IconButton.tsx';
 
@@ -11,7 +13,7 @@ export interface PresenceGlyph {
 }
 
 export interface GreetingProps {
-  /** The greeting, from the screen: "Good morning, Maria". It is Today's `h1`. */
+  /** The greeting, from the screen: "Good morning, Mike". It is Today's `h1`. */
   text: string;
   /**
    * Who is here right now: the line says it in words ("Two people are talking to your Desk right
@@ -23,6 +25,11 @@ export interface GreetingProps {
    * short while after a copy that worked: the pill says "Copied" with a check, at the same width.
    */
   link?: { label: string; onCopy: () => void; copied?: boolean };
+  /**
+   * The screen's own controls, after the link pill at the right of the greeting's line: usually one
+   * `Button`, such as Today's "Chat as a customer".
+   */
+  actions?: ReactNode;
 }
 
 /** At most this many glyphs: the line carries the count, the glyphs only the feeling of company. */
@@ -30,9 +37,10 @@ const MAX_GLYPHS = 3;
 
 /**
  * The top of Today: a greeting in Claude's serif voice, one quiet line about who is talking to the
- * Desk right now, and the public link with a button to copy it.
+ * Desk right now, and at the right of its line the public link with a button to copy it, then the
+ * screen's own actions. On a phone the link and the actions go under the presence line.
  */
-export function Greeting({ text, presence, link }: GreetingProps) {
+export function Greeting({ text, presence, link, actions }: GreetingProps) {
   const glyphs = presence?.people.slice(0, MAX_GLYPHS) ?? [];
   return (
     <header className="cd-greeting">
@@ -57,22 +65,27 @@ export function Greeting({ text, presence, link }: GreetingProps) {
           </p>
         ) : null}
       </div>
-      {link ? (
-        <div className={`cd-greeting__link cd-type-meta${link.copied ? ' cd-greeting__link--copied' : ''}`}>
-          {/* "Copied" is laid over the link's words, so the pill keeps its width. It and the check are
-              for sighted owners: the screen says it to screen readers in its own status line. */}
-          <span className="cd-greeting__link-words">
-            <span className="cd-greeting__link-label">{link.label}</span>
-            <span className="cd-greeting__copied" aria-hidden="true">
-              Copied
-            </span>
-          </span>
-          <span className="cd-greeting__copy">
-            <IconButton label="Copy your Desk link" icon="copy" shape="round" onClick={link.onCopy} />
-            <span className="cd-greeting__check" aria-hidden="true">
-              <Icon name="check" size={16} />
-            </span>
-          </span>
+      {link || actions ? (
+        <div className="cd-greeting__actions">
+          {link ? (
+            <div className={`cd-greeting__link cd-type-meta${link.copied ? ' cd-greeting__link--copied' : ''}`}>
+              {/* "Copied" is laid over the link's words, so the pill keeps its width. It and the check are
+                  for sighted owners: the screen says it to screen readers in its own status line. */}
+              <span className="cd-greeting__link-words">
+                <span className="cd-greeting__link-label">{link.label}</span>
+                <span className="cd-greeting__copied" aria-hidden="true">
+                  Copied
+                </span>
+              </span>
+              <span className="cd-greeting__copy">
+                <IconButton label="Copy your Desk link" icon="copy" shape="round" onClick={link.onCopy} />
+                <span className="cd-greeting__check" aria-hidden="true">
+                  <Icon name="check" size={16} />
+                </span>
+              </span>
+            </div>
+          ) : null}
+          {actions}
         </div>
       ) : null}
     </header>

@@ -5,7 +5,7 @@
 ## When to use
 
 - `owner`: the hero composer on Today and Rules ("Ask Claude about your Desk, or change a rule"), and wherever the owner answers Claude in their own words. The controls sit in a row under the text, with the helper line between them.
-- `visitor`: the public page ("Message Rivera Plumbing"), one row with the send button at the end.
+- `visitor`: the public page ("Message Turner Plumbing"), one row with the send button at the end.
 - `whisper`: a conversation while Claude answers ("Whisper to Claude. Dana won't see it."), one row, its send button named "Send whisper". Put a `TakeOverBar` above it.
 - Not for a form field with a label above it: use `TextField`.
 
@@ -30,7 +30,7 @@
 `failed` (N-R2-Setup-04-Answer-Failed) keeps what was sent in the composer until the screen tries again:
 
 - `line`, the screen's own words for what happened and what to do ("I couldn't answer just now. Your answer is still here; try again."), as an error `Notice`: a refused dot, read out at once. It sits 20 px over the box.
-- The box keeps the composer's surface, radius and shadow, without its hairline, as the board draws it, padded 12 px 14 px. In it, `text`, the words as `onSend` got them, in `.cd-type-body` marked `data-copy="user"`, keeping their line breaks, then 12 px after them a primary "Try again" (`retryLabel`, for a screen in another language: "Intentar de nuevo"), both on the box's bottom line: 56 px high around one line. The box is a group named by `label`. Kept text is capped at six lines and scrolls internally, so Try again stays in view. It is a tab-focusable region named by the same `label`; arrow keys scroll its words, and focus shows the standard 2 px `accent-blue` ring at a 2 px offset. Short text keeps its existing size and layout.
+- The box keeps the composer's surface, radius and shadow, without its hairline, as the board draws it, padded 12 px 14 px. In it, `text`, the words as `onSend` got them, in `.cd-type-body` marked `data-copy="user"`, keeping their line breaks, then 12 px after them a primary "Try again" (`retryLabel`, for a screen in another language: "Intentar de nuevo"), both on the box's bottom line: 56 px high around one line. The box is a group named by `label`. Kept text is capped at six lines and scrolls internally, so Try again stays in view. It is a tab-focusable region named by the same `label`; arrow keys scroll its words, and keyboard focus shows the standard 2 px `ring-focus` ring at a 2 px offset. Short text keeps its existing size and layout.
 - Nothing can be typed while it shows, and the helper, the counter and the other buttons are left out. "Try again" calls `onRetry()`: the screen sends `text` again and passes `disabled` while that send is in flight, so the button waits (`aria-disabled`, focus kept) and a second press calls nothing. It clears `failed` once the send goes through, and the text box comes back empty.
 - Focus follows only from the composer's own control: when the text box had focus as the failure arrived, "Try again" takes it, and when "Try again" had it, the text box takes it back. Focus the owner left elsewhere, on another control or on the page itself, stays there, and a composer that opens failed takes no focus.
 
@@ -51,6 +51,6 @@
 | `failed` | `{ text: string; line: string; retryLabel?: string; onRetry: () => void }` | A send that failed: `line` over the box, which keeps `text` beside "Try again" (`retryLabel`). Pass `disabled` while the send is in flight again. |
 | `inertSend` | `boolean` | Vision pages only: Send and Enter do nothing and the text stays. `false` by default. |
 
-`bg-surface`, `radius-composer`, an inset `line-hairline` and `shadow-composer`. The text is `.cd-type-message`. While the text box has focus the whole composer shows the focus ring (`ring-composer`, 2 px at a 2 px offset), because the canvas's 55% ring is 2.9:1. A button inside it (attach, speak, send) shows its own ring instead, so there is only ever one. The single-row composer is 52 px high with one line of text.
+`bg-surface`, `radius-composer`, an inset `line-hairline` and `shadow-composer`. The text is `.cd-type-message`. While the text box has focus it shows its caret, by pointer or keyboard, and no ring, and the box's inset edge goes from `line-hairline` to `line-field` (3.1:1 on `bg-surface`), so focus shows while the caret blinks off (owner, 2026-11-01, WCAG 2.4.7). A button inside it (attach, speak, send) shows its own ring on keyboard focus. The single-row composer is 52 px high with one line of text.
 
 On a touch screen each `IconButton` takes a tap in the 44 px square centred on it, but its hit area reaches only halfway across the gap to the control beside it: 2 px between adjacent buttons in the owner's tools, which are 4 px apart, and 4 px in the visitor's row, whose controls and text box are 8 px apart. A sole Send in the owner's tools keeps its full 44 px square. A tap between two controls lands on the nearer one.

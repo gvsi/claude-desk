@@ -210,7 +210,7 @@ def test_default_cards_are_compiler_asks_for_anyone():
 
 
 def test_valid_cards_are_accepted():
-    # The Rivera seed's cards, the approval drafts and a default ask: each constructor raises if a rule rejects it.
+    # The Turner seed's cards, the approval drafts and a default ask: each constructor raises if a rule rejects it.
     weekdays = HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start="08:00", end="18:00")
     cards = [
         RuleCard(card_id="rv-quote", applies_to="native.quote", mode="auto", who="anyone", reason="x"),
@@ -304,10 +304,10 @@ def test_probe_names_a_start_time():
 
 def test_create_session_takes_preview():
     # the owner previews a draft as a customer before Answering goes live; a plain visitor session is no preview
-    assert CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="visitor").preview is False
-    assert CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="visitor", preview=True).preview is True
+    assert CreateSessionRequest(desk_slug="turner-plumbing-abc123", kind="visitor").preview is False
+    assert CreateSessionRequest(desk_slug="turner-plumbing-abc123", kind="visitor", preview=True).preview is True
     with pytest.raises(ValidationError):          # a preview is the owner acting as a visitor, never an agent: 422 invalid
-        CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="agent", preview=True)
+        CreateSessionRequest(desk_slug="turner-plumbing-abc123", kind="agent", preview=True)
 
 
 def test_the_turn_sends_one_message_and_answers_a_language():
@@ -495,16 +495,16 @@ def test_owner_typing_carries_no_free_text():
     events = TypeAdapter(SseEvent)
     until = datetime(2026, 10, 29, 15, 4, 30, tzinfo=UTC)
     event = events.validate_python(
-        {"type": "owner_typing", "name": "Maria Rivera", "until": "2026-10-29T08:04:30-07:00", "text": "On my way"})
+        {"type": "owner_typing", "name": "Mike Turner", "until": "2026-10-29T08:04:30-07:00", "text": "On my way"})
     assert isinstance(event, EvOwnerTyping)
-    assert event.model_dump() == {"type": "owner_typing", "name": "Maria Rivera", "until": until}   # no text travels
+    assert event.model_dump() == {"type": "owner_typing", "name": "Mike Turner", "until": until}   # no text travels
     with pytest.raises(ValidationError):
-        events.validate_python({"type": "owner_typing", "name": "Maria Rivera", "until": "2026-10-29T15:04:30"})
+        events.validate_python({"type": "owner_typing", "name": "Mike Turner", "until": "2026-10-29T15:04:30"})
 
 
 def test_sse_union_discriminates():
     ev = TypeAdapter(SseEvent).validate_python(
-        {"type": "held", "decision_id": "d1", "state": "held", "visitor_plain": "Asked Maria",
+        {"type": "held", "decision_id": "d1", "state": "held", "visitor_plain": "Asked Mike",
          "ledger_seq": 7, "signature": "s"})
     assert isinstance(ev, EvHeld)
 
@@ -587,7 +587,7 @@ def test_a_tool_says_why_it_needs_review():
         ToolProfile(**base, status="needs_review", review_reason="edited")
 
 
-PUBLIC_DESK = {"business_name": "Rivera Plumbing", "desk_name": "Main line", "owner_display_name": "Maria Rivera",
+PUBLIC_DESK = {"business_name": "Turner Plumbing", "desk_name": "Main line", "owner_display_name": "Mike Turner",
                "brand": {}, "charter": [], "agent_card": []}
 
 

@@ -1,17 +1,18 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
+import { Button, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
-import { publicLink } from '../customerLink.ts';
-import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
+import { customerLink, publicLink } from '../customerLink.ts';
+import { useInboxOpen } from '../inbox/inboxOpen.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { firstName, heldOldestFirst, isLive, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
+import { firstName, heldOldestFirst, isLive, needsYouKey, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ContinueSetup } from './ContinueSetup.tsx';
 import { LiveNow } from './LiveNow.tsx';
@@ -35,6 +36,10 @@ export interface TodayPageProps {
 /** What the copy button's press did, read out to screen readers. */
 type LinkCopy = 'idle' | 'copied' | 'failed';
 
+type PendingFocus =
+  | { kind: 'dismiss'; next: string | undefined }
+  | { kind: 'done'; handoffId: string; readAt: number; failedAt: number };
+
 const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
   copied: 'Your Desk link is copied.',
   failed: "Copy didn't work. Select the link and copy it yourself.",
@@ -44,13 +49,14 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
 export const COPIED_FOR_MS = 1_600;
 
 /**
- * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy, "Not
- * live yet" while the Desk's setup hasn't gone live, "Things to try", then, in this order, "Needs
- * you" and "Live now" when they have something, and "Since last night" always; the right column
- * has the public page a new tab away and the last 7 days. Today opens no visitor chat itself, and
+ * `/app/:deskId/today`: a band across the page with the greeting, who is here now, the Desk's public
+ * link to copy and "Chat as a customer" (the public page a new tab away), then "Not live yet" while
+ * the Desk's setup hasn't gone live, and "Things to try"; under it two columns: in this order "Needs
+ * you" and "Live now" when they have something, and "Since last night" always; at the right the last
+ * 7 days. Today opens no visitor chat itself, and
  * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
  * request (`#request-<id>`, as the Demo inbox links an owner's alert) brings that request's card
- * into view and focus. Until what the page first shows is read, it holds its own shapes, so it
+ * into view and focus, once the demo bar's Demo inbox sheet, whose link it may be, has closed. Until what the page first shows is read, it holds its own shapes, so it
  * opens drawn however the owner came to it.
  */
 export function TodayPage({ namesTheTab = true }: TodayPageProps) {
@@ -58,6 +64,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // The page's heading greets the owner, so the tab takes the sidebar's row.
   useDocumentTitle(namesTheTab ? inApp(NAV_LABELS.today) : null);
   const deskId = desk.desk_id;
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
   const opening = useTodayOpening(deskId);
@@ -80,8 +87,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     return () => window.clearTimeout(timer);
   }, [copied]);
   const cards = useRef(new Map<string, HTMLElement>());
-  // Whether the Demo inbox's sheet is open, as it says once it has opened or closed.
-  const [inboxOpen, setInboxOpen] = useState(false);
+  // Whether the demo bar's Demo inbox sheet is open, as the frame hears it.
+  const inboxOpen = useInboxOpen();
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
   // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
@@ -120,23 +127,42 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   }, []);
   // Focus brings the card into view too. A request with no card here is left alone.
   const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
-  // Decide from the committed sections, since dismissing before the answer's refresh lands can
-  // expose a cached hold and keep Needs you mounted. Only move on once that section is gone.
+  // Share the post-commit landing for dismissed answers and completed callbacks. A cached hold
+  // can keep Needs you mounted, and a closed callback stays until its refreshed list commits.
   const needsYouSection = useRef<HTMLElement>(null);
   const liveNow = useRef<HTMLElement>(null);
   const sinceLastNight = useRef<HTMLElement>(null);
-  const dismissedFocus = useRef<{ next: string | undefined } | null>(null);
+  const pendingFocus = useRef<PendingFocus | null>(null);
   const dismissAnswer = (id: string, next: string | undefined) => {
-    dismissedFocus.current = { next };
+    pendingFocus.current = { kind: 'dismiss', next };
     answers.dismiss(id);
   };
+  const callbackDone = (handoffId: string) => {
+    // The close may have waited through another read: snapshot the query as it stands now,
+    // before CallbackCard starts its refresh, rather than the render that began the close.
+    const read = queryClient.getQueryState(needsYouKey(deskId));
+    pendingFocus.current = { kind: 'done', handoffId, readAt: read?.dataUpdatedAt ?? 0, failedAt: read?.errorUpdatedAt ?? 0 };
+  };
   useLayoutEffect(() => {
-    const dismissed = dismissedFocus.current;
-    if (dismissed === null) return;
-    dismissedFocus.current = null;
+    const pending = pendingFocus.current;
+    if (pending === null) return;
+    if (pending.kind === 'done') {
+      if (needsYouSection.current !== null && callbacks.some((item) => item.handoff.handoff_id === pending.handoffId)) {
+        // Wait for the committed list to lose this card. A settled read that keeps it (including
+        // a failed or paused read) spends the request, so a later poll cannot move focus unexpectedly.
+        if (readAt > pending.readAt || needsYou.errorUpdatedAt > pending.failedAt || needsYou.isPaused) pendingFocus.current = null;
+        return;
+      }
+      pendingFocus.current = null;
+      if (document.activeElement !== null && document.activeElement !== document.body) return;
+    } else {
+      pendingFocus.current = null;
+    }
     if (needsYouSection.current !== null) {
-      const card = dismissed.next === undefined ? undefined : answeredFocus.cardFor(dismissed.next);
-      (card ?? needsYouSection.current).focus();
+      const card = pending.kind === 'dismiss' && pending.next !== undefined ? answeredFocus.cardFor(pending.next) : undefined;
+      const target = card ?? needsYouSection.current;
+      if (pending.kind === 'done') target.focus({ preventScroll: true });
+      else target.focus();
     } else {
       (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true });
     }
@@ -215,12 +241,17 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
       {opening ? <h1 className="cd-sr-only">Today</h1> : null}
       <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton />} className="cd-today-opening">
         <div className="cd-today" onClick={followInAppLinks(navigate)}>
-          <div className="cd-today__main">
+          <div className="cd-today__band">
             <div className="cd-today__greeting">
               <Greeting
                 text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
                 presence={today.data ? greetingPresence(live) : undefined}
                 link={{ label: link, onCopy: copyLink, copied: copied !== null }}
+                actions={
+                  <Button variant="secondary" href={customerLink(desk.slug, deskId)} external>
+                    Chat as a customer
+                  </Button>
+                }
               />
               <p className="cd-sr-only" role="status">
                 {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
@@ -230,6 +261,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} answering={desk.answering} />
             ) : null}
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
+          </div>
+          <div className="cd-today__main">
             {/* Drawn while it lists something or a read has failed: its Dismiss sends focus on when neither is left. */}
             {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
               <NeedsYou
@@ -242,12 +275,13 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                 readFailure={readFailure}
                 sectionRef={needsYouSection}
                 onDismiss={dismissAnswer}
+                onDone={callbackDone}
               />
             ) : null}
             {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} openHandoffs={handoffs} /> : null}
             <SinceLastNight sectionRef={sinceLastNight} />
           </div>
-          <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
+          <TodayAside deskId={deskId} />
         </div>
       </SkeletonScreen>
     </>

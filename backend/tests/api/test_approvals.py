@@ -71,7 +71,7 @@ async def held_request(app, browser, fake, kernel_http, model) -> Held:
     owner = browser(app)
     owner.cookies.set("desk_owner", copy.owner_token, domain="desk.test", path="/api/owner")
     visitor, token, opened = await open_session(app, browser, slug)
-    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")))
     sent = await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": "Can I get a discount on a drain?"})
     assert sent.status_code == 202
     await app.state.runtime.runner.drain()
@@ -122,7 +122,7 @@ async def test_allow_once_resumes_with_the_visitor_credential(app, browser, fake
         put(record)
 
     monkeypatch.setattr(fake, "_put_decision", remember)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     fake.calls.clear()
 
     answered = await answer(held, "allow_once")
@@ -154,7 +154,7 @@ async def test_allow_once_resumes_with_the_visitor_credential(app, browser, fake
     assert types(events) == ["writing", "held", "message", "turn_end", "receipt", "resolved", "writing",
                              "message", "turn_end"]
     assert [event.model_dump(mode="json") for _, event in events if event.type in ("receipt", "resolved")] == expected
-    assert events[7][1].blocks[0].text == "Good news: Maria said yes."
+    assert events[7][1].blocks[0].text == "Good news: Mike said yes."
     follow_up = json.dumps(model.requests[1].messages)
     assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\" result_fact_ids=' in follow_up)
     after = fake.calls[answered_at:]
@@ -340,7 +340,7 @@ async def test_answer_after_expiry_or_cancel(app, browser, fake, kernel_http, mo
     fake.now += timedelta(hours=13)
     assert (await expired.visitor.get(f"/api/public/desks/{expired.slug}/session")).status_code == 200
     fake.now += timedelta(hours=12)                                  # the hold is past its day; the visitor isn't idle
-    model.add(response(reply("Maria didn't get to your request in time; shall I ask again?")))
+    model.add(response(reply("Mike didn't get to your request in time; shall I ask again?")))
     late = await answer(expired, "allow_once")
     assert late.status_code == 409
     assert (late.json()["error"], late.json()["decision"]["state"]) == ("already_resolved", "expired")
@@ -362,7 +362,7 @@ async def test_answer_without_an_approved_snapshot_shows_only_the_outcome(app, b
                                                                          engine, choice, final_state):
     held = await held_request(app, browser, fake, kernel_http, model)
     fake.never(fake.sessions[held.session_id].desk_id, "native.quote")     # the owner said never for quotes since
-    model.add(response(reply("Maria's rules have changed, so I can't offer that one.")))
+    model.add(response(reply("Mike's rules have changed, so I can't offer that one.")))
 
     answered = await answer(held, choice)
 
@@ -502,7 +502,7 @@ async def test_lost_answer_response_still_resumes(app, browser, fake, kernel_htt
     (shown,) = await resolved(engine, held.session_id)
     assert shown == signed(executed.model_dump(mode="json"))
     await jobs_done(jobs_connector)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
         events = await stream.until(lambda events: types(events).count("turn_end") == 2)
     await app.state.runtime.runner.drain()
@@ -571,7 +571,7 @@ async def test_lost_answer_while_approved_keeps_an_unknown_outcome_pending(
     assert len(model.requests) == 1
 
     final = fake.reconcile(held.decision_id)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
         events = await stream.until(lambda events: types(events).count("turn_end") == 2)
     await app.state.runtime.runner.drain()
@@ -644,7 +644,7 @@ async def test_answer_resumes_in_the_request_when_the_queue_cant_take_the_job(ap
         raise ConnectorException("the job queue's database can't be reached")
 
     monkeypatch.setattr(jobs_connector, "defer_jobs_all", unreachable)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     calls = len(fake.calls)
 
     answered = await answer(held, "allow_once")
@@ -729,7 +729,7 @@ async def test_answer_during_take_over_executes_and_waits_for_hand_back(app, bro
     assert [tuple(row) for row in waiting] == [(True, None)] and resumable == [True]
 
     fake.set_mode(held.session_id, "ai")                             # handed back: Claude follows up
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     async with Stream(app, events_path(held.slug, "after=6"), headers=[cookie(held.token)]) as stream:
         events = await stream.until(lambda events: "turn_end" in types(events))
     await app.state.runtime.runner.drain()

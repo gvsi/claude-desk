@@ -57,6 +57,16 @@ function parseColor(input: string, depth = 0): Rgba {
   throw new Error(`Unsupported color: ${input}`);
 }
 
+/**
+ * An opaque color token's value as `#rrggbb`, its aliases followed, for code that must hand a color
+ * to something that reads no CSS, such as the web app's QR code. Throws on a translucent token.
+ */
+export function tokenHex(name: string): string {
+  const { r, g, b, a } = parseColor(name);
+  if (a !== 1) throw new Error(`${name} is not an opaque color`);
+  return `#${[r, g, b].map((channel) => Math.round(channel).toString(16).padStart(2, '0')).join('')}`;
+}
+
 /** `top` alpha-composited over `bottom` (source-over); over an opaque `bottom` the result is opaque. */
 function composite(top: Rgba, bottom: Rgba): Rgba {
   const a = bottom.a === 1 ? 1 : top.a + bottom.a * (1 - top.a);
@@ -131,7 +141,7 @@ function pairs(
 
 const TEXT = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'] as const;
 
-const MARKS = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
+const MARKS = ['accent-blue', 'ring-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
 const SURFACES = ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'] as const;
 
 export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
@@ -144,6 +154,8 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(MARKS, SURFACES, 3, 'Focus rings and status dots on the app, panels, raised surfaces and the selected row.'),
   ...pairs(MARKS, ['fill-card'], 3, 'Focus rings and status dots inside cards.', 'bg-app'),
   ...pairs(MARKS, ['fill-hover'], 3, 'Focus rings and status dots on a hovered conversation or attempt row.', 'bg-app'),
+  ...pairs(['ring-focus'], ['bg-muted'], 3, "The focus ring on the reviewer bar's Start over."),
+  ...pairs(['ring-focus'], ['fill-hover'], 3, 'The focus ring just inside a menu item that has focus, on its hover fill in a menu.', 'bg-surface'),
   ...pairs(
     ['mark-ink-light', 'mark-clay'],
     ['bg-app', 'bg-panel', 'bg-surface'],
@@ -170,7 +182,9 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5, "Names, messages and meta lines on the intro illustration's light cards."),
   ...pairs(['illustration-ink'], ['illustration-avatar'], 4.5, 'The initials on an intro illustration card.'),
   ...pairs(['illustration-handled'], ['illustration-card'], 3, "The check and the receipt dots on the intro illustration's light cards."),
+  ...pairs(['qr-ink'], ['qr-tile'], 3, "The QR code's dark modules on its sand tile, on Share's printable card."),
   ...pairs(['line-field'], ['bg-surface', 'bg-app'], 3, "A text field's outline, its boundary, on a dialog or a page."),
+  ...pairs(['line-field-focus'], ['bg-surface', 'bg-app'], 3, "A text field's border while it has focus, one step stronger than its outline, on a dialog or a page."),
   ...pairs(['line-field'], ['fill-card'], 3, "The outline of an inline CopyField's value, such as the agents page's address, in a card.", 'bg-app'),
   ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'A danger button in a card, such as Deny this time on a held request, at rest and on hover.', 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['fill-card'], 4.5, 'A danger-ghost button in a card: a refusal in red words with no fill.', 'bg-app'),
@@ -205,6 +219,7 @@ export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze
   'mark-hairline': "The edge of the mark's tile in the About pages' app icon; the tile itself carries the mark's contrast.",
   'illustration-line': "The booked box's outline on an intro illustration card; the words inside it say what it is.",
   'illustration-arc': "Two soft arcs on the intro illustration's clay field, behind the cards; they carry nothing.",
+  'qr-hairline': "The inset edge of the QR code's sand tile; the code's modules carry its contrast.",
   'connector-stripe': 'A third-party brand mark beside its name; nothing is read on it.',
   'connector-google-blue': 'A third-party brand mark beside its name; nothing is read on it.',
 });

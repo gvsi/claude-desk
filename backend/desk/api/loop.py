@@ -79,6 +79,7 @@ from desk.api.tools import (
     hand_off,
     model_tools,
     not_run,
+    offer_shown_instead,
     prose_unshown,
     recover_call,
     route_call,
@@ -439,7 +440,8 @@ class _Turn:
 
     async def _end_turn(self, content: list[dict]) -> TurnOutcome | None:
         """Claude ended its turn. Its text goes out as prose, checked like any reply, unless a reply already went out
-        this turn."""
+        this turn. When the kernel's call-back offer showed in the text's place, a note holds the result a reply call
+        would have read (`shown_instead`), since no tool result tells Claude what the visitor saw."""
         prose = "\n\n".join(block["text"].strip() for block in content
                             if block.get("type") == "text" and block["text"].strip())
         if self.delivered is not None:
@@ -457,6 +459,11 @@ class _Turn:
             await append_message(self.conn, self.caller.ids, "note", text=NOTES["prose_blocked"] + "\n" + violations)
             await self.conn.commit()                       # with the stopped draft `_reply` kept for the owner
             return None
+        if "shown_instead" in outcome.result:              # the call-back offer showed in the text's place, and no
+            # tool result tells Claude so: a note holding the result a reply call would have read does
+            await append_message(self.conn, self.caller.ids, "note",
+                                 text=json.dumps(outcome.result, ensure_ascii=False))
+            await self.conn.commit()
         return self._ended()
 
     async def _tool_use(self, content: list[dict], tool_uses: list[dict]) -> TurnOutcome | None:
@@ -807,11 +814,13 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int, open_
 
 def _recovered_reply(shown: Any | None, block: dict) -> ToolOutcome:
     """A `send_reply` call's (`block`'s) result from its delivered row, as `send_reply` answered it: its event's
-    handoff flag, and `prose_shown` false when the prose the call drafted isn't among the shown blocks."""
+    handoff flag, `prose_shown` false when the prose the call drafted isn't among the shown blocks, and the kernel's
+    call-back offer as `shown_instead` when that was shown in its place."""
     if shown is None:
         return not_run()
-    result = delivered_result(shown.handoff, shown.ref_id, prose_shown=not prose_unshown(
-        block["input"], [shown_block.kind for shown_block in shown.blocks or []]))
+    result = delivered_result(shown.handoff, shown.ref_id,
+                              prose_shown=not prose_unshown(block["input"], shown.blocks or []),
+                              shown_instead=offer_shown_instead(block["input"], shown.blocks or []))
     return ToolOutcome(result, shown.handoff, delivered="handoff" if shown.handoff else "reply",
                        message_id=shown.ref_id)
 

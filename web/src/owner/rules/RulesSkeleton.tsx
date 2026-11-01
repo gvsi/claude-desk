@@ -4,10 +4,12 @@ import { ALWAYS_ON, Skeleton, SkeletonCard, outcomePhrase, type SkeletonText } f
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
 import { CONNECTOR_PAGES_BUILT } from '../connectors/pages.ts';
+import { BUSINESS_WORDS } from '../connectors/businessWords.ts';
 import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, rulesVersionLine } from './copy.ts';
 import { moneyLimitLine } from './ruleWords.ts';
 
 import './RulesPage.css';
+import './BusinessJobs.css';
 
 /** Intrinsic width in the real CSS/font; drawn controls use public Skeleton.measure. */
 function useMeasuredWidth(
@@ -56,26 +58,67 @@ function useMeasuredWidth(
 }
 
 /** Known copy is measured, never drawn: wrapping follows this column and this browser's fonts. */
+function useLineWidths(box: RefObject<HTMLDivElement | null>, words: string, className: string, precise: boolean) {
+  const [widths, setWidths] = useState<number[]>();
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!precise || !element) return;
+    let live = true;
+    const measure = () => {
+      if (!live || !element.isConnected || element.closest('[data-state="leaving"]')) return;
+      const probe = document.createElement('p');
+      probe.className = className;
+      probe.inert = true;
+      probe.setAttribute('aria-hidden', 'true');
+      Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', width: `${element.getBoundingClientRect().width}px`, margin: '0' });
+      probe.textContent = words;
+      element.append(probe);
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(probe);
+        const next = [...range.getClientRects()].map(({ width }) => width);
+        setWidths((was) => JSON.stringify(was) === JSON.stringify(next) ? was : next);
+      } finally {
+        probe.remove();
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    document.fonts.addEventListener('loadingdone', measure);
+    void document.fonts.ready.then(measure);
+    return () => {
+      live = false;
+      observer.disconnect();
+      document.fonts.removeEventListener('loadingdone', measure);
+    };
+  }, [box, words, className, precise]);
+  return precise ? widths : undefined;
+}
+
 function Lines({
   words,
   className,
   text = 'body',
   anchor,
   fitted = false,
+  precise = false,
 }: {
   words: string;
   className: string;
   text?: SkeletonText;
   anchor?: string;
   fitted?: boolean;
+  precise?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const width = useMeasuredWidth(box, fitted ? { label: words, className, tagName: 'span' } : undefined);
   const count = useTextLines(box, { parts: [words], className }, 1);
+  const widths = useLineWidths(box, words, className, precise);
   return (
     <div ref={box} className={className} style={fitted && width !== undefined ? { width: Math.ceil(width) } : undefined} data-skeleton-anchor={anchor}>
-      {Array.from({ length: count }, (_, i) => (
-        <Skeleton key={i} shape="line" text={text} width={i ? '70%' : '100%'} />
+      {Array.from({ length: widths?.length ?? count }, (_, i) => (
+        <Skeleton key={i} shape="line" text={text} width={widths?.[i] ?? (i ? '70%' : '100%')} />
       ))}
     </div>
   );
@@ -204,10 +247,53 @@ function Header() {
   );
 }
 
-/** A fresh copy has no suggestions: draw its connector groups and always-on rules. */
+/** A fresh Turner copy has one urgent callback job, with a read-only rule and fallback. */
+function Jobs() {
+  return (
+    <section className="cd-business-jobs">
+      <Lines precise words={BUSINESS_WORDS.jobs} className="cd-business-jobs__title cd-type-section" text="section" anchor="rules-jobs-title" />
+      <SkeletonCard padding={16} anchor="rules-job">
+        <div className="cd-tool-rules">
+          <div className="cd-tool-rules__tool">
+            <div className="cd-tool-rules__tool-text">
+              <div className="cd-tool-rules__tool-head">
+                <Lines precise fitted words="Emergency callback" className="cd-tool-rules__tool-name cd-type-section" text="section" anchor="rules-job-name" />
+              </div>
+              <Lines precise words="Urgent: A burst or leaking pipe, flooding, a sewage backup, or no water" className="cd-tool-rules__tool-description cd-type-meta" text="meta" anchor="rules-job-description" />
+            </div>
+          </div>
+          <ul className="cd-tool-rules__rules">
+            <li className="cd-tool-rules__rule">
+              <div className="cd-rule-row">
+                <div className="cd-rule-row__layout">
+                  <div className="cd-rule-row__text">
+                    <Lines precise words="Anyone can ask for an urgent callback, which alerts you at once." className="cd-rule-row__reason cd-type-body" anchor="rules-job-reason" />
+                    <Lines precise words="Anyone" className="cd-rule-row__words cd-type-meta" text="meta" anchor="rules-job-words" />
+                  </div>
+                  <div className="cd-outcome cd-type-meta" data-skeleton-anchor="rules-job-outcome">
+                    <div className="cd-status-label">
+                      <Skeleton shape="block" width="var(--size-dot)" height="var(--size-dot)" radius="full" />
+                      <Lines precise fitted words={outcomePhrase('auto')} className="cd-type-meta" text="meta" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <div className="cd-tool-rules__fallback">
+            <Lines precise fitted words="Anything else here: ask me." className="cd-tool-rules__fallback-line cd-type-meta" text="meta" anchor="rules-job-fallback" />
+          </div>
+        </div>
+      </SkeletonCard>
+    </section>
+  );
+}
+
+/** A fresh copy has one job and no suggestions: then its connector groups and always-on rules. */
 function Body() {
   return (
     <>
+      <Jobs />
       <div className="cd-connector-list">
         <div className="cd-connector-list__body">
           <Lines words={rulesVersionLine(7)} className="cd-connector-list__summary cd-type-meta" text="meta" />

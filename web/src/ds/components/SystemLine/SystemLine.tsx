@@ -1,7 +1,7 @@
 import './SystemLine.css';
 
 export interface SystemLineProps {
-  /** What happened, in the consumer's words: "Maria Rivera joined the chat", "Claude is helping again." */
+  /** What happened, in the consumer's words: "Mike Turner joined the chat", "Claude is helping again." */
   text: string;
   /** Initials beside the words, for a person joining; hidden from screen readers. */
   initials?: string;

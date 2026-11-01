@@ -17,6 +17,7 @@ const PLAN_02: Record<RouteKey, string> = {
   me: 'GET /api/owner/me',
   desks: 'GET /api/owner/desks',
   setAnswering: 'PUT /api/owner/desks/{desk_id}/answering',
+  setBusiness: 'PUT /api/owner/desks/{desk_id}/business',
   deleteDesk: 'DELETE /api/owner/desks/{desk_id}',
   openPreview: 'POST /api/owner/desks/{desk_id}/preview_session',
   // Today
@@ -68,6 +69,7 @@ const PLAN_02: Record<RouteKey, string> = {
   setupAnswer: 'POST /api/owner/setup/{id}/answer',
   setupProposal: 'POST /api/owner/setup/{id}/proposals/{proposal_id}',
   setupSuggestions: 'POST /api/owner/setup/{id}/suggestions',
+  setupEvents: 'GET /api/owner/setup/{id}/events',
   setupTools: 'GET /api/owner/setup/{id}/tools',
   setupConnect: 'POST /api/owner/setup/{id}/tools/connect',
   setupPublicLines: 'GET /api/owner/setup/{id}/public_lines',

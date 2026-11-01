@@ -23,7 +23,7 @@ type Story = StoryObj<typeof meta>;
 const PHONE_LINE = 358;
 
 export const Default: Story = {
-  parameters: { canvasNote: "The board's first message is about a water heater; the Rivera fixture's Dana writes about her kitchen sink." },
+  parameters: { canvasNote: "The board's first message is about a water heater; the Turner fixture's Dana writes about her kitchen sink." },
   play: async ({ canvas, canvasElement }) => {
     const bubble = canvas.getByText(danaText);
     // A faint bubble in the message type, on the right, never wider than 85% of its column.
@@ -46,10 +46,10 @@ export const Default: Story = {
   },
 };
 
-const luciaText = '¿Puedo hablar con Maria? También gotea la llave de paso.';
+const luciaText = '¿Puedo hablar con Mike? También gotea la llave de paso.';
 
 export const WithTranslation: Story = {
-  args: { text: luciaText, translation: 'Can I talk to Maria? The shutoff valve is dripping too.' },
+  args: { text: luciaText, translation: 'Can I talk to Mike? The shutoff valve is dripping too.' },
   parameters: {
     canvas: 'N-Conv-TakeOver',
     canvasNote: 'The board reads the label to screen readers only; here "Translated by Claude" is shown to everyone, as the owner reads it.',
@@ -57,12 +57,12 @@ export const WithTranslation: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByText(luciaText)).toBeVisible();
     const line = canvasElement.querySelector('.cd-visitor-message__translation') as HTMLElement;
-    await expect(line).toHaveTextContent(/^Translated by Claude: Can I talk to Maria\? The shutoff valve is dripping too\.$/);
+    await expect(line).toHaveTextContent(/^Translated by Claude: Can I talk to Mike\? The shutoff valve is dripping too\.$/);
     // The translate icon is decorative; the words say what the line is.
     await expect(line.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     expectComputed(line, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     // The translation carries the visitor's words, so it is user text; the label is not.
-    await expect(canvas.getByText('Can I talk to Maria? The shutoff valve is dripping too.')).toHaveAttribute('data-copy', 'user');
+    await expect(canvas.getByText('Can I talk to Mike? The shutoff valve is dripping too.')).toHaveAttribute('data-copy', 'user');
   },
 };
 

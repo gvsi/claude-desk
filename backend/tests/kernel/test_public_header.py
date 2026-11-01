@@ -9,7 +9,7 @@ new Desk's slug would carry, is refused (422 `invalid`) and ledgered `desk_data`
 "canary", fields, fact_ids}`, naming the fields and the documents, never the text. A header value
 stored before that check is withheld from the page, which shows the field's safe fallback
 instead, in the header and in the Agent Card that names the business and the owner, and the owner
-is alerted in the Demo inbox. Tests run on Rivera Plumbing copies as `POST /copies` seeds
+is alerted in the Demo inbox. Tests run on Turner Plumbing copies as `POST /copies` seeds
 them (Friday 10:04 in Oakland).
 """
 
@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, PriceItem, RenderedBlock
+from desk.contracts import BRAND_PALETTE, Claim, PriceItem, RenderedBlock
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import Fact as FactRow
@@ -33,13 +33,13 @@ from .test_adapters import Rivera, rivera
 from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, put_part, updated
 from .test_labels_hardening import assert_no_canary_on_record, disguises, documents, full_width
 
-RIVERA_BRAND = {"primary": "#1F4E4A", "accent": "#B87333"}
-RIVERA_BUSINESS = {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera",
+RIVERA_BRAND = {"palette": "teal", **BRAND_PALETTE["teal"]}   # as the seed stores it
+RIVERA_BUSINESS = {"name": "Turner Plumbing", "owner_display_name": "Mike Turner",
                    "timezone": "America/Los_Angeles", "brand": RIVERA_BRAND}
 
 
 def business(**fields) -> dict:
-    """A `PUT /desks/{id}/business` body: Rivera Plumbing's business with `fields` changed."""
+    """A `PUT /desks/{id}/business` body: Turner Plumbing's business with `fields` changed."""
     return RIVERA_BUSINESS | fields
 
 
@@ -67,27 +67,27 @@ async def test_a_document_body_in_the_business_name_is_refused(app, client):
     # the owner pastes Dana's whole invoice into the business's name
     response = await put_part(client, copy, "business", business(name=dana.body))
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
-    assert [row.name for row in await rows_of(app, copy.copy_id, select(Business))] == ["Rivera Plumbing"]
+    assert [row.name for row in await rows_of(app, copy.copy_id, select(Business))] == ["Turner Plumbing"]
     # ledgered on the Desk, naming the field and the document, never the text
     [entry] = (await entries_of(app, copy))[before:]
     assert (entry.event.kind, entry.event.summary) == ("desk_data", {
         "part": "business", "refused": "canary", "fields": ["name"], "fact_ids": [f"document:{dana.document_id}"]})
     await assert_no_canary_on_record(app, copy, dana.canary)
-    assert (await public_page(client, copy)).business_name == "Rivera Plumbing"
+    assert (await public_page(client, copy)).business_name == "Turner Plumbing"
 
 
 async def test_a_disguised_or_split_canary_in_any_header_field_is_refused(app, client):
     copy = await rivera(app, client)
     seeded = await documents(app, copy)
     dana, bob = seeded["dana-invoice"], seeded["bob-warranty"]
-    refused = [({"name": f"Rivera Plumbing {disguised}"}, ["name"], dana) for disguised in disguises(dana.canary)]
+    refused = [({"name": f"Turner Plumbing {disguised}"}, ["name"], dana) for disguised in disguises(dana.canary)]
     refused += [
         ({"brand": {"accent": f"#c2410c {bob.canary}"}}, ["brand"], bob),           # a brand color
         ({"brand": {f"accent {full_width(bob.canary)}": "#c2410c"}}, ["brand"], bob),   # or its name
         # refused for the canary before the display name's own check, so it is on record
-        ({"owner_display_name": f"Maria {dana.canary}"}, ["owner_display_name"], dana),
+        ({"owner_display_name": f"Mike {dana.canary}"}, ["owner_display_name"], dana),
         # split between two fields the page shows side by side: every field is named
-        ({"name": f"Rivera Plumbing {dana.canary[:10]}", "owner_display_name": f"{dana.canary[10:]} Maria"},
+        ({"name": f"Turner Plumbing {dana.canary[:10]}", "owner_display_name": f"{dana.canary[10:]} Mike"},
          ["name", "owner_display_name", "brand"], dana),
     ]
     before = len(await entries_of(app, copy))
@@ -95,7 +95,7 @@ async def test_a_disguised_or_split_canary_in_any_header_field_is_refused(app, c
         response = await put_part(client, copy, "business", business(**fields))
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), fields
     assert [(row.name, row.owner_display_name, row.brand) for row in await rows_of(
-        app, copy.copy_id, select(Business))] == [("Rivera Plumbing", "Maria Rivera", RIVERA_BRAND)]
+        app, copy.copy_id, select(Business))] == [("Turner Plumbing", "Mike Turner", RIVERA_BRAND)]
     assert [entry.event.summary for entry in (await entries_of(app, copy))[before:]] == [
         {"part": "business", "refused": "canary", "fields": named, "fact_ids": [f"document:{document.document_id}"]}
         for _, named, document in refused]
@@ -128,7 +128,7 @@ async def test_a_new_desk_is_held_to_the_same(app, client):
         response = await post_desk(client, copy, body)
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), body
     assert set(await desks_of(app, copy)) == {copy.desk_id}
-    assert [row.name for row in await rows_of(app, copy.copy_id, select(Business))] == ["Rivera Plumbing"]
+    assert [row.name for row in await rows_of(app, copy.copy_id, select(Business))] == ["Turner Plumbing"]
     # with no new Desk, each refusal goes on the ledger of the Desk whose document it held
     assert [entry.event.summary for entry in (await entries_of(app, copy))[before:]] == [
         {"part": "desk", "refused": "canary", "fields": named, "fact_ids": [f"document:{dana.document_id}"]}
@@ -136,7 +136,7 @@ async def test_a_new_desk_is_held_to_the_same(app, client):
     # a new Desk of a business whose name was stored holding a canary would carry it in its public
     # address, which is made from that name, so it is refused too
     [rivera_business] = await rows_of(app, copy.copy_id, select(Business))
-    await store_business(app, copy, name=f"Rivera Plumbing {dana.canary}")
+    await store_business(app, copy, name=f"Turner Plumbing {dana.canary}")
     response = await post_desk(client, copy, new_desk(existing_business_id=rivera_business.business_id))
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert set(await desks_of(app, copy)) == {copy.desk_id}
@@ -154,7 +154,7 @@ async def test_a_new_desk_holding_two_desks_documents_is_ledgered_on_both(app, c
     seeded = await documents(app, copy)
     dana, kim = seeded["dana-invoice"], seeded["kim-estimate"]
     before = {desk_id: len(await entries_of(app, copy, desk_id)) for desk_id in (copy.desk_id, lopez.desk_id)}
-    # Dana's invoice (on Rivera's Desk) in the business's name, Kim's estimate (on Lopez's) in the Desk's
+    # Dana's invoice (on Turner's Desk) in the business's name, Kim's estimate (on Lopez's) in the Desk's
     line_2 = LOPEZ_DESK.model_copy(update={"name": f"Line 2 {kim.canary}"})
     response = await post_desk(client, copy, new_desk(name=f"Lopez Electric {dana.canary}", desk=line_2))
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
@@ -192,7 +192,7 @@ async def test_a_canary_the_public_address_would_carry_is_refused(app, client):
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), name
         assert (await entries_of(app, copy))[-1].event.summary == refused
         # and a new Desk of a business whose stored name would make the same slug
-        await store_business(app, copy, name=f"Rivera Plumbing {sharp_s(dana.canary, ch)}")
+        await store_business(app, copy, name=f"Turner Plumbing {sharp_s(dana.canary, ch)}")
         response = await post_desk(client, copy, new_desk(existing_business_id=rivera_business.business_id))
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), ch
         assert (await entries_of(app, copy))[-1].event.summary == refused
@@ -217,7 +217,7 @@ async def test_a_canary_split_after_a_new_desks_business_name_is_refused(app, cl
                                                       owner_display_name=f"{tail.capitalize()} Lopez"))
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     # an existing business whose stored name holds the start, then the new Desk's name
-    await store_business(app, copy, name=f"Rivera Plumbing {head}")
+    await store_business(app, copy, name=f"Turner Plumbing {head}")
     response = await post_desk(client, copy, new_desk(existing_business_id=rivera_business.business_id,
                                                       desk=LOPEZ_DESK.model_copy(update={"name": f"{tail} Line 2"})))
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
@@ -230,7 +230,7 @@ async def test_a_canary_split_after_a_new_desks_business_name_is_refused(app, cl
         {"part": "desk", "refused": "canary", "fields": ["business.name", "desk.name", "desk.charter",
                                                          "desk.price_items"], "fact_ids": fact_ids}]
     assert set(await desks_of(app, copy)) == {copy.desk_id}
-    assert [row.name for row in await rows_of(app, copy.copy_id, select(Business))] == [f"Rivera Plumbing {head}"]
+    assert [row.name for row in await rows_of(app, copy.copy_id, select(Business))] == [f"Turner Plumbing {head}"]
     await assert_no_canary_on_record(app, copy, dana.canary, head)
 
 
@@ -353,7 +353,7 @@ async def test_a_stored_canary_is_withheld_from_the_public_page(app, client, fro
     dana = (await documents(app, copy))["dana-invoice"]
     clean = await public_page(client, copy)
     assert (clean.business_name, clean.desk_name, clean.owner_display_name, clean.brand) == (
-        "Rivera Plumbing", "Main line", "Maria Rivera", RIVERA_BRAND)
+        "Turner Plumbing", "Main line", "Mike Turner", RIVERA_BRAND)
     # Dana's invoice, pasted into the business's name before the check
     await store_business(app, copy, name=dana.body)
     response = await client.get(f"/public/{copy.slug}")
@@ -362,7 +362,7 @@ async def test_a_stored_canary_is_withheld_from_the_public_page(app, client, fro
     page = PublicDesk.model_validate(response.json())
     # the name gives way to its fallback, in the Agent Card too, and the rest of the page is served as it was
     assert page == clean.model_copy(update={"business_name": "",
-                                            "agent_card": card_naming(clean.agent_card, "Rivera Plumbing",
+                                            "agent_card": card_naming(clean.agent_card, "Turner Plumbing",
                                                                       WITHHELD_BUSINESS["en"])})
     # the owner hears of it at most once an hour
     alert = ("Text from one of your private documents is in your business name, so your public page doesn't show "
@@ -383,17 +383,17 @@ async def test_each_field_is_withheld_alone_and_a_split_withholds_them_all(app, 
     dana, bob = seeded["dana-invoice"], seeded["bob-warranty"]
     clean = await public_page(client, copy)
     # the owner's name and a brand color, each holding a canary however written, give way alone
-    await store_business(app, copy, owner_display_name=f"Maria {bob.canary.upper()}",
+    await store_business(app, copy, owner_display_name=f"Mike {bob.canary.upper()}",
                          brand={"primary": "#1F4E4A", "accent": full_width(dana.canary)})
     assert await public_page(client, copy) == clean.model_copy(update={
         "owner_display_name": "", "brand": {},
-        "agent_card": card_naming(clean.agent_card, "Maria Rivera", WITHHELD_OWNER["en"])})
+        "agent_card": card_naming(clean.agent_card, "Mike Turner", WITHHELD_OWNER["en"])})
     assert await withheld_alerts(app, copy) == [
         "Text from one of your private documents is in your display name and brand colors, so your public page "
         "doesn't show them. Change them to show them again."]
     # a canary split between the business's name and the Desk's, which the page shows side by side,
     # leaves out every field
-    await store_business(app, copy, name=f"Rivera Plumbing {dana.canary[:10]}", owner_display_name="Maria Rivera",
+    await store_business(app, copy, name=f"Turner Plumbing {dana.canary[:10]}", owner_display_name="Mike Turner",
                          brand=RIVERA_BRAND)
     await store(app, copy, Desk, name=f"{dana.canary[10:]} Main line")
     frozen_clock.advance(60 * 60)
@@ -419,15 +419,15 @@ async def test_the_agent_card_names_a_withheld_name_in_fixed_words(app, client, 
     assert response.status_code == 200, response.text
     assert dana.canary not in response.text and "Dana Whitfield" not in response.text
     card = PublicDesk.model_validate(response.json()).agent_card
-    assert card == card_naming(clean.agent_card, "Rivera Plumbing", WITHHELD_BUSINESS[lang])
+    assert card == card_naming(clean.agent_card, "Turner Plumbing", WITHHELD_BUSINESS[lang])
     assert all("  " not in block.text for block in card)
     # the owner's name holds Bob's canary instead: the card says "the owner"
-    await store_business(app, copy, name="Rivera Plumbing", owner_display_name=f"Maria {bob.canary}")
+    await store_business(app, copy, name="Turner Plumbing", owner_display_name=f"Mike {bob.canary}")
     response = await client.get(f"/public/{copy.slug}", params={"lang": lang})
     assert response.status_code == 200, response.text
     assert bob.canary not in response.text
     card = PublicDesk.model_validate(response.json()).agent_card
-    assert card == card_naming(clean.agent_card, "Maria Rivera", WITHHELD_OWNER[lang])
+    assert card == card_naming(clean.agent_card, "Mike Turner", WITHHELD_OWNER[lang])
     assert all("  " not in block.text and " 's" not in block.text for block in card)
 
 
@@ -438,18 +438,41 @@ async def test_ordinary_names_pass(app, client):
     # digits, symbols, accents and hex colors are ordinary; so is text one character away from a
     # canary: a digit changed, or a plain letter between its characters
     near = dana.canary[:-1] + ("1" if dana.canary.endswith("0") else "0")
-    for name in ("Rivera Plumbing & Drains 24/7", f"Rivera Plumbing, ref {near}",
-                 f"Rivera Plumbing {dana.canary[:10]}x{dana.canary[10:]}"):
+    for name in ("Turner Plumbing & Drains 24/7", f"Turner Plumbing, ref {near}",
+                 f"Turner Plumbing {dana.canary[:10]}x{dana.canary[10:]}"):
         before = len(await entries_of(app, copy))
         response = await put_part(client, copy, "business", business(
-            name=name, owner_display_name="María O'Neil-Rivera", brand={"primary": "#0F3D3A", "accent": "#C2410C"}))
+            name=name, owner_display_name="Mike O'Neil-Turner", brand={"primary": "#0F3D3A", "accent": "#C2410C"}))
         assert response.status_code == 200, (name, response.text)
         assert [entry.event.summary for entry in (await entries_of(app, copy))[before:]] == [
             {"part": "business", "refs": [rivera_business.business_id]}]
         page = await public_page(client, copy)
         assert (page.business_name, page.owner_display_name, page.brand) == (
-            name, "María O'Neil-Rivera", {"primary": "#0F3D3A", "accent": "#C2410C"})
+            name, "Mike O'Neil-Turner", {"primary": "#0F3D3A", "accent": "#C2410C"})
     assert await withheld_alerts(app, copy) == []
     after_hours = LOPEZ_DESK.model_copy(update={"name": "Line 2, after hours"})
     response = await post_desk(client, copy, new_desk(desk=after_hours))
     assert response.status_code == 200, response.text
+
+
+async def test_the_public_page_serves_a_pick_a_free_form_brand_or_teal(app, client):
+    copy = await rivera(app, client)
+    teal = {"palette": "teal", **BRAND_PALETTE["teal"]}
+    assert (await public_page(client, copy)).brand == teal                       # the seed's pick
+    # a pick shows as its key and the table's colours
+    for key in ("plum", "clay"):
+        await updated(client, copy, "business", business(brand={}, brand_palette=key))
+        assert (await public_page(client, copy)).brand == {"palette": key, **BRAND_PALETTE[key]}, key
+    # a brand passed back with a pick shows the table's colours, never the colours it sent
+    await updated(client, copy, "business", business(brand={"palette": "navy", "primary": "#000000"}))
+    assert (await public_page(client, copy)).brand == {"palette": "navy", **BRAND_PALETTE["navy"]}
+    # "none", no colours: the key alone, so the web draws its neutral header
+    await updated(client, copy, "business", business(brand={}, brand_palette="none"))
+    assert (await public_page(client, copy)).brand == {"palette": "none"}
+    # nothing stored reads as teal; free-form colours from before the palette show as stored
+    await updated(client, copy, "business", business(brand={}))
+    assert (await public_page(client, copy)).brand == teal
+    legacy = {"primary": "#0F3D3A", "accent": "#C2410C"}
+    await store_business(app, copy, brand=legacy)
+    assert (await public_page(client, copy)).brand == legacy
+    assert await withheld_alerts(app, copy) == []
