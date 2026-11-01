@@ -596,6 +596,8 @@ export interface SetupPublicHours {
   windows: HoursWindow[];
 }
 
+export type PublicPriceItem = SetupPublicPriceItem;
+
 export interface SetupPublicPriceItem {
   item_id: string;
   title: string;

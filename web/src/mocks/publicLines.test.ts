@@ -4,12 +4,68 @@ import type { PublicDesk } from '../api/contracts.ts';
 import type { SetupPublicLines, QuestionKey, SetupState } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { SETUP_QUESTIONS } from './setup.ts';
-import { mockStore } from './store.ts';
+import { mockStore, MockStore } from './store.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import { holdPublicLineOnSeed, storePublicLines, storePublicState } from './publicLineStore.ts';
 import { cardChrome } from '../ds/components/ReplyCard/chrome.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
+
+it('removes one suggested price, recomputes duplicate ids and clears the last price', async () => {
+  const params = await atRules();
+  const response = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in response) throw new Error('read failed');
+  const data = response.body as SetupPublicLines;
+  expect(data.prices!.items.map((item) => item.item_id)).toEqual(['tax-return-review', 'business-tax-return', 'monthly-bookkeeping']);
+  const removed = await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'business-tax-return' } });
+  expect(removed).toMatchObject({ status: 200, body: { lines: data.lines, hours: data.hours, prices: { source: 'suggested', items: [
+    data.prices!.items[0], data.prices!.items[2],
+  ] } } });
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'business-tax-return' } })).toMatchObject({ status: 409, body: { error: 'conflict' } });
+  // The API builds these ids from titles after each change, including duplicate-title suffixes.
+  storePublicState(mockStore.world, params.id, { ...data, prices: { source: 'suggested', items: [
+    { item_id: 'cafe-review', title: 'Café review!', unit_cents: 25000 },
+    { item_id: 'cafe-review-2', title: 'Café review!', unit_cents: 60000 },
+    { item_id: 'cafe-review-3', title: 'Café review!', unit_cents: 15000 },
+  ] } });
+  const first = await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' } });
+  expect(first).toMatchObject({ status: 200, body: { prices: { source: 'suggested', items: [
+    { item_id: 'cafe-review', title: 'Café review!', unit_cents: 60000 },
+    { item_id: 'cafe-review-2', title: 'Café review!', unit_cents: 15000 },
+  ] } } });
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review-3' } })).toMatchObject({ status: 409 });
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' } })).toMatchObject({ status: 200, body: { prices: { items: [
+    { item_id: 'cafe-review', title: 'Café review!', unit_cents: 15000 },
+  ] } } });
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'cafe-review' } })).toMatchObject({ status: 200, body: { prices: null } });
+});
+
+it('refuses per-price removal for owner prices, wrong stages and another owner', async () => {
+  const params = await atRules();
+  const priceParams = { ...params, item_id: 'tax-return-review' };
+  expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({ status: 200 });
+  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams })).toMatchObject({ status: 422, body: { error: 'not_suggested', key: 'prices' } });
+  expect(await mockStore.dispatch('setupPublicLines', { params })).toMatchObject({ body: { prices: { source: 'owner', items: expect.arrayContaining([expect.objectContaining({ item_id: priceParams.item_id })]) } } });
+  await mockStore.dispatch('setupSafetyCheck', { params });
+  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams })).toMatchObject({ status: 409, body: { error: 'conflict' } });
+  expect(await mockStore.dispatch('removePublicPrice', { params: { id: 'missing', item_id: priceParams.item_id } })).toMatchObject({ status: 404 });
+  mockStore.reset('rivera', { signedIn: false });
+  expect(await mockStore.dispatch('removePublicPrice', { params: priceParams })).toMatchObject({ status: 401 });
+  const store = new MockStore({ cookies: 'real' });
+  const owner = async () => {
+    const copy = await store.dispatch('copies', { body: { passcode: 'demo' } });
+    if ('network' in copy) throw new Error('copy failed');
+    const value = /^desk_owner=([^;]+)/.exec(copy.setCookie?.find((line) => line.startsWith('desk_owner=')) ?? '')?.[1];
+    if (!value) throw new Error('owner cookie missing');
+    return { desk_owner: value };
+  };
+  const first = await owner();
+  const second = await owner();
+  const started = await store.dispatch('startSetup', { cookies: first, body: { description: START_EXAMPLES.en.examples[3]!.description, timezone: 'UTC', idempotency_key: 'price-ownership' } });
+  if ('network' in started) throw new Error('start failed');
+  expect(await store.dispatch('removePublicPrice', { cookies: first, params: { id: (started.body as SetupState).interview_id, item_id: 'tax-return-review' } })).toMatchObject({ status: 409 });
+  expect(await store.dispatch('removePublicPrice', { cookies: second, params: { id: (started.body as SetupState).interview_id, item_id: 'tax-return-review' } })).toMatchObject({ status: 404 });
+});
 
 it('removes only suggested items and never publishes a removed item', async () => {
   const params = await atRules();
@@ -66,6 +122,7 @@ it('publishes suggestions only after an edit or confirmation, including structur
   expect(confirmed).toMatchObject({ status: 200, body: { hours: { source: 'owner' }, prices: { source: 'owner' } } });
   if ('network' in confirmed) throw new Error('confirm failed');
   expect((confirmed.body as SetupPublicLines).lines.every((line) => line.source === 'owner')).toBe(true);
+  expect(JSON.stringify(await publicRead())).not.toMatch(/Tax return review|Business tax return|Monthly bookkeeping|charter:prices/);
   expect((await publicRead()).charter.map((card) => card.fact_id)).toEqual(expect.arrayContaining([
     'charter:contact', 'charter:hours', 'charter:policy:service_area',
   ]));
@@ -192,9 +249,9 @@ it('seeds exactly the CPA suggestions alongside owner lines without moving the i
     ]),
     hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] },
     prices: { source: 'suggested', items: [
-      { title: 'Tax return review', unit_cents: 25000 },
-      { title: 'Business tax return', unit_cents: 60000 },
-      { title: 'Monthly bookkeeping', unit_cents: 15000 },
+      { item_id: 'tax-return-review', title: 'Tax return review', unit_cents: 25000 },
+      { item_id: 'business-tax-return', title: 'Business tax return', unit_cents: 60000 },
+      { item_id: 'monthly-bookkeeping', title: 'Monthly bookkeeping', unit_cents: 15000 },
     ] },
   });
   expect(await mockStore.dispatch('setup', { params })).toMatchObject({ body: { step: 'rules' } });

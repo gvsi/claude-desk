@@ -30,8 +30,10 @@ function checkedLines(value: SetupPublicLines): SetupPublicLines {
         && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(window.start) && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(window.end))))
     || !(value.prices === null || (value.prices && ['owner', 'suggested'].includes(value.prices.source)
       && Array.isArray(value.prices.items) && value.prices.items.every((item) => item
+        && typeof item.item_id === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.item_id) && item.item_id.length <= 40
         && typeof item.title === 'string' && item.title.trim() && Array.from(item.title).length <= 80
-        && Number.isSafeInteger(item.unit_cents) && item.unit_cents >= 0)))
+        && Number.isSafeInteger(item.unit_cents) && item.unit_cents >= 0)
+      && new Set(value.prices.items.map((item) => item.item_id)).size === value.prices.items.length))
   ) throw new Error('invalid public lines');
   return value;
 }
@@ -145,14 +147,22 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       setBusy(null);
     }
   };
-  const remove = async (key: string, row: string) => {
+  const remove = async (key: string, row: string, itemId?: string) => {
     if (editingKey !== null || busy !== null) return;
     setBusy('remove');
     setRemoving(row);
     setError(null);
     try {
-      const saved = checkedLines(await request('removePublicLine', { params: { id, key } }));
-      if (key === 'hours' || key === 'prices' ? saved[key] !== null : saved.lines.some((line) => line.key === key)) throw new Error('item not removed');
+      if (key === 'prices' && itemId === undefined) throw new Error('missing price id');
+      const saved = checkedLines(itemId === undefined
+        ? await request('removePublicLine', { params: { id, key } })
+        : await request('removePublicPrice', { params: { id, item_id: itemId } }));
+      if (itemId !== undefined) {
+        const remaining = lines.data?.prices?.items.filter((item) => item.item_id !== itemId);
+        if (!remaining || remaining.length !== (saved.prices?.items.length ?? 0)
+          || remaining.some((item, index) => item.title !== saved.prices?.items[index]?.title || item.unit_cents !== saved.prices?.items[index]?.unit_cents)
+          || (remaining.length === 0 ? saved.prices !== null : saved.prices?.source !== 'suggested')) throw new Error('unexpected remaining prices');
+      } else if (key === 'hours' ? saved.hours !== null : saved.lines.some((line) => line.key === key)) throw new Error('item not removed');
       queryClient.setQueryData(queryKey, saved);
     } catch (err) {
       if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'not_suggested'))) {
@@ -276,7 +286,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       )}
     </div>
   );
-  const renderStructured = (key: 'hours' | 'prices', index: number, label: string, value: string) => (
+  const renderStructured = (key: 'hours' | 'prices', index: number, label: string, value: string, itemId?: string) => (
     <div className={`cd-public-lines__row${label ? '' : ' cd-public-lines__row--continuation'}`} key={`${key}-${index}`}>
       <span className="cd-public-lines__label cd-type-meta">{label}</span>
       <div id={`${fieldId}-${key}-${index}`} className="cd-public-lines__text" data-copy="user">{value}</div>
@@ -286,7 +296,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
           waiting={editingKey !== null || busy !== null}
           busy={removing === `${key}-${index}`}
           describedBy={`${fieldId}-${key}-${index}`}
-          onClick={() => void remove(key, `${key}-${index}`)}
+          onClick={() => void remove(key, `${key}-${index}`, itemId)}
         >
           {copy.remove}
         </Button>
@@ -320,7 +330,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
                 <div className="cd-public-lines">
                   {suggested.map(renderLine)}
                   {hours.map((window, index) => renderStructured('hours', index, index === 0 ? copy.hours : '', formatPublicHours(window)))}
-                  {prices.map((item, index) => renderStructured('prices', index, index === 0 ? copy.prices : '', formatPublicPrice(item)))}
+                  {prices.map((item, index) => renderStructured('prices', index, index === 0 ? copy.prices : '', formatPublicPrice(item), item.item_id))}
                 </div>
               </div>
             </Card>

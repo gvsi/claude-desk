@@ -7,7 +7,7 @@ import { OWNER_ERROR_COPY } from '../api/http.ts';
 import { CHANGED_REFRESHED } from '../ds/index.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
-import { holdPublicLineOnSeed, storedPublicState, storePublicLines } from '../mocks/publicLineStore.ts';
+import { holdPublicLineOnSeed, storedPublicState, storePublicLines, storePublicState } from '../mocks/publicLineStore.ts';
 import { worker } from '../mocks/browser.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
@@ -668,14 +668,21 @@ it('removes suggestions with one busy action, blocks other actions, and hides th
   expect(mockStore.requests.filter((request) => request.key === 'setupPublicLinesConfirm')).toHaveLength(0);
   release();
   await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).not.toBeInTheDocument();
-  // Each price row removes the whole suggested list, as the API's `prices` key specifies.
   await screen.getByRole('button', { name: 'Remove', exact: true }).nth(2).click();
+  await expect.element(screen.getByText('Business tax return, $600', { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByText('Tax return review, $250', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Monthly bookkeeping, $150', { exact: true })).toBeVisible();
+  await screen.getByRole('button', { name: 'Remove', exact: true }).first().click();
+  await expect.element(screen.getByText('(408) 555-0199, linda@chenandco.com', { exact: true })).not.toBeInTheDocument();
+  await screen.getByRole('button', { name: 'Remove', exact: true }).first().click();
   await expect.element(screen.getByText('Tax return review, $250', { exact: true })).not.toBeInTheDocument();
-  await expect.element(screen.getByText('Monthly bookkeeping, $150', { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByText('Monthly bookkeeping, $150', { exact: true })).toBeVisible();
+  expect(screen.getByText('Price list', { exact: true }).elements()).toHaveLength(1);
   await screen.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).not.toBeInTheDocument();
   await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeEnabled();
-  expect(mockStore.requests.filter((request) => request.key === 'removePublicLine').map((request) => request.path.split('/').at(-1))).toEqual(['hours', 'prices', 'contact']);
+  expect(mockStore.requests.filter((request) => request.key === 'removePublicLine').map((request) => request.path.split('/').at(-1))).toEqual(['hours', 'contact']);
+  expect(mockStore.requests.filter((request) => request.key === 'removePublicPrice').map((request) => request.path.split('/').at(-1))).toEqual(['business-tax-return', 'tax-return-review', 'monthly-bookkeeping']);
   expectNoHorizontalScroll();
   await expectScreenBasics(screen.container, { owner: true });
 });
@@ -730,7 +737,7 @@ it('renders multiple hours windows and exact price amounts without text lines or
       { days: ['mon', 'wed', 'fri'], start: '09:30', end: '12:00' },
       { days: ['sat'], start: '18:00', end: '00:00' },
     ] },
-    prices: { source: 'suggested', items: [{ title: 'Annual review', unit_cents: 186000 }, { title: 'Filing', unit_cents: 4050 }] },
+    prices: { source: 'suggested', items: [{ item_id: 'annual-review', title: 'Annual review', unit_cents: 186000 }, { item_id: 'filing', title: 'Filing', unit_cents: 4050 }] },
   } });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
   await screen.getByRole('button', { name: 'Looks right' }).click();
@@ -777,4 +784,50 @@ it('keeps an edited suggestion open if a successful save does not make it owner-
   await expect.element(screen.getByRole('alert')).toHaveTextContent(OWNER_ERROR_COPY.unavailable);
   await expect.element(field).toHaveValue('hello@chenandco.com');
   expect(mockStore.requests.filter((request) => request.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
+
+it('refreshes a stale price id and uses recomputed ids from each response while other actions wait', async () => {
+  const state = await atSituations();
+  const params = { id: state.interview_id };
+  const response = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in response) throw new Error('read failed');
+  const data = response.body as SetupPublicLines;
+  storePublicState(mockStore.world, params.id, {
+    lines: data.lines.filter((line) => line.source === 'owner'), hours: null,
+    prices: { source: 'suggested', items: [
+      { item_id: 'review', title: 'Review', unit_cents: 25000 },
+      { item_id: 'review-2', title: 'Review', unit_cents: 60000 },
+      { item_id: 'review-3', title: 'Review', unit_cents: 15000 },
+    ] },
+  });
+  const { screen } = await renderRoute(`/app/setup/${params.id}`, { viewport: 'phone' });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByText('Review, $150', { exact: true })).toBeVisible();
+  await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'review-3' } });
+  await screen.getByRole('button', { name: 'Remove', exact: true }).nth(2).click();
+  await expect.element(screen.getByText('Review, $150', { exact: true })).not.toBeInTheDocument();
+  expect(mockStore.requests.filter((request) => request.key === 'setup').length).toBeGreaterThanOrEqual(2);
+  expect(mockStore.requests.filter((request) => request.key === 'setupPublicLines').length).toBeGreaterThanOrEqual(3);
+  await expect.element(screen.getByText('Review, $250', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Review, $600', { exact: true })).toBeVisible();
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(release);
+  worker.use(http.delete('/api/owner/setup/:id/public_lines/prices/:item_id', async () => { await gate; return undefined; }));
+  await screen.getByRole('button', { name: 'Remove', exact: true }).first().click();
+  await expect.element(screen.getByRole('button', { name: 'Remove', exact: true }).first()).toHaveAttribute('aria-busy', 'true');
+  await expect.element(screen.getByRole('button', { name: 'Remove', exact: true }).nth(1)).toBeDisabled();
+  await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeDisabled();
+  (screen.getByRole('button', { name: 'Looks right' }).element() as HTMLButtonElement).click();
+  (screen.getByRole('button', { name: 'Remove', exact: true }).nth(1).element() as HTMLButtonElement).click();
+  expect(mockStore.requests.filter((request) => request.key === 'setupPublicLinesConfirm')).toHaveLength(0);
+  release();
+  await expect.element(screen.getByText('Review, $250', { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByText('Review, $600', { exact: true })).toBeVisible();
+  await screen.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).not.toBeInTheDocument();
+  expect(mockStore.requests.filter((request) => request.key === 'removePublicPrice').map((request) => request.path.split('/').at(-1))).toEqual(['review-3', 'review-3', 'review', 'review']);
+  expectNoHorizontalScroll();
+  await expectScreenBasics(screen.container, { owner: true });
 });

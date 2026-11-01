@@ -73,6 +73,7 @@ const PLAN_02: Record<RouteKey, string> = {
   setupPublicLine: 'PUT /api/owner/setup/{id}/public_lines',
   setupPublicLinesConfirm: 'POST /api/owner/setup/{id}/public_lines/confirm',
   removePublicLine: 'DELETE /api/owner/setup/{id}/public_lines/{key}',
+  removePublicPrice: 'DELETE /api/owner/setup/{id}/public_lines/prices/{item_id}',
   // Public
   publicDesk: 'GET /api/public/{slug}',
   openSession: 'POST /api/public/desks/{slug}/sessions',

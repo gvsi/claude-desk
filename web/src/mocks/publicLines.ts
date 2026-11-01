@@ -1,5 +1,5 @@
 /** Setup's public lines, scoped to the mock copy and interview. The real API uses the kernel scan. */
-import type { SetupPublicLine, SetupPublicLines, SetupState } from '../api/views.ts';
+import type { SetupPublicLine, SetupPublicLines, PublicPriceItem, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
 import { SETUP_QUESTIONS, SETUP_ROUTES, setupAbout } from './setup.ts';
 import { heldPublicLineSeed, storedPublicState, storePublicState } from './publicLineStore.ts';
@@ -26,6 +26,23 @@ function afterHoursOf(answer: string | undefined): string | undefined {
   return clauses?.length ? clauses.join(' ') : undefined;
 }
 
+/** Match setup.py's price_items: ASCII-folded title slugs, capped at 40, with unique suffixes. */
+function priceItems(items: Pick<PublicPriceItem, 'title' | 'unit_cents'>[]): PublicPriceItem[] {
+  const taken = new Set<string>();
+  return items.map(({ title, unit_cents }) => {
+    const base = title.normalize('NFKD').replace(/[^\x00-\x7f]/g, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/g, '') || 'item';
+    let item_id = base;
+    let count = 1;
+    while (taken.has(item_id)) {
+      const suffix = `-${++count}`;
+      item_id = base.slice(0, 40 - suffix.length).replace(/-+$/g, '') + suffix;
+    }
+    taken.add(item_id);
+    return { item_id, title, unit_cents };
+  });
+}
+
 function seed(sv: Server, state: SetupState): Omit<SetupPublicLines, 'revision'> {
   const desk = sv.world.desk(state.desk_id);
   if (/^Chen & Co\.?(?: CPA)?$/i.test(desk?.summary.business_name ?? '')) {
@@ -36,11 +53,11 @@ function seed(sv: Server, state: SetupState): Omit<SetupPublicLines, 'revision'>
     return {
       lines,
       hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] },
-      prices: { source: 'suggested', items: [
+      prices: { source: 'suggested', items: priceItems([
         { title: 'Tax return review', unit_cents: 25000 },
         { title: 'Business tax return', unit_cents: 60000 },
         { title: 'Monthly bookkeeping', unit_cents: 15000 },
-      ] },
+      ]) },
     };
   }
   const about = desk ? setupAbout(sv.world, desk) : null;
@@ -78,10 +95,21 @@ function read(sv: Server, req: Req): SetupPublicLines | Failure {
       }),
     });
   }
+  if (data.prices) data.prices.items = priceItems(data.prices.items);
   return data;
 }
 
 export const PUBLIC_LINES_ROUTES = {
+  removePublicPrice(sv, req) {
+    const found = read(sv, req);
+    if ('status' in found) return found;
+    if (found.prices?.source === 'owner') return { status: 422, body: { error: 'not_suggested', key: 'prices' } };
+    const index = found.prices?.items.findIndex((item) => item.item_id === req.params.item_id) ?? -1;
+    if (!found.prices || index === -1) return { status: 409, body: { error: 'conflict' } };
+    const items = found.prices.items.filter((_, position) => position !== index);
+    found.prices = items.length ? { source: 'suggested', items: priceItems(items) } : null;
+    return { status: 200, body: structuredClone(found) };
+  },
   removePublicLine(sv, req) {
     const found = read(sv, req);
     if ('status' in found) return found;

@@ -162,6 +162,7 @@ export const ROUTES = {
   setupPublicLine: { method: 'PUT', path: '/api/owner/setup/{id}/public_lines', owner: true },
   setupPublicLinesConfirm: { method: 'POST', path: '/api/owner/setup/{id}/public_lines/confirm', owner: true },
   removePublicLine: { method: 'DELETE', path: '/api/owner/setup/{id}/public_lines/{key}', owner: true },
+  removePublicPrice: { method: 'DELETE', path: '/api/owner/setup/{id}/public_lines/prices/{item_id}', owner: true },
 
   // Public: the visitor cookie (set by openSession) on all but publicDesk, openSession and agentCard
   publicDesk: { method: 'GET', path: '/api/public/{slug}', owner: false },
@@ -250,6 +251,7 @@ interface RouteShapes {
   setupPublicLine: { body: SetupPublicLineIn; response: SetupPublicLines };
   setupPublicLinesConfirm: { body: SetupPublicLinesConfirmIn; response: SetupPublicLines };
   removePublicLine: { body: undefined; response: SetupPublicLines };
+  removePublicPrice: { body: undefined; response: SetupPublicLines };
 
   publicDesk: { body: undefined; response: PublicDesk };
   openSession: { body: undefined; response: VisitorSession };
