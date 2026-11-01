@@ -307,6 +307,12 @@
   min-width: 0;
 }
 
+/* Take over and its line stay at the left, under the take-over bar's own lines, at every width
+   (CNV-01): the pane is wide enough to set them side by side, as the bar does elsewhere. */
+.cd-conversation__controls .cd-take-over__action {
+  flex-basis: 100%;
+}
+
 /* Today's handoff cards, in Needs you order, above the transcript. */
 .cd-conversation__handoffs {
   display: flex;

@@ -255,9 +255,13 @@ describe('Conversations', () => {
       expect(p.getBoundingClientRect().width).toBeLessThanOrEqual(640);
       expect(Math.abs(p.getBoundingClientRect().left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
     }
-    // Take over and its lines keep to their own reading column, from the left.
+    // Take over stays at the left, under the note about whispers, with its own line under it.
     const takeOver = screen.getByRole('button', { name: 'Take over' }).element().getBoundingClientRect();
-    expect(takeOver.left).toBeGreaterThanOrEqual(inner.left - 1);
+    const note = document.querySelector('.cd-conversation__controls .cd-take-over__lead')!.getBoundingClientRect();
+    expect(Math.abs(takeOver.left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    expect(takeOver.top).toBeGreaterThanOrEqual(note.bottom);
+    const line = document.querySelector('.cd-conversation__controls .cd-take-over__action .cd-take-over__line');
+    if (line) expect(line.getBoundingClientRect().top).toBeGreaterThanOrEqual(takeOver.bottom);
     expectNoHorizontalScroll();
   });
 
