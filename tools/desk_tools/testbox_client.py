@@ -28,8 +28,16 @@ from pathlib import Path
 base = Path(BASE)
 repo = (base / 'repo').resolve()
 previous = json.loads((base / 'manifest.json').read_text()) if (base / 'manifest.json').exists() else []
-current = json.loads((base / 'transfer/manifest.json').read_text())
-for name in set(previous) - set(current):
+pending = base / 'pending-manifest.json'
+previous = set(previous) | set(json.loads(pending.read_text()) if pending.exists() else [])
+current = set(json.loads((base / 'transfer/manifest.json').read_text()))
+def remember(paths):
+    temporary = base / 'pending-manifest.tmp'
+    temporary.write_text(json.dumps(sorted(paths)))
+    temporary.replace(pending)
+# Remember everything before pruning: interruption during cleanup is recoverable too.
+remember(previous | current)
+for name in previous - current:
     relative = Path(name)
     if relative.is_absolute() or '..' in relative.parts:
         continue
@@ -46,6 +54,7 @@ for name in set(previous) - set(current):
         except OSError:
             break
         parent = parent.parent
+remember(current)
 """.replace('BASE', repr(base))
 
 

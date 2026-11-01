@@ -175,3 +175,23 @@ def test_worker_restores_index_on_every_call_even_when_refs_are_unchanged(tmp_pa
         worker.main()
     assert git('diff', '--cached', '--name-only') == ''
     assert (repo / 'source.txt').read_text() == 'unstaged'
+
+
+def test_interrupted_transfer_paths_survive_request_overwrite_and_are_pruned(tmp_path):
+    import json
+    import sys
+    from desk_tools.testbox_client import cleanup_script
+
+    repo, transfer = tmp_path / 'repo', tmp_path / 'transfer'
+    repo.mkdir()
+    transfer.mkdir()
+    (tmp_path / 'manifest.json').write_text('[]')
+    (transfer / 'manifest.json').write_text('["partial_branch_test.py"]')
+    subprocess.run([sys.executable, '-c', cleanup_script(str(tmp_path))], check=True)
+    # First sync was interrupted after copying a file but before worker promotion.
+    (repo / 'partial_branch_test.py').write_text('partial transfer')
+    assert json.loads((tmp_path / 'pending-manifest.json').read_text()) == ['partial_branch_test.py']
+    (transfer / 'manifest.json').write_text('[]')
+    subprocess.run([sys.executable, '-c', cleanup_script(str(tmp_path))], check=True)
+    assert not (repo / 'partial_branch_test.py').exists()
+    assert json.loads((tmp_path / 'pending-manifest.json').read_text()) == []

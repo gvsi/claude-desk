@@ -60,7 +60,10 @@ def main():
     request = json.loads((transfer / "request.json").read_text())
     # Remove files that disappeared on branch switches, without touching lane build state.
     current = set(json.loads((transfer / "manifest.json").read_text()))
-    (base / "manifest.json").write_text(json.dumps(sorted(current)))
+    completed = base / "manifest.tmp"
+    completed.write_text(json.dumps(sorted(current)))
+    completed.replace(base / "manifest.json")
+    (base / "pending-manifest.json").unlink(missing_ok=True)
     if not (repo / ".git").exists():
         run(["git", "init", "-q", str(repo)])
         run(["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/gvsi/claude-desk.git"])
