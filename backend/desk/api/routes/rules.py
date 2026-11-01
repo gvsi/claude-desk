@@ -192,8 +192,9 @@ async def rule_chat(desk_id: DeskId, body: RuleChatIn, request: Request,
     (503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer.
 
     Accept: text/event-stream subscribes to whole-answer deltas, reset on retry, then final
-    RuleChatOut after any kernel proof, or an error with status and error code. Admission
-    failures remain JSON. Without that header the existing JSON/202 behavior is unchanged.
+    RuleChatOut after any kernel proof, or an error: the JSON error body this route would answer,
+    plus its status. Admission failures remain JSON. Without that header the existing JSON/202
+    behavior is unchanged.
     """
     async def admit() -> None:
         state = runtime(request).started()

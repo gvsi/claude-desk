@@ -939,3 +939,45 @@ async def test_a_subscriber_holds_no_database_connection(app, browser, fake, ker
             await live.close()
         if chat == "setup":
             await app.state.runtime.turn_runs.wait(initial["interview_id"])
+
+
+@pytest.mark.parametrize("failure", ["above_money_cap", "changes_always_on", "model_unavailable", "kernel",
+                                     "kernel_unavailable", "internal"])
+async def test_a_streamed_rules_error_is_the_json_error_and_its_status(
+        app, browser, fake, kernel_http, model, monkeypatch, failure):
+    import httpx
+
+    from desk.api import rules
+    from desk.api.deps import ApiProblem
+    from desk.api.kernel_client import KernelFailed, KernelUnavailable
+    from desk.api.versions import ChangesAlwaysOn
+    from tests.api.test_owner_desks import new_owner as rules_owner
+
+    raised = {"above_money_cap": lambda: rules.AboveMoneyCap(0),        # no money limit set yet
+              "changes_always_on": lambda: ChangesAlwaysOn(["rv-verify"]),
+              "model_unavailable": lambda: ApiProblem(503, "model_unavailable"),
+              "kernel": lambda: KernelFailed(409, "version_conflict"),
+              "kernel_unavailable": lambda: KernelUnavailable("POST /policy/draft", 503, "internal"),
+              "internal": lambda: RuntimeError("private detail")}[failure]
+
+    async def failing(*args, **kwargs):
+        raise raised()
+
+    monkeypatch.setattr(rules, "chat", failing)
+    owner = await rules_owner(app, browser, fake, kernel_http)
+    path, body = f"/api/owner/policy/{owner.desk_id}/chat", {"text": "Take deposits on their own"}
+    plain = httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                              base_url="https://desk.test", cookies=owner.browser.cookies)
+    live = None
+    try:
+        answered = await plain.post(path, json=body)
+        assert answered.headers["content-type"].startswith("application/json")
+        assert answered.status_code == {"above_money_cap": 422, "changes_always_on": 422, "model_unavailable": 503,
+                                        "kernel": 409, "kernel_unavailable": 503, "internal": 500}[failure]
+        live = LiveEvents(app, browser, owner).open(path, body=body)
+        assert await live.next() == ("error", {"status": answered.status_code, **answered.json()})
+        assert "private detail" not in json.dumps(answered.json())
+    finally:
+        if live is not None:
+            await live.close()
+        await plain.aclose()

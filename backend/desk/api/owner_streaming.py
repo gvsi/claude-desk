@@ -228,20 +228,30 @@ def response(events: AsyncIterator[dict]) -> EventSourceResponse:
 
 
 def failure(error: BaseException) -> dict[str, Any]:
+    """The JSON error body the route would answer `error` with (the app's error handlers, and the drafting routes'
+    422 bodies), plus its HTTP `status`. Never the exception's message."""
     # Import lazily: deps owns the proving registry that also uses these display channels.
     from desk.api.deps import ApiProblem
     from desk.api.kernel_client import KernelFailed, KernelUnavailable
+    from desk.api.main import KERNEL_CODES
+    from desk.api.ratelimit import RateLimited
     from desk.api.rules import AboveMoneyCap
+    from desk.api.schemas import AboveMoneyCap as AboveMoneyCapBody, ApiError, ChangesAlwaysOn as ChangesAlwaysOnBody
     from desk.api.versions import ChangesAlwaysOn
 
-    if isinstance(error, ApiProblem):
-        return {"status": error.status, "error": error.error}
     if isinstance(error, AboveMoneyCap):
-        return {"status": 422, "error": "above_money_cap"}
-    if isinstance(error, ChangesAlwaysOn):
-        return {"status": 422, "error": "changes_always_on"}
-    if isinstance(error, KernelFailed):
-        return {"status": error.status, "error": "kernel"}
-    if isinstance(error, KernelUnavailable):
-        return {"status": 503, "error": "kernel"}
-    return {"status": 503, "error": "model_unavailable"}
+        status, body = 422, AboveMoneyCapBody(cap_cents=error.cap_cents)
+    elif isinstance(error, ChangesAlwaysOn):
+        status, body = 422, ChangesAlwaysOnBody(card_ids=error.card_ids)
+    elif isinstance(error, ApiProblem):
+        status, body = error.status, ApiError(error=error.error, code=error.code, retry_after=error.retry_after)
+    elif isinstance(error, RateLimited):
+        status, body = 429, ApiError(error="rate_limited", retry_after=error.retry_after)
+    elif isinstance(error, KernelFailed):
+        status, body = error.status, ApiError(error="kernel", code=error.code)
+    elif isinstance(error, KernelUnavailable):
+        status, body = 503, ApiError(error="kernel", code=error.code if error.code in KERNEL_CODES
+                                     else "kernel_unavailable")
+    else:
+        status, body = 500, ApiError(error="internal")
+    return {"status": status, **body.model_dump(mode="json", exclude_none=True)}

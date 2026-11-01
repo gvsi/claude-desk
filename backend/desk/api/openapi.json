@@ -6964,7 +6964,7 @@
     "/api/owner/policy/{desk_id}/chat": {
       "post": {
         "summary": "Rule Chat",
-        "description": "Ask Claude about the Desk's rules in plain words. A question gets an answer and drafts nothing; a change comes\nback as a draft the kernel compiled and proved, with how it differs from the active rules, which nothing changes\nuntil `confirm`. Counts on the copy's `owner_ai` limit (40 an hour) and, in production, the daily model budget\n(503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer.\n\nAccept: text/event-stream subscribes to whole-answer deltas, reset on retry, then final\nRuleChatOut after any kernel proof, or an error with status and error code. Admission\nfailures remain JSON. Without that header the existing JSON/202 behavior is unchanged.",
+        "description": "Ask Claude about the Desk's rules in plain words. A question gets an answer and drafts nothing; a change comes\nback as a draft the kernel compiled and proved, with how it differs from the active rules, which nothing changes\nuntil `confirm`. Counts on the copy's `owner_ai` limit (40 an hour) and, in production, the daily model budget\n(503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer.\n\nAccept: text/event-stream subscribes to whole-answer deltas, reset on retry, then final\nRuleChatOut after any kernel proof, or an error: the JSON error body this route would answer,\nplus its status. Admission failures remain JSON. Without that header the existing JSON/202\nbehavior is unchanged.",
         "operationId": "owner_rule_chat",
         "parameters": [
           {

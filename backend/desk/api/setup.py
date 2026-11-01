@@ -1497,9 +1497,10 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                         await _rollback_turn(owner, engine, interview_id, run_id)
                 except Exception as rollback_failed:
                     logger.warning("setup turn couldn't be reopened (%s)", type(rollback_failed).__name__)
-            display.finish("error", {"run": run_id, "error": display_failure(failed)["error"]})
-            if isinstance(failed, TimeoutError):
-                raise ApiProblem(503, "model_unavailable") from None
+            answered = ApiProblem(503, "model_unavailable") if isinstance(failed, TimeoutError) else failed
+            display.finish("error", {"run": run_id, "error": display_failure(answered)["error"]})
+            if answered is not failed:
+                raise answered from None
             raise
         finally:
             guard.close()
