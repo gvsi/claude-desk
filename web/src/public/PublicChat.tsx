@@ -777,12 +777,15 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // stops calling it live, so a remount (the visitor leaving the page and coming back) draws it still.
   const drawn = !opening && chat.status !== 'not_found' && desk !== null;
   const replyComingIn = useReplyComingIn(endRef, drawn);
-  // The stream's place when the visitor last sent, until the stream says what came of it.
+  // The turn's marks when the visitor last sent, until the stream says what came of that turn
+  // (Claude writing, a reply, its end, an error), or the owner is in the chat: she answers in her
+  // own time. A receipt or a held request's outcome that comes first doesn't end it.
   const [sentAt, setSentAt] = useState<number | null>(null);
-  const lastSeq = chat.state.lastSeq;
+  const turnMarks = chat.state.turnMarks;
+  const ownerInChatNow = chat.ownerInChat;
   useEffect(() => {
-    if (sentAt !== null && lastSeq !== sentAt) setSentAt(null);
-  }, [sentAt, lastSeq]);
+    if (sentAt !== null && (turnMarks !== sentAt || ownerInChatNow)) setSentAt(null);
+  }, [sentAt, turnMarks, ownerInChatNow]);
   // Messages fade where they scroll under the chat's head, once the conversation is scrolled from its top.
   useTopFade(endRef, '.cd-public-shell__scroll', drawn);
   const { shown } = chat;
@@ -962,16 +965,21 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     newest.follow();
     visitorTyping.sent();
     // While the owner has the chat she answers, in her own time: nothing waits on Claude.
-    if (!chat.ownerInChat) setSentAt(state.lastSeq);
+    if (!chat.ownerInChat) setSentAt(state.turnMarks);
     chat.send(text);
   };
-  // Claude's reply is on its way: from the visitor's message until the stream says what came of it
-  // (writing, a reply, a line, an error), unless it didn't send; then while Claude writes and the
+  // Claude's reply is on its way: from the visitor's message until the stream says what came of its
+  // turn, unless it didn't send or the owner is in the chat; then while Claude writes and the
   // kernel checks the reply; then while its words are revealed and its cards and receipts come in.
   // The visitor can type meanwhile, and Send waits.
   const lastSent = state.rows.findLast(({ item }) => item.kind === 'visitor')?.item;
   const replyOnItsWay =
-    sentAt !== null && state.lastSeq === sentAt && state.connection === 'open' && lastSent?.kind === 'visitor' && lastSent.status === 'sent';
+    sentAt !== null &&
+    state.turnMarks === sentAt &&
+    !chat.ownerInChat &&
+    state.connection === 'open' &&
+    lastSent?.kind === 'visitor' &&
+    lastSent.status === 'sent';
   const sendHeld = ready && (replyOnItsWay || state.writing || replyComingIn);
   const resend = (id: string) => {
     newest.follow();
