@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles db-throwaway web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
+.PHONY: kernel test db-roles db-throwaway web-deps web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
 
 # Run this worktree's tests/builds on the isolated SSM test machine (docs/testbox.md).
 .PHONY: remote
@@ -81,11 +81,15 @@ db-throwaway:
 		-d "$(DB_NAME)" -c 'ALTER SYSTEM SET fsync = off' -c 'ALTER SYSTEM SET synchronous_commit = off' \
 		-c 'ALTER SYSTEM SET full_page_writes = off' -c 'SELECT pg_reload_conf()'
 
-# The web app's checks, as CI's `web tests` runs them: install, type-check and unit tests, then the
-# production build, its check and the mocked end-to-end test (which uses web-test's install). WebKit
-# runs the skeleton's sweep checks (the `ds-webkit` project), as iPhones draw it.
-web-test:
-	cd web && npm ci && npx playwright install --with-deps chromium webkit && npm run typecheck && npm test
+# The web app's checks, as CI's `web tests` runs them: install (web-deps), type-check and unit tests, then
+# the production build, its check and the mocked end-to-end test (which needs the install too). WebKit
+# runs the skeleton's sweep checks (the `ds-webkit` project), as iPhones draw it. CI runs the tests in
+# four shards, passing each its shard and worker count in WEB_TEST_ARGS; locally it's empty.
+web-deps:
+	cd web && npm ci && npx playwright install --with-deps chromium webkit
+
+web-test: web-deps
+	cd web && npm run typecheck && npm test -- $(WEB_TEST_ARGS)
 
 web-e2e:
 	cd web && npm run build && npm run check:build && npm run e2e:mock

@@ -174,6 +174,16 @@ async def test_free_consult_is_accepted_and_confirmed_through_core_card_fields(a
     assert (await read(client, visitor.headers, decision)).visitor_plain == '“Book a consult”: booked on Maria Rivera\'s calendar'
 
 
+async def test_a_reply_may_name_an_enabled_free_consult_by_its_appointment_type(app, client):
+    """The owner's decision of 2026-10-31: the free word in an enabled tool's appointment type passes
+    in Claude's prose inside a repeat of it, before any booking card."""
+    from .test_reply_check import checked
+
+    copy, visitor = await configured(app, client, config={'appointment_type': 'Free consult'})
+    verdict = await checked(client, visitor, 'I can book you a Free consult with Maria.')
+    assert verdict.ok, verdict.violations
+
+
 @pytest.mark.solver
 async def test_identical_put_refreshes_and_reproves_an_old_typed_booking_profile(app, client, desk_prove):
     from desk.kernel_service import adapters

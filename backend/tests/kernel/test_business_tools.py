@@ -1046,3 +1046,109 @@ async def test_approved_intake_keeps_base_behavior_for_a_closed_session(app, cli
     assert response.status_code == 200, response.text
     assert response.json()['decision']['state'] == 'executed'
     assert response.json()['execution']['model_view']['saved'] is True
+
+
+# The owner's decision of 2026-10-31: a free word may stand in Claude's reply only inside a repeat of
+# the title or appointment type of one of the Desk's enabled business tools that resolve.
+INTRO_CALL = 'Book a free intro call'
+
+
+def test_free_words_stand_in_titles_and_appointment_types_and_never_on_a_payments_card():
+    """One definition of the fields that may hold a free word, for the write and the reply check alike."""
+    from desk.contracts import BusinessTool
+    from desk.kernel_service import business_tools, reply_check
+    from desk.kernel_service.adapters import blocks
+
+    assert {block: blocks.free_name_fields(block) for block in blocks.CARD_FIELDS} == {
+        'intake': ('title',), 'typed_booking': ('title', 'appointment_type'), 'purpose_payment': (),
+        'urgent': ('title',)}
+    free = reply_check.FREE_WORDS
+    for config, allowed in [
+            ({'block': 'intake', 'questions': ['What?']}, {'desk.consult.0-title': free}),
+            ({'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 30},
+             {'desk.consult.0-title': free, 'desk.consult.1-appointment_type': free}),
+            ({'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': 5000}, {})]:
+        tool = BusinessTool.model_validate(intake(tool='desk.consult', config=config))
+        assert business_tools.free_allow_words(tool) == allowed
+
+
+async def named_desk(app, client, tools, states):
+    """Rivera with business `tools` written, each row then put in its state of `states` (by tool):
+    `enabled`, `needs_review` (as written), `disabled`, `stale` (enabled, its profile pin broken), or
+    `drifted` (enabled, its stored definition changed outside the write and its profile pin recomputed
+    to match, so only `adapters.resolve`'s check of the definition can tell); a visitor of it. The seed's
+    urgent tool, which the whole-set write turns off, is left as it is."""
+    copy = await rivera(app, client)
+    assert (await put(client, copy, tools)).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        for row in await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+                Tool.desk_id == copy.desk_id, Tool.source == 'business', Tool.tool.in_(states)))):
+            state = states[row.tool]
+            if state != 'needs_review':
+                row.status, row.review_reason = ('disabled' if state == 'disabled' else 'enabled'), None
+            if state == 'stale':
+                row.profile_sha256 = '0' * 64
+            if state == 'drifted':
+                business = row.profile.business.model_copy(update={'description': 'Changed outside the write.'})
+                row.profile = row.profile.model_copy(update={'business': business})
+                row.profile_sha256 = adapters.profile_sha256(row.profile)
+    return copy, await open_visitor(client, copy)
+
+
+async def test_a_reply_may_repeat_an_enabled_business_tools_title_with_its_free_word(app, client):
+    from .test_reply_check import checked
+
+    copy, visitor = await named_desk(app, client, [intake(title=INTRO_CALL)], {'desk.new-enquiry': 'enabled'})
+    verdict = await checked(client, visitor, 'Book a free intro call whenever suits you.')
+    assert verdict.ok, verdict.violations
+
+
+async def test_a_free_word_outside_the_repeated_title_is_still_a_promise_word(app, client):
+    from .test_reply_check import checked
+
+    copy, visitor = await named_desk(app, client, [intake(title=INTRO_CALL)], {'desk.new-enquiry': 'enabled'})
+    verdict = await checked(client, visitor, 'Book a free intro call, and the first visit is free too.')
+    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [('promise_word', 'lex.en.promise', 'free')]
+    assert not verdict.ok
+
+
+@pytest.mark.parametrize('state', ['needs_review', 'disabled', 'stale', 'drifted'])
+async def test_a_business_tool_waiting_for_review_disabled_or_stale_backs_no_free_word(app, client, state):
+    """Beside an enabled tool whose title the reply repeats, a second tool's title backs its own
+    free word only once that tool is enabled and resolves."""
+    from .test_reply_check import checked
+
+    tools = [intake(title=INTRO_CALL), intake(tool='desk.consult', title='Free consult')]
+    copy, visitor = await named_desk(app, client, tools, {'desk.new-enquiry': 'enabled', 'desk.consult': state})
+    verdict = await checked(client, visitor, 'Book a free intro call, or ask me about a Free consult.')
+    assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [('promise_word', 'lex.en.promise', 'Free')]
+
+
+async def test_business_free_names_are_enabled_resolving_titles_and_types_never_a_payments(app, client):
+    """Desk-wide, in tool order: every enabled tool that resolves lends its title and appointment
+    type, and nothing else does (a tool waiting for review, a disabled one, one whose profile no
+    longer matches its pin, or one whose definition drifted from its pinned profile). The enabled
+    payment resolves too, and lends nothing: a payment's title never backs a free word
+    (`blocks.free_name_fields`). The batch leaves out the Rivera seed's urgent tool, which it turns off."""
+    from desk.kernel_service import context
+
+    tools = [intake(title=INTRO_CALL),
+             intake(tool='desk.consult', title='Book a consult', config={
+                 'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 30}),
+             intake(tool='desk.retainer', title='Initial retainer', config={
+                 'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': 5000}),
+             intake(tool='desk.urgent', title='Urgent support', config={
+                 'block': 'urgent', 'urgent_when': 'A burst pipe'}),
+             intake(tool='desk.waiting', title='Free trial lesson'),
+             intake(tool='desk.old', title='Free old lesson'),
+             intake(tool='desk.stale', title='Free stale lesson'),
+             intake(tool='desk.drifted', title='Free drifted lesson')]
+    copy, _ = await named_desk(app, client, tools, {
+        'desk.new-enquiry': 'enabled', 'desk.consult': 'enabled', 'desk.retainer': 'enabled',
+        'desk.urgent': 'enabled', 'desk.waiting': 'needs_review', 'desk.old': 'disabled', 'desk.stale': 'stale',
+        'desk.drifted': 'drifted'})
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        assert await context.business_free_names(ctx, copy.desk_id) == ['Book a consult', 'Free consult', INTRO_CALL,
+                                                                         'Urgent support']

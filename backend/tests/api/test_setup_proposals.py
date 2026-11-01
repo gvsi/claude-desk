@@ -453,7 +453,7 @@ def test_dotted_hour_ranges_are_the_owners_on_the_hours_question():
 @pytest.mark.parametrize("domain", ["attacker.example", "bobs-plumbing-booking.net"])
 async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(proposals, model, engine, fake, domain):
     from tests.api.test_setup_questions import answer, turn
-    from tests.api.test_setup_rules import settled, unparseable
+    from tests.api.test_setup_rules import say, settled, unparseable
 
     owner, state, _ = proposals
     interview_id = state["interview_id"]
@@ -467,6 +467,9 @@ async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(p
     assert "public_contact" not in said.get("owner_fields", [])
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
     assert reply.status_code == 200, reply.text
+    # The owner typed their own phone on the contact question, so the test-client offer waits: not now.
+    assert reply.json()["question"] == "test_client"
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 200
     model.add(unparseable(), unparseable())
     reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
     assert reply.status_code == 200, reply.text
@@ -481,7 +484,7 @@ async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(p
 @pytest.mark.parametrize("topic", ["contact_and_after_hours", "hours_and_area"])
 async def test_contact_offer_words_stay_held_through_rules(proposals, model, engine, fake, topic):
     from tests.api.test_setup_questions import answer, turn
-    from tests.api.test_setup_rules import settled, unparseable
+    from tests.api.test_setup_rules import say, settled, unparseable
 
     owner, state, _ = proposals
     interview_id = state["interview_id"]
@@ -496,6 +499,10 @@ async def test_contact_offer_words_stay_held_through_rules(proposals, model, eng
     assert "public_contact" not in said.get("owner_fields", [])
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
     assert reply.status_code == 200, reply.text
+    # A phone typed on the contact question is the owner's own, so the test-client offer waits there: not now.
+    assert reply.json()["question"] == ("test_client" if topic == "contact_and_after_hours" else None)
+    if topic == "contact_and_after_hours":
+        assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 200
     model.add(unparseable(), unparseable())
     reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
     assert reply.status_code == 200, reply.text
