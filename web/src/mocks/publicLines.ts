@@ -16,8 +16,21 @@ const CPA_LINES = [
   ['how_we_help', 'Book a free intro call: New clients pick a time within your opening hours and book a 20-minute call.\nNew client intake: Before their call, new clients answer three short questions.\nSend a retainer link: Clients you’ve priced get a secure link to pay a retainer before you start.'],
 ] as const;
 
+/** Only an explicit after-hours clause is known; contact details and ambiguous answers stay out. */
+function afterHoursOf(answer: string | undefined): string | undefined {
+  const clauses = answer?.split(/(?<=[.!?])\s+|[;\n]+/)
+    .map((clause) => clause.trim())
+    .filter((clause) => /^(?:after[ -]hours|outside business hours)\b/i.test(clause));
+  return clauses?.length ? clauses.join(' ') : undefined;
+}
+
 function seed(sv: Server, state: SetupState): PublicLine[] {
   const desk = sv.world.desk(state.desk_id);
+  if (/^Chen & Co\.?(?: CPA)?$/i.test(desk?.summary.business_name ?? '')) {
+    return CPA_LINES.map(([key, text]): PublicLine => ({
+      key: `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help',
+    }));
+  }
   const about = desk ? setupAbout(sv.world, desk) : null;
   const answers = new Map<string, string>();
   let question: string | undefined;
@@ -29,18 +42,12 @@ function seed(sv: Server, state: SetupState): PublicLine[] {
       answers.set(question, message.text);
     }
   }
-  const values: Record<string, string | undefined> = {
-    about: about ?? undefined,
-    intake: answers.get('what_you_do'),
-    service_area: answers.get('hours_and_area'),
-    pricing: answers.get('quote_limit'),
-    after_hours: answers.get('contact_and_after_hours'),
-  };
-  const cpa = desk?.summary.business_name.includes('Chen & Co.');
-  return CPA_LINES.flatMap(([key, fallback]) => {
-    const text = values[key] ?? (cpa ? fallback : undefined);
-    return text?.trim() ? [{ key: `policy:${key}`, text, source: values[key] === undefined ? 'suggested' as const : 'owner' as const, editable: key !== 'how_we_help' }] : [];
-  });
+  const values: [string, string | null | undefined][] = [
+    ['about', about],
+    ['after_hours', afterHoursOf(answers.get('contact_and_after_hours'))],
+  ];
+  return values.flatMap(([key, text]): PublicLine[] => text?.trim()
+    ? [{ key: `policy:${key}`, text, source: 'owner', editable: true }] : []);
 }
 
 function read(sv: Server, req: Req): { lines: PublicLine[] } | Failure {

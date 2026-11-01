@@ -1,15 +1,15 @@
 import { beforeEach, expect, it } from 'vitest';
 
-import type { PublicLines, SetupState } from '../api/views.ts';
+import type { PublicLines, QuestionKey, SetupState } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { SETUP_QUESTIONS } from './setup.ts';
 import { mockStore } from './store.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
 
-async function atRules(pricing = 'Ask me first.') {
+async function atRules(answers: Partial<Record<QuestionKey, string>> = {}, description = START_EXAMPLES.en.examples[3]!.description) {
   const started = await mockStore.dispatch('startSetup', { body: {
-    description: START_EXAMPLES.en.examples[3]!.description,
+    description,
     timezone: 'America/Los_Angeles', idempotency_key: 'public-lines',
   } });
   if ('network' in started) throw new Error('start failed');
@@ -17,7 +17,7 @@ async function atRules(pricing = 'Ask me first.') {
   const params = { id: state.interview_id };
   await mockStore.dispatch('setupConsent', { params, body: { allow: false } });
   for (const question of SETUP_QUESTIONS) {
-    await mockStore.dispatch('setupAnswer', { params, body: { question: question.key, text: question.key === 'quote_limit' ? pricing : 'Ask me first.' } });
+    await mockStore.dispatch('setupAnswer', { params, body: { question: question.key, text: answers[question.key] ?? 'Ask me first.' } });
   }
   await mockStore.dispatch('setupRules', { params });
   return params;
@@ -36,6 +36,70 @@ it('reads the seven public lines in order without moving the interview', async (
   expect(lines.at(-1)).toMatchObject({ editable: false });
   expect(lines.at(-1)?.text.split('\n')).toHaveLength(3);
   expect(await mockStore.dispatch('setup', { params })).toMatchObject({ body: { step: 'rules' } });
+});
+
+it('seeds the CPA starter exactly from the board and keeps limit answers out of every line', async () => {
+  const limits = {
+    quote_limit: 'Always ask me first.',
+    discounts: 'Never offer discounts.',
+    documents_and_payments: 'Documents require verification and payments always ask me.',
+    money_limit: '$500 is the money limit.',
+  };
+  const params = await atRules({
+    ...limits,
+    what_you_do: 'Tax returns and bookkeeping for individuals and small businesses in San Jose.',
+    hours_and_area: 'Monday to Friday, 9 to 6. Customers can book those times on their own.',
+    contact_and_after_hours: 'Email Linda. After hours, take a message.',
+  });
+  const board = [
+    ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
+    ['pricing', 'The intro consult is free and takes 20 minutes. We price each engagement after it, and new work starts with a retainer.'],
+    ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
+    ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
+    ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
+    ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
+    ['how_we_help', 'Book a free intro call: New clients pick a time within your opening hours and book a 20-minute call.\nNew client intake: Before their call, new clients answer three short questions.\nSend a retainer link: Clients you’ve priced get a secure link to pay a retainer before you start.'],
+  ];
+  const expected = { lines: board.map(([key, text]) => ({ key: `policy:${key}`, text, source: 'suggested', editable: key !== 'how_we_help' })) };
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  expect(read).toMatchObject({ status: 200, body: expected });
+  if ('network' in read) throw new Error('read failed');
+  for (const answer of Object.values(limits)) {
+    for (const line of (read.body as PublicLines).lines) expect(line.text).not.toContain(answer);
+  }
+  expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({ status: 200, body: expected });
+});
+
+it('seeds other businesses only from their About and explicit after-hours clauses', async () => {
+  const limits = {
+    quote_limit: 'Always ask me first for quotes.',
+    discounts: 'Never offer discounts.',
+    documents_and_payments: 'Documents require verification and payments always ask me.',
+    money_limit: '$500 is the money limit.',
+  };
+  const knownAbout = { key: 'policy:about', text: 'We help local businesses.', source: 'owner', editable: true };
+  for (const [contact, afterHours] of [
+    ['Email me at lee@example.com; After hours, take a message.', 'After hours, take a message.'],
+    ['Call me. Outside business hours, take a message.', 'Outside business hours, take a message.'],
+    ['Email me at lee@example.com.', null],
+  ] as const) {
+    mockStore.reset('rivera');
+    const params = await atRules({
+      ...limits,
+      what_you_do: 'Tax returns and bookkeeping for individuals and small businesses.',
+      hours_and_area: 'Monday to Friday, 9 to 6. Customers can book those times on their own.',
+      contact_and_after_hours: contact,
+    }, 'Lakeview Accounts. I’m Lee. We help local businesses.');
+    const read = await mockStore.dispatch('setupPublicLines', { params });
+    expect(read).toMatchObject({ status: 200, body: { lines: [knownAbout, ...(afterHours ? [
+      { key: 'policy:after_hours', text: afterHours, source: 'owner', editable: true },
+    ] : [])] } });
+    if ('network' in read) throw new Error('read failed');
+    for (const answer of Object.values(limits)) {
+      for (const line of (read.body as PublicLines).lines) expect(line.text).not.toContain(answer);
+    }
+    expect(await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} })).toMatchObject({ status: 200 });
+  }
 });
 
 it('updates one editable line and refuses unsafe, read-only or invalid edits without changing it', async () => {
@@ -69,7 +133,7 @@ it('confirms all editable lines, rescans seeded answers and leaves the interview
   expect(await mockStore.dispatch('setup', { params })).toMatchObject({ body: { step: 'rules' } });
   mockStore.reset('rivera');
   const started = await mockStore.dispatch('startSetup', { body: {
-    description: 'We run Chen & Co. We always help.', timezone: 'UTC', idempotency_key: 'unsafe-seed',
+    description: 'We run Lakeview Accounts. We always help.', timezone: 'UTC', idempotency_key: 'unsafe-seed',
   } });
   if ('network' in started) throw new Error('start failed');
   const unsafe = { id: (started.body as SetupState).interview_id };
@@ -118,9 +182,9 @@ it('shows saved and confirmed lines in the public charter for their claims', asy
 });
 
 it('keeps refused seeded lines private before and after a refused confirm while publishing accepted edits', async () => {
-  const refused = 'We always charge $20.';
-  const key = 'policy:pricing';
-  const params = await atRules(refused);
+  const refused = 'After hours, we always charge $20.';
+  const key = 'policy:after_hours';
+  const params = await atRules({ contact_and_after_hours: refused }, 'Lakeview Accounts. We help local businesses.');
   const setup = await mockStore.dispatch('setup', { params });
   if ('network' in setup) throw new Error('setup read failed');
   const { slug } = setup.body as SetupState;

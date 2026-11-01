@@ -139,7 +139,7 @@ it('opens the row named by a refused confirm and lets the owner correct it', asy
   mockStore.inject({ route: 'setupPublicLinesConfirm', status: 422, body: { error: 'line_refused', key: 'policy:after_hours', reason: 'do not show this reason' } });
   await screen.getByRole('button', { name: 'Looks right' }).click();
   const field = screen.getByRole('textbox', { name: 'After hours', exact: true });
-  await expect.element(field).toHaveValue('Ask me first.');
+  await expect.element(field).toHaveValue('Outside business hours, the Desk takes a message and Linda replies the next business day.');
   await expect.element(screen.getByText(REFUSED_COPY, { exact: true })).toBeVisible();
   expect(screen.container.textContent).not.toContain('do not show this reason');
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
