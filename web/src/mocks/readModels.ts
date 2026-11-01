@@ -636,7 +636,10 @@ function stoppedReplyTriage(): Triage {
 /**
  * The newest AI-written triage summary of a chat's stopped attempts, the one Safety shows for it,
  * or null when nothing in it was triaged: what Needs you sends on a handoff (the API's
- * `newest_triage`). The ledger's order says which is newest.
+ * `newest_triage`). Here the ledger's order says which is newest. The API keeps the summary
+ * written last, and its summaries are written by background jobs that can finish out of order, so
+ * with two triaged attempts in one chat the two can pick differently. The mock writes no summary
+ * late, so it doesn't model that.
  */
 function newestTriageSummary(world: MockWorld, desk: DeskRecord, sessionId: string): string | null {
   const triaged = [

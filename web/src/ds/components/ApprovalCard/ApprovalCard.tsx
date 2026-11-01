@@ -90,7 +90,11 @@ export interface ApprovalCardProps {
   decision: Decision;
   /** The rule that held it (`NeedsYouItem.held_by`), shown as "Held by your rule: {heldBy}", in the owner's words. */
   heldBy?: string;
-  /** One line of context in meta type; mark a visitor's own words with `data-copy="user"`. */
+  /**
+   * One line of context in meta type; mark a visitor's own words with `data-copy="user"`. The
+   * visitor's own words only: never AI-written text such as a triage summary, which a visitor could
+   * steer to sway the answer (master plan, "never in approval cards").
+   */
   context?: ReactNode;
   /** Where and when it was held: "Web chat, 2 min ago". */
   waiting: string;
