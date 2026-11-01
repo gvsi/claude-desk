@@ -947,7 +947,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
     return;
   }
   const question = interview.state.question;
-  if (question !== null) {
+  if (question !== null && question !== 'test_client') {
     interview.covered.add(question);
     interview.answers[question] = text.trim();
   }
