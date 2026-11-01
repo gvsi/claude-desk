@@ -344,12 +344,19 @@ def _named_reach(text: str, names: Iterable[str]) -> list[int]:
 
 
 def _real_spelling(text: str) -> tuple[str, list[int]]:
-    """`text` read across case, width and accents only, with no lookalike letter read as another
-    (as `_allowed_public_hit` reads a word), and the index in `text` each character came from."""
+    """`text` read across case, width and accents, with each dash and apostrophe read as the
+    lexicons read them (`_plain`) and each run of whitespace as one space, but no lookalike letter
+    read as another (as `_allowed_public_hit` reads a word); and the index in `text` each character
+    came from."""
     chars: list[str] = []
     origin: list[int] = []
     for index, char in enumerate(text):
-        for part in unicodedata.normalize("NFKD", char):
+        if char.isspace():
+            if not chars or chars[-1] != " ":
+                chars.append(" ")
+                origin.append(index)
+            continue
+        for part in unicodedata.normalize("NFKD", "’" if char == "'" else _plain(char)):
             if unicodedata.category(part) not in ("Mn", "Me"):
                 folded = part.casefold()
                 chars.append(folded)
@@ -370,8 +377,9 @@ def _free_name_reach(text: str, names: Iterable[str]) -> list[int] | None:
     for name in keys:
         start = folded.find(name)
         while start != -1:
-            low, high = origin[start], origin[start + len(name) - 1] + 1
-            reach[low] = max(reach[low], high)
+            if start == 0 or not folded[start - 1].isalnum():   # a repeat starts at a word's start
+                low, high = origin[start], origin[start + len(name) - 1] + 1
+                reach[low] = max(reach[low], high)
             start = folded.find(name, start + 1)
     if not any(reach):
         return None

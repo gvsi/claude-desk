@@ -2775,9 +2775,22 @@ def test_a_free_word_passes_inside_an_enabled_business_tools_name(prose, names, 
     ("We offer a Consult free to all clients.", ("Consult free",), [("lex.en.promise", "free")]),
     # The name's other words are scanned as ever.
     ("I can book a Free half-day visit for you.", ("Free half-day visit",), [("lex.en.number", "half")]),
+    # A repeat starts at a word's start: "videoconsulta" isn't the owner's "Consulta gratuita".
+    ("Ofrecemos una videoconsulta gratuita.", CONSULTA_GRATUITA, [("lex.es.promise", "gratuita")]),
 ])
 def test_a_free_word_outside_an_enabled_business_tools_name_is_still_blocked(prose, names, found):
     assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose, approved_free_names=names)] == found
+
+
+@pytest.mark.parametrize(("prose", "names"), [
+    ("I can book you a Kid\u2019s free day.", ("Kid's free day",)),          # another apostrophe
+    ("I can book you a Free check\u2010up.", ("Free check-up",)),             # another hyphen
+    ("I can book you a Free  consult.", FREE_CONSULT),                        # a run of spaces
+])
+def test_a_repeat_of_a_business_tools_name_reads_apostrophes_dashes_and_spaces_alike(prose, names):
+    """Apostrophes, dashes and runs of whitespace aren't letters, so a repeat that writes them
+    another way is still the name (as the lexicons read them), and its free word passes."""
+    assert reply_check.scan_prose(prose, approved_free_names=names) == []
 
 
 def test_a_long_draft_repeating_a_business_tools_name_is_scanned_in_one_pass():
