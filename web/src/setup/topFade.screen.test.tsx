@@ -12,7 +12,7 @@ import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 
 const DESCRIPTION =
-  "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops.";
+  "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops.";
 
 /** An interview at its questions, every one but the last answered, so the conversation is long. */
 async function interviewMidQuestions(): Promise<SetupState> {

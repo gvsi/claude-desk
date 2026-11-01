@@ -260,7 +260,7 @@ export const SendHeld: Story = {
     canvasNote: 'The board shows the composer ready; while a reply comes in, typing works and Send waits.',
   },
   play: async ({ args, canvas, userEvent }) => {
-    const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const input = canvas.getByRole('textbox', { name: 'Message Turner Plumbing' });
     const send = canvas.getByRole('button', { name: 'Send' });
     await expect(input).toBeEnabled();
     await userEvent.click(input);

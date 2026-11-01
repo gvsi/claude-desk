@@ -14,7 +14,7 @@ import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 
 const DESCRIPTION =
-  "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops.";
+  "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops.";
 
 /** An interview whose rules are confirmed, at the owner's preview, made as the API makes one. */
 async function interviewAtPreview(): Promise<SetupState> {

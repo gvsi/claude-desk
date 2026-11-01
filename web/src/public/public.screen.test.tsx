@@ -1397,19 +1397,19 @@ describe('public chat page', () => {
     }
     await frames();
 
-    // Maria joins, and her row rises into place, reaching a little below the end until it settles.
+    // Mike joins, and his row rises into place, reaching a little below the end until it settles.
     // The visitor, at the end, scrolls to the very bottom as it lands, so the browser takes the
     // conversation back up a pixel at a time as the row settles, each scroll's event coming only
     // with the next frame. Between one of those scrolls and its event, a pasted message grows the
     // composer over the end. The browser's scroll isn't the visitor leaving the end, so the end
     // comes back above the composer.
     const region = chatScroller();
-    const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLTextAreaElement;
+    const box = screen.getByRole('textbox', { name: 'Message Turner Plumbing' }).element() as HTMLTextAreaElement;
     let tookBack = false;
     let grownOver = 0;
     await new Promise<void>((resolve) => {
       const watcher = new MutationObserver(() => {
-        if (!document.body.textContent?.includes('Maria Rivera joined the chat')) return;
+        if (!document.body.textContent?.includes('Mike Turner joined the chat')) return;
         watcher.disconnect();
         region.scrollTo({ top: region.scrollHeight, behavior: 'instant' });
         let was = region.scrollTop;
@@ -1432,7 +1432,7 @@ describe('public chat page', () => {
       });
       onTestFinished(() => watcher.disconnect());
       watcher.observe(document.body, { subtree: true, childList: true, characterData: true });
-      mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
+      mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Mike Turner' });
     });
     expect(tookBack, 'the browser took the conversation back up as the row settled').toBe(true);
     expect(grownOver, 'the composer grew over the end').toBeGreaterThan(48);
