@@ -3,7 +3,8 @@
 `collect_usage(records, session_ids)` reads one `UsageRecord` per model call from a run's records:
 the API's `app.model_calls` rows (route as the row names it), the kernel's ledger, whose `review`
 entries hold the reviewer's call (route `reviewer`) and whose `reply` entries hold the soft-promise
-check's under `soft_promise` (route `soft_promise`, null when the check made no call), and the
+check's under `soft_promise` (route `soft_promise`, null when the check made no call; its one try
+is one record, irrespective of its violation kind), and the
 simulated visitor's usage per turn (route `simulator`). A row or entry naming another session than
 `session_ids` is left out; one naming no session is the copy's own and is kept. `kernel_check_call(event)`
 is that reading of one ledger entry, which the tier 2 runner shares for a run's usage and spend.
@@ -15,6 +16,10 @@ prices and the kernel's checks at the Claude API's, which they always use; setup
 Desk, drafting cards, situations and the rules chat) reported apart as setup cost; the visiting
 agent's and the simulated visitor's calls left out. `percentile(samples, q)` is the nearest-rank
 percentile every spread here and in `evals.latency` uses.
+
+The production soft check uses Sonnet 5.5 (the 220-case calibration averaged $0.0017/check).
+Costs use each ledger entry's actual model and token counts, including thinking in output_tokens;
+historical Haiku checks retain their own price. Latency is recorded without a two-second cutoff.
 """
 
 import math

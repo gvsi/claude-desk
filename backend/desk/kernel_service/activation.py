@@ -82,6 +82,8 @@ from sqlalchemy import func, select
 
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
+    BusinessTool,
+    BusinessToolDef,
     LedgerEvent,
     NormalizedAction,
     PolicyVersion,
@@ -94,6 +96,7 @@ from desk.contracts import (
     RuleCard,
     ToolProfile,
     money_tool,
+    money_tools_of,
 )
 from desk.db.models import AgentKey, Business, Desk, Person, Tool
 from desk.db.models import DemoInboxEntry as DemoInboxRow
@@ -101,13 +104,14 @@ from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import ToolPin
 from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain, ledger, mcp_client, mcp_pins, payments,
                                  reference, render, review_thresholds, seed)
+from desk.kernel_service.adapters import blocks
 from desk.kernel_service.adapters.base import Normalized
 from desk.kernel_service.auth import OwnerCtx, SessionRow
 from desk.kernel_service.baseline_reasons import BASELINE_RULE_PLAIN as BASELINE_REASONS
 from desk.kernel_service.decisions import Reviewed
 from desk.kernel_service.reference import RefSets
 from desk.kernel_service.repo import (KernelCtx, KernelFailure, KernelRuntime, copy_ids, desks_to_bring_up,
-                                     kernel_transaction, log_error)
+                                     kernel_transaction, limit_lock_waits, log_error)
 from desk.presets import PRESETS
 
 log = logging.getLogger(__name__)
@@ -143,14 +147,18 @@ async def run_selftest() -> ProofMode:
     mode: ProofMode = "bounded"
     try:
         code, stdout = await _run([prover_path(), "--selftest"], kill_after=SELFTEST_TIMEOUT_S)
-        report = ProofReport.model_validate_json(stdout) if code == 0 else None
-        if (report is not None and report.ok and report.method == "symcc" and not report.timed_out
+        report = ProofReport.model_validate_json(stdout) if stdout else None
+        if (code == 0 and report is not None and report.ok and report.method == "symcc" and not report.timed_out
                 and report.checks and all(check.ok for check in report.checks)):
             mode = "symcc"
         else:
-            log.warning("proof_selftest_failed exit=%s", code)
+            # Selftest names come from compiled-in fixtures; report details and stderr stay private.
+            checks = ",".join(check.name for check in report.checks if not check.ok) or "none" \
+                if report is not None else "unavailable"
+            timed_out = True if code is None else report.timed_out if report is not None else "unknown"
+            log.warning("proof_selftest_failed exit=%s checks=%s timed_out=%s", code, checks, timed_out)
     except Exception:                    # a missing binary, an unreadable report, anything: bounded
-        log.warning("proof_selftest_failed", exc_info=True)
+        log.warning("proof_selftest_failed checks=unavailable timed_out=unknown", exc_info=True)
     _proof_mode = mode
     log.info("proof_mode mode=%s", mode)
     return mode
@@ -180,7 +188,8 @@ async def _run(argv: Sequence[str], *, kill_after: float) -> tuple[int | None, b
                 pass
             await process.wait()
     if stderr:
-        log.info("prover_stderr %s", stderr[-2000:].decode("utf-8", "replace"))
+        # Diagnostics can quote policy inputs or paths; only their size belongs in the log.
+        log.info("prover_stderr bytes=%s", len(stderr))
     return process.returncode, stdout
 
 
@@ -363,6 +372,8 @@ def profiles_sha256(profiles: Iterable[ToolProfile]) -> str:
         if profile.tool in by_tool:
             raise ValueError(f"{profile.tool} is enabled twice")
         by_tool[profile.tool] = profile.model_dump(mode="json", exclude=set(adapters.UNHASHED_PROFILE_FIELDS))
+        if profile.business is None:
+            by_tool[profile.tool].pop("business", None)
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(by_tool)).encode()).hexdigest()
 
 
@@ -391,7 +402,9 @@ def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any], p
 # is every new Desk's first cap. A preset drafted at another cap misses the shipped report and
 # proves live like any draft. Each is compiled over the profiles a Desk made from it enables
 # (`shipped_profiles`): the native adapters', and the seed's also its connected MCP tools', pinned at
-# the hashes of the server's default definitions (`mcp_client.seed_pins()`), so proving needs no server.
+# the hashes of the server's default definitions (`mcp_client.seed_pins()`), so proving needs no server,
+# and its business tools' (`SHIPPED_BUSINESS_TOOLS`), each pinned at its definition's hash, as the
+# seed's version turns them on (`activate_shipped` with `enables`).
 
 PROOFS_DIR = compiler.CEDAR_DIR / "proofs"
 SHIPPED_PRESETS: dict[str, list[RuleCard]] = {
@@ -409,16 +422,30 @@ SHIPPED_CONNECTIONS: dict[str, tuple[str, ...]] = {   # the MCP servers a Desk f
     "ask_first": (),
     "auto": (),
 }
+SHIPPED_BUSINESS_TOOLS: dict[str, list[BusinessTool]] = {   # the business tools a Desk from each set enables
+    "rivera": seed.RIVERA_BUSINESS_TOOLS,
+    "ask_first": [],
+    "auto": [],
+}
+
+
+def shipped_business_profiles(preset: str | None = None) -> dict[str, ToolProfile]:
+    """The profiles of the business tools a Desk made from `preset` is given (`SHIPPED_BUSINESS_TOOLS`),
+    by tool name, as the owner's replacement builds them (`blocks.profile`)."""
+    return {tool.tool: blocks.profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
+            for tool in SHIPPED_BUSINESS_TOOLS.get(preset or "", ())}
 
 
 def shipped_profiles(preset: str | None = None) -> list[ToolProfile]:
     """The profiles a Desk made from `preset` enables, by tool name: the registered native adapters'
     (all a new Desk from `desks.create_desk` has), and for the seed also its connected MCP tools',
-    each pinned at its seed hash."""
+    each pinned at its seed hash, and its business tools', each pinned at its definition's hash."""
     pins = mcp_client.seed_pins()
     connected = [ToolPin(tool=tool, definition_sha256=pins[mcp_pins.MCP_OPERATIONS[tool]])
                  for server in SHIPPED_CONNECTIONS.get(preset or "", ()) for tool in mcp_pins.SERVERS[server]]
-    return mcp_pins.enabled_with(adapters.registered_profiles(source="native"), connected)
+    business = shipped_business_profiles(preset)
+    configured = [ToolPin(tool=tool, definition_sha256=profile.definition_sha256) for tool, profile in business.items()]
+    return mcp_pins.enabled_with(adapters.registered_profiles(source="native"), [*connected, *configured], business)
 
 
 class ShippedReport(BaseModel):
@@ -676,7 +703,8 @@ def version_cap(row: PolicyVersionRow | None) -> int:
         return 0
 
 
-async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money_cap_cents: int) -> PolicyVersion:
+async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money_cap_cents: int, *,
+                           enables: Sequence[ToolPin] = ()) -> PolicyVersion:
     """Makes a shipped rule set (`SHIPPED_PRESETS`) version 1 of a new Desk at the money cap
     `auto_money_cap_cents` (its `DeskSeed`'s), `active`, in the caller's transaction, ledgered
     `policy` `{version, status: "active", preset, activated: true, from: null,
@@ -685,10 +713,22 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money
     either proof mode; nothing is proved here, so only the cap the set was proved at in CI
     (`SHIPPED_CAPS`) hits. A miss raises `SeedUnproved` (503, so the caller's transaction and
     everything in it roll back), lists the preset in `Health.unproved_seeds` and logs
-    `seed_unproved` with the hashes, since there may be no Desk left to ledger on."""
+    `seed_unproved` with the hashes, since there may be no Desk left to ledger on.
+
+    With `enables` (the seed's business tools, waiting for review), the version turns those tools
+    on as a confirmed `/tools/confirm` draft does: it is compiled over the enabled profiles plus
+    each of them pinned at its hash (`draft_profiles`), so the shipped report covers them; each pin
+    is checked again as `confirm` checks it (`mcp_pins.check_enables`); the version stores them, and
+    they are turned on in this transaction (`mcp_pins.enable_tools`), their `tool_pin` `enabled`
+    events ledgered after the `policy` entry. A stored profile that no longer matches its pin, or a
+    pin that isn't current, is the set left unproved, as a miss is (`SeedUnproved`, logged
+    `seed_unproved` with the reason)."""
     cards = SHIPPED_PRESETS[preset]
     cap = auto_money_cap_cents
-    profiles = await desks.enabled_profiles(ctx, desk_id)
+    try:
+        profiles = await draft_profiles(ctx, desk_id, enables)
+    except mcp_pins.BusinessProfileChanged:
+        raise _unproved_seed(ctx, preset, "profile_changed") from None
     schema = compiler.desk_schema(profiles)
     compiled = compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap)
     hashes = version_hashes(compiled, schema, profiles, cards=cards, auto_money_cap_cents=cap)
@@ -698,16 +738,29 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money
         log.error("seed_unproved preset=%s %s", preset,
                   " ".join(f"{field}={value}" for field, value in hashes._asdict().items()))
         raise SeedUnproved(preset)
+    if enables and (await mcp_pins.check_enables(ctx, desk_id, enables)).state != "ok":
+        raise _unproved_seed(ctx, preset, "pin_changed")
     row = version_row(copy_id=ctx.copy_id, desk_id=desk_id, version=1, parent_version=None, compiled=compiled,
                       a0=compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap, review=False).A,
                       schema=schema, hashes=hashes, auto_money_cap_cents=cap, status="active", proof=report,
-                      created_at=ctx.clock.now(), preset=preset)
+                      created_at=ctx.clock.now(), preset=preset, enables=enables)
     ctx.db.add(row)
     await ctx.db.flush()
+    events = await mcp_pins.enable_tools(ctx, desk_id, 1, enables) if enables else []
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
         kind="policy", origin="kernel", summary={"version": 1, "status": "active", "preset": preset,
                                                  "activated": True, "from": None, "auto_money_cap_cents": cap}))
+    for event in events:
+        await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=event)
     return version_contract(row)
+
+
+def _unproved_seed(ctx: KernelCtx, preset: str, reason: str) -> SeedUnproved:
+    """A shipped set whose tools can't be turned on at the pins it was proved with: listed in
+    `Health.unproved_seeds` and logged `seed_unproved` with the reason, as a missing report is."""
+    ctx.policies.unproved_seeds.add(preset)
+    log.error("seed_unproved preset=%s reason=%s", preset, reason)
+    return SeedUnproved(preset)
 
 
 async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | None:
@@ -782,7 +835,17 @@ def _due(row: PolicyVersionRow, tools: Sequence[Tool]) -> bool:
     return rebuild_due(row, desks.enabled_of(tools))
 
 
-Rebuilt = dict[tuple[str, int], str | None]   # (desk_id, version): None when rebuilt, else why not
+Rebuilt = dict[tuple[str, int], str | None]   # None = rebuilt, string = why not; no-longer-due versions omitted
+
+
+ProofSource = Literal["live", "cached"]
+
+
+@dataclass(frozen=True)
+class RebuildSuccess:
+    """A version rebuilt in the caller's transaction, with the source of its proof report."""
+
+    proof_source: ProofSource
 
 
 @dataclass(frozen=True)
@@ -824,14 +887,22 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
     results: Rebuilt = {}
     left: list[tuple[str, str]] = []
     unscanned: list[str] = []
+
+    def finish(copies_left: list[str] | None) -> StartupRebuild:
+        rebuilt = sum(reason is None for reason in results.values())
+        log.info("startup_rebuild_done rebuilt=%s not_rebuilt=%s left=%s copies_left=%s seconds=%.1f",
+                 rebuilt, len(results) - rebuilt, len(left),
+                 "unlisted" if copies_left is None else len(copies_left), monotonic() - started)
+        return StartupRebuild(results=results, left=left, unscanned=copies_left)
+
     try:                                      # listing the copies counts against the budget too
         copies = await asyncio.wait_for(copy_ids(runtime), STARTUP_REBUILD_S)
     except TimeoutError:
         log.info("rebuild_copies_cut_off")
-        return StartupRebuild(results={}, left=[], unscanned=None)
+        return finish(None)
     except Exception as exc:
         log_error(log, exc, "rebuild_copies_failed")
-        return StartupRebuild(results={}, left=[], unscanned=None)
+        return finish(None)
     for n, copy_id in enumerate(copies):
         if spent():
             unscanned += copies[n:]
@@ -861,9 +932,7 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
                 left.append((copy_id, desk_id))
             elif done is not None:
                 results[(desk_id, done[0])] = done[1]
-    if left or unscanned:
-        log.info("startup_rebuild_left desks=%s copies=%s", len(left), len(unscanned))
-    return StartupRebuild(results=results, left=left, unscanned=unscanned)
+    return finish(unscanned)
 
 
 T = TypeVar("T")
@@ -926,7 +995,8 @@ async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild)
         await wait_to_retry(RETRY_WAITS_S[min(attempt, len(RETRY_WAITS_S)) - 1])
         pending, work = failed, again
         busy = await _alert_all(runtime, work, told)
-    log.info("background_rebuild_done desks=%s", len(results))
+    rebuilt = sum(reason is None for reason in results.values())
+    log.info("background_rebuild_done rebuilt=%s not_rebuilt=%s", rebuilt, len(results) - rebuilt)
     return results
 
 
@@ -965,12 +1035,6 @@ async def _alert_all(runtime: KernelRuntime, desks: list[tuple[str, str]],
     return busy
 
 
-async def _limit_lock_waits(ctx: KernelCtx, seconds: float) -> None:
-    """Holds the transaction's waits for a lock to `seconds` (Postgres `lock_timeout`), so a row an
-    owner's write holds makes the rebuild try that Desk again later rather than stall the others."""
-    await ctx.db.execute(select(func.set_config("lock_timeout", f"{max(1, int(seconds * 1000))}ms", True)))
-
-
 def _lock_busy(exc: BaseException) -> bool:
     """Whether `exc` is Postgres giving up on a lock wait (`lock_not_available`, 55P03)."""
     return getattr(getattr(exc, "orig", None), "sqlstate", None) == "55P03"
@@ -1001,7 +1065,7 @@ async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str, *, 
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
-            await _limit_lock_waits(ctx, lock_s)
+            await limit_lock_waits(ctx, lock_s)
             await _lock(ctx, "waiting-alert", desk_id)
             # the Desk row held to the commit, so a deletion comes before the check or waits for the alert
             deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)
@@ -1031,8 +1095,9 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove
                     lock_s: float) -> tuple[int, str | None] | str | None:
     """Brings the Desk's native tools up to date (`desks.update_native_tools`), then rebuilds its
     active version if it is due (`rebuild_due`; `rebuild_version`, proving live only when `prove`),
-    each in a transaction of its own. Returns the version it rebuilt and what became of it, None
-    when the Desk's version needs no rebuild, or `FAILED` when either step raised: that is logged,
+    each in a transaction of its own. Returns `(version, None)` when rebuilt or `(version, reason)`
+    when refused; None when the Desk's version needs no rebuild (including the recheck under the
+    versions lock), or `FAILED` when either step raised: that is logged,
     the Desk is left as it was (without a tool, it can't be called on it; with an outdated version
     left as stored, it decides nothing), and its callers try it again. A Desk whose tools couldn't
     be brought up to date isn't rebuilt over the old ones. Each transaction's lock waits are held to
@@ -1041,7 +1106,7 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
-            await _limit_lock_waits(ctx, lock_s)
+            await limit_lock_waits(ctx, lock_s)
             await desks.update_native_tools(ctx, desk_id)
     except Exception as exc:
         log_error(log, exc, "native_tools_failed copy_id=%s desk_id=%s", copy_id, desk_id)
@@ -1050,24 +1115,33 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
-            await _limit_lock_waits(ctx, lock_s)
+            await limit_lock_waits(ctx, lock_s)
             deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)))
             row = await active_version(ctx, desk_id)
             if deleted is not None or row is None or not rebuild_due(row, await desks.enabled_profiles(ctx, desk_id)):
                 return None
             version = row.version
-            done = version, await rebuild_version(ctx, desk_id, version, prove=prove)
+            outcome = await rebuild_version(ctx, desk_id, version, prove=prove)
+            if outcome is None:               # no longer active or due after taking the versions lock
+                return None
+            done = version, None if isinstance(outcome, RebuildSuccess) else outcome
+        # The context manager has committed: never claim a rolled-back rebuild succeeded.
+        if isinstance(outcome, RebuildSuccess):
+            log.info("version_rebuilt copy_id=%s desk_id=%s version=%s proved=%s",
+                     copy_id, desk_id, version, outcome.proof_source)
         return done
     except Exception as exc:
         log_error(log, exc, "version_rebuild_failed copy_id=%s desk_id=%s version=%s", copy_id, desk_id, version)
         return FAILED
 
 
-async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *, prove: bool = True) -> str | None:
+async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *,
+                          prove: bool = True) -> RebuildSuccess | str | None:
     """Rebuilds the Desk's active version `version`, due a rebuild (`rebuild_due`), in the
     caller's transaction, under the Desk's `versions` lock with the row `FOR UPDATE`, as a confirm
-    takes them. Returns None when it is rebuilt, or when it is no longer active or due; otherwise
-    why it can't be. A rebuilt version is ledgered `policy` `{version, status: "active", rebuilt:
+    takes them. Returns `RebuildSuccess` with the actual proof source when rebuilt, None when it
+    is no longer active or due, or a string saying why it can't be rebuilt. A rebuilt version is
+    ledgered `policy` `{version, status: "active", rebuilt:
     true, auto_money_cap_cents, cedar_sha256, from_cedar_sha256}`. One that can't be is left as
     stored; the attempt is ledgered `policy` `{version, rebuilt: false, refused: <why>}`. An
     outdated one keeps refusing, so the attempt also alerts the owner in the Demo inbox whatever
@@ -1092,30 +1166,44 @@ async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *, prove: 
         await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
             kind="policy", origin="kernel", summary={"version": version, "rebuilt": False, "refused": rebuilt}))
         return rebuilt
+    rebuilt_row, proof_source = rebuilt
     stored = row.cedar_sha256
     for column in _REBUILT_COLUMNS:
-        setattr(row, column, getattr(rebuilt, column))
+        setattr(row, column, getattr(rebuilt_row, column))
     await ctx.db.flush()
     await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
         kind="policy", origin="kernel",
         summary={"version": version, "status": "active", "rebuilt": True,
                  "auto_money_cap_cents": row.auto_money_cap_cents, "cedar_sha256": row.cedar_sha256,
                  "from_cedar_sha256": stored}))
-    return None
+    return RebuildSuccess(proof_source)
 
 
-async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *, prove: bool) -> PolicyVersionRow | str:
+async def _money_tools(ctx: KernelCtx, desk_id: str) -> frozenset[str]:
+    """This copy's Desk money tools, including rows awaiting review or disabled.
+
+    A rule can name a business tool before it is enabled; enabling checks its cards again.
+    """
+    rows = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == desk_id)))
+    return money_tools_of((row.profile.tool, row.profile.effects) for row in rows)
+
+
+async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *,
+                   prove: bool) -> tuple[PolicyVersionRow, ProofSource] | str:
     """`row` compiled again as a draft of its own cards would be, at its own cap, over the Desk's
-    enabled profiles, with a proof of all seven obligations; or why it can't be (`NEEDS_PROOF`
-    when only a live proof would answer and `prove` is false)."""
+    enabled profiles, with a proof of all seven obligations and its actual source (`cached` for a
+    stored report, `live` if this call ran the prover); or why it can't be (`NEEDS_PROOF` when only
+    a live proof would answer and `prove` is false)."""
     desk_id, cap = row.desk_id, row.auto_money_cap_cents
     if type(cap) is not int or not 0 <= cap <= AUTO_MONEY_HARD_CAP_CENTS:
         return "invalid_money_cap"
     owned = [card for card in row.cards if not card.is_default]
     people = await desk_people(ctx, desk_id)
+    money_tools = await _money_tools(ctx, desk_id)
     if compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx),
-                               auto_money_cap_cents=cap):
-        return compiler.ABOVE_MONEY_CAP if compiler.above_money_cap(owned, cap) else "invalid_cards"
+                               auto_money_cap_cents=cap, money_tools=money_tools):
+        return (compiler.ABOVE_MONEY_CAP if compiler.above_money_cap(owned, cap, money_tools=money_tools)
+                else "invalid_cards")
     profiles = await desks.enabled_profiles(ctx, desk_id)
     try:
         schema = compiler.desk_schema(profiles)
@@ -1128,18 +1216,20 @@ async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *, prove: bool) -> Pol
                   compiled=compiled):
         return "unloadable"
     report = ctx.policies.cache.get(hashes)               # a shipped report, or one this process proved
+    proof_source: ProofSource = "cached"
     if report is None and proof_mode() == "symcc":
         if not prove:
             return NEEDS_PROOF
         report = await prove_or_check(ctx.policies.engine, owned, profiles, key_prefix=f"rebuild:{desk_id}",
                                       auto_money_cap_cents=cap)
+        proof_source = "live"
         ctx.policies.cache.put(hashes, report)
     if report is None or not proved(report):
         return "not_proved"
     return version_row(copy_id=row.copy_id, desk_id=desk_id, version=row.version, parent_version=row.parent_version,
                        compiled=compiled, a0=a0, schema=schema, hashes=hashes, auto_money_cap_cents=cap,
                        status=row.status, proof=report, created_at=row.created_at, preset=row.preset,
-                       draft_key_sha256=row.draft_key_sha256)
+                       draft_key_sha256=row.draft_key_sha256), proof_source
 
 
 # ---- Owner drafts --------------------------------------------------------------------------------
@@ -1173,7 +1263,9 @@ def _hashes(profiles: Sequence[ToolProfile], schema: Mapping[str, Any], auto_mon
 async def draft_profiles(ctx: KernelCtx, desk_id: str, enables: Sequence[ToolPin] = ()) -> list[ToolProfile]:
     """The profiles a version of the Desk enabling `enables` is proved over: its enabled tools'
     plus each tool `enables` turns on, pinned at its hash."""
-    return mcp_pins.enabled_with(await desks.enabled_profiles(ctx, desk_id), enables)
+    rows = await mcp_pins._rows(ctx, desk_id, [pin.tool for pin in enables], lock=False)
+    return mcp_pins.enabled_with(await desks.enabled_profiles(ctx, desk_id), enables,
+                                 {tool: row.profile for tool, row in rows.items()})
 
 
 async def current_hashes(ctx: KernelCtx, desk_id: str, auto_money_cap_cents: int, *,
@@ -1305,10 +1397,11 @@ async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[R
     if type(cap) is not int or not 0 <= cap <= AUTO_MONEY_HARD_CAP_CENTS:
         raise KernelFailure(422, "invalid", "invalid_money_cap")
     people = await desk_people(ctx, desk_id)
+    money_tools = await _money_tools(ctx, desk_id)
     if compiler.validate_cards(owned, people=people.keys(), agent_keys=await _agent_keys(ctx),
-                               auto_money_cap_cents=cap):
+                               auto_money_cap_cents=cap, money_tools=money_tools):
         # the log's reason is read from the cards, never from the wording of the errors
-        above = bool(compiler.above_money_cap(owned, cap))
+        above = bool(compiler.above_money_cap(owned, cap, money_tools=money_tools))
         raise KernelFailure(422, "invalid", compiler.ABOVE_MONEY_CAP if above else "invalid_cards")
     profiles = await draft_profiles(ctx, desk_id, enables)
     schema = compiler.desk_schema(profiles)
@@ -1456,9 +1549,13 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
                             persist=partial(_ledger_unavailable, copy_id=copy_id, desk_id=desk_id, version=version))
     if pins.state != "ok":
         raise ConfirmConflict(copy_id, desk_id, version, "pin_changed", drifted=pins.drifted)
-    if _proved_against(row) != await current_hashes(ctx, desk_id, row.auto_money_cap_cents, enables=row.enables):
+    try:
+        hashes = await current_hashes(ctx, desk_id, row.auto_money_cap_cents, enables=row.enables)
+    except mcp_pins.BusinessProfileChanged:
+        raise ConfirmConflict(copy_id, desk_id, version, "pin_changed") from None
+    if _proved_against(row) != hashes:
         raise ConfirmConflict(copy_id, desk_id, version, "hash_changed")
-    if compiler.above_money_cap(row.cards, row.auto_money_cap_cents):
+    if compiler.above_money_cap(row.cards, row.auto_money_cap_cents, money_tools=await _money_tools(ctx, desk_id)):
         raise ConfirmConflict(copy_id, desk_id, version, "above_money_cap")
     events: list[LedgerEvent] = []
     for hook in ON_ACTIVATE:
@@ -1980,12 +2077,18 @@ async def _probe_tools(ctx: KernelCtx, row: PolicyVersionRow) -> dict[str, _Prob
     off."""
     from desk.kernel_service import decide       # decide builds on this module
 
-    tools = {tool: _ProbeTool(tool_row.profile, tool_row.profile_sha256)
+    tools = {tool: _ProbeTool(tool_row.profile.model_copy(update={"status": tool_row.status}), tool_row.profile_sha256)
              for tool, tool_row in (await decide.enabled_tools(ctx, row.desk_id)).items()}
     if row.status not in ("active", "superseded"):
         for pin in row.enables or ():
-            if pin.tool in adapters.ADAPTERS:    # a tool no adapter runs is never given
-                profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256)
+            # A stale draft pin never borrows a newer enabled definition from the live Desk.
+            tools.pop(pin.tool, None)
+            adapter = await adapters.resolve(ctx, row.desk_id, pin.tool)
+            if adapter is not None:    # a tool no adapter runs is never given
+                try:
+                    profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256, adapter.profile)
+                except mcp_pins.BusinessProfileChanged:
+                    continue          # a changed business pin is not given; the batch still runs
                 tools[pin.tool] = _ProbeTool(profile, adapters.profile_sha256(profile))
     return tools
 
@@ -2046,6 +2149,7 @@ class _Prober:
         principal, session_row = _probe_principal(ctx.copy_id, row.desk_id, probe)
         subject, tool = _probe_subject(probe, self.people), probe.call.tool
         list_cents, discount = probe.amount_cents, None
+        adapter = await adapters.resolve(self.ctx, self.desk_row.desk_id, tool)
 
         def discounted() -> int | None:
             """The stand-in price less the discount asked for ("Discounts")."""
@@ -2053,13 +2157,13 @@ class _Prober:
 
         def asked() -> str:
             """"<subject> asks to <what>.", with the stand-in amount and the discount asked for."""
-            return explain.asked(subject, "asks", tool, discounted(), discount)
+            return explain.asked(subject, "asks", tool, discounted(), discount,
+                                 business=adapter.profile.business if adapter is not None else None)
 
         def refused(code: str) -> ProbeResult:
             return self._result(probe, "refuse", [], False,
                                 [asked(), PROBE_OUTCOME_PLAIN["refuse"], PROBE_REFUSED_PLAIN[code]])
 
-        adapter = adapters.ADAPTERS.get(tool) if tool in decide.TOOL_NAMES else None
         if adapter is None:
             return refused("unknown_tool")
         if tool not in decide.tools_given(principal, session_row, self.desk_row, self.tools):

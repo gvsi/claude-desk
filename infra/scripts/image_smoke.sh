@@ -129,17 +129,17 @@ database() {
 
 {
   printf '%s\n' "DESK_ENV=production" "DESK_DB_URLS=KERNEL,MOCKPAY" "KERNEL_DB_USER=desk_kernel" \
-    "MOCKPAY_DB_USER=desk_mockpay"
+    "MOCKPAY_DB_USER=desk_mockpay" "SAMPLE_WEEK=1"
   database
   printf '%s\n' "KERNEL_DB_PASSWORD=$KERNEL_ROLE_PASSWORD" "MOCKPAY_DB_PASSWORD=$MOCKPAY_ROLE_PASSWORD" \
-    "DESK_SIGNING_SEED=$seed" "ANTHROPIC_API_KEY=not-a-key" "MOCKPAY_KEY=$mockpay_key"
+    "DESK_SIGNING_SEED=$seed" "ANTHROPIC_API_KEY=not-a-key" "MOCKPAY_KEY=$mockpay_key" "TYPESAFE_API_KEY="
 } >"$kernel_env"
 
 {
   printf '%s\n' "DESK_ENV=production" "DESK_DB_URLS=API" "API_DB_USER=desk_api"
   database
   printf '%s\n' "KERNEL_URL=http://127.0.0.1:8701" "PUBLIC_ORIGIN=https://localhost.invalid" "TRUSTED_PROXY_HOPS=0" \
-    "API_DB_PASSWORD=$API_ROLE_PASSWORD" "ANTHROPIC_API_KEY=not-a-key" "PASSCODE_HASH=$passcode_hash"
+    "BUSINESS_TOOLS_ENABLED=1" "API_DB_PASSWORD=$API_ROLE_PASSWORD" "ANTHROPIC_API_KEY=not-a-key" "PASSCODE_HASH=$passcode_hash"
 } >"$api_env"
 
 say "admin task: migrations and role passwords on $DB_NAME"

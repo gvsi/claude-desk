@@ -25,8 +25,13 @@ shows. A removed person (`removed_at`) is on record for no one.
 A callback's window comes from the Desk's hours (`next_open_window`), never from a tool call, and
 the public page's open-now line from them too (`open_window_status`), on the local day and minute
 Cedar's hours checks read.
+
+A setup-made Desk's calendar is kept open from its hours (`extend_calendar`): at the kernel's start
+and then daily, each live one gets the days after its latest slot, up to 14 days ahead. No slot it
+has is changed, but a tail the owner trimmed or a calendar they cleared is filled again.
 """
 
+import asyncio
 import json
 import logging
 import math
@@ -37,29 +42,36 @@ from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping, 
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from functools import partial
-from typing import Any
-from zoneinfo import available_timezones
+from typing import Any, Protocol
+from zoneinfo import ZoneInfo, available_timezones
 
 import desk_kernel
 from fastapi import Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql import ColumnElement
 
+from desk.calendar import calendar_slots
+from desk.public_contact import valid_public_contact
 from desk.contracts import (BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, SeedDocument,
                             ToolProfile)
+from desk.contracts import CalendarSlot as CalendarSlotSeed
 from desk.contracts import PriceItem as PriceItemSeed
 from desk.db.models import Action as ActionRow
 from desk.db.models import (ActorSession, Booking, Business, CalendarSlot, Desk, Document, NotificationPref, Person,
                              PriceItem, Tool, VerificationChallenge)
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
+from desk.db.models import PolicyVersion as PolicyVersionRow
+from desk.db.session import KernelRepo
 from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCalendarRequest, DeskCharterRequest,
                              DeskCreated, DeskHoursRequest, DeskMemoryRequest, DeskNotificationsRequest, DeskPeopleRequest,
                              DeskPricesRequest, DeskUpdated, DocumentCreated, KernelRequest)
-from desk.kernel_service import adapters, auth, clock, labels, ledger, mcp_pins, payments
+from desk.kernel_service import adapters, auth, clock, labels, ledger, mcp_pins, payments, reply_check
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
-from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
+from desk.kernel_service.repo import (REF, KernelCtx, KernelFailure, KernelRuntime, copy_ids, kernel_transaction,
+                                      limit_lock_waits, log_error, new_id, route_template, storable)
 
 log = logging.getLogger("desk.kernel_service")
 
@@ -72,6 +84,8 @@ WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 WINDOW_SEARCH = timedelta(days=14)        # how far ahead a callback window is looked for
 DAY_END = 24 * 60                         # an hours window ending at 00:00 ends at midnight
 HOURS_FACT = "charter:hours"
+STARTER_KEY_PREFIX = "starter:"           # a seed-only public question's claim key, `starter:<n>:<lang>`
+STARTER_FACT_PREFIX = f"charter:{STARTER_KEY_PREFIX}"   # its fact's ID, `charter:starter:<n>:<lang>`
 TIMEZONES = frozenset(available_timezones())   # the IANA names the time zone database lists
 MAX_DOCUMENT_BYTES = 200 * 1024
 MAX_DOCUMENTS = 50                        # on one Desk, each a canary every scan looks for
@@ -80,6 +94,21 @@ MASKING = frozenset("•*")                 # what a masked contact holds and a 
 EMAIL = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
 PHONE = re.compile(r"\+?[0-9 ().-]+")
 PHONE_DIGITS = range(7, 16)               # E.164 numbers have at most 15 digits
+
+
+def is_starter_key(key: str) -> bool:
+    """A charter claim key only the demo seed writes: one of the public starter questions."""
+    return key.startswith(STARTER_KEY_PREFIX)
+
+
+def is_starter_fact(fact_id: str) -> bool:
+    """A seed-only starter question's fact: a chip on the public page, never a fact for Claude."""
+    return fact_id.startswith(STARTER_FACT_PREFIX)
+
+
+def not_starter() -> ColumnElement[bool]:
+    """The condition that leaves the seed-only starter facts out of a query of facts."""
+    return ~FactRow.fact_id.startswith(STARTER_FACT_PREFIX)
 
 
 class InvalidSeed(KernelFailure):
@@ -139,10 +168,13 @@ def one_person_per_contact(contacts: Iterable[str]) -> None:
 
 
 def check_charter(charter: Sequence[Claim]) -> None:
-    """Charter claims become `charter:<key>` facts: one per key, and never the hours."""
+    """Charter claims become `charter:<key>` facts: one per key, never hours or seed-only starters."""
     if any(claim.key == "hours" for claim in charter):
         raise InvalidSeed("hours_claim")
     unique(claim.key for claim in charter)
+    starters = {claim.key: ["starter_seed_only"] for claim in charter if is_starter_key(claim.key)}
+    if starters:
+        raise KernelFailure(422, "invalid", "starter_seed_only", detail=starters)
 
 
 def unique(ids: Iterable[str]) -> None:
@@ -323,6 +355,7 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     await refuse_public_canaries(ctx, "desk", shown)
     validate_business(business)
     validate_desk(desk)
+    await refuse_public_charter(ctx, "desk", desk.charter)
     if existing is not None:
         business_id = existing.business_id
     else:
@@ -420,6 +453,65 @@ async def refuse_public_canaries(ctx: KernelCtx, part: str, values: Mapping[str,
         _ledger_refusal, copy_id=ctx.copy_id, desk_ids=desk_ids, summary=summary))
 
 
+def policy_values(charter: Sequence[Claim]) -> dict[str, str]:
+    """Only free-text policies render verbatim; contact and structured claims have other checks."""
+    return {claim.key: claim.value for claim in charter if claim.key.startswith("policy:") and claim.kind == "text"}
+
+
+async def _refusal_desk_ids(ctx: KernelCtx, desk_id: str | None) -> list[str]:
+    """Where a refused write is ledgered: its Desk, or for a Desk not yet created, the copy's Desks in ID order."""
+    if desk_id is not None:
+        return [desk_id]
+    return list(await ctx.db.scalars(ctx.repo.scoped(select(Desk.desk_id).order_by(Desk.desk_id))))
+
+
+async def refuse_public_charter(ctx: KernelCtx, part: str, charter: Sequence[Claim], desk_id: str | None = None) -> None:
+    """Refuse a charter whose public contact isn't a list of contact endpoints (`valid_public_contact`) or
+    whose text policies the reply check would reject, in one refusal naming every refused key, so the
+    owner's setup learns them all from one write (`refuse_public_promises`)."""
+    contact_format = any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
+                         for claim in charter)
+    await refuse_public_promises(ctx, part, policy_values(charter), desk_id, contact_format=contact_format)
+
+
+async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str, str],
+                                desk_id: str | None = None, *,
+                                allow_words: Mapping[str, frozenset[str]] = {}, contact_format: bool = False,
+                                amenities: bool = True) -> None:
+    """Refuse public prose the reply check would reject, and with `contact_format` a contact that isn't a
+    list of contact endpoints, before writing any of it: 422 `invalid`.
+
+    Detail names only refused keys and sorted rule IDs, the contact as `{"contact": ["contact_format"]}`
+    beside every refused policy. The post-rollback ledger entry `{part, refused, fields}` names the same,
+    the contact by its fact ID `charter:contact`, since a ledger summary never carries a key named
+    `contact` (`ledger.check_summary`); `refused` is "contact" when only the contact was refused, else
+    "promise". For cap refusals it also records the first `PUBLIC_POLICY_MAX_COUNT` keys in order, the
+    count of all policies, their total characters and a reason. Never rejected text or the contact.
+    A refused creation has no Desk chain yet. Record it on the copy's existing Desks, in ID
+    order, so the owner can audit the attempt without creating a row for refused input.
+    """
+    count, total_characters = len(values), sum(map(len, values.values()))
+    limit = None
+    if count > reply_check.PUBLIC_POLICY_MAX_COUNT:
+        limit = "policy_count_limit"
+    elif total_characters > reply_check.PUBLIC_POLICY_MAX_CHARS:
+        limit = "policy_text_limit"
+    fields = {"charter": [limit]} if limit is not None else reply_check.scan_public_policies(
+        values, allow_words=allow_words, amenities=amenities)
+    if not fields and not contact_format:
+        return
+    contact = {"contact": ["contact_format"]} if contact_format else {}
+    summary = {"part": part, "refused": "promise" if fields else "contact",
+               "fields": fields | ({"charter:contact": ["contact_format"]} if contact_format else {})}
+    if limit is not None:
+        keys = sorted(values)[:reply_check.PUBLIC_POLICY_MAX_COUNT]
+        summary.update(keys=[ledger.safe_ref(key) for key in keys], policy_count=count,
+                       total_characters=total_characters, reason=limit)
+    reason = limit or ("public_promise" if fields else "contact_format")
+    raise KernelFailure(422, "invalid", reason, detail=contact | fields, persist=partial(
+        _ledger_refusal, copy_id=ctx.copy_id, desk_ids=await _refusal_desk_ids(ctx, desk_id), summary=summary))
+
+
 async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_ids: Sequence[str], summary: dict[str, Any]) -> None:
     """A refused owner write's `desk_data` entry on each of `desk_ids`, in ID order, in the fresh
     transaction `KernelFailure.persist` runs in."""
@@ -456,14 +548,19 @@ def prices_shown(price_items: Sequence[PriceItemSeed]) -> list[tuple[str, str]]:
 
 
 async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) -> list[str]:
-    """The Desk's public `charter:<key>` facts, replaced; `charter:hours` comes only from its hours.
+    """The Desk's public `charter:<key>` facts, replaced; keep hours and seed-only starters.
     The public page shows them, so a document's canary in a key or a value is refused first
-    (`refuse_public_canaries`)."""
+    (`refuse_public_canaries`). Text policies render verbatim, so their values must also pass
+    the reply check's public prose scan, and the contact must be a list of contact endpoints, both
+    refused together in one refusal (`refuse_public_charter`). Structured claims keep their own checks.
+    """
     await refuse_public_canaries(ctx, "charter", {"charter": charter_shown(body.charter)}, desk_row.desk_id)
     check_charter(body.charter)
+    await refuse_public_charter(ctx, "charter", body.charter, desk_row.desk_id)
     now = ctx.clock.now()
     rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-        FactRow.desk_id == desk_row.desk_id, FactRow.kind == "charter", FactRow.fact_id != HOURS_FACT)))}
+        FactRow.desk_id == desk_row.desk_id, FactRow.kind == "charter", FactRow.fact_id != HOURS_FACT,
+        not_starter())))}
     wanted = {fact.fact_id: fact for fact in map(charter_fact, body.charter)}
     for fact_id, row in rows.items():
         if fact_id not in wanted:
@@ -566,6 +663,153 @@ async def _spoken_for(ctx: KernelCtx, desk_id: str) -> set[str]:
         or_(DecisionRow.state == "approved",
             and_(DecisionRow.state.in_(("allowed", "held")), DecisionRow.expires_at > now)))))
     return set(booked) | {resource.id for resource in pending}
+
+
+# ---- Keeping a setup-made Desk's calendar open --------------------------------------------------
+#
+# Setup gives a new Desk 60-minute slots from its hours for the 14 days after it finishes
+# (`desk.calendar.calendar_slots`), once. So that a live Desk doesn't run out of open times, the
+# kernel adds the days after its latest slot from its hours as the days go by: at its start and
+# then daily (`keep_calendars_open`, which the app's lifespan runs beside the kernel).
+
+CALENDAR_REFRESH_EVERY_S = 24 * 60 * 60   # a pass at the kernel's start, then one a day
+CALENDAR_REFRESH_LOCK_S = 5.0             # how long a pass waits for a row another write holds
+CALENDAR_LOOKUP_S = 10.0                  # the pass's limit on listing the copies or one copy's Desks, as
+                                          # the background rebuild's (`activation.BACKGROUND_LOOKUP_S`)
+# The shipped rule set `POST /desks`, the route setup makes a Desk through, activates as a new Desk's
+# version 1. Rivera's seed (`POST /copies`) starts from "rivera" instead and builds its own two-hour
+# slots for each copy, so a Desk whose version 1 came from this preset is one setup made. Every
+# Desk has had a version 1 since it was created, and nothing writes a version's `preset` after
+# that: a confirm only changes `status`, and a rebuild only `_REBUILT_COLUMNS`
+# (`activation.rebuild_version`), which leave it out.
+NEW_DESK_PRESET = "ask_first"
+
+
+class SlotStart(Protocol):
+    slot_id: str
+    starts_at: datetime
+
+
+def later_slots(hours: Sequence[HoursWindow], timezone: str, now: datetime,
+                rows: Collection[SlotStart]) -> list[CalendarSlotSeed]:
+    """The slots `calendar_slots` gives from `hours` on the 14 days after `now`'s day in the
+    business's time zone, keeping only the days after the latest of the Desk's slots `rows` (all
+    of them when it has none), and none whose ID one of `rows` already has."""
+    zone = ZoneInfo(timezone)
+    today = now.astimezone(zone).date()
+    last = max((row.starts_at.astimezone(zone).date() for row in rows), default=today)
+    taken = {row.slot_id for row in rows}
+    return [slot for slot in calendar_slots(list(hours), timezone, today)
+            if slot.starts_at.astimezone(zone).date() > last and slot.slot_id not in taken]
+
+
+def made_in_setup() -> ColumnElement[bool]:
+    """The condition on a Desk's `policy_versions` rows that finds its version 1 when setup made
+    the Desk (`NEW_DESK_PRESET`)."""
+    return and_(PolicyVersionRow.version == 1, PolicyVersionRow.preset == NEW_DESK_PRESET)
+
+
+async def _made_in_setup(ctx: KernelCtx, desk_id: str) -> bool:
+    found = await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow.version).where(
+        PolicyVersionRow.desk_id == desk_id, made_in_setup())))
+    return found.first() is not None
+
+
+async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
+    """Adds to Desk `desk_id`'s calendar the slots its hours give for the days after its latest
+    slot, up to 14 days ahead (`later_slots`), when it is a Desk whose calendar the kernel keeps
+    open: live, not deleted, with hours, and made in setup (`NEW_DESK_PRESET`), never Rivera's
+    seed. Returns their IDs, in order; [] when it adds none, and then writes nothing.
+
+    It only inserts: a booked slot, one a request still names, and every change the owner made
+    inside the days the calendar covers stay exactly as they are. A tail the owner trimmed, or a
+    calendar they cleared, is filled again from the hours (wish #596 tracks keeping them).
+
+    In the caller's transaction, bound to the Desk's copy, it holds the Desk row `FOR UPDATE`, read
+    afresh, as an owner's calendar write does, so the two take turns (`repo.py`). Every write that
+    changes or deletes a slot holds that row first, so the Desk's slots are read without a lock,
+    and a booking holding its slot `FOR SHARE` and the refresh never wait on each other for a slot;
+    like any two writes to one Desk, they take turns only at its ledger head. The new slots go in
+    under fresh keys, then the ledger head is taken for the entry an owner's write leaves,
+    `desk_data` `{part: "calendar", refs}`, with `extended_from: "hours"` saying the kernel added
+    them from the hours."""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id).with_for_update()
+                                                     .execution_options(populate_existing=True)))).one_or_none()
+    if (desk_row is None or desk_row.deleted_at is not None or not desk_row.answering or not desk_row.hours
+            or not await _made_in_setup(ctx, desk_id)):
+        return []
+    timezone = (await ctx.db.scalars(ctx.repo.scoped(select(Business.timezone).where(
+        Business.business_id == desk_row.business_id)))).one()
+    rows = (await ctx.db.execute(ctx.repo.scoped(select(CalendarSlot.slot_id, CalendarSlot.starts_at).where(
+        CalendarSlot.desk_id == desk_id)))).all()
+    added = later_slots(desk_row.hours, timezone, ctx.clock.now(), rows)
+    if not added:
+        return []
+    ctx.db.add_all(CalendarSlot(desk_id=desk_id, slot_id=slot.slot_id, copy_id=desk_row.copy_id,
+                                starts_at=slot.starts_at, minutes=slot.minutes) for slot in added)
+    await ctx.db.flush()
+    refs = sorted(slot.slot_id for slot in added)
+    await ledger_desk_data(ctx, desk_row, {"part": "calendar", "refs": refs, "extended_from": "hours"})
+    return refs
+
+
+async def desks_to_extend(runtime: KernelRuntime, copy_id: str) -> list[str]:
+    """The copy's live Desks with hours that setup made (`NEW_DESK_PRESET`), in ID order: the
+    ones `extend_calendar` may add to, which checks each again under its lock. Read through the
+    copy's own `KernelRepo`, as `repo.desks_to_bring_up` reads each copy."""
+    copy = KernelRepo(copy_id)
+    async with runtime.sessions() as db:
+        copy.bind(db)
+        live = (await db.execute(copy.scoped(select(Desk.desk_id, Desk.hours).where(
+            Desk.deleted_at.is_(None), Desk.answering.is_(True)).order_by(Desk.desk_id)))).all()
+        setup_made = set(await db.scalars(copy.scoped(select(PolicyVersionRow.desk_id).where(made_in_setup()))))
+    return [desk_id for desk_id, hours in live if hours and desk_id in setup_made]
+
+
+async def extend_calendars(runtime: KernelRuntime) -> dict[str, list[str]]:
+    """One pass over every copy (`repo.copy_ids`): each Desk `desks_to_extend` finds gets
+    `extend_calendar` in a transaction of its own, whose lock waits are held to
+    `CALENDAR_REFRESH_LOCK_S` (`repo.limit_lock_waits`). A copy whose lookup fails or outlasts
+    `CALENDAR_LOOKUP_S` (stuck behind a migration's lock, say), or a Desk whose extension fails
+    (one an owner's write holds past that wait), is logged and left to the next pass, and the
+    others go on; a listing of the copies that outlasts it fails the pass, which the next one
+    repeats. Returns the slots it added, by Desk."""
+    added: dict[str, list[str]] = {}
+    for copy_id in await asyncio.wait_for(copy_ids(runtime), CALENDAR_LOOKUP_S):
+        try:
+            desk_ids = await asyncio.wait_for(desks_to_extend(runtime, copy_id), CALENDAR_LOOKUP_S)
+        except TimeoutError:
+            log.info("calendar_lookup_cut_off copy_id=%s", copy_id)
+            continue
+        except Exception as exc:
+            log_error(log, exc, "calendar_lookup_failed copy_id=%s", copy_id)
+            continue
+        for desk_id in desk_ids:
+            try:
+                async with kernel_transaction(runtime) as ctx:
+                    ctx.bind(copy_id)
+                    await limit_lock_waits(ctx, CALENDAR_REFRESH_LOCK_S)
+                    refs = await extend_calendar(ctx, desk_id)
+            except Exception as exc:
+                log_error(log, exc, "calendar_extend_failed copy_id=%s desk_id=%s", copy_id, desk_id)
+                continue
+            if refs:
+                added[desk_id] = refs
+                log.info("calendar_extended copy_id=%s desk_id=%s slots=%s", copy_id, desk_id, len(refs))
+    return added
+
+
+async def keep_calendars_open(runtime: KernelRuntime, every_s: float = CALENDAR_REFRESH_EVERY_S) -> None:
+    """Extends the calendars (`extend_calendars`) at once, then every `every_s` seconds, until it
+    is cancelled: the kernel's lifespan runs it beside the kernel, without waiting for it, and
+    cancels it at shutdown, when the Desk in hand rolls back. A pass that fails is logged, and the
+    next one comes on time."""
+    while True:
+        try:
+            await extend_calendars(runtime)
+        except Exception as exc:
+            log_error(log, exc, "calendar_refresh_failed")
+        await asyncio.sleep(every_s)
 
 
 async def put_people(ctx: KernelCtx, desk_row: Desk, body: DeskPeopleRequest) -> list[str]:

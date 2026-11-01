@@ -4,13 +4,14 @@ import { useRef, useState, type ReactNode } from 'react';
 import type { PolicyVersion } from '../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, SetupState } from '../api/views.ts';
-import { Button, Card, EmptyState, LoadingLine, Notice, PageHeader, SafetyCheckRow, StatusLabel } from '../ds/index.ts';
+import { Button, Card, EmptyState, Notice, PageHeader, SafetyCheckRow, SkeletonScreen, StatusLabel } from '../ds/index.ts';
 import { capOf, draftFromDiff, draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { useLanding } from './landing.ts';
 import { gaveUp, setupRulesQuery } from './shared.ts';
+import { SafetyCheckSkeleton } from './StepSkeletons.tsx';
 
 const copy = SETUP_COPY.safety;
 
@@ -187,8 +188,11 @@ export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps
     );
 
   let body: ReactNode;
+  // While the draft or the check is read, the step draws as its shapes.
+  let reading = false;
   if (draft.data === undefined) {
-    body = draft.isError ? failure(draft.error, () => void draft.refetch()) : <LoadingLine>{copy.loading}</LoadingLine>;
+    body = draft.isError ? failure(draft.error, () => void draft.refetch()) : null;
+    reading = !draft.isError;
   } else if (status?.status === 'failed') {
     // The check ran and failed: what didn't pass, and only "Save and exit".
     body = (
@@ -213,7 +217,8 @@ export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps
     // The latest run failed: its rows, from an earlier run, no longer stand, and nothing confirms on them.
     body = failure(check.error, () => void check.refetch());
   } else if (check.data === undefined) {
-    body = <LoadingLine>{copy.loading}</LoadingLine>;
+    body = null;
+    reading = true;
   } else {
     const { rows, blocked: stopped, total } = check.data;
     // The check's own counts, never worked out here. While the rows land, the count on screen
@@ -276,7 +281,10 @@ export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} />
-      {body}
+      {/* A check that just ran lands under the fading shapes, its rows one by one. */}
+      <SkeletonScreen loading={reading} status={copy.loading} skeleton={<SafetyCheckSkeleton />} className="cd-setup-step__region">
+        {body}
+      </SkeletonScreen>
     </div>
   );
 }

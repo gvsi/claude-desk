@@ -28,6 +28,7 @@ type Story = StoryObj<typeof meta>;
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expectOwnerFrame(canvasElement, 'Today');
+    await expect(canvas.getByText('Your public page opens in a new tab. Ask about a price or a time.')).toBeVisible();
 
     // The reviewer arrival: the bar across the top, then the greeting in Claude's serif voice.
     const bar = canvas.getByRole('note');
@@ -72,14 +73,14 @@ export const Board: Story = {
 
     await expectFooter(canvasElement);
 
-    // focus_order_is_logical: the bar, the business, the pages in order, Answering, then the page.
+    // focus_order_is_logical: the bar, the business, the pages in order, Claude acts for you, then the page.
     const sidebar = canvas.getByRole('complementary', { name: 'Claude Desk' });
     const nav = within(sidebar).getByRole('navigation', { name: 'Main' });
     await expectTabOrder(userEvent, [
       within(bar).getByRole('button', { name: 'Start over' }),
       within(sidebar).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(nav).getAllByRole('link'),
-      within(sidebar).getByRole('switch', { name: 'Answering' }),
+      within(sidebar).getByRole('switch', { name: 'Claude acts for you' }),
       canvas.getByRole('button', { name: 'Copy your Desk link' }),
       canvas.getByRole('button', { name: 'Hide this list' }),
       canvas.getByRole('button', { name: 'Open your public page' }),

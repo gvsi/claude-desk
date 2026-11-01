@@ -1,4 +1,4 @@
-# Settings for CI's `secret scan` check: gitleaks' default rules, with no exceptions.
+# Settings for CI's `secret scan` check: gitleaks' default rules, with one reviewed allowlist entry below.
 #
 # tools/tests/test_ci_workflow.py requires this file to hold only these settings and no
 # .gitleaksignore to exist, and the scan ignores inline gitleaks:allow comments. An exception is a

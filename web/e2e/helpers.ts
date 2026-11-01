@@ -47,7 +47,7 @@ const TODAY_URL = /\/app\/[^/]+\/today$/;
 
 /**
  * Makes a fresh copy from `/`: the intro dialog's passcode and "Start the demo", then the Desk from
- * Today's URL and the slug from the "Chat as a customer" link under "Your public page". Nothing is
+ * Today's URL and the slug from the "Chat as a customer" link beside the greeting. Nothing is
  * read from a fixed value, since every copy has slugs of its own. A refused passcode fails at once.
  *
  * The passcode is never printed or written, even when this fails:
@@ -119,15 +119,15 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
   // The chats under Live now on arrival, by the conversation each opens: a fresh copy may already
   // have one, so the chat this path starts is the one whose link wasn't there.
   let liveOnArrival = new Set<string>();
-  await test.step("Today as Maria, with no chat open and the right column's public page and last 7 days", async () => {
+  await test.step('Today as Maria, with no chat open, the public page beside the greeting and the last 7 days in the right column', async () => {
     await expect(page.getByText(live ? /You're .+ today\./ : "You're Maria Rivera today.")).toBeVisible();
     await expect(page.getByRole('textbox', { name: /^Message / })).toHaveCount(0);
+    await expect(publicPageSection(page).getByRole('link', { name: 'Chat as a customer' })).toBeVisible();
     const aside = page.locator('.cd-today-aside');
-    await expect(aside.getByRole('heading', { name: 'Your public page' })).toBeVisible();
     await expect(aside.getByRole('heading', { name: 'Last 7 days' })).toBeVisible();
     const main = await page.locator('.cd-today__main').boundingBox();
     const right = await aside.boundingBox();
-    expect(main !== null && right !== null && right.x >= main.x + main.width, 'the public page and last 7 days are in the right column').toBe(true);
+    expect(main !== null && right !== null && right.x >= main.x + main.width, 'the last 7 days are in the right column').toBe(true);
     // The seeded hold waits for the owner.
     await expect(heldCards.first(), 'the seeded hold shows in Needs you').toBeVisible({ timeout: wait.update });
     seeded = await heldCards.count();
@@ -226,21 +226,28 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
     // Then the reply's turn ends, and the page no longer says "Claude is writing".
     await expect.poll(turnEnds, { message: "the reply's turn ended", timeout: wait.reply }).toBeGreaterThanOrEqual(sent + 1);
     await expect(publicTab.getByText('Claude is writing')).toHaveCount(0, { timeout: wait.update });
+    // The reply that arrived live has come in whole: its words revealed, its cards and receipts in.
+    const comingIn = '.cd-claude-message--revealing, .cd-claude-message--following, .cd-transcript-row--following';
+    await expect(publicTab.locator(comingIn), 'the reply came in whole').toHaveCount(0, { timeout: wait.update });
     await expectNoAxeViolations(publicTab, 'the public page');
   });
 
-  await test.step('Safety: every entry of the record checks out', async () => {
+  await test.step('Safety: every entry of the record matches the chain', async () => {
     await page.bringToFront();
     await page.getByRole('navigation').getByRole('link', { name: /^Safety/ }).click();
     await page.waitForURL(`**/app/${encodeURIComponent(deskId)}/safety`);
-    await expect(page.getByText('Every entry checks out', { exact: true })).toBeVisible({ timeout: wait.update });
+    await expect(page.getByText('Every entry matches the chain', { exact: true })).toBeVisible({ timeout: wait.update });
     await expectNoAxeViolations(page, 'Safety');
   });
 }
 
-/** The "Your public page" card in Today's right column. */
+/**
+ * The top of Today: the greeting with the Desk's link and "Chat as a customer" at its right. On a
+ * phone, Things to try's own "Chat as a customer" row is a link too, to the same page, so the
+ * greeting is where the link is read from.
+ */
 function publicPageSection(page: Page): Locator {
-  return page.locator('.cd-today-aside section').filter({ has: page.getByRole('heading', { name: 'Your public page' }) });
+  return page.locator('.cd-today__greeting .cd-greeting');
 }
 
 /** The links under Live now that show, by the conversation each opens; none while it isn't there. */

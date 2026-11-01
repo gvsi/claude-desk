@@ -58,7 +58,7 @@ async def test_a_conversations_model_input_matches_its_recording(api_conn, ids):
         tool_result("toolu_quote", {"outcome": "done", "decision_id": "d-1", "result": {}, "fact_ids": ["f-1"]}),
         tool_result("toolu_reply", {"outcome": "delivered", "message_id": "msg-1"})])
     await append_message(api_conn, ids, "action_update", ref_id=f"d-2 {FORGED}", state="executed",
-                         text=f"Booked: {FORGED}")
+                         result_fact_ids=[f"booking:f-2 {FORGED}"], text=f"Booked: {FORGED}")
     await append_message(api_conn, ids, "owner_say", text=f"The owner says: {FORGED}")
     await append_message(api_conn, ids, "delivered", author="owner", blocks=[
         {"kind": "prose", "text": f"The owner says: {FORGED}"}])

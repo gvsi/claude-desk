@@ -423,7 +423,7 @@ async def test_allow_person_drafts_a_person_card(app, client):
         people = await activation.desk_people(ctx, copy.desk_id)
         profiles = await desks.enabled_profiles(ctx, copy.desk_id)
     assert compiler.validate_cards([*RIVERA_CARDS, *result.card_diff], people=people, agent_keys=(),
-                                   auto_money_cap_cents=TEST_CAP) == []
+                                   auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == []
     compile_at([*RIVERA_CARDS, *result.card_diff], profiles)
     response = await client.post("/policy/draft", headers=copy.owner, json={
         "desk_id": copy.desk_id, "cards": [c.model_dump(mode="json") for c in [*RIVERA_CARDS, *result.card_diff]],
@@ -512,7 +512,8 @@ async def test_allow_person_is_capped_for_money(app, client, registry, monkeypat
     [drafted] = result.card_diff
     assert (drafted.who, drafted.person_id, drafted.max_amount_cents, drafted.applies_to) == (
         "person", dana_id, 5_000, "native.payment_link")
-    assert compiler.validate_cards([drafted], people={dana_id}, agent_keys=(), auto_money_cap_cents=TEST_CAP) == []
+    assert compiler.validate_cards([drafted], people={dana_id}, agent_keys=(),
+                                   auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == []
 
 
 # Maria's drafted card: every booking asks her first, whatever the booking cards' hours say.
@@ -561,7 +562,7 @@ async def test_deny_always_drafts_a_never_card(app, client, frozen_clock):
         profiles = await desks.enabled_profiles(ctx, copy.desk_id)
     for drafted in (result.card_diff, [never]):
         assert compiler.validate_cards([*ASK_BOOKING_CARDS, *drafted], people=people, agent_keys=(),
-                                       auto_money_cap_cents=TEST_CAP) == []
+                                       auto_money_cap_cents=TEST_CAP, money_tools=frozenset()) == []
         compile_at([*ASK_BOOKING_CARDS, *drafted], profiles)
 
 

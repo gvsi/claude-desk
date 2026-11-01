@@ -1,5 +1,7 @@
 /* RuleChat: the Ask Claude panel itself lays out the conversation. The wrapper only holds it for
-   focus, so it takes no box of its own. Claude's answer and the change it drafted sit 12 px apart. */
+   focus, so it takes no box of its own. Claude's answer and the change it drafted sit 12 px apart;
+   once confirmed, the receipt that takes the review's place sits 8 px under the answer, as receipts
+   sit under their message. */
 
 .cd-rule-chat {
   display: contents;
@@ -18,6 +20,10 @@
   flex-direction: column;
   gap: var(--space-12);
   min-width: 0;
+}
+
+.cd-rule-chat__answer:has(> .cd-rule-draft--confirmed) {
+  gap: var(--space-8);
 }
 
 .cd-rule-chat__kept {

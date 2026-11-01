@@ -56,12 +56,16 @@ const RAW_COLOR = /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b|\b(?:rgba?|hsla?
 const RAW_MS = /\b\d+(?:\.\d+)?ms\b/;
 const RAW_CSS_SECONDS = /(?<![\w.-])\d*\.?\d+s\b/;
 
-// The Vision article is the named exception to design system v2, with its own light palette scoped to the article.
+// The About set's light reading style is the named exception to design system v2: the Vision article and the two
+// reading pages, on a light palette of their own. Two stylesheets hold its colors, each only on its root rule: the
+// set's paper, which the article and the reading pages share, and the article's own (its phones).
 const VISION_ARTICLE_STYLES = 'about/vision/VisionArticle.css';
-// A CSS comment; the article's root rule, its class alone as the selector (read with comments blanked); and a
+const PAPER_STYLES = 'about/paper.css';
+const PALETTE_ROOTS: Record<string, string> = { [VISION_ARTICLE_STYLES]: 'vision-article', [PAPER_STYLES]: 'cd-about-paper' };
+// A CSS comment; a palette's root rule, its class alone as the selector (read with comments blanked); and a
 // custom property's name, which is a declaration's whole name.
 const CSS_COMMENT = /\/\*[\s\S]*?(?:\*\/|$)/g;
-const VISION_ROOT_RULE = /(?<=^|[{};])\s*\.vision-article\s*\{([^{}]*)\}/g;
+const rootRule = (root: string) => new RegExp(String.raw`(?<=^|[{};])\s*\.${root}\s*\{([^{}]*)\}`, 'g');
 const CUSTOM_PROPERTY_NAME = /^--[\w-]+$/;
 
 /** Where each declaration in a rule's body starts and ends: split at semicolons outside strings and brackets. */
@@ -91,14 +95,14 @@ function declarationRanges(body: string, offset: number): [number, number][] {
 }
 
 /**
- * The Vision article's stylesheet as the color scan reads it: each declaration on its root rule whose own name
- * is a custom property is blanked, and everything else stays, comments included. Comments are blanked only to
- * find the rule and read its declarations' names, so a name in a comment or a string never passes for one.
+ * A palette's stylesheet as the color scan reads it: each declaration on the rule for its root class alone whose
+ * own name is a custom property is blanked, and everything else stays, comments included. Comments are blanked
+ * only to find the rule and read its declarations' names, so a name in a comment or a string never passes for one.
  */
-function withoutTheArticlePalette(text: string): string {
+function withoutThePalette(text: string, root: string): string {
   const code = text.replace(CSS_COMMENT, (comment) => ' '.repeat(comment.length));
   const read = text.split('');
-  for (const rule of code.matchAll(VISION_ROOT_RULE)) {
+  for (const rule of code.matchAll(rootRule(root))) {
     const bodyStart = rule.index + rule[0].indexOf('{') + 1;
     for (const [start, end] of declarationRanges(rule[1] ?? '', bodyStart)) {
       const declaration = code.slice(start, end);
@@ -112,18 +116,21 @@ function withoutTheArticlePalette(text: string): string {
 }
 
 /**
- * Every raw color in `scanned`, as "file: match", but the custom properties on the root rule of the Vision
- * article's stylesheet: that one file keeps its palette there, and any other color in it still counts.
+ * Every raw color in `scanned`, as "file: match", but the custom properties on the root rule of each palette's
+ * stylesheet: those files keep their palettes there, each on its own root, and any other color in them still counts.
  */
 function rawColors(scanned: Source[] = sources): string[] {
   return hits(
     RAW_COLOR,
-    scanned.map((source) => (source.file === VISION_ARTICLE_STYLES ? { ...source, text: withoutTheArticlePalette(source.text) } : source)),
+    scanned.map((source) => {
+      const root = PALETTE_ROOTS[source.file];
+      return root === undefined ? source : { ...source, text: withoutThePalette(source.text, root) };
+    }),
   );
 }
 
 // A label swapped for a waiting one ("Starting…", "Sending your answer..."): a busy button keeps its words and spins.
-const BUSY_LABEL = /['"`>]\s*[A-Z][a-z]+ing\b[^'"`<>{}\n]*(?:…|\.{3})\s*(?=['"`<])/;
+const BUSY_LABEL = /['"`>]\s*(?!(?:Something|Nothing|Anything|Everything)\b)[A-Z][a-z]+ing\b[^'"`<>{}\n]*(?:…|\.{3})\s*(?=['"`<])/;
 
 // One part of a JSX opening tag: a character outside braces, or a braced expression (braces nest
 // two deep), so an arrow's `>` inside `onClick={() => …}` doesn't end the tag.
@@ -168,7 +175,9 @@ const HOLDS_CARDS_FILE = 'public/agents/SendAgentPanel.tsx';
 
 // An owner's reason on a receipt: the decision's `reason_plain` and the receipt props that show it
 // to the owner. The visitor's page shows each receipt's `visitor_plain` and nothing else.
-const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b/;
+const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b|\bowner_plain\b|\bownerPlain\b/;
+// Imported aliases still name the original export; renamed wrappers still import the owner path.
+const OWNER_RECEIPT_PATH = /\bApprovalCard\b|\buseOwnerReceipt\b|\b(?:from\s*|import\s*(?:\(\s*)?)['"][^'"]*\bowner\//;
 
 // The open status: the kernel's object, passed on as it came, and its times read in one place.
 const SHELL_FILE = 'ds/components/PublicShell/PublicShell.tsx';
@@ -359,6 +368,11 @@ const LIB_IMPORT = /\bfrom\s+['"](?:\.\.\/)+lib\/([\w.-]+)['"]/g;
 function libModulesOf(visitor: Source[], all: Source[] = sources): Source[] {
   const files = new Set(visitor.flatMap(({ text }) => [...text.matchAll(LIB_IMPORT)].map((m) => `lib/${m[1]}`)));
   return all.filter((s) => files.has(s.file));
+}
+
+/** Owner annotations and owner-only rendering paths in visitor code and its library modules. */
+function ownerReasonLeaks(scanned: Source[]): string[] {
+  return [...hits(OWNER_REASON, scanned), ...hits(OWNER_RECEIPT_PATH, scanned)];
 }
 
 /** Object literals (or types) that pair `open:` with `text:`: an open status the page made itself. */
@@ -712,11 +726,31 @@ describe('app source guards', () => {
     expect(hits(RAW_MS, bad)).toHaveLength(1);
     expect(hits(RAW_CSS_SECONDS, [{ file: 'x.css', text: 'transition: opacity .2s; gap: var(--space-2s);' }])).toHaveLength(1);
 
-    // The Vision article's stylesheet, and no other file, may hold colors, and only as custom properties on
-    // its root rule. A neighbour holding the same palette is caught: the article's own code, a sibling
-    // stylesheet, the reading pages' and the vision pages' styles, and a path that only ends the same way.
+    // The Vision article's stylesheet and the About set's paper, and no other file, may hold colors, and only as
+    // custom properties on their own root rule. A neighbour holding the same palette is caught: the article's own
+    // code, a sibling stylesheet, the reading pages' and the vision pages' styles, and a path that only ends the
+    // same way.
     const palette = '.vision-article {\n  --va-paper: #F4F2EC;\n  --va-line: rgba(28, 27, 25, 0.13);\n}';
     expect(rawColors([{ file: VISION_ARTICLE_STYLES, text: palette }])).toEqual([]);
+    const paper = '.cd-about-paper {\n  --va-paper: #F4F2EC;\n  --va-line: rgba(28, 27, 25, 0.13);\n}';
+    expect(rawColors([{ file: PAPER_STYLES, text: paper }])).toEqual([]);
+    // Each file only on its own root: the paper's root in the article's stylesheet, or the article's in the
+    // paper's, is a neighbour too.
+    expect(rawColors([{ file: VISION_ARTICLE_STYLES, text: paper }])).toEqual([`${VISION_ARTICLE_STYLES}: #F4F2EC`, `${VISION_ARTICLE_STYLES}: rgba(`]);
+    expect(rawColors([{ file: PAPER_STYLES, text: palette }])).toEqual([`${PAPER_STYLES}: #F4F2EC`, `${PAPER_STYLES}: rgba(`]);
+    // In the paper, the rule that points the app's tokens at the palette holds no color of its own, and neither
+    // does a rule under or beside the root.
+    for (const text of [
+      '.cd-about-paper--app { --bg-app: #F4F2EC; }',
+      '.cd-about-paper .cd-card { --va-ink: #F4F2EC; }',
+      '.cd-about-paper, .cd-card { --va-ink: #F4F2EC; }',
+      '.cd-about-paper { background: #F4F2EC; }',
+    ]) {
+      expect(rawColors([{ file: PAPER_STYLES, text }]), text).toEqual([`${PAPER_STYLES}: #F4F2EC`]);
+    }
+    for (const file of ['about/reader.css', 'about/Paper.css', 'about/vision/paper.css', 'xabout/paper.css']) {
+      expect(rawColors([{ file, text: paper }]), file).toEqual([`${file}: #F4F2EC`, `${file}: rgba(`]);
+    }
     // A custom property after a comment, as the stylesheet writes its groups, is one too.
     const grouped = '/* The page. */\n.vision-article {\n  /* The ground. */\n  --va-paper: #F4F2EC;\n  color: var(--va-ink);\n}';
     expect(rawColors([{ file: VISION_ARTICLE_STYLES, text: grouped }])).toEqual([]);
@@ -757,9 +791,17 @@ describe('app source guards', () => {
       "<Button busy={busy}>{busy ? 'Starting…' : 'Start the demo'}</Button>",
       '<Button variant="primary">Sending...</Button>',
       'const label = pending ? `Sending your answer…` : `Allow this time`;',
+      '<Button>Saving…</Button>',
+      '<Button>Checking…</Button>',
     ];
     for (const text of bad) expect(hits(BUSY_LABEL, sample(text)), text).toHaveLength(1);
-    const fine = "<Button {...props} busy={busy}>Start the demo</Button>; const rows = [...all]; // GET …/briefing\n<TextField placeholder='Type a message…' />";
+    const fine = [
+      "<Button {...props} busy={busy}>Start the demo</Button>; const rows = [...all]; // GET …/briefing\n<TextField placeholder='Type a message…' />",
+      "'Something else…'",
+      "'Nothing…'",
+      "'Anything…'",
+      "'Everything…'",
+    ].join('\n');
     expect(hits(BUSY_LABEL, sample(fine))).toEqual([]);
     expect(hits(BUSY_LABEL)).toEqual([]);
   });
@@ -891,11 +933,17 @@ describe('app source guards', () => {
   });
 
   it('visitor_code_never_shows_owner_reasons', () => {
-    const visitor = (s: Source) => s.file.startsWith('public/');
-    const bad = '<MarginReceipt {...receipt} reason={decision.reason_plain} cardBelow />';
-    expect(hits(OWNER_REASON, sample(bad))).toHaveLength(3);
+    const visitor = sources.filter((s) => s.file.startsWith('public/'));
+    const bad = '<MarginReceipt {...receipt} reason={decision.reason_plain} cardBelow />; decision.owner_plain; const ownerPlain = line;';
+    expect.soft(hits(OWNER_REASON, sample(bad))).toHaveLength(5);
     expect(hits(OWNER_REASON, sample('<MarginReceipt {...receipt} onOpenTrace={open} />; const why = reasonPlain;'))).toEqual([]);
-    expect(hits(OWNER_REASON, sources.filter(visitor))).toEqual([]);
+    expect.soft(ownerReasonLeaks(sample("import { ApprovalCard as CustomerCard } from '../ds/index.ts'; <CustomerCard {...decision} />"))).not.toEqual([]);
+    const wrapper: Source[] = [{ file: 'lib/receipt.ts', text: "export { useOwnerReceipt as receiptFor } from '../owner/conversations/ownerReceipt.ts';" }];
+    expect.soft(ownerReasonLeaks(libModulesOf(sample("import { receiptFor } from '../lib/receipt.ts';"), wrapper))).not.toEqual([]);
+    expect.soft(ownerReasonLeaks(sample("import { View as CustomerReceipt } from '../owner/Receipt.tsx'; <CustomerReceipt />"))).not.toEqual([]);
+    expect(ownerReasonLeaks([...visitor, ...libModulesOf(visitor)])).toEqual([]);
+    // Leak assertions in public tests may name the key; tests already sit outside this source scan.
+    expect(isScanned('public/leak.test.ts')).toBe(false);
   });
 
   it('open_status_comes_from_the_ds_once_it_has_the_slot', () => {

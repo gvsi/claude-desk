@@ -33,6 +33,8 @@ describe('ask claude', () => {
     const { screen } = await renderRoute(RULES);
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     await expect.element(composer).toBeVisible();
+    // The reload's outgoing frame also has a content element; measure after its fade ends.
+    await settled(screen.container);
     const sent = composer.element().getBoundingClientRect().left;
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
     await composer.fill(ASK);
@@ -64,7 +66,8 @@ describe('ask claude', () => {
     const { screen } = await renderRoute(RULES);
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     await expect.element(composer).toBeVisible();
-    const group = () => screen.container.querySelector<HTMLElement>('.cd-connector-section__header');
+    // The loading layer also has these classes; wait for the page's own group.
+    const group = () => [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__header')].find((el) => !el.closest('.cd-skeleton-screen__layer')) ?? null;
     await expect.poll(() => group()).not.toBeNull();
     const top = () => (group() as HTMLElement).getBoundingClientRect().top;
     const closed = top();

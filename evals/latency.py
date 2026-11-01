@@ -73,7 +73,7 @@ MESSAGES: dict[Kind, tuple[str, ...]] = {
 }
 TURN_TIMEOUT_S = 90.0
 # What a turn should cost until measured: the master plan's Opus first call and second call after a tool,
-# a reviewer call and a soft-promise check ($0.031, "Model cost and latency budget"), rounded up for cold
+# a reviewer call and a Sonnet soft-promise check ($0.0324, "Model cost and latency budget"), rounded up for cold
 # caches and a conversation that grows. Twenty turns of each kind come to $3.00.
 PER_TURN_USD = 0.05
 PROVE_RUNS = 20   # the timings `scripts.prove_latency --runs` makes of each card set (Plan 01a)

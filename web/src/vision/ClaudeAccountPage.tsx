@@ -20,6 +20,8 @@ import { ClaudeWords, noop, VisionFrame } from './VisionFrame.tsx';
  */
 export function ClaudeAccountPage() {
   const { brand, ownerName } = brandFrom(RIVERA_PUBLIC_DESK);
+  // Messages name the owner as the Desk serves the name; the shell's head asks for `ownerName`.
+  const owner = RIVERA_PUBLIC_DESK.owner_display_name;
   const t = CLAUDE_ACCOUNT_TURNS;
   const s = CLAUDE_ACCOUNT_SOURCES;
   const composerLabel = `Message ${brand.name}`;
@@ -40,7 +42,7 @@ export function ClaudeAccountPage() {
           <Transcript label={`Conversation with ${brand.name}`}>
             <SystemLine text={t.signedIn} />
             <TranscriptRow margin={<MarginReceipt source={s.checked} plain={t.checked} ledgerSeq={40} />}>
-              <ClaudeWords text={t.ask} ownerName={ownerName} />
+              <ClaudeWords text={t.ask} ownerName={owner} />
             </TranscriptRow>
             <TranscriptRow>
               <VisitorMessage text={t.yes} />
@@ -51,7 +53,7 @@ export function ClaudeAccountPage() {
                 <MarginReceipt key="checked" source={s.checked} plain={t.checked} ledgerSeq={42} />,
               ]}
             >
-              <ClaudeMessage blocks={CLAUDE_ACCOUNT_WELCOME} language="en" ownerName={ownerName} />
+              <ClaudeMessage plainProse blocks={CLAUDE_ACCOUNT_WELCOME} language="en" ownerName={owner} />
             </TranscriptRow>
             <TranscriptRow>
               <VisitorMessage text={t.invoice} />
@@ -62,7 +64,7 @@ export function ClaudeAccountPage() {
                 <MarginReceipt key="released" source={s.released} plain={t.releasedReceipt} ledgerSeq={44} />,
               ]}
             >
-              <ClaudeMessage blocks={CLAUDE_ACCOUNT_INVOICE} language="en" ownerName={ownerName} inertDownload />
+              <ClaudeMessage plainProse blocks={CLAUDE_ACCOUNT_INVOICE} language="en" ownerName={owner} inertDownload />
             </TranscriptRow>
           </Transcript>
         </PublicShell>

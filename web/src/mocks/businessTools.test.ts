@@ -11,7 +11,7 @@ const booking = {
   how: 'Books a free 20-minute intro call with Linda for a new client.',
   config: { block: 'typed_booking' as const, appointment_type: 'Free intro call', minutes: 20 },
 };
-const intake = {
+const intake: { title: string; how: string; config: Extract<BusinessToolDef['config'], { block: 'intake' }> } = {
   title: 'New client intake',
   how: 'Saves the answers for Linda.',
   config: { block: 'intake' as const, questions: ['Which tax years do you need help with?'] },
@@ -26,14 +26,14 @@ it('turns accepted jobs into business rows in order with the kernel block profil
       source: 'business', status: 'needs_review', review_reason: 'new',
       business: { title: booking.title, description: booking.how, config: booking.config },
       effects: ['change'], reversible: true,
-      description_confirmed: 'Books one open time on your calendar for this kind of appointment.',
+      description_confirmed: "Books one open time on the business's calendar for this kind of appointment.",
       pending_definition_text: null, pending_sha256: null, cards: [],
     }),
     expect.objectContaining({
       source: 'business', status: 'needs_review', review_reason: 'new',
       business: { title: intake.title, description: intake.how, config: intake.config },
       effects: ['change'], reversible: true,
-      description_confirmed: "Saves the person's name, contact details and answers to your questions, so you can follow up.",
+      description_confirmed: "Saves the person's name, contact details and answers to the business's questions, so the owner can follow up.",
       pending_definition_text: null, pending_sha256: null, cards: [],
     }),
   ]);
@@ -46,11 +46,11 @@ it('retains empty descriptions and zero-dollar payments with their fixed block p
   ]);
   expect(rows).toHaveLength(2);
   expect(rows[0]?.business?.description).toBe('');
-  expect(rows[0]?.description_confirmed).toBe('Books one open time on your calendar for this kind of appointment.');
+  expect(rows[0]?.description_confirmed).toBe("Books one open time on the business's calendar for this kind of appointment.");
   expect(rows[1]).toMatchObject({
     business: { description: '', config: { block: 'purpose_payment', purpose: 'Consultation', amount_cents: 0 } },
     effects: ['charge'], reversible: false,
-    description_confirmed: 'Creates a payment link for the configured purpose and kernel-owned amount.',
+    description_confirmed: "Creates a secure payment link for this purpose, for the amount the owner set.",
   });
 });
 
@@ -121,11 +121,11 @@ it('uses stable definition hashes and the fixed payment and urgent profiles', ()
   const rows = businessToolRows(jobs);
   expect(rows[2]).toMatchObject({
     effects: ['charge'], reversible: false,
-    description_confirmed: 'Creates a payment link for the configured purpose and kernel-owned amount.',
+    description_confirmed: "Creates a secure payment link for this purpose, for the amount the owner set.",
   });
   expect(rows[3]).toMatchObject({
     effects: ['change'], reversible: true,
-    description_confirmed: 'Saves an urgent callback request and alerts the owner.',
+    description_confirmed: "Saves an urgent callback request and alerts the owner right away.",
   });
   for (const row of rows) expect(row.definition_sha256).toMatch(/^[a-f0-9]{64}$/);
   const hashes = (input: typeof jobs) => businessToolRows(input).map((row) => row.definition_sha256);
@@ -156,9 +156,11 @@ it('seeds a Desk with independent business rows whose definitions reach the tool
   const desk = [...mockStore.world.desks.values()][0];
   if (!desk) throw new Error('The mock has a Desk');
   seedBusinessTools(desk);
-  const rows = rulesView(desk).tools.filter((row) => row.source === 'business');
+  // Chen's rows, beside the urgent tool every Rivera copy already has.
+  const chen = new Set(chenBusinessTools.map((row) => row.tool));
+  const rows = rulesView(desk).tools.filter((row) => row.source === 'business' && chen.has(row.tool));
   expect(rows.map((row) => row.business)).toEqual(chenBusinessTools.map((row) => row.business));
-  expect(rows[0]?.description_confirmed).toBe('Offers open times and books a free intro call, 20 minutes.');
+  expect(rows[0]?.description_confirmed).toBe("Books one open time on the business's calendar for this kind of appointment.");
   const intake = rows[1]?.business;
   if (intake?.config.block !== 'intake') throw new Error('The second job is intake');
   intake.config.questions.push('Changed locally');

@@ -15,7 +15,7 @@ export interface SkeletonAnchor {
   page: string;
   size?: boolean;
   /** Extra dimensions when only width or height is predictable before data arrives. */
-  dimensions?: readonly ('width' | 'height')[];
+  dimensions?: readonly ('width' | 'height' | 'bottom')[];
 }
 export interface SkeletonLoad {
   status: string;
@@ -27,13 +27,17 @@ export interface SkeletonLoad {
 }
 
 /** Shared layout classes also occur in the layer: only measure the landed page outside it. */
+function findLanded(selector: string): HTMLElement | undefined {
+  return [...document.querySelectorAll<HTMLElement>(selector)].find((el) => !el.closest('.cd-skeleton-screen__layer'));
+}
+
 function landed(selector: string): HTMLElement {
-  const element = [...document.querySelectorAll<HTMLElement>(selector)].find((el) => !el.closest('.cd-skeleton-screen__layer'));
+  const element = findLanded(selector);
   if (!element) throw new Error(`No landed element for ${selector}`);
   return element;
 }
 
-function compare(shape: DOMRect, real: DOMRect, label: string, size = false, dimensions: readonly ('width' | 'height')[] = []): void {
+function compare(shape: DOMRect, real: DOMRect, label: string, size = false, dimensions: readonly ('width' | 'height' | 'bottom')[] = []): void {
   for (const edge of size ? (['top', 'left', 'width', 'height'] as const) : (['top', 'left', ...dimensions] as const)) {
     expect(Math.abs(shape[edge] - real[edge]), `${label} ${edge}: shape ${shape[edge]}, page ${real[edge]}`).toBeLessThanOrEqual(
       SKELETON_TOLERANCE_PX,
@@ -50,8 +54,11 @@ function watchLoad(load: SkeletonLoad) {
   let firstVisibility: string | undefined;
   let firstStatus: string | null = null;
   let firstBusy: string | null = null;
-  let leaving: { style: { name: string; duration: string; pointer: string }; anchors: DOMRect[] } | undefined;
-  let replaced: DOMRect[] | undefined;
+  let leaving: { style: { name: string; duration: string; pointer: string }; anchors: (DOMRect | undefined)[] } | undefined;
+  let replaced: (DOMRect | undefined)[] | undefined;
+  let replacementFrame = 0;
+  let replacementPaint: Promise<void> | undefined;
+  let replacementPainted = false;
   // Several regions can load together. Keep each mount's history until its status identifies it.
   const candidates = new Map<
     HTMLElement,
@@ -67,6 +74,7 @@ function watchLoad(load: SkeletonLoad) {
   const read = () => {
     if (!region) {
       for (const element of document.querySelectorAll<HTMLElement>('.cd-skeleton-screen')) {
+        if (element.children.length < 2) continue;
         const parts = partsOf(element);
         if (!parts.layer) continue;
         const state = parts.layer.dataset.state as LayerState;
@@ -94,19 +102,37 @@ function watchLoad(load: SkeletonLoad) {
         break;
       }
     }
-    if (!region) return;
+    if (!region || region.children.length < 2) return;
     const parts = partsOf(region);
     const state = (parts.layer?.dataset.state ?? 'gone') as LayerState;
-    if (states.at(-1)?.state === state) return;
-    states.push({ state, at: performance.now() });
-    if (state === 'leaving' && parts.layer) {
+    if (states.at(-1)?.state !== state) states.push({ state, at: performance.now() });
+    if (state === 'leaving' && parts.layer && !leaving) {
       const style = getComputedStyle(parts.layer);
       leaving = {
         style: { name: style.animationName, duration: style.animationDuration, pointer: style.pointerEvents },
-        anchors: load.anchors.map((a) => landed(a.page).getBoundingClientRect()),
+        anchors: load.anchors.map(() => undefined),
       };
     }
-    if (state === 'gone') replaced = load.anchors.map((a) => landed(a.page).getBoundingClientRect());
+    if (state === 'gone' && !replaced) {
+      replaced = load.anchors.map(() => undefined);
+      replacementPaint = new Promise<void>((resolve) => {
+        replacementFrame = requestAnimationFrame(() => {
+          // Include commits before the replacement's first paint, then freeze missing slots too.
+          read();
+          replacementPainted = true;
+          resolve();
+        });
+      });
+    }
+    if (state === 'leaving' || state === 'gone') {
+      // A page can commit its anchors separately during the fade. Never backfill a leaving
+      // position from a later commit after the layer has gone.
+      load.anchors.forEach((anchor, i) => {
+        const positions = state === 'leaving' ? leaving?.anchors : replacementPainted ? undefined : replaced;
+        if (!positions || positions[i]) return;
+        positions[i] = findLanded(anchor.page)?.getBoundingClientRect();
+      });
+    }
   };
   const observer = new MutationObserver(read);
   observer.observe(document.body, {
@@ -116,7 +142,11 @@ function watchLoad(load: SkeletonLoad) {
     attributes: true,
     attributeFilter: ['data-state', 'aria-busy'],
   });
-  onTestFinished(() => observer.disconnect());
+  const stop = () => {
+    observer.disconnect();
+    cancelAnimationFrame(replacementFrame);
+  };
+  onTestFinished(stop);
   return {
     states,
     appeared: () => appeared,
@@ -130,12 +160,22 @@ function watchLoad(load: SkeletonLoad) {
     },
     leaving: () => leaving,
     replaced: () => replaced,
+    replacementPaint: () => replacementPaint,
+    stop,
   };
 }
 
 async function checkLoad(load: SkeletonLoad, still: boolean): Promise<void> {
   await loadWebFonts();
   const watch = watchLoad(load);
+  try {
+    await checkWatchedLoad(load, still, watch);
+  } finally {
+    watch.stop();
+  }
+}
+
+async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: ReturnType<typeof watchLoad>): Promise<void> {
   await load.open();
   await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'shown')).toBe(true));
   const { status, body, layer } = watch.parts();
@@ -193,6 +233,21 @@ async function checkLoad(load: SkeletonLoad, still: boolean): Promise<void> {
   const stays = (load.stays ?? []).map((selector) => landed(selector).getBoundingClientRect());
   load.release();
   await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'gone')).toBe(true));
+  await watch.replacementPaint();
+  if (!still) expect(watch.leaving(), 'the layer never started leaving').toBeDefined();
+  for (const [i, anchor] of load.anchors.entries()) {
+    const label = `${anchor.name} (${anchor.page})`;
+    if (!still) expect(watch.leaving()?.anchors[i], `${label} was not on the page while the layer faded`).toBeDefined();
+    expect(watch.replaced()?.[i], `${label} was not on the page at the first paint after replacement`).toBeDefined();
+  }
+  let final: DOMRect[] = [];
+  await vi.waitFor(() => {
+    final = load.anchors.map((anchor) => {
+      const element = findLanded(anchor.page);
+      expect(element, `${anchor.name} (${anchor.page}) never landed within 2 s of the layer being gone`).toBeDefined();
+      return element!.getBoundingClientRect();
+    });
+  }, { timeout: 2_000 });
   if (still) {
     expect(watch.states.some(({ state }) => state === 'leaving')).toBe(false);
     expect(watch.replaced()).toHaveLength(load.anchors.length);
@@ -203,7 +258,11 @@ async function checkLoad(load: SkeletonLoad, still: boolean): Promise<void> {
   for (const [i, anchor] of load.anchors.entries()) {
     const moment = still ? watch.replaced() : watch.leaving()?.anchors;
     compare(anchors[i]!, moment![i]!, anchor.name, anchor.size, anchor.dimensions);
-    compare(anchors[i]!, landed(anchor.page).getBoundingClientRect(), anchor.name, anchor.size, anchor.dimensions);
+    if (!still) compare(anchors[i]!, watch.replaced()![i]!, anchor.name, anchor.size, anchor.dimensions);
+    // The tables allow data-dependent sizes relative to the shape. After replacement, the
+    // landed anchor's own top, left, width and height must all stay stable.
+    compare(watch.replaced()![i]!, final[i]!, `${anchor.name} after gone`, true);
+    compare(anchors[i]!, final[i]!, anchor.name, anchor.size, anchor.dimensions);
   }
   (load.stays ?? []).forEach((selector, i) => compare(stays[i]!, landed(selector).getBoundingClientRect(), selector, true));
   expect(watch.parts().body.hasAttribute('aria-busy')).toBe(false);

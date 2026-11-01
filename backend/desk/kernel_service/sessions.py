@@ -158,9 +158,10 @@ async def set_mode(session_id: Annotated[str, Path(alias="id")], body: ModeReque
 async def close_card_handoffs(ctx: KernelCtx, row: SessionRow) -> list[str]:
     """Closes the session's open handoffs the handoff card opened, when the owner handles the
     conversation (the owner's decision of 2026-10-31): the owner takes it over (`set_mode`) or
-    says something in it (`reply_check.owner_message`). Each goes `done` as the owner's mark of
+    says something in it (`reply_check.owner_message`); and when the visitor books a time in it
+    (`adapters.book`, the owner's decision of 2026-11-01). Each goes `done` as the owner's mark of
     done closes one, its `handoff:<id>` fact, if any, expired. A call-back stays open: it promises
-    the visitor a call, which neither keeps. The caller holds the session row; the handoffs are
+    the visitor a call, which none of these keeps. The caller holds the session row; the handoffs are
     taken `FOR UPDATE` in the order a call-back's closing takes them (newest first), then their
     facts, before the caller appends to the ledger (`ledger_card_handoffs_closed`). Returns the
     IDs it closed."""
@@ -184,7 +185,7 @@ async def close_card_handoffs(ctx: KernelCtx, row: SessionRow) -> list[str]:
 async def ledger_card_handoffs_closed(ctx: KernelCtx, row: SessionRow, handoff_ids: list[str],
                                       closed_by: str) -> None:
     """Ledgers each closing `close_card_handoffs` made, `desk_data` `{part: "handoffs", refs: [its
-    id], closed_by}` (`takeover` or `owner_message`), so the owner's history can tell it from the
+    id], closed_by}` (`takeover`, `owner_message` or `booking`), so the owner's history can tell it from the
     owner's own mark of done."""
     for handoff_id in handoff_ids:
         await ledger.append(ctx, copy_id=row.copy_id, desk_id=row.desk_id, event=LedgerEvent(

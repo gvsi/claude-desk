@@ -5,7 +5,7 @@ import { expectComputed } from '../test/expectComputed.ts';
 import { ANSWERING_LINE, GENERAL_DETAILS, GeneralSettings, SettingsPage } from './parts.tsx';
 import { SPEC, expectFooter, expectFooterAtFoot, expectSettingsPage, one } from './spec.ts';
 
-/** Settings › General: the business's details, Answering, and deleting this Desk. */
+/** Settings › General: the business's details, Claude acts for you, and deleting this Desk. */
 function SettingsGeneral() {
   return (
     <SettingsPage current="general">
@@ -24,9 +24,9 @@ const meta = {
     canvas: 'N-Run2-Settings-General',
     canvasNote: [
       'Signed on 2026-10-30.',
-      'Settings › General: SubNav at the left, the business’s details as a DetailList, Answering as a Switch in a Card, and Delete this Desk.',
+      'Settings › General: SubNav at the left, the business’s details as a DetailList, Claude acts for you as a Switch in a Card, and Delete this Desk.',
       'The board draws a ghost Change at the right of each detail; the details are read-only, with no Change (owner decision, 2026-10-30).',
-      'Answering’s line is the short one, “Claude answers under your rules.”, the same as on a phone, where this board adds a second sentence (owner decision, 2026-10-30).',
+      'The switch says “Claude acts for you” with “Within your rules” while on, the same as on a phone (owner decision, 2026-11-01).',
       'Delete this Desk is a neutral secondary button where the board draws it red (owner decision, 2026-10-30).',
       'The board centers a 1000 px column; Settings keeps the app’s 960 px content width, like every other owner page (owner decision, 2026-10-30), so it sits 20 px right of the render.',
     ].join(' '),
@@ -41,7 +41,7 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
     const content = await expectSettingsPage(canvasElement, 'General');
-    // The page's own: the sidebar has an Answering switch too.
+    // The page's own: the sidebar has an Claude acts for you switch too.
     const page = within(canvas.getByRole('main'));
 
     // The details, read-only: each label over its value, in the board's words, with no Change.
@@ -56,16 +56,24 @@ export const Board: Story = {
     await expect(Math.round(card.getBoundingClientRect().width)).toBe(720);
     await expect(Math.round(card.getBoundingClientRect().height)).toBe(326);
 
-    // Answering, on, in its own card 20 px under the details.
-    const answering = page.getByRole('switch', { name: 'Answering' });
+    // Claude acts for you, on, in its own card 20 px under the details.
+    const answering = page.getByRole('switch', { name: 'Claude acts for you' });
     await expect(answering).toHaveAttribute('aria-checked', 'true');
     // The short line everywhere, as the phone board writes it (owner decision, 2026-10-30).
-    await expect(answering).toHaveAccessibleDescription('Claude answers under your rules.');
-    const answeringCard = page.getByRole('region', { name: 'Answering' });
-    expectComputed(answeringCard, SPEC.card);
+    await expect(answering).toHaveAccessibleDescription('Within your rules');
+    const answeringCard = page.getByRole('region', { name: 'Claude acts for you' });
+    // The words line up with Business; the switch keeps its vertical inset and the card's height.
+    const label = within(answering).getByText('Claude acts for you', { exact: true });
+    await expect(Math.round(label.getBoundingClientRect().left)).toBe(
+      Math.round(within(business).getByText('Business', { exact: true }).getBoundingClientRect().left),
+    );
+    await expect(Math.round(answeringCard.getBoundingClientRect().height)).toBe(91);
+    await expect(Math.round(answering.getBoundingClientRect().top - answeringCard.getBoundingClientRect().top)).toBe(21);
+    await expect(Math.round(answeringCard.getBoundingClientRect().bottom - answering.getBoundingClientRect().bottom)).toBe(21);
+    expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
     await expect(Math.round(answeringCard.getBoundingClientRect().top - card.getBoundingClientRect().bottom)).toBe(20);
 
-    // Delete this Desk: its heading 28 px under Answering, the line, and the neutral button at the column's right.
+    // Delete this Desk: its heading 28 px under Claude acts for you, the line, and the neutral button at the column's right.
     const remove = page.getByRole('region', { name: 'Delete this Desk' });
     await expect(Math.round(within(remove).getByRole('heading').getBoundingClientRect().top - answeringCard.getBoundingClientRect().bottom)).toBe(28);
     await expect(within(remove).getByText('Its public link stops working and its chats close. Its safety record is kept.')).toBeVisible();

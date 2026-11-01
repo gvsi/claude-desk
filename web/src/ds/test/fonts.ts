@@ -18,12 +18,12 @@ export const FONT_FACES = [
 ] as const;
 
 /** How long the stylesheet and its faces get, together, before the story fails, in ms. */
-const FONT_TIMEOUT = 10_000;
+export const FONT_TIMEOUT = 10_000;
 
 /** `promise`, or a failure naming `what` once `ms` have passed without it settling. */
-export function withinDeadline<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+export function withinDeadline<T>(promise: Promise<T>, ms: number, what: string, timeoutMessage = `${what} didn't load within ${ms} ms.`): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${what} didn't load within ${ms} ms.`)), ms);
+    const timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
     promise.then(
       (value) => {
         clearTimeout(timer);

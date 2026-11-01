@@ -97,7 +97,7 @@ RunErrorKind = Literal["infra", "timeout", "simulator_refused", "config_mismatch
 # routes a tier 2 run can reach, and the kernel's checks as their ledger entries record them. A call on
 # any other route, or served by another model, is a configuration error, never a verdict.
 DESK_MODELS = {"conversation": "claude-opus-5-5", "triage": "claude-haiku-5-5", "translation": "claude-haiku-5-5"}
-KERNEL_CHECK_MODELS = {"review": "claude-sonnet-5-5", "reply": "claude-haiku-5-5"}
+KERNEL_CHECK_MODELS = {"review": "claude-sonnet-5-5", "reply": "claude-sonnet-5-5"}
 # An `EvError` the stack sends when it failed, not when the Desk decided something.
 INFRA_ERRORS = frozenset({"kernel_unavailable", "internal"})
 SETTLE_POLL_S = 0.05   # how often a turn end re-reads the session while a turn holds it

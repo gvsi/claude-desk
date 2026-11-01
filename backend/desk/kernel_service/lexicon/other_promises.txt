@@ -1,0 +1,30 @@
+# French, Portuguese, Italian and German commitments refused only in public policy text,
+# with rule ID language. One `<reading>\t<regex>` per line, matched case-insensitively as
+# whole words, with lookalikes and whitespace read as in the English/Spanish lexicons.
+# `folded` drops accents; `accented` keeps them. Portuguese grátis requires its accent:
+# Spanish gratis and reembolso remain the Spanish lexicon's responsibility. Reply prose
+# keeps its existing language check and never reads this lexicon.
+
+# French
+folded	gratuite?s?
+folded	offerte?s?
+folded	sans[\s-]+frais
+folded	remises?|rabais
+folded	garantie?s?
+folded	remboursée?s?|remboursements?
+
+# Portuguese
+accented	grátis
+folded	sem[\s-]+(?:custos?|taxas?|cobrancas?)
+# Not "garante", which is also Spanish for a guarantor ("Se requiere un garante.").
+folded	descontos?|garantid[oa]s?|garant(?:o|imos|em)
+# Keep the Portuguese noun distinct from Spanish garantía.
+accented	garantia
+
+# Italian
+folded	senza[\s-]+cost[oi]
+folded	scont[oi]|omaggi(?:o)?|garantit[oaie]|rimborso|rimborsi
+
+# German
+folded	kostenlos(?:e[nmrs]?)?|umsonst
+folded	rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?

@@ -9,12 +9,12 @@ import {
   Button,
   Card,
   EmptyState,
-  LoadingLine,
   MoneyLimit,
   Notice,
   OutcomeGroups,
   PageHeader,
   SituationRow,
+  SkeletonScreen,
   StatusLabel,
   type OutcomeGroupRow,
   type RuleMode,
@@ -26,7 +26,9 @@ import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
 import { SETUP_COPY } from './copy.ts';
 import { useLanding } from './landing.ts';
-import { aroundBusiness, setupRulesQuery } from './shared.ts';
+import { aroundBusiness, setupRulesQuery, useOpensAtTop } from './shared.ts';
+import { PublicLinesStep } from './PublicLinesStep.tsx';
+import { DraftRulesSkeleton, SituationsSkeleton } from './StepSkeletons.tsx';
 
 const copy = SETUP_COPY.rules;
 
@@ -36,6 +38,7 @@ export interface RulesStepProps {
   business: string;
   /** The interview moved on. */
   onNext: (step: SetupStep) => void;
+  reread: () => Promise<SetupState | null>;
   /**
    * The owner came to Real situations on this page (from the rules): the situations are tried as
    * they watch, and their rows land as they arrive. Setup opened at Real situations (a reload, or
@@ -91,12 +94,14 @@ function DraftRules({ draft, people, check }: { draft: RulesDraft; people: Peopl
  * what Claude does on its own, asks about and never does, the always-on rules and the check. A
  * draft that can't be checked can't go on: only "Save and exit". "Check real situations" runs the
  * draft on situations from the owner's answers, which land one by one as they arrive; "Looks right"
- * goes on to the safety check.
+ * opens the public lines review before the safety check.
  */
-export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
+export function RulesStep({ state, business, onNext, reread, live }: RulesStepProps) {
   const id = state.interview_id;
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
-  const [view, setView] = useState<'rules' | 'situations'>(state.step === 'situations' ? 'situations' : 'rules');
+  const [view, setView] = useState<'rules' | 'situations' | 'public_lines'>(state.step === 'situations' ? 'situations' : 'rules');
+  // Real situations and What customers will read each open at their top, as setup's steps do.
+  useOpensAtTop(view);
   const draft = useQuery(setupRulesQuery(id));
   const people = useQuery({ ...peopleQuery(state.desk_id), refetchOnWindowFocus: false });
   const situations = useQuery({
@@ -141,11 +146,12 @@ export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
 
   // The situations go on only from a draft whose check passed, however the stage was opened.
   const checked = draft.data !== undefined && checkStatus(draft.data.proof).status === 'checked';
+  if (view === 'public_lines' && checked) return <PublicLinesStep state={state} onNext={onNext} reread={reread} />;
   if (view === 'situations' && checked) {
     const s = SETUP_COPY.situations;
     let body: ReactNode;
     if (situations.data === undefined) {
-      body = situations.isError ? failure(situations.error, () => void situations.refetch()) : <LoadingLine>{s.loading}</LoadingLine>;
+      body = situations.isError ? failure(situations.error, () => void situations.refetch()) : null;
     } else {
       body = (
         <>
@@ -173,7 +179,7 @@ export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
             </Card>
           )}
           <div className="cd-setup-step__actions">
-            <Button variant="primary" size="main" onClick={() => onNext('safety_check')}>
+            <Button variant="primary" size="main" onClick={() => setView('public_lines')}>
               {s.looksRight}
             </Button>
           </div>
@@ -183,14 +189,21 @@ export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
     return (
       <div className="cd-setup-step">
         <PageHeader title={s.title} subtitle={aroundBusiness(s.subtitle, business)} />
-        {body}
+        <SkeletonScreen
+          loading={situations.data === undefined && !situations.isError}
+          status={s.loading}
+          skeleton={<SituationsSkeleton />}
+          className="cd-setup-step__region"
+        >
+          {body}
+        </SkeletonScreen>
       </div>
     );
   }
 
   let body: ReactNode;
   if (draft.data === undefined) {
-    body = draft.isError ? failure(draft.error, () => void draft.refetch()) : <LoadingLine>{copy.loading}</LoadingLine>;
+    body = draft.isError ? failure(draft.error, () => void draft.refetch()) : null;
   } else {
     const check = checkStatus(draft.data.proof);
     // Only a draft whose check passed goes on; one that can't be checked, or failed, waits here.
@@ -214,7 +227,16 @@ export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.title} subtitle={copy.subtitle} />
-      {body}
+      {/* The rows name customers from the people read, so the draft waits for it too. Opened at
+          Real situations, the draft is read first, under the situations' shapes and words. */}
+      <SkeletonScreen
+        loading={draft.data === undefined ? !draft.isError : people.isPending}
+        status={view === 'situations' ? SETUP_COPY.situations.loading : copy.loading}
+        skeleton={view === 'situations' ? <SituationsSkeleton /> : <DraftRulesSkeleton />}
+        className="cd-setup-step__region"
+      >
+        {body}
+      </SkeletonScreen>
     </div>
   );
 }

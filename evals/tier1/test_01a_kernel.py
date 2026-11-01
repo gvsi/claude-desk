@@ -7,8 +7,9 @@ signed and ledgered; seeds that activate only from cached proofs, in either proo
 proved before confirm, and a rule set wider than its cards rejected in plain words; the public Desk
 with no private field; a document's canary in a reply; hostile tool names and fact ids, each still
 ledgered; and an owner take-over between an execution's intent and its side effect. Two more come
-from the PR review: a first reply with no marker of any language hands off, and so does a French or
-German one whose only English markers are words that language writes too.
+from the PR review: a first reply with no marker of any language gets one checked rewrite.
+Positive evidence of another language still hands off at once, including French or German whose
+only English markers are words that language writes too.
 
 Three cases run kernel code in-process (`white_box`): one breaks the compiler to see the proof
 catch it, one hides the shipped proof reports or the prover and restarts the kernel, and one takes
@@ -329,15 +330,21 @@ async def test_a_documents_canary_in_a_reply_is_blocked(k: KernelHarness, record
 
 
 @pytest.mark.requires("01a")
-async def test_an_unmarked_first_reply_hands_off(k: KernelHarness):
-    """A session's first reply of four or more words with no marker of any language is another
-    language, not too little to tell: it is `unsupported_language` alone and only the handoff is
-    shown, in English, so a time or a price in words neither lexicon reads ("às dez") never rests on
-    the model check alone."""
+@pytest.mark.parametrize("final", [True, False], ids=["final", "rewrite"])
+async def test_an_unmarked_first_reply_gets_one_rewrite(k: KernelHarness, records, final: bool):
+    """Unmarked prose never shows; the first check rewrites and the final one hands off."""
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
-    await check_reply(k, visitor, UNMARKED_PROSE, expect=Expect(fields={
-        **handed_off(visitor, "unsupported_language").fields, "violations": {"$len": 1}, "language": "en"}))
+    verdict = await check_reply(k, visitor, UNMARKED_PROSE, final=final, expect=Expect(fields={
+        "ok": False, "violations": {"$len": 1}, "violations.0.kind": "uncertain_language",
+        "violations.0.rule_id": "language_uncertain", "language": "en",
+        **shown_blocks(HANDED_OFF if final else [])}))
+    if k.is_real:
+        events = [entry.event for entry in await records.ledger_entries(desk.copy.copy_id, desk.desk_id)
+                  if entry.event.session_id == visitor.state.session_id]
+        hands = [e for e in events if e.kind == "desk_data" and e.summary.get("part") == "handoffs"]
+        assert len(hands) == int(final)
+        assert verdict.blocks == [] if not final else verdict.blocks[0].template == "handoff"
 
 
 @pytest.mark.requires("01a")

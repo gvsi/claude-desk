@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, test } from 'vitest';
 
-import type { Effect, RuleCard, ToolName } from '../../../api/contracts.ts';
+import type { Effect, HoursWindow, RuleCard, ToolName } from '../../../api/contracts.ts';
+import { RIVERA_HOURS, presetCards, weekdayWindows } from '../../../mocks/seed.ts';
 import { groupsOverlap, rulesForTool } from '../ToolRulesCard/toolRules.ts';
 import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_WORDS, outcomePhrase, type RulesPreset } from './outcomeWords.ts';
 
@@ -41,6 +42,7 @@ const TOOL_EFFECTS = {
   'native.start_verification': ['send_message'],
   'native.fetch_website': ['read'],
   'native.read_memory': ['read'],
+  'native.web_search': ['read'],
   'payments.list_charges': ['private_data'],
   'payments.create_refund': ['pay_out', 'private_data'],
 } as const satisfies Record<ToolName, readonly Effect[]>;
@@ -137,13 +139,29 @@ function refuses(read: () => unknown): boolean {
 /** The tools that take or send money. */
 const MONEY_TOOLS: readonly ToolName[] = ['native.payment_link', 'native.charge_mandate', 'payments.create_refund'];
 
-/** Working hours, as the preset's booking card keeps them (plan 01a: weekday bookings from 09:00 to 17:00). */
-const WORKING_HOURS = { days: new Set(['mon', 'tue', 'wed', 'thu', 'fri']), start: '09:00:00', end: '17:00:00' };
+/** The presets' own booking hours (plan 01a: weekdays, 09:00 to 17:00), "your hours" for a Desk with no hours. */
+const FALLBACK_HOURS: HoursWindow = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '17:00:00' };
 
-/** Seconds since midnight of a JSON time. */
-function seconds(time: string): number {
+/**
+ * What "in your hours" means for a Desk with these opening hours: its weekday windows, as the
+ * preset reads them (`weekdayWindows`, the API's `weekday_windows`), or the presets' own 9 to 5
+ * when it has no hours at all. None for a Desk whose hours have no weekday.
+ */
+function yourWeekdayHours(hours: readonly HoursWindow[]): HoursWindow[] {
+  return hours.length === 0 ? [FALLBACK_HOURS] : weekdayWindows(hours);
+}
+
+/** Seconds since midnight of a JSON time; an end at 00:00 is midnight, the end of the day. */
+function seconds(time: string, end = false): number {
   const [h = '0', m = '0', s = '0'] = time.split(':');
-  return Number(h) * 3600 + Number(m) * 60 + Number(s);
+  const total = Number(h) * 3600 + Number(m) * 60 + Number(s);
+  return end && total === 0 ? 24 * 3600 : total;
+}
+
+/** Whether `window` lies inside `within`: all its days among `within`'s, from no earlier to no later. */
+function inside(window: HoursWindow, within: HoursWindow): boolean {
+  const [start, end] = [seconds(window.start), seconds(window.end, true)];
+  return window.days.every((day) => within.days.includes(day)) && start < end && start >= seconds(within.start) && end <= seconds(within.end, true);
 }
 
 /**
@@ -200,8 +218,33 @@ function asksFirst(words: string, tools: readonly ToolName[]): Claim {
   };
 }
 
-/** What each preset's description claims about its cards, and nothing it doesn't. */
-const CLAIMS: Record<PresetName, readonly Claim[]> = {
+/**
+ * "weekday bookings in your hours", for a Desk with these opening hours: an automatic card for anyone
+ * governs bookings, and every automatic one's whole window lies inside one of the Desk's weekday
+ * windows (`yourWeekdayHours`). A Desk whose hours have no weekday books nothing on its own.
+ */
+function bookingsInYourHours(hours: readonly HoursWindow[]): Claim {
+  const words = 'weekday bookings in your hours';
+  const windows = yourWeekdayHours(hours);
+  if (windows.length === 0) {
+    return {
+      words,
+      problem: (cards) => {
+        const automatic = governing(cards, 'native.book').find((card) => card.mode === 'auto');
+        return automatic === undefined ? null : `${automatic.card_id} books on its own, but the Desk has no weekday hours`;
+      },
+    };
+  }
+  return onItsOwn(words, 'native.book', 'anyone', (card) => {
+    const window = card.hours;
+    if (window === null || window === undefined) return 'books at any hour';
+    if (windows.some((within) => inside(window, within))) return null;
+    return `books ${window.days.join(', ')} ${window.start} to ${window.end}, outside the Desk's weekday hours`;
+  });
+}
+
+/** What each preset's description claims about its cards, for a Desk with these opening hours, and nothing it doesn't. */
+const claims = (hours: readonly HoursWindow[]): Record<PresetName, readonly Claim[]> => ({
   // It speaks only to these four; open times, leads, callbacks and identity checks are left to the preset.
   ask_first: [
     asksFirst('Quotes', ['native.quote']),
@@ -213,31 +256,23 @@ const CLAIMS: Record<PresetName, readonly Claim[]> = {
     onItsOwn('Quotes at list price', 'native.quote', 'anyone', (card) =>
       (card.max_discount_bp ?? 0) === 0 ? null : `allows a ${card.max_discount_bp} bp discount`,
     ),
-    onItsOwn('weekday bookings in your hours', 'native.book', 'anyone', (card) => {
-      const window = card.hours;
-      if (window === null || window === undefined) return 'books at any hour';
-      const outside = window.days.filter((day) => !WORKING_HOURS.days.has(day));
-      if (outside.length > 0) return `books on ${outside.join(', ')}`;
-      // An end at 00:00 is midnight, the end of the day.
-      const [start, end] = [seconds(window.start), seconds(window.end) || 24 * 3600];
-      if (start < seconds(WORKING_HOURS.start) || end > seconds(WORKING_HOURS.end) || start >= end) {
-        return `books ${window.start} to ${window.end}, outside ${WORKING_HOURS.start} to ${WORKING_HOURS.end}`;
-      }
-      return null;
-    }),
+    bookingsInYourHours(hours),
     onItsOwn('documents to verified customers', 'native.release_document', 'record_owner', (card) =>
       card.who === 'record_owner' ? null : `is for ${card.who}, not the verified customer the document is for`,
     ),
     asksFirst('Payments ask you first.', MONEY_TOOLS),
   ],
-};
+});
 
-/** Everything the descriptions say that the presets' cards don't do; empty when they agree. */
-function descriptionProblems(cards: PresetCards): string[] {
+/**
+ * Everything the descriptions say that the presets' cards don't do, for a Desk with these opening
+ * hours (none: the presets' own 9 to 5); empty when they agree.
+ */
+function descriptionProblems(cards: PresetCards, hours: readonly HoursWindow[] = []): string[] {
   const problems: string[] = [];
   for (const preset of ['ask_first', 'auto'] as const) {
     const description = PRESET_WORDS.find((item) => item.value === preset)?.description ?? '';
-    for (const claim of CLAIMS[preset]) {
+    for (const claim of claims(hours)[preset]) {
       if (!description.includes(claim.words)) problems.push(`${preset}: the description doesn't say "${claim.words}"`);
       const wrong = claim.problem(cards[preset]);
       if (wrong !== null) problems.push(`${preset}, "${claim.words}": ${wrong}`);
@@ -300,6 +335,26 @@ describe('outcome words', () => {
     // Every claim each description makes holds for the presets' own cards.
     const cards = parsePresetCards(JSON.parse(readFileSync(PRESETS_EXPORT, 'utf8')));
     expect(descriptionProblems(cards)).toEqual([]);
+  });
+
+  test('preset_descriptions_hold_in_the_desks_own_hours', () => {
+    // A Desk's draft of each preset keeps its description's promises in that Desk's hours: Rivera's,
+    // a split week, all day every day, weekends only (no booking card) and none (the presets' 9 to 5).
+    const window = (days: HoursWindow['days'], start: string, end: string): HoursWindow => ({ days, start, end });
+    const drafted = (hours: readonly HoursWindow[]): PresetCards => ({ ask_first: presetCards('ask_first', hours), auto: presetCards('auto', hours) });
+    const desks: [string, HoursWindow[]][] = [
+      ["Rivera's", RIVERA_HOURS],
+      ['a split week', [window(['mon', 'tue', 'wed', 'thu'], '08:00:00', '18:00:00'), window(['fri'], '08:00:00', '16:00:00')]],
+      ['all day every day', [window(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')]],
+      ['weekends only', [window(['sat', 'sun'], '10:00:00', '16:00:00')]],
+      ['no hours', []],
+    ];
+    for (const [what, hours] of desks) expect({ what, problems: descriptionProblems(drafted(hours), hours) }).toEqual({ what, problems: [] });
+    expect(presetCards('auto', [window(['sat', 'sun'], '10:00:00', '16:00:00')]).some((card) => card.applies_to === 'native.book')).toBe(false);
+    // Another Desk's hours break the promise: Rivera's 8 to 6 for a 9 to 5 Desk, and the presets'
+    // 9 to 5 for a Desk open only at weekends.
+    expect(descriptionProblems(drafted(RIVERA_HOURS), [FALLBACK_HOURS])).not.toEqual([]);
+    expect(descriptionProblems(drafted([]), [window(['sat'], '09:00:00', '13:00:00')])).not.toEqual([]);
   });
 
   test('a_changed_preset_card_fails_the_descriptions', () => {

@@ -14,7 +14,8 @@
  * snapshot as the items, so the stream resumes after the last join or leave the transcript holds.
  *
  * A decision's later status replaces its previous receipt under the same message, however far
- * the chat has gone on. Every line remains the event's own visitor_plain.
+ * the chat has gone on, except that an approved receipt stays and its outcome joins below it.
+ * Every line remains the event's own visitor_plain.
  * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
  * its own (after the visitor confirmed it's them) explains its reply too.
  *
@@ -84,7 +85,7 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   error: EvErrorCode | null;
   /** Held requests the visitor can still cancel, oldest first. */
   openHolds: string[];
-  /** Each decision on the page, by `decision_id`: its latest receipt, replaced by later statuses. */
+  /** Each decision's latest receipt, used to replace it or attach an outcome below its approval. */
   latest: ReadonlyMap<string, ReceiptView>;
   /** Demo inbox notices for this chat (no code in them). */
   inbox: EvDemoInbox[];
@@ -202,24 +203,34 @@ function presenceLine(id: string, ev: EvOwnerJoined | EvOwnerLeft): RowPart<Chat
   return { kind: 'line', row: { kind: 'system', id, ev } };
 }
 
-/** A held request is open until its resolution arrives. */
+/** Approval or a resolved outcome ends the visitor's chance to cancel a held request. */
+export function closesHold(ev: SseEvent | null | undefined): ev is StatusEvent {
+  return ev?.type === 'resolved' || (ev?.type === 'receipt' && ev.state === 'approved');
+}
+
+/** A held request can be cancelled until approval or its resolution arrives. */
 function withHolds(openHolds: string[], ev: StatusEvent): string[] {
   if (ev.type === 'held') return openHolds.includes(ev.decision_id) ? openHolds : [...openHolds, ev.decision_id];
-  if (ev.type === 'resolved') return openHolds.filter((id) => id !== ev.decision_id);
+  if (closesHold(ev)) {
+    return openHolds.filter((id) => id !== ev.decision_id);
+  }
   return openHolds;
 }
 
 /**
- * A status as it joins the chat: a decision's latest receipt replaces its previous one.
- * Keep the latest reference for any further status, whether or not the decision was held.
+ * A status replaces the decision's previous receipt, except that an approved receipt stays and
+ * its outcome attaches below it in the same place. Keep the latest reference so further outcomes
+ * replace that outcome (including unknown → final), leaving the approval above it.
  */
 function statusPart(
   latest: ReadonlyMap<string, ReceiptView>,
   ev: StatusEvent,
 ): { part: RowPart<ChatItem, ReceiptView>; latest: ReadonlyMap<string, ReceiptView> } {
   const receipt = receiptFromEvent(ev);
+  const previous = latest.get(ev.decision_id);
+  const approved = previous?.source.kind === 'decision' && previous.source.state === 'approved';
   return {
-    part: { kind: 'receipt', receipt, replaces: latest.get(ev.decision_id) },
+    part: { kind: 'receipt', receipt, ...(approved ? { after: previous } : { replaces: previous }) },
     latest: new Map(latest).set(ev.decision_id, receipt),
   };
 }

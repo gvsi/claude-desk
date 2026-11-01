@@ -5,6 +5,7 @@ import { CodeBlock } from '../components/CodeBlock/CodeBlock.tsx';
 import { CopyField } from '../components/CopyField/CopyField.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
+import { FONT_TIMEOUT, withinDeadline } from '../test/fonts.ts';
 import { AgentsCard, AgentsFrame, brandOf } from './parts.tsx';
 import { SPEC, expectAgentsDisclosure, expectFooter, expectFooterAtFoot, expectTabOrder, one } from './spec.ts';
 
@@ -88,7 +89,7 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1500]);
     await expectAgentsDisclosure(canvasElement);
-    await document.fonts.load('13px "JetBrains Mono"');
+    await withinDeadline(document.fonts.load('13px "JetBrains Mono"'), FONT_TIMEOUT, 'Agents page JetBrains Mono');
     // The brand header, 76 px with its rule, is the page's banner; the page's title is its one h1.
     const banner = canvas.getByRole('banner');
     await expect(Math.round(banner.getBoundingClientRect().height)).toBe(76);
@@ -109,7 +110,7 @@ export const Board: Story = {
     // The address in its outlined box, where the render draws it: from 393 px, 32 px tall at 655 (the
     // render's 654, under the 1 px taller disclosure),
     // ending 8 px before the button (603 px wide once the interface font has loaded).
-    await document.fonts.ready;
+    await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents page fonts');
     const addressBox = address.getBoundingClientRect();
     await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 655, 32]);
     await expect(Math.round(copy.getBoundingClientRect().left - addressBox.right)).toBe(8);

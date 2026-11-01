@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { expect, fn, spyOn, waitFor, within, type Mock } from 'storybook/test';
 
+import { ANIMATION_DEADLINE_MS, animationLabel, animationWithin } from '../../test/animationWithin.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { settled } from '../../test/settled.ts';
@@ -417,7 +418,7 @@ export const PlaysOnce: Story = {
     // focus_from_the_first_frame: the passcode field has focus before anything is drawn, and still
     // has it in the first frame, while the panel is arriving.
     const field = canvas.getByLabelText('Passcode');
-    await waitFor(() => expect(firstFrame).not.toBeNull());
+    await waitFor(() => expect(firstFrame, 'cd-intro-arrive draws its first frame').not.toBeNull(), { timeout: ANIMATION_DEADLINE_MS });
     await expect(firstFrame).toEqual({ beforeDrawing: field, drawing: field, arriving: true });
     await expect(field).toHaveFocus();
 
@@ -485,8 +486,8 @@ export const PlaysOnce: Story = {
       // check_draws_short_arm_first: the booking's check draws as a hand writes one. Looked at
       // without moving it, so the beats still end in their order.
       await expectDrawsShortArmFirst(check);
-      await Promise.all(playing.map((animation) => animation.finished));
-      await waitFor(() => expect(art).toHaveClass(PLAYED));
+      await Promise.all(playing.map((animation) => animationWithin(animation.finished, animationLabel(animation))));
+      await waitFor(() => expect(art, 'cd-intro-tick marks the illustration played').toHaveClass(PLAYED), { timeout: ANIMATION_DEADLINE_MS });
       await expect(endedAsItWasPlayed).toEqual(beats);
     } finally {
       watchPlayed.disconnect();
@@ -603,7 +604,7 @@ export const Leaving: Story = {
       // leaves_on_a_correct_passcode: once the page says the passcode worked, the dialog leaves,
       // still open and still starting the demo: the scrim fades to clear and the panel goes, both
       // in motion-fast.
-      await waitFor(() => expect(exit.at()).not.toBeNull());
+      await waitFor(() => expect(exit.at(), 'cd-intro-clear starts the exit').not.toBeNull(), { timeout: ANIMATION_DEADLINE_MS });
       await expect(exit.at()).toEqual({
         open: true,
         busy: 'true',
@@ -614,7 +615,7 @@ export const Leaving: Story = {
 
       // closes_on_animationend: it had closed by the time its exit's animationend passed it, and
       // said so once.
-      await waitFor(() => expect(dialog.open).toBe(false));
+      await waitFor(() => expect(dialog.open, 'cd-intro-clear closes on animationend').toBe(false), { timeout: ANIMATION_DEADLINE_MS });
       await expect(openAsItEnded).toEqual([false]);
       await expect(args.onClosed).toHaveBeenCalledTimes(1);
       await expect(args.onSubmit).toHaveBeenCalledTimes(1);
@@ -650,7 +651,7 @@ export const LeavingWithoutAnimationEnd: Story = {
     try {
       await userEvent.type(canvas.getByLabelText('Passcode'), 'rivera-demo');
       await userEvent.keyboard('{Enter}');
-      await waitFor(() => expect(exit.at()).not.toBeNull());
+      await waitFor(() => expect(exit.at(), 'cd-intro-clear starts the exit').not.toBeNull(), { timeout: ANIMATION_DEADLINE_MS });
       await expect(exit.at()?.open).toBe(true);
 
       // closes_by_the_fallback: it still closes, and says so once, by a timer set to the exit's
@@ -658,7 +659,7 @@ export const LeavingWithoutAnimationEnd: Story = {
       // once and was swallowed while the dialog was still open, and the dialog closed no sooner than
       // the timer's delay after it started to leave (less a millisecond for rounding), so the timer
       // closed it, not an animationend.
-      await waitFor(() => expect(dialog.open).toBe(false));
+      await waitFor(() => expect(dialog.open, 'cd-intro-clear closes by its fallback').toBe(false), { timeout: ANIMATION_DEADLINE_MS });
       await expect(args.onClosed).toHaveBeenCalledTimes(1);
       const [fast, instant] = [motion('fast'), motion('instant')];
       await expect(timers.mock.calls.map(([, delay]) => delay)).toContain(fast + instant);

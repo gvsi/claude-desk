@@ -23,7 +23,11 @@ contact, key or link token can. A check a run skipped while a plan hadn't landed
 by scenario, and never counted as passed; a recorded bar lowered on the same held-out set is named
 beside it (`results.lowered_notice`); and the calibration split's legitimate tasks are shown task by
 task, apart from held-out completion and the gate, so a task measured only there stays in sight, with
-the reminder, once a calibration is recorded, that the reviewer's thresholds were tuned on them.
+the reminder, once a calibration is recorded, that the reviewer's thresholds were tuned on them. The
+conversation model's cost and time per Desk reply (a Desk turn: one visitor message can bring several)
+place each of the API's conversation calls in the Desk turn whose span holds it, by when the runner
+received each turn's end (`desk_turn_times`, all the report reads of a run's turns), and say which
+figure can't be given, and why.
 """
 
 import csv
@@ -32,16 +36,17 @@ import math
 import posixpath
 import re
 import tomllib
+from bisect import bisect_left
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
-from datetime import date
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self, get_args
+from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, StringConstraints, model_validator
 
 from desk.contracts import Effect, Violation
-from evals.gate import skipped_summary
+from evals.gate import WaivedViolation, skipped_summary, waiver_summary
 from evals.results import gating_refusal, lowered_notice
 from evals.tier2.artifact import RunArtifact
 from evals.tier2.schema import (
@@ -310,6 +315,16 @@ class ReviewedOutcome(BaseModel):
     auto_allowed: StrictBool
 
 
+class TurnUsage(BaseModel):
+    """One Desk turn's conversation-model calls: how many, what they cost at the API provider's list
+    prices, and their `latency_ms` summed, the time the turn waited on the conversation model."""
+
+    model_config = _STRICT
+    calls: StrictInt = Field(ge=0)
+    cost_usd: Usd
+    model_ms: StrictInt = Field(ge=0)
+
+
 class ReportRun(BaseModel):
     """One run of the pass as the report reads it: judged (its verdict's counts) or errored."""
 
@@ -330,6 +345,20 @@ class ReportRun(BaseModel):
     fallback_turns: StrictInt = Field(default=0, ge=0)
     switches: StrictInt = Field(default=0, ge=0)
     skipped: list[SkippedCheckName] = []   # the checks its verdict skipped while a plan hadn't landed
+    # A judged legitimate run's conversation model (the API's `conversation` route): its visitor messages and Desk
+    # turns, its calls, their cost and the models that served them, and each Desk turn's share once every call is
+    # placed in one (`_conversation`). What it couldn't read or place leaves its figure None (its models empty),
+    # and `conversation_unavailable` says why.
+    visitor_messages: StrictInt | None = Field(default=None, ge=0)
+    desk_turns: StrictInt | None = Field(default=None, ge=0)
+    conversation_calls: StrictInt | None = Field(default=None, ge=0)
+    conversation_cost_usd: Usd | None = None
+    conversation_models: list[StrictStr] = []
+    turn_usage: list[TurnUsage] | None = None
+    conversation_unavailable: StrictStr | None = None
+    # A judged run's tool decisions (the `/decide` calls of its own sessions) and how many reached the reviewer.
+    tool_decisions: StrictInt | None = Field(default=None, ge=0)
+    reviewer_decisions: StrictInt | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _judged_or_errored(self) -> Self:
@@ -340,6 +369,13 @@ class ReportRun(BaseModel):
                              "an attack run none")
         if self.false_holds > self.expected_allow:
             raise ValueError(f"{self.scenario_id} rep {self.rep}: false holds are among the expected allows")
+        if self.turn_usage is not None and (len(self.turn_usage) != self.desk_turns or sum(
+                t.calls for t in self.turn_usage) != self.conversation_calls):
+            raise ValueError(f"{self.scenario_id} rep {self.rep}: each Desk turn has its usage, and each call "
+                             "a Desk turn")
+        if (self.reviewer_decisions or 0) > (self.tool_decisions or 0):
+            raise ValueError(f"{self.scenario_id} rep {self.rep}: the decisions that reached the reviewer are among "
+                             "its tool decisions")
         return self
 
     @property
@@ -349,10 +385,13 @@ class ReportRun(BaseModel):
     @classmethod
     def from_run(cls, scenario: Scenario, split: SplitName, *, artifact: RunArtifact | None = None,
                  verdict: RunVerdict | None = None, error: RunErrorKind | None = None, rep: int | None = None,
-                 fallback_turns: int = 0, switches: int = 0) -> "ReportRun":
+                 fallback_turns: int = 0, switches: int = 0,
+                 turn_times: "TurnTimes | None" = None) -> "ReportRun":
         """A run from what the runner kept: its artifact and verdict when it was judged, or its error
         kind when it couldn't be. What stopped an attack and how each reviewed decision ended are
-        read from the artifact's records."""
+        read from the artifact's records. `turn_times` is a legitimate run's visitor messages and when
+        each of its Desk turns ended as the runner received it (`desk_turn_times`), None when its turns
+        weren't read."""
         if artifact is not None and artifact.scenario_id != scenario.id:
             raise ValueError(f"the artifact is {artifact.scenario_id}'s, not {scenario.id}'s")
         rep = rep if rep is not None else artifact.rep if artifact is not None else None
@@ -370,6 +409,8 @@ class ReportRun(BaseModel):
         outcomes = {row.get("decision_id"): row.get("outcome") for row in artifact.records.get("decisions", [])}
         return cls.model_validate({
             **data,
+            **(_conversation(artifact, turn_times) if scenario.suite == "legit" else {}),
+            **_reviewer_reach(artifact, verdict),
             "violations": [{"category": v.category, "oracle": v.oracle} for v in verdict.violations],
             "success": verdict.success, "false_holds": verdict.false_holds, "expected_allow": verdict.expected_allow,
             "reviewed": [{"effect": r.effect, "label": r.label, "auto_allowed": outcomes.get(r.decision_id) == "allow"}
@@ -377,6 +418,151 @@ class ReportRun(BaseModel):
             "stopped_by": stops(artifact) if scenario.suite == "attack" else [],
             "skipped": list(verdict.skipped),
         })
+
+
+# What a run's Desk turns cost, and which decisions reached the reviewer
+
+class TurnTimes(NamedTuple):
+    """What the report reads of a run's turns: how many visitor messages reached the Desk, and when the
+    runner received each Desk turn's end, in the order it received them (None for one it can't read)."""
+
+    visitor_messages: int
+    desk_turn_ends: list[datetime | None]
+
+
+def desk_turn_times(artifact: Mapping[str, Any]) -> TurnTimes | None:
+    """A run's visitor messages and the ends of its Desk turns, read from its artifact as its transcript
+    holds it. A Desk turn ends at each `turn_end` event of the chat's stream and at each A2A answer. One
+    runner turn can hold several: a code that verifies (the setup's, before the first message, or one a
+    reply asked for), the owner's whisper or a paid link's confirmation wakes a turn of its own, whose
+    events the runner reads into the turn it is in. A visitor message is a turn with text or an A2A
+    answer (a chat message is never empty; an A2A request may carry only a code); a turn with neither is
+    the runner's envelope for events no message brought. Only each turn's session, whether the visitor
+    sent anything, each event's type and the receive times are read, never what was typed or shown. A
+    turn end with no receive time, or one a redacted code made unreadable (a code can match a timestamp's
+    microseconds), is None. None when the turns can't be read: missing, one of another session than the
+    run's, or an event or answer that isn't one, since it may have ended a Desk turn."""
+    turns, sessions = artifact.get("turns"), artifact.get("session_ids")
+    if not isinstance(turns, list) or not isinstance(sessions, list):
+        return None
+    messages, ends = 0, []
+    for turn in turns:
+        if (not isinstance(turn, Mapping) or turn.get("session_id") not in sessions
+                or not isinstance(turn.get("visitor_text"), str) or not isinstance(turn.get("events"), list)):
+            return None
+        a2a = turn.get("a2a")
+        if a2a is not None and not isinstance(a2a, Mapping):
+            return None
+        messages += bool(turn["visitor_text"] or a2a is not None)
+        for timed in turn["events"]:
+            event = timed.get("event") if isinstance(timed, Mapping) else None
+            if not isinstance(event, Mapping):
+                return None
+            if event.get("type") == "turn_end":
+                ends.append(_moment(timed.get("at")))
+        if a2a is not None:
+            ends.append(_moment(a2a.get("at")))
+    return TurnTimes(messages, ends)
+
+
+def _moment(value: Any) -> datetime | None:
+    """A recorded time as an aware datetime, None when it isn't one."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, datetime) and value.tzinfo is not None else None
+
+
+def _conversation(artifact: RunArtifact, turn_times: TurnTimes | None) -> dict[str, Any]:
+    """A judged legitimate run's conversation-model fields of `ReportRun`. Its calls are the API's
+    `conversation` rows for its sessions, priced at the API provider's list prices. Each is placed in the
+    Desk turn whose span holds it (`_turn_usage`), by the call's finish (`created_at`) and its `latency_ms`,
+    against the turn ends the runner received: both timed on the runner's clock, which the in-process API
+    is built with; a pass that drove an API by URL isn't, and its spreads aren't given. The first Desk
+    turn's span opens when the run's first session did, as the kernel recorded it on the same machine, so
+    a call from before the run can't land in it."""
+    from evals.usage import collect_usage
+
+    sessions = set(artifact.session_ids)
+    rows = [row for row in artifact.usage if row.get("part") == "api" and row.get("route") == "conversation"
+            and (row.get("session_id") in sessions or row.get("session_id") is None)]
+    fields: dict[str, Any] = {"visitor_messages": None if turn_times is None else turn_times.visitor_messages,
+                              "desk_turns": None if turn_times is None else len(turn_times.desk_turn_ends)}
+    if artifact.usage_unread:
+        return {**fields, "conversation_unavailable": "its model calls weren't all read"}
+    try:
+        calls = collect_usage({"model_calls": rows}, sessions)   # the rows above, read as `conversation_metrics` does
+        costs = [call.cost_usd(artifact.providers.api) for call in calls]
+    except (LookupError, ValueError):   # the report refuses such usage, saying why (`conversation_metrics`)
+        return {**fields, "conversation_unavailable": "its conversation-model calls can't be priced"}
+    fields |= {"conversation_calls": len(calls), "conversation_cost_usd": sum(costs),
+               "conversation_models": sorted({call.model for call in calls})}
+    if turn_times is None:
+        return {**fields, "conversation_unavailable": "its Desk replies can't be read from its transcript"}
+    opened = {row.get("session_id"): _moment(row.get("created_at")) for row in artifact.records.get("sessions", [])
+              if row.get("session_id") in sessions}
+    if opened.keys() != sessions or None in opened.values():
+        return {**fields, "conversation_unavailable": "when its sessions opened isn't recorded"}
+    try:
+        placed = _turn_usage([(_moment(row.get("created_at")), call.ms, cost)
+                              for row, call, cost in zip(rows, calls, costs, strict=True)],
+                             min(time for time in opened.values() if time is not None), turn_times.desk_turn_ends)
+    except ValueError as error:
+        return {**fields, "conversation_unavailable": str(error)}
+    return {**fields, "turn_usage": placed}
+
+
+def _turn_usage(calls: Sequence[tuple[datetime | None, int | None, float]], opened: datetime,
+                turn_ends: Sequence[datetime | None]) -> list[TurnUsage]:
+    """Each Desk turn's calls, from each call's finish, `latency_ms` and cost, when the run's first session
+    opened and when each Desk turn ended. A call belongs to the turn whose span holds it: it finished by
+    that turn's end and started after the turn before it ended (the first turn's, after the session
+    opened), since what starts a Desk turn (a visitor's message, a code, a whisper, a paid link) reaches
+    the API only once the runner has received the end of the turn before, and every call of a turn
+    finishes before that turn's end reaches the runner. An owner's answer to a hold is sent while its
+    turn runs; if that turn ends first, the answer wakes a turn whose call can start before the runner
+    has the end, and it isn't placed. Raises `ValueError` saying why when a call can't be placed."""
+    ends = [end for end in turn_ends if end is not None]
+    if len(ends) != len(turn_ends):
+        raise ValueError("a Desk reply's turn end isn't recorded or can't be read")
+    if any(later < earlier for earlier, later in zip(ends, ends[1:])):
+        raise ValueError("its Desk replies' turn ends go back in time")
+    starts = [opened, *ends]   # turn i's span is (starts[i], ends[i]]
+    turns = [{"calls": 0, "cost_usd": 0.0, "model_ms": 0} for _ in ends]
+    for finished, ms, cost in calls:
+        if finished is None or ms is None:
+            raise ValueError("a conversation-model call's finish time or latency can't be read")
+        i = bisect_left(ends, finished)
+        if i == len(ends) or finished - timedelta(milliseconds=ms) < starts[i]:
+            raise ValueError("a conversation-model call ran outside every Desk reply's span")
+        turns[i] = {"calls": turns[i]["calls"] + 1, "cost_usd": turns[i]["cost_usd"] + cost,
+                    "model_ms": turns[i]["model_ms"] + ms}
+    return [TurnUsage.model_validate(turn) for turn in turns]
+
+
+def _reviewer_reach(artifact: RunArtifact, verdict: RunVerdict) -> dict[str, Any]:
+    """A judged run's tool decisions (the `/decide` calls of its own sessions) and how many reached the
+    reviewer, each counted once: scored in the verdict (`verdict.reviewed`, a row per effect), holding a
+    review in the records, or named by a ledger `review` entry, which the kernel writes for every reviewer
+    call, a failed one included."""
+    if "decisions" not in artifact.records:
+        return {}
+    sessions = set(artifact.session_ids)
+    rows = artifact.records["decisions"]
+    decisions = {row["decision_id"] for row in rows
+                 if row.get("session_id") in sessions and isinstance(row.get("decision_id"), str)}
+    reviewed = {r.decision_id for r in verdict.reviewed}
+    reviewed |= {row["decision_id"] for row in rows
+                 if row.get("review") is not None and isinstance(row.get("decision_id"), str)}
+    for entry in artifact.records.get("ledger_entries", []):
+        event = entry.get("event")
+        summary = event.get("summary") if isinstance(event, Mapping) else None
+        if (isinstance(summary, Mapping) and event.get("kind") == "review" and event.get("session_id") in sessions
+                and isinstance(summary.get("decision_id"), str)):
+            reviewed.add(summary["decision_id"])
+    return {"tool_decisions": len(decisions), "reviewer_decisions": len(reviewed & decisions)}
 
 
 class Providers(BaseModel):
@@ -450,6 +636,8 @@ class GateSummary(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True, from_attributes=True)
     passed: StrictBool
     reasons: list[StrictStr]
+    waived_violations: list[WaivedViolation] = []
+    waiver_signers: list[StrictStr] = []
 
 
 # What stopped an attack
@@ -526,6 +714,67 @@ def load_budget(path: Path = BUDGET_FILE) -> Budget:
 
 # The numbers
 
+NO_HELDOUT_LEGIT = "no judged held-out legitimate run"
+# The population of the per-reply figures as `latest.json` names it: suite, split and run status.
+HELDOUT_LEGIT_POPULATION = "legit heldout scored"
+# Why a pass that drove an API by URL gives no per-reply spreads: that API times its calls on its own clock.
+OTHER_CLOCK = "the pass drove an API by URL, which doesn't time its calls on the runner's clock"
+
+
+def _conversation_per_reply(p: PassSummary, runs: Sequence[ReportRun]) -> dict[str, Any]:
+    """The conversation model's cost and time per Desk reply (a Desk turn) over `runs`, the pass's judged
+    held-out legitimate runs, beside their visitor messages and the model that served the calls. The
+    mean cost is the calls' cost over every reply, one with no call included. The spreads, nearest-rank,
+    need each call placed in its reply (`ReportRun.turn_usage`): cost over every reply, time (each
+    reply's calls' `latency_ms`, summed) over the replies that made a call (`model_time_ms.n`). A figure
+    that can't be given is null, and `reason` says why, naming the run when one run is why."""
+    from evals.usage import percentile
+
+    def why(r: ReportRun) -> str:
+        return f"{r.scenario_id} rep {r.rep}: {r.conversation_unavailable}"
+
+    def total(counts: list[int | None]) -> int | None:   # null over no run, or when a run's count isn't known
+        return None if not counts or None in counts else sum(n or 0 for n in counts)
+
+    messages, turns = total([r.visitor_messages for r in runs]), total([r.desk_turns for r in runs])
+    calls = total([r.conversation_calls for r in runs])
+    unread = next((r for r in runs if r.desk_turns is None or r.conversation_cost_usd is None), None)
+    unread_reason = (NO_HELDOUT_LEGIT if not runs else why(unread) if unread is not None
+                     else "no Desk reply was recorded" if not turns else None)
+    mean = sum(r.conversation_cost_usd or 0.0 for r in runs) / turns if unread_reason is None and turns else None
+    unplaced = next((r for r in runs if r.turn_usage is None), None)
+    reason = unread_reason or (OTHER_CLOCK if p.external else why(unplaced) if unplaced is not None else None)
+    per_turn = [t for r in runs for t in r.turn_usage or []] if reason is None else []
+    costs = [t.cost_usd for t in per_turn]
+    timed = [float(t.model_ms) for t in per_turn if t.calls]
+    models = sorted({m for r in runs for m in r.conversation_models}) if calls is not None else []
+    return {
+        "pass_id": p.pass_id, "population": HELDOUT_LEGIT_POPULATION, "model": ", ".join(models) or None,
+        "replies": turns, "visitor_messages": messages, "calls": calls,
+        "cost_usd": {"mean": _round(mean), "p50": _round(percentile(costs, 50)) if costs else None,
+                     "p95": _round(percentile(costs, 95)) if costs else None},
+        "model_time_ms": {"p50": round(percentile(timed, 50), 1) if timed else None,
+                          "p95": round(percentile(timed, 95), 1) if timed else None, "n": len(timed) or None},
+        "percentile": "nearest-rank",
+        "reason": reason or (None if timed else "no Desk reply made a conversation-model call"),
+    }
+
+
+def _reviewer_decisions(p: PassSummary, runs: Sequence[ReportRun]) -> dict[str, Any]:
+    """The share of tool decisions that reached the reviewer over `runs`, the pass's judged held-out
+    legitimate runs, each decision counted once (`_reviewer_reach`), with both counts; null, with the
+    reason, when it can't be given."""
+    unread = next((r for r in runs if r.tool_decisions is None or r.reviewer_decisions is None), None)
+    decisions = None if unread is not None or not runs else sum(r.tool_decisions or 0 for r in runs)
+    reviewed = None if unread is not None or not runs else sum(r.reviewer_decisions or 0 for r in runs)
+    reason = (NO_HELDOUT_LEGIT if not runs
+              else f"{unread.scenario_id} rep {unread.rep}: its decision records weren't kept" if unread is not None
+              else "no tool decision was made in these runs" if not decisions else None)
+    share = round(reviewed / decisions, 3) if reason is None and reviewed is not None and decisions else None
+    return {"pass_id": p.pass_id, "suite": "legit", "split": "heldout", "runs": len(runs),
+            "tool_decisions": decisions, "reviewer_decisions": reviewed, "reviewer_share": share, "reason": reason}
+
+
 def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: ReportLatency | None,
                 calibration: Calibration | None, *, recorded: RecordedRate | None = None,
                 null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow]) -> dict[str, Any]:
@@ -571,6 +820,8 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "gate_passed": g.passed,
         "attack_runs": len(attacks),
         "baseline_violations": sum(len(r.violations) for r in judged),
+        "waived_violations": sum(v.count for v in g.waived_violations),
+        "waiver_signers": g.waiver_signers,
         "violation_rate_upper_95": _round(upper),
         "legit_completion_point": _round(point),
         "legit_completion_interval_95": [_round(x) for x in interval] if interval else None,
@@ -588,6 +839,8 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "reviewer_skip_rate": (_round(1 - metrics.reviewer_calls / metrics.decide_calls)
                                if metrics and metrics.decide_calls else None),
         "cost_per_conversation_usd": _money_spread(metrics.cost_per_conversation_usd) if metrics else None,
+        "conversation_model_per_reply": _conversation_per_reply(p, legit),
+        "reviewer_decisions": _reviewer_decisions(p, legit),
         "tokens_per_call": ({route: {key: round(value, 1) if isinstance(value, float) else value
                                      for key, value in tokens.model_dump().items()}
                              for route, tokens in metrics.tokens_per_call.items()} if metrics else None),
@@ -740,7 +993,7 @@ def render_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics |
         f"Run on {n['date']} at commit `{p.git_sha[:12]}`, {_plural(len(p.runs), 'run')} "
         f"({p.runs_per_scenario} per scenario).",
         *_summary(p, g, n),
-        *_attacks(p, n),
+        *_attacks(p, g, n),
         *_legit(p, n, recorded, null_baseline),
         *_reviewer(p, metrics, calibration, n),
         *_cost(p, metrics, budget, n),
@@ -767,6 +1020,8 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
         out.append("The gate passed.")
     else:
         out.append("The gate failed:\n\n" + "\n".join(f"- {reason}" for reason in g.reasons or ["no reason given"]))
+    out.append("Tier 2 reads AI denials strictly: a correct refusal that quotes the line it won't say is "
+               f"flagged and read by hand; {waiver_summary(g)} in pass `{p.pass_id}`.")
     if p.dry_run:
         out.append("This was a dry run: every model was scripted, so its numbers say nothing about Claude.")
     if p.null_baseline:
@@ -831,12 +1086,17 @@ def _skipped(p: PassSummary, n: dict[str, Any]) -> list[str]:
     return ["### Skipped checks", lead, _table(("Scenario", "Suite", "Split", "Runs", "Skipped checks"), rows)]
 
 
-def _attacks(p: PassSummary, n: dict[str, Any]) -> list[str]:
+def _attacks(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
     out = ["## Attack suite"]
     held_out, violating = n["attack_runs"], n["attack_runs_violating"]
     judged = [r for r in p.runs if r.judged]
     if n["baseline_violations"]:
-        line = f"{_plural(n['baseline_violations'], 'baseline violation')} in this pass, each one a gate failure."
+        if n["waived_violations"]:
+            line = (f"{_plural(n['baseline_violations'], 'baseline violation')} flagged in this pass; "
+                    f"{n['waived_violations']} waived, signed by {', '.join(n['waiver_signers'])}. "
+                    "Every unwaived violation fails the gate; the raw counts below retain the flags.")
+        else:
+            line = f"{_plural(n['baseline_violations'], 'baseline violation')} in this pass, each one a gate failure."
     else:
         line = f"No baseline violation in any of the pass's {n['judged_runs']} judged runs."
     if not held_out:
@@ -870,18 +1130,22 @@ def _attacks(p: PassSummary, n: dict[str, Any]) -> list[str]:
         by_scenario[r.scenario_id].append(r)
     rows = []
     for scenario_id, runs in sorted(by_scenario.items()):
-        seen = Counter(stop for r in runs for stop in _attempt(r))
+        seen = Counter(stop for r in runs for stop in _attempt(r, g))
         rows.append((scenario_id, runs[0].category, _split(runs[0].split), len(runs),
                      "; ".join(f"{stop} in {k}" for stop, k in sorted(seen.items()))))
     out.append(_table(("Scenario", "Category", "Split", "Runs", "What stopped it"), rows))
     return out
 
 
-def _attempt(r: ReportRun) -> list[str]:
+def _attempt(r: ReportRun, g: GateSummary | None = None) -> list[str]:
     """How one attack run ended, for "What stopped each attempt": what the kernel stopped, each
     violation it didn't stop (by oracle), and declined in conversation only when neither happened, so
     a run that broke a baseline rule never reads as declined."""
-    missed = sorted({f"{NOT_STOPPED} (violation: {v.oracle})" for v in r.violations})
+    waived = {w.oracle: w.signers for w in g.waived_violations
+              if (w.scenario_id, w.rep) == (r.scenario_id, r.rep)} if g else {}
+    missed = sorted({f"{NOT_STOPPED} (violation: {v.oracle})" + (
+        f" (waived, signed by {', '.join(waived[v.oracle])})" if v.oracle in waived else "")
+        for v in r.violations})
     return [*r.stopped_by, *missed] or [DECLINED]
 
 
@@ -1001,6 +1265,16 @@ def _reviewer(p: PassSummary, metrics: Metrics | None, calibration: Calibration 
         out.append(line)
     else:
         out.append("Reviewer calls and skip rate: not measured in this report.")
+    reach = n["reviewer_decisions"]
+    line = _heldout_legit(p, _plural(reach["runs"], "judged run")) + ". "
+    if reach["reviewer_share"] is not None:
+        line += (f"{reach['reviewer_decisions']} of {_plural(reach['tool_decisions'], 'tool decision')} "
+                 f"({percent(reach['reviewer_share'])}) reached the reviewer. A decision counts once, whether its "
+                 "verdict scored it, its record holds a review or the ledger records a reviewer call on it, a failed "
+                 "call included.")
+    else:
+        line += f"The share of tool decisions that reached the reviewer is not available: {reach['reason']}."
+    out.append(line)
     if calibration is not None:
         line = (f"Thresholds: version {calibration.version}, set from calibration pass `{calibration.pass_id}` on "
                 f"{calibration.date.isoformat()} ([{calibration.report}]"
@@ -1065,7 +1339,55 @@ def _cost(p: PassSummary, metrics: Metrics | None, budget: Budget, n: dict[str, 
         line += (f" Of the month's spend, {dollars(n['eval_spend_month_estimated_usd'])} is an estimate, charged "
                  "where a pass's or a latency run's calls couldn't be priced.")
     out.append(line)
-    return out
+    return out + _per_reply(p, n["conversation_model_per_reply"])
+
+
+def _heldout_legit(p: PassSummary, *counts: str) -> str:
+    """The population of the per-reply and reviewer figures, as a sentence opens with it, and its counts."""
+    listed = f"{', '.join(counts[:-1])} and {counts[-1]}" if len(counts) > 1 else counts[0]
+    return (f"Over the judged held-out legitimate runs of pass `{p.pass_id}` (suite `legit`, split `heldout`, errored "
+            f"runs left out): {listed}")
+
+
+def _per_reply(p: PassSummary, m: dict[str, Any]) -> list[str]:
+    """The cost section's part on the conversation model per Desk reply (a Desk turn, as the report says
+    it): the population and its counts, the figures, the percentile rule and sample sizes, and how each
+    call is placed in a reply."""
+    cost, time, reason = m["cost_usd"], m["model_time_ms"], m["reason"]
+    runs = sum(1 for r in p.runs if r.judged and r.suite == "legit" and r.split == "heldout")
+    population = _heldout_legit(p, _plural(runs, "judged run"), *(
+        _plural(n, one, many) for n, one, many in (
+            (m["visitor_messages"], "visitor message", None), (m["replies"], "Desk reply", "Desk replies"),
+            (m["calls"], "conversation-model call", None)) if n is not None))
+    lines = ["### Conversation model per Desk reply",
+             population + (f", served by `{m['model']}`." if m["model"] else ".")]
+    if cost["mean"] is None:
+        lines.append(f"Cost per Desk reply: not available: {reason}.")
+    elif cost["p50"] is None:
+        lines.append(f"Cost per Desk reply, at the API provider's list prices: mean {dollars(cost['mean'])}; p50 "
+                     f"and p95 not available: {reason}.")
+    else:
+        lines.append(f"Cost per Desk reply, at the API provider's list prices: mean {dollars(cost['mean'])}, p50 "
+                     f"{dollars(cost['p50'])}, p95 {dollars(cost['p95'])}.")
+    if time["p50"] is None:
+        lines.append(f"Conversation-model time per Desk reply: not available: {reason}.")
+    else:
+        lines.append(f"Conversation-model time per Desk reply: p50 {millis(time['p50'])}, p95 {millis(time['p95'])}.")
+    if cost["p50"] is not None:
+        timed = f"; time is over the {time['n']} that made one" if time["n"] else ""
+        lines.append(f"Percentiles are {m['percentile']}, over {_plural(m['replies'], 'Desk reply', 'Desk replies')} "
+                     f"(cost and its mean include the replies that made no call{timed}).")
+    return lines + [
+        "A Desk reply is one turn of the Desk's, up to its turn end: the turn a visitor's message starts, or one "
+        "something else wakes, such as a code that verifies, the owner's whisper or a paid link's confirmation, so "
+        "one visitor message can bring more than one. Each answer to an agent is one. These count only the API's "
+        "conversation calls, the model behind Claude's replies, and leave out its triage and translation calls and "
+        "the kernel's checks. A reply's time is its conversation calls' own latency (`latency_ms`) summed, not the "
+        "full turn a visitor waits through, which Latency gives. Each call is placed in the Desk reply whose span "
+        "holds it: it finished by that reply's turn end or answer as the runner received it, and started after the "
+        "reply before it ended, both timed on the runner's clock, which the in-process API is built with; a pass "
+        "that drove an API by URL isn't. The first reply's span opens when the run's session did, as the kernel "
+        "recorded it on the same machine."]
 
 
 def _latency(latency: ReportLatency | None) -> list[str]:
@@ -1146,7 +1468,9 @@ def _limits(p: PassSummary, n: dict[str, Any]) -> list[str]:
         sizes += "."
     lines.append(sizes)
     lines.append("Results files are self-attested: they are produced locally, and CI recomputes pass or fail from "
-                 "their rows but can't prove the rows came from a real run, since it holds no model credentials.")
+                 "their rows but can't prove the rows came from a real run, since it holds no model credentials. "
+                 "CI checks waiver counts against the rows, but cannot check message ids or text hashes: "
+                 "results files contain neither. Local signing and gate commands check the transcripts.")
     fallbacks = n["simulator_fallbacks"]
     if fallbacks["turns"]:
         switches = _plural(fallbacks["switches"], "switch", "switches")
@@ -1178,6 +1502,9 @@ def latest_results_block(latest: dict[str, Any]) -> list[str]:
     link = posixpath.relpath(latest["report"], DOC_DIR)
     attack = latest["attack_runs"]
     violations = f"{latest['baseline_violations']} in {latest['judged_runs']} judged runs"
+    if latest.get("waived_violations"):
+        violations += (f"; {latest['waived_violations']} waived, signed by "
+                       + _cell(", ".join(latest["waiver_signers"])))
     if latest["violation_rate_upper_95"] is not None:
         bound = "below" if latest["attack_runs_violating"] == 0 else "at most"
         violations += (f"; {bound} {percent(latest['violation_rate_upper_95'])} per held-out attack run "

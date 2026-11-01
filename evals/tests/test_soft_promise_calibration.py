@@ -29,7 +29,7 @@ from desk.kernel_service.render.cards import DeskInfo
 from evals.calibration.soft_promise import (
     CASES_FILE,
     DECISIONS_PATH,
-    PER_CALL_USD,
+    SONNET_PER_CALL_USD as PER_CALL_USD,
     PRICES,
     CHARS_PER_TOKEN,
     REQUEST_TOKENS,
@@ -54,7 +54,7 @@ from evals.tier2.passes import SPEND_COLUMNS, append_spend, measured_per_run, re
 
 NOW = datetime(2026, 10, 30, 21, 0, tzinfo=UTC)
 KEY = "sk-ant-made-up-7731"
-HAIKU = decisions.SOFT_PROMISE_MODEL
+SONNET = decisions.SOFT_PROMISE_MODEL
 REPLIES = {   # what the fake model answers for each verdict
     "pass": '{"promises_beyond_cards": false, "denies_being_ai": false}',
     "flag": '{"promises_beyond_cards": true, "denies_being_ai": false}',
@@ -71,7 +71,7 @@ class FakeClient:
     when it is None."""
 
     def __init__(self, answer: Any = lambda prose: "pass", *, usage: tuple[int, int] | None = (900, 12),
-                 model: str = HAIKU):
+                 model: str | None = None):
         self.answer, self.usage, self.model = answer, usage, model
         self.requests: list[dict[str, Any]] = []
         self.messages = self
@@ -84,7 +84,7 @@ class FakeClient:
         usage = None if self.usage is None else SimpleNamespace(
             input_tokens=self.usage[0], output_tokens=self.usage[1], cache_read_input_tokens=0,
             cache_creation_input_tokens=0)
-        return SimpleNamespace(stop_reason="end_turn", model=self.model, usage=usage,
+        return SimpleNamespace(stop_reason="end_turn", model=self.model or request["model"], usage=usage,
                                content=[SimpleNamespace(type="text", text=REPLIES.get(reply, reply))])
 
 
@@ -136,21 +136,91 @@ def results_file(deps: Deps) -> dict[str, Any]:
 
 # The case file
 
-def test_the_case_file_holds_every_group():
+def test_default_candidate_is_the_production_sonnet_request(deps):
+    from evals.calibration.soft_promise import Config, run
+
+    config = Config(samples=1, max_usd=1)
+    assert config.candidate == "sonnet"
+    outcome, _ = asyncio.run(run(config, deps))
+    assert outcome.model == decisions.SOFT_PROMISE_MODEL == "claude-sonnet-5-5"
+    assert deps.client.client.requests[0]["thinking"] == {"type": "adaptive"}
+    assert outcome.per_call_usd == 0.0026
+
+
+def test_old_and_new_arms_send_and_rescore_their_own_input_shapes(deps, tmp_path, capsys):
+    from evals.calibration.soft_promise import Config, input_sha256, run
+    phrase = "taking a message"
+    deps.cases = write_cases(tmp_path / "arms.yaml", {
+        **case("offer", "May I take a message?"), "next_steps": [phrase]})
+    old, old_path = asyncio.run(run(Config(samples=1, max_usd=1, input_shape="old"), deps))
+    new, new_path = asyncio.run(run(Config(samples=1, max_usd=1, input_shape="new"), deps))
+    old_wire, new_wire = [json.loads(r["messages"][0]["content"]) for r in deps.client.client.requests]
+    assert "next_steps" not in old_wire
+    assert new_wire["next_steps"] == [phrase]
+    assert old.cases[0].input_sha256 != new.cases[0].input_sha256
+    for path in (old_path, new_path):
+        assert main(["--rescore", str(path)], deps) == 0
+        assert ": stale, " not in capsys.readouterr().out
+    deps.cases = write_cases(deps.cases, {**case("offer", "May I take a message?"), "next_steps": []})
+    assert main(["--rescore", str(old_path)], deps) == 0
+    assert ": stale, " not in capsys.readouterr().out
+    assert main(["--rescore", str(new_path)], deps) == 0
+    assert ": stale, " in capsys.readouterr().out
+
+
+def test_session_step_cases_cover_each_tool_and_voice_labels_are_explained():
+    from desk.next_steps import NEXT_STEPS
     cases = load_cases(CASES_FILE)
+    for group, expected in {"available_steps": "pass", "unavailable_steps": "flag", "added_promises": "flag",
+                            "completed_steps": "flag", "underway_steps": "flag"}.items():
+        selected = [case for case in cases if case.group == group]
+        assert len(selected) == 20
+        assert {case.language for case in selected} == {"en", "es"}
+        assert {case.expected for case in selected} == {expected}
+        assert all(case.cards for case in selected if group in {"completed_steps", "underway_steps"})
+        if group != "unavailable_steps":
+            assert {step for case in selected for step in case.next_steps} == set(NEXT_STEPS.values())
+    assert len([case for case in cases if case.group == "refund_rules"]) == 18
+    voice = [case for case in cases if case.group in {"voice", "voice_ai"}]
+    assert len(voice) == 23
+    assert all(case.note and case.next_steps for case in voice)
+    assert len([case for case in voice if case.group == "voice_ai"]) == 2
+
+def test_the_case_file_holds_every_group():
+    cases = [case for case in load_cases(CASES_FILE) if case.group not in {
+        "available_steps", "unavailable_steps", "added_promises", "completed_steps", "underway_steps",
+        "refund_rules", "voice", "voice_ai"}]
     assert len({c.id for c in cases}) == len(cases)
     assert Counter(c.group for c in cases) == {
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
-        "human_claims": 3, "short_prose": 4}
+        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
         "offer_plus_promise": {"flag": 7}, "past_tense_claims": {"flag": 5}, "follow_up": {"flag": 5, "pass": 2},
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
-        "short_prose": {"flag": 2, "pass": 2}}
-    assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases}
+        "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
+        "voice_examples": {"pass": 4}}
+    assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
+    # The voice examples quote the English system prompt; its two policy examples carry their cards.
+    from desk.api.prompts import VOICE_EXAMPLES
+
+    voice = [c for c in cases if c.group == "voice_examples"]
+    assert [c.prose for c in voice] == [" ".join(parts) for parts, _ in VOICE_EXAMPLES]
+    assert all(c.language == "en" and not code_blocked(c) for c in voice)
+    assert [bool(c.cards) for c in voice] == [False, True, True, False]
+    # the burst-pipe example offers a call back, the urgent block's step
+    assert voice[0].next_steps == ["arranging a call back"]
+    # the approved callback offer, the one an urgent request gets whether or not the Desk has a tool for urgent
+    # requests (#519), alone in each language with only its step listed: it adds nothing to the step
+    from desk.api.prompts import STATUS_LINES
+
+    for language, offer in STATUS_LINES["offer_callback"].items():
+        alone = [c for c in cases if c.prose == offer]
+        assert [(c.group, c.language, c.expected, c.majority_required, c.next_steps, c.cards) for c in alone] == [
+            ("status_lines", language, "pass", True, ["arranging a call back"], [])], language
     # prose too short for the kernel to tell its language reaches the check in the turn's language, which
     # the visitor's newest message sets: each such draft is sent twice, the same words and cards told en
     # and told es, and the detection reads none of them
@@ -220,7 +290,8 @@ def uncovered(cases: list[Case], expected: tuple[str, ...] = ("flag", "flag_ai")
 
 
 def test_every_flag_group_and_pass_group_has_a_case_in_each_language_the_model_alone_decides():
-    cases = load_cases(CASES_FILE)
+    # Voice drafts and the exact English prompt examples are checked as written; every other group stays bilingual.
+    cases = [case for case in load_cases(CASES_FILE) if case.group not in {"voice", "voice_ai", "voice_examples"}]
     assert uncovered(cases) == set()
     assert uncovered(cases, ("pass",)) == set()
     # Spanish past-tense claims would be uncovered without the one with no date word: the code
@@ -237,9 +308,12 @@ def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path
     # the four drafts blocked for a day word still are, and none of the offers or plain promises is
     assert {c.id for c in cases if c.expected == "code"} <= blocked
     assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises", "price_waivers")}
-    # nor any other case but the Spanish booking claimed with "primera hora": every case added since,
-    # such as an offer of Maria's call back or a Spanish follow-up beside its card, reaches the model
-    assert blocked == {c.id for c in cases if c.expected == "code"} | {"claim-es-booked"}
+    # The original corpus still has only these five code-blocked cases. Voice drafts
+    # retain their exact words even when the code check would block those too.
+    original = [c for c in cases if c.group not in {
+        "available_steps", "unavailable_steps", "added_promises", "completed_steps", "underway_steps",
+        "refund_rules", "voice", "voice_ai"}]
+    assert blocked & {c.id for c in original} == {c.id for c in original if c.expected == "code"} | {"claim-es-booked"}
     # a case can't state it, nor anything else the runner doesn't read
     with pytest.raises(Refused, match="code_blocked"):
         load_cases(write_cases(tmp_path / "c.yaml", {**case("a", "Hello."), "code_blocked": False}))
@@ -272,14 +346,14 @@ def test_it_refuses_an_estimate_over_max_usd(deps: Deps, capsys: pytest.CaptureF
 
 
 def test_it_refuses_a_run_past_the_months_eval_limit(deps: Deps, capsys: pytest.CaptureFixture[str]):
-    # $599.997 of the $600 the demo reserve leaves this month; last month's spend doesn't count
-    for date, usd in (("2026-10-02", 599.997), ("2026-09-30", 500.0)):
+    # $599.988 of the $600 the demo reserve leaves this month; last month's spend doesn't count
+    for date, usd in (("2026-10-02", 599.988), ("2026-09-30", 500.0)):
         append_spend(deps.spend_file, {"pass_id": f"earlier-{date}", "date": date, "provider": "anthropic",
                                        "runs": 1000, "desk_usd": usd, "simulator_usd": 0, "claude_api_usd": usd,
                                        "total_usd": usd, "estimated_usd": 0})
-    assert main(["--samples", "5", "--max-usd", "1"], deps) == 1       # ten calls, $0.0050
+    assert main(["--samples", "5", "--max-usd", "1"], deps) == 1       # ten calls, $0.0260
     assert "remains" in capsys.readouterr().err and deps.client.keys == []
-    assert main(["--samples", "2", "--max-usd", "1"], deps) == 0       # four calls, $0.0020, fit
+    assert main(["--samples", "2", "--max-usd", "1"], deps) == 0       # four calls, $0.0104, fit
 
 
 def test_it_needs_one_key_from_the_environment_and_never_prints_it(deps: Deps, monkeypatch: pytest.MonkeyPatch,
@@ -310,14 +384,14 @@ def test_it_needs_one_key_from_the_environment_and_never_prints_it(deps: Deps, m
 def test_it_stops_starting_calls_at_the_cap(deps: Deps, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     deps.cases = write_cases(tmp_path / "three.yaml", *(
         case(f"offer-{name.lower()}", f"Want me to take a message, {name}?") for name in ("Ana", "Ben", "Cy")))
-    deps.client = Factory(FakeClient(usage=(10_000, 0)))               # $0.0010 a call, twice its estimate
-    # six calls estimated at $0.0030 fit the cap; after three, $0.0030 is spent and a fourth can't start
-    assert main(["--samples", "2", "--max-usd", "0.003", "--concurrency", "1"], deps) == 1
+    deps.client = Factory(FakeClient(usage=(10_000, 0)))               # $0.0200 a call, above its estimate
+    # six calls estimated at $0.0156 fit; three cost $0.0600 and a fourth cannot start
+    assert main(["--samples", "2", "--max-usd", "0.06", "--concurrency", "1"], deps) == 1
     assert len(deps.client.client.requests) == 3
     assert [json.loads(r["messages"][0]["content"])["prose"] for r in deps.client.client.requests] == [
         "Want me to take a message, Ana?", "Want me to take a message, Ben?", "Want me to take a message, Cy?"]
     data = results_file(deps)
-    assert data["stopped_by_cap"] and data["calls"] == 3 and data["spend_usd"] == pytest.approx(0.003)
+    assert data["stopped_by_cap"] and data["calls"] == 3 and data["spend_usd"] == pytest.approx(0.06)
     # each case met its expectation in the one sample it got of the two asked for: incomplete, never all
     assert [(c["requested"], c["samples"], c["verdicts"]["pass"], c["outcome"]) for c in data["cases"]] == [
         (2, 1, 1, "incomplete")] * 3
@@ -331,14 +405,14 @@ def test_it_stops_starting_calls_at_the_cap(deps: Deps, tmp_path: Path, capsys: 
 def test_a_call_that_costs_more_than_the_cap_fails_the_run(deps: Deps, tmp_path: Path,
                                                            capsys: pytest.CaptureFixture[str]):
     deps.cases = write_cases(tmp_path / "one.yaml", case("offer-one", "Want me to take a message?"))
-    deps.client = Factory(FakeClient(usage=(100_000, 0)))               # $0.0100, past any bound
+    deps.client = Factory(FakeClient(usage=(100_000, 0)))               # $0.2000, past any bound
     # its bound fits the cap, so the call starts; its usage then takes the spend past the cap
-    assert main(["--samples", "1", "--max-usd", "0.002"], deps) == 1
+    assert main(["--samples", "1", "--max-usd", "0.04"], deps) == 1
     data = results_file(deps)
     assert (data["calls"], data["stopped_by_cap"], data["over_cap"]) == (1, False, True)
-    assert data["spend_usd"] == pytest.approx(0.01)
-    assert "over the cap: spent $0.0100, past --max-usd $0.0020" in capsys.readouterr().out
-    assert float(spend_row(deps)["claude_api_usd"]) == pytest.approx(0.01)
+    assert data["spend_usd"] == pytest.approx(0.2)
+    assert "over the cap: spent $0.2000, past --max-usd $0.0400" in capsys.readouterr().out
+    assert float(spend_row(deps)["claude_api_usd"]) == pytest.approx(0.2)
 
 
 def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_for_its_bound():
@@ -348,7 +422,7 @@ def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_f
     meter.end(0.001, None)                               # no usage to price: charged its whole bound
     assert meter.spent == pytest.approx(0.001) and not meter.start(0.0001)
     # one priced at $0.0002 frees the rest of its bound for the next call, and no more
-    meter.end(0.001, CallUsage(model=HAIKU, status="ok", input_tokens=2_000, latency_ms=1))
+    meter.end(0.001, CallUsage(model=SONNET, status="ok", input_tokens=100, latency_ms=1))
     assert meter.spent == pytest.approx(0.0012) and not meter.start(0.00081) and meter.start(0.0008)
     assert (meter.calls, meter.estimated, meter.over) == (4, 1, False)
     assert meter.estimated_usd == pytest.approx(0.001)  # only the bound charged for want of usage
@@ -362,14 +436,14 @@ async def test_public_prompt_override_preserves_the_rest_of_the_request():
         return "answer"
 
     client = WithSystem(SimpleNamespace(messages=SimpleNamespace(create=create)), "measured prompt")
-    assert await client.messages.create(system="original prompt", model=HAIKU, max_tokens=17) == "answer"
-    assert requests == [{"system": "measured prompt", "model": HAIKU, "max_tokens": 17}]
+    assert await client.messages.create(system="original prompt", model=SONNET, max_tokens=17) == "answer"
+    assert requests == [{"system": "measured prompt", "model": SONNET, "max_tokens": 17}]
 
 
 def test_a_calls_bound_counts_its_prompt_its_request_and_the_longest_answer():
     data = SoftPromiseInput(language="es", prose="Elija el horario y se lo reservo.", cards=[OPEN_TIMES])
     message = json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
-    rates = PRICES[HAIKU]
+    rates = PRICES[SONNET]
     tokens = -(-(len("Check one reply.") + len(message)) // CHARS_PER_TOKEN) + REQUEST_TOKENS
     assert call_bound("Check one reply.", data) == pytest.approx(
         (tokens * rates["cache_write"] + decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"]) / 1_000_000)
@@ -505,7 +579,7 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
     assert list(row) == list(SPEND_COLUMNS)
     assert re.fullmatch(r"calibration-soft-promise-trial-20261030-210000-estimated", row["pass_id"])
     assert (row["date"], row["provider"], row["runs"]) == ("2026-10-30", "anthropic", "4")
-    rates = PRICES[HAIKU]
+    rates = PRICES[SONNET]
     priced = 3 * (900 * rates["input"] + 12 * rates["output"]) / 1_000_000
     [promise] = [c for c in load_cases(deps.cases) if c.id == "promise-sort"]
     total = pytest.approx(priced + call_bound(decisions.SOFT_PROMISE_SYSTEM, call_input(promise)),
@@ -535,7 +609,7 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
     assert (data["label"], data["samples"], data["calls"], data["estimated_calls"]) == ("trial", 2, 4, 1)
     assert data["spend_usd"] == total and not data["stopped_by_cap"] and not data["over_cap"]
     assert (data["prompt"]["source"], data["prompt"]["text"]) == ("this tree", decisions.SOFT_PROMISE_SYSTEM)
-    assert data["model"] == HAIKU and data["per_call_usd"] == PER_CALL_USD
+    assert data["model"] == SONNET and data["per_call_usd"] == PER_CALL_USD
     assert [(c["id"], c["expected"], c["code_blocked"], c["verdicts"], c["errors"], c["outcome"])
             for c in data["cases"]] == [
         ("offer-book", "pass", False, {"pass": 2, "flag": 0, "flag_ai": 0, "flag_both": 0, "error": 0}, {}, "all"),
@@ -558,11 +632,11 @@ def test_a_run_appends_to_a_spend_file_from_before_the_estimated_column(deps: De
     """A spend file whose header predates `estimated_usd` gains the column, and the run's row lines up
     with it; the earlier row's dollars still count against the month."""
     deps.spend_file.write_text("pass_id,date,provider,runs,desk_usd,simulator_usd,claude_api_usd,total_usd\n"
-                               "earlier,2026-10-02,anthropic,1000,599.997,0,599.997,599.997\n")
-    assert main(["--samples", "5", "--max-usd", "1", "--label", "trial"], deps) == 1   # $0.0050 does not fit
-    assert main(["--samples", "1", "--max-usd", "1", "--label", "trial"], deps) == 0   # $0.0010 fits
+                               "earlier,2026-10-02,anthropic,1000,599.988,0,599.988,599.988\n")
+    assert main(["--samples", "5", "--max-usd", "1", "--label", "trial"], deps) == 1   # $0.0260 does not fit
+    assert main(["--samples", "1", "--max-usd", "1", "--label", "trial"], deps) == 0   # $0.0052 fits
     earlier, row = list(csv.DictReader(deps.spend_file.open()))
-    assert list(row) == list(SPEND_COLUMNS) and earlier["total_usd"] == "599.997"
+    assert list(row) == list(SPEND_COLUMNS) and earlier["total_usd"] == "599.988"
     assert row["pass_id"] == "calibration-soft-promise-trial-20261030-210000" and float(row["estimated_usd"]) == 0
 
 

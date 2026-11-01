@@ -1,0 +1,61 @@
+/* The About set's paper: the light reading style the Vision article first drew, which the two reading pages (the
+   capability prediction and the product proposal) take on too, so the set's three pages read as one. It is the
+   named exception to design system v2 that the article is (AGENTS.md, Design). Clay stays out.
+
+   Two classes, each on a page's root, and no rule on anything inside one:
+   - .cd-about-paper declares the palette. Its names keep the article's prefix: these are its colors.
+   - .cd-about-paper--app, beside it on a page drawn with the app's own components (the two reading pages, the
+     set's error page and wait, and the Vision article, whose top bar is the reading pages'), points the app's color
+     tokens at the palette inside that page alone, so a card, a pill, a link, a focus ring or the footer draws in ink
+     on paper with no rule of its own; and lays the paper under the page, the window's height at least. The article
+     draws every other part in its own rules, from the palette itself. */
+
+.cd-about-paper {
+  /* The page. */
+  --va-paper: #f4f2ec;
+  --va-band: #eae6dc;
+  --va-ink: #1c1b19;
+  --va-ink-2: #5c5850;
+  --va-line: rgba(28, 27, 25, 0.13);
+  --va-link: #2d5b8a;
+  --va-bar: rgba(244, 242, 236, 0.94);
+  /* Cards on the page, a shade lighter than the paper, and their edge while pointed at. */
+  --va-tile: #fbfaf7;
+  --va-line-strong: rgba(28, 27, 25, 0.28);
+  /* A control in the bar while pointed at. */
+  --va-hover: rgba(28, 27, 25, 0.06);
+  /* Status, as a dot beside the words that say it. */
+  --va-done: #4f8a3b;
+  --va-held: #c79a16;
+  --va-declined: #c2475a;
+}
+
+/* Each app color token the reading pages, their figures and the error page draw with, on the paper: the page and
+   the figures' cards (tiles, as the article's cards are), ink and secondary ink, the hairlines and their stronger
+   edge, the fills, the link color (which focus rings take too) and the status dots. A token the tokens file
+   defines from another (status-info) is pointed here too, since it was resolved on the app's root. */
+.cd-about-paper--app {
+  --bg-app: var(--va-paper);
+  --bg-panel: var(--va-tile);
+  --bg-surface: var(--va-paper);
+  --text-primary: var(--va-ink);
+  --text-secondary: var(--va-ink-2);
+  --text-tertiary: var(--va-ink-2);
+  --line-hairline: var(--va-line);
+  --line-card: var(--va-line);
+  --line-control: var(--va-line-strong);
+  --line-control-hover: var(--va-line-strong);
+  --fill-card: var(--va-tile);
+  --fill-count: var(--va-hover);
+  --fill-hover: var(--va-hover);
+  --fill-secondary: var(--va-band);
+  --accent-blue: var(--va-link);
+  --status-handled: var(--va-done);
+  --status-held: var(--va-held);
+  --status-refused: var(--va-declined);
+  --status-info: var(--va-ink-2);
+  min-height: 100dvh;
+  background: var(--va-paper);
+  color: var(--va-ink);
+  color-scheme: light;
+}

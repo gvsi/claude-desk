@@ -59,7 +59,7 @@ Length: as long as it's useful **(Giovanni)**, and the owner can accept Claude's
 
 **Flow (Giovanni: both):** the conversation proposes each tool, rule and connector inline as a card the owner accepts or changes; the Tools and Rules screens stay as the review of everything it built before the safety check. A redesign of setup's screens: canvas boards and Giovanni's sign-off before code.
 
-**Sample memory (#303) (Giovanni: presented as a real memory):** the start model call writes memory items from the owner's description (topics include setup's query words), setup PUTs them to the kernel's new `PUT /desks/{id}/memory` (kernel lane 14, agreed), then the consent read returns them. A failed write means an empty memory, never Rivera's. The memory also names the apps the owner "already connected" to Claude, picked from a fixed catalog that fits the business; setup keeps that list on its side.
+**Sample memory (#303) (Giovanni: presented as a real memory):** the start model call writes memory items from the owner's description (topics include setup's query words), the API writes them through the kernel's owner-only `PUT /desks/{id}/memory` route, then the consent read returns them. A failed write means an empty memory, never Rivera's. The memory also names the apps the owner "already connected" to Claude, picked from a fixed catalog that fits the business; setup keeps that list on its side.
 
 **Connectors (Giovanni: propose, connect the mocks):** setup proposes the connected apps that fit the jobs. Ones with a working mock connect and run (payments today); the rest appear in the plan and the Tools step as coming later. First cut if time runs short: no new connector mocks **(Giovanni)**.
 
@@ -80,20 +80,22 @@ Length: as long as it's useful **(Giovanni)**, and the owner can accept Claude's
 | Payment for a purpose | `native.payment_link` | a name and an owner-set amount (a price item the kernel prices) | "Pay a retainer", "Pay the application fee", "Pay a booking deposit" |
 | Urgent request | `native.request_callback` | what this business calls urgent | "Report an emergency": takes the details and alerts the owner now |
 
-The exact kernel contract (how a configured tool is stored, pinned, reviewed and named in Cedar) is the kernel lane's to propose in the plan; the reply cards these tools need (a typed booking's confirmation, a purpose payment) reuse today's templates where they fit. If time runs short, this part falls back to words only: setup writes how each job works as policy and the agent follows it on today's tools **(my call; second cut after connector mocks)**.
+The exact kernel contract (how a configured tool is stored, pinned, reviewed and named in Cedar) belongs to the kernel and is defined in the implementation plan; the reply cards these tools need (a typed booking's confirmation, a purpose payment) reuse today's templates where they fit. If time runs short, this part falls back to words only: setup writes how each job works as policy and the agent follows it on today's tools **(my call; second cut after connector mocks)**.
 
 ## Part C: the visitor agent knows the business
 
-- Setup publishes text claims to the Desk's charter as `policy:` keys, so the policy card can cite them: `policy:about`, `policy:pricing` ("priced per case after a free consult"), `policy:intake`, `policy:after_hours`, `policy:urgent`, and `policy:service_area` (shown as "Service area", #307). They reach the agent through `<desk_context>` and stay untrusted text.
-- The visitor prompt gains a short business-aware section: use the Desk's own words; when there's no price for a request, offer the business's next step (book a consult, take the details) instead of a dead end; qualify a new request with the intake questions; treat what the business calls urgent as urgent. Visitor-prompt lane (cb), through the evals gate.
-- The reply check's word list blocks "Your appointment is confirmed." but lets "Your viewing is confirmed." through: kernel lane, invariant 2, alongside typed bookings.
-- The demo agent's tasks ask every Desk for a water heater visit: draw them from the Desk's own tools and catalog.
+- Setup publishes text claims to the Desk's charter as `policy:` keys, so the policy card can cite them: `policy:about`, `policy:pricing` ("Pricing is discussed after we understand the work."), `policy:intake`, `policy:after_hours`, `policy:urgent`, and `policy:service_area` (shown as "Service area", #307). They reach the agent through `<desk_context>` and stay untrusted text.
+- The visitor prompt gains a short business-aware section: use the Desk's own words; when there's no price for a request, offer the business's next step (book a consult, take the details) instead of a dead end; qualify a new request with the intake questions; treat what the business calls urgent as urgent. The API owns this prompt change, which must pass the evals gate.
+- The reply check's word list blocks "Your appointment is confirmed." but lets "Your viewing is confirmed." through: the kernel owns this reply-check change under invariant 2, alongside typed bookings.
+- The demo agent's tasks asked every Desk for a water heater visit. Each task is now a fixed line that code picks by the Desk's setup business type (trade, office, landlord or other), and the seeded Rivera Desk keeps its own lines; the owner signed the lines and the agents page's chips on 2026-11-01 (#572). Two other designs were rejected:
+  - (a) Building the lines from the Desk's own tool or catalog names would put the Desk's text into the agent's model, whose requests its launcher sees unchecked, and so widen that recorded exception.
+  - (b) Hiding the agent's words for those tasks would undo the owner's decision to show them.
 
 ## Part D: make today's tools work on any new Desk
 
 - **People on record:** setup offers to add the owner as a test client with their own contact, so a tester can verify and receive a sample document.
 - **Slots refresh:** a setup Desk's calendar is generated once for 14 days and never refreshed.
-- The run's fixes in flight: #295, #304 to #311, and b9's receipt change.
+- The API and web app fixes in flight: #295, #304 to #311, and the web app's receipt change.
 
 ## Part E: starter businesses for reviewers
 
@@ -105,16 +107,16 @@ The exact kernel contract (how a configured tool is stored, pinned, reviewed and
 
 A web change to setup's screens: a design PR with Giovanni's sign-off.
 
-## Cost, lanes and cuts
+## Cost, ownership and cuts
 
-| Part | Size | Lane |
+| Part | Size | Owner |
 |---|---|---|
-| A. Setup consultant, inline proposals | L, setup code and prompts; setup web redesign | setup (af); setup web (cd) |
-| A. Sample memory and connected apps | M | kernel route (14, in progress); setup |
-| B. Building blocks | L | kernel (14 or 4b) and setup |
-| C. Business-aware visitor prompt, reply-check gap, demo tasks | M | visitor prompt (cb); kernel |
-| D. Test client, slot refresh | S to M | setup; kernel |
-| E. Starter businesses | S, design PR | setup web (cd) |
+| A. Setup consultant, inline proposals | L, setup code and prompts; setup web redesign | Setup API; setup web app |
+| A. Sample memory and connected apps | M | Kernel memory route; setup API |
+| B. Building blocks | L | Kernel; setup API |
+| C. Business-aware visitor prompt, reply-check gap, demo tasks | M | Visitor prompt; kernel; demo-agent API |
+| D. Test client, slot refresh | S to M | Setup API; kernel |
+| E. Starter businesses | S, design PR | Setup web app |
 
 **Cut order if time runs short:** new connector mocks first **(Giovanni)**, then building blocks fall back to words only, then Part D **(my call)**. The consultant, the visitor agent and the starters stay.
 

@@ -26,7 +26,7 @@ const NOTIFICATIONS = `${SETTINGS}/notifications`;
 const BILLING = `${SETTINGS}/billing`;
 
 /** What Answering on means, under General's switch (owner decision, 2026-10-30: the short line everywhere). */
-const ANSWERING_LINE = 'Claude answers under your rules.';
+const ANSWERING_LINE = 'Within your rules';
 
 /** What deleting a Desk does, beside its button and in the dialog that asks first. */
 const DELETE_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
@@ -155,15 +155,16 @@ describe('Settings', () => {
 
   it('answering_is_one_switch', async () => {
     const { screen } = await renderRoute(GENERAL);
-    const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' }).getByRole('switch', { name: 'Answering' });
-    const page = main(screen).getByRole('switch', { name: 'Answering' });
+    const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' }).getByRole('switch', { name: 'Claude acts for you' });
+    const page = main(screen).getByRole('switch', { name: 'Claude acts for you' });
     const saved = () => mockStore.world.desk(RIVERA.deskId)?.summary.answering;
     await expect.element(page).toHaveAttribute('aria-checked', 'true');
     await expect.element(page).toHaveAccessibleDescription(ANSWERING_LINE);
-    await expect.element(main(screen).getByRole('region', { name: 'Answering' })).toBeVisible();
+    await expect.element(main(screen).getByRole('region', { name: 'Claude acts for you' })).toBeVisible();
 
     // General's switch sends one change, and the sidebar's follows it.
     await page.click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.element(page).toHaveAttribute('aria-checked', 'false');
     await expect.element(sidebar).toHaveAttribute('aria-checked', 'false');
     await expect.poll(() => saved()).toBe(false);
@@ -171,6 +172,7 @@ describe('Settings', () => {
 
     // The sidebar's sends one too, and General's follows it.
     await sidebar.click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.element(page).toHaveAttribute('aria-checked', 'true');
     await expect.poll(() => saved()).toBe(true);
     expect(requests('setAnswering').map((r) => r.body)).toEqual([{ on: false }, { on: true }]);
@@ -178,8 +180,9 @@ describe('Settings', () => {
     // A change that didn't save puts both back, with the sidebar's line.
     mockStore.inject({ route: 'setAnswering', status: 500, delayMs: 400 });
     await page.click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.element(sidebar).toHaveAttribute('aria-checked', 'false');
-    await expect.element(screen.getByRole('alert')).toHaveTextContent("That didn't save, so Answering is still on.");
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("That didn’t save, so Claude is still acting for you.");
     await expect.element(page).toHaveAttribute('aria-checked', 'true');
     await expect.element(sidebar).toHaveAttribute('aria-checked', 'true');
     expect(requests('setAnswering')).toHaveLength(3);
@@ -190,7 +193,8 @@ describe('Settings', () => {
     // Turned off here, Answering is what a visitor's chat goes by: a price question gets the
     // handoff card, as asking for Maria does, with no quote and nothing decided for it.
     const { screen } = await renderRoute(GENERAL);
-    await main(screen).getByRole('switch', { name: 'Answering' }).click();
+    await main(screen).getByRole('switch', { name: 'Claude acts for you' }).click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.poll(() => mockStore.world.desk(RIVERA.deskId)?.summary.answering).toBe(false);
     expect(requests('setAnswering').map((r) => r.body)).toEqual([{ on: false }]);
 
@@ -298,7 +302,8 @@ describe('Settings', () => {
     // "not found", until the owner reloads.
     mockStore.inject({ route: 'setAnswering', status: 'network', afterCommit: true });
     const reads = requests('desks').length;
-    await main(unsure.screen).getByRole('switch', { name: 'Answering' }).click();
+    await main(unsure.screen).getByRole('switch', { name: 'Claude acts for you' }).click();
+    await unsure.screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.poll(() => requests('desks').length).toBeGreaterThan(reads);
     await new Promise((resolve) => setTimeout(resolve, 300));
     await expect.element(unconfirmed).toHaveTextContent(`${UNCONFIRMED}Reload`);
@@ -371,7 +376,8 @@ describe('Settings', () => {
     await expect.element(page.getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
     const early = holdNextDesksRead();
     const sawNotFound = watchFor("This page doesn't exist");
-    await page.getByRole('switch', { name: 'Answering' }).click();
+    await page.getByRole('switch', { name: 'Claude acts for you' }).click();
+    await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
     await expect.poll(() => early.arrived()).toBe(true);
     const reads = requests('desks').length;
 
@@ -434,7 +440,7 @@ describe('Settings against its boards', () => {
     const { screen } = await renderRoute(GENERAL);
     const business = main(screen).getByRole('region', { name: 'Your business' });
     await expect.element(business).toBeVisible();
-    const answering = main(screen).getByRole('switch', { name: 'Answering' });
+    const answering = main(screen).getByRole('switch', { name: 'Claude acts for you' });
     const remove = main(screen).getByRole('button', { name: 'Delete this Desk' });
     await expectOwnerBoard(screen.container, {
       current: 'Settings',
@@ -450,7 +456,7 @@ describe('Settings against its boards', () => {
     const card = one(business.element(), '.cd-card');
     expect(round(top(card) - bottom(one(business.element(), 'h2')))).toBe(8);
     expect(round(card.getBoundingClientRect().width)).toBe(720);
-    const answeringCard = main(screen).getByRole('region', { name: 'Answering' }).element();
+    const answeringCard = main(screen).getByRole('region', { name: 'Claude acts for you' }).element();
     expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
     const switchRow = answering.element();
     expect(round(top(switchRow) - top(answeringCard))).toBe(21);
@@ -526,7 +532,7 @@ describe('Settings against its boards', () => {
     expect(round(top(details) - bottom(nav))).toBe(16);
     const detailCard = one(details, '.cd-card');
     expect([round(detailCard.getBoundingClientRect().left), round(detailCard.getBoundingClientRect().width)]).toEqual([16, 358]);
-    const switchCard = main(phone.screen).getByRole('region', { name: 'Answering' }).element();
+    const switchCard = main(phone.screen).getByRole('region', { name: 'Claude acts for you' }).element();
     expect(round(top(switchCard) - bottom(detailCard))).toBe(16);
     const deleting = main(phone.screen).getByRole('region', { name: 'Delete this Desk' });
     const heading = deleting.getByRole('heading', { name: 'Delete this Desk' }).element();
@@ -548,7 +554,7 @@ describe('Settings against its boards', () => {
       const { screen } = await renderRoute(GENERAL, { viewport });
       const business = main(screen).getByRole('region', { name: 'Your business' });
       await expect.element(business).toBeVisible();
-      const answering = main(screen).getByRole('region', { name: 'Answering' });
+      const answering = main(screen).getByRole('region', { name: 'Claude acts for you' });
       const detailCard = one(business.element(), '.cd-card');
       const words = (el: Element) => {
         const range = document.createRange();
@@ -557,7 +563,7 @@ describe('Settings against its boards', () => {
       };
       const term = business.getByRole('term').first().element();
       const value = business.getByRole('definition').first().element();
-      const label = answering.getByText('Answering', { exact: true }).element();
+      const label = answering.getByText('Claude acts for you', { exact: true }).element();
       const line = answering.getByText(ANSWERING_LINE, { exact: true }).element();
       const inset = words(term) - detailCard.getBoundingClientRect().left;
       expect(Math.abs(words(label) - words(term)), `label at ${viewport}`).toBeLessThanOrEqual(1);

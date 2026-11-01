@@ -43,7 +43,6 @@ from desk.api.schemas import (
     DeskSetup,
     DeskSummary,
     GenerationIn,
-    Lead,
     NeedsYouItem,
     OwnerMessageIn,
     OwnerTranscript,
@@ -91,10 +90,12 @@ class CopyRequest(BaseModel):
 async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup]]:
     """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
     unfinished setup interviews by Desk ID, from the API's own rows."""
-    desks = [row for row in await ctx.ro.desks() if row["desk_id"] in ctx.desk_ids]
+    # Deleted Desks still consume pending setup claims; whoami lists only the active Desks to show.
+    all_desks = await ctx.ro.desks()
+    desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    return desks, businesses, await owner_reads.unfinished_setups(ctx)
+    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks)
 
 
 def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup]) -> DeskSummary:
@@ -407,13 +408,10 @@ async def people(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) 
     desk_id = ctx.desk(desk_id)
     on_record = sorted(await ctx.ro.rows("people", desk_id=desk_id),
                        key=lambda row: (owner_reads.utc(row["created_at"]), row["person_id"]))
-    leads = sorted(await ctx.ro.rows("leads", desk_id=desk_id),
-                   key=lambda row: (owner_reads.utc(row["created_at"]), row["lead_id"]), reverse=True)
     return PeopleOut(
         people=[PersonOnRecord(person_id=row["person_id"], display_name=row["display_name"],
                                masked_contact=row["masked_contact"]) for row in on_record],
-        leads=[Lead(lead_id=row["lead_id"], display_name=row["display_name"], note=row["note"],
-                    created_at=row["created_at"]) for row in leads])
+        leads=await owner_reads.leads(ctx, desk_id))
 
 
 @router.get("/desks/{desk_id}/today", response_model=Today, responses=error_responses(401, 404, 422, 503))
@@ -471,7 +469,8 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
     for item, reason in zip(statuses, reasons, strict=True):
         item.owner_plain = reason
     return OwnerTranscript(state=state, items=items,
-                           typing_until=process.presence.visitor_typing_until(session_id, process.clock()))
+                           typing_until=process.presence.visitor_typing_until(session_id, process.clock()),
+                           replayed=await owner_reads.transcript_replayed(ctx, session["desk_id"], session_id))
 
 
 @router.get("/desks/{desk_id}/safety", response_model=list[Attempt], responses=error_responses(401, 404, 422, 503))
@@ -568,7 +567,10 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
         return await _no_longer_held(state, ctx, decision_id, failure)
     except KernelUnavailable as failure:
         return await _no_longer_held(state, ctx, decision_id, failure)
-    await _resume(state, ctx, result.decision, result.approved)
+    result_fact_ids = ([fact.fact_id for fact in result.execution.facts]
+                       if result.execution is not None and result.execution.state == "succeeded"
+                       and result.decision.state == "executed" else [])
+    await _resume(state, ctx, result.decision, result.approved, result_fact_ids=result_fact_ids)
     return ApprovalAnswerOut(decision=result.decision, card_diff=result.card_diff,
                              execution_state=result.execution.state if result.execution is not None else None)
 
@@ -614,12 +616,13 @@ async def _remember_approval(ctx: OwnerCtx, decision: Decision) -> None:
         raise
 
 
-async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: Decision | None = None) -> None:
+async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: Decision | None = None,
+                  result_fact_ids: list[str] | None = None) -> None:
     """Defer the resume job for the decision's session, named by the kernel's answer within the owner's copy. If the
     queue can't take it, the request does the job's work itself: like the job, it holds only IDs and signed
     records and makes no kernel call. Both paths publish the optional approved receipt before the outcome, with
-    only the outcome waking Claude. If that fails too, the answer still stands, and the due-decisions job surfaces
-    the outcome once it is final."""
+    only the outcome waking Claude and naming the executed answer's result facts. If that fails too, the answer
+    still stands, and the due-decisions job surfaces the outcome once it is final."""
     decision = visitor_safe(decision)
     approved = visitor_safe(approved) if approved is not None else None
     session = await ctx.ro.session(decision.session_id)
@@ -628,13 +631,13 @@ async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: D
         return
     ids = Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=decision.session_id)
     try:
-        await defer_resume_after_answer(state.jobs, ids, decision, approved)
+        await defer_resume_after_answer(state.jobs, ids, decision, approved, result_fact_ids=result_fact_ids)
         return
     except Exception as error:
         logger.error("the resume job couldn't be queued (%s); resuming here", type(error).__name__)
     try:
         async with state.database().connect() as conn:
-            await resume_after_answer(conn, ids, decision, approved)
+            await resume_after_answer(conn, ids, decision, approved, result_fact_ids=result_fact_ids)
     except Exception as error:
         logger.error("the answer couldn't be resumed here either (%s)", type(error).__name__)
 

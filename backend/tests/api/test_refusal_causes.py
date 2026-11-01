@@ -25,6 +25,7 @@ from desk.kernel_service import decide
         ("no_such_quote", "quote_unpayable"), ("quote_paid", "quote_unpayable"), ("quote_paying", "quote_unpayable"),
         ("no_such_charge", "no_such_charge"), ("not_refundable", "not_refundable"),
         ("no_such_document", "no_such_document"), ("not_verified", None),
+        ("answer_count", "incomplete_request"),
         ("no_mandate", None), ("mandate_exhausted", None),
         ("not_an_agent_with_a_mandate", None),
     ]],
@@ -161,6 +162,7 @@ def test_refusal_checks_track_kernel_adapters():
         "mandate_exhausted": "Mandate reservation happens in prepare during execution.",
         "not_an_agent_with_a_mandate": "tools_given excludes charge_mandate without an agent's mandate.",
         "not_verified": "tools_given excludes private-data payments tools before normalization: not_given wins.",
+        "search_limit": "The web search cap is counted in prepare during execution, for owner sessions only.",
     }
     assert all(unreachable_at_decide.values())
     assert set(REFUSAL_CHECKS).isdisjoint(unreachable_at_decide)

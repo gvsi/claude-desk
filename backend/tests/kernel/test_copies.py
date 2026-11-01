@@ -107,7 +107,8 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
         ("Bob Okafor", "b•••@example.com"), ("Dana Whitfield", "d•••@example.com")]
     prices = await rows_of(app, copy_id, select(PriceItem).order_by(PriceItem.unit_cents))
     assert [(p.item_id, p.title, p.unit_cents) for p in prices] == [
-        ("deposit", "Service call deposit", 2000), ("heater", "Water heater flush", 15000),
+        ("deposit", "Service call deposit", 2000), ("short-notice", "Short-notice fee", 5000),
+        ("pipe", "Pipe repair (starting price)", 10000), ("heater", "Water heater flush", 15000),
         ("drain", "Drain clearing", 18000), ("leak", "Leak repair", 25000)]
     slots = await rows_of(app, copy_id, select(CalendarSlot).order_by(CalendarSlot.starts_at))
     assert len(slots) == 10 * 5 + 2 * 2                    # two weeks of weekday and Saturday slots
@@ -119,7 +120,8 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     # charter facts, the hours included, are public
     facts = {fact.fact_id: fact for fact in await rows_of(app, copy_id, select(Fact).where(Fact.kind == "charter"))}
     assert set(facts) == {"charter:contact", "charter:policy:service_area", "charter:policy:first_visit",
-                          "charter:policy:arrival", "charter:hours"}
+                          "charter:policy:arrival", "charter:hours",
+                          *(f"charter:starter:{n}:{lang}" for n in (1, 2, 3) for lang in ("en", "es"))}
     assert all(fact.readers == ["public"] and fact.source == "kernel" and fact.status == "available"
                for fact in facts.values())
     assert [(c.key, c.value) for c in facts["charter:contact"].claims] == [("contact", "(510) 555-0142")]
@@ -129,15 +131,17 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     assert [(w.days, w.start, w.end) for w in desk.hours] == [
         (["mon", "tue", "wed", "thu", "fri"], time(8), time(18)), (["sat"], time(9), time(13))]
     # the Desk's creation and two knowledge items are first, then its two mock payments tools pinned
-    # (plan 01c), its rules' activation, then the held request on Today
+    # (plan 01c), its urgent business tool written as the owner's replacement writes it, its rules'
+    # activation and the urgent tool that version turns on, then the held request on Today
     # (test_adapters.test_copy_seeds_one_held_quote)
     entries = await rows_of(app, copy_id, select(LedgerEntry).order_by(LedgerEntry.seq))
     assert [(e.desk_id, e.seq, e.event.kind) for e in entries] == [
         (desk_id, 1, "desk_data"), (desk_id, 2, "desk_data"), (desk_id, 3, "desk_data"),
-        (desk_id, 4, "tool_pin"), (desk_id, 5, "tool_pin"), (desk_id, 6, "policy"),
-        (desk_id, 7, "session"), (desk_id, 8, "decide")]
+        (desk_id, 4, "tool_pin"), (desk_id, 5, "tool_pin"), (desk_id, 6, "business_tools"), (desk_id, 7, "policy"),
+        (desk_id, 8, "tool_pin"), (desk_id, 9, "session"), (desk_id, 10, "decide")]
     pins = mcp_client.seed_pins()
-    assert [e.event.summary for e in entries[:6]] == [
+    [urgent] = await rows_of(app, copy_id, select(Tool).where(Tool.tool == "desk.emergency-callback"))
+    assert [e.event.summary for e in entries[:8]] == [
         {"part": "desk", "created": True},
         {"part": "knowledge", "item_id": "kn-website", "owner_only_forced": False},
         {"part": "knowledge", "item_id": "kn-price-list", "owner_only_forced": False},
@@ -145,22 +149,27 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
          "definition_sha256": pins["create_refund"]},
         {"tool": "payments.list_charges", "event": "connected", "status": "enabled",
          "definition_sha256": pins["list_charges"]},
+        {"tools": [{"tool": "desk.emergency-callback", "block": "urgent", "definition_sha256": urgent.definition_sha256,
+                    "change": "new"}]},
         {"version": 1, "status": "active", "preset": "rivera", "activated": True, "from": None,
-         "auto_money_cap_cents": 50_000}]
+         "auto_money_cap_cents": 50_000},
+        {"tool": "desk.emergency-callback", "event": "enabled", "version": 1,
+         "definition_sha256": urgent.definition_sha256}]
     # the seed's cards: the starter preset's utility cards plus Rivera's own
     ask_first = seed.PRESETS["ask_first"]
     assert all(card.card_id.startswith("preset-") and card.mode == "auto" for card in ask_first)
     assert [card.card_id for card in seed.RIVERA_CARDS] == [card.card_id for card in ask_first] + [
-        "rv-quote", "rv-book-wk", "rv-book-sat", "rv-docs", "rv-link", "rv-charges", "rv-refund", "rv-mandate"]
+        "rv-quote", "rv-book-wk", "rv-book-sat", "rv-docs", "rv-link", "rv-charges", "rv-refund", "rv-mandate",
+        "rv-urgent"]
     [link] = [card for card in seed.RIVERA_CARDS if card.card_id == "rv-link"]       # the 01c rows of the seed
     assert (link.applies_to, link.mode, link.who, link.max_amount_cents, link.review) == (
         "native.payment_link", "auto", "anyone", 30_000, True)
-    assert [(c.applies_to, c.mode, c.who, c.max_amount_cents) for c in seed.RIVERA_CARDS[-3:]] == [
+    assert [(c.applies_to, c.mode, c.who, c.max_amount_cents) for c in seed.RIVERA_CARDS[-4:]] == [
         ("payments.list_charges", "auto", "record_owner", None), ("payments.create_refund", "ask", "record_owner", None),
-        ("native.charge_mandate", "auto", "anyone", 2_000)]
+        ("native.charge_mandate", "auto", "anyone", 2_000), ("desk.emergency-callback", "auto", "anyone", None)]
     assert {card.applies_to for card in ask_first} == {
         "native.find_slots", "native.capture_lead", "native.request_callback", "native.start_verification",
-        "native.fetch_website", "native.read_memory"}
+        "native.fetch_website", "native.read_memory", "native.web_search"}
     assert seed.PRESETS is presets.PRESETS and seed.PRESETS["auto"][:len(ask_first)] == ask_first
     assert [(c.card_id, c.applies_to, c.mode, c.who) for c in seed.PRESETS["auto"][len(ask_first):]] == [
         ("preset-quote", "native.quote", "auto", "anyone"), ("preset-book-weekday", "native.book", "auto", "anyone"),
@@ -221,6 +230,24 @@ def test_seeded_knowledge_states_no_amount(frozen_clock):
     assert website.text == (
         "Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
         "water heater flushes. " + area)
+
+
+async def test_a_copy_prices_a_plumbing_emergency(app, client):
+    """A plumbing emergency is quoted as "pipe repairs start from $100, and there's a short-notice fee
+    of $50", each amount on a quote card. Cards come only from the price list, so a fresh copy's list
+    holds both, the pipe repair titled as the starting price it is (a price item has no "from" price)."""
+    created = await create_copy(client)
+    prices = {p.item_id: (p.title, p.unit_cents) for p in await rows_of(app, created["copy_id"], select(PriceItem))}
+    assert prices["short-notice"] == ("Short-notice fee", 5_000)
+    assert prices["pipe"] == ("Pipe repair (starting price)", 10_000)
+
+
+def test_the_price_list_knowledge_says_when_the_short_notice_fee_applies():
+    """The owner's sentence (2026-11-01) tells Claude when to add the fee, with no amount: an amount
+    reaches a visitor only on a quote card."""
+    from desk.kernel_service import seed
+    [price_list] = [item for item in seed.RIVERA_KNOWLEDGE if item.item_id == "kn-price-list"]
+    assert "The short-notice fee is added to an urgent visit that Maria fits in at short notice." in price_list.text
 
 
 async def test_copies_are_isolated(app, client):

@@ -24,9 +24,9 @@ const meta = {
     canvas: 'N-Run2-Settings-Phone',
     canvasNote: [
       'Signed on 2026-10-30.',
-      'Settings › General at 390 px: SubNav as one line across the page’s gutters over a hairline, then the details, Answering and Delete this Desk, 16 px apart, and the footer under them.',
+      'Settings › General at 390 px: SubNav as one line across the page’s gutters over a hairline, then the details, Claude acts for you and Delete this Desk, 16 px apart, and the footer under them.',
       'The board draws a ghost Change on each detail; the details are read-only, with no Change (owner decision, 2026-10-30), so the hours wrap at another word; Delete this Desk is neutral where the board draws it red (owner decision, 2026-10-30).',
-      'Answering’s line is this board’s, “Claude answers under your rules.”, the same on a laptop (owner decision, 2026-10-30). Every row from the top bar to Answering’s card sits where the render draws it.',
+      'The switch says “Claude acts for you” with “Within your rules” while on, the same on a laptop (owner decision, 2026-11-01). Every row from the top bar to the switch’s card sits where the render draws it.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -63,10 +63,17 @@ export const Board: Story = {
     await expect(within(business).getAllByRole('definition').map((value) => value.textContent)).toEqual(GENERAL_DETAILS.map(({ value }) => value));
     await expect(Math.round(card.getBoundingClientRect().height)).toBe(346);
 
-    // Answering 16 px under, with the one short line.
-    const answering = page.getByRole('region', { name: 'Answering' });
+    // Claude acts for you 16 px under, with the one short line.
+    const answering = page.getByRole('region', { name: 'Claude acts for you' });
     await expect(top(answering) - bottom(card)).toBe(16);
-    await expect(page.getByRole('switch', { name: 'Answering' })).toHaveAccessibleDescription('Claude answers under your rules.');
+    await expect(page.getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
+    const switchRow = within(answering).getByRole('switch', { name: 'Claude acts for you' });
+    await expect(Math.round(within(switchRow).getByText('Claude acts for you', { exact: true }).getBoundingClientRect().left)).toBe(
+      Math.round(within(business).getByText('Business', { exact: true }).getBoundingClientRect().left),
+    );
+    await expect(Math.round(answering.getBoundingClientRect().height)).toBe(91);
+    await expect(top(switchRow) - top(answering)).toBe(21);
+    await expect(bottom(answering) - bottom(switchRow)).toBe(21);
 
     // Delete this Desk 16 px under: the heading, the line 8 px under it, and the neutral button 8 px under that, at the left.
     const remove = page.getByRole('region', { name: 'Delete this Desk' });

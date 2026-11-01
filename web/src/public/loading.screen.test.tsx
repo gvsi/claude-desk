@@ -29,35 +29,73 @@ const CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'chat-title', page: '.cd-public-shell__chat-title > h2' },
   { name: 'disclosure', page: '.cd-public-shell__disclosure' },
   { name: 'ask-owner', page: '.cd-public-shell__chat-head > button', size: true },
+];
+
+// History is unknown while loading, so the skeleton draws the first view. A first visit to a Desk
+// with starters lands on it in place; a resumed chat keeps only its head.
+const FIRST_VIEW_ANCHORS: readonly SkeletonAnchor[] = [
+  ...CHAT_ANCHORS,
+  { name: 'greeting', page: '.cd-public-shell__greeting' },
+  { name: 'invitation', page: '.cd-public-shell__invitation', dimensions: ['height'] },
   { name: 'composer', page: '.cd-composer__box', size: true },
-  { name: 'concept-footer', page: '.cd-public-shell__footer .cd-concept-footer', size: true },
+  { name: 'starters', page: '.cd-public-shell__starters', size: true },
+  { name: 'concept-footer', page: '.cd-concept-footer', size: true },
+];
+
+const DESKTOP_CHAT_ANCHORS: readonly SkeletonAnchor[] = [
+  ...CHAT_ANCHORS,
+  { name: 'concept-footer', page: '.cd-concept-footer', size: true },
 ];
 
 it('public_chat_opens_in_place_desktop', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    anchors: [...CHAT_ANCHORS, { name: 'about-title', page: '.cd-public-shell__about > h2' }],
+    anchors: [...FIRST_VIEW_ANCHORS, { name: 'about-title', page: '.cd-public-shell__about > h2' }],
     open: async () => {
       await renderRoute(CHAT, { pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
     },
     release: read.release,
   });
+  await expect.element(document.querySelector<HTMLElement>('.cd-public-shell__welcome')).toBeVisible();
   await expectScreenBasics(document.body, { owner: false });
+});
+
+// Every load draws the first view, so a resumed chat's composer and footer move when it lands; its
+// head stays in place.
+it.each(['desktop', 'phone'] as const)('resumed_public_chat_keeps_its_head_in_place_%s', async (viewport) => {
+  const first = await renderRoute(CHAT, { viewport, pollScale: 100 });
+  await expect.element(first.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+  const chat = mockStore.visitorSession(RIVERA.slug)!;
+  mockStore.world.visitorText(chat, 'How much is drain clearing?');
+  await renderRoute('/no/such/page');
+  const read = holdReads(CHAT_READ);
+  await expectSkeletonLoad({
+    status: 'Opening the chat',
+    anchors: CHAT_ANCHORS,
+    open: async () => {
+      await renderRoute(CHAT, { viewport, pollScale: 100 });
+      await vi.waitFor(() => expect(read.held()).toBe(1));
+    },
+    release: read.release,
+  });
+  await expect.element(document.querySelector<HTMLElement>('.cd-visitor-message')).toHaveTextContent('How much is drain clearing?');
+  expect(document.querySelector('.cd-public-shell__welcome')).toBeNull();
 });
 
 it('public_chat_opens_in_place_phone', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    anchors: CHAT_ANCHORS,
+    anchors: [...FIRST_VIEW_ANCHORS, { name: 'about-title', page: '.cd-public-shell__about > h2' }],
     open: async () => {
       await renderRoute(CHAT, { viewport: 'phone', pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
     },
     release: read.release,
   });
+  await expect.element(document.querySelector<HTMLElement>('.cd-public-shell__welcome')).toBeVisible();
   await expectScreenBasics(document.body, { owner: false });
 });
 
@@ -79,7 +117,7 @@ it('public_chat_opens_in_spanish_desktop', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Abriendo el chat',
-    anchors: CHAT_ANCHORS,
+    anchors: FIRST_VIEW_ANCHORS,
     open: async () => {
       await renderRoute(CHAT, { viewport: 'desktop', language: 'es-MX', pollScale: 100 });
       await vi.waitFor(() => expect(document.querySelector('[role="status"][lang="es"]')?.textContent).toBe('Abriendo el chat'));
@@ -89,7 +127,8 @@ it('public_chat_opens_in_spanish_desktop', async () => {
   await expectScreenBasics(document.body, { owner: false });
 });
 
-it('setup_preview_opens_in_place', async () => {
+/** A confirmed setup at its preview step, the Desk's public page not yet read. */
+async function setupAtPreview(): Promise<SetupState> {
   const started = await mockStore.dispatch('startSetup', { body: {
     description: "Rivera Plumbing. I'm Maria, a plumber in Oakland.",
     timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey(),
@@ -105,17 +144,45 @@ it('setup_preview_opens_in_place', async () => {
   await mockStore.dispatch('setupSituations', { params });
   await mockStore.dispatch('setupSafetyCheck', { params });
   await mockStore.dispatch('setupConfirm', { params });
+  return state;
+}
+
+/**
+ * The shapes setup's preview lands on: the interview's owner-name change to "Ask for the owner" is
+ * recorded in setup_preview_ask_moves_once_for_the_owner_name.
+ */
+const PREVIEW_ANCHORS = CHAT_ANCHORS.filter((anchor) => anchor.name !== 'ask-owner');
+
+it.each([
+  ['desktop', PREVIEW_ANCHORS],
+  // A Desk fresh from setup has neither opening hours nor starter questions yet, and on a phone the
+  // skeleton draws both: a row for the hours in its brand header (#553), so the header and the chat's
+  // head land 16 px higher than their shapes, and three starter chips under its composer, which in the
+  // short frame sits at the chat's foot, so the composer lands 128 px lower than its shape. Until the
+  // skeleton knows what a Desk has, the phone checks only that the shapes fill the frame.
+  ['phone', []],
+] as const)('setup_preview_opens_in_place_%s', async (viewport, anchors) => {
+  // The preview's shapes fill its frame, inside the frame's 1 px border, as the page that replaces
+  // them does: on a laptop and on a phone, where the preview is a full-height chat too.
+  const state = await setupAtPreview();
   const read = holdReads(ROUTES.publicDesk.path.replace('{slug}', state.slug));
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    // The interview's owner-name change is recorded in setup_preview_ask_moves_once_for_the_owner_name.
-    anchors: CHAT_ANCHORS.filter((anchor) => anchor.name !== 'concept-footer' && anchor.name !== 'ask-owner'),
+    anchors,
     open: async () => {
-      await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100 });
+      await renderRoute(`/app/setup/${state.interview_id}`, { viewport, pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
-      const preview = document.querySelector('.cd-setup-live__preview')!;
-      expect(preview.querySelector('.cd-public-shell--skeleton')).not.toBeNull();
+      const preview = document.querySelector<HTMLElement>('.cd-setup-live__preview')!;
+      const shapes = preview.querySelector<HTMLElement>('.cd-public-shell--skeleton');
+      expect(shapes).not.toBeNull();
       expect(preview.querySelector('.cd-concept-footer')).toBeNull();
+      const frame = preview.getBoundingClientRect();
+      const border = parseFloat(getComputedStyle(preview).borderTopWidth);
+      const filled = shapes!.getBoundingClientRect();
+      expect(Math.abs(filled.top - (frame.top + border))).toBeLessThanOrEqual(1);
+      expect(Math.abs(filled.bottom - (frame.bottom - border))).toBeLessThanOrEqual(1);
+      expect(Math.abs(filled.left - (frame.left + border))).toBeLessThanOrEqual(1);
+      expect(Math.abs(filled.right - (frame.right - border))).toBeLessThanOrEqual(1);
     },
     release: read.release,
   });
@@ -233,7 +300,7 @@ it.each(['phone', 'desktop'] as const)('agents_page_opens_in_spanish_%s', async 
       { name: 'key-card', page: '.cd-agents-page__cards > section:nth-child(5)', size: true },
       { name: 'key-action', page: '.cd-agents-page__cards > section:nth-child(5) .cd-button', size: true },
       { name: 'agents-footer', page: '.cd-agents-page__main > .cd-concept-footer', size: true },
-      ...[0, 1, 2].map((i) => ({ name: `task-chip-${i}`, page: `.cd-suggestion-chips > button:nth-child(${i + 1})`, size: true })),
+      ...[0, 1, 2].map((i) => ({ name: `task-chip-${i}`, page: `.cd-suggestion-chips > :nth-child(${i + 1})`, size: true })),
     ],
     open: async () => { await renderRoute(AGENTS, { viewport, language: 'es-MX', pollScale: 100 }); },
     release: read.release,
@@ -257,7 +324,7 @@ it('public_chat_still_under_reduced_motion_phone', async () => {
 it('public_chat_still_under_reduced_motion_desktop', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonStill({
-    status: 'Opening the chat', anchors: CHAT_ANCHORS,
+    status: 'Opening the chat', anchors: DESKTOP_CHAT_ANCHORS,
     open: async () => { await renderRoute(CHAT, { pollScale: 100 }); },
     release: read.release,
   });

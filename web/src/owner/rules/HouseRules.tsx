@@ -21,6 +21,7 @@ import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { deskPath } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { BusinessJobs } from './BusinessJobs.tsx';
+import { REVIEWER_LINE } from './copy.ts';
 import { defaultRow } from './defaultRow.ts';
 import { hubSections, toolFallback, toolRuleRows, type HubSection } from './hub.ts';
 import { peopleQuery, rulesQuery } from './RuleDraftReview.tsx';
@@ -115,7 +116,7 @@ export function HouseRules() {
     <div className="cd-house-rules" onClick={followInAppLinks(navigate)}>
       <div className="cd-house-rules__header">
         <Breadcrumb items={[{ label: RULES_TITLE, href: `${deskPath(deskId)}/rules` }, { label: TITLE }]} linkComponent={RouterLink} />
-        <PageHeader title={TITLE} subtitle="Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules." />
+        <PageHeader title={TITLE} subtitle="Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules." note={REVIEWER_LINE} />
       </div>
       {body}
       <AlwaysOnList />

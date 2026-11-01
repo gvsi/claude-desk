@@ -1,9 +1,10 @@
 /**
  * The page for people's AI agents, `/d/:slug/agents`, in a real browser against the mock API: the
- * built-in agent sent on a task, its signed requests titled by code and the Desk's checked replies
- * with their receipts; then what agents can do here (the kernel's Agent Card blocks), how they prove
- * who they are, and connecting your own agent (the API's code-built address, signing rules and
- * example request, and a demo key shown once). The agent's own words never reach the page.
+ * built-in agent sent on a task, its signed requests titled by code, each quoting the words it sent
+ * as the agent's own text, and the Desk's checked replies with their receipts; then what agents can
+ * do here (the kernel's Agent Card blocks), how they prove who they are, and connecting your own
+ * agent (the API's code-built address, signing rules and example request, and a demo key shown
+ * once). Nothing else an agent's turn holds reaches the page.
  */
 import { http } from 'msw';
 import { StrictMode } from 'react';
@@ -18,6 +19,7 @@ import { App } from '../../app/App.tsx';
 import { setPollScale } from '../../app/poll.ts';
 import { routes } from '../../app/routes.tsx';
 import { proseBlock, rivera } from '../../ds/fixtures/index.ts';
+import { expectComputed } from '../../ds/test/expectComputed.ts';
 import {
   AGENT_START_LOST_COPY,
   CHAT_ENDED_COPY,
@@ -31,6 +33,7 @@ import { AGENT_CARD_BLOCKS, agentCardOut } from '../../mocks/agents.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { liveSetupDesk } from '../../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute, type Viewport } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { agentStartLostLine } from './copy.ts';
@@ -255,6 +258,69 @@ describe('agents page', () => {
     await expectScreenBasics(phone.screen.container, { owner: false });
   });
 
+  it('a_desk_setup_made_offers_its_own_tasks', async () => {
+    // A dentist's Desk, which setup made as an office: its chips ask for a consult and say "up front",
+    // in English and Spanish, never Rivera's visit or service call deposit; the run's first request
+    // is titled with the chip picked. The Desk's set is read once, with the visitor's chat. (The CPA
+    // starter is an office too, but the mock's setup runs it as its consultant interview, which this
+    // helper doesn't answer; the mock's unit test types every starter.)
+    const slug = await liveSetupDesk("I'm Dana Park. Park Dental is a family dentist in Fremont, and new patients start with a checkup.");
+    const office = ['Book the earliest consult', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+    const { screen } = await renderRoute(`/d/${slug}/agents`);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: office[0] })).toBeVisible();
+    const names = () => panel.getByRole('button').elements().map((el) => el.textContent);
+    expect(names().filter((name) => office.includes(name ?? ''))).toEqual(office);
+    expect(names()).not.toContain('Book the earliest visit');
+    expect(names()).not.toContain('Get a quote and pay the service call deposit');
+    expect(requests('agentTasks')).toHaveLength(1);
+    expect(calls().indexOf('openSession')).toBeLessThan(calls().indexOf('agentTasks'));
+
+    await panel.getByRole('button', { name: office[0] }).click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'book_visit' });
+    const titles = [...panel.element().querySelectorAll('.cd-agent-message__title')].map((title) => title.textContent);
+    expect(titles[0]).toBe(office[0]);
+    await expectScreenBasics(screen.container, { owner: false });
+
+    const es = await renderRoute(`/d/${slug}/agents`, { language: 'es-MX' });
+    const enviar = es.screen.getByRole('region', { name: 'Enviar un agente' });
+    await expect.element(enviar.getByRole('button', { name: 'Reservar la primera consulta libre' })).toBeVisible();
+    await expect.element(enviar.getByRole('button', { name: 'Pagar por adelantado, dentro de su límite' })).toBeVisible();
+  });
+
+  it('the_tasks_wait_in_shapes_and_a_failed_read_offers_plain_words', async () => {
+    // While the Desk's set is read, the tasks' shapes hold their place and no task can be picked yet.
+    mockStore.inject({ route: 'agentTasks', status: 200, body: { task_set: 'rivera' }, delayMs: 1_000 });
+    const slow = await renderRoute(PAGE);
+    const waiting = slow.screen.getByRole('region', { name: 'Send an agent' });
+    await expect.poll(() => waiting.element().querySelectorAll('[data-loading="task-chips"] .cd-skeleton').length).toBe(3);
+    expect(chipsIn(slow.screen)).toEqual([]);
+    await expect.element(waiting.getByRole('button', { name: TASKS[0] })).toBeVisible();
+    expect(waiting.element().querySelector('[data-loading="task-chips"]')).toBeNull();
+
+    // A read that fails, or a session that won't open for it, never holds the page up: the tasks come
+    // in plain words for any business, and the agent still goes out on the one picked.
+    const plain = ['Book the earliest appointment', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+    const failures = [
+      { route: 'agentTasks', status: 503 },
+      { route: 'agentTasks', status: 'network' },
+      { route: 'openSession', status: 429 },
+      { route: 'openSession', status: 'network' },
+    ] as const;
+    for (const failure of failures) {
+      mockStore.inject({ ...failure });
+      const { screen } = await renderRoute(PAGE);
+      const panel = screen.getByRole('region', { name: 'Send an agent' });
+      await expect.element(panel.getByRole('button', { name: plain[0] })).toBeVisible();
+      for (const name of plain) await expect.element(panel.getByRole('button', { name })).toBeVisible();
+      await expect.element(screen.getByRole('region', { name: 'What agents can do here' })).toBeVisible();
+      await panel.getByRole('button', { name: plain[2] }).click();
+      await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+      expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'push_the_limit' });
+    }
+  });
+
   it('send_an_agent_leads_the_cards', async () => {
     // The page's one live moment comes first, right under the title and the AI disclosure; the
     // reference follows in its own order: what agents can do, how they prove who they are, then
@@ -296,6 +362,14 @@ describe('agents page', () => {
     await expect.element(es.screen.getByText('El agente terminó.', { exact: true })).toBeVisible();
     const pills = [...es.screen.container.querySelectorAll('.cd-agent-message .cd-pill')].map((pill) => pill.textContent);
     expect(pills).toEqual(['Firmado', 'Firmado']);
+    // The agent's words are its own, in English, the language it writes in: their quote says so,
+    // inside a message that is Spanish like the page.
+    const quotes = [...es.screen.container.querySelectorAll('.cd-agent-message__text')];
+    expect(quotes).toHaveLength(2);
+    for (const quote of quotes) {
+      expect(quote.getAttribute('lang')).toBe('en');
+      expect(quote.closest('.cd-agent-message')?.getAttribute('lang')).toBe('es');
+    }
     await expectScreenBasics(es.screen.container, { owner: false });
 
     // Before the Desk shows, and when it can't be read, the page still says who answers.
@@ -408,6 +482,8 @@ describe('agents page', () => {
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await expect.element(panel.getByText(LEAD, { exact: true })).toBeVisible();
     expect(limitIn(screen)).toEqual({ values: LIMIT_VALUES, source: LIMIT_SOURCE });
+    // The tasks come once the Desk's set is read: Rivera's own.
+    await expect.element(panel.getByRole('button', { name: TASKS[0] })).toBeVisible();
     expect(chipsIn(screen)).toEqual(TASKS);
     // Before a run, the tasks sit under the signed limit.
     const limitRegion = panel.getByRole('region', { name: 'Signed limit' }).element();
@@ -454,6 +530,130 @@ describe('agents page', () => {
     await phone.screen.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(phone.screen.getByText('The agent finished.', { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
+  });
+
+  it('each_request_says_what_it_asks', async () => {
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    const requests = () => [...panel.element().querySelectorAll('.cd-agent-message')];
+    const read = (selector: string) => requests().map((el) => el.querySelector(selector)?.textContent ?? null);
+
+    // The booking run: each request quotes what the agent asked, under titles that stay the page's.
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(read('.cd-agent-message__title')).toEqual(['Book the earliest visit', 'Signed request']);
+    expect(read('.cd-agent-message__text')).toEqual([
+      'What’s your earliest visit for a leaking water heater? Any day this week.',
+      'Book Tuesday, November 3 at 2:00 pm for Alex Kim.',
+    ]);
+    expect(read('.cd-agent-message__meta')).toEqual(['Request 1', 'Request 2']);
+    // The time it books is the first the open-times card offered.
+    await expect.element(panel.getByText('Tuesday, November 3, 2:00 pm', { exact: true })).toBeVisible();
+
+    // The over-limit run: its one request says the $185 it tried, over the kernel's refusal.
+    await panel.getByRole('button', { name: 'Try to pay more than its limit' }).click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(read('.cd-agent-message__title')).toEqual(['Try to pay more than its limit']);
+    expect(read('.cd-agent-message__text')).toEqual(['Charge the full repair, $185, to Alex Kim’s card.']);
+    const refusal = panel.element().querySelector('.cd-transcript-row__margin .cd-status-dot--refused');
+    expect(refusal).not.toBeNull();
+    await expectScreenBasics(screen.container, { owner: false });
+  });
+
+  it('agent_words_show_as_the_agents_own_text', async () => {
+    // The words an agent turn carries are a model's on the hosted site: untrusted. They show as the
+    // agent's own text, quoted under its name, apart from the Desk's checked replies, cut to 280
+    // characters, and never as markup. A turn without words draws as before.
+    const reply = rivera.conversations.alexAgent.turns.find((turn) => turn.kind === 'event' && turn.event.type === 'message');
+    if (reply?.kind !== 'event' || reply.event.type !== 'message') throw new Error("the fixture's agent chat has a reply");
+    const { blocks } = reply.event;
+    const run: DemoAgentRun = {
+      ...plantedRun('done'),
+      task: 'quote_and_deposit',
+      turns: [
+        { author: 'agent', n: 1, blocks: [], receipts: [], text: '<b>x</b> Quote   the\n\ndeposit, please.' },
+        { author: 'desk', n: 2, blocks, receipts: [], text: 'A desk turn’s words never show' },
+        { author: 'agent', n: 3, blocks: [], receipts: [], text: `${'y'.repeat(300)} and more` },
+        { author: 'desk', n: 4, blocks, receipts: [], text: null },
+        { author: 'agent', n: 5, blocks: [], receipts: [], text: null },
+        { author: 'agent', n: 6, blocks: [], receipts: [] },
+      ],
+    };
+    mockStore.inject({ route: 'agentRun', status: 200, body: run, times: 100 });
+    const { screen } = await renderRoute(PAGE);
+    await screen.getByRole('button', { name: 'Get a quote and pay the service call deposit' }).click();
+    await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
+    const panel = screen.getByRole('region', { name: 'Send an agent' }).element();
+    const requests = [...panel.querySelectorAll('.cd-agent-message')];
+    expect(requests).toHaveLength(4);
+    // The titles and counts are the page's, as before.
+    expect(requests.map((el) => el.querySelector('.cd-agent-message__title')?.textContent)).toEqual([
+      'Get a quote and pay the service call deposit',
+      'Signed request',
+      'Signed request',
+      'Signed request',
+    ]);
+    expect(requests.map((el) => el.querySelector('.cd-agent-message__meta')?.textContent)).toEqual(['Request 1', 'Request 2', 'Request 3', 'Request 4']);
+
+    // Markup-looking words show literally, as one line of text, with no element made from them.
+    const [first, long, empty, missing] = requests.map((el) => el.querySelector('.cd-agent-message__text'));
+    expect(first?.textContent).toBe('<b>x</b> Quote the deposit, please.');
+    expect(first?.querySelector('*')).toBeNull();
+    expect(panel.querySelector('.cd-agent-message b')).toBeNull();
+
+    // The agent's: quoted user text inside its own row, under its name and over the page's count.
+    const row = requests[0]!;
+    expect(first?.tagName).toBe('BLOCKQUOTE');
+    expect(first?.getAttribute('data-copy')).toBe('user');
+    expect(first?.closest('.cd-agent-message')).toBe(row);
+    expect(first?.closest('.cd-claude-message')).toBeNull();
+    const name = row.querySelector('.cd-agent-message__name');
+    expect(name?.textContent).toBe('Alex Kim’s assistant');
+    expect(name!.compareDocumentPosition(first!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(first!.compareDocumentPosition(row.querySelector('.cd-agent-message__meta')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Unlike the Desk's checked replies: the interface's sans type behind a rule at its left, where
+    // Claude's words are serif with no rule.
+    const prose = panel.querySelector('.cd-claude-message__prose')!;
+    expectComputed(first!, { borderLeftWidth: '2px', borderLeftStyle: 'solid' });
+    expect(getComputedStyle(first!).fontFamily).toContain('Hanken Grotesk');
+    expect(getComputedStyle(prose).fontFamily).toContain('Source Serif 4');
+    expectComputed(prose, { borderLeftWidth: '0px' });
+
+    // Long words are cut to 280 characters, "…" included.
+    expect(long?.textContent).toBe(`${'y'.repeat(279)}…`);
+
+    // A turn with no words, null or missing, draws as it did: its title and count.
+    expect(empty).toBeNull();
+    expect(missing).toBeNull();
+    expect(requests[2]?.textContent).toBe('Alex Kim’s assistantSignedSigned requestRequest 3');
+    expect(requests[3]?.textContent).toBe('Alex Kim’s assistantSignedSigned requestRequest 4');
+    // A Desk turn's words are never shown.
+    expect(document.body.textContent).not.toContain('A desk turn’s words never show');
+  });
+
+  it('agent_words_are_capped_at_280_characters', async () => {
+    // 280 characters show whole; 281 or more are cut to 279 and "…", with no space left before
+    // it; words that are all whitespace show no quote, and the row draws as before.
+    const run: DemoAgentRun = {
+      ...plantedRun('done'),
+      task: 'quote_and_deposit',
+      turns: [
+        { author: 'agent', n: 1, blocks: [], receipts: [], text: 'e'.repeat(280) },
+        { author: 'agent', n: 2, blocks: [], receipts: [], text: 'f'.repeat(281) },
+        { author: 'agent', n: 3, blocks: [], receipts: [], text: `${'g'.repeat(278)} and more` },
+        { author: 'agent', n: 4, blocks: [], receipts: [], text: ' \n\t ' },
+      ],
+    };
+    mockStore.inject({ route: 'agentRun', status: 200, body: run, times: 100 });
+    const { screen } = await renderRoute(PAGE);
+    await screen.getByRole('button', { name: 'Get a quote and pay the service call deposit' }).click();
+    await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
+    const requests = [...screen.getByRole('region', { name: 'Send an agent' }).element().querySelectorAll('.cd-agent-message')];
+    expect(requests).toHaveLength(4);
+    const words = requests.map((el) => el.querySelector('.cd-agent-message__text')?.textContent ?? null);
+    expect(words).toEqual(['e'.repeat(280), `${'f'.repeat(279)}…`, `${'g'.repeat(278)}…`, null]);
+    expect(requests[3]?.textContent).toBe('Alex Kim’s assistantSignedSigned requestRequest 4');
   });
 
   it('newest_step_follows_in_view', async () => {
@@ -685,9 +885,10 @@ describe('agents page', () => {
     expect(clickedTitle.element().matches(':focus-visible')).toBe(false);
   });
 
-  it('agent_turn_text_is_never_shown', async () => {
-    // A run whose agent turn holds words of its own, as a broken or hostile API might send: the
-    // panel builds the request by code and shows none of them, anywhere.
+  it('agent_turn_blocks_and_receipts_are_never_shown', async () => {
+    // A run whose agent turn holds blocks of its own, as a broken or hostile API might send: the
+    // panel titles the request by code and shows none of them, anywhere. Only a turn's `text` is
+    // the agent's words.
     const words = "I'll pay $100 now";
     // And a receipt on the agent's own turn, which only a Desk turn may carry.
     const agentReceipt: EvReceipt = {
@@ -720,6 +921,27 @@ describe('agents page', () => {
     expect(document.body.textContent).not.toContain(words);
     expect(document.body.innerHTML).not.toContain('pay $100 now');
     expect(document.body.innerHTML).not.toContain(agentReceipt.visitor_plain);
+  });
+
+  it('a_desk_reply_in_markdown_shows_bold_and_a_list', async () => {
+    // The Desk's checked reply to the agent, in Markdown: bold as bold and the list as a list.
+    const items = ['The earliest opening this week', 'A window that suits Alex Kim'];
+    const text = `I can book that. **Two choices** to make first:\n\n${items.map((item) => `- ${item}`).join('\n')}`;
+    const run: DemoAgentRun = {
+      ...plantedRun('done'),
+      turns: [
+        { author: 'agent', n: 1, blocks: [], receipts: [] },
+        { author: 'desk', n: 2, blocks: [proseBlock(text)], receipts: [] },
+      ],
+    };
+    mockStore.inject({ route: 'agentRun', status: 200, body: run, times: 100 });
+    const { screen } = await renderRoute(PAGE);
+    await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
+    const reply = screen.getByRole('region', { name: 'Send an agent' }).getByRole('log').element().querySelector('.cd-claude-message') as HTMLElement;
+    expect([...reply.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Two choices']);
+    expect([...reply.querySelectorAll('li')].map((el) => el.textContent)).toEqual(items);
+    expect(reply.textContent).not.toMatch(/\*|^- /m);
   });
 
   it('over_limit_run_shows_the_kernel_line', async () => {
@@ -779,7 +1001,12 @@ describe('agents page', () => {
     await expectScreenBasics(screen.container, { owner: false });
 
     // Mounted as the app mounts it, in StrictMode, the key still shows once it comes, and so does a run.
+    // StrictMode runs the panel's effect twice, yet the Desk's tasks are read once, in one session.
+    const strictMark = mockStore.requests.length;
     const strict = await renderStrict(PAGE);
+    await expect.element(strict.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    expect(requests('openSession', strictMark)).toHaveLength(1);
+    expect(requests('agentTasks', strictMark)).toHaveLength(1);
     const strictCard = strict.getByRole('region', { name: 'Try it with a demo key' });
     await strictCard.getByRole('button', { name: 'Get a demo key' }).click();
     await expect.element(strictCard.getByRole('group', { name: 'Private key' })).toBeVisible();
@@ -818,6 +1045,7 @@ describe('agents page', () => {
     const landed = new Promise((resolve) => {
       land = resolve;
     });
+    onTestFinished(() => land());
     mockStore.inject({
       route: 'agentKey',
       status: 200,
@@ -939,6 +1167,7 @@ describe('agents page', () => {
     const landed = new Promise((resolve) => {
       land = resolve;
     });
+    onTestFinished(() => land());
     mockStore.inject({ route: 'agentCard', status: 503 });
     mockStore.inject({ route: 'agentCard', status: 503, until: landed });
     const { screen } = await renderRoute(PAGE);
@@ -973,6 +1202,7 @@ describe('agents page', () => {
     const failed = new Promise((resolve) => {
       fail = resolve;
     });
+    onTestFinished(() => fail());
     mockStore.inject({ route: 'agentCard', status: 503 });
     mockStore.inject({ route: 'agentCard', status: 503, until: failed });
     const moved = await renderRoute(PAGE);
@@ -996,6 +1226,7 @@ describe('agents page', () => {
     const dropped = new Promise((resolve) => {
       drop = resolve;
     });
+    onTestFinished(() => drop());
     mockStore.inject({ route: 'agentCard', status: 503 });
     mockStore.inject({ route: 'agentCard', status: 503, until: dropped });
     const unfocused = await renderRoute(PAGE);
@@ -1094,6 +1325,8 @@ describe('agents page', () => {
     const theirs = owner.screen.getByRole('log', { name: `Conversation with ${name}` });
     await expect.element(theirs.getByText('Request 1', { exact: true })).toBeVisible();
     expect(theirs.element().querySelectorAll('.cd-agent-message')).toHaveLength(1);
+    // Maria reads the words the visitor's page quoted.
+    expect(theirs.element().querySelector('.cd-agent-message__text')?.textContent).toBe('Charge the full repair, $185, to Alex Kim’s card.');
   });
 
   it('stopped_or_busy_run_says_so', async () => {
@@ -1145,8 +1378,8 @@ describe('agents page', () => {
   });
 
   it('both_actions_share_one_session', async () => {
-    // A fresh page, where both actions start before the visitor's session has opened: one session
-    // opens, and the key and the run both belong to it, so the run is read to its end.
+    // A fresh page, whose session opens slowly: the page's read of the Desk's tasks opens it, and the
+    // key and the run, sent once the tasks show, both belong to it, so the run is read to its end.
     worker.use(
       http.post(`/api/public/desks/${RIVERA.slug}/sessions`, async () => {
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1164,6 +1397,8 @@ describe('agents page', () => {
     // When both find the session gone at once, one new session opens for both.
     mockStore.reset('rivera', {});
     const again = await renderRoute(PAGE);
+    await expect.element(again.screen.getByRole('button', { name: 'Try to pay more than its limit' })).toBeVisible();
+    mockStore.dropVisitorCookie(RIVERA.slug);
     const opened = requests('openSession').length;
     await again.screen.getByRole('button', { name: 'Get a demo key' }).click();
     await again.screen.getByRole('button', { name: 'Try to pay more than its limit' }).click();
@@ -1172,8 +1407,30 @@ describe('agents page', () => {
     expect(requests('openSession')).toHaveLength(opened + 1);
   });
 
+  it('a_send_shares_the_open_after_a_failed_task_read', async () => {
+    // The page's read of the Desk's tasks finds no session it can open (a 429), so the plain tasks
+    // show. A demo key and a task, pressed together, then share the one session the first opens.
+    mockStore.inject({ route: 'openSession', status: 429 });
+    worker.use(
+      http.post(`/api/public/desks/${RIVERA.slug}/sessions`, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return undefined;
+      }),
+    );
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest appointment' })).toBeVisible();
+    expect(requests('agentTasks')).toHaveLength(0);
+    const mark = mockStore.requests.length;
+    await screen.getByRole('button', { name: 'Get a demo key' }).click();
+    await panel.getByRole('button', { name: 'Book the earliest appointment' }).click();
+    await expect.element(screen.getByRole('group', { name: 'Private key' })).toBeVisible();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(requests('openSession', mark)).toHaveLength(1);
+  });
+
   it('both_actions_share_one_reopened_session', async () => {
-    // The session opens with a key request the demo refuses as busy.
+    // The page opens its session to read the Desk's tasks, and a key request in it is refused as busy.
     mockStore.inject({ route: 'agentKey', status: 429 });
     const { screen } = await renderRoute(PAGE);
     const card = screen.getByRole('region', { name: 'Try it with a demo key' });
@@ -1272,7 +1529,8 @@ describe('agents page', () => {
     // answered 401), and opening a new one fails (a 429, or no answer). The send itself never
     // answered, so the start is still unresolved: the lost line and "Try again" stay, with no task to
     // send a second agent and no busy line. The next "Try again" opens a new session, where the key,
-    // the old session's, is a 409 `conflict`: the reload, with no task, and the agent ran once.
+    // the old session's, is a 409 `conflict`: the reload, with no task, and the agent ran once. The
+    // page opened its session when it read the Desk's tasks, so the first send opens none.
     for (const failure of [{ status: 429 as const }, { status: 'network' as const }]) {
       mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
       const { screen } = await renderRoute(PAGE);
@@ -1286,7 +1544,7 @@ describe('agents page', () => {
       mockStore.dropVisitorCookie(RIVERA.slug);
       mockStore.inject({ route: 'openSession', ...failure });
       await panel.getByRole('button', { name: 'Try again' }).click();
-      await expect.poll(() => requests('openSession', mark).length, { message: what }).toBe(2);
+      await expect.poll(() => requests('openSession', mark).length, { message: what }).toBe(1);
       await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
       await expect.element(panel.getByText(agentStartLostLine('en'), { exact: true })).toBeVisible();
       expect(chipsIn(screen), what).toEqual([]);
@@ -1297,7 +1555,7 @@ describe('agents page', () => {
       await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
       await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
       expect(chipsIn(screen), what).toEqual([]);
-      expect(requests('openSession', mark), what).toHaveLength(3);
+      expect(requests('openSession', mark), what).toHaveLength(2);
       const keys = requests('sendAgent', mark).map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
       expect(keys, what).toHaveLength(3);
       expect(new Set(keys).size, what).toBe(1);

@@ -5,8 +5,11 @@ import { SectionHeader } from '../SectionHeader/SectionHeader.tsx';
 
 import './AlwaysOnList.css';
 
-/** The always-on baseline, in the owner's words: enforced on every Desk, whatever is connected. */
-const ALWAYS_ON = [
+/**
+ * The always-on baseline, in the owner's words: enforced on every Desk, whatever is connected.
+ * Exported so a skeleton can measure the lines they take, without drawing them.
+ */
+export const ALWAYS_ON = [
   "Always says it's an AI",
   'Private data only to its verified owner',
   'Codes only go to the contact on record',

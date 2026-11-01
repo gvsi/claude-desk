@@ -14,11 +14,18 @@
  * The panel's card holds the run and so the Desk's reply cards: it is the one `Card` that
  * `holdsCards`, which only this file may use.
  *
- * The agent's own words never show. Its turns carry none (plan 02b), and anything a turn of its
- * holds is ignored: each request is drawn by code, titled with the chosen task first and "Signed
- * request" after. The Desk's turns are its checked replies, shown as they came, each with its
- * receipts' `visitor_plain` under it, read-only. They are in English, the language the built-in
- * agent writes in, so their cards' chrome is too.
+ * The tasks take the Desk's own words (plan 09, C2): the panel reads the Desk's set once, with the
+ * visitor's session (`agentTasks`), and offers the tasks once it has it; a set it can't read gives
+ * plain words for any business (`FALLBACK_TASK_SET`). The set is a key, so every word is the page's.
+ *
+ * Each of the agent's requests is titled by code, with the chosen task first and "Signed request"
+ * after, and quotes the request as the agent sent it (its turn's `text`) under the title: the
+ * agent's own words, untrusted, so `AgentMessage` draws them as quoted user text with a rule at
+ * their left, a text node only, apart from the Desk's replies, and the panel first collapses their
+ * whitespace and cuts them to 280 characters, so a long model message can't flood the page.
+ * Anything else an agent turn holds is ignored. The Desk's turns are its checked replies, shown as
+ * they came, each with its receipts' `visitor_plain` under it, read-only. They are in English, the
+ * language the built-in agent writes in, so their cards' chrome is too.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
@@ -39,6 +46,7 @@ import {
   Notice,
   RELOAD_PAGE_LABEL,
   SignedLimitPanel,
+  Skeleton,
   SuggestionChips,
   SystemLine,
   Transcript,
@@ -50,7 +58,16 @@ import {
 import type { AgentSession } from './agentSession.ts';
 import { AgentsCardContent } from './AgentsCard.tsx';
 import { PUBLIC_COPY } from '../copy.ts';
-import { AGENTS_COPY, DEMO_TASKS, DEMO_TASK_COPY, agentStartLostLine, type DemoTask } from './copy.ts';
+import {
+  AGENTS_COPY,
+  DEMO_TASKS,
+  DEMO_TASK_COPY,
+  FALLBACK_TASK_SET,
+  agentStartLostLine,
+  isDemoTaskSet,
+  type DemoTask,
+  type DemoTaskSet,
+} from './copy.ts';
 import { useRunInView } from './runInView.ts';
 
 /** The panel's title's id, which the public page's "Send an agent" link names (`#send`). */
@@ -69,8 +86,23 @@ export const pageActions = {
  */
 export const KEY_RETRY_WINDOW_MS = 55 * 60_000;
 
-/** The language of the Desk's replies to the built-in agent, which writes in English. */
+/** The language of the built-in agent's words and of the Desk's replies to them: it writes in English. */
 const RUN_LANGUAGE: CopyLanguage = 'en';
+
+/** The most of an agent's request the panel quotes, "…" included. */
+export const AGENT_WORDS_MAX = 280;
+
+/**
+ * An agent turn's request as the panel quotes it: its whitespace collapsed to single spaces, so it
+ * reads as one run of words, and cut to 279 characters and "…" past `AGENT_WORDS_MAX`, with no
+ * space left before the "…". Undefined when the turn has no words, so the row draws without a quote.
+ */
+function agentWords(turn: AgentTurn): string | undefined {
+  if (typeof turn.text !== 'string') return undefined;
+  const chars = Array.from(turn.text.split(/\s+/).filter(Boolean).join(' '));
+  if (chars.length === 0) return undefined;
+  return chars.length > AGENT_WORDS_MAX ? `${chars.slice(0, AGENT_WORDS_MAX - 1).join('').trimEnd()}…` : chars.join('');
+}
 
 /** Cards that report something done: their executed receipt draws the check. */
 const DONE_CARDS: ReadonlySet<string> = new Set(['booking_confirmed', 'payment_confirmed', 'charge_confirmed']);
@@ -200,6 +232,23 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   // newest step stays there while they are at its end.
   const runInView = useRunInView();
   const titleRef = useRef<HTMLHeadingElement>(null);
+  // Which words the Desk's tasks take: read once with the visitor's session, null until then.
+  const [taskSet, setTaskSet] = useState<DemoTaskSet | null>(null);
+  const setRead = useRef<Promise<DemoTaskSet> | null>(null);
+  useEffect(() => {
+    let live = true;
+    setRead.current ??= session.call(() => request('agentTasks', { params: { slug } })).then(
+      (read) => (isDemoTaskSet(read?.task_set) ? read.task_set : FALLBACK_TASK_SET),
+      () => FALLBACK_TASK_SET,
+    );
+    void setRead.current.then((read) => {
+      if (live) setTaskSet(read);
+    });
+    return () => {
+      live = false;
+    };
+  }, [session, slug]);
+  const words = DEMO_TASK_COPY[language][taskSet ?? FALLBACK_TASK_SET];
   // The current run's reads; aborted by a new run, a new chat and the page going away, which ends
   // its waits and stops it applying anything.
   const reading = useRef<AbortController | null>(null);
@@ -264,7 +313,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   };
 
   const pick = (label: string) => {
-    const task = DEMO_TASKS.find((t) => DEMO_TASK_COPY[language][t] === label);
+    const task = DEMO_TASKS.find((t) => words[t] === label);
     if (task === undefined) return;
     // The tasks go while the agent works, the one pressed with them: its focus moves to the title
     // before it goes, so it doesn't fall to the page. The focus doesn't scroll the page: bringing
@@ -362,9 +411,16 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
       </Notice>
     );
   }
-  const chips = OFFERS_TASKS.has(status) ? (
-    <SuggestionChips label={copy.tasksLabel} suggestions={DEMO_TASKS.map((t) => DEMO_TASK_COPY[language][t])} onPick={pick} />
-  ) : null;
+  // Until the Desk's set is read, the tasks' shapes hold their place, as the page's skeleton draws them.
+  const chips = !OFFERS_TASKS.has(status) ? null : taskSet === null ? (
+    <div className="cd-suggestion-chips" aria-hidden="true" data-loading="task-chips">
+      {DEMO_TASKS.map((t) => (
+        <Skeleton key={t} shape="block" measure={{ label: DEMO_TASK_COPY[language].rivera[t], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" />
+      ))}
+    </div>
+  ) : (
+    <SuggestionChips label={copy.tasksLabel} suggestions={DEMO_TASKS.map((t) => words[t])} onPick={pick} />
+  );
   // After a run that finished, failed or is gone, the tasks come at its end, under its last line
   // (boards 04 and 05); otherwise they sit under the signed limit (board 03).
   const chipsAtEnd = status === 'done' || status === 'stopped';
@@ -372,7 +428,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   // place (boards 04 and 05). A start that never ran keeps the lead.
   const ran = status === 'sending' || status === 'lost' || status === 'reload' || runId !== null;
   const lead =
-    task !== null && ran ? DEMO_TASK_COPY[language][task] : copy.sendLead(<span data-copy="user">{business}</span>);
+    task !== null && ran ? words[task] : copy.sendLead(<span data-copy="user">{business}</span>);
 
   return (
     <Card as="section" label={copy.sendTitle} padding={16} holdsCards>
@@ -382,7 +438,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
         {chipsAtEnd ? null : chips}
         {run !== null && task !== null && run.turns.length > 0 ? (
           <Transcript label={copy.conversation}>
-            <RunRows turns={run.turns} task={task} ownerName={ownerName} language={language} />
+            <RunRows turns={run.turns} task={task} taskSet={taskSet ?? FALLBACK_TASK_SET} ownerName={ownerName} language={language} />
           </Transcript>
         ) : null}
         {working ? <LoadingLine>{copy.working}</LoadingLine> : null}
@@ -399,15 +455,19 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
 interface RunRowsProps {
   turns: readonly AgentTurn[];
   task: DemoTask;
+  /** Which words the Desk's tasks take, for the first request's title. */
+  taskSet: DemoTaskSet;
   ownerName: string;
   language: CopyLanguage;
 }
 
 /**
- * The run's turns in order: each of the agent's requests built by code, never from what the turn
- * holds, and each Desk reply with its receipts under it. A turn by anyone else shows nothing.
+ * The run's turns in order: each of the agent's requests titled and numbered by code, quoting the
+ * words it sent (`agentWords`), marked as English (`RUN_LANGUAGE`) whatever the page's language,
+ * and nothing else the turn holds, and each Desk reply with its receipts under it. A turn by anyone
+ * else shows nothing.
  */
-function RunRows({ turns, task, ownerName, language }: RunRowsProps) {
+function RunRows({ turns, task, taskSet, ownerName, language }: RunRowsProps) {
   const copy = AGENTS_COPY[language];
   let requests = 0;
   return (
@@ -420,8 +480,10 @@ function RunRows({ turns, task, ownerName, language }: RunRowsProps) {
               <AgentMessage
                 agentName={copy.agentName}
                 signed
-                title={requests === 1 ? DEMO_TASK_COPY[language][task] : copy.signedRequest}
+                title={requests === 1 ? DEMO_TASK_COPY[language][taskSet][task] : copy.signedRequest}
                 meta={copy.request(requests)}
+                text={agentWords(turn)}
+                textLanguage={RUN_LANGUAGE}
                 language={language}
               />
             </TranscriptRow>

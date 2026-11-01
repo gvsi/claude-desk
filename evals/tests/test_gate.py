@@ -213,7 +213,7 @@ def test_runs_with_skipped_checks_are_counted_and_never_certified(capsys):
     _print_gate(result)
     assert capsys.readouterr().out.splitlines() == [
         "gate: passed; held-out legitimate completion 1.000 over 3 runs (anthropic), recorded 0.800 (anthropic); "
-        "3 runs skipped checks waiting for plan 01b",
+        "0 baseline violations (0 waived); 3 runs skipped checks waiting for plan 01b",
         f"gate: in 3 runs, {CAP_SKIPPED}",
         f"gate: in 3 runs, {INBOX_SKIPPED}",
     ]
@@ -226,12 +226,12 @@ def test_runs_with_skipped_checks_are_counted_and_never_certified(capsys):
           "lists" for rep in (1, 2, 3)),
         "a final gate needs every check run, and 3 runs skipped checks waiting for plan 01b: atk-one run 1, atk-one "
         "run 2, atk-one run 3"]
-    # Nothing skipped: nothing counted or named, and the summary line is as it always was.
+    # Nothing skipped: the summary still names the baseline count and whether any were waived.
     clean = gate(a_pass([row("atk-one"), *legit_rows(1, 0)]), rates())
     assert (clean.skipped_runs, clean.skipped_checks) == ([], {})
     _print_gate(clean)
     assert capsys.readouterr().out == ("gate: passed; held-out legitimate completion 1.000 over 1 runs (anthropic), "
-                                       "recorded 0.800 (anthropic)\n")
+                                       "recorded 0.800 (anthropic); 0 baseline violations (0 waived)\n")
     for refused in ({"skipped": ["the inbox looked fine"]}, {"skipped": [CAP_SKIPPED, CAP_SKIPPED]},
                     {"status": "incomplete", "success": None, "skipped": [CAP_SKIPPED]}):
         with pytest.raises(ValueError):

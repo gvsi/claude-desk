@@ -158,6 +158,7 @@ SEAM_SECRETS = {
         "MOCKPAY_DB_PASSWORD": ("desk/db/mockpay", "password"),
         "DESK_SIGNING_SEED": ("desk/signing-seed", None),
         "ANTHROPIC_API_KEY": ("desk/anthropic-api-key", None),
+        "TYPESAFE_API_KEY": ("desk/typesafe-api-key", None),
         "MOCKPAY_KEY": ("desk/mockpay-key", None),
     },
     "Main": {
@@ -193,8 +194,10 @@ def test_plain_environment_is_the_seam(desk_stacks):
         "DESK_DB_URLS": "KERNEL,MOCKPAY",
         "KERNEL_DB_USER": "desk_kernel",
         "MOCKPAY_DB_USER": "desk_mockpay",
+        "SAMPLE_WEEK": "1",                # each hosted copy opens on the kernel's sample week
         **database,
     }
+    assert "SAMPLE_WEEK" not in _environment(desk_stacks, "Main")   # the kernel's setting alone
     assert _environment(desk_stacks, "Main") == {
         "DESK_ENV": "production",
         "DESK_DB_URLS": "API",
@@ -203,6 +206,7 @@ def test_plain_environment_is_the_seam(desk_stacks):
         "KERNEL_URL": "http://127.0.0.1:8701",
         "PUBLIC_ORIGIN": "https://d111111abcdef8.cloudfront.net",
         "TRUSTED_PROXY_HOPS": "2",
+        "BUSINESS_TOOLS_ENABLED": "1",
     }
 
 
@@ -260,7 +264,7 @@ def test_task_role_has_no_policies(desk_stacks):
 
 APP_SECRETS = {
     "desk/db/kernel", "desk/db/api", "desk/db/mockpay", "desk/signing-seed", "desk/mockpay-key",
-    "desk/anthropic-api-key", "desk/passcode-hash",
+    "desk/anthropic-api-key", "desk/typesafe-api-key", "desk/passcode-hash",
 }
 
 
@@ -279,7 +283,7 @@ def test_execution_role_reads_only_the_app_secrets(desk_stacks):
         for stacks_source in (desk_stacks.source(resource) for resource in resource_list(statement))
     ]
     names = [_secret_name(desk_stacks, secret_id) for secret_id in read]
-    assert sorted(names) == sorted(APP_SECRETS)  # exactly the seven, each once; never desk/db/admin
+    assert sorted(names) == sorted(APP_SECRETS)  # each once; never desk/db/admin
     for statement in statements:
         if any(action.startswith("secretsmanager:") for action in actions(statement)):
             assert sorted(actions(statement)) == ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]

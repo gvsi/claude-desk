@@ -22,27 +22,27 @@ export const CONTINUE_SETUP_COPY = {
 export const CONTINUE_SETUP_LINES: Readonly<Record<UnfinishedSetupStep, { pickUp: string; answeringOff: string }>> = {
   questions: {
     pickUp: 'Your answers are saved. Pick up at the questions.',
-    answeringOff: 'Answering stays off until your Desk is live.',
+    answeringOff: 'Claude takes messages only until your Desk is live.',
   },
   tools: {
     pickUp: 'Your answers are saved. Pick up at your tools.',
-    answeringOff: 'Answering stays off until your Desk is live.',
+    answeringOff: 'Claude takes messages only until your Desk is live.',
   },
   rules: {
     pickUp: "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   situations: {
     pickUp: "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   safety_check: {
     pickUp: "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   preview: {
     pickUp: 'Your answers are saved. Pick up at going live.',
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
 };
 
@@ -51,3 +51,23 @@ export function continueSetupLine(step: UnfinishedSetupStep, answering: boolean)
   const { pickUp, answeringOff } = CONTINUE_SETUP_LINES[step];
   return answering ? pickUp : `${pickUp} ${answeringOff}`;
 }
+
+/** Literal Today copy shared by the page and its word-free loading measurements. */
+export const TODAY_COPY = {
+  chatDetail: 'Your public page opens in a new tab. Ask about a price or a time.',
+  breakBeforeOwner: "Ask for a discount, another customer's address or ",
+  breakAfterOwner: "'s home number. Safety shows what was refused and why.",
+  waiting: 'A request is waiting for your answer.',
+  heldBy: 'Held by your rule: ',
+  /** "Answer a held request" before anything is held. */
+  heldNone: 'When a request waits for your answer, it shows up here.',
+  createDetail: 'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',
+  handledTitle: 'Handled by Claude, or by you',
+  turnedDownEmpty: 'Nothing turned down in the last 7 days.',
+  /** The link to the Desk's Safety page, under Turned down here and under Rules' always-on rules. */
+  openSafety: 'Open Safety',
+  vision: 'Vision: where a Desk could go next',
+} as const;
+
+export const handledCount = (count: number) => `Claude handled ${count}`;
+export const steppedInCount = (count: number) => `You stepped in ${count} ${count === 1 ? 'time' : 'times'}`;

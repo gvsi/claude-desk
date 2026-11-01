@@ -21,6 +21,7 @@ from procrastinate.testing import InMemoryConnector
 
 from desk.api.main import create_app
 from tests.api.fakes import ScriptedModel, response, text
+from tests.api.notes import conversation_notes
 from tests.api.test_approvals import jobs_done
 from tests.api.test_loop_fencing import Kernel
 from tests.api.test_public_chat import HOURS, Stream, cookie, events_path, reply, rows, types
@@ -150,8 +151,8 @@ async def test_a_stopped_plain_text_answer_is_kept_with_the_note_claude_reads(ap
         {"kind": "promise_word", "span": DRAFT[:40], "fact_ids": [], "rule_id": "fake.promise_word"}]}
     assert (sent["prose"], sent["clauses"]) == (DRAFT, [])
     # Kept in the same transaction as the note that tells Claude why its text was stopped.
-    assert await rows(engine, chat.session_id, "stopped_draft", "created_at") == await rows(
-        engine, chat.session_id, "note", "created_at")
+    assert await rows(engine, chat.session_id, "stopped_draft", "created_at") == await conversation_notes(
+        engine, chat.session_id, "created_at")
     # Claude's next input holds its text once, in its own answer: the note names the span, never the whole draft.
     _, rewrite_request = model.requests
     assert json.dumps(rewrite_request.messages).count(DRAFT) == 1
@@ -164,7 +165,7 @@ async def test_a_canary_hits_span_is_kept_for_the_owner_only(app, browser, fake,
     desk = fake.desks[fake.sessions[chat.session_id].desk_id]
     document = next(iter(desk.documents.values()))
     leaked = f"Here is your invoice reference: {document.canary}."
-    model.add(response(reply(leaked)), response())             # Claude reads the handoff, and says nothing more
+    model.add(response(reply(leaked)), response(reply("What else can I help you with?")))
 
     stream = await visitor_says(app, chat, "What does my invoice say?")
     await jobs_done(jobs_connector)
@@ -184,17 +185,22 @@ async def test_a_canary_hits_span_is_kept_for_the_owner_only(app, browser, fake,
     (kept_at,) = await rows(engine, chat.session_id, "stopped_draft", "created_at")
     assert await rows(engine, chat.session_id, "delivered", "created_at") == [kept_at]
 
-    # Claude's next input holds its own draft once, in its call, answered with the handoff alone.
+    # The shown handoff ends Claude's turn. Its next input, on the visitor's next message, holds its own draft once,
+    # in its call, answered with the handoff alone.
+    assert len(model.requests) == 1
+    later = await visitor_says(app, chat, "Can you help me with something else?")
+    await jobs_done(jobs_connector)
     _, after_handoff = model.requests
     assert json.dumps(after_handoff.messages).count(document.canary) == 1
     # Neither the canary nor the hit's span reaches the visitor, Claude's result, the job queue or a log line.
     reloaded = (await chat.visitor.get(f"/api/public/desks/{chat.slug}/session")).json()
-    assert [item["kind"] for item in reloaded["items"]] == ["visitor_text", "delivered"]
-    (results,) = await rows(engine, chat.session_id, "model_tool_results", "model_content")
+    assert [item["kind"] for item in reloaded["items"]] == ["visitor_text", "delivered", "visitor_text", "delivered"]
+    results = await rows(engine, chat.session_id, "model_tool_results", "model_content")
+    assert len(results) == 2
     queued = json.dumps([job["args"] for job in jobs_connector.jobs.values()])
     assert jobs_connector.jobs and caplog.records
-    for place in (json.dumps(reloaded), json.dumps(sent_events(stream)), json.dumps(results), queued,
-                  logged(caplog)):
+    for place in (json.dumps(reloaded), json.dumps(sent_events(stream)), json.dumps(sent_events(later)),
+                  json.dumps(results), queued, logged(caplog)):
         assert document.canary not in place and "document text" not in place and "stopped_draft" not in place
 
 

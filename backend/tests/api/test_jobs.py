@@ -7,6 +7,9 @@ what they leave is read with the visitor's own credential on the session's next 
 """
 
 import asyncio
+import inspect
+import json
+from xml.etree import ElementTree
 from datetime import timedelta
 
 import pytest
@@ -37,14 +40,23 @@ from desk.api.jobs import (
     surface_due_decisions,
 )
 from desk.api.runner import TurnRunner
+from desk.api.loop import run_turn
 from desk.api.sse import append_control, unhandled_controls
 from desk.api.tools import Caller
 from desk.contracts import Decision, ToolCall
 from desk.db.session import procrastinate_connector
 from desk.kernel_api import AnswerRequest, CreateCopyRequest, CreateSessionRequest, DecideRequest, ExecuteRequest
-from tests.api.fakes import ScriptedModel
+from tests.api.fakes import ScriptedModel, response, tool_use
 
 DRAIN = {"items": [{"item_id": "drain", "qty": 1}]}
+
+
+def test_resume_result_ids_cannot_bind_to_a_positional_argument():
+    for function in (jobs.resume_after_answer, jobs.defer_resume_after_answer):
+        signature = inspect.signature(function)
+        with pytest.raises(TypeError):
+            signature.bind(None, None, None, None, ["refund:R-1"])
+        signature.bind(None, None, None, None, result_fact_ids=["refund:R-1"])
 
 
 class Copy:
@@ -88,6 +100,62 @@ async def show(engine, caller: Caller, decision: Decision, phase: str) -> None:
     async with engine.connect() as conn:
         await deliver(conn, caller.ids, Status(decision, phase))
         await conn.commit()
+
+
+async def test_an_approved_booking_is_shown_with_its_result_card(copy, engine):
+    caller = await copy.visitor()
+    desk = copy.fake.desks[caller.desk_id]
+    slot = next(iter(desk.slots))
+    copy.fake.script("native.book", outcome="hold")
+    held = await caller.kernel.call("POST /decide", DecideRequest(
+        session_id=caller.session_id, generation=0,
+        call=ToolCall(call_id="approved-booking", tool="native.book", args={"slot_id": slot})))
+    assert held.state == "held"
+    executed = await copy.answer(held)
+    result = copy.fake.decisions[held.decision_id].result
+    (fact,) = result.facts
+    assert executed.state == "executed" and fact.kind == "booking"
+
+    def show_booking(request):
+        updates = [ElementTree.fromstring(block["text"]) for message in request.messages
+                   for block in message["content"] if block.get("type") == "text"
+                   and block["text"].startswith("<action_update ")]
+        assert updates[0].attrib["result_fact_ids"].split() == [fact.fact_id]
+        return response(tool_use("send_reply", {"prose": "Here are the details of your request.",
+                                                "clauses": [{"template": "booking_confirmed",
+                                                             "fact_id": fact.fact_id}]}))
+
+    async with engine.connect() as conn:
+        await resume_after_answer(conn, caller.ids, executed, result_fact_ids=[fact.fact_id])
+        assert await run_turn(conn, caller, ScriptedModel([show_booking])) == "done"
+        messages = (await conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s"
+                                            " AND type = 'message'"), {"s": caller.session_id})).scalars().all()
+    assert [block["fact_id"] for message in messages for block in message["blocks"]
+            if block.get("template") == "booking_confirmed"] == [fact.fact_id]
+    assert len([entry for entry in desk.ledger if entry.event.kind == "execute"
+                and entry.event.summary.get("decision_id") == held.decision_id]) == 1
+
+
+async def test_resume_carries_only_result_ids_on_executed_updates(copy, engine):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "with-result", discount_bp=1500)
+    executed = await copy.answer(held)
+    fact_ids = [fact.fact_id for fact in copy.fake.decisions[held.decision_id].result.facts]
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, executed, result_fact_ids=fact_ids)
+        block = (await conn.execute(text("SELECT model_content FROM app.messages WHERE session_id = :s"
+                                         " AND kind = 'action_update'"), {"s": caller.session_id})).scalar_one()
+    update = ElementTree.fromstring(block["text"])
+    assert update.attrib["result_fact_ids"].split() == fact_ids
+    assert update.attrib["decision_id"] == held.decision_id
+    for state in ("denied", "expired"):
+        other = await copy.visitor()
+        decision = (await copy.decide(other, state, discount_bp=1500)).model_copy(update={"state": state})
+        async with engine.connect() as conn:
+            await resume_after_answer(conn, other.ids, decision, result_fact_ids=fact_ids)
+            block = (await conn.execute(text("SELECT model_content FROM app.messages WHERE session_id = :s"
+                                             " AND kind = 'action_update'"), {"s": other.session_id})).scalar_one()
+        assert "result_fact_ids" not in ElementTree.fromstring(block["text"]).attrib
 
 
 async def session_rows(engine, session_id: str) -> dict[str, list]:
@@ -310,6 +378,22 @@ async def test_resume_strips_owner_reason_from_approved_snapshot(copy, engine, m
     assert outcome.owner_plain == "Private outcome reason"
 
 
+@pytest.mark.parametrize("choice, given", [("deny_once", ["x"]), ("allow_once", [])])
+async def test_resume_job_queues_result_ids_only_when_there_are_some(copy, choice, given):
+    """A denied answer, or an executed one with no result facts, queues no result IDs at all, so a job queued during a
+    rolling deploy still runs on a worker whose resume job doesn't take them."""
+    caller = await copy.visitor()
+    outcome = await copy.answer(await copy.decide(caller, f"call-no-result-ids-{choice}", discount_bp=1500), choice)
+    assert outcome.state == ("denied" if choice == "deny_once" else "executed")
+    connector = InMemoryConnector()
+    app = jobs_app(connector, schedule=False)
+    async with app.open_async():
+        await jobs.defer_resume_after_answer(app, caller.ids, outcome, result_fact_ids=given)
+    (job,) = connector.jobs.values()
+    assert "result_fact_ids" not in job["args"]
+    assert set(job["args"]) == {"copy_id", "desk_id", "session_id", "decision", "approved"}
+
+
 async def test_direct_resume_clears_the_owner_reason(copy, engine, monkeypatch):
     caller = await copy.visitor()
     held = await copy.decide(caller, "call-private-reason", discount_bp=1500)
@@ -455,11 +539,32 @@ async def test_an_abandoned_hold_is_read_once(copy, engine, fake, ro_schema, mon
     assert [decision_ids for decision_ids in asked if decision_ids] == [[held.decision_id]]
 
 
-async def test_the_minute_scan_reads_held_events_through_their_own_index(engine):
+# A run_events table as a running Desk fills it: mostly messages and receipts, a few held events and controls.
+REALISTIC_RUN_EVENTS = """
+INSERT INTO app.run_events (copy_id, desk_id, session_id, kind, seq, type, payload)
+SELECT 'copy', 'desk', 's' || (g % 400), 'sse', g,
+       (ARRAY['message', 'writing', 'turn_end', 'receipt', 'resolved', 'message', 'writing', 'message'])[1 + g % 8],
+       jsonb_build_object('decision_id', 'd' || g, 'ledger_seq', g, 'state', 'allowed')
+FROM generate_series(1, 8000) g;
+INSERT INTO app.run_events (copy_id, desk_id, session_id, kind, seq, type, payload)
+SELECT 'copy', 'desk', 's' || g, 'sse', 100000 + g, 'held', jsonb_build_object('decision_id', 'h' || g, 'ledger_seq', 100000 + g)
+FROM generate_series(1, 20) g;
+INSERT INTO app.run_events (copy_id, desk_id, session_id, kind, seq, type, payload)
+SELECT 'copy', 'desk', 's' || g, 'control', NULL, (ARRAY['decision_due', 'decision_pending'])[1 + g % 2],
+       jsonb_build_object('decision_id', 'c' || g)
+FROM generate_series(1, 20) g;
+ANALYZE app.run_events;
+"""
+
+
+async def test_the_minute_scan_reads_held_events_through_their_own_index(db, engine):
     """`surface_due_decisions` looks, every minute, at each held event ever shown, so it reads them through a partial
     index of their own, never the whole run_events table, and checks each for a final state through the index that
     keeps statuses unique and for a waiting `decision_due` row through the one that keeps those unique. Sequential
-    scans are off, so the plan names an index wherever one serves the query."""
+    scans are off, so the plan names an index wherever one serves the query. The table first holds what a running
+    Desk writes, and is analyzed: on a near-empty table the indexes cost about the same, and the planner's choice
+    hung on the statistics earlier tests happened to leave."""
+    db.execute(REALISTIC_RUN_EVENTS)
     sql = jobs._waiting_decisions().compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
     async with engine.connect() as conn:
         await conn.execute(text("SET LOCAL enable_seqscan = off"))

@@ -10,6 +10,7 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import timedelta
+from xml.etree import ElementTree
 
 import httpx
 import pytest
@@ -20,6 +21,7 @@ from sqlalchemy import text
 
 from desk.api.jobs import RESUME_AFTER_ANSWER, surface_due_decisions
 from desk.api.main import create_app
+from desk.contracts import Claim, Fact, Label
 from desk.kernel_api import AnswerRequest, CreateCopyRequest
 from tests.api.fakes import ScriptedModel, response, tool_use
 from tests.api.test_jobs import session_rows
@@ -154,7 +156,7 @@ async def test_allow_once_resumes_with_the_visitor_credential(app, browser, fake
     assert [event.model_dump(mode="json") for _, event in events if event.type in ("receipt", "resolved")] == expected
     assert events[7][1].blocks[0].text == "Good news: Maria said yes."
     follow_up = json.dumps(model.requests[1].messages)
-    assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\">' in follow_up)
+    assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\" result_fact_ids=' in follow_up)
     after = fake.calls[answered_at:]
     assert "POST /check_reply" in [call.route for call in after]
     assert all(call.headers.get(VISITOR) == held.token and OWNER not in call.headers for call in after)
@@ -182,6 +184,85 @@ async def resume_jobs(connector: InMemoryConnector) -> list[dict]:
     return [job for job in await jobs_done(connector) if job["task_name"] == RESUME_AFTER_ANSWER]
 
 
+@pytest.mark.parametrize("inline", [False, True])
+async def test_approved_result_ids_reach_the_follow_up(app, browser, fake, kernel_http, model, engine,
+                                                      jobs_connector, monkeypatch, inline):
+    held = await held_request(app, browser, fake, kernel_http, model)
+    if inline:
+        async def unavailable(*args, **kwargs):
+            raise ConnectorException()
+        monkeypatch.setattr(jobs_connector, "defer_jobs_all", unavailable)
+    answered = await answer(held, "allow_once")
+    assert answered.status_code == 200
+    await resolved(engine, held.session_id)
+    result = fake.decisions[held.decision_id].result
+    fact_ids = [fact.fact_id for fact in result.facts]
+    async with engine.connect() as conn:
+        block = (await conn.execute(text("SELECT model_content FROM app.messages WHERE session_id = :s"
+                                         " AND kind = 'action_update'"), {"s": held.session_id})).scalar_one()
+    assert ElementTree.fromstring(block["text"]).attrib["result_fact_ids"].split() == fact_ids
+    if not inline:
+        (job,) = await resume_jobs(jobs_connector)
+        assert job["args"]["result_fact_ids"] == fact_ids
+        assert set(job["args"]) == {"copy_id", "desk_id", "session_id", "decision", "approved", "result_fact_ids"}
+        assert result.model_view not in list(job["args"].values())
+        assert all(isinstance(value, str) for value in job["args"]["result_fact_ids"])
+
+
+@pytest.mark.parametrize("kind, template, readable", [
+    ("refund", "refund_issued", True), ("booking", "booking_confirmed", True),
+    ("refund", "refund_issued", False),
+])
+async def test_resumed_result_card_uses_the_answer_association(app, browser, fake, kernel_http, model, engine,
+                                                              jobs_connector, kind, template, readable):
+    """Stage typed execution results on a held quote; real refund execution is tested in tier 1."""
+    held = await held_request(app, browser, fake, kernel_http, model)
+    desk = fake.desks[fake.sessions[held.session_id].desk_id]
+    label = Label(readers=[f"session:{held.session_id}"] if readable else ["owner"])
+    claims = ([Claim(key="starts_at", kind="datetime", value="2026-11-03T10:00:00-08:00")]
+              if kind == "booking" else [Claim(key="total", kind="money", value=25000)])
+    expected = Fact(fact_id=f"{kind}:approved", kind=kind, status="committed", source="kernel",
+                    label=label, claims=claims)
+    other = expected.model_copy(update={"fact_id": f"{kind}:earlier"})
+    fake._put_fact(desk, other)
+    fake.script("native.quote", facts=[expected], model_view={"owner_only": "PRIVATE RESULT DETAILS"})
+    answered = await answer(held, "allow_once")
+    assert answered.status_code == 200
+    await resolved(engine, held.session_id)
+    (job,) = await resume_jobs(jobs_connector)
+    assert job["args"]["result_fact_ids"] == [expected.fact_id]
+    assert "PRIVATE RESULT DETAILS" not in json.dumps(job["args"])
+
+    def show_matching_card(request):
+        updates = [ElementTree.fromstring(block["text"]) for message in request.messages
+                   for block in message["content"] if block.get("type") == "text"
+                   and block["text"].startswith("<action_update ")]
+        (update,) = updates
+        assert update.attrib["decision_id"] == held.decision_id
+        (fact_id,) = update.attrib["result_fact_ids"].split()
+        return response(tool_use("send_reply", {"prose": "Here are the details of your request.",
+                                                "clauses": [{"template": template, "fact_id": fact_id}]}))
+
+    model.add(show_matching_card)
+    if not readable:
+        model.add(response(tool_use("send_reply", {"prose": "Here are the details of your request.",
+                                                  "clauses": [{"template": template,
+                                                               "fact_id": expected.fact_id}]})), response())
+    async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
+        shown = await stream.until(lambda events: types(events).count("turn_end") == 2)
+    await app.state.runtime.runner.drain()
+    cards = [block for _, event in shown if event.type == "message" for block in event.blocks
+             if block.template == template]
+    if readable:
+        assert [block.fact_id for block in cards] == [expected.fact_id]
+    else:
+        assert cards == []
+        verdicts = [entry.event.summary for entry in desk.ledger if entry.event.kind == "reply"]
+        assert any("unentitled_fact" in verdict["violations"] for verdict in verdicts), verdicts
+    assert len([entry for entry in desk.ledger if entry.event.kind == "execute"
+                and entry.event.summary.get("decision_id") == held.decision_id]) == 1
+
+
 async def test_answer_twice_resolves_once(app, browser, fake, kernel_http, model, engine, jobs_connector):
     held = await held_request(app, browser, fake, kernel_http, model)
     first = await answer(held, "allow_once")
@@ -196,13 +277,14 @@ async def test_answer_twice_resolves_once(app, browser, fake, kernel_http, model
 
     jobs = await resume_jobs(jobs_connector)
     assert [(job["task_name"], job["status"]) for job in jobs] == [("desk.resume_after_answer", "succeeded")]
-    # The job holds IDs and signed decisions only: no token, key or code.
+    # The job holds IDs, signed decisions and result fact IDs only: no token, key or code.
     session = fake.sessions[held.session_id]
     approved = jobs[0]["args"]["approved"]
     assert (approved["decision_id"], approved["state"]) == (held.decision_id, "approved")
     assert jobs[0]["args"] == {"copy_id": session.copy_id, "desk_id": session.desk_id, "session_id": held.session_id,
                                "decision": {key: value for key, value in first.json()["decision"].items()
-                                            if key != "owner_plain"}, "approved": approved}
+                                            if key != "owner_plain"}, "approved": approved,
+                               "result_fact_ids": [fact.fact_id for fact in fake.decisions[held.decision_id].result.facts]}
     before = await sse_events(engine, held.session_id)
     async with engine.connect() as conn:
         messages_before = (await conn.execute(text("SELECT count(*) FROM app.messages WHERE session_id = :s"),
@@ -317,6 +399,7 @@ async def test_refusal_reason_stays_on_owner_reads(app, browser, fake, kernel_ht
     (job,) = await resume_jobs(jobs_connector)
     assert owner_line not in json.dumps(job["args"])
     assert "owner_plain" not in json.dumps(job["args"])
+    assert "result_fact_ids" not in job["args"]                       # a refused answer queues no result IDs
     assert fake.decisions[held.decision_id].decision.owner_plain == owner_line
     visitor_read = await kernel_http.session(held.token).call("GET /decisions/{id}", path={"id": held.decision_id})
     assert visitor_read.owner_plain is None and owner_line not in visitor_read.model_dump_json()
@@ -358,11 +441,11 @@ async def test_owner_reason_is_cleared_before_resume_crossings(app, browser, fak
     deferred, delivered = [], []
     defer, deliver = owner.defer_resume_after_answer, jobs.deliver
 
-    async def defer_seen(app, ids, decision, approved=None):
+    async def defer_seen(app, ids, decision, approved=None, result_fact_ids=None):
         deferred.append(decision.owner_plain)
         if path == "fallback":
             raise ConnectorException("queue unavailable")
-        await defer(app, ids, decision, approved)
+        await defer(app, ids, decision, approved, result_fact_ids=result_fact_ids)
 
     async def deliver_seen(conn, ids, item, **kwargs):
         delivered.append(item.decision.owner_plain)
@@ -582,7 +665,7 @@ async def test_answer_resumes_in_the_request_when_the_queue_cant_take_the_job(ap
         events = await stream.until(lambda events: types(events).count("turn_end") == 2)
     await app.state.runtime.runner.drain()
     assert types(events)[4:] == ["receipt", "resolved", "writing", "message", "turn_end"]
-    assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\">'
+    assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\" result_fact_ids='
             in json.dumps(model.requests[1].messages))
 
 
@@ -597,7 +680,7 @@ async def test_answer_stands_when_neither_the_queue_nor_the_request_can_resume(a
     async def unreachable(jobs):
         raise ConnectorException("the job queue's database can't be reached")
 
-    async def unresumable(conn, ids, decision, approved=None):
+    async def unresumable(conn, ids, decision, approved=None, result_fact_ids=None):
         raise RuntimeError(f"no resume for {decision.reason_plain}")
 
     monkeypatch.setattr(jobs_connector, "defer_jobs_all", unreachable)
@@ -652,5 +735,5 @@ async def test_answer_during_take_over_executes_and_waits_for_hand_back(app, bro
     await app.state.runtime.runner.drain()
     assert types(events) == ["writing", "message", "turn_end"]
     assert len(model.requests) == calls_before + 1
-    assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\">'
+    assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\" result_fact_ids='
             in json.dumps(model.requests[-1].messages))

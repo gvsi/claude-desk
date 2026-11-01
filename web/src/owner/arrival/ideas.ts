@@ -1,7 +1,7 @@
 /**
  * What the demo suggests trying: the four things the intro dialog lists (and Today's own list
- * titles, with the line each row says once it's done). "Show me ideas" offers `BREAK_IT_IDEAS`
- * (`web/src/lib/breakItIdeas.ts`), which the public page shares.
+ * titles, with the line each row says once it's done). "Show me ideas" offers `breakItIdeas`
+ * (`web/src/lib/breakItIdeas.ts`), in the Desk's own owner's name, which the public page shares.
  */
 import type { IconName } from '../../ds/index.ts';
 import type { UncountedAnswer } from './doneSignals.ts';
@@ -26,7 +26,8 @@ export const THINGS_TO_TRY = [
  * What "Answer a held request" says once an answer given on Today settles a request the list doesn't
  * count, in the card's own words: the request had expired or been cancelled first, so nothing was
  * done; or, on a Desk besides the one the copy started with, the answer went through (the row's
- * done line), or it ended otherwise, said exactly as the card says it.
+ * done line), or it ended otherwise, said exactly as the card says it. An execution refusal uses
+ * the decision's owner_plain when present; this table supplies its fallback.
  */
 export const UNCOUNTED_ANSWER_LINES = {
   expired: 'Expired before you answered. Nothing was done.',

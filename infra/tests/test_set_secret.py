@@ -61,7 +61,8 @@ def test_writes_only_allowed_secret_ids(secrets, monkeypatch, capsys, secret_id)
     assert KEY_ID in capsys.readouterr().err
 
 
-def test_reads_without_echo_and_never_prints(secrets, monkeypatch, capsys):
+@pytest.mark.parametrize("secret_id", [KEY_ID, "desk/typesafe-api-key"])
+def test_reads_without_echo_and_never_prints(secrets, monkeypatch, capsys, secret_id):
     client, stub = secrets
     module = load_script("set_secret")
     prompts = []
@@ -71,13 +72,13 @@ def test_reads_without_echo_and_never_prints(secrets, monkeypatch, capsys):
         return TYPED
 
     monkeypatch.setattr(module.getpass, "getpass", getpass)
-    _expect_write(stub, KEY_ID, TYPED)
+    _expect_write(stub, secret_id, TYPED)
 
-    assert module.main([KEY_ID], client=client, stdin=_Terminal()) == 0
+    assert module.main([secret_id], client=client, stdin=_Terminal()) == 0
     out, err = capsys.readouterr()
-    assert prompts and KEY_ID in prompts[0] and TYPED not in prompts[0]
+    assert prompts and secret_id in prompts[0] and TYPED not in prompts[0]
     assert TYPED not in out + err
-    assert KEY_ID in out and VERSION in out
+    assert secret_id in out and VERSION in out
 
 
 def test_reads_a_piped_hash_from_stdin(secrets, monkeypatch, capsys):

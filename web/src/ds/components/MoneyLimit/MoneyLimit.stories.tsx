@@ -220,3 +220,22 @@ export const Phone: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };
+
+export const Updated: Story = {
+  args: { updated: true },
+  parameters: {
+    canvasNote:
+      'The signed board draws the limit at rest; P7-01 on the review canvas has a new limit land the way a changed rule does, so its line carries "Updated" until the owner leaves Rules. The line keeps no fill: its "Change" is a Button, which the selected ground can\'t take. Storybook shows the motion your system asks for: under reduced motion "Updated" is there at once.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const words = canvas.getByText(line);
+    const pill = canvas.getByText('Updated', { exact: true });
+    await expect(pill).toHaveClass('cd-pill');
+    await Promise.all((pill.parentElement ?? pill).getAnimations().map((arrival) => arrival.finished));
+    // In the line, after its words, and "Change" still at the right.
+    await expect(words.contains(pill)).toBe(true);
+    await expect(canvas.getByRole('button', { name: 'Change' })).toBeVisible();
+    expectComputed(pill.parentElement ?? pill, { marginLeft: '8px' });
+    expectComputed(row(canvasElement).closest('.cd-connector-section__above') ?? canvasElement, { backgroundColor: 'rgba(0, 0, 0, 0)' });
+  },
+};

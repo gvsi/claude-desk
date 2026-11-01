@@ -20,10 +20,23 @@
   - "Chat with {name}" and, under it, the AI disclosure. It can't be turned off:
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {ownerName} cuando quieras."
+
+    When `{name}` already ends in '.', '!' or '?', the period after it is left out (`afterName`), so 'Chen & Co.' reads 'Chen & Co. Ask for …'.
+
   - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
+  - **When the owner gave no name** (`ownerName` is null), the disclosure and the button ask for a person instead, and name no one:
+    - "You're chatting with Claude, an AI answering for {name}. Ask for a person anytime."
+    - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con una persona cuando quieras."
+    - "Ask for a person" / "Pedir hablar con una persona".
+
+    "a person" is the shell's own copy, so only the business's name is marked as written by someone.
   - **While the owner is in the chat** (`ownerInChat`, take-over option A, N-R2-TakeOver-A-1512-EN and N-R2-TakeOver-A-390-EN), the disclosure's line says so instead, in the same element, type and place, and "Ask for {ownerName}" isn't shown:
     - "{ownerName} is in this chat. Claude, an AI, is paused until {ownerName} hands it back."
     - "{ownerName} está en este chat. Claude, una IA, está en pausa hasta que {ownerName} le devuelva el chat."
+
+    With no owner name, the line names no one:
+    - "The business owner is in this chat. Claude, an AI, is paused until they hand it back."
+    - "El dueño del negocio está en este chat. Claude, una IA, está en pausa hasta que le devuelva el chat."
 
     The line still names Claude as an AI and says it is paused, so the AI disclosure is never off; it is the shell's own copy, and the consumer can't empty it or pass other words. Each `{ownerName}` is marked as written by someone (`data-copy="user"`), as the other names are. When the owner hands back, the usual disclosure and the button come back. The shell draws only its head: the chat's own lines ("Maria Rivera joined the chat", "Claude is helping again.") are the page's `SystemLine`s in the conversation.
   - **Focus.** If "Ask for {ownerName}" has focus as the owner joins, focus goes on to the composer's text box (or, while that is disabled, to the conversation's scroll region, the stop after Ask), without scrolling, so it doesn't drop to the page and the visitor stays where they were reading. Focus anywhere else, or nowhere, stays where it is.
@@ -70,6 +83,7 @@ On a short shell, pinning the brand header and the footer as well would leave th
 - below 520 px of shell height (a phone on its side, a short phone, a 640 px phone with its on-screen keyboard open), or
 - when the banner (if any), the brand header, the chat's head, the composer area and the footer, pinned, would leave the conversation under 120 px, whatever the height: a tagline that wraps, the longest closed status or a long draft can fill a shell well over 520 px. It is measured with the about column where it is, and the composer area is watched, so a growing draft can turn the shell short.
 - It turns tall again only with 16 px more than that to spare, so it can't flap as a draft grows and shrinks at the edge.
+- While the page passes `keepComposerRoom`, the composer area counts at the tallest it has been since. The public chat passes it while a request is open, because the line it shows above the composer for that request comes and goes as the request's receipt leaves the view and comes back. Each switch between tall and short moves the conversation, which can bring that receipt into view or out of it again, so without kept room the line and the shell would answer each other for ever on a window at the edge. Once the page lets the room go, the shell fits itself again at once.
 
 The shell decides in a layout effect and sets `cd-public-shell--short` on its root itself (React's class for the shell leaves it out, and the shell puts it back after each render), so it is in place before the page's own layout effects run and the page scrolls the right element from the first render on, as when a chat is reopened.
 
@@ -85,7 +99,9 @@ On a short shell:
 
 When the shell turns short or tall, the element that scrolls the conversation changes: the scroll region while tall, the shell itself while short. The shell then:
 
-1. keeps the visitor's place: the first message under the chat's head stays where it was under it, on the new scroller;
+1. keeps the visitor's place on the new scroller, even when the width changes too, as when a phone turns. The place is what is first under the chat's head: the about column while it opens the scroll region and still reaches under the head (the chat's start on a narrow shell), and the first message otherwise. It stays where it was under the head; when part of it is above the head's edge, the same share of it stays above, however it has wrapped, so the same part of it is at the edge and it is still what is first under the head. If the about column was the place and has since moved beside the chat, nothing is put back.
+
+   The shell hears of a new size only once the browser has laid the page out at it. At the same width nothing under the chat's head has moved by then, and the shell reads the place there. At a new width the about column, the messages and the chat's head have already wrapped onto other lines, and the browser's scroll anchoring may have moved the conversation to keep some other element still, so the shell puts back the place it read after the last scroll of the conversation, or the last time it laid itself out, at the old width. A scroll at the new width before the shell hears of it isn't taken for the visitor's, so a visitor's own scroll in that very frame is lost with it;
 2. sends one event from its root, once per switch, after the place is kept:
 
 ```ts
@@ -132,8 +148,8 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
   - `field` and `accent` are the brand's colors.
   - `ink` and `inkSecondary` are `var(--text-primary)` and `var(--text-secondary)`.
   - The mapping keeps both inks at 4.5:1 over the field, falling back to `bg-panel` when they can't.
-- `ownerName` (`owner_display_name`), `language`, `onAskForOwner`.
-- `ownerInChat`, whether the owner is in the chat. Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens or reloads, kept current by the stream's `owner_joined` and `owner_left` (the events the page also draws as the joined and "Claude is helping again." lines). The line tells the visitor a person is in the chat, so it is never set from anything else. The web app is to set it this way; it doesn't yet. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
+- `ownerName` (`owner_display_name`), or null when the owner gave no name, `language`, `onAskForOwner`. The kernel has no field that says no name was given: the public page's mapping (`brandFrom`) reads setup's fallback name, "Owner", as null, so the page never asks for "Owner". The charter's cards never name the owner, so a null name leaves them as they are.
+- `ownerInChat`, whether the owner is in the chat. Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens or reloads, kept current by the stream's `owner_joined` and `owner_left` (the events the page also draws as the joined and "Claude is helping again." lines). The line tells the visitor a person is in the chat, so it is never set from anything else. `PublicChat` passes `chat.ownerInChat` from `PublicChatProvider`, which derives it through `ownerInChatNow`. The flag is false while the stream is disconnected or catching up, or the session mode is not confirmed. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, pinned at the bottom, and `children`, the conversation, in the scroll region. Whatever the page adds after the conversation (notices, the element it keeps above the composer) goes in `children` too.
@@ -145,16 +161,17 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `brand` | `PublicBrand` | Required. `{ name; tagline; monogram; field; ink; inkSecondary; accent }`. |
-| `ownerName` | `string` | Required. |
+| `ownerName` | `string \| null` | Required. `owner_display_name`, or null when the owner gave no name: the head then asks for a person. |
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
-| `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. The web app is to set it so; it doesn't yet. `false` by default. |
+| `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. `PublicChat` passes `chat.ownerInChat`, derived by `PublicChatProvider` through `ownerInChatNow`; it is false while the stream is disconnected or catching up, or the mode is not confirmed. `false` by default. |
 | `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |
 | `composer` | `ReactNode` | Required. Pinned at the bottom, with the footer under it (the footer scrolls on a short shell). |
+| `keepComposerRoom` | `boolean` | While true, the composer area counts at the tallest it has been since when the shell decides whether it is short, so a line the page shows above the composer and takes away again can't switch it (see "A short shell"). `false` by default. |
 | `banner` | `ReactNode` | Above the brand header, inside the window's height; pinned with the header, and scrolls with it on a short shell. |
 | `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 
@@ -175,12 +192,47 @@ at 390 px, closed and no-hours headers change height once (19 px taller and 16 p
 The agents page passes `hours={false}` because its real header has no hours.
 
 The shell shape shares the shell's layout and visual-viewport measurement hooks, including short
-windows and embedded panels. It draws the real fresh copy's five charter cards and two agents
-links: beside the chat from 900 px, and opening the conversation's scroll region below that,
-as the current page does. Greeting and starter chips are left out until those ship. In setup's
-fresh preview (`footer={false}`), there is no charter or footer, so neither is drawn. Text that
-depends on other Desk data can change size once when it arrives.
+windows and embedded panels. History is unknown until the page lands, so every load draws the first
+view, placed by the same `useFirstView` hook as the real one: a greeting line (two on a phone), its
+meta line, the inline composer and three starter chips as wide as the fresh copy's. It draws the
+real fresh copy's five charter cards and two agents links: beside the chat from 900 px, and under
+the footer below that, as the first view does. In setup's fresh preview (`footer={false}`), there
+is no charter or footer, so neither is drawn.
 
-The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell
-at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
+A first visit to a Desk with starters lands in place. A resumed chat keeps its head in place, and
+its composer moves down to the bottom as it lands. A Desk without starters lands on the greeting
+alone, without the meta line and chips: on a laptop the shorter group is centred about 30 px lower,
+and on a phone the composer moves up by the meta line, and the footer and About by the chips as
+well. Text that depends on other Desk data, such as a long greeting or longer starters, can change
+size once when it arrives.
+
+The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell's
+first view at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
 (`#artboard-d122e70134a0`), and follow the real page wherever it differs from that board.
+
+## Before the first message
+
+Pass `firstView` only after session history has loaded and while the chat is empty. The shell shows
+“How can {business} help?” and, when there are starters, “Try one of these, or ask in your own
+words.” (with the signed Spanish copy when `language="es"`). The business name keeps `data-copy="user"`; the surrounding words are
+app copy. The disclosure and its punctuation stay in their usual head above the invitation.
+
+`starters={{ words, onPick, disabled }}` supplies localized business content to `SuggestionChips`;
+only the first three words entries appear. Omit it, or pass an empty array, for the greeting alone: no meta line and no chips. `onPick`
+must use the same send path as the composer. PublicChat reads `(desk.starters ?? []).slice(0, 3)`
+and sends picks through its ordinary visitor send handler, including in Today and setup previews.
+
+On a wide shell, the invitation and composer sit slightly above the middle of the transcript column,
+with 20 px between the invitation and composer and the chips below. On a narrow shell they sit inline
+under the chat head, before the footer and About cards. The narrow body scrolls with its disclosure
+head sticky and the brand header above it. Existing conversations keep their normal scroll layout.
+
+When `firstView` becomes false, the invitation and chips fade for `motion-fast`. The desktop composer
+moves to its dock using only a transform, for `motion-base + motion-instant` (260 ms) with
+`motion-ease-emphasis`; the transcript can show the visitor's bubble immediately. A narrow shell
+only fades. With reduced motion, the invitation disappears and the composer moves immediately.
+A shell that opens without `firstView` plays none of this motion.
+
+The vision pages use populated, static conversations; they omit `firstView` and retain their existing
+inert composers and suggestions. Stories: `FirstViewEnglish`, `FirstViewSpanish`,
+`FirstViewWithoutStarters`.

@@ -10,10 +10,13 @@
  * ("Automatic. …"), or "Held for you" alone with the request's card right under it. Until that
  * read answers, or if it fails, it carries no reason and shows the event's `visitor_plain`.
  *
- * Every other receipt keeps the event's `visitor_plain` and reads nothing: a first receipt that
- * reads `failed`, `unknown` or `refused_at_execution` (the reason it was allowed would contradict
- * what happened), every later one for the same decision (the reason is written once, at decide
- * time, so a hold's words never follow it to its outcome), and every reply's check.
+ * An execution refusal uses the transcript item's `owner_plain`, verbatim, when present; it falls
+ * back to the event's `visitor_plain`. This owner-only exception never changes the signed event
+ * or a visitor surface. A first receipt that reads `failed`, `unknown` or `refused_at_execution`
+ * never fetches `reason_plain`: the reason it was allowed would contradict what happened.
+ * Later receipts for the same decision never fetch it either (a hold's words never follow it to
+ * its outcome). Apart from the execution refusal's owner annotation, those receipts and every
+ * reply check keep the event's `visitor_plain`.
  */
 import { useQuery } from '@tanstack/react-query';
 
@@ -55,8 +58,11 @@ export interface OwnerReceiptView extends ReceiptView {
  * The receipt for `ev` on an owner screen. `first` is true for the first status row of its
  * `decision_id` in the transcript.
  */
-export function useOwnerReceipt(ev: StatusEvent | EvMessage, first: boolean): OwnerReceiptView {
-  const view = receiptFromEvent(ev);
+export function useOwnerReceipt(ev: StatusEvent | EvMessage, first: boolean, ownerPlain?: string | null): OwnerReceiptView {
+  const eventView = receiptFromEvent(ev);
+  const view = ev.type !== 'message' && ev.state === 'refused_at_execution' && ownerPlain != null
+    ? { ...eventView, plain: ownerPlain }
+    : eventView;
   const decisionId = ev.type === 'message' ? null : ev.decision_id;
   const wanted = decisionId !== null && first && ev.type !== 'message' && REASON_STATES.has(ev.state);
   const read = useQuery({ ...decisionQuery(decisionId ?? ''), enabled: wanted });

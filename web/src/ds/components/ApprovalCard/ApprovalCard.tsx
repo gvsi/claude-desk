@@ -90,7 +90,11 @@ export interface ApprovalCardProps {
   decision: Decision;
   /** The rule that held it (`NeedsYouItem.held_by`), shown as "Held by your rule: {heldBy}", in the owner's words. */
   heldBy?: string;
-  /** One line of context in meta type; mark a visitor's own words with `data-copy="user"`. */
+  /**
+   * One line of context in meta type; mark a visitor's own words with `data-copy="user"`. The
+   * visitor's own words only: never AI-written text such as a triage summary, which a visitor could
+   * steer to sway the answer (master plan, "never in approval cards").
+   */
   context?: ReactNode;
   /** Where and when it was held: "Web chat, 2 min ago". */
   waiting: string;
@@ -199,8 +203,9 @@ function itemWords(answer: ApprovalAnswer, personName: string | undefined): Reac
   return say(ANSWERS[answer].item, personName);
 }
 
-/** The status line for `state`; a state this build doesn't know asks for a reload, and offers nothing. */
-function statusLine(state: DecisionState): string {
+/** The kernel's owner line for an execution refusal, else the state's line; unknown states ask for a reload. */
+function statusLine({ state, owner_plain }: Decision): string {
+  if (state === 'refused_at_execution' && owner_plain != null) return owner_plain;
   return Object.hasOwn(STATUS_LINES, state) ? STATUS_LINES[state] : errorCopy('conflict');
 }
 
@@ -547,10 +552,10 @@ function RequestWords({ decision, tone, heldBy, context, waiting, statusRef }: R
           <StatusDot tone={tone} />
           {statusRef ? (
             <span ref={statusRef} role="status" tabIndex={-1} className="cd-approval-card__status-line">
-              {statusLine(decision.state)}
+              {statusLine(decision)}
             </span>
           ) : (
-            <span className="cd-approval-card__status-line">{statusLine(decision.state)}</span>
+            <span className="cd-approval-card__status-line">{statusLine(decision)}</span>
           )}
         </span>
         <span className="cd-approval-card__waiting">{waiting}</span>

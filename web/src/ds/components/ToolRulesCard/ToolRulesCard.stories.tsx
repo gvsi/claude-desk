@@ -35,7 +35,7 @@ const meta = {
     label: 'Payment link',
     tool: {
       name: 'Payment link',
-      description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
+      description: "Makes a one-time link for a quote. Charges money. Can't be undone.",
       href: '/connectors/payments/payment-link',
     },
     // The rules that govern the tool, most specific first: the agent's shared rule, then the tool's own.
@@ -67,7 +67,7 @@ export const PaymentLinkOnPayments: Story = {
     // The tool's name and line are one link to its page, with a chevron.
     const link = canvas.getByRole('link', { name: /^Payment link/ });
     await expect(link).toHaveAttribute('href', '/connectors/payments/payment-link');
-    await expect(link).toHaveTextContent('Makes a one-time link for a quote. Charges money. Can be undone.');
+    await expect(link).toHaveTextContent("Makes a one-time link for a quote. Charges money. Can't be undone.");
     await expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     // A row per rule, the shared one first.
     const rows = canvas.getAllByRole('listitem');
@@ -87,7 +87,7 @@ export const PaymentLinkOnPayments: Story = {
 export const WithoutLink: Story = {
   name: 'Without a link',
   args: {
-    tool: { name: 'Payment link', description: 'Makes a one-time link for a quote. Charges money. Can be undone.' },
+    tool: { name: 'Payment link', description: "Makes a one-time link for a quote. Charges money. Can't be undone." },
   },
   parameters: {
     canvasNote:
@@ -99,10 +99,23 @@ export const WithoutLink: Story = {
     await expect(card.querySelectorAll('.cd-tool-rules__chevron')).toHaveLength(0);
     const name = within(card).getByText('Payment link', { selector: '.cd-tool-rules__tool-name' });
     expectComputed(name, { color: 'rgba(250, 249, 245, 0.92)', display: 'block' });
-    await expect(within(card).getByText('Makes a one-time link for a quote. Charges money. Can be undone.')).toBeVisible();
+    await expect(within(card).getByText("Makes a one-time link for a quote. Charges money. Can't be undone.")).toBeVisible();
     // The rules and the fallback as with a link.
     await expect(within(card).getAllByRole('listitem')).toHaveLength(2);
     await expect(within(card).getByText('Anything else here: ask me.')).toBeVisible();
+  },
+};
+
+export const NameOnly: Story = {
+  name: 'Name only',
+  args: {
+    tool: { name: 'Payment link', description: '' },
+  },
+  play: async ({ canvas }) => {
+    const card = canvas.getByRole('region', { name: 'Payment link' });
+    await expect(card.querySelector('.cd-tool-rules__tool-description')).toBeNull();
+    await expect(card).toHaveAccessibleName('Payment link');
+    await expect(within(card).getByText('Payment link', { selector: '.cd-tool-rules__tool-name' })).toBeVisible();
   },
 };
 
@@ -167,5 +180,59 @@ export const Phone: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
+  },
+};
+
+/** A business's own job on Rules, just after a confirmed change landed on it. */
+const INTAKE_ASKS: RuleCard = {
+  card_id: 'intake-asks',
+  applies_to: 'desk.new-client-intake',
+  mode: 'ask',
+  who: 'anyone',
+  person_id: null,
+  agent_key_id: null,
+  max_amount_cents: null,
+  max_discount_bp: 0,
+  hours: null,
+  review: false,
+  is_default: false,
+  reason: 'New clients answer three questions, then wait for your answer.',
+};
+
+export const Landed: Story = {
+  args: {
+    label: 'New client intake',
+    tool: { name: 'New client intake', description: 'Asks: Is this for you or for a business? Which tax years do you need help with?' },
+    rules: [{ rule: INTAKE_ASKS, words: [{ field: 'who', text: 'Anyone' }] }],
+    onAddRule: undefined,
+    landed: 1,
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws a business job landing; the review board UXC-P701-After draws a tool row on Rules landing, and a job card lands the same way: lit in the selected fill, then let go, keeping "Updated" by its title. Storybook shows the motion your system asks for: under reduced motion the card is at its end state at once.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const body = canvasElement.querySelector<HTMLElement>('.cd-tool-rules');
+    if (!body) throw new Error('no card body');
+    await expect(body).toHaveAttribute('data-landed', '1');
+    // "Updated" 8 px after the tool's name, centered on it.
+    const name = canvas.getByText('New client intake', { selector: '.cd-tool-rules__tool-name' });
+    const pill = canvas.getByText('Updated', { exact: true });
+    await Promise.all((pill.parentElement ?? pill).getAnimations().map((arrival) => arrival.finished));
+    await expect(Math.round(pill.getBoundingClientRect().left - name.getBoundingClientRect().right)).toBe(8);
+    const middle = (el: Element) => (el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2;
+    await expect(Math.abs(middle(pill) - middle(name))).toBeLessThan(1);
+    // The fill covers the card out to its edge, behind its words.
+    const glow = body.querySelector<HTMLElement>('.cd-landed-glow');
+    if (!glow) throw new Error('no fill behind the landed card');
+    const card = body.closest('.cd-card') as HTMLElement;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      expectComputed(glow, { display: 'none' });
+      return;
+    }
+    await expect(Math.round(glow.getBoundingClientRect().left - card.getBoundingClientRect().left)).toBe(1);
+    await expect(Math.round(card.getBoundingClientRect().bottom - glow.getBoundingClientRect().bottom)).toBe(1);
+    expectComputed(glow, { animationName: 'cd-landed-light, cd-landed-let-go', animationDelay: '0s, 1.72s' });
   },
 };

@@ -9,13 +9,17 @@ import type { RuleCard, ToolName } from '../../api/contracts.ts';
 import type { NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { chenBusinessTools } from '../../mocks/businessTools.ts';
+import { businessTools } from '../connectors/catalog.ts';
 import { describeEffects, type ToolSummaryView } from '../../ds/index.ts';
 import { needsYou, peopleOut, rulesView } from '../../mocks/readModels.ts';
-import { RIVERA } from '../../mocks/seed.ts';
+import { PRESETS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { validateContract } from '../../mocks/validate.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
-import { governingRules, holdQuestion, hubSections, parseLimit, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
+import { changeRows } from './changeRows.ts';
+import { draftFromDiff, type RuleDraft } from './drafts.ts';
+import { governingRules, holdQuestion, hubSections, parseLimit, rowsChangedBy, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
+import { targetWords } from './ruleWords.ts';
 
 /** The mock's main Desk, a fresh Rivera copy for every test. */
 function desk(): DeskRecord {
@@ -60,6 +64,13 @@ beforeEach(() => {
 });
 
 describe('the Rules hub', () => {
+  it('says_the_payment_tools_cant_be_undone_as_the_kernels_profiles_do', () => {
+    // A charge can't be taken back: the kernel's payment link and signed-limit profiles say so.
+    const rules = view();
+    expect(hubTool(rules, 'native.payment_link').description).toBe("Makes a one-time link for a quote. Charges money. Can't be undone.");
+    expect(hubTool(rules, 'native.charge_mandate').description).toBe("Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.");
+  });
+
   it('uses a business description followed by its effects', () => {
     for (const tool of chenBusinessTools) {
       expect(toolLine(tool)).toBe(`${tool.business?.description} ${describeEffects(tool.effects, tool.reversible)}`);
@@ -99,6 +110,7 @@ describe('the Rules hub', () => {
     const keys = sections.flatMap((s) => s.tools.map((t) => t.key));
     expect(keys).not.toContain('native.fetch_website');
     expect(keys).not.toContain('native.read_memory');
+    expect(keys).not.toContain('native.web_search');
     expect(sections.map((s) => s.connector.id)).not.toContain('google_calendar');
     // The payment limit's line sits atop Payments and Stripe only.
     expect(sections.filter((s) => s.moneyLimit).map((s) => s.connector.id)).toEqual(['payments', 'stripe']);
@@ -520,5 +532,77 @@ describe('the Rules hub', () => {
 
     // No hold, no question.
     expect(holdQuestion([])).toBeNull();
+  });
+});
+
+describe('the rows a confirmed change lands on', () => {
+  /** A draft of Rivera's rules with `add` in place of the cards of the same id, as the review builds it. */
+  function drafted(add: readonly RuleCard[], opts: { cap?: number } = {}) {
+    const stored = opts.cap === undefined ? mockStore.world.draft(desk(), add) : mockStore.world.draftCards(desk(), desk().policy.cards, opts);
+    return draftFromDiff(stored, desk().policy);
+  }
+
+  it('a_tool_rule_lands_on_its_tool_alone', () => {
+    // "Stop quoting on weekends": the quote rule moves to weekdays.
+    const weekdays = { ...rivera.ruleCards['rv-quote'], hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } } satisfies RuleCard;
+    expect(rowsChangedBy(drafted([weekdays]), view().tools)).toEqual({ tools: ['native.quote'], moneyLimit: false });
+  });
+
+  it('a_preset_lands_on_every_tool_whose_rules_it_changes', () => {
+    // "Ask me first" drops each of Rivera's own rules: every tool one of them governed changes, the
+    // urgent callback among them, and the tools only the starter's cards govern (open times, leads,
+    // callbacks, identity checks) don't.
+    const stored = mockStore.world.draftCards(desk(), PRESETS.ask_first);
+    const changed = rowsChangedBy(draftFromDiff(stored, desk().policy, 'ask_first'), view().tools);
+    expect([...changed.tools].sort()).toEqual(
+      ['desk.emergency-callback', 'native.book', 'native.charge_mandate', 'native.payment_link', 'native.quote', 'native.release_document', 'payments.create_refund', 'payments.list_charges'].sort(),
+    );
+    expect(changed.moneyLimit).toBe(false);
+  });
+
+  /**
+   * The names of the tools a change lands on, as the review's row titles name them: a Desk's own
+   * job by its title, from the Desk's tool rows.
+   */
+  const namesOf = (tools: readonly string[]) => new Set(tools.map((tool) => targetWords(tool, businessTools(view().tools))));
+  /** The titles of the review's rows, each once. */
+  const titlesOf = (draft: RuleDraft) => new Set(changeRows(draft, people(), view().tools).map((row) => row.title));
+
+  it('a_rule_replaced_by_one_that_differs_only_in_its_id_lands_nowhere', () => {
+    // Quote and documents go to new cards that differ from Rivera's only in their ids, and refunds
+    // never go through: the review lists only Refund, and only Refund lands.
+    const cards = desk().policy.cards.map((c) => {
+      if (c.card_id === 'rv-quote' || c.card_id === 'rv-docs') return { ...c, card_id: `${c.card_id}-again` };
+      return c.card_id === 'rv-refund' ? { ...c, mode: 'never' as const, reason: 'Refunds never go through.' } : c;
+    });
+    const draft = draftFromDiff(mockStore.world.draftCards(desk(), cards), desk().policy);
+    expect(titlesOf(draft)).toEqual(new Set(['Refund']));
+    expect(rowsChangedBy(draft, view().tools)).toEqual({ tools: ['payments.create_refund'], moneyLimit: false });
+  });
+
+  it('a_preset_lands_on_exactly_the_tools_its_review_lists', () => {
+    // "Recommended rules" in place of Rivera's own: its quote and document rules replace Rivera's
+    // with ones that differ only in their ids, so its review lists neither, and neither lands. Its
+    // urgent callback job loses its own rule, so the review lists it by its title, and it lands.
+    const draft = draftFromDiff(mockStore.world.draftCards(desk(), PRESETS.auto), desk().policy, 'auto');
+    const changed = rowsChangedBy(draft, view().tools);
+    expect(namesOf(changed.tools)).toEqual(titlesOf(draft));
+    expect(changed.tools).toContain('desk.emergency-callback');
+    expect(titlesOf(draft)).toContain('Emergency callback');
+    expect(changed.tools).not.toContain('native.quote');
+    expect(changed.tools).not.toContain('native.release_document');
+    expect(changed.moneyLimit).toBe(false);
+  });
+
+  it('a_new_limit_lands_on_its_line_and_the_rules_it_lowers', () => {
+    // Raised to $5,000, no rule changes: the limit's line alone.
+    expect(rowsChangedBy(drafted([], { cap: 500_000 }), view().tools)).toEqual({ tools: [], moneyLimit: true });
+    // Lowered to $100 with Payment link's $300 brought down with it: the line, and Payment link.
+    const lowered = mockStore.world.draftCards(
+      desk(),
+      desk().policy.cards.map((c) => (c.card_id === 'rv-link' ? { ...c, max_amount_cents: 10_000 } : c)),
+      { cap: 10_000 },
+    );
+    expect(rowsChangedBy(draftFromDiff(lowered, desk().policy), view().tools)).toEqual({ tools: ['native.payment_link'], moneyLimit: true });
   });
 });

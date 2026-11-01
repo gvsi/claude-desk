@@ -90,7 +90,7 @@ from pydantic import (
 
 from evals import results
 from evals.credentials import mask_credentials
-from evals.gate import GateInput, RunRow
+from evals.gate import GateInput, RunRow, gate, waiver_summary
 from evals.results import API_ROUTES, KERNEL_ROUTES, SIMULATOR_ROUTES
 from evals.tier1.harness import load_landed
 from evals.tier2.runner import RunError, RunOutcome, SimulatorStats, run_scenario
@@ -1059,8 +1059,8 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
     set, committed rate and coverage). It is appended onto the head's committed history, unchanged: the
     working tree's `recorded_rates.json` must hold exactly that history (`results.history_refusal` names
     the first entry that differs), so no uncommitted edit is carried forward. Then refused unless it is of
-    three or more runs, clean (no incomplete run, violation, check skipped while a plan hadn't landed, or
-    budget stop), on today's held-out set, and
+    three or more runs, no incomplete run, unwaived violation, check skipped while a plan hadn't landed,
+    or budget stop, on today's held-out set, and
     has a run of every held-out legitimate scenario, of which there is at least one. Last, the bar is
     never lowered quietly: a Wilson lower bound below the current rate's on the same held-out set
     (`heldout_sha256`) is refused unless `lower_bar` (`--lower-bar`) is given, and then the entry records
@@ -1072,16 +1072,19 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
     rates_file = evals_path(root, "recorded_rates.json")
     history = load_recorded_rates(rates_file).history
     try:
-        committed = results.reconcile_pass(result, RecordedRates(history=history), root=root,
-                                           use="recorded rate").rates.history
+        at_head = results.reconcile_pass(result, RecordedRates(history=history), root=root,
+                                         use="recorded rate")
     except results.ResultsRefused as refused:
         raise PassRefused(str(refused)) from None
+    committed = at_head.rates.history
     if refusal := results.history_refusal(history, committed):
         raise PassRefused(refusal)
     if config.runs < RECORD_MIN_RUNS:
         raise PassRefused(f"a rate is recorded from a pass of {RECORD_MIN_RUNS} or more runs per scenario, "
                           f"not {config.runs}")
-    if result.stopped_by_budget or any(r.status != "scored" or r.violations or r.skipped for r in result.runs):
+    # Judge safety through the gate's sole waiver-matching path. Completion's lower-bar rule stays below.
+    judged = gate(result, RecordedRates(history=[]), waivers=at_head.waivers)
+    if not judged.passed or judged.skipped_runs:
         raise PassRefused("a rate is recorded only from a clean pass: no incomplete run, violation, skipped check or "
                           "budget stop")
     suite = load_suite(evals_path(root, "tier2", "scenarios"))
@@ -1113,7 +1116,8 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
         model_ids={"api": result.model_ids["conversation"], "simulator": result.model_ids["visitor"],
                    **result.model_ids},
         report=f"evals/reports/{result.created_at.astimezone(UTC):%Y-%m-%d}-{result.pass_id}.md",
-        reason=reason.strip(), signed_off_by=signed_off_by.strip(), lowered=lowered,
+        reason=(f"{reason.strip()} ({waiver_summary(judged)})" if judged.waived_violations else reason.strip()),
+        signed_off_by=signed_off_by.strip(), lowered=lowered,
     )
     updated = RecordedRates(history=[*committed, rate])
     rates_file.write_text(json.dumps(updated.model_dump(mode="json"), indent=2) + "\n")

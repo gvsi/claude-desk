@@ -134,6 +134,7 @@ export const Review: Story = {
       'The quote is the fixture’s changed definition, whose markup must show as text, not the board’s sentence. “What you confirmed before” shows the description Claude sees, where the board shows the tool’s short line.',
       'The card’s top line names Stripe with its Mock badge before when it was noticed, as Today’s changed-tool item does, where the board shows only when it was noticed.',
       'The recent requests are those before the tool went off, as the board lists them.',
+      'The tool page’s suggestion chips will follow the Rules page’s newest-held-request pattern once the tool pages are built.',
       SIDEBAR_NOTE,
     ].join(' '),
   },
@@ -183,7 +184,11 @@ export const After: Story = {
   ),
   parameters: {
     canvas: 'N-Conn-15-Changed-After',
-    canvasNote: ['The Refund page right after the reviewed definition was confirmed: on again, its definition reviewed today, and the screen’s notice.', SIDEBAR_NOTE].join(' '),
+    canvasNote: [
+      'The Refund page right after the reviewed definition was confirmed: on again, its definition reviewed today, and the screen’s notice.',
+      'The tool page’s suggestion chips will follow the Rules page’s newest-held-request pattern once the tool pages are built.',
+      SIDEBAR_NOTE,
+    ].join(' '),
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect(window.innerWidth).toBe(1512);

@@ -24,6 +24,10 @@ export default defineConfig(async (env) =>
               name: 'unit',
               environment: 'jsdom',
               include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs'],
+              // Vitest gives Node and browser tests separate worker budgets that run at once. Running these
+              // after the browser projects keeps a CI shard's --maxWorkers the ceiling for the whole run,
+              // so the browser tests' timing isn't starved by Node tests beside them.
+              sequence: { groupOrder: 1 },
             },
           },
           {
@@ -33,6 +37,8 @@ export default defineConfig(async (env) =>
             plugins: [storybookTest({ configDir: path.join(dirname, '.storybook') })],
             test: {
               name: 'storybook',
+              // CI runners are slower than a laptop; each story's own waits must stay bounded well under this ceiling.
+              testTimeout: 30_000,
               browser: {
                 enabled: true,
                 headless: true,

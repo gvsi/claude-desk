@@ -43,7 +43,8 @@ What the model sees (Plan 02a, "Transcript contract"):
 Model-visible kinds and their wrappers (prompts.py's `ROW_TAGS`): `visitor_text` <visitor_message>, `agent_text`
 <agent_message>, `owner_say` <owner_said_to_visitor>, `whisper` <owner_whisper> (an untrusted owner note in the user
 turn, never system text), `action_update` <action_update decision_id state>, `desk_context` <desk_context>, `note`
-<note>, and a `delivered` row whose author is the Desk <shown_to_visitor>. Claude's own delivered replies are replayed
+<note> (its `ref_id` may be `business_local_time:{timezone}|{local_now}`), and a `delivered` row whose author is the
+Desk <shown_to_visitor>. Claude's own delivered replies are replayed
 through its `send_reply` calls; an owner's say reaches the model through its `owner_say` row. `status`, `triage` and
 `annotation` rows are never model-visible, and neither are `owner_joined` and `owner_left` (Plan 02b): each keeps a
 take-over or a hand-back in the transcript, holding the event the visitor's stream got (`event_seq`), while Claude
@@ -57,12 +58,13 @@ labels (`SUMMARY_LABELS`, `SHOWN_LABELS`).
 import hashlib
 import json
 import secrets
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, get_args
 
 from pydantic import ConfigDict, ValidationError
+from pydantic_core import from_json
 from sqlalchemy import and_, case, cast, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -73,7 +75,10 @@ from desk.api.prompts import (
     SEND_REPLY_TOOL,
     SHOWN_LABELS,
     SUMMARY_LABELS,
+    TIME_NOTE,
+    WEEKDAYS,
     Triage,
+    TriageCategory,
     conversation_so_far,
     result_line,
     summary_line,
@@ -82,7 +87,8 @@ from desk.api.prompts import (
 )
 from desk.api.schemas import OwnerTranscriptItem, StoppedDraft, TranscriptItem
 from desk.contracts import RenderedBlock
-from desk.db.models import Message, RunEvent
+from desk.db.models import ActionUpdateMetadata, Message, RunEvent
+from desk.kernel_api import ContextClock
 
 MESSAGES = Message.__table__
 RUN_EVENTS = RunEvent.__table__
@@ -196,7 +202,8 @@ NOT_REPLAYED = MESSAGES.c.replay_id.is_(None)   # every query that builds a mode
 SEND_REPLY = SEND_REPLY_TOOL["name"]
 # The notes whose state a fresh context's summary keeps, the latest of each group: the visitor verified, and the
 # owner's latest take-over, hand-back or resume.
-STATE_NOTES = ((NOTES["verified"],), (NOTES["taken_over"], NOTES["handed_back"], NOTES["resumed"]))
+VERIFIED_NOTES = (NOTES["verified"], "The visitor verified as the contact on record.")
+STATE_NOTES = (VERIFIED_NOTES, (NOTES["taken_over"], NOTES["handed_back"], NOTES["resumed"]))
 
 
 def lock_key(name: str) -> int:
@@ -223,10 +230,11 @@ def _text_block(text: str) -> dict:
     return {"type": "text", "text": text}
 
 
-def _frozen_block(kind: str, values: dict[str, Any], state: str | None) -> dict | None:
+def _frozen_block(kind: str, values: dict[str, Any], state: str | None,
+                  result_fact_ids: Sequence[str] = ()) -> dict | None:
     """The block the model will see for a new row, or None when the model never sees it."""
     if kind == "action_update":
-        return _text_block(wrap_action_update(values["text"], values["ref_id"], state))
+        return _text_block(wrap_action_update(values["text"], values["ref_id"], state, result_fact_ids))
     if kind == "delivered":
         return _text_block(wrap(ROW_TAGS[kind], blocks_text(values["blocks"]))) if values["author"] == "desk" else None
     return _text_block(wrap(ROW_TAGS[kind], values["text"])) if kind in ROW_TAGS else None
@@ -243,10 +251,13 @@ async def _insert(conn: AsyncConnection, ids: Ids, **values: Any) -> int:
 
 
 async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: str | None = None,
+                         result_fact_ids: Sequence[str] = (),
                          replayed: Replayed | None = None, **columns: Any) -> int:
     """Append a transcript row and return its `n`, under the session's events lock (module docstring). A row the
     model will see is written with its frozen block and waits for the next model call. `state` (the decision's) is
-    required for an `action_update`, whose `ref_id` is the decision and `text` its `visitor_plain`. A `replayed` row
+    required for an `action_update`, whose `ref_id` is the decision and `text` its `visitor_plain`. Its optional
+    `result_fact_ids` and state are stored in `blocks` for the code-built summary, independently of the frozen
+    block. A `replayed` row
     (a visitor's, an agent's, a delivered one or a status) is recorded history: written at its moment with its
     `replay_id`, with no frozen block and no `wake`. Context, tool-change and model rows, which no reader polls,
     have their own functions."""
@@ -265,6 +276,8 @@ async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: s
         raise ValueError(f"a {kind} row has text")
     if kind == "action_update" and not (values["ref_id"] and state):
         raise ValueError("an action_update names its decision (ref_id) and state")
+    if kind == "action_update":
+        values["blocks"] = ActionUpdateMetadata(state=state, result_fact_ids=list(result_fact_ids))
     if kind == "annotation" and not values["ref_id"]:
         raise ValueError("an annotation names the row it annotates (ref_id, its message_id)")
     if kind in PRESENCE_KINDS and not values.get("event_seq"):
@@ -280,7 +293,7 @@ async def append_message(conn: AsyncConnection, ids: Ids, kind: str, *, state: s
         return await _insert(conn, ids, kind=kind, visibility=spec.visibility, model_content=None,
                              created_at=replayed.at, replay_id=replayed.replay_id, **values)
     return await _insert(conn, ids, kind=kind, visibility=spec.visibility,
-                         model_content=_frozen_block(kind, values, state), **values)
+                         model_content=_frozen_block(kind, values, state, result_fact_ids), **values)
 
 
 TRANSLATED_KINDS = ("visitor_text", "agent_text", "delivered")
@@ -316,11 +329,43 @@ async def triaged(conn: AsyncConnection, copy_id: str, **where: str) -> dict[str
     return found
 
 
+async def newest_triage(conn: AsyncConnection, copy_id: str, desk_id: str,
+                        session_ids: Iterable[str]) -> dict[str, Triage]:
+    """Each of the Desk's given sessions' newest triage row that reads back as its `Triage`, by `session_id`; a
+    session with none is left out."""
+    wanted = sorted(set(session_ids))
+    if not wanted:
+        return {}
+    rows = await conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(
+        MESSAGES.c.copy_id == copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "triage",
+        MESSAGES.c.session_id.in_(wanted)).order_by(MESSAGES.c.n))
+    found = {}
+    for session_id, text in rows:
+        if (triage := _read_triage(text)) is not None:
+            found[session_id] = triage
+    return found
+
+
+_LEGACY_TRIAGE_CATEGORIES = {
+    "discount_push": "prices", "private_data": "records", "code_redirect": "codes",
+    "injection": "instructions", "over_limit": "limits", "impersonation": "other",
+}
+
+
 def _read_triage(text: str | None) -> Triage | None:
-    """A triage row's `Triage`; None for one that doesn't read back as one."""
+    """Read stored categories into today's filters without rewriting the owner's summary.
+
+    Compatibility belongs here, never in `Triage`: fresh model output must use the current categories.
+    None for a row whose JSON or remaining fields don't read back as a triage.
+    """
     try:
-        return Triage.model_validate_json(text or "")
-    except ValidationError:
+        stored = from_json(text or "")
+        if isinstance(stored, dict):
+            category = stored.get("category")
+            category = _LEGACY_TRIAGE_CATEGORIES.get(category, category) if isinstance(category, str) else "other"
+            stored["category"] = category if category in get_args(TriageCategory) else "other"
+        return Triage.model_validate(stored)
+    except ValueError:
         return None
 
 
@@ -380,10 +425,38 @@ async def append_note_once(conn: AsyncConnection, ids: Ids, text: str, *, wake: 
     await lock_events(conn, ids.session_id)
     noted = (await conn.execute(select(MESSAGES.c.n).where(
         MESSAGES.c.copy_id == ids.copy_id, MESSAGES.c.session_id == ids.session_id, MESSAGES.c.kind == "note",
-        MESSAGES.c.text == text).limit(1))).first()
+        MESSAGES.c.text.in_(VERIFIED_NOTES if text in VERIFIED_NOTES else (text,))).limit(1))).first()
     if noted is not None:
         return None
     return await append_message(conn, ids, "note", text=text, wake=wake)
+
+
+TIME_NOTE_REF = "business_local_time:"
+
+
+async def append_time_note(conn: AsyncConnection, ids: Ids, clock: ContextClock) -> int | None:
+    """Keep the kernel's business time in a model-only note; its ref_id retains the zone and offset-aware local_now.
+
+    Read and write under the events lock, so a concurrent refresh can't append the same note twice."""
+    local = datetime.fromisoformat(clock.local_now)
+    await lock_events(conn, ids.session_id)
+    previous = (await conn.execute(select(MESSAGES.c.ref_id).where(
+        MESSAGES.c.copy_id == ids.copy_id, MESSAGES.c.session_id == ids.session_id, MESSAGES.c.kind == "note",
+        MESSAGES.c.ref_id.startswith(TIME_NOTE_REF, autoescape=True)).order_by(MESSAGES.c.n.desc()).limit(1)
+    )).scalar_one_or_none()
+    if previous is not None:
+        zone, separator, timestamp = previous.removeprefix(TIME_NOTE_REF).partition("|")
+        # Older markers have no zone: replace them on the next turn.
+        if separator and zone == clock.timezone:
+            last = datetime.fromisoformat(timestamp)
+            elapsed = local.astimezone(UTC) - last.astimezone(UTC)
+            if local.date() == last.date() and timedelta(0) <= elapsed < timedelta(minutes=10):
+                return None
+    offset = local.strftime("%z")
+    return await append_message(conn, ids, "note", ref_id=f"{TIME_NOTE_REF}{clock.timezone}|{clock.local_now}",
+                                text=TIME_NOTE.format(weekday=WEEKDAYS[clock.weekday], date=local.date().isoformat(),
+                                                      time=local.strftime("%H:%M"), timezone=clock.timezone,
+                                                      offset=f"UTC{offset[:3]}:{offset[3:5]}"))
 
 
 async def append_tool_change(conn: AsyncConnection, ids: Ids, change: str, tool_name: str) -> int:
@@ -465,8 +538,10 @@ async def unread_results(conn: AsyncConnection, session_id: str) -> UnreadResult
 
 async def delivered_reply(conn: AsyncConnection, session_id: str, call_id: str) -> Any | None:
     """What Claude's `send_reply` call `call_id` put on the visitor's screen: its `delivered` row's kernel message ID
-    (`ref_id`) and `blocks`, or None when nothing was shown for that call."""
-    return (await conn.execute(select(MESSAGES.c.ref_id, MESSAGES.c.blocks).where(
+    (`ref_id`), its `blocks` and its event's `handoff` flag, or None when nothing was shown for that call."""
+    return (await conn.execute(select(MESSAGES.c.ref_id, MESSAGES.c.blocks,
+                                     RUN_EVENTS.c.payload["handoff"].as_boolean().label("handoff"))
+        .select_from(WITH_EVENTS).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "delivered", MESSAGES.c.call_id == call_id)
         .order_by(MESSAGES.c.n).limit(1))).first()
 
@@ -480,6 +555,13 @@ def _summary_line(row: Any) -> str:
     """A summary line for a row, labelled as prompts.py says: a delivered row by its author, any other by its kind."""
     if row.kind == "delivered":
         return summary_line(SHOWN_LABELS[row.author], blocks_text(row.blocks or []))
+    if row.kind == "action_update":
+        # Older rows have no structured metadata; retain their decision and text without parsing frozen text.
+        metadata = f'decision_id={json.dumps(row.ref_id, ensure_ascii=False)} '
+        if row.blocks is not None:
+            metadata += (f'state={json.dumps(row.blocks.state)} '
+                         f'result_fact_ids={json.dumps(" ".join(row.blocks.result_fact_ids), ensure_ascii=False)} ')
+        return summary_line(SUMMARY_LABELS[row.kind], metadata + (row.text or ""))
     return summary_line(SUMMARY_LABELS[row.kind], row.text or "")
 
 
@@ -494,24 +576,26 @@ def _result_text(block: dict) -> str:
 
 
 async def _state_notes(conn: AsyncConnection, session_id: str) -> list[Any]:
-    """The latest note of each `STATE_NOTES` group, when the model has been sent it; one still waiting follows the
-    summary in full, and an older one is overtaken by it."""
+    """The latest note of each `STATE_NOTES` group and the latest business time, when the model has been sent it;
+    one still waiting follows the summary in full, and an older one is overtaken by it."""
     rows = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text,
-                                      MESSAGES.c.blocks, MESSAGES.c.model_seq).where(
+                                      MESSAGES.c.blocks, MESSAGES.c.model_seq, MESSAGES.c.ref_id).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "note",
-        MESSAGES.c.text.in_([text for group in STATE_NOTES for text in group])).order_by(MESSAGES.c.n))).all()
+        or_(MESSAGES.c.text.in_([text for group in STATE_NOTES for text in group]),
+            MESSAGES.c.ref_id.startswith(TIME_NOTE_REF, autoescape=True))).order_by(MESSAGES.c.n))).all()
     latest = [next((row for row in reversed(rows) if row.text in group), None) for group in STATE_NOTES]
+    latest.append(next((row for row in reversed(rows) if (row.ref_id or "").startswith(TIME_NOTE_REF)), None))
     return [row for row in latest if row is not None and row.model_seq is not None]
 
 
 async def _summary(conn: AsyncConnection, session_id: str, unread: UnreadResults | None) -> str:
     """The conversation so far, by code: texts, delivered blocks (says included), action updates and the latest
-    state notes (`STATE_NOTES`; whispers never), each on one labelled, escaped line, and, where they were written,
-    the results Claude hadn't read (`unread`), one line each, labelled by tool: the context they were written in is
+    state notes (including business time; whispers never), each on one labelled, escaped line, and, where they were
+    written, the results Claude hadn't read (`unread`), one line each, labelled by tool: the context they were written in is
     closing, and Claude must not lose what its calls did. Rows still waiting for the model are left out; they follow
     it in full. Recorded history is never in it."""
     rows = await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text,
-                                     MESSAGES.c.blocks).where(
+                                     MESSAGES.c.blocks, MESSAGES.c.ref_id, MESSAGES.c.model_content).where(
         MESSAGES.c.session_id == session_id,
         MESSAGES.c.kind.in_(("visitor_text", "agent_text", "delivered", "action_update")),
         ~and_(MESSAGES.c.model_seq.is_(None), MESSAGES.c.model_content.is_not(None)), NOT_REPLAYED,

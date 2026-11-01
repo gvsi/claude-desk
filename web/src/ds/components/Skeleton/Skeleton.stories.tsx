@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { expect, fn, userEvent, waitFor } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
+import { ANIMATION_DEADLINE_MS, animationWithin } from '../../test/animationWithin.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { partsOf, regionIn, watchRegion, type LayerState, type RegionParts } from '../../test/skeletonRegion.ts';
 import { Button } from '../Button/Button.tsx';
@@ -36,21 +37,6 @@ const FRAME_MS = 17;
  * fallback that removes a layer whose fade never reports back.
  */
 const PROMPTLY_MS = 250;
-
-/** Animation promises must report which phase stalled before Storybook's whole-story timeout. */
-async function animationWithin<T>(promise: Promise<T>, phase: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`the skeleton fade did not ${phase} within 2000 ms`)), 2000);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /** Each line's type style, its line box and the pill centred in it, as the boards draw them. */
 const LINES: readonly { text: SkeletonText; label: string; box: number; pill: number; width: number }[] = [
@@ -383,7 +369,7 @@ function sweepOf(shape: HTMLElement): CSSAnimation {
 export const Sweep: Story = {
   render: () => <SkeletonScreen loading status="Opening your Desk" skeleton={<TodayHead />} />,
   play: async ({ canvasElement }) => {
-    const later = await waitFor(() => anchored(canvasElement, 'later'), { timeout: 2000 });
+    const later = await waitFor(() => anchored(canvasElement, 'later'), { timeout: ANIMATION_DEADLINE_MS });
 
     // skeleton_sweeps_one_band: every shape paints fill-hover under one band, transparent at both
     // ends and fill-secondary at its centre, 900 px wide, moved on the writing loop at an even speed.
@@ -566,7 +552,7 @@ export const FastLoad: Story = {
     try {
       // fast_load_goes_straight_to_the_page: the load ends at 100 ms, inside the wait, so the
       // shapes never show and nothing fades; the people draw in their place.
-      await waitFor(() => landedList(canvasElement), { timeout: 2000 });
+      await waitFor(() => landedList(canvasElement), { timeout: ANIMATION_DEADLINE_MS });
       await pause(SKELETON_DELAY_MS * 2);
       await expect(watch.states.map((entry) => entry.state)).toEqual(['waiting', 'gone']);
       await expect(fades.fades).toEqual([]);
@@ -729,10 +715,10 @@ export const Lands: Story = {
       // Seek to the end rather than waiting for 120 ms of composited frames. The browser still
       // delivers the fade's own end, which must remove the layer well before the fallback.
       if (!moment) throw new Error('no leaving frame to finish');
-      const ended = animationWithin(moment.fade.finished.then(() => performance.now()), 'finish');
+      const ended = animationWithin(moment.fade.finished.then(() => performance.now()), 'cd-skeleton-leave finish');
       moment.fade.finish();
       const endedAt = await ended;
-      const gone = await watch.reached('gone', 2000);
+      const gone = await watch.reached('gone', ANIMATION_DEADLINE_MS);
       await expect(gone.at - endedAt).toBeLessThan(PROMPTLY_MS);
       await expect(watch.states.map((entry) => entry.state)).toEqual(['waiting', 'shown', 'leaving', 'gone']);
       await expectLanded(canvasElement);
@@ -792,7 +778,7 @@ export const Continues: Story = {
       await watch.reached('leaving');
       await expect(firstFrame).toEqual({ state: 'shown', status: 'Loading your customers', outer: 'leaving' });
       // The outer region lands; the inner one keeps its shapes while the people are read.
-      await watch.reached('gone', 2000);
+      await watch.reached('gone', ANIMATION_DEADLINE_MS);
       const inner = partsOf(canvasElement.querySelectorAll<HTMLElement>('.cd-skeleton-screen')[1] as HTMLElement);
       await expect(inner.layer?.dataset.state).toBe('shown');
       await expect(inner.body).toHaveAttribute('aria-busy', 'true');
@@ -831,7 +817,7 @@ export const Fails: Story = {
       if (!moment) throw new Error('no leaving frame to cancel');
       const { fade } = moment;
       const layer = moment.parts.layer as HTMLElement;
-      await animationWithin(fade.ready, 'pause');
+      await animationWithin(fade.ready, 'cd-skeleton-leave pause');
       fade.currentTime = 60;
       const fadingOpacity = Number(getComputedStyle(layer).opacity);
       await expect(fadingOpacity).toBeGreaterThan(0);
@@ -839,7 +825,7 @@ export const Fails: Story = {
       fade.cancel();
       const cancelled = performance.now();
       expectComputed(layer, { opacity: '0' });
-      const gone = await watch.reached('gone', 2000);
+      const gone = await watch.reached('gone', ANIMATION_DEADLINE_MS);
       await expect(gone.at - cancelled).toBeLessThan(PROMPTLY_MS);
       await expectLanded(canvasElement);
       await expect(region.contains(notice)).toBe(true);

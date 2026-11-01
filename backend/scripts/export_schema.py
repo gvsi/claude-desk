@@ -34,6 +34,9 @@ def export_schema() -> dict:
         model.__name__: model for model in (*_contract_models(), *KERNEL_REQUESTS, *KERNEL_RESPONSES, A2AResponse)
     }
     exported["SseEvent"] = SseEvent
+    # Keep the closed native/MCP name available after ToolProfile also accepts desk.* names.
+    exported.update(ToolName=contracts.ToolName, AnyToolName=contracts.AnyToolName,
+                    BusinessToolName=contracts.BusinessToolName)
     by_name, document = TypeAdapter.json_schemas(
         [(name, "validation", TypeAdapter(annotation)) for name, annotation in exported.items()]
     )

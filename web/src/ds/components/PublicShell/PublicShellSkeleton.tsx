@@ -5,14 +5,27 @@ import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { Skeleton, SkeletonCard } from '../Skeleton/Skeleton.tsx';
 import { PublicBrandHeaderSkeleton } from './PublicBrandHeaderSkeleton.tsx';
 import { ASK_OWNER_PREFIX, useShellLayout, useVisualViewportFit } from './PublicShell.tsx';
+import { useFirstView } from './useFirstView.ts';
 
+import '../SuggestionChips/SuggestionChips.css';
 import './PublicShell.css';
 
-/** The shell's own layout and measurements, with no visitor content or interactive elements. */
+/** Three one-line starter chips, as wide as the fresh copy's, so they wrap as its do at 390 px. */
+const CHIP_WIDTHS = [177, 186, 163] as const;
+
+/** The invitation's meta line, as wide as its words in each language. */
+const INVITATION_WIDTH: Record<CopyLanguage, number> = { en: 250, es: 287 };
+
+/**
+ * The shell's own layout and measurements, with no visitor content or interactive elements. History
+ * is unknown until the page lands, so every load draws the first view: the greeting, its meta line,
+ * the composer and three starter chips, placed by the same hook as the real invitation.
+ */
 export function PublicShellSkeleton({ language, footer }: { language: CopyLanguage; footer: boolean }) {
   const shell = useRef<HTMLDivElement>(null);
   useVisualViewportFit(shell, !footer);
   const aboutBeside = useShellLayout(shell);
+  useFirstView(shell, true, aboutBeside, CHIP_WIDTHS.length);
   const about = footer ? (
     <div className="cd-public-shell__about" data-skeleton-anchor="about-column">
       <Skeleton shape="line" text="section" width={200} anchor="about-title" />
@@ -44,7 +57,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
     </div>
   ) : null;
   return (
-    <div ref={shell} className={`cd-public-shell cd-public-shell--skeleton${footer ? '' : ' cd-public-shell--embedded'}`} lang={language}>
+    <div ref={shell} className={`cd-public-shell cd-public-shell--skeleton cd-public-shell--first-view${footer ? '' : ' cd-public-shell--embedded'}`} lang={language}>
       <PublicBrandHeaderSkeleton hours />
       <div className="cd-public-shell__body">
         <div className="cd-public-shell__chat">
@@ -60,13 +73,29 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
             <Skeleton shape="block" measure={{ label: `${ASK_OWNER_PREFIX[language]}Maria Rivera`, className: 'cd-button cd-button--secondary cd-button--inline cd-type-control' }} height="var(--size-control)" className="cd-public-shell-skeleton__ask" anchor="ask-owner" />
           </div>
           <div className="cd-public-shell__scroll">
-            {aboutBeside ? null : about}
-            <div className="cd-public-shell__conversation" data-skeleton-anchor="conversation" />
+            <div className="cd-public-shell__conversation" data-skeleton-anchor="conversation">
+              <div className="cd-public-shell__welcome">
+                <Skeleton shape="line" text="greeting" width="70%" anchor="greeting" />
+                <Skeleton shape="line" text="greeting" width="60%" className="cd-public-shell-skeleton__phone-line" />
+                <Skeleton shape="line" text="meta" width={INVITATION_WIDTH[language]} className="cd-public-shell__invitation" anchor="invitation" />
+              </div>
+            </div>
           </div>
           <div className="cd-public-shell__composer">
-            <div className="cd-public-shell-skeleton__composer">
-              <Skeleton shape="block" height="calc(var(--size-control) + 2 * var(--space-10))" radius="composer" anchor="composer" />
-              <Skeleton shape="line" text="body" width="55%" className="cd-public-shell-skeleton__placeholder" />
+            <div className="cd-public-shell__composer-group">
+              <div className="cd-public-shell__composer-lift">
+                <div className="cd-public-shell-skeleton__composer">
+                  <Skeleton shape="block" height="calc(var(--size-control) + 2 * var(--space-10))" radius="composer" anchor="composer" />
+                  <Skeleton shape="line" text="body" width="55%" className="cd-public-shell-skeleton__placeholder" />
+                </div>
+              </div>
+              <div className="cd-public-shell__starters" data-skeleton-anchor="starters">
+                <div className="cd-suggestion-chips">
+                  {CHIP_WIDTHS.map((width, i) => (
+                    <Skeleton key={i} shape="block" width={width} height="var(--space-28)" radius="full" />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
           {footer ? (
@@ -74,6 +103,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
               <div data-skeleton-anchor="concept-footer"><ConceptFooter poweredBy /></div>
             </div>
           ) : null}
+          {aboutBeside ? null : about}
         </div>
         {aboutBeside ? about : null}
       </div>

@@ -26,6 +26,11 @@ export interface AgentMessageProps {
   text?: string;
   /** The page's language: the signed status's words and `lang` on the message. English by default. */
   language?: CopyLanguage;
+  /**
+   * The language the agent's text is in, when it isn't the page's: `lang` on the quote alone, so
+   * English words on a Spanish page are read as English. Left out, the quote takes the message's.
+   */
+  textLanguage?: CopyLanguage;
 }
 
 /**
@@ -35,7 +40,7 @@ export interface AgentMessageProps {
  * run of user text with the signed status in a pill beside it, and the words are quoted under the
  * title, so nothing an agent writes can read as the status, the title or the meta line.
  */
-export function AgentMessage({ agentName, signed, title, meta, time, text, language = 'en' }: AgentMessageProps) {
+export function AgentMessage({ agentName, signed, title, meta, time, text, language = 'en', textLanguage }: AgentMessageProps) {
   const hasText = text !== undefined && text.trim() !== '';
   const hasTime = time !== undefined && time.trim() !== '';
   // Only a signature the kernel accepted reads as signed.
@@ -56,7 +61,7 @@ export function AgentMessage({ agentName, signed, title, meta, time, text, langu
       <div className="cd-agent-message__bubble">
         <p className="cd-agent-message__title cd-type-body">{title}</p>
         {hasText ? (
-          <blockquote className="cd-agent-message__text cd-type-body" data-copy="user">
+          <blockquote className="cd-agent-message__text cd-type-body" data-copy="user" lang={textLanguage}>
             {text}
           </blockquote>
         ) : null}

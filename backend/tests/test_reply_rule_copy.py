@@ -1,27 +1,102 @@
-"""Owner explanations cover the rule IDs emitted by the kernel's soft-check result path."""
+"""What the kernel's soft checks are shown, and the owner's explanations of the rule IDs their result
+path emits."""
 
 from types import SimpleNamespace
+from typing import get_args
 from unittest.mock import AsyncMock
 
 import pytest
 
-from desk.api.owner_reads import REPLY_WHY_BY_RULE
-from desk.kernel_service import reply_check
+from desk.api.owner_reads import REPLY_WHY_BY_RULE, reply_reason
+from desk.contracts import ClauseTemplate, RenderedBlock
+from desk.kernel_service import jev, render, reply_check
+from desk.kernel_service.adapters import payment_link, release_document  # noqa: F401 -- register link templates
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 
 
-@pytest.mark.parametrize("verdict", [
-    pytest.param(None, id="unavailable"),
-    pytest.param(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=True), id="denies-ai"),
+def stub_ctx(soft_promise: AsyncMock) -> SimpleNamespace:
+    """A kernel context with only what `soft_promises` reads: the Sonnet check, a Jev key and a Desk."""
+    return SimpleNamespace(decisions=SimpleNamespace(soft_promise=soft_promise),
+                           settings=SimpleNamespace(typesafe_api_key="fake-key"),
+                           repo=SimpleNamespace(scoped=lambda query: query),
+                           db=SimpleNamespace(scalars=AsyncMock(return_value=SimpleNamespace(one=lambda: None))))
+
+
+def test_every_card_template_has_a_label_for_the_soft_checks():
+    """Each card reaches the soft checks named by its kind (the owner's decision of 2026-11-01), so
+    every template the kernel registers, and every one the contract lists, has a fixed label: a new
+    template without one fails here."""
+    assert set(render.CHECK_LABELS) == set(render.TEMPLATES) == set(get_args(ClauseTemplate))
+    assert all(label.strip() == label and label for label in render.CHECK_LABELS.values())
+
+
+# A live deposit reply's cards: the quote, its payment link and a policy, as the kernel renders them.
+DEPOSIT_CARDS = [
+    RenderedBlock(kind="card", template="quote",
+                  text="$20.00\nService call deposit\nGood until Monday, November 2, 9:04 am"),
+    RenderedBlock(kind="card", template="payment_link", text="Service call deposit, $20.00"),
+    RenderedBlock(kind="card", template="policy", text="We work in Oakland, Berkeley, Alameda and Emeryville."),
+]
+
+
+@pytest.mark.parametrize(("language", "prose"), [("en", "Here's the quote and the link to pay."),
+                                                 ("es", "Aquí tiene el presupuesto y el enlace para pagar.")])
+async def test_both_soft_checkers_read_each_card_with_its_kind(language, prose, monkeypatch):
+    """The owner's decision of 2026-11-01: a card's text alone ("Service call deposit, $20.00") doesn't
+    say it is a payment link, so an honest "here's the link to pay" read as a promise no card backed.
+    Each card goes to Sonnet and to Jev as its kind's fixed English label, whatever the reply's
+    language, then its text, and both checkers are shown the same list."""
+    soft_promise = AsyncMock(return_value=(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False),
+                                           None))
+    evaluate = AsyncMock(return_value=jev.Result(status="ok", scores=dict.fromkeys(jev.STATEMENTS, 0.0),
+                                                 blocked=False))
+    monkeypatch.setattr(reply_check.context, "resolved_tools", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reply_check, "principal_for", lambda session: None)
+    monkeypatch.setattr(jev, "evaluate", evaluate)
+
+    violations, _, _ = await reply_check.soft_promises(stub_ctx(soft_promise), SimpleNamespace(desk_id="desk"),
+                                                       language, prose, DEPOSIT_CARDS)
+
+    labelled = ["Quote card: $20.00\nService call deposit\nGood until Monday, November 2, 9:04 am",
+                "Payment link card: Service call deposit, $20.00",
+                "Policy card: We work in Oakland, Berkeley, Alameda and Emeryville."]
+    soft_promise.assert_awaited_once_with(SoftPromiseInput(language=language, prose=prose, cards=labelled))
+    evaluate.assert_awaited_once_with(prose, labelled, [], api_key="fake-key")
+    assert violations == []
+
+
+@pytest.mark.parametrize(("verdict", "jev_blocked", "found"), [
+    pytest.param(None, False, [("check_unavailable", "soft.unavailable")], id="unavailable"),
+    pytest.param(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=True), False,
+                 [("soft_promise", "soft.denies_ai")], id="denies-ai"),
+    pytest.param(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False), True,
+                 [("soft_promise", "soft.jev")], id="jev"),
 ])
-async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict):
+async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict, jev_blocked, found, monkeypatch):
+    """One Sonnet try (no recheck): the kernel asks the model once, with no per-try timeout of its own."""
     soft_promise = AsyncMock(return_value=(verdict, None))
-    ctx = SimpleNamespace(decisions=SimpleNamespace(soft_promise=soft_promise))
+    ctx = stub_ctx(soft_promise)
+    monkeypatch.setattr(reply_check.context, "resolved_tools", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reply_check, "principal_for", lambda session: None)
+    scores = dict.fromkeys(jev.STATEMENTS, 0.0)
+    scores["owner_promised"] = 0.95 if jev_blocked else 0.0
+    monkeypatch.setattr(jev, "evaluate", AsyncMock(return_value=jev.Result(status="ok", scores=scores,
+                                                                          blocked=jev_blocked)))
     prose = "Here is the information."
 
-    violations, usage = await reply_check.soft_promises(ctx, "en", prose, [])
+    violations, usage, record = await reply_check.soft_promises(ctx, SimpleNamespace(desk_id="desk"), "en", prose, [])
 
     soft_promise.assert_awaited_once_with(SoftPromiseInput(language="en", prose=prose, cards=[]))
     assert usage is None
-    assert len(violations) == 1 and violations[0].kind == "soft_promise"
+    assert [(violation.kind, violation.rule_id) for violation in violations] == found
     assert {violation.rule_id for violation in violations} <= REPLY_WHY_BY_RULE.keys()
+    if jev_blocked:
+        assert REPLY_WHY_BY_RULE["soft.jev"] == "a second check flagged a promise the business's records don't back"
+
+
+def test_both_promise_checkers_have_one_owner_explanation():
+    assert reply_reason([("soft_promise", "soft.promise"), ("soft_promise", "soft.jev")]) == (
+        "A reply was stopped before it was shown, because it made a promise the rules don't back.")
+    assert reply_reason([("soft_promise", "soft.jev")]) == (
+        "A reply was stopped before it was shown, because "
+        "a second check flagged a promise the business's records don't back.")

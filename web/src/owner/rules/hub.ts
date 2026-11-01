@@ -19,7 +19,8 @@ import {
 import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, businessTools, connectorOn, isCatalogTool, toolDisplayName, toolNoun, toolState, type BusinessTools, type ConnectorKey } from '../connectors/catalog.ts';
 import { heldOldestFirst } from '../useDesks.ts';
-import { coveredTools } from './changeRows.ts';
+import { coveredTools, reviewedTools } from './changeRows.ts';
+import type { RuleDraft } from './drafts.ts';
 import { toolOutcome } from './outcome.ts';
 import { ABOVE_CEILING, PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
 
@@ -230,6 +231,25 @@ export function hubSections(view: RulesView, people: PeopleOut | null | undefine
       },
     ];
   });
+}
+
+/** The rows on Rules a confirmed change changed: its tools' rows, and the payment limit's line. */
+export interface ChangedRows {
+  /** The tools whose rules the change changed, or which it turned on, in the order of `tools`. */
+  tools: AnyToolName[];
+  /** It changed the payment limit, whose line leads Payments and Stripe. */
+  moneyLimit: boolean;
+}
+
+/**
+ * The rows on Rules that a confirmed `draft` changed, read from the draft's own cards, never from
+ * the words on the page: the tools its review's rows are about (`reviewedTools`, from the same
+ * pairing the review lists its rows by), so the rows that land are exactly the ones the review
+ * listed, each tool it turns on, and the payment limit when the draft changes it. A rule the draft
+ * replaces with one that differs only in its id changes no row.
+ */
+export function rowsChangedBy(draft: RuleDraft, tools: readonly Pick<ToolRow, 'tool' | 'effects' | 'source' | 'business'>[]): ChangedRows {
+  return { tools: reviewedTools(draft, tools), moneyLimit: draft.moneyCap !== null };
 }
 
 /** The payment limit's field, when it holds anything but whole dollars. */

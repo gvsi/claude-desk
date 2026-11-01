@@ -47,6 +47,15 @@ function isNarrow(): boolean {
 }
 
 /**
+ * Whether Ask Claude is a modal sheet over the page at this window's width, rather than a panel
+ * beside it, kept up to date as the width crosses its breakpoint. A page uses it to wait for the
+ * sheet to close before showing something the sheet would cover.
+ */
+export function useAskClaudeIsSheet(): boolean {
+  return useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
+}
+
+/**
  * While `modal`, the panel is a modal sheet. In `AppShell`'s `panel`, it asks the shell to make
  * everything else inert; on entering, focus moves to its composer unless it is already inside.
  * Whatever else happens, focus stays inside: a focus that lands outside it, by Tab or by a script,
@@ -125,7 +134,7 @@ function useModalSheet(panelRef: { current: HTMLElement | null }, modal: boolean
 export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskClaudePanelProps) {
   const headingId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
-  const modal = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
+  const modal = useAskClaudeIsSheet();
   useModalSheet(panelRef, modal);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {

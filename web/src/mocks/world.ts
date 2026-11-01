@@ -38,19 +38,23 @@ import type {
   TranscriptKind,
 } from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
+import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
+import { DOCUMENT_HREF, type DocumentLink } from './documents.ts';
 import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
   EVENT_GAP_MS,
-  VISITOR_PLAIN,
   allows,
   answersFor,
   linkCancelledBlock,
   statusLine,
   turnEnd,
   turnLanguage,
+  visitorLine,
   writing,
   type DecisionSpec,
+  type DeskOwner,
   type Language,
   type Step,
   type TurnContext,
@@ -58,6 +62,12 @@ import {
 
 export const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
+
+/** Tokens `prefix1`, `prefix2`…, for a copy made without a store to name its links. */
+function counted(prefix: string): () => string {
+  let n = 0;
+  return () => `${prefix}${(n += 1)}`;
+}
 
 /** RFC 3339 UTC with microseconds, the form the kernel signs. */
 export function isoTime(ms: number): string {
@@ -72,6 +82,9 @@ export const LEDGER_KEY = { key_id: rivera.ledger.verified.key_id, public_key_he
 /** The reason the kernel gives a handoff the handoff card opened: its own words, never the visitor's or Claude's. */
 export const CARD_REASON = 'The Desk handed this to you.';
 
+/** What closed a card handoff, as the kernel's `closed_by` names it: the owner taking the chat over or writing in it, or the visitor booking a time. */
+type CardHandoffCloser = 'takeover' | 'owner_message' | 'booking';
+
 type Listener = (seq: number, ev: SseEvent) => void;
 
 /** How long a typing signal shows, and how often one counts (plan 02b Task 1). */
@@ -80,6 +93,11 @@ export const TYPING_EVERY_MS = 2_000;
 
 export interface SessionRecord {
   state: SessionState;
+  /**
+   * The visitor's chat has ended for good (a seeded scenario: its document waits for the owner
+   * after the chat closed). The visitor's routes no longer find it; the owner's history still does.
+   */
+  ended: boolean;
   deskId: string;
   ownerPreview: boolean;
   /** The verified person on record, once the visitor confirmed it's them; null until then. */
@@ -89,7 +107,6 @@ export interface SessionRecord {
   /** The last turn's language; a follow-up after an answer uses it. */
   language: Language;
   lastActivity: number;
-  lastVisitorText: string | null;
   /** The owner's view: the visitor's view leaves out whispers. */
   items: TranscriptItem[];
   /** Every event the session's stream has carried, `seq` from 1 with no gaps. */
@@ -126,6 +143,11 @@ export interface DeskRecord {
   tools: ToolRecord[];
   /** Rules the owner's answers suggest, newest first; none until a test adds one. */
   suggestions: Suggestion[];
+  /**
+   * Who the stream names as the owner who takes a chat over and types in it: a Desk setup made
+   * names its own owner; the seeded Desks leave it out and name Rivera's (`BUSINESS`).
+   */
+  ownerName?: string;
 }
 
 /**
@@ -186,9 +208,10 @@ export function canonicalCard(card: RuleCard): string {
 
 export interface DecisionRecord {
   decision: Decision;
+  /** The signed approval snapshot, kept separately from the execution outcome. */
+  approved?: Decision | null;
   deskId: string;
   createdAt: number;
-  fromTheVisitor: string | null;
 }
 
 /** An open or done handoff. What its visitor wrote is read from its chat on every read, as the API does. */
@@ -261,11 +284,13 @@ export class MockWorld {
   keepsKnowledgeOwnerOnly: (item: KnowledgeItem) => boolean = () => false;
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /** The document links this copy's document cards handed out, by token (documents.ts), opened or not. */
+  readonly documentLinks = new Map<string, DocumentLink>();
   /**
    * The Desks deleted from this copy, by id. Their chats, decisions and callback requests stay in
    * the copy, closed: the routes that name one answer 409 `closed` (served.ts), as the kernel does.
    */
-  readonly deletedDesks = new Set<string>();
+  readonly deletedDesks = new Map<string, DeskRecord>();
   /** Each session's open demo code, by session id: the code and who it confirms. Spent once it works. */
   readonly challenges = new Map<string, { code: string; person: { personId: string; name: string } }>();
   private counter = 0;
@@ -279,6 +304,8 @@ export class MockWorld {
     readonly copyNo: number,
     /** A new payment link's token, from the store that holds the copy. */
     private readonly linkToken: () => string,
+    /** A new document link's token, from the store that holds the copy; a copy made without one counts its own. */
+    private readonly documentToken: () => string = counted('doc'),
   ) {
     this.ids = copyIds(copyNo);
   }
@@ -323,6 +350,16 @@ export class MockWorld {
     return desk;
   }
 
+  /** The owner's display name on the session's Desk: its own, or Rivera's on a seeded Desk. */
+  ownerNameOf(session: SessionRecord): string {
+    return ownerNameOfDesk(this.deskOf(session));
+  }
+
+  /** Whom the visitor's lines on the session's Desk name, its handoff card's among them (`deskOwner`). */
+  ownerOf(session: SessionRecord): DeskOwner {
+    return deskOwner(this.deskOf(session));
+  }
+
   sessionsOf(deskId: string): SessionRecord[] {
     return [...this.sessions.values()].filter((s) => s.deskId === deskId);
   }
@@ -356,7 +393,7 @@ export class MockWorld {
     }
     const index = this.desks.indexOf(desk);
     if (index !== -1) this.desks.splice(index, 1);
-    this.deletedDesks.add(desk.summary.desk_id);
+    this.deletedDesks.set(desk.summary.desk_id, desk);
   }
 
   /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */
@@ -365,13 +402,13 @@ export class MockWorld {
     const kind = opts.agent === undefined ? 'visitor' : 'agent';
     const session: SessionRecord = {
       state: { session_id: sessionId, kind, verified: false, assurance: 'none', mode: 'ai', generation: 1 },
+      ended: false,
       deskId: desk.summary.desk_id,
       ownerPreview: opts.ownerPreview ?? false,
       person: null,
       displayName: opts.agent ?? null,
       language: 'en',
       lastActivity: this.now(),
-      lastVisitorText: null,
       items: [],
       events: [],
       listeners: new Set(),
@@ -417,17 +454,18 @@ export class MockWorld {
   /** The visitor's message: it takes the place of their typing, and their next keystroke counts at once. */
   visitorText(session: SessionRecord, text: string): void {
     this.addItem(session, 'visitor_text', text, null);
-    session.lastVisitorText = text;
     session.language = turnLanguage(text);
     session.lastActivity = this.now();
     session.typingUntil = null;
     session.visitorTypedAt = null;
   }
 
-  /** A visiting agent's signed request: its words reach the owner's view only, never a visitor's page. */
+  /**
+   * A visiting agent's signed request: its words join the owner's view of the chat. The built-in
+   * agent's run also quotes them to the page that sent it, on its agent turn (`AgentTurn.text`).
+   */
   agentText(session: SessionRecord, text: string): void {
     this.addItem(session, 'agent_text', text, null);
-    session.lastVisitorText = text;
     session.lastActivity = this.now();
   }
 
@@ -452,7 +490,8 @@ export class MockWorld {
   say(session: SessionRecord, text: string): OwnerMessageResult {
     const messageId = this.id('msg');
     const { language } = session;
-    const checked = this.appendLedger(this.deskOf(session), {
+    const desk = this.deskOf(session);
+    const checked = this.appendLedger(desk, {
       kind: 'reply',
       origin: 'kernel',
       session_id: session.state.session_id,
@@ -462,7 +501,7 @@ export class MockWorld {
     this.closeCardHandoffs(session, 'owner_message');
     const blocks = [cardBlock('owner_said', { fact_id: `owner:${messageId}`, title: text })];
     const signature = sign(messageId);
-    const visitorPlain = VISITOR_PLAIN[language].owner_said;
+    const visitorPlain = visitorLine(language, 'owner_said', deskOwner(desk));
     this.emit(session, {
       type: 'message',
       message_id: messageId,
@@ -505,7 +544,7 @@ export class MockWorld {
     const now = this.now();
     if (session.ownerTypedAt !== null && now - session.ownerTypedAt < TYPING_EVERY_MS) return;
     session.ownerTypedAt = now;
-    this.emit(session, { type: 'owner_typing', name: BUSINESS.owner_display_name, until: isoTime(now + TYPING_SHOWS_MS) });
+    this.emit(session, { type: 'owner_typing', name: this.ownerNameOf(session), until: isoTime(now + TYPING_SHOWS_MS) });
   }
 
   /**
@@ -554,6 +593,7 @@ export class MockWorld {
     const callId = this.id('call');
     const actionId = this.id('act');
     if (spec.outcome === 'allow' && spec.executed) {
+      this.runSideEffects(session, spec.tool);
       const ran = this.appendLedger(desk, {
         kind: 'execute',
         origin: 'kernel',
@@ -593,7 +633,7 @@ export class MockWorld {
       review: null,
       reason_plain: spec.reasonPlain,
       owner_plain: null,
-      visitor_plain: statusLine(language, state === 'refused' && spec.visitorStatus !== undefined ? spec.visitorStatus : state, spec.tool),
+      visitor_plain: statusLine(language, state === 'refused' && spec.visitorStatus !== undefined ? spec.visitorStatus : state, spec.tool, deskOwner(desk)),
       answers: hold ? answersFor(spec, session.person !== null) : [],
       expires_at: isoTime(this.now() + DAY),
       inbox,
@@ -604,7 +644,6 @@ export class MockWorld {
       decision,
       deskId: desk.summary.desk_id,
       createdAt: this.now(),
-      fromTheVisitor: session.lastVisitorText,
     });
     return decision;
   }
@@ -687,13 +726,27 @@ export class MockWorld {
   /**
    * The owner's answer, as the kernel records it: the approval, with the summary `approvals.py`
    * writes as it takes an answer (the decision, its action, the answer, and `approved` or `denied`),
-   * and the run when it allows.
+   * and the run when it allows. Keep the approval snapshot separate from the run's outcome.
    */
   answer(record: DecisionRecord, answer: ApprovalAnswer): Decision {
     const desk = this.desk(record.deskId);
     const session = this.sessions.get(record.decision.session_id);
     if (!desk || !session) throw new Error(`decision ${record.decision.decision_id} has no Desk or session`);
     const { decision_id: decisionId, session_id: sessionId } = record.decision;
+    // Recheck before writing an approval: a refusal is one approval entry, with no execution.
+    const action = record.decision.action;
+    if (allows(answer) && session.ended && action?.effects.includes('private_data')) {
+      return this.refuseAnswer(record, answer, desk, 'session_ended', 'session_closed', 'Not shared: their session ended before your answer');
+    }
+    const rulesRefuse = action != null && rulesForTool(action, desk.policy.cards).some((card) => card.mode === 'never' && (
+      card.who === 'anyone' ||
+      (card.who === 'verified' && session.state.verified) ||
+      (card.who === 'person' && session.person?.personId === card.person_id) ||
+      (card.who === 'record_owner' && session.person != null && session.person.personId === action.resource.owner_person_id)
+    ));
+    if (allows(answer) && rulesRefuse) {
+      return this.refuseAnswer(record, answer, desk, 'rules_changed', 'policy', "Your rules changed before this ran, so it wasn't done.");
+    }
     const approval = this.appendLedger(desk, {
       kind: 'approval',
       origin: 'kernel',
@@ -706,23 +759,33 @@ export class MockWorld {
         state: allows(answer) ? 'approved' : 'denied',
       },
     });
+    record.approved = allows(answer) ? {
+      ...record.decision,
+      state: 'approved',
+      visitor_plain: visitorLine(session.language, 'approved', deskOwner(desk)),
+      inbox: [],
+      ledger_seq: approval.seq,
+      signature: sign(`${decisionId}:approved`),
+    } : null;
     let state: DecisionState = 'denied';
     let ledgerSeq = approval.seq;
     if (allows(answer)) {
+      state = 'executed';
+      this.runSideEffects(session, record.decision.action?.tool);
       const ran = this.appendLedger(desk, {
         kind: 'execute',
         origin: 'kernel',
         session_id: sessionId,
         ref_id: decisionId,
-        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state: 'executed' },
+        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state },
       });
-      state = 'executed';
       ledgerSeq = ran.seq;
     }
     record.decision = {
       ...record.decision,
       state,
-      visitor_plain: statusLine(session.language, state, record.decision.action?.tool ?? null),
+      owner_plain: null,
+      visitor_plain: statusLine(session.language, state, record.decision.action?.tool ?? null, deskOwner(desk)),
       inbox: [],
       ledger_seq: ledgerSeq,
       signature: sign(`${decisionId}:${state}`),
@@ -730,19 +793,41 @@ export class MockWorld {
     return record.decision;
   }
 
+  private refuseAnswer(record: DecisionRecord, answer: ApprovalAnswer, desk: DeskRecord, reason: string, check: string, ownerPlain: string): Decision {
+    const decision = record.decision;
+    const entry = this.appendLedger(desk, {
+      kind: 'approval', origin: 'kernel', session_id: decision.session_id, ref_id: decision.decision_id,
+      summary: { decision_id: decision.decision_id, action_id: decision.action?.action_id ?? null,
+        answer, state: 'refused_at_execution', reason, check },
+    });
+    record.decision = { ...decision, state: 'refused_at_execution', owner_plain: ownerPlain,
+      visitor_plain: statusLine(this.sessions.get(decision.session_id)?.language ?? 'en', 'refused_at_execution', decision.action?.tool ?? null, deskOwner(desk)),
+      inbox: [], ledger_seq: entry.seq, signature: sign(`${decision.decision_id}:refused_at_execution`) };
+    return record.decision;
+  }
+
   /**
    * The owner's answer to a held request of a deleted Desk, as the kernel takes it: an allow is
    * re-checked at execution and refused there (`refused_at_execution`), so nothing runs, and a deny
-   * is `denied`. The Desk's chat is closed, so it hears nothing, and its ledger went with the Desk.
+   * is `denied`. The Desk's chat is closed, so it hears nothing. Its retained ledger records the answer.
    */
   answerClosed(record: DecisionRecord, answer: ApprovalAnswer): Decision {
+    const desk = this.deletedDesks.get(record.deskId);
+    if (!desk) throw new Error('the decision has no deleted Desk');
+    if (allows(answer)) return this.refuseAnswer(record, answer, desk, 'rules_changed', 'desk', "This Desk was deleted before this ran, so it wasn't done.");
     const state: DecisionState = allows(answer) ? 'refused_at_execution' : 'denied';
     const language = this.sessions.get(record.decision.session_id)?.language ?? 'en';
+    const entry = this.appendLedger(desk, {
+      kind: 'approval', origin: 'kernel', session_id: record.decision.session_id, ref_id: record.decision.decision_id,
+      summary: { decision_id: record.decision.decision_id, action_id: record.decision.action?.action_id ?? null, answer, state },
+    });
     record.decision = {
       ...record.decision,
       state,
-      visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null),
+      owner_plain: null,
+      visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null, deskOwner(desk)),
       inbox: [],
+      ledger_seq: entry.seq,
       signature: sign(`${record.decision.decision_id}:${state}`),
     };
     return record.decision;
@@ -764,7 +849,7 @@ export class MockWorld {
     record.decision = {
       ...record.decision,
       state: 'cancelled',
-      visitor_plain: statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null),
+      visitor_plain: statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null, deskOwner(desk)),
       inbox: [],
       ledger_seq: cancelled.seq,
       signature: sign(`${decisionId}:cancelled`),
@@ -774,16 +859,27 @@ export class MockWorld {
   }
 
   /**
-   * A reply of Claude's, checked and recorded. One that shows the handoff card opens the owner's
-   * handoff first, as the kernel's check does (`openCardHandoff`), except in history the seed or a
-   * test writes: the kernel's seed holds its request without checking a reply.
+   * A reply of Claude's, checked and recorded. Outside the owner's preview, one that shows the
+   * handoff card opens the owner's handoff first, as the kernel's check does (`openCardHandoff`),
+   * except in history the seed or a test writes: the kernel's seed holds its request without
+   * checking a reply.
    */
   reply(session: SessionRecord, blocks: RenderedBlock[], language: Language, opts: { blocked?: boolean; paused?: boolean } = {}): EvMessage {
     const paused = opts.paused ?? false;
     const blocked = paused || (opts.blocked ?? false);
+    const handoff = blocks.some((block) => block.template === 'handoff');
     const messageId = this.id('msg');
-    if (this.replaying === 0 && blocks.some((block) => block.template === 'handoff')) this.openCardHandoff(session);
-    const checked = this.appendLedger(this.deskOf(session), {
+    if (this.replaying === 0 && handoff && !session.ownerPreview) this.openCardHandoff(session);
+    // Each document card hands out a link of its own, in place of the one it was written with,
+    // which opens once from now on.
+    const shown = blocks.map((block) => {
+      if (block.template !== 'document_link' || !DOCUMENT_HREF.test(block.href ?? '')) return block;
+      const token = this.documentToken();
+      this.documentLinks.set(token, { title: block.title ?? '', opened: false });
+      return { ...block, href: `/api/d/${token}` };
+    });
+    const desk = this.deskOf(session);
+    const checked = this.appendLedger(desk, {
       kind: 'reply',
       origin: 'kernel',
       session_id: session.state.session_id,
@@ -796,9 +892,9 @@ export class MockWorld {
       generation: session.state.generation,
       author: 'claude',
       language,
-      handoff: blocked,
-      blocks: blocks.map((block) => ({ ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] })),
-      visitor_plain: VISITOR_PLAIN[language][blocked ? 'reply_handed_off' : 'reply_checked'],
+      handoff,
+      blocks: shown.map((block) => ({ ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] })),
+      visitor_plain: visitorLine(language, handoff ? 'reply_handed_off' : 'reply_checked', deskOwner(desk)),
       ledger_seq: checked.seq,
       signature: sign(messageId),
     };
@@ -806,11 +902,16 @@ export class MockWorld {
 
   /** The step context for one turn of `session`, in `language`. */
   context(session: SessionRecord, language: Language, text: string): TurnContext {
+    // Looked up only when a step names the owner, so making a context still never reads the Desk.
+    const owner = () => this.ownerOf(session);
     return {
       language,
       text,
       get person() {
         return session.person;
+      },
+      get owner() {
+        return owner();
       },
       decide: (spec) => this.decide(session, spec, language),
       status: (type, decision) => statusEvent(type, decision),
@@ -892,7 +993,7 @@ export class MockWorld {
       ref_id: token,
       summary: { state: 'cancelled', by },
     });
-    if (by === 'rules_changed') this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language)]);
+    if (by === 'rules_changed' && !session.ended) this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language, `payment_link:${token}`, this.ownerOf(session))]);
   }
 
   /**
@@ -902,7 +1003,8 @@ export class MockWorld {
   private fromTheDesk(session: SessionRecord, blocks: RenderedBlock[]): ReplyVerdict {
     const messageId = this.id('msg');
     const { language } = session;
-    const checked = this.appendLedger(this.deskOf(session), {
+    const desk = this.deskOf(session);
+    const checked = this.appendLedger(desk, {
       kind: 'reply',
       origin: 'kernel',
       session_id: session.state.session_id,
@@ -910,7 +1012,7 @@ export class MockWorld {
       summary: { author: 'desk', ok: true, language, violations: [] },
     });
     const signature = sign(messageId);
-    const visitorPlain = VISITOR_PLAIN[language].reply_checked;
+    const visitorPlain = visitorLine(language, 'reply_checked', deskOwner(desk));
     this.emit(session, {
       type: 'message',
       message_id: messageId,
@@ -1023,10 +1125,11 @@ export class MockWorld {
   /**
    * A handoff closed, a call-back request's or the handoff card's, as the kernel records it: a
    * `desk_data` entry naming it, on no chat and with no `kind`. The owner marking it done gives no
-   * more; a call-back closing it adds `replaced_by`, the call-back's own handoff; handling a card
-   * handoff adds `closed_by`, naming the owner's action.
+   * more; a call-back closing it adds `replaced_by`, the call-back's own handoff; closing a card
+   * handoff because the owner handled the chat or the visitor booked a time adds `closed_by`,
+   * naming which.
    */
-  closeHandoff(record: HandoffRecord, replacedBy?: string, closedBy?: 'takeover' | 'owner_message'): void {
+  closeHandoff(record: HandoffRecord, replacedBy?: string, closedBy?: CardHandoffCloser): void {
     const desk = this.desk(record.deskId);
     if (!desk) throw new Error(`handoff ${record.handoff.handoff_id} has no Desk`);
     record.handoff = { ...record.handoff, status: 'done' };
@@ -1044,13 +1147,26 @@ export class MockWorld {
     });
   }
 
-  /** Handling the conversation closes card handoffs; a promised call-back is still owed. */
-  private closeCardHandoffs(session: SessionRecord, by: 'takeover' | 'owner_message'): void {
+  /**
+   * The owner handling the conversation, or the visitor booking a time in it, closes its card
+   * handoffs; a promised call-back is still owed.
+   */
+  private closeCardHandoffs(session: SessionRecord, by: CardHandoffCloser): void {
     for (const record of this.handoffs.values()) {
       if (record.handoff.session_id === session.state.session_id && record.handoff.status === 'open' && record.handoff.kind === 'card') {
         this.closeHandoff(record, undefined, by);
       }
     }
+  }
+
+  /**
+   * What an action does to its chat as it runs, recorded before its execution entry, as the
+   * kernel's adapter does: a booking (`native.book`, the owner's decision of 2026-11-01) closes the
+   * chat's card handoffs, since the visitor has what they asked for. The mock runs no typed
+   * booking, which closes them the same way in the kernel.
+   */
+  private runSideEffects(session: SessionRecord, tool: string | undefined): void {
+    if (tool === 'native.book') this.closeCardHandoffs(session, 'booking');
   }
 
   /**
@@ -1069,7 +1185,7 @@ export class MockWorld {
       summary: { from: previous, to: 'owner', generation: session.state.generation },
     });
     this.closeCardHandoffs(session, 'takeover');
-    this.emit(session, { type: 'owner_joined', name: BUSINESS.owner_display_name });
+    this.emit(session, { type: 'owner_joined', name: this.ownerNameOf(session) });
     return session.state;
   }
 
@@ -1231,6 +1347,28 @@ export class MockWorld {
       ref_id: String(version),
       summary: { version, parent_version: record.parent },
     });
+    // A never rule or a deciding ask rule revokes auto-allowed links in the scopes this mock models.
+    // The script issues only auto-allowed links: it has no owner-approved link provenance or
+    // full kernel rule evaluator (limits, hours, reviewer conditions and other principal scopes).
+    const linkRules = rulesForTool({ tool: 'native.payment_link', effects: ['charge'] }, desk.policy.cards);
+    // Match rulesForTool's ordering: personal tool, personal effect, group tool, group effect.
+    const specificity = (card: RuleCard) => (card.who === 'person' || card.who === 'agent' ? 0 : 2)
+      + (card.applies_to.startsWith('effect:') ? 1 : 0);
+    for (const [token, link] of this.links) {
+      if (link.deskId !== desk.summary.desk_id || link.view.state !== 'issued') continue;
+      const session = this.sessions.get(link.sessionId);
+      if (!session) continue;
+      const applicable = linkRules.filter((card) => (
+        card.who === 'anyone' ||
+        (card.who === 'verified' && session.state.verified) ||
+        (card.who === 'person' && session.person?.personId === card.person_id)
+      ));
+      const mostSpecific = applicable[0];
+      // Never always wins; otherwise only the most specific cards decide, with ask winning ties.
+      if (applicable.some((card) => card.mode === 'never') || (mostSpecific && applicable.some(
+        (card) => card.mode === 'ask' && specificity(card) === specificity(mostSpecific),
+      ))) this.cancelLink(token, link, 'rules_changed');
+    }
     return { ...desk.policy, cards: desk.policy.cards.map((card) => ({ ...card })) };
   }
 
@@ -1249,7 +1387,7 @@ export class MockWorld {
     if (entries.length === 0) return 'not_found';
     if (!enable) {
       if (entries.some((entry) => entry.tool === 'native.start_verification')) return 'conflict';
-      const off = new Set(entries.map((entry) => entry.tool));
+      const off = new Set<string>(entries.map((entry) => entry.tool));
       // Off no longer waits for review, so it gives no reason; a changed definition stays to review later.
       desk.tools = desk.tools.map((tool) => (off.has(tool.tool) ? { ...tool, status: 'disabled', review_reason: null } : tool));
       for (const entry of entries) {
@@ -1305,6 +1443,21 @@ function shortName(name: string): string {
   const last = words.length > 1 ? words.at(-1) : undefined;
   const initial = last === undefined ? '' : (Array.from(last)[0] ?? '');
   return initial === '' ? first : `${first} ${initial}.`;
+}
+
+/** The owner's display name on `desk`: its own, or Rivera's on a seeded Desk. */
+function ownerNameOfDesk(desk: DeskRecord): string {
+  return desk.ownerName ?? BUSINESS.owner_display_name;
+}
+
+/**
+ * Whom the visitor's lines on `desk` name: its owner, by display name, or no one by name when the
+ * Desk carries setup's fallback, "Owner", which is no one's name and which the public page never
+ * shows (`brandFrom`).
+ */
+function deskOwner(desk: DeskRecord): DeskOwner {
+  const name = ownerNameOfDesk(desk);
+  return { name: name === OWNER_NAME_FALLBACK ? null : name, business: desk.summary.business_name };
 }
 
 function statusEvent(type: StatusEvent['type'], decision: Decision): StatusEvent {

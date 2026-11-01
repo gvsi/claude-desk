@@ -3,6 +3,7 @@ import { expect, within } from 'storybook/test';
 
 import { VISION_INERT_LINE } from '../components/VisionBar/visionInert.tsx';
 import { expectComputed } from '../test/expectComputed.ts';
+import { FONT_TIMEOUT, withinDeadline } from '../test/fonts.ts';
 import {
   SPEC,
   expectConversationType,
@@ -174,8 +175,8 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
     // The heights below are the page's once its two typefaces have loaded.
-    await Promise.all([document.fonts.load('15px "Hanken Grotesk"'), document.fonts.load('15px "Source Serif 4"')]);
-    await document.fonts.ready;
+    await withinDeadline(Promise.all([document.fonts.load('15px "Hanken Grotesk"'), document.fonts.load('15px "Source Serif 4"')]), FONT_TIMEOUT, 'City office typefaces');
+    await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'City office fonts');
     const bar = await expectVisionBar(canvasElement, VISION_BACK_HREF);
 
     // The city's public page right under the bar: its header, its name, the Permit Center and its open status.

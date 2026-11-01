@@ -763,7 +763,7 @@ REPLY_RULE = (
 )
 REPLY_CHECK_HOW = (
     "The code check scans Claude's prose in English and Spanish for digits, money, dates, discount and promise words, "
-    "and booking claims without a booking card; a model check on Haiku 5.5 flags promises the cards don't back and "
+    "and booking claims without a booking card; a model check on Sonnet 5.5 flags promises the cards don't back and "
     "prose that denies being an AI, and its errors count as violations."
 )
 REPLY_CHECK_LINKS = "Claude may write links and email addresses, guided by its prompt."   # owner's decision, 2026-10-30

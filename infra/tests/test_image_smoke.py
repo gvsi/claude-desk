@@ -187,6 +187,8 @@ def test_image_smoke_env_covers_the_seam(smoke_run, desk_stacks):
     assert roles["kernel"]["env"]["MOCKPAY_DB_PASSWORD"] == DOT_ENV["MOCKPAY_ROLE_PASSWORD"]
     assert roles["api"]["env"]["API_DB_PASSWORD"] == DOT_ENV["API_ROLE_PASSWORD"]
     assert roles["kernel"]["env"]["ANTHROPIC_API_KEY"] == roles["api"]["env"]["ANTHROPIC_API_KEY"] == "not-a-key"
+    assert roles["kernel"]["env"]["TYPESAFE_API_KEY"] == ""  # optional checker stays off in the smoke
+    assert "TYPESAFE_API_KEY" not in roles["api"]["env"]
     seed, mockpay_key = roles["kernel"]["env"]["DESK_SIGNING_SEED"], roles["kernel"]["env"]["MOCKPAY_KEY"]
     assert re.fullmatch(r"[0-9a-f]{64}", seed) and re.fullmatch(r"[0-9a-f]{64}", mockpay_key) and seed != mockpay_key
     assert roles["api"]["env"]["PASSCODE_HASH"] == PASSCODE_HASH
@@ -231,7 +233,7 @@ def test_image_smoke_runs_the_task_shape_and_prints_no_value(smoke_run):
     values = [value for run in roles.values() for name, value in run["env"].items()
               if name.endswith(("PASSWORD", "KEY", "SEED", "HASH"))]
     printed = result.stdout + result.stderr + joined + "\n".join(uv_calls)
-    assert values and not [value for value in values if value in printed]
+    assert values and not [value for value in values if value and value in printed]
     assert {run["path"].parent for run in roles.values()} == {smoke_run.out}     # IMAGE_SMOKE_OUT
     assert not list(smoke_run.out.glob("image-smoke*")), "env files are deleted on exit"
     assert any(call["argv"][:2] == ["rm", "-f"] for call in calls)

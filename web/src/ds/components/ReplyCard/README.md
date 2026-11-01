@@ -6,7 +6,7 @@
 
 - Every `RenderedBlock` of kind `card` in a visitor reply, an owner's transcript or an agent's conversation. Prices, dates, discounts and bookings reach a visitor only this way; Claude's own words can't state a price, date or discount, can't make a promise the cards don't back, and can confirm a booking only next to a booking card.
 - Never for anything a component made up. The card shows only what the block carries. Plain status lines are margin receipts, not cards.
-- A blocked reply reaches the visitor as the kernel's `handoff` card, with its receipt.
+- When only the prose failed, a blocked reply reaches the visitor as its checked cards, then the kernel's `handoff` card if Claude drafted one. Other blocked replies reach the visitor as the handoff card alone, with its receipt.
 
 ## What the consumer provides
 
@@ -31,7 +31,7 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 | `quote`, `charges` | `title`, `lines` |
 | `link_cancelled` | `title` (the link's amount), `lines` (what the link was for, then the kernel's line) |
 | `booking_options` | `title`, then one line and one option per open time |
-| `booking_confirmed` | `title` (the date), `lines` ("Arriving {start} to {end}", "With {owner}"; no booking ID) |
+| `booking_confirmed` | `title` (the date), `lines` ("{start} to {end}", "With {owner}"; no booking ID) |
 | `hours` | `title` (the first window), `lines` (any more windows) |
 | `handoff` | `title`, `lines` |
 | `payment_link`, `document_link` | `title`, `href` |

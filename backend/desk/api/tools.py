@@ -5,11 +5,12 @@ Claude only proposes. Every tool call but `send_reply` goes to `/decide` with th
 and runs only on the kernel's allow, through `/execute`; a hold returns at once. The visitor sees each decision
 once, as the kernel signed it (`Status`, through `deliver()`), and an execution's Demo inbox notices meant for it (a
 code sent), code-free; a decision's own notices are owner alerts and never reach it. `send_reply` goes to
-`/check_reply`, and only what the kernel passed, or its handoff, reaches the visitor, through `deliver()`. A
-check is `final` (`CheckReplyRequest.final`) unless it is a first attempt the turn could still rewrite: the kernel
-opens the owner's handoff for a blocked final check, and the API shows that check's handoff at once, so what the
-kernel opens is what the session sees. The kinds a rewrite fixes are `desk.rewrites.REWRITABLE`, which the kernel
-reads too.
+`/check_reply`, and only the kernel's checked blocks reach the visitor, through `deliver()`. A
+check is `final` (`CheckReplyRequest.final`) unless it is a first attempt the turn could still rewrite. A blocked
+final check shows the checked cards when only the prose failed (with Claude's drafted handoff clause after them,
+when it drafted one), else the handoff clause; the kernel opens the owner's handoff whenever the shown blocks include
+that clause, and the API shows the verdict's blocks at once, so what the kernel opens is what the session sees. The
+kinds a rewrite fixes are `desk.rewrites.REWRITABLE`, which the kernel reads too.
 
 Failures fail closed ("Fail-closed behavior"): nothing is decided twice (a lost `/decide` answer is found by call
 ID, a lost `/execute` answer by polling the decision), an `/execute` answered 409 `conflict` (the kernel has no
@@ -48,7 +49,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelUnavailable
-from desk.api.prompts import KERNEL_ONLY_TEMPLATES, REPLY_TEMPLATES, REWRITE_INSTRUCTION, SEND_REPLY_TOOL
+from desk.api.prompts import (
+    INVALID_REPLY_DIAGNOSTIC, INVALID_REPLY_SHAPES, KERNEL_ONLY_TEMPLATES, REPLY_DIAGNOSTICS,
+    REPLY_RULE_IDS, REPLY_TEMPLATES, REWRITE_INSTRUCTION, SEND_REPLY_TOOL,
+)
 from desk.api.ro import KERNEL_RO
 from desk.api.schemas import CheckedDraft, StoppedDraft
 from desk.api.sse import append_control, emit_inbox
@@ -408,6 +412,10 @@ async def _settle(conn: AsyncConnection, caller: Caller, generation: int | None,
     repeat answers 409 `conflict` (no stored result to give) is read again and answered from its state, never
     `refused` (`_not_known_yet`)."""
     if decision.outcome == "hold":
+        # The owner may have answered while this turn was interrupted. Never execute a hold again;
+        # approved/unknown still wait, and the resume job publishes the eventual answer.
+        if decision.state not in ("held", "approved", "unknown"):
+            return _from_state(decision, None)
         status = None
         if decision.state == "held":
             status = await _publish(conn, caller, Status(decision, "held"))
@@ -536,14 +544,23 @@ def _draft(tool_input: Any) -> tuple[str, list[Clause]] | list[dict]:
     try:
         reply = _ReplyInput.model_validate(tool_input)
     except ValidationError as error:
-        where = ".".join(str(part) for part in error.errors()[0]["loc"])
-        return [{"kind": "invalid_input", "span": where}]
-    problems = [{"kind": "unknown_fact", "span": clause.template} for clause in reply.clauses
+        problem = error.errors()[0]
+        # Pydantic locations may contain arbitrary caller keys. Only schema fields and indices are public paths.
+        where = ".".join(str(part) if isinstance(part, int) or part in {"prose", "clauses", "template", "fact_id"}
+                         else "extra_field" for part in problem["loc"]) or "draft"
+        code = problem["type"] if problem["type"] in INVALID_REPLY_SHAPES else "invalid_input"
+        return [{"kind": "invalid_input", "rule_id": "other", "field": where, "code": code,
+                 "expected": INVALID_REPLY_SHAPES[code]}]
+    problems = [{"kind": "unknown_fact", "rule_id": "kernel_only_template", "template": clause.template}
+                for clause in reply.clauses
                 if clause.template in KERNEL_ONLY_TEMPLATES]
-    problems += [{"kind": "invalid_input", "span": clause.template} for clause in reply.clauses
+    problems += [{"kind": "invalid_input", "rule_id": "template_unavailable", "field": f"clauses.{index}.template",
+                  "code": "template_unavailable", "expected": INVALID_REPLY_SHAPES["template_unavailable"]}
+                 for index, clause in enumerate(reply.clauses)
                  if clause.template not in REPLY_TEMPLATES and clause.template not in KERNEL_ONLY_TEMPLATES]
     if not reply.prose and not reply.clauses:
-        problems.append({"kind": "invalid_input", "span": "prose"})
+        problems.append({"kind": "invalid_input", "rule_id": "other", "field": "prose", "code": "empty_draft",
+                         "expected": INVALID_REPLY_SHAPES["empty_draft"]})
     if problems:
         return problems
     return reply.prose, [Clause(template=clause.template, fact_id=clause.fact_id) for clause in reply.clauses]
@@ -566,8 +583,38 @@ def _kept(prose: str, clauses: list[Clause], verdict: ReplyVerdict, *, rewritabl
 
 
 def _blocked(violations: list[dict], **timing: int) -> ToolOutcome:
-    return ToolOutcome({"outcome": "blocked", "violations": violations, "instruction": REWRITE_INSTRUCTION}, True,
+    diagnostics = list(dict.fromkeys(
+        INVALID_REPLY_DIAGNOSTIC.format(**v) if "field" in v else
+        REPLY_DIAGNOSTICS.get(v.get("rule_id"), REPLY_DIAGNOSTICS["other"]) for v in violations))
+    return ToolOutcome({"outcome": "blocked", "delivered": False, "violations": violations,
+                        "diagnostics": diagnostics, "instruction": REWRITE_INSTRUCTION}, True,
                        **timing)
+
+
+CLAUSE_RULE_IDS = frozenset({"names_no_fact", "no_such_fact", "not_a_reader", "template_mismatch", "not_current",
+                            "nothing_to_show", "template_unavailable", "kernel_only_template", "claims_changed",
+                            "policy_combined"})
+
+
+def _feedback(verdict: ReplyVerdict, clauses: list[Clause]) -> list[dict]:
+    """Fixed diagnostics and only references from Claude's own draft, never checker spans or payloads."""
+    feedback = []
+    for violation in verdict.violations:
+        rule_id = violation.rule_id if violation.rule_id in REPLY_RULE_IDS else "other"
+        item = {"kind": violation.kind, "rule_id": rule_id}
+        if rule_id in CLAUSE_RULE_IDS:
+            matches = [(index, clause) for index, clause in enumerate(clauses)
+                       if clause.template == violation.span and (
+                           not violation.fact_ids or clause.fact_id in violation.fact_ids)]
+            # Empty metadata can also mean the kernel couldn't store the cited ID (for example, a NUL).
+            # Don't infer an omitted ID from it, or forward an ID the kernel couldn't name.
+            if len(matches) == 1 and (violation.fact_ids or matches[0][1].fact_id is None):
+                index, clause = matches[0]
+                item.update(clause_index=index, template=clause.template)
+                if clause.fact_id is not None:
+                    item["fact_id"] = clause.fact_id
+        feedback.append(item)
+    return feedback
 
 
 async def _check(caller: Caller, generation: int, prose: str, clauses: list[Clause], *,
@@ -586,46 +633,70 @@ async def _check(caller: Caller, generation: int, prose: str, clauses: list[Clau
         return _unavailable()
 
 
-async def _show(conn: AsyncConnection, caller: Caller, verdict: ReplyVerdict, call_id: str | None, result: dict,
-                delivered: Literal["reply", "handoff"], **timing: int) -> ToolOutcome:
+def prose_unshown(tool_input: Any, kinds: Iterable[str | None]) -> bool:
+    """Whether Claude drafted prose (`tool_input`, its `send_reply` input, a nonempty string `prose`) that none of the
+    shown blocks (their `kinds`) holds: the check failed and showed the kept cards or a handoff in its place."""
+    prose = tool_input.get("prose") if isinstance(tool_input, dict) else None
+    return isinstance(prose, str) and bool(prose.strip()) and "prose" not in kinds
+
+
+def delivered_result(handoff: bool, message_id: str, *, prose_shown: bool = True) -> dict:
+    """What Claude reads for a shown reply: `delivered_handoff` when it showed the handoff clause, else `delivered`
+    with the message ID, each with `prose_shown` false when the prose Claude drafted wasn't shown."""
+    result = dict(DELIVERED_HANDOFF) if handoff else {"outcome": "delivered", "message_id": message_id}
+    if not prose_shown:
+        result["prose_shown"] = False
+    return result
+
+
+async def _show(conn: AsyncConnection, caller: Caller, verdict: ReplyVerdict, call_id: str | None,
+                tool_input: Any = None, **timing: int) -> ToolOutcome:
     """Deliver a checked reply. A verdict whose generation the session has left (a take-over while it was checked)
-    is dropped by `deliver()`: nothing is shown, and the turn stops."""
+    is dropped by `deliver()`: nothing is shown, and the turn stops. `tool_input` is the `send_reply` input the
+    verdict answers, if any, for `prose_shown`."""
     reply = Reply(verdict, "claude", "model" if call_id is not None else "api", call_id=call_id)
     seq = await deliver(conn, caller.ids, reply, ro_schema=caller.ro_schema)
     await conn.commit()
     if seq is None:
         return ToolOutcome(dict(NOT_RUN), True, fenced=True, **timing)
-    return ToolOutcome(result, delivered == "handoff", delivered=delivered, message_id=verdict.message_id, **timing)
+    result = delivered_result(reply.handoff, verdict.message_id, prose_shown=not prose_unshown(
+        tool_input, [block.kind for block in verdict.blocks]))
+    return ToolOutcome(result, reply.handoff, delivered="handoff" if reply.handoff else "reply",
+                       message_id=verdict.message_id, **timing)
 
 
 async def hand_off(conn: AsyncConnection, caller: Caller, generation: int, *,
-                   call_id: str | None = None) -> ToolOutcome:
+                   call_id: str | None = None, tool_input: Any = None) -> ToolOutcome:
     """Hand the conversation to the owner: the handoff clause alone, checked like any reply (a paused session's
     check answers with the handoff verdict too), then shown. `call_id` is the `send_reply` call it answers, if any,
-    so the delivered row records what that call put on screen."""
+    so the delivered row records what that call put on screen, and `tool_input` that call's input."""
     started = time.monotonic()
     verdict = await _check(caller, generation, "", [Clause(template="handoff")])
     if isinstance(verdict, ToolOutcome):
         return replace(verdict, check_reply_ms=_ms(started))
-    shown = await _show(conn, caller, verdict, call_id, dict(DELIVERED_HANDOFF), "handoff",
-                        check_reply_ms=_ms(started))
+    shown = await _show(conn, caller, verdict, call_id, tool_input, check_reply_ms=_ms(started))
     return replace(shown, stopped=_stopped(verdict))
 
 
 async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, tool_input: Any, attempt: int, *,
                      call_left: bool = True, call_id: str | None = None) -> ToolOutcome:
-    """Claude's reply: checked by the kernel, then shown through `deliver()` only as the kernel passed it.
+    """Claude's reply: checked by the kernel, then shown through `deliver()` as the kernel's verdict permits.
 
     Claude may rewrite only attempt 1, and only while the turn has a model call left (`call_left`); that check alone
     is sent with `final` false, every other one final, for every kind of session. A non-final reply blocked with
     only kinds a rewrite can fix (`desk.rewrites.REWRITABLE`) shows nothing and sends Claude the violations and
-    `REWRITE_INSTRUCTION`. Any other block, an immediate-handoff kind (`canary`, `unsupported_language`,
-    `session_paused`) or a final check's, shows the verdict's blocks, the handoff clause, with no further kernel
-    call: the handoff the kernel opened for the owner. Input that doesn't fit the tool never reaches the kernel:
+    `REWRITE_INSTRUCTION`; a soft check that gave no verdict (`check_unavailable`) is one of them, and the final
+    check makes its own try. Any other block, an immediate-handoff kind (`canary`, `unsupported_language`,
+    `session_paused`) or a final check's, shows the verdict's blocks with no further kernel call: the checked cards
+    when they survive (with Claude's drafted handoff clause after them, when it drafted one), otherwise the handoff
+    the kernel opened for the owner. Any shown handoff clause ends the turn as `delivered_handoff`, even when the
+    draft passed. Either outcome carries `prose_shown` false when the prose Claude drafted wasn't shown (the kept
+    cards, or a handoff in its place), so Claude never refers to it.
+    Input that doesn't fit the tool never reaches the kernel:
     Claude gets one rewrite while it can, then the handoff. `call_id` is the `send_reply` call's `tool_use` ID;
     without one (Claude's plain text) the reply is the API's.
 
-    A draft the check stopped is kept for the owner (module docstring): committed with the handoff shown in its place,
+    A draft the check stopped is kept for the owner (module docstring): committed with the checked cards or handoff shown,
     or, on a block Claude may rewrite, carried on the outcome (`kept`) for the caller to keep with the call's result.
     Nothing is left open on `conn` either way, so no lock of the session outlives the call."""
     if attempt not in (1, 2):
@@ -635,20 +706,18 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     if isinstance(draft, list):
         if not final:
             return _blocked(draft)
-        return await hand_off(conn, caller, generation, call_id=call_id)
+        return await hand_off(conn, caller, generation, call_id=call_id, tool_input=tool_input)
     started = time.monotonic()
     verdict = await _check(caller, generation, *draft, final=final)
     timing = {"check_reply_ms": _ms(started)}
     if isinstance(verdict, ToolOutcome):
         return replace(verdict, **timing)
     if verdict.ok:
-        return await _show(conn, caller, verdict, call_id, {"outcome": "delivered", "message_id": verdict.message_id},
-                           "reply", **timing)
+        return await _show(conn, caller, verdict, call_id, tool_input, **timing)
     if not final and all(violation.kind in REWRITABLE for violation in verdict.violations):
-        return replace(_blocked([{"kind": violation.kind, "span": violation.span}
-                                 for violation in verdict.violations], **timing), stopped=_stopped(verdict),
+        return replace(_blocked(_feedback(verdict, draft[1]), **timing), stopped=_stopped(verdict),
                        kept=_kept(*draft, verdict, rewritable=True))
     await run_lock(conn, caller.session_id)            # before the events lock, as the handoff's delivery takes them
     await append_stopped_draft(conn, caller.ids, _kept(*draft, verdict, rewritable=False))
-    shown = await _show(conn, caller, verdict, call_id, dict(DELIVERED_HANDOFF), "handoff", **timing)
+    shown = await _show(conn, caller, verdict, call_id, tool_input, **timing)
     return replace(shown, stopped=_stopped(verdict))

@@ -86,6 +86,7 @@ from desk.kernel_service import (activation, adapters, auth, decide, labels, led
                                  repo)
 from desk.kernel_service.adapters.base import (Adapter, AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown,
                                                ExecCtx, Normalized, NormalizeCtx)
+from desk.kernel_service.adapters.web_search import SearchFailure, record_usage
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import Reviewed
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction
@@ -143,6 +144,7 @@ class _Target:
     adapter: Adapter | None
     principal: Principal
     checked: Checked | None = None       # the version and cap step 6 ran against, once it has
+    prepare_check: str = "prepare"
     notices: list[InboxNotice] = field(default_factory=list)   # owner alerts the re-check wrote (a drift)
 
     def xctx(self, ctx: KernelCtx, *, reconciling: bool = False) -> ExecCtx:
@@ -171,7 +173,7 @@ async def _target(ctx: KernelCtx, decision: DecisionRow) -> _Target:
                           .execution_options(**fresh))
     return _Target(decision=decision, action_row=action_row, action=decide.normalized_action(action_row),
                    session_row=session_row, desk_row=desk_row, business=business,
-                   adapter=adapters.ADAPTERS.get(action_row.tool),
+                   adapter=await adapters.resolve(ctx, decision.desk_id, action_row.tool),
                    principal=principal_for(session_row, desk_id=decision.desk_id))
 
 
@@ -201,15 +203,17 @@ async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str) -> Sess
     Desk's deletion, each of which writes the row under `FOR UPDATE` (a deletion closes it),
     either commits before T2 takes it, and T2 sees what it wrote, or waits until T2 commits. An
     adapter that writes the session's own rows
-    (`locks_session`: a verification start, or a call-back request, which keeps one open handoff
-    per session) holds it `FOR UPDATE` instead, so two such executions
+    (`locks_session`: a verification start, a call-back request, which keeps one open handoff
+    per session, a purpose payment, which keeps one open link per tool in a session, or a booking,
+    which closes the session's card handoffs) holds it `FOR UPDATE` instead, so two such executions
     in one session take turns: each holding it shared and then asking for it outright, they would
     wait on each other until Postgres ended one. Never None, since a missing row raises (and the
     action ends `unknown`, never fenced). The action's tool is read without a lock, which waits
     for nothing."""
     tool = await _one(ctx, select(ActionRow.tool).where(ActionRow.action_id == action_id))
+    desk_id = await _one(ctx, select(ActionRow.desk_id).where(ActionRow.action_id == action_id))
     return await _share_session(ctx, session_id,
-                                exclusive=getattr(adapters.ADAPTERS.get(tool), "locks_session", False))
+                                exclusive=getattr(await adapters.resolve(ctx, desk_id, tool), "locks_session", False))
 
 
 def _checked(execution: Execution) -> Checked | None:
@@ -401,7 +405,8 @@ def _receipt_ready(target: _Target) -> None:
     ledger head while it waits for a row."""
     try:
         decide.status_line("executed", tool=target.action.tool, session=target.session_row,
-                           owner=target.business.owner_display_name)
+                           owner=target.business.owner_display_name,
+                           business=target.adapter.profile.business if target.adapter is not None else None)
     except KeyError:
         decision = target.decision
         copy_id, desk_id, session_id = decision.copy_id, decision.desk_id, decision.session_id
@@ -424,7 +429,12 @@ async def _prepare_intent(ctx: KernelCtx, target: _Target) -> bool:
         try:
             async with ctx.db.begin_nested():           # a refusal takes back what prepare wrote
                 await prepare(target.xctx(ctx), target.action)
-        except AdapterRefusal:
+        except AdapterRefusal as refused:
+            # A fixed search-budget code can be recorded as the terminal check; all other
+            # prepare refusals keep the existing generic check and never expose adapter text.
+            if refused.code == "search_limit":
+                target.prepare_check = "search_limit"
+                await _note(ctx, target.decision, _summary(target, "prepare_refused", reason="search_limit"))
             return False
     checked = target.checked
     ctx.db.add(Execution(action_id=target.action.action_id, copy_id=target.action.copy_id,
@@ -517,7 +527,7 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
     if (failed := await _recheck(ctx, target, "allow")) is not None:
         raise await _refused_at_execution(ctx, target, failed)
     if not await _prepare_intent(ctx, target):
-        raise await _refused_at_execution(ctx, target, "prepare")
+        raise await _refused_at_execution(ctx, target, target.prepare_check)
     await ctx.db.commit()                                # T1: the intent row, before any side effect
     return await _run(ctx, row.decision_id, target.action.action_id, row.session_id, path="allow",
                       checked=target.checked)
@@ -577,7 +587,7 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
         raise RuntimeError(f"{path}_without_session")
     if (gone := _gone(target, session, path)) is not None:
         return await _refused_in_t2(ctx, target, execution, gone, path)
-    if path == "approved" and releases_private_data(target.action.tool):
+    if path == "approved" and releases_private_data(target.action.tool, target.adapter):
         # step 6 runs an approved hold for a closed session, but never one that releases private data
         if (ended := await session_ended(ctx, target.decision)) is not None:
             return await _refused_in_t2(ctx, target, execution, ended, path, reason="session_ended")
@@ -590,6 +600,19 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":
             return await _fenced(ctx, target, execution, f"mode_{session.mode}")
+    from desk.contracts import is_business_tool
+    if is_business_tool(target.action.tool):
+        # T1 committed before the owner could replace this configuration. Re-read the row and
+        # hold it through the side effect, so a replacement either wins first or waits for T2.
+        current = (await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == target.action.desk_id, Tool.tool == target.action.tool)
+            .with_for_update(read=True).execution_options(populate_existing=True)))).one_or_none()
+        if (current is None or current.status != "enabled"
+                or current.profile_sha256 != target.action.profile_sha256):
+            return await _refused_in_t2(ctx, target, execution, "profile", path)
+        target.adapter = await adapters.resolve(ctx, target.action.desk_id, target.action.tool)
+        if target.adapter is None:
+            return await _refused_in_t2(ctx, target, execution, "profile", path)
     adapter = target.adapter
     if adapter is None:
         raise AdapterFailure("no_adapter")
@@ -707,6 +730,8 @@ async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failu
         repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
         await ctx.db.rollback()
         return await _settle_unknown(ctx, decision_id, action_id, checked)
+    if isinstance(failure, SearchFailure):
+        await record_usage(ctx, target.action, failure.usage)
     code = failure.args[0] if failure.args and isinstance(failure.args[0], str) else "adapter_failure"
     result = _no_result(action_id, "failed")
     await _finish(ctx, target, execution, result, "failed", _summary(target, "failed", reason=ledger.safe_ref(code)))
@@ -804,10 +829,10 @@ async def _narrow_to_owner(ctx: KernelCtx, desk_id: str, facts: list[Fact]) -> i
     return len(rows)
 
 
-def releases_private_data(tool: str) -> bool:
+def releases_private_data(tool: str, resolved=None) -> bool:
     """Whether the tool's adapter declares that its result gives the session data it reads only as
     its verified person (`releases_private_data`); an unknown tool counts as one that does."""
-    adapter = adapters.ADAPTERS.get(tool)
+    adapter = resolved if resolved is not None else adapters.ADAPTERS.get(tool)
     return True if adapter is None else adapter.releases_private_data
 
 
@@ -817,6 +842,13 @@ async def session_ended(ctx: KernelCtx, decision: DecisionRow) -> str | None:
     is off the record, `contact_changed` when it was closed with its person still on record (only a
     new contact closes a session so), `session_closed` for any other close; None while it stands, or
     when its Desk is deleted, which the Desk's own checks refuse first."""
+    from desk.contracts import is_business_tool
+    if is_business_tool(decision.tool):
+        # approvals.py still calls the conservative classifier without a resolved adapter.
+        # Keep this compatibility check until that caller can be updated in its own lane.
+        adapter = await adapters.resolve(ctx, decision.desk_id, decision.tool)
+        if adapter is not None and not adapter.releases_private_data:
+            return None
     named = Named(copy_id=decision.copy_id, desk_id=decision.desk_id, session_id=decision.session_id)
     if await auth.session_stands(ctx, named, None):
         return None
@@ -926,9 +958,11 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     `session_ended`), the adapter is still asked, under that row, since what it did outside the
     kernel must be recorded as it happened, but nothing it answers reaches the session
     (`_refused_in_recovery`)."""
-    tool = (await ctx.db.execute(ctx.repo.scoped(select(ActionRow.tool).where(
-        ActionRow.action_id == action_id)))).scalar_one_or_none()
-    private = tool is None or releases_private_data(tool)
+    action_row = (await ctx.db.execute(ctx.repo.scoped(select(ActionRow.tool, ActionRow.desk_id).where(
+        ActionRow.action_id == action_id)))).one_or_none()
+    resolved = (await adapters.resolve(ctx, action_row.desk_id, action_row.tool)
+                if action_row is not None else None)
+    private = action_row is None or releases_private_data(action_row.tool, resolved)
     if private and not await _hold_session_for(ctx, decision_id):
         return False
     decision = (await ctx.db.scalars(ctx.repo.scoped(

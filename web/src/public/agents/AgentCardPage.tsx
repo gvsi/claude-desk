@@ -5,7 +5,8 @@
  * under the business's brand header and the AI disclosure. The built-in agent sent on a task
  * (`SendAgentPanel`) leads; what agents can do, how they prove who they are, and connecting your
  * own agent with a demo key (`ConnectYourOwn`) follow. No model text is shown here but the Desk's
- * checked replies to the built-in agent; the agent's own words never are.
+ * checked replies to the built-in agent and the agent's requests as it sent them, quoted as its own
+ * words and cut to 280 characters.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useLocation, useParams } from 'react-router';

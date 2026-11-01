@@ -7,8 +7,13 @@ API refuses a request whose strict schemas together carry more than 24 optional 
 schema just under those limits can compile for longer than a model call may take. Each schema the API sends keeps to a
 budget well inside them (`SCHEMA_*_MAX`), counted through every `$ref` at each place it is used, and no request's
 strict schemas together pass the API's own limits (`REQUEST_*_MAX`).
+
+The API also refuses a schema whose compiled grammar is too large ("The compiled grammar is too large, which would cause
+performance issues"), which neither count sees. A setup turn has the most fields, so each one's strict schema keeps
+within `SETUP_TURN_SCHEMA_CHARS_MAX` characters and `SETUP_TURN_PROPERTIES_MAX` top-level properties.
 """
 
+import json
 from dataclasses import dataclass
 
 import pytest
@@ -32,6 +37,15 @@ from desk.api.prompts import (
 
 SCHEMA_OPTIONAL_MAX, SCHEMA_UNION_MAX = 8, 6
 REQUEST_OPTIONAL_MAX, REQUEST_UNION_MAX = 24, 16
+# The longest a setup turn's strict schema may be, as `len(json.dumps(strict_schema(model)))` with json's default
+# separators (how the live probe measured it). This is a margin, not a measured limit: no refusal is known to come
+# from characters alone (the 10,895-character turn that was refused had 23 top-level properties), and a turn of
+# 8,802 characters and 20 properties compiled.
+SETUP_TURN_SCHEMA_CHARS_MAX = 9_000
+# The most top-level properties a setup turn's strict schema may have: the limit found by live probes, which the
+# character cap alone didn't catch. Turns of 21 properties were refused as too large a grammar even with every
+# description stripped (5,951 characters), and removing any one property let them compile; turns of 20 compiled.
+SETUP_TURN_PROPERTIES_MAX = 20
 
 # Every structured output the API sends, by the route that sends it.
 OUTPUTS: dict[str, tuple[type[BaseModel], ...]] = {
@@ -162,3 +176,21 @@ def test_no_request_passes_the_apis_limits(route, output):
     assert schemas == [strict_schema(output)]
     total = sum((complexity(schema) for schema in schemas), Complexity())
     assert total.optional <= REQUEST_OPTIONAL_MAX and total.union <= REQUEST_UNION_MAX, total
+
+
+def test_every_setup_turn_schema_is_small_enough_to_compile():
+    sizes = {key: len(json.dumps(strict_schema(model))) for key, model in SETUP_TURNS.items()}
+    for model in SETUP_TURNS.values():
+        assert request("setup", model)["output_config"]["format"]["schema"] == strict_schema(model)
+    over = {key: size for key, size in sizes.items() if size > SETUP_TURN_SCHEMA_CHARS_MAX}
+    assert not over, (f"setup turn strict schemas over {SETUP_TURN_SCHEMA_CHARS_MAX} characters, measured as "
+                      f"len(json.dumps(strict_schema(SETUP_TURNS[key]))) with default separators, as the live grammar "
+                      f"probe measures them: {over}; every turn: {sizes}")
+
+
+def test_every_setup_turn_schema_has_few_enough_properties_to_compile():
+    counts = {key: len(strict_schema(model)["properties"]) for key, model in SETUP_TURNS.items()}
+    over = {key: count for key, count in counts.items() if count > SETUP_TURN_PROPERTIES_MAX}
+    assert not over, (f"setup turn strict schemas over {SETUP_TURN_PROPERTIES_MAX} top-level properties, the limit "
+                      f"live probes found (21 refused, 20 compiled; the character cap didn't catch it): {over}; "
+                      f"every turn: {counts}")

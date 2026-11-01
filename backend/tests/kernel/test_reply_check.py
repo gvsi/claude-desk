@@ -3,7 +3,8 @@
 A draft from Claude is guarded prose plus typed clauses. The kernel scans the prose in English and
 Spanish for numbers, money, percentages, dates and promise words, renders each clause from
 a fact the session may read, in the reply's language, and answers with a signed, ledgered verdict:
-the prose and cards when everything passed, else only the handoff clause.
+the prose and cards when everything passed, checked cards alone when only the prose failed,
+and the handoff clause when no card can be kept.
 
 Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), with
 the facts made the way a conversation makes them: a quote, open times and a booking decided and
@@ -13,6 +14,7 @@ executed through `/decide` and `/execute`.
 import asyncio
 import hashlib
 import json
+import re
 import sys
 import time
 import unicodedata
@@ -20,6 +22,8 @@ import unicodedata
 import desk_kernel
 import httpx
 import pytest
+
+from tests import public_policy_cases as policy_cases
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI
@@ -30,6 +34,7 @@ from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import labels, lang, ledger, render, reply_check
+from desk.next_steps import NEXT_STEPS
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 from scripts import lookalikes
 
@@ -40,7 +45,30 @@ from .test_approvals import answered
 from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, set_mode, set_session
 from .test_execute import executed
 
+# A stranger's steps on a fresh Rivera copy, in tool-name order. The seed's urgent tool, first by
+# name, offers the native call-back's step, which is listed once, there.
+VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
+    "native.request_callback", "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
+    "native.quote", "native.start_verification")]
+
 ROUTE = "POST /check_reply"
+
+
+@pytest.mark.parametrize(("prose", "detected"), [
+    ("In Des Moines.", "en"),
+    ("Nos vemos.", "none"),
+    ("No des vueltas.", "none"),
+    ("Une ambos tubos.", "none"),
+    ("Vos estás cerca.", "es"),
+])
+async def test_honest_english_spanish_language_and_real_reply(app, client, prose, detected):
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose)
+    verify_verdict(app.state.kernel.signer.public_key_hex(), visitor.session_id, verdict)
+    assert verdict.ok and verdict.violations == []
+    assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+    assert lang.detect(prose) == detected
+    assert not lang.positive_other_language(prose)
 
 
 def clause(template: str, fact_id: str | None = None) -> dict:
@@ -48,9 +76,9 @@ def clause(template: str, fact_id: str | None = None) -> dict:
 
 
 async def post_check(client: httpx.AsyncClient, visitor: Visitor, prose: str, clauses=(), *, generation: int = 0,
-                     headers: dict[str, str] | None = None) -> httpx.Response:
+                     headers: dict[str, str] | None = None, final: bool = True) -> httpx.Response:
     return await client.post("/check_reply", headers=visitor.headers if headers is None else headers, json={
-        "draft": {"session_id": visitor.session_id, "generation": generation, "prose": prose,
+        "final": final, "draft": {"session_id": visitor.session_id, "generation": generation, "prose": prose,
                   "clauses": list(clauses)}})
 
 
@@ -95,8 +123,29 @@ async def test_clean_prose_with_a_quote_card_passes(app, client):
     assert entry.event.summary == {"message_id": verdict.message_id, "author": "claude", "ok": True, "language": "en",
                                    "violations": [], "rule_ids": [], "fact_ids": [quote.fact_id],
                                    "soft_promise": FakeDecisions.SOFT_USAGE | {"status": "ok"},   # the check passed it
+                                   "soft_checks": {
+                                       "sonnet": {"flags": {"promises_beyond_cards": False, "denies_being_ai": False},
+                                                  "blocked": False},
+                                       "jev": {"status": "off", "scores": None, "blocked": False, "latency_ms": 0,
+                                               "top_statement": None}},
+                                   "dropped": [],                     # no card was dropped at signing
                                    "final": True}                     # no `final` sent: the reply's last attempt
     assert (await session_of(app, copy, visitor)).last_language == "en"
+
+
+async def test_a_plumbing_emergency_gets_both_amounts_on_quote_cards(app, client):
+    """"Pipe repairs start from $100, and there's a short-notice fee of $50": Claude's words name the
+    starting price and the fee, and each amount is on a quote card built from the seed's price list."""
+    copy, visitor = await visitor_of(app, client)
+    repair = await own_quote(client, visitor, ("pipe", 1), call_id="call-pipe")
+    fee = await own_quote(client, visitor, ("short-notice", 1), call_id="call-fee")
+    verdict = await checked(client, visitor, "Pipe repairs have a starting price, and there's a short-notice fee.",
+                            [clause("quote", repair.fact_id), clause("quote", fee.fact_id)])
+    assert (verdict.ok, verdict.violations) == (True, [])
+    _, *cards = verdict.blocks
+    assert [(card.template, card.fact_id, card.title, card.lines[0]) for card in cards] == [
+        ("quote", repair.fact_id, "$100.00", "Pipe repair (starting price)"),
+        ("quote", fee.fact_id, "$50.00", "Short-notice fee")]
 
 
 def kinds_of(verdict: ReplyVerdict) -> set[str]:
@@ -114,6 +163,17 @@ def assert_handed_off(verdict: ReplyVerdict, language: str = "en") -> None:
     assert verdict.ok is False and verdict.violations
     [block] = verdict.blocks
     assert (block.kind, block.template, block.fact_id, block.title) == ("card", "handoff", None, handoff)
+    assert (verdict.language, verdict.visitor_plain) == (language, receipt)
+
+
+def assert_kept(verdict: ReplyVerdict, cards: list[tuple[str, str]], language: str = "en") -> None:
+    """A check failed only for its prose: not ok, and only the checked cards it cited, as
+    `(template, fact_id)` in draft order, with no prose and no handoff, so the reply receipt."""
+    receipt = {"en": "Reply checked against Maria Rivera's rules",
+               "es": "Respuesta revisada con las reglas de Maria Rivera"}[language]
+    assert verdict.ok is False and verdict.violations
+    assert [(block.kind, block.template, block.fact_id) for block in verdict.blocks] == [
+        ("card", template, fact_id) for template, fact_id in cards]
     assert (verdict.language, verdict.visitor_plain) == (language, receipt)
 
 
@@ -377,7 +437,8 @@ async def test_a_fraction_beside_its_quote_is_blocked(app, client, reviewer):
     verdict = await checked(client, visitor, "That's a quarter off.", [clause("quote", quote.fact_id)])
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("number_in_prose", "lex.en.number",
                                                                           "quarter")]
-    assert_handed_off(verdict)
+    assert not verdict.ok
+    assert [(b.template, b.fact_id) for b in verdict.blocks] == [("quote", quote.fact_id)]
     assert reviewer.soft_inputs == []
 
 
@@ -420,9 +481,10 @@ async def test_promise_words_are_blocked(app, client, prose, rule_id, span, lang
     ("Come by on the wee\u043aend.", "wee\u043aend"),        # a Cyrillic k, which no table reads as k
     ("H\u0435llo, how can I help?", "H\u0435llo"),            # a Cyrillic e in a word no lexicon holds
 ])
-async def test_a_word_mixing_scripts_is_blocked(app, client, prose, span):
+@pytest.mark.parametrize("final", [True, False])
+async def test_a_word_mixing_scripts_is_blocked(app, client, prose, span, final):
     copy, visitor = await visitor_of(app, client)
-    verdict = await checked(client, visitor, prose)
+    verdict = await checked(client, visitor, prose, final=final)
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("unsupported_language", "mixed_script", span)]
     assert_handed_off(verdict)
 
@@ -469,9 +531,9 @@ async def test_only_the_desks_own_names_may_mix_scripts(app, client):
 def test_a_long_draft_is_scanned_in_one_pass(prose, names):
     """Letters shaped like 0 or 1 that make no number are passed over once, not once per letter,
     and each mixed-script word is looked up once among the Desk's names, not once per mention."""
-    started = time.perf_counter()
+    started = time.process_time()      # CPU time: the scan is pure computation, and wall time varies with load
     reply_check.scan_prose(prose, names=names)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
 
 
 def test_the_lookalike_table_is_what_its_script_makes():
@@ -676,15 +738,17 @@ async def test_a_canary_in_prose_is_blocked(app, client):
     ("Con gusto le ayudo.", "es"),
     ("Je peux vous aider avec ça.", "other"),
     ("Je peux envoyer un plombier pour la fuite.", "other"),            # French, with Spanish's "la" and "un"
-    ("Posso ajudar você com isso.", "other"),                           # Portuguese
+    ("Posso ajudar você com isso.", "other"),
+    ("我可以帮忙。", "other"),                           # Portuguese
     ("OK", "none"),                                                     # too little to tell: the last language
 ])
-async def test_language_detection(app, client, prose, detected):
+@pytest.mark.parametrize("final", [True, False])
+async def test_language_detection(app, client, prose, detected, final):
     copy, visitor = await visitor_of(app, client)
     assert lang.detect(prose) == detected
     if detected == "none":
         assert (await checked(client, visitor, "Con gusto le ayudo.")).language == "es"
-    verdict = await checked(client, visitor, prose)
+    verdict = await checked(client, visitor, prose, final=final)
     if detected == "other":
         assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
         assert_handed_off(verdict, "en")                                # in the session's last language
@@ -747,6 +811,7 @@ def test_other_languages_outweigh_the_words_spanish_shares(prose):
     "Don't pour grease down the drain.",            # "pour" and "et" mark no other language
     "Don't pour it.",
     "We fix sinks, tubs, et cetera.",
+    "We serve Des Moines.",
 ])
 async def test_plumbing_english_with_a_dropped_word_reads_as_english(app, client, prose):
     copy, visitor = await visitor_of(app, client)
@@ -789,14 +854,15 @@ async def test_a_tie_with_english_reads_as_english(app, client, prose):
     "Il tecnico arriva all'una.",                   # and "all", as "all'" ("at one o'clock")
     "Se for urgente, vou às dez.",                  # Portuguese writes "for" ("se for", "if it is")
 ])
-async def test_english_markers_another_language_writes_dont_outvote_it(app, client, prose):
+@pytest.mark.parametrize("final", [True, False])
+async def test_english_markers_another_language_writes_dont_outvote_it(app, client, prose, final):
     # "on", "in", "an", "am", "was", "will", "i", "also", "her", "all", "for" and "but" are English
     # markers that French, German, Italian or Portuguese write as their own, so they don't count
     # against that language: one of its own markers still hands off on a first reply, and a time, a
     # day or a price in its words never rests on the model check alone
     copy, visitor = await visitor_of(app, client)
     assert lang.detect(prose) == "other"
-    verdict = await checked(client, visitor, prose)
+    verdict = await checked(client, visitor, prose, final=final)
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
     assert_handed_off(verdict, "en")
     assert (await session_of(app, copy, visitor)).last_language is None
@@ -852,7 +918,7 @@ def test_a_dropped_english_word_alone_is_too_little_to_tell(prose):
     "Maria checks heaters too.",
 ])
 async def test_frequent_english_words_keep_plumbing_english_english(app, client, prose):
-    # four or more words with no marker of any language hand off; one frequent English word
+    # four or more words with no marker of any language get a rewrite; one frequent English word
     # neither other list holds ("down", "up", "out", "off", "then", "now", "until", "after",
     # "before", "than", "too") makes these English, on a first reply too
     copy, visitor = await visitor_of(app, client)
@@ -863,26 +929,51 @@ async def test_frequent_english_words_keep_plumbing_english_english(app, client,
 
 
 @pytest.mark.parametrize("prose", [
-    "Entendido, revisamos ambos grifos.",           # Spanish in words no list holds hands off too
+    "Entendido, revisamos ambos grifos.",           # Spanish in words no list holds gets a rewrite
     "Por favor, me diga o endereço.",               # Portuguese with no Portuguese marker
     "O técnico chega às dez, combinado?",           # a time in words neither lexicon reads
     "Harganya lima puluh ribu rupiah saja.",        # a price in a language no list covers
 ])
-async def test_an_unmarked_reply_hands_off_on_a_first_reply_too(app, client, prose):
-    # four or more words and no marker of any language are another language whether or not the
-    # session has a language yet, so a time or a price in words no lexicon reads never reaches the
-    # visitor on the model check alone; the handoff is in the session's last language, else English
+async def test_an_unmarked_reply_gets_one_rewrite_and_never_shows(app, client, prose):
+    from .test_handoff_card import handoffs_of
+
     copy, visitor = await visitor_of(app, client)
-    verdict = await checked(client, visitor, prose)
-    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
-    assert_handed_off(verdict, "en")
+    verdict = await checked(client, visitor, prose, final=False)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("uncertain_language", "language_uncertain")]
+    assert not verdict.ok and verdict.blocks == []
+    assert await handoffs_of(app, copy) == []
     assert (await session_of(app, copy, visitor)).last_language is None
+    verdict = await checked(client, visitor, prose, final=True)
+    assert_handed_off(verdict, "en")
+    assert len(await handoffs_of(app, copy)) == 1
     assert (await checked(client, visitor, "Con gusto le ayudo.")).language == "es"
-    verdict = await checked(client, visitor, prose)
-    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
+    verdict = await checked(client, visitor, prose, final=True)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("uncertain_language", "language_uncertain")]
     assert_handed_off(verdict, "es")
     assert (await session_of(app, copy, visitor)).last_language == "es"
-    assert lang.detect(prose) == "other"
+    assert lang.detect(prose) == "unmarked"
+
+
+@pytest.mark.parametrize(("prose", "detected", "kind", "rule_id"), [
+    ("Absolutely. Payment link below.", "unmarked", "uncertain_language", "language_uncertain"),
+    ("Je peux vous aider avec ça.", "other", "unsupported_language", "language"),
+    ("H\u0435llo, how can I help?", "en", "unsupported_language", "mixed_script"),
+], ids=["uncertain", "other-language", "mixed-script"])
+@pytest.mark.parametrize("final", [False, True])
+async def test_refused_prose_preserves_the_visitors_turn_language(app, client, prose, detected, kind, rule_id, final):
+    from .test_turn_language import SPANISH, turn
+
+    copy, visitor = await visitor_of(app, client)
+    assert await turn(client, visitor, SPANISH) == "es"
+    assert lang.detect(prose) == detected
+    verdict = await checked(client, visitor, prose, final=final)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [(kind, rule_id)]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    if final or kind == "unsupported_language":
+        assert_handed_off(verdict, "es")
+    else:
+        assert not verdict.ok and verdict.blocks == [] and verdict.language == "es"
+    assert (await session_of(app, copy, visitor)).last_language == "es"
 
 
 async def own_slots(client: httpx.AsyncClient, visitor: Visitor, call_id: str = "call-slots") -> Fact:
@@ -954,7 +1045,7 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
     assert {template: (card.title, card.lines) for template, card in cards.items()} == {
         "quote": ("$153.00", ["Drain clearing", "Includes 15% off $180.00", "Good until Monday, November 2, 9:04 am"]),
         "booking_options": ("Times that are open", [label for _, label in open_times]),
-        "booking_confirmed": ("Monday, November 2", ["Arriving 10:00 am to 12:00 pm", "With Maria Rivera"]),
+        "booking_confirmed": ("Monday, November 2", ["10:00 am to 12:00 pm", "With Maria Rivera"]),
         "hours": ("Monday to Friday, 8:00 am to 6:00 pm", ["Saturday, 9:00 am to 1:00 pm"]),
         "policy": ("We work in Oakland, Berkeley, Alameda and Emeryville.", []),
         "contact": ("(510) 555-0142", []),
@@ -975,7 +1066,7 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
     spanish = await checked(client, visitor, "Aquí tiene los detalles.",
                             [clause("booking_confirmed", booking.fact_id)])
     assert (spanish.blocks[1].title, spanish.blocks[1].lines) == (
-        "lunes 2 de noviembre", ["Llegada de 10:00 a 12:00", "Con Maria Rivera"])
+        "lunes 2 de noviembre", ["De 10:00 a 12:00", "Con Maria Rivera"])
 
 
 # The soft-promise check flagging nothing, so a block below is the code's own.
@@ -995,7 +1086,9 @@ async def test_a_booking_claim_beside_its_booking_card_passes_by_the_owners_deci
     assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (prose, "booking_confirmed", booking.fact_id)
-    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[card.text])]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose,
+                                                     cards=[f"Booking confirmed card: {card.text}"],
+                                                     next_steps=VISITOR_NEXT_STEPS)]
 
 
 @pytest.mark.parametrize(("prose", "language", "span"), [
@@ -1010,7 +1103,11 @@ async def test_a_booking_claim_without_a_booking_card_is_blocked(app, client, re
         verdict = await checked(client, visitor, prose, clauses)
         assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
             ("promise_word", f"lex.{language}.booking", span)], clauses
-        assert_handed_off(verdict, language)
+        if clauses:
+            assert not verdict.ok
+            assert [(b.template, b.fact_id) for b in verdict.blocks] == [("quote", quote.fact_id)]
+        else:
+            assert_handed_off(verdict, language)
     assert reviewer.soft_inputs == []
 
 
@@ -1035,6 +1132,140 @@ async def test_a_booking_card_the_checks_refuse_lets_no_booking_claim_through(ap
     assert reviewer.soft_inputs == []
     [entry] = await reply_entries(app, copy)
     assert entry.event.summary["rule_ids"] == ["lex.en.booking", rule_id]
+
+
+async def own_callback(client: httpx.AsyncClient, visitor: Visitor) -> Fact:
+    """A real callback fact, issued only after its request was allowed and executed."""
+    decision = await decided(client, visitor, "native.request_callback", {
+        "name": "Sam Lee", "contact": "sam@example.com", "reason": "Please call me back"},
+        call_id="request-callback")
+    assert decision.outcome == "allow", decision.reason_plain
+    result = await executed(client, visitor, decision)
+    assert result.state == "succeeded"
+    [fact] = result.facts
+    return fact
+
+
+@pytest.mark.parametrize(("prose", "callback_pattern"), [
+    ("We've booked your appointment—call us for details.", r"We've booked your appointment-call"),
+    ("Once your call is confirmed, your appointment is booked.",
+     r"your call is confirmed, your appointment is booked"),
+])
+def test_booking_matches_survive_callback_containment(monkeypatch, prose, callback_pattern):
+    # Keep the category boundary enforced even if a callback pattern is too broad.
+    monkeypatch.setattr(reply_check, "CALLBACK_LINES", [
+        ("lex.en.callback", re.compile(callback_pattern, re.IGNORECASE))])
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == [
+        ("promise_word", "lex.en.booking")]
+
+
+BOOKING_THEN_CALL_CASES = [
+    (f"We've booked your {noun}{separator}call us for details.", "en",
+     f"Call us to book your {noun}.")
+    for noun in ("appointment", "table", "viewing")
+    for separator in ("—", "–", " - ", ", ", ": ", "; ")
+] + [
+    (f"Hemos reservado su {noun}{separator}llámenos para más detalles.", "es",
+     f"Llámenos para reservar su {noun}.")
+    for noun in ("cita", "mesa", "visita")
+    for separator in ("—", "–", " - ", ", ", ": ", "; ")
+]
+
+
+def test_a_spanish_booking_subject_ending_in_llamada_still_needs_a_booking_card():
+    prose = "Tu cita de llamada está confirmada."
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == [
+        ("promise_word", "lex.es.booking")]
+
+
+@pytest.mark.parametrize(("prose", "language", "honest"), BOOKING_THEN_CALL_CASES)
+def test_an_imperative_call_after_a_booking_is_not_a_callback_claim(prose, language, honest):
+    expected = [("promise_word", f"lex.{language}.booking")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+    assert reply_check.scan_prose(honest) == []
+
+
+@pytest.mark.parametrize(("prose", "language", "honest"), BOOKING_THEN_CALL_CASES)
+async def test_a_real_callback_receipt_does_not_back_a_booking_before_an_imperative(
+        app, client, reviewer, prose, language, honest):
+    _, visitor = await visitor_of(app, client)
+    callback = await own_callback(client, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    receipt = clause("callback_confirmed", callback.fact_id)
+    for clauses in ([], [receipt]):
+        verdict = await checked(client, visitor, prose, clauses)
+        assert [(v.kind, v.rule_id) for v in verdict.violations] == [
+            ("promise_word", f"lex.{language}.booking")]
+        if clauses:          # a failure only of the prose keeps the checked card alone, never the claim
+            assert_kept(verdict, [("callback_confirmed", callback.fact_id)], language)
+        else:
+            assert_handed_off(verdict, language)
+    assert reviewer.soft_inputs == []
+    for clauses in ([], [receipt]):
+        verdict = await checked(client, visitor, honest, clauses)
+        assert (verdict.ok, verdict.violations) == (True, [])
+    acknowledgment = "Your call is confirmed." if language == "en" else "Su llamada está confirmada."
+    verdict = await checked(client, visitor, acknowledgment, [receipt])
+    assert (verdict.ok, verdict.violations) == (True, [])
+    assert [block.template for block in verdict.blocks] == [None, "callback_confirmed"]
+
+
+@pytest.mark.parametrize(("prose", "language", "category"), [
+    ("Your call is confirmed.", "en", "callback"),
+    ("Your intro call is confirmed.", "en", "callback"),
+    ("Tu llamada está confirmada.", "es", "callback"),
+    ("Tu devolución de llamada está confirmada.", "es", "callback"),
+    ("Your viewing is confirmed.", "en", "booking"),
+    ("Your meeting is booked.", "en", "booking"),
+    ("Tu visita está confirmada.", "es", "booking"),
+    ("Tu reunión está confirmada.", "es", "booking"),
+])
+async def test_booking_and_callback_claims_need_their_own_validated_receipt(app, client, reviewer,
+                                                                          prose, language, category):
+    _, visitor = await visitor_of(app, client)
+    callback = await own_callback(client, visitor)
+    booking = await own_booking(client, reviewer, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    receipts = {"callback": clause("callback_confirmed", callback.fact_id),
+                "booking": clause("booking_confirmed", booking.fact_id)}
+    verdict = await checked(client, visitor, prose, [receipts[category]])
+    assert (verdict.ok, verdict.language, verdict.violations) == (True, language, [])
+    assert [(block.kind, block.template) for block in verdict.blocks] == [
+        ("prose", None), ("card", f"{category}_confirmed")]
+    assert verdict.blocks[0].text == prose
+    assert len(reviewer.soft_inputs) == 1
+    other = "booking" if category == "callback" else "callback"
+    other_fact = (booking if other == "booking" else callback).fact_id
+    for clauses in ([], [receipts[other]]):
+        blocked = await checked(client, visitor, prose, clauses)
+        assert [(v.kind, v.rule_id) for v in blocked.violations] == [
+            ("promise_word", f"lex.{language}.{category}")]
+        if clauses:          # the other receipt passed its checks: kept alone, without the claim
+            assert_kept(blocked, [(f"{other}_confirmed", other_fact)], language)
+        else:
+            assert_handed_off(blocked, language)
+    assert len(reviewer.soft_inputs) == 1  # unbacked claims never reach the model check
+
+
+@pytest.mark.parametrize(("case", "kind", "rule_id"), [
+    ("another session", "unentitled_fact", "not_a_reader"),
+    ("expired", "stale_fact", "not_current"),
+    ("wrong template", "unknown_fact", "template_mismatch"),
+])
+async def test_a_rejected_callback_card_cannot_exempt_a_call_claim(app, client, reviewer, case, kind, rule_id):
+    copy, visitor = await visitor_of(app, client)
+    owner = await open_visitor(client, copy) if case == "another session" else visitor
+    callback = await own_callback(client, owner)
+    if case == "expired":
+        await change_fact(app, copy, callback.fact_id, status="expired")
+    template = "booking_confirmed" if case == "wrong template" else "callback_confirmed"
+    verdict = await checked(client, visitor, "Your call is confirmed.", [clause(template, callback.fact_id)])
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [
+        ("promise_word", "lex.en.callback"), (kind, rule_id)]
+    assert_handed_off(verdict)
+    assert reviewer.soft_inputs == []
 
 
 async def test_a_reply_naming_only_the_card_passes(app, client, reviewer):
@@ -1190,6 +1421,396 @@ def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
     assert reply_check.scan_prose(prose, booking_card=True) == []
 
 
+# Business appointment names need the same card boundary as a booking or a visit.
+BUSINESS_BOOKINGS_EN = [
+    ("booking", "bookings"), ("appointment", "appointments"), ("visit", "visits"),
+    ("reservation", "reservations"), ("slot", "slots"), ("spot", "spots"),
+    ("viewing", "viewings"), ("showing", "showings"), ("tour", "tours"),
+    ("class", "classes"), ("lesson", "lessons"), ("session", "sessions"),
+    ("table", "tables"), ("room", "rooms"), ("stay", "stays"),
+    ("consultation", "consultations"), ("consult", "consults"), ("fitting", "fittings"),
+    ("tasting", "tastings"), ("treatment", "treatments"), ("massage", "massages"),
+    ("haircut", "haircuts"), ("trial", "trials"), ("demo", "demos"), ("pickup", "pickups"),
+]
+
+
+@pytest.mark.parametrize("prose", [
+    "Your viewing is confirmed.", "Your class is confirmed.", "Your lesson is confirmed.",
+    "Your tour is set.", "Your spot is saved.", "We've reserved your table.",
+    "Your session is confirmed.", "Your table is confirmed.", "Your consultation is confirmed.",
+    "Your stay is confirmed.", "Your fitting is booked in.", "Your tasting is all set.",
+    "Your service call is confirmed.", "Your service call is set.",
+    *(f"The {noun} is confirmed." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"The {plural} are confirmed." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"{noun}: confirmed." for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"Your {noun}: all set." for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"Your {noun} is saved." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"We've {verb} your {noun}." for pair in BUSINESS_BOOKINGS_EN for noun in pair
+      for verb in ("reserved", "booked", "confirmed", "scheduled")),
+])
+def test_business_booking_claims_en_need_a_card(prose):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == [
+        ("promise_word", "lex.en.booking")]
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+@pytest.mark.parametrize("prose", [
+    "Viewing times are below.", "Would you like to book a viewing?", "Pick a time for your class.",
+    "Your details are saved.", "Here are the open times for a tasting.",
+    "Is your table for the patio?", "Have you booked your lesson yet?",
+    "Once your tour is set, you'll get a card.",
+    *(f"Once your {noun} is confirmed, you'll get a card." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"Once your {plural} are saved, you'll get a card." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"Have you booked your {noun} yet?" for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"All scheduled {plural} include a reminder." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"Once we've reserved your {noun}, you'll get a card." for noun, _ in BUSINESS_BOOKINGS_EN),
+])
+def test_business_booking_words_en_without_a_claim_pass(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
+BUSINESS_BOOKINGS_ES = [
+    ("cita", "citas", "a"), ("reserva", "reservas", "a"), ("visita", "visitas", "a"),
+    ("turno", "turnos", "o"), ("hora", "horas", "a"), ("plaza", "plazas", "a"),
+    ("visita guiada", "visitas guiadas", "a"), ("recorrido", "recorridos", "o"),
+    ("clase", "clases", "a"), ("lección", "lecciones", "a"), ("sesión", "sesiones", "a"),
+    ("mesa", "mesas", "a"), ("habitación", "habitaciones", "a"), ("estancia", "estancias", "a"),
+    ("estadía", "estadías", "a"), ("alojamiento", "alojamientos", "o"),
+    ("consulta", "consultas", "a"), ("prueba", "pruebas", "a"),
+    ("degustación", "degustaciones", "a"), ("tratamiento", "tratamientos", "o"),
+    ("masaje", "masajes", "o"), ("corte de pelo", "cortes de pelo", "o"),
+    ("demostración", "demostraciones", "a"), ("recogida", "recogidas", "a"),
+]
+
+
+@pytest.mark.parametrize("prose", [
+    "Tu visita está confirmada.", "Tu clase está confirmada.", "Tu lección está confirmada.",
+    "Tu visita guiada está lista.", "Tu plaza está guardada.", "Hemos reservado tu mesa.",
+    "Tu sesión está confirmada.", "Tu mesa está confirmada.", "Tu consulta está confirmada.",
+    "Tu estancia está confirmada.", "Tu prueba está agendada.", "Tu degustación está lista.",
+    *(f"Tu {noun} está confirmad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tus {plural} están confirmad{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"{noun}: confirmad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"{plural}: confirmad{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tu {noun} está guardad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tus {plural} están list{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Hemos {verb} tu {noun}." for noun, _, _ in BUSINESS_BOOKINGS_ES
+      for verb in ("reservado", "agendado", "confirmado", "programado")),
+    *(f"He reservado tus {plural}." for _, plural, _ in BUSINESS_BOOKINGS_ES),
+])
+def test_business_booking_claims_es_need_a_card(prose):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == [
+        ("promise_word", "lex.es.booking")]
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+@pytest.mark.parametrize("prose", [
+    "Los horarios de visita están abajo.", "¿Quieres reservar una visita?",
+    "Elige un horario para tu clase.", "Tus datos están guardados.",
+    "Aquí están los horarios disponibles para una degustación.", "¿Tu mesa es para el patio?",
+    "¿Ya has reservado tu lección?", "Cuando tu visita guiada esté lista, recibirás una tarjeta.",
+    *(f"Cuando tu {noun} está confirmad{gender}, recibirás una tarjeta."
+      for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando tus {plural} están list{gender}s, recibirás una tarjeta."
+      for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando tu {noun} está guardad{gender}, recibirás una tarjeta."
+      for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando hemos reservado tu {noun}, recibirás una tarjeta."
+      for noun, _, _ in BUSINESS_BOOKINGS_ES),
+    *(f"¿Has reservado tu {noun}?" for noun, _, _ in BUSINESS_BOOKINGS_ES),
+    *(f"No hemos reservado tu {noun}." for noun, _, _ in BUSINESS_BOOKINGS_ES),
+])
+def test_business_booking_words_es_without_a_claim_pass(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
+@pytest.mark.parametrize(("prose", "honest", "language", "category"), [
+    (prose, f"Have you booked your {noun} yet?", "en", category)
+    for noun, category in (("call", "callback"), ("calls", "callback"),
+                           ("callback", "callback"), ("callbacks", "callback"),
+                           ("call back", "callback"), ("call backs", "callback"),
+                           ("intro call", "callback"), ("intro calls", "callback"),
+                           ("meeting", "booking"), ("meetings", "booking"))
+    for prose in (f"Your {noun} is confirmed.", f"The {noun} is booked.",
+                  f"{noun.capitalize()}: confirmed.", f"{noun.capitalize()} confirmed.",
+                  f"Your {noun}: all set.", f"Your {noun} is saved.",
+                  *(f"We've {verb} your {noun}." for verb in ("booked", "reserved", "confirmed", "scheduled")),
+                  f"Maria booked your {noun}.")
+] + [
+    (prose, f"¿Has reservado tu {noun}?", "es", category)
+    for noun, category in (("llamada", "callback"), ("llamadas", "callback"),
+                           ("devolución de llamada", "callback"), ("devoluciones de llamada", "callback"),
+                           ("devolucion de llamada", "callback"), ("devoluciones de llamadas", "callback"),
+                           ("reunión", "booking"), ("reuniones", "booking"), ("reunion", "booking"))
+    for prose in (f"Tu {noun} está confirmada.", f"Tus {noun} están confirmadas.",
+                  f"{noun.capitalize()}: confirmada.", f"{noun.capitalize()} confirmada.",
+                  f"Tu {noun} está guardada.", f"Tu {noun} está lista.",
+                  *(f"Hemos {verb} tu {noun}." for verb in ("reservado", "confirmado", "agendado", "programado")),
+                  f"He reservado tu {noun}.")
+] + [
+    ("Your glow-up is confirmed.", "Once your glow-up is confirmed, you'll get a card.", "en", "booking"),
+    ("Your glow-up is set.", "Your details are saved.", "en", "booking"),
+    ("The next call is booked.", "Once the next call is booked, you'll get a card.", "en", "callback"),
+    ("Your next intro call is confirmed.", "Have you booked your next intro call?", "en", "callback"),
+    ("Your calls are confirmed.", "All scheduled calls include a reminder.", "en", "callback"),
+    ("Your intro calls are confirmed.", "All scheduled intro calls include a reminder.", "en", "callback"),
+    ("Your service call is confirmed.", "Have you booked your service call?", "en", "booking"),
+    ("Your SERVICE CALL is confirmed.", "Have you booked your service call?", "en", "booking"),
+    ("Tu próxima llamada está confirmada.", "Cuando tu próxima llamada está confirmada, recibirás una tarjeta.",
+     "es", "callback"),
+    ("Hemos reservado tu próxima llamada.", "No te hemos reservado tu próxima llamada.", "es", "callback"),
+    ("Quedó confirmada tu llamada.", "¿Has reservado tu llamada?", "es", "callback"),
+])
+def test_call_and_meeting_claims_require_the_matching_card(prose, honest, language, category):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == [
+        ("promise_word", f"lex.{language}.{category}")]
+    assert reply_check.scan_prose(honest) == []
+    assert reply_check.scan_prose(prose, **{f"{category}_card": True}) == []
+    other = "booking" if category == "callback" else "callback"
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, **{f"{other}_card": True})] == [
+        ("promise_word", f"lex.{language}.{category}")]
+
+
+@pytest.mark.parametrize("prose", [
+    "Your viewing is confirmed call is booked.",
+    "Your viewing IS confirmed call is booked.",
+    "Your viewing is-confirmed call is booked.",
+    "Your ritual is set call is confirmed.",
+    "Your glow-up is set call is confirmed.",
+    "Your viewing is confirmed. Your call is confirmed.",
+])
+def test_a_callback_card_cannot_hide_a_separate_booking_claim_in_a_modifier(prose):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, callback_card=True)] == [
+        ("promise_word", "lex.en.booking")]
+
+
+@pytest.mark.parametrize(("prose", "honest", "language"), [
+    (prose, f"Have you booked your {noun}?", "en")
+    for noun in ("phone-call", "follow-up-call")
+    for verb in ("booked", "reserved", "confirmed", "scheduled")
+    for prose in (f"We've {verb} your {noun}.", f"{verb.capitalize()} your {noun}.")
+] + [
+    ("Hemos reservado tu llamada.", "¿Has reservado tu llamada?", "es"),
+    ("He confirmado tu llamada.", "No he confirmado tu llamada.", "es"),
+])
+def test_completed_hyphenated_call_claims_need_a_callback_card(prose, honest, language):
+    expected = [("promise_word", f"lex.{language}.callback")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, booking_card=True)] == expected
+    assert reply_check.scan_prose(prose, callback_card=True) == []
+    assert reply_check.scan_prose(honest) == []
+
+
+@pytest.mark.parametrize(("prose", "conditioned", "language"), [
+    (prose, f"{condition} {prose[0].lower() + prose[1:-1]}, we can discuss access.", "en")
+    for noun in ("phone-call", "follow-up-call")
+    for prose, condition in ((f"Your {noun} is confirmed.", "Once"),
+                             (f"Your {noun} is booked.", "When"),
+                             (f"The {noun} is confirmed.", "Once"),
+                             (f"Your {noun}: confirmed.", "Once"))
+] + [
+    ("Tu llamada está confirmada.", "Si tu llamada está confirmada, podemos hablar del acceso.", "es"),
+    ("Tu llamada está reservada.", "Cuando tu llamada está reservada, podemos hablar del acceso.", "es"),
+])
+def test_conditions_reach_the_whole_hyphenated_call_noun(prose, conditioned, language):
+    assert reply_check.scan_prose(conditioned) == []
+    expected = [("promise_word", f"lex.{language}.callback")]
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == expected
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, booking_card=True)] == expected
+    assert reply_check.scan_prose(prose, callback_card=True) == []
+
+
+@pytest.mark.parametrize(("prose", "honest", "language"), [
+    ("We've booked your follow-up-call.", "Have you booked your follow-up-call?", "en"),
+    ("We've booked your phone-call.", "Have you booked your phone-call?", "en"),
+    ("Booked your follow-up-call.", "We haven't booked your follow-up-call.", "en"),
+    ("Your follow-up-call is confirmed.",
+     "Once your follow-up-call is confirmed, we can discuss access.", "en"),
+    ("Your phone-call is booked.", "When your phone-call is booked, we can discuss access.", "en"),
+    ("Tu llamada está confirmada.", "Si tu llamada está confirmada, podemos hablar del acceso.", "es"),
+])
+async def test_hyphenated_call_claims_with_a_real_callback_receipt(app, client, reviewer, prose, honest, language):
+    _, visitor = await visitor_of(app, client)
+    callback = await own_callback(client, visitor)
+    reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
+    blocked = await checked(client, visitor, prose)
+    assert [(v.kind, v.rule_id) for v in blocked.violations] == [("promise_word", f"lex.{language}.callback")]
+    assert_handed_off(blocked, language)
+    assert reviewer.soft_inputs == []
+    backed = await checked(client, visitor, prose, [clause("callback_confirmed", callback.fact_id)])
+    assert (backed.ok, backed.violations) == (True, [])
+    assert [block.template for block in backed.blocks] == [None, "callback_confirmed"]
+    harmless = await checked(client, visitor, honest)
+    assert (harmless.ok, harmless.violations) == (True, [])
+    assert len(reviewer.soft_inputs) == 2
+
+
+@pytest.mark.parametrize("clitics", ["me", "te", "le", "lo", "la", "nos", "os", "les", "los", "las", "se",
+                                     "se lo", "se la", "te lo", "nos la"])
+@pytest.mark.parametrize(("noun", "category"), [("mesa", "booking"), ("llamada", "callback")])
+def test_spanish_booking_negation_reaches_across_bounded_clitics(clitics, noun, category):
+    for auxiliary in ("he", "hemos"):
+        affirmative = f"{clitics.capitalize()} {auxiliary} reservado una {noun}."
+        assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(affirmative)] == [
+            ("promise_word", f"lex.es.{category}")]
+        for negation in ("No", "Nunca"):
+            assert reply_check.scan_prose(f"{negation} {clitics} {auxiliary} reservado una {noun}.") == []
+        # A sentence break cannot attach a preceding denial to a fresh claim.
+        assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(
+            f"No {clitics}. Hemos reservado una {noun}.")] == [("promise_word", f"lex.es.{category}")]
+
+
+@pytest.mark.parametrize(("noun", "category"), [("mesa", "booking"), ("llamada", "callback")])
+def test_spanish_negation_cannot_start_inside_a_name(noun, category):
+    for clitics in ("", "te ", "nos la "):
+        assert reply_check.scan_prose(f"No {clitics}hemos reservado una {noun}.") == []
+        assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(
+            f"Con Bruno {clitics}hemos reservado una {noun}.")] == [("promise_word", f"lex.es.{category}")]
+
+
+@pytest.mark.parametrize("denial", ["We haven't", "We have not", "We've never", "We have never"])
+@pytest.mark.parametrize(("noun", "category"), [("table", "booking"), ("call", "callback")])
+def test_english_booking_negation_still_passes(denial, noun, category):
+    assert reply_check.scan_prose(f"{denial} booked your {noun}.") == []
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(f"We've booked your {noun}.")] == [
+        ("promise_word", f"lex.en.{category}")]
+
+
+@pytest.mark.parametrize(("prose", "language"), [
+    ("Your appointment and call are booked.", "en"),
+    ("Your visit and call are booked.", "en"),
+    ("Your class and call are scheduled.", "en"),
+    ("Your appointment and call have been booked.", "en"),
+    ("Your appointment and your call are booked.", "en"),
+    ("Your table and call are confirmed.", "en"),
+    ("Your call and appointment are confirmed.", "en"),
+    ("Your appointment or call is confirmed.", "en"),
+    ("Your appointment plus call is confirmed.", "en"),
+    ("Your appointment & call are confirmed.", "en"),
+    ("Tu cita y tu llamada están confirmadas.", "es"),
+    ("Tu mesa y tu llamada están confirmadas.", "es"),
+    ("Tu reserva y la llamada quedaron confirmadas.", "es"),
+    ("Ya están confirmadas tu llamada y tu cita.", "es"),
+    ("Quedaron confirmadas la llamada y la reserva.", "es"),
+    ("Tu cita e llamada están confirmadas.", "es"),
+    ("Tu cita o llamada están confirmadas.", "es"),
+    ("Tu cita u llamada están confirmadas.", "es"),
+])
+def test_coordinated_booking_and_call_subjects_need_both_receipts(prose, language):
+    for booking_card, callback_card in ((False, False), (True, False), (False, True), (True, True)):
+        expected = {f"lex.{language}.{category}" for category, backed in
+                    (("booking", booking_card), ("callback", callback_card)) if not backed}
+        assert {v.rule_id for v in reply_check.scan_prose(
+            prose, booking_card=booking_card, callback_card=callback_card)} == expected
+    honest = "Your call is confirmed." if language == "en" else "Tu llamada está confirmada."
+    assert reply_check.scan_prose(honest, callback_card=True) == []
+
+
+@pytest.mark.parametrize("subject", ["call with Maria", "callback request", "intro call with Maria",
+                                    "follow-up-call with Maria Rivera", "phone-call request"])
+def test_modified_callback_subjects_keep_their_receipt_category(subject):
+    prose = f"Your {subject} is confirmed."
+    assert {v.rule_id for v in reply_check.scan_prose(prose)} == {"lex.en.callback"}
+    assert {v.rule_id for v in reply_check.scan_prose(prose, booking_card=True)} == {"lex.en.callback"}
+    assert reply_check.scan_prose(prose, callback_card=True) == []
+    assert reply_check.scan_prose(f"Once your {subject} is confirmed, we can discuss access.") == []
+    for booking_subject in (f"appointment {subject}", f"{subject} appointment", "service call"):
+        assert "lex.en.booking" in {v.rule_id for v in reply_check.scan_prose(
+            f"Your {booking_subject} is confirmed.", callback_card=True)}
+
+
+@pytest.mark.parametrize("subject", [
+    "identity", "details", "contact", "contact details", "email", "phone", "number", "address", "account",
+    "information", "info", "name", "code", "verification", "payment method", "preferences", "message", "request",
+])
+def test_nonbooking_success_subjects_do_not_need_a_booking_receipt(subject):
+    for predicate in ("confirmed", "set"):
+        assert reply_check.scan_prose(f"Your {subject} is {predicate}.") == []
+        prose = f"Your {subject} appointment is {predicate}."
+        assert {v.rule_id for v in reply_check.scan_prose(prose)} == {"lex.en.booking"}
+        assert reply_check.scan_prose(prose, booking_card=True) == []
+    # Existing completed-booking predicates retain their conservative interpretation.
+    assert {v.rule_id for v in reply_check.scan_prose(f"Your {subject} is booked.")} == {"lex.en.booking"}
+
+
+@pytest.mark.parametrize("honest", ["Your IDENTITY is confirmed.", "Your contact DETAILS are confirmed.",
+                                   "Your call WITH Maria is confirmed."])
+def test_honest_subject_exclusions_cover_capital_stroke_readings(honest):
+    assert reply_check.scan_prose(honest, callback_card=True) == []
+    assert {v.rule_id for v in reply_check.scan_prose(
+        f"{honest} Your appointment is confirmed.", callback_card=True)} == {"lex.en.booking"}
+
+
+@pytest.mark.parametrize("tail", ["up", "to receive messages"])
+def test_phrasal_set_is_not_a_custom_booking(tail):
+    assert reply_check.scan_prose(f"Your account is set {tail}.") == []
+    assert reply_check.scan_prose(f"Your custom workspace is set {tail}.") == []
+    assert {v.rule_id for v in reply_check.scan_prose(f"Your appointment is set {tail}.")} == {"lex.en.booking"}
+    assert {v.rule_id for v in reply_check.scan_prose("Your glow-up is set.")} == {"lex.en.booking"}
+
+
+@pytest.mark.parametrize("subject", ["appointment with Maria", "contact details appointment", "call appointment request"])
+def test_a_booking_noun_in_a_modified_subject_keeps_its_claim(subject):
+    for tail in ("up", "to receive messages"):
+        prose = f"Your {subject} is set {tail}."
+        assert {v.rule_id for v in reply_check.scan_prose(prose, callback_card=True)} == {"lex.en.booking"}
+        assert reply_check.scan_prose(prose, booking_card=True, callback_card=True) == []
+
+
+@pytest.mark.parametrize("subject", ["service call", "service-call", "emergency service call",
+                                    "emergency service-call", "service call with Maria"])
+@pytest.mark.parametrize("tail", ["up", "to proceed"])
+def test_phrasal_set_service_calls_still_need_a_booking_receipt(subject, tail):
+    prose = f"Your {subject} is set {tail}."
+    for booking_card, callback_card in ((False, False), (False, True), (True, False), (True, True)):
+        expected = set() if booking_card else {"lex.en.booking"}
+        assert {v.rule_id for v in reply_check.scan_prose(
+            prose, booking_card=booking_card, callback_card=callback_card)} == expected
+    for honest in ("Your account is set up.", "Your workspace is set up."):
+        assert reply_check.scan_prose(honest) == []
+
+
+@pytest.mark.parametrize("honest", [
+    "Have you previously booked a consultation with us?",
+    "You said you'd booked a consultation with us before.",
+    "You said you’d booked a consultation with us before.",
+    "If you have already booked a consultation, I can help with it.",
+    "Customers who have previously booked a consultation can request a receipt.",
+    "Have you already previously booked a consultation with us?",
+    "Have you previously booked a callback with us?",
+    "If you have already booked a callback, I can help with it.",
+    "You said you'd booked a callback with us before.",
+    "Si te hemos reservado una mesa, puedo buscar la confirmación.",
+    "Si ya hemos reservado tu mesa, puedo buscar la confirmación.",
+    "Si ya te hemos reservado tu mesa, puedo buscar la confirmación.",
+    "Si nos la hemos reservado una mesa, puedo buscar la confirmación.",
+    "Si te hemos reservado una llamada, puedo buscar la confirmación.",
+    "Si ya hemos reservado tu llamada, puedo buscar la confirmación.",
+])
+def test_visitor_booking_context_does_not_hide_an_independent_claim(honest):
+    assert reply_check.scan_prose(honest) == []
+    if honest.startswith("Si"):
+        claim, rule = "Hemos reservado tu mesa.", "lex.es.booking"
+    else:
+        claim, rule = "We've booked your consultation.", "lex.en.booking"
+    assert {v.rule_id for v in reply_check.scan_prose(claim)} == {rule}
+    assert {v.rule_id for v in reply_check.scan_prose(f"{honest} {claim}", callback_card=True)} == {rule}
+    assert reply_check.scan_prose(claim, booking_card=True) == []
+
+
+@pytest.mark.parametrize("history", ["consultation", "callback"])
+@pytest.mark.parametrize(("noun", "category"), [("appointment", "booking"), ("call", "callback")])
+@pytest.mark.parametrize("separator", ["—", "–", "-", " - ", "\n- ", "\n* ", "\n", "; ", ": ", ", ", "/ "])
+def test_visitor_history_stops_before_a_later_completed_claim(history, noun, category, separator):
+    prefix = "- " if "\n" in separator else ""
+    prose = f"{prefix}You said you'd booked a {history}{separator}Booked your {noun}."
+    for booking_card, callback_card in ((False, False), (True, False), (False, True), (True, True)):
+        backed = booking_card if category == "booking" else callback_card
+        expected = set() if backed else {f"lex.en.{category}"}
+        assert {v.rule_id for v in reply_check.scan_prose(
+            prose, booking_card=booking_card, callback_card=callback_card)} == expected
+
+
 def test_a_booking_card_lets_only_the_booking_claim_through():
     """The owner's decision of 2026-10-30 passes a booking claim beside its card, and nothing else
     the scan finds: a day, a digit or a promise word in the same prose still blocks."""
@@ -1289,9 +1910,9 @@ def test_a_long_draft_of_booking_claims_is_scanned_in_one_pass():
     """Thousands of booking claims, conditioned or not and each holding a shorter one, are read in
     one pass: a condition is looked for just before each claim, and claims inside others drop out
     in one sweep."""
-    started = time.perf_counter()
+    started = time.process_time()
     found = reply_check.scan_prose("si ya está confirmada " * 4_000 + "tu cita está confirmada " * 4_000)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
     assert {(v.rule_id, v.span) for v in found} == {("lex.es.booking", "tu cita está confirmada")}
     assert len(found) == 4_000
 
@@ -1328,7 +1949,8 @@ async def test_a_policy_restated_beside_its_card_is_shown_by_the_owners_decision
     verdict = await checked(client, visitor, SERVICE_AREA, [clause("policy", "charter:policy:service_area")])
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", SERVICE_AREA), ("card", SERVICE_AREA)]
-    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[SERVICE_AREA])]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[f"Policy card: {SERVICE_AREA}"],
+                                                     next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
@@ -1391,7 +2013,7 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (reply_check.shown(prose), "quote", quote.fact_id)
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=reply_check.shown(prose),
-                                                     cards=[card.text])]
+                                                     cards=[f"Quote card: {card.text}"], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
     assert link not in json.dumps(entry.event.summary)
@@ -1534,10 +2156,10 @@ def test_a_long_draft_of_dotted_runs_passes_the_scan_in_one_pass():
     before the owner's decision of 2026-10-30 removed it, are read in one pass by the lexicons'
     readings and hold no violation, so a lexicon line with dots ("a.m.", "p.ej.") can't backtrack
     on them unnoticed."""
-    started = time.perf_counter()
+    started = time.process_time()
     found = reply_check.scan_prose("x" * 40_000 + " " + "a." * 20_000 + " " + "rivera.pay.section " * 2_000
                                    + "a.b/" * 10_000)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
     assert found == []
 
 
@@ -1566,14 +2188,16 @@ async def public_key(client: httpx.AsyncClient) -> str:
     return (await client.get("/health")).json()["public_key_hex"]
 
 
-async def test_a_failed_check_returns_a_signed_handoff(app, client):
+async def test_failed_checks_sign_the_kept_cards_or_handoff(app, client):
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     key = await public_key(client)
     english = await checked(client, visitor, "That will be $180.", [clause("quote", quote.fact_id)])
     spanish = await checked(client, visitor, "Le hago el cincuenta por ciento de descuento, con gusto.")
-    for verdict, language in ((english, "en"), (spanish, "es")):
-        assert_handed_off(verdict, language)                              # neither the prose nor the card
+    assert not english.ok and english.violations
+    assert [(b.template, b.fact_id) for b in english.blocks] == [("quote", quote.fact_id)]
+    assert_handed_off(spanish, "es")
+    for verdict in (english, spanish):
         verify_verdict(key, visitor.session_id, verdict)
     entries = await reply_entries(app, copy)
     assert [(entry.seq, entry.event.ref_id, entry.event.summary["ok"], entry.event.summary["language"])
@@ -1745,3 +2369,703 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
         desk.deleted_at = frozen_clock.now()
     deleted = await client.get(f"/public/{copy.slug}")
     assert (deleted.status_code, deleted.json()) == (404, {"code": "not_found"})
+
+
+@pytest.mark.parametrize(("prose", "flagged"), [
+    ("The total is lima puluh ribu rupiah, thanks.", True),
+    ("Here is the link to pay.", False),
+])
+async def test_unread_price_still_needs_the_soft_check(app, client, reviewer, prose, flagged):
+    copy, visitor = await visitor_of(app, client)
+    assert lang.detect(prose) == "en"
+    assert reply_check.scan_prose(prose) == []
+    reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
+    verdict = await checked(client, visitor, prose, final=False)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == ([("soft_promise", "soft.promise")] if flagged else [])
+    assert verdict.ok == (not flagged)
+    assert [b.kind for b in verdict.blocks] == ([] if flagged else ["prose"])
+    assert len(reviewer.soft_inputs) == 1
+
+
+async def test_payment_caption_rewrites_and_prose_failure_keeps_its_card(app, client, reviewer):
+    from .test_handoff_card import handoffs_of
+
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    reviewer.answer = PASS
+    link = await decided(client, visitor, "native.payment_link", {"quote_id": quote.fact_id.removeprefix("quote:")},
+                         call_id="call-link")
+    assert link.outcome == "allow", link.reason_plain
+    [fact] = (await executed(client, visitor, link)).facts
+    cited = [clause("payment_link", fact.fact_id)]
+    first = await checked(client, visitor, "Absolutely. Payment link below.", cited, final=False)
+    assert [(v.kind, v.rule_id) for v in first.violations] == [("uncertain_language", "language_uncertain")]
+    assert first.blocks == []
+    assert first.visitor_plain == "Passed to Maria Rivera to answer"
+    assert await handoffs_of(app, copy) == []
+    corrected = await checked(client, visitor, "Here is the link to pay.", cited)
+    assert corrected.ok
+    assert [b.template for b in corrected.blocks] == [None, "payment_link"]
+    assert corrected.blocks[-1].fact_id == fact.fact_id
+    assert await handoffs_of(app, copy) == []
+    kept = await checked(client, visitor, "Absolutely. Payment link below.", cited)
+    assert not kept.ok
+    assert [(v.kind, v.rule_id) for v in kept.violations] == [("uncertain_language", "language_uncertain")]
+    assert [b.template for b in kept.blocks] == ["payment_link"]
+    assert kept.blocks[0].fact_id == fact.fact_id
+    assert kept.visitor_plain == "Reply checked against Maria Rivera's rules"
+    assert await handoffs_of(app, copy) == []
+
+
+async def set_document_canary(app: FastAPI, copy: Rivera, canary: str) -> None:
+    async with kernel_ctx(app) as ctx:
+        repo = ctx.bind(copy.copy_id)
+        document = (await ctx.db.scalars(repo.scoped(select(Document)))).first()
+        document.body = document.body.replace(document.canary, canary)
+        document.canary = canary
+
+
+async def test_uncertain_language_span_never_echoes_a_document_canary(app, client):
+    copy, visitor = await visitor_of(app, client)
+    canary = "cdk-01be234567890123"              # "be" is an English marker, not reply prose
+    await set_document_canary(app, copy, canary)
+    verdict = await checked(client, visitor, f"{canary} Entendido, revisamos ambos grifos.", final=False)
+    assert {v.kind for v in verdict.violations} == {"uncertain_language", "canary"}
+    assert all(canary not in violation.span for violation in verdict.violations)
+    assert canary not in verdict.model_dump_json()
+    assert_handed_off(verdict)
+    assert all(canary not in entry.envelope_jcs for entry in await reply_entries(app, copy))
+    assert (await session_of(app, copy, visitor)).last_language is None
+
+
+async def test_english_language_ignores_spanish_markers_in_a_document_canary(app, client):
+    copy, visitor = await visitor_of(app, client)
+    await set_session(app, copy, visitor.session_id, last_language="es")
+    canary = "cdk-el1la2los3las4un5una"          # synthetic Spanish markers outnumber the prose's English ones
+    await set_document_canary(app, copy, canary)
+    verdict = await checked(client, visitor, f"Here is the link to pay. {canary}")
+    assert {v.kind for v in verdict.violations} == {"canary"}
+    assert all(canary not in violation.span for violation in verdict.violations)
+    assert canary not in verdict.model_dump_json()
+    assert_handed_off(verdict, "en")
+    assert all(canary not in entry.envelope_jcs for entry in await reply_entries(app, copy))
+    assert (await session_of(app, copy, visitor)).last_language == "en"
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("20% off for first-time clients", ["digit", "percent_sign"]),
+    ("$50 deposit", ["currency", "digit"]),
+    ("free consultation", ["lex.en.promise"]),
+    ("we guarantee", ["lex.en.promise"]),
+    ("refund within 30 days", ["digit", "lex.en.promise"]),
+    ("within two hours", ["lex.en.date", "lex.en.number"]),
+    ("after 6 pm", ["digit", "lex.en.date"]),
+    ("Monday to Friday", ["lex.en.date"]),
+    ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
+    ("garantizamos", ["lex.es.promise"]),
+    ("reembolso", ["lex.es.promise"]),
+    ("You're booked.", ["lex.en.booking"]),
+    ("Tu cita está confirmada.", ["lex.es.booking"]),
+    ("$50, $50, twenty dollars and veinte pesos", ["currency", "digit", "lex.en.money", "lex.en.number",
+                                                "lex.es.money", "lex.es.number"]),
+    ("We work with small businesses and families.", []),
+    ("Tell us what you need and we'll suggest next steps.", []),
+    ("Ask about our services.", []),
+    ("Trabajamos con pequeños negocios y familias.", []),
+    ("Cuéntenos qué necesita y le sugeriremos los siguientes pasos.", []),
+    ("Pregunte por nuestros servicios aquí.", []),
+    ("Se requiere un garante.", []),
+])
+def test_scan_public_text(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+POLICY_AI_DENIAL_CASES = [text for text, _ in policy_cases.AI_DENIAL_REFUSALS] + [
+    f"{opening} {verb} {preposition} {person}."
+    for opening in ("You are", "You're")
+    for verb in ("chatting", "talking", "speaking")
+    for preposition in ("with", "to")
+    for person in ("a human", "a real person", "a live person")
+] + [
+    "You’re talking to a human.", "YOU’RE CHATTING WITH A HUMAN RECEPTIONIST.",
+    "You are talking with an actual human.", "You're not talking to a bot.", "You aren't chatting with an AI.",
+    "I am a human being.", "I am a human.", "I'm a human.", "I’m a human.", "I'm human.", "I'm a human, not a bot.",
+    "I am a real person.", "I'm a real person.",
+    "I'm not a bot.", "I am not a robot.", "I'm not an AI.", "I’m not AI.",
+    "This is not an AI.", "This is not a bot.", "This isn't a chatbot.",
+    "This is a real person.", "This is a human receptionist.", "This is a human.",
+    "You've reached a real person.", "You have reached a live agent.",
+    "Está hablando con una persona.", "ESTA HABLANDO CON UNA PERSONA.",
+    # Informal and plural Spanish forms of the same claim.
+    "Estás hablando con una persona.", "Estas hablando con una persona.", "Estáis hablando con una persona.",
+    "Están hablando con una persona.", "Está hablando con un humano.", "Estás hablando con un humano.",
+    "Está chateando con un ser humano.", "Estás hablando con una agente humana.",
+    "No estás hablando con un bot.", "No está hablando con una IA.",
+    "Soy una persona real.", "Soy una persona de verdad.", "Soy humano.", "Soy humana.", "Soy un ser humano.",
+    "No soy un bot.", "No soy un robot.", "No soy una IA.",
+    "Esto no es un bot.", "Este chat no es una IA.",
+    "Quien le responde es una persona real.", "Este asistente es una persona.",
+]
+# Directions to reach a person, explicit AI disclosures and role words that name no speaker.
+POLICY_HONEST_PERSON_CASES = [
+    *policy_cases.PAYMENT_TIMING,
+    *policy_cases.HUMAN_OCCUPATIONS,
+    *policy_cases.AI_DENIAL_CONTROLS,
+    "Talk to a real person by phone.", "Call to speak with a live agent.",
+    "This is an AI assistant, not a real person.", "I'm an AI assistant, not a person.",
+    "A human receptionist answers our phone line.", "A real person reads every message.",
+    "Maria is a real person.", "I'm a human resources consultant.", "I am a human rights lawyer.",
+    "A real person will call back in the morning.", "Call to speak with a live person.",
+    "Our photos are not AI-generated.", "This is not AI-generated.", "This is a human-run business.",
+    "Una persona real le devolverá la llamada.",
+    "You're not talking to a real person.",
+    "Habla con una persona real por teléfono.", "Llame para hablar con un agente humano.",
+    "Este asistente es una IA, no una persona real.", "No soy una persona real, soy una IA.",
+    "No está hablando con una persona: soy un asistente de IA.",
+    "Para nosotros eres una persona, no un número.", "Recepcionista humana.", "Persona real.",
+]
+POLICY_FREE_PRICE_CASES = [
+    "Consultations cost nothing.", "It costs nothing.", "At no cost.", "No cost to you.",
+    "Nothing to pay.", "It won't cost you anything.", "It WON’T cost you anything.",
+    "No cuesta nada.", "No le cuesta nada.", "Nada que pagar.",
+    "It costs nothing to ask a question about our services?",
+    # Plural subjects, other pronouns and "we charge nothing" in Spanish.
+    "Las consultas no cuestan nada.", "No les cuesta nada.", "No te cuesta nada.",
+    "No cobramos nada.", "No le cobramos nada por la visita.",
+]
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, ["policy.ai_denial"]) for text in POLICY_AI_DENIAL_CASES],
+    *[(text, []) for text in POLICY_HONEST_PERSON_CASES],
+    *[(text, (["lex.en.promise"] if text in {"At no cost.", "No cost to you."} else [])
+       + ["policy.free_price"]) for text in POLICY_FREE_PRICE_CASES],
+    ("Human resources consulting", []),
+    ("We treat every customer like a person", []),
+    ("Complimentary parking", []),
+    ("Free parking", []),
+    ("Our receptionist will greet you", []),
+    ("Atención personalizada", []),
+    ("A humanist receptionist", []),
+    ("A real personality", []),
+    ("Our mascot is not a botanical illustration", []),
+    ("Our sculpture costs nothingness", []),
+    ("Dinner is on the house", ["lex.en.promise"]),
+    ("No cobramos por adelantado.", []),
+    ("No cobramos nada más que lo acordado.", []),
+    # Payment timing is not a free price.
+    ("Nothing to pay until the job is done.", []),
+    ("You have nothing to pay before you approve the work.", []),
+    ("Nada que pagar hasta que el trabajo esté hecho.", []),
+    ("No tiene nada que pagar antes de aprobar el trabajo.", []),
+    ("Hablamos con cada persona antes de empezar.", []),
+])
+def test_public_policy_ai_denial_and_free_price_phrases(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert not any(hit.rule_id in {"policy.ai_denial", "policy.free_price"}
+                   for hit in reply_check.scan_prose(text))
+    if text == "Complimentary parking":
+        assert [hit.rule_id for hit in reply_check.scan_prose(text)] == ["lex.en.promise"]
+
+
+FREE_AMENITY_CASES = [
+    *policy_cases.AMENITY_ACCEPTED,
+    "Complimentary parking.", "Free parking.", "Free wi-fi while you wait.", "Complimentary coffee while you wait.",
+    "Estacionamiento gratis.", "Free parking for every visit.", "Free coffee, tea and water.",
+    "Free Wi‑Fi and snacks.", "A free waiting area.", "Wifi y café gratis.", "Sala de espera gratuita.",
+]
+FREE_SERVICE_CASES = [
+    *policy_cases.AMENITY_REFUSALS,
+    ("Consultations are complimentary.", "lex.en.promise"), ("The first visit is complimentary.", "lex.en.promise"),
+    ("Free estimates.", "lex.en.promise"), ("Consulta gratis.", "lex.es.promise"),
+    ("Complimentary inspection with every visit.", "lex.en.promise"),
+    ("Free parking and consultations.", "lex.en.promise"), ("Free parking and your first visit.", "lex.en.promise"),
+    ("Free parking, coffee, tea, water and estimates.", "lex.en.promise"),
+    ("Consulta y estacionamiento gratis.", "lex.es.promise"), ("Presupuesto gratuito.", "lex.es.promise"),
+]
+
+
+def test_public_policy_many_gratis_scan_is_bounded():
+    from time import process_time   # CPU time: the scan is pure computation, and wall time varies with load
+
+    text = ("gratis " * 1_143)[:8_000]
+    start = process_time()
+    fields = reply_check.scan_public_policies({"policy:about": text})
+    elapsed = process_time() - start
+    assert "lex.es.promise" in fields["policy:about"]
+    print(f"8,000-character gratis policy: {elapsed:.6f}s")
+    assert elapsed < 1.5   # the windowless scan this guards against took 41 s at 7.8k characters
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, []) for text in FREE_AMENITY_CASES], *[(text, [rule]) for text, rule in FREE_SERVICE_CASES],
+])
+def test_public_policy_free_words_pass_only_before_an_amenity(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert reply_check.scan_public_policies({"policy:a": text, "policy:b": "Ask about our services."}) == (
+        {"policy:a": rules} if rules else {})
+    # Claude's own reply prose keeps refusing every one of these words.
+    assert any(hit.rule_id.endswith(".promise") for hit in reply_check.scan_prose(text))
+
+
+def test_public_policy_free_amenity_is_read_within_one_card():
+    assert reply_check.scan_public_policies({"policy:a": "Free", "policy:b": "parking."}) == {
+        "policy:a": ["lex.en.promise"]}
+    assert reply_check.scan_public_policies({"policy:a": "Estacionamiento", "policy:b": "gratis."}) == {
+        "policy:b": ["lex.es.promise"]}
+
+
+@pytest.mark.parametrize(("left", "right", "rule"), [
+    ("You are chatting with", "a human receptionist.", "policy.ai_denial"),
+    ("Está hablando con", "una persona.", "policy.ai_denial"),
+    ("Consultations cost", "nothing.", "policy.free_price"),
+    ("No le cuesta", "nada.", "policy.free_price"),
+])
+def test_public_policy_phrase_attribution(left, right, rule):
+    assert reply_check.scan_public_policies({
+        "policy:a": left, "policy:b": right, "policy:c": "Ask about our services.",
+    }) == {"policy:a": [rule], "policy:b": [rule]}
+    # A denial wholly inside reply prose does not turn an honest policy into a refusal.
+    assert reply_check._scan_public_parts([
+        (None, f"{left} {right}"), ("policy:a", "Ask about our services."),
+    ]) == {}
+
+
+@pytest.mark.parametrize("text", [
+    "Within 25 miles of Oakland.", "Within 25 mi of Oakland.", "Within 25 km of Oakland.",
+    "Within 25 kilometers of Oakland.", "Dentro de 25 kilómetros.", "Dentro de 25 millas.",
+    "We drive a few miles past Oakland.", "The East Bay, seven days a week.",
+    "Serving the East Bay since 1998.", "We do evenings and weekends.", "Trabajamos fines de semana.",
+    # A distance with a hyphen or a space before a singular or plural unit.
+    "Within a 25-mile radius of Oakland.", "We serve a 30 mile radius around Oakland.",
+    "Within 1 mile of Lake Merritt.", "A 50-km radius.", "Dentro de 1 kilómetro.",
+    "Within 25 kms of Oakland.", "Within 25 kilometres of Oakland.", "Hasta 40 kilometros de Madrid.",
+    # Cardinal number words before a distance unit or "days a week", and the days and parts of the
+    # day the business works.
+    "Within twenty-five miles of Oakland.", "Within a ten-mile radius.", "Dentro de treinta y cinco kilómetros.",
+    "Trabajamos siete días a la semana.", "Monday to Friday, mornings and afternoons.",
+    "De lunes a viernes, mañanas y tardes.", "Sábados y domingos.",
+    # Any cardinal number word, and half or a hundred before a distance unit
+    "We cover three counties: Alameda, Contra Costa and Marin.", "We serve all nine Bay Area counties.",
+    "Two locations: Oakland and Berkeley.", "Serving the five boroughs.",
+    "Atendemos tres condados: Alameda, Contra Costa y Marin.", "Dos sucursales: Oakland y Berkeley.",
+    "Serving the East Bay for over twenty years.", "Within half a mile of Lake Merritt.",
+    "Within a hundred miles of Oakland.", "Within one hundred miles of Oakland.", "Dentro de cien kilómetros.",
+    # Digits before "days a week", and a range of digits before a distance unit
+    "Oakland and Berkeley, 7 days a week.", "Trabajamos 7 días a la semana.", "We cover 20-30 miles around Oakland.",
+    "Within 20–30 miles of Oakland.", "20 to 30 miles", "Dentro de 20 a 30 km.", "De 20 hasta 30 kilómetros.",
+    # Years need an immediately preceding year marker.
+    "Serving the East Bay desde 1998.",
+    "In 1998.",
+    "From 1998.",
+    "Est. 1998.",
+    "Established 1998.",
+    "Founded 1998.",
+    "Desde 1998.",
+    "En 1998.",
+    "Since 1900.",
+    "Since 2099.",
+    # ZIP codes, road numbers and literal round-the-clock availability.
+    "Oakland and Berkeley, 24/7.",
+    "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "ZIP 94601.",
+    "ZIP code 94601.",
+    "ZIP codes 94601.",
+    "Código postal 94601.",
+    "Oakland, CA 94601.",
+    "Along I-580.",
+    "Along Highway 101.",
+    "Along Hwy 24.",
+    # "mañana" as the morning, after "por la", "en la" or "de la"
+    "Trabajamos por la mañana.", "Abrimos de la mañana a la noche.", "En la mañana y en la tarde.",
+    # A known limit: a fee written in words passes, since any cardinal number word does.
+    "Trip fee: fifty.", "Trip charge twenty-five outside Oakland.", "Cargo de viaje: cincuenta.",
+    "Seven days to finish any job in Oakland.",
+])
+def test_public_service_area_allowance_stays_with_its_key(text):
+    assert reply_check.scan_public_policies({"policy:service_area": text}) == {}
+    assert reply_check.scan_public_policies({"policy:pricing": text})
+
+
+@pytest.mark.parametrize("text", [
+    "Within 25 miles, $50 trip fee.", "Within 25 miles, 10% off.",
+    "Guaranteed same-day service across the East Bay.", "Within 25 miles, free consultation.",
+    "Within 25 miles, fifty dollars.", "Within 25 miles, ten percent off.",
+    "Within 25 miles, your appointment is confirmed.", "Within 25 miles, consultas gratis.",
+    "Within 25 miles, Nous garantissons le service.", "Within 25 miles, Привет мир.",
+    "Trip fee: 50.",
+    "24/7, $50 trip fee.",
+    "24/7, 10% off.",
+    "24/7, discounts.",
+    "24/7, guaranteed service.",
+    "24/7, free consultation.",
+    "24/7, your appointment is confirmed.",
+    "ZIP 9460.",
+    "ZIP 946012.",
+    "CA 9460.",
+    "Trip fee 94601.",
+    "Highway 101, trip fee 50.",
+    "24/7, fifty dollars.",
+    # An unmarked number of years in business remains outside the allowance.
+    "Serving Oakland for 25 years.",
+])
+def test_public_service_area_keeps_price_promise_and_language_refusals(text):
+    assert reply_check.scan_public_policies({"policy:service_area": text})
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    # Fractions and discounts
+    ("Outside Oakland, half off.", ["lex.en.number"]),
+    ("Half price outside Oakland.", ["lex.en.number"]),
+    ("Mitad de precio fuera de Oakland.", ["lex.es.number"]),
+    ("Fuera de Oakland, cobramos la mitad.", ["lex.es.number"]),
+    # Amounts with no currency word
+    ("Trip fee 2000.", ["digit"]),
+    ("Within 25 miles. Trip fee 2000.", ["digit"]),
+    ("Cargo de viaje: 2000.", ["digit"]),
+    ("Oakland 1998.", ["digit"]),
+    ("For 1998 years.", ["digit"]),
+    ("Since 1899.", ["digit"]),
+    ("Since 2100.", ["digit"]),
+    ("Begin 1998.", ["digit"]),
+    ("Since 1998, trip fee 2000.", ["digit"]),
+    ("Within 25 miles. Trip fee 1500.", ["digit"]),
+    ("Within 25 miles, 1000 off.", ["digit"]),
+    ("Oakland: 1500 minimum.", ["digit"]),
+    ("Outside Oakland, a hundred off.", ["lex.en.number"]),
+    ("Trip fee 20 to 30.", ["digit"]),
+    ("Llegamos mañana.", ["lex.es.date"]),
+    ("Mañana por la mañana en Oakland.", ["lex.es.date"]),
+    ("Seven days a week, 2 to 3 hours each.", ["digit"]),
+    # Response times and dates
+    ("Service in Oakland within two hours.", ["lex.en.date"]),
+    ("Same-day service in Oakland.", ["lex.en.date"]),
+    ("We can be there tomorrow.", ["lex.en.date"]),
+    ("Servicio el mismo día en Oakland.", ["lex.es.date"]),
+    ("Llegamos en dos horas a todo Oakland.", ["lex.es.date"]),
+    ("Oakland, until 6 pm.", ["digit", "lex.en.date"]),
+])
+def test_public_service_area_allows_only_distances_years_and_day_words(text, rules):
+    """Under the service area, these rules refuse what they refuse under any other key."""
+    assert reply_check.scan_public_policies({"policy:service_area": text}) == {"policy:service_area": rules}
+    assert set(rules) <= set(reply_check.scan_public_policies({"policy:pricing": text})["policy:pricing"])
+
+
+def test_public_service_area_allowance_cannot_cross_into_other_policies_or_prose():
+    assert reply_check.scan_public_policies({"policy:service_area": "Within 25", "policy:z": "miles."}) == {
+        "policy:service_area": ["digit"], "policy:z": ["lex.es.number"]}
+    cards = [RenderedBlock(kind="card", template="policy", fact_id="charter:policy:service_area",
+                           text="Within 25 miles.")]
+    assert reply_check.policy_card_violations("", cards) == []
+    assert reply_check.policy_card_violations("No charge for consultations.", cards) == []
+
+
+@pytest.mark.parametrize("control", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067",
+                                     "\u2068", "\u2069", "\u200c", "\u200d", "\u200b", "\u200e", "\u200f",
+                                     "\u00ad", "\ufeff", "\U000e0001"])
+@pytest.mark.parametrize("honest", ["Ask about our services.", "Pregunte por nuestros servicios aquí."])
+def test_public_text_refuses_format_controls(control, honest):
+    assert reply_check.scan_public_text(honest) == []
+    assert reply_check.scan_public_text(honest + control) == ["format_control"]
+
+
+@pytest.mark.parametrize(("values", "fields"), [
+    ({"policy:c": "charge.", "policy:a": "No", "policy:b": "extra"},
+     {key: ["lex.en.promise"] for key in ("policy:a", "policy:b", "policy:c")}),
+    ({"policy:a": "Your appointment is" + " " * 100, "policy:b": "confirmed."},
+     {key: ["lex.en.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Oﬃce.", "policy:b": "No", "policy:c": "charge.", "policy:d": "Ask about our services."},
+     {key: ["lex.en.promise"] for key in ("policy:b", "policy:c")}),
+    ({"policy:a": "Once your appointment is", "policy:b": "confirmed."}, {}),
+    ({"policy:a": "Tu cita está", "policy:b": "pendiente."}, {}),
+    ({"policy:a": "quedó hecha", "policy:b": "la reserva", "policy:c": "Pregunte aquí."},
+     {key: ["lex.es.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "libres", "policy:b": "para todos"},
+     {key: ["lex.es.promise"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "You are free to", "policy:b": "all clients"},
+     {key: ["lex.en.promise"] for key in ("policy:a", "policy:b")}),
+    # Call claims split across two policies, and a claim-group lookahead reading into the next one
+    ({"policy:a": "Your callback is", "policy:b": "scheduled."},
+     {key: ["lex.en.callback"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Tu llamada está", "policy:b": "confirmada."},
+     {key: ["lex.es.callback"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Ya quedó hecha", "policy:b": "tu cita."},
+     {key: ["lex.es.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Ya quedó hecha", "policy:b": "la tarea."}, {}),
+])
+def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context(values, fields):
+    assert reply_check.scan_public_policies(values) == fields
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
+    ("We work with small businesses and families.", []),
+    ("Trabajamos con pequeños negocios y familias.", []),
+    ("Service area: Portland, Beaverton, Hillsboro, Tigard", []),
+    ("Cash, card, Venmo accepted", []),
+    ("Emergency service available", []),
+    ("Emergency service available weekends", ["lex.en.date"]),
+    ("Portland Beaverton Hillsboro free", ["lex.en.promise"]),
+    ("Привет мир.", ["language"]),
+    ("OK", []),
+    ("No", []),
+    ("", []),
+])
+def test_public_policy_language_requires_positive_evidence(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Consultations gratuites pour tous les clients.", ["language"]),
+    ("Services sans frais pour tous les clients.", ["language"]),
+    ("Livraison offerte pour tous", ["language"]),
+    ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
+    ("Pour-over coffee available", []),
+    ("Open 9-5 EST", ["digit"]),
+    ("Les ofrecemos envío a domicilio", []),
+])
+def test_public_policy_language_recognizes_short_french_promises(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+def test_public_policy_language_checks_the_combined_rendering():
+    parts = {"policy:a": "nous the", "policy:b": "vous la y"}
+    assert all(reply_check.scan_public_text(value) == [] for value in parts.values())
+    assert reply_check.scan_public_policies(parts) == {key: ["language"] for key in parts}
+
+
+PUBLIC_ALLOW_WORD_CASES = [
+    ({"a:title": "Book a free intro consult"}, {}),
+    ({"a:title": "ƒree"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "frꬲꬲ"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "Book a $0 intro consult"}, {"a:title": ["currency", "digit"]}),
+    ({"a:title": "Free consult, 50% off"}, {"a:title": ["digit", "percent_sign"]}),
+    ({"b:type": "free"}, {"b:type": ["lex.en.promise"]}),
+    ({"a:title": "Free", "b:type": "to all new clients"},
+     {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    *[({"a:title": title, "b:type": audience},
+       {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]})
+      for title, audience in [
+          ("Free to", "all clients"), ("Free", "-to all clients"),
+          ("Frée to", "all clients"), ("Frée", "-to all clients"),
+          ("Ｆｒｅｅ ｔｏ", "ａｌｌ ｃｌｉｅｎｔｓ"), ("Ｆｒｅｅ", "－ｔｏ ａｌｌ ｃｌｉｅｎｔｓ"),
+      ]],
+    ({"a:title": "Intro consult no", "b:type": "charge"},
+     {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    ({"a:title": "discount"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "frее"}, {"a:title": ["language", "lex.en.promise", "mixed_script"]}),
+    ({"a:title": "free dollars"}, {"a:title": ["lex.en.money"]}),
+    ({"a:title": "free Monday"}, {"a:title": ["lex.en.date"]}),
+    ({"a:title": "free guarantee"}, {"a:title": ["lex.en.promise"]}),
+]
+
+
+@pytest.mark.parametrize(("values", "fields"), PUBLIC_ALLOW_WORD_CASES)
+def test_public_policy_allow_words_are_scoped_to_a_whole_hit_in_one_key(values, fields):
+    allowed = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+    assert reply_check.scan_public_policies(values, allow_words={"a:title": allowed}) == fields
+    if len(values) == 1 and "a:title" in values:
+        assert reply_check.scan_public_text(values["a:title"], allow_words=allowed) == fields.get("a:title", [])
+
+
+@pytest.mark.parametrize("word", ["free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas",
+                                  "FREE", "frée", "GRÁTUITA", "Ｆｒｅｅ"])
+def test_public_text_allows_only_explicit_owner_words_with_case_width_and_accent_normalization(word):
+    assert reply_check.FREE_WORDS == frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+    assert reply_check.scan_public_text(word, allow_words=reply_check.FREE_WORDS) == []
+    assert reply_check.scan_public_policies({"title": word}, allow_words={"title": reply_check.FREE_WORDS}) == {}
+    assert reply_check.scan_public_text(word)  # default callers remain strict
+
+
+FREE_CONSULT = ("Free consult",)              # an enabled typed-booking tool's appointment type
+CONSULTA_GRATUITA = ("Consulta gratuita",)
+
+
+@pytest.mark.parametrize(("prose", "names", "booking_card", "rule_id"), [
+    ("Done, I've booked your Free consult. Here are the details.", FREE_CONSULT, True, "lex.en.promise"),
+    ("I can book you a Free consult with Maria\u2026", FREE_CONSULT, False, "lex.en.promise"),
+    ("Listo, reservé tu consulta gratuita\u2026", CONSULTA_GRATUITA, True, "lex.es.promise"),
+    ("Your \uff26\uff32\uff25\uff25 CONSULT is ready.", FREE_CONSULT, False, "lex.en.promise"),    # width and case
+    ("Tu consulta gratuíta está lista.", CONSULTA_GRATUITA, False, "lex.es.promise"),           # an accent
+    ("We offer a Free consultation.", FREE_CONSULT, False, "lex.en.promise"),                   # the name, then more
+    ("Book a free intro call whenever suits you.", ("Book a free intro call",), False, "lex.en.promise"),
+])
+def test_a_free_word_passes_inside_an_enabled_business_tools_name(prose, names, booking_card, rule_id):
+    """The owner's decision of 2026-10-31: a free word in the name the owner gave an enabled business
+    tool (its title or appointment type) passes in Claude's prose inside a repeat of that name, read
+    across case, width and accents. Without the name the same prose is blocked on that word alone."""
+    assert [v.rule_id for v in reply_check.scan_prose(prose, booking_card=booking_card)] == [rule_id]
+    assert reply_check.scan_prose(prose, booking_card=booking_card, approved_free_names=names) == []
+
+
+@pytest.mark.parametrize(("prose", "names", "found"), [
+    # A free word outside the name: the name backs "your Free consult", not the second "free".
+    ("Your Free consult is free of charge too.", FREE_CONSULT, [("lex.en.promise", "free")]),
+    ("Tu consulta gratuita es gratis.", CONSULTA_GRATUITA, [("lex.es.promise", "gratis")]),
+    ("Consultations are free.", (), [("lex.en.promise", "free")]),
+    ("Consultations are free.", FREE_CONSULT, [("lex.en.promise", "free")]),            # the name isn't there
+    ("Book a \u0192ree consult.", FREE_CONSULT, [("lex.en.promise", "\u0192ree")]),         # a lookalike f
+    ("Book a fr\u0435e consult.", FREE_CONSULT, [("lex.en.promise", "fr\u0435e"), ("mixed_script", "fr\u0435e")]),
+    # Only free words are exempt: another promise word in the name still blocks.
+    ("I can book a Guaranteed free consult for you.", ("Guaranteed free consult",),
+     [("lex.en.promise", "Guaranteed")]),
+    ("I can book a free discount visit for you.", ("free discount visit",), [("lex.en.promise", "discount")]),
+    # Nor does a name lend the amenity allowance of a policy's text ("Free parking."): it lends free words alone.
+    ("Book a Consult with complimentary coffee while you wait.", ("Consult with complimentary coffee",),
+     [("lex.en.promise", "complimentary")]),
+    # A name made only of free words backs no free word: it can't tell the name from the word.
+    ("Consultations are free.", ("Free",), [("lex.en.promise", "free")]),
+    ("Las consultas son gratis.", ("Gratis",), [("lex.es.promise", "gratis")]),
+    # A free word whose promise reads past the name ("free to all clients") isn't the name's.
+    ("We offer a Consult free to all clients.", ("Consult free",), [("lex.en.promise", "free")]),
+    # The name's other words are scanned as ever.
+    ("I can book a Free half-day visit for you.", ("Free half-day visit",), [("lex.en.number", "half")]),
+    # A repeat starts at a word's start: "videoconsulta" isn't the owner's "Consulta gratuita".
+    ("Ofrecemos una videoconsulta gratuita.", CONSULTA_GRATUITA, [("lex.es.promise", "gratuita")]),
+])
+def test_a_free_word_outside_an_enabled_business_tools_name_is_still_blocked(prose, names, found):
+    assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose, approved_free_names=names)] == found
+
+
+@pytest.mark.parametrize(("prose", "names"), [
+    ("I can book you a Kid\u2019s free day.", ("Kid's free day",)),          # another apostrophe
+    ("I can book you a Free check\u2010up.", ("Free check-up",)),             # another hyphen
+    ("I can book you a Free  consult.", FREE_CONSULT),                        # a run of spaces
+])
+def test_a_repeat_of_a_business_tools_name_reads_apostrophes_dashes_and_spaces_alike(prose, names):
+    """Apostrophes, dashes and runs of whitespace aren't letters, so a repeat that writes them
+    another way is still the name (as the lexicons read them), and its free word passes."""
+    assert reply_check.scan_prose(prose, approved_free_names=names) == []
+
+
+def test_a_long_draft_repeating_a_business_tools_name_is_scanned_in_one_pass():
+    """Each free word is looked up once among the names' repeats, not once per repeat."""
+    prose = "Your Free consult is free. " * 800
+    started = time.process_time()      # CPU time: the scan is pure computation, and wall time varies with load
+    found = reply_check.scan_prose(prose, approved_free_names=FREE_CONSULT * 20)
+    assert time.process_time() - started < 2
+    assert [v.span for v in found] == ["free"] * 800
+
+
+
+@pytest.mark.parametrize("phrase", ["We offer free consultations. ", "You are free to all clients. "])
+def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phrase):
+    from time import process_time   # CPU time: the scan is pure computation, and wall time varies with load
+
+    # Forty policies totaling exactly 8,000 characters, with many ordinary lexical hits.
+    values = {f"policy:{index:02d}": (phrase * 8)[:200] for index in range(40)}
+    scanned_lengths = []
+    scan = reply_check._prose_hits
+
+    def counted(text, *args, **kwargs):
+        scanned_lengths.append(len(text))
+        return scan(text, *args, **kwargs)
+
+    monkeypatch.setattr(reply_check, "_prose_hits", counted)
+    start = process_time()
+    assert reply_check.scan_public_policies(values) == {key: ["lex.en.promise"] for key in values}
+    elapsed = process_time() - start
+    assert len(scanned_lengths) == 41  # one per value and one combined, no growing-prefix scans
+    assert elapsed < 1.5   # the quadratic or backtracking scans this guards against take many seconds
+
+
+@pytest.mark.parametrize("text", [
+    "Nos prestations : la visite, la pose, la réparation sont offertes.",
+    "Une garantie pour la pose et la réparation.",
+    "Consultas sem custo para todos os clientes.",
+    "La consegna e la posa sono senza costi.",
+    "Beratung kostenlos für alle Kunden.",
+    "GRATUIT", "gratuites", "offerts", "sans frais", "remise", "rabais",
+    "garantis", "garanties", "remboursées", "remboursements",
+    "GRÁTIS", "gra\u0301tis", "sem custos", "sem taxa", "sem taxas",
+    "descontos", "garantidos", "garantidas", "senza costo", "sconti", "omaggi",
+    "garantiti", "garantite", "rimborsi", "umsonst", "Rabatte", "garantiert", "Erstattungen",
+    "ｇｒａｔｕｉｔ", "grátuit", "оffеrtеs", "sеm custo",
+])
+def test_public_policy_other_commitment_terms_ignore_language_vote(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert "language" in reply_check.scan_public_text(text)
+
+
+@pytest.mark.parametrize(("left", "right"), [
+    ("sans", "frais"), ("sem", "custo"), ("sem", "taxas"), ("senza", "costi"),
+])
+def test_public_policy_other_commitment_split_attribution(left, right, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    values = {"policy:a": left, "policy:b": right, "policy:z": "Ask about our services."}
+    assert reply_check.scan_public_text(left) == reply_check.scan_public_text(right) == []
+    assert reply_check.scan_public_policies(values) == {
+        "policy:a": ["language"], "policy:b": ["language"]}
+
+
+def test_public_policy_other_commitments_do_not_scan_reply_prose_or_word_parts(monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert reply_check.scan_public_text("gratuitous remiseness garage offerings") == []
+    assert "language" not in reply_check.scan_public_text("gratis")
+    assert "language" not in reply_check.scan_public_text("reembolso")
+    assert reply_check.scan_prose("Is it gratuit?") == []
+    assert reply_check.policy_card_violations("Is it gratuit?", [RenderedBlock(
+        kind="card", template="policy", fact_id="charter:policy:about", text="Ask about our services.")]) == []
+
+
+@pytest.mark.parametrize("text", [
+    "garanto", "garantimos", "garantem", "garantia",
+    "garantido", "garantida", "garantidos", "garantidas", "sem cobrança", "sem cobranças",
+])
+def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    prose_rules = {v.rule_id for v in reply_check.scan_prose(text)}
+    assert reply_check.scan_public_text(text) == sorted(prose_rules | {"language"})
+    assert reply_check.scan_public_text("x" + text.replace(" ", "x") + "x") == []
+    assert "language" not in prose_rules  # policy-only vocabulary
+
+
+@pytest.mark.parametrize("text", ["Ask about our services.", "Consultas con cita previa.", "garantía",
+                                  # Spanish for guarantor, a Portuguese verb form too
+                                  "Se requiere un garante.", "El garante firma el contrato."])
+def test_public_policy_portuguese_terms_preserve_english_and_spanish(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert "language" not in reply_check.scan_public_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Contact: info@example.com",
+    "Non-emergency plumbing",
+    "Consultas con cita previa en example.com",
+    "Contact: https://example.com/contact",
+    "Contact: www.example.com",
+    "Contact: info+help@example.com",
+    "Contact: EXAMPLE.COM",
+    "Non‐emergency plumbing",
+])
+def test_public_policy_language_ignores_addresses_and_english_non_compounds(text):
+    assert not lang.positive_other_language(text)
+    assert reply_check.scan_public_text(text) == []
+    assert reply_check.scan_public_policies({"policy:a": text, "policy:b": text}) == {}
+    # Policy evidence changes independently of the conservative reply language detector.
+    assert lang.detect(text) == ("en" if "+help@" in text else "other")
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("com carinho info@example.com", ["language"]),
+    ("non merci", ["language"]),
+    ("Contact: info@example.com free", ["lex.en.promise"]),
+    ("Non-free plumbing", ["lex.en.promise"]),
+    ("Garantimos o serviço. https://example.com", ["language"]),
+])
+def test_public_policy_language_address_exclusion_preserves_other_refusals(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    *[(text, []) for text in policy_cases.COST_AMENITIES],
+    *[(text, [rule]) for text, rule in policy_cases.COST_SERVICE_REFUSALS],
+])
+def test_public_policy_no_cost_amenities_require_a_complete_phrase(text, rules):
+    assert reply_check.scan_public_text(text) == rules
+    assert reply_check.scan_public_policies({"policy:about": text}) == ({"policy:about": rules} if rules else {})
+
+
+def test_public_policy_costs_nothing_amenity_cannot_cross_cards():
+    assert reply_check.scan_public_policies({"policy:a": "Parking", "policy:b": "costs nothing."}) == {
+        "policy:b": ["policy.free_price"]}

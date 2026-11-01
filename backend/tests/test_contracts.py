@@ -332,6 +332,55 @@ def test_kernel_error_codes_include_rate_limited():
         "invalid", "rate_limited", "seed_unproved", "internal"}
 
 
+@pytest.mark.parametrize('detail', [
+    {'A visitor wrote this': ['public_promise']},
+    {'desk.x.title': ['This text is a promise']},
+    {'': ['public_promise']},
+    {'x' * 121: ['public_promise']},
+    {'desk.x.title\n': ['public_promise']},
+    {'desk.x/title': ['public_promise']},
+    {'desk.x.title': ['']},
+    {'desk.x.title': ['x' * 65]},
+    {'desk.x.title': ['Public_Promise']},
+    {'desk.x.title': ['lex.en.promise\n']},
+    {'desk.x.title': ['lex.en/promise']},
+    {'desk.x.title': ['prómise']},
+])
+def test_kernel_error_detail_refuses_free_text_and_invalid_identifiers(detail):
+    with pytest.raises(ValidationError):
+        KernelError(code='invalid', detail=detail)
+    with pytest.raises(ValidationError):
+        KernelError.model_validate_json(json.dumps({'code': 'invalid', 'detail': detail}))
+
+
+def test_kernel_error_detail_accepts_emitted_fields_and_bounded_rule_ids():
+    from desk.contracts import BusinessTool
+    from desk.kernel_service import business_tools, reply_check
+
+    for config in ({'block': 'intake', 'questions': ['What?']},
+                   {'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 30},
+                   {'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': 5000},
+                   {'block': 'urgent', 'urgent_when': 'A burst pipe'}):
+        for title in ('Guaranteed service', 'Intake \u202edeetnaraug\u202c'):
+            tool = BusinessTool(tool='desk.' + 'x' * 40, title=title, description='Take details.', config=config)
+            values = business_tools.public_fields(tool)
+            detail = business_tools.hidden_fields(values) or business_tools.card_refusal(
+                tool, reply_check.scan_public_policies(values, allow_words=business_tools.free_allow_words(tool),
+                                                  amenities=False))
+            assert detail and KernelError(code='invalid', detail=detail).detail == detail
+
+    detail = {'charter:policy:service_area': [f'lex.{language}.{category}'
+              for language, entries in reply_check.LEXICONS.items() for category, _ in entries],
+              'desk.x.0-title': ['public_promise', 'format_control'], 'A' * 120: ['r' * 64]}
+    answer = KernelError(code='invalid', detail=detail)
+    assert KernelError.model_validate_json(answer.model_dump_json()).detail == detail
+
+
+def test_kernel_error_detail_schema_constrains_every_key():
+    detail = KernelError.model_json_schema()['properties']['detail']
+    assert detail['propertyNames'] == {'pattern': '^[A-Za-z0-9_.:-]{1,120}$'}
+
+
 def test_ev_error_codes_are_closed():
     # the web app shows a static string per code, so the list is fixed and nothing else gets through
     events = TypeAdapter(SseEvent)
@@ -549,6 +598,17 @@ def test_public_desk_open_status_is_optional():
     assert "open_status" not in export_schema()["$defs"]["PublicDesk"]["required"]   # optional in the web's types too
 
 
+def test_public_desk_starters_default_to_an_independent_empty_list():
+    first, second = (PublicDesk.model_validate(PUBLIC_DESK) for _ in range(2))
+    assert first.starters == second.starters == []
+    first.starters.append("Do you work in Alameda?")
+    assert second.starters == []
+    schema = export_schema()["$defs"]["PublicDesk"]
+    assert "starters" not in schema["required"]
+    assert schema["properties"]["starters"] == {
+        "default": [], "items": {"type": "string"}, "title": "Starters", "type": "array"}
+
+
 AS_OF = "2026-11-02T12:04:00-08:00"   # a Monday in the business's time zone, on the kernel's clock
 MIDNIGHT = "2026-11-03T00:00:00-08:00"   # the next local midnight
 OPEN_STATUSES = (   # open until a time, open all week, closed until later today, closed until tomorrow
@@ -715,3 +775,12 @@ def test_a_copy_without_a_replay_carries_nothing_replayed():
 
 def test_schema_export_is_current():
     assert export_schema() == json.loads(Path("desk/contracts.schema.json").read_text())
+
+
+def test_knowledge_sources_share_one_contract_type():
+    from desk.contracts import KnowledgeItem, KnowledgeSource
+    from desk.api.schemas import KnowledgeRow
+
+    assert get_args(KnowledgeSource) == ("website", "upload", "setup", "memory_import", "web_search")
+    assert KnowledgeItem.model_fields["source"].annotation is KnowledgeSource
+    assert KnowledgeRow.model_fields["source"].annotation is KnowledgeSource

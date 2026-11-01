@@ -27,6 +27,7 @@ from desk.api.prompts import NOTES
 from desk.api.routes import public
 from desk.kernel_api import CreateCopyRequest, DeskBusinessRequest
 from tests.api.fakes import ScriptedModel, response
+from tests.api.notes import conversation_notes
 from tests.api.test_approvals import answer, held_request, resolved
 from tests.api.test_loop_fencing import Kernel
 from tests.api.test_owner_desks import new_desk
@@ -390,9 +391,11 @@ async def test_hand_back_resumes_claude_with_the_visitor_credential(app, browser
     assert (events[-2][1].author, events[-2][1].generation) == ("claude", 2)
     # Claude read the outcome and that the owner handed the conversation back, in its user turn.
     follow_up = json.dumps(model.requests[-1].messages)
-    assert f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\">' in follow_up
+    fact_ids = " ".join(fact.fact_id for fact in fake.decisions[held.decision_id].result.facts)
+    assert fact_ids and (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\"'
+                         f' result_fact_ids=\\"{fact_ids}\\">' in follow_up)
     assert f"<note>{NOTES['handed_back']}</note>" in follow_up
-    assert await rows(engine, held.session_id, "note", "text", "wake") == [
+    assert await conversation_notes(engine, held.session_id, "text", "wake") == [
         (NOTES["taken_over"], False), (NOTES["handed_back"], False)]
     # Its turn ran with the visitor's own credential, and nothing else.
     turn = fake.calls[fake.calls.index(sent) + 1:]
@@ -418,7 +421,7 @@ async def test_resume_after_breaker_pause(app, browser, fake, kernel_http, model
     assert sent.body == {"mode": "ai", "generation": 0} and sent.headers[OWNER] == held.owner_token
     assert fake.sessions[held.session_id].strikes == 0
     assert ledgered(fake, held.session_id, "breaker")[-1] == ("breaker", {"resumed": True})
-    assert await rows(engine, held.session_id, "note", "text", "wake") == [(NOTES["resumed"], False)]
+    assert await conversation_notes(engine, held.session_id, "text", "wake") == [(NOTES["resumed"], False)]
 
     # Claude continues once the visitor's credential is present, reading the outcome and the resume.
     async with Stream(app, events_path(held.slug, "after=4"), headers=[cookie(held.token)]) as stream:
@@ -429,7 +432,9 @@ async def test_resume_after_breaker_pause(app, browser, fake, kernel_http, model
     assert (events[1][1].decision_id, events[1][1].state) == (held.decision_id, "executed")
     assert events[3][1].blocks[0].text == "Good news: Maria said yes." and events[3][1].generation == 1
     follow_up = json.dumps(model.requests[-1].messages)
-    assert f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\">' in follow_up
+    fact_ids = " ".join(fact.fact_id for fact in fake.decisions[held.decision_id].result.facts)
+    assert fact_ids and (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\"'
+                         f' result_fact_ids=\\"{fact_ids}\\">' in follow_up)
     assert f"<note>{NOTES['resumed']}</note>" in follow_up
     turn = fake.calls[fake.calls.index(sent) + 1:]
     assert "POST /check_reply" in [call.route for call in turn]

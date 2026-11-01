@@ -1,4 +1,5 @@
-# The nine checks on main and on pull requests to any base; docs/ci.md says what each one proves.
+# The nine required checks on main and on pull requests to any base; docs/ci.md says what each proves.
+# The changed paths job rules out unaffected suites on pull requests before they take a runner.
 # Suites that other parts of the project add run through tools/desk_tools/gate.py, which runs,
 # skips visibly or fails each one by whether its code is in the repo. No secrets, read-only.
 # Jobs run on GitHub-hosted ubuntu-24.04 unless the repository variable CI_RUNNER_MODE is "ec2" and
@@ -28,9 +29,51 @@ defaults:
     shell: bash
 
 jobs:
+  changes:
+    name: changed paths
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-changes"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.classify.outputs.backend }}
+      web: ${{ steps.classify.outputs.web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Classify the changed paths
+        id: classify
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: PYTHONPATH=tools python3 -m desk_tools.changed_paths
+
   backend:
     name: backend tests
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    needs: [changes, backend-1, backend-2, backend-3, backend-4]
+    if: always()
+    steps:
+      - name: Require every shard to pass
+        env:
+          NEEDED: ${{ needs.changes.outputs.backend }}
+          SHARD_1: ${{ needs.backend-1.result }}
+          SHARD_2: ${{ needs.backend-2.result }}
+          SHARD_3: ${{ needs.backend-3.result }}
+          SHARD_4: ${{ needs.backend-4.result }}
+        run: |
+          if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped; then
+            exit 0
+          fi
+          test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success
+
+  backend-1:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    name: backend tests 1/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -71,9 +114,160 @@ jobs:
       - name: Make the job's database skip durable commits
         run: make db-throwaway
       - name: Run the backend tests
+        env:
+          PYTEST_ADDOPTS: --shard=1/4
+        run: cd backend && uv run pytest -q
+
+  backend-2:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    name: backend tests 2/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    services:
+      postgres:
+        # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
+        # pull limit; the same official image from its ECR Public mirror on self-hosted runners.
+        image: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'public.ecr.aws/docker/library/postgres:16' || 'postgres:16' }}
+        ports: ["5433:5432"]
+        env:
+          POSTGRES_USER: desk_admin
+          POSTGRES_PASSWORD: change-me-admin
+          POSTGRES_DB: desk
+        options: >-
+          --health-cmd "pg_isready -U desk_admin"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
+          fi
+      - name: Use the local settings
+        run: |
+          cp .env.example .env
+          grep -E '^[A-Z][A-Z0-9_]*=' .env >> "$GITHUB_ENV"
+      - name: Check the migrations have one head
+        run: test "$(cd backend && uv run alembic heads | wc -l)" -eq 1
+      - name: Migrate
+        run: cd backend && uv run alembic upgrade head
+      - name: Set the role passwords
+        run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
+      - name: Run the backend tests
+        env:
+          PYTEST_ADDOPTS: --shard=2/4
+        run: cd backend && uv run pytest -q
+
+  backend-3:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    name: backend tests 3/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-3"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    services:
+      postgres:
+        # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
+        # pull limit; the same official image from its ECR Public mirror on self-hosted runners.
+        image: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'public.ecr.aws/docker/library/postgres:16' || 'postgres:16' }}
+        ports: ["5433:5432"]
+        env:
+          POSTGRES_USER: desk_admin
+          POSTGRES_PASSWORD: change-me-admin
+          POSTGRES_DB: desk
+        options: >-
+          --health-cmd "pg_isready -U desk_admin"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
+          fi
+      - name: Use the local settings
+        run: |
+          cp .env.example .env
+          grep -E '^[A-Z][A-Z0-9_]*=' .env >> "$GITHUB_ENV"
+      - name: Check the migrations have one head
+        run: test "$(cd backend && uv run alembic heads | wc -l)" -eq 1
+      - name: Migrate
+        run: cd backend && uv run alembic upgrade head
+      - name: Set the role passwords
+        run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
+      - name: Run the backend tests
+        env:
+          PYTEST_ADDOPTS: --shard=3/4
+        run: cd backend && uv run pytest -q
+
+  backend-4:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    name: backend tests 4/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-4"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    services:
+      postgres:
+        # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
+        # pull limit; the same official image from its ECR Public mirror on self-hosted runners.
+        image: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'public.ecr.aws/docker/library/postgres:16' || 'postgres:16' }}
+        ports: ["5433:5432"]
+        env:
+          POSTGRES_USER: desk_admin
+          POSTGRES_PASSWORD: change-me-admin
+          POSTGRES_DB: desk
+        options: >-
+          --health-cmd "pg_isready -U desk_admin"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
+          fi
+      - name: Use the local settings
+        run: |
+          cp .env.example .env
+          grep -E '^[A-Z][A-Z0-9_]*=' .env >> "$GITHUB_ENV"
+      - name: Check the migrations have one head
+        run: test "$(cd backend && uv run alembic heads | wc -l)" -eq 1
+      - name: Migrate
+        run: cd backend && uv run alembic upgrade head
+      - name: Set the role passwords
+        run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
+      - name: Run the backend tests
+        env:
+          PYTEST_ADDOPTS: --shard=4/4
         run: cd backend && uv run pytest -q
 
   kernel:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: kernel tests
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-kernel"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
@@ -88,6 +282,8 @@ jobs:
         run: cd kernel && cargo test --locked
 
   proofs:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: proofs
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-proofs"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
@@ -104,6 +300,28 @@ jobs:
   tier1:
     name: tier 1 evals
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    needs: [changes, tier1-1, tier1-2, tier1-3, tier1-4]
+    if: always()
+    steps:
+      - name: Require every shard to pass
+        env:
+          NEEDED: ${{ needs.changes.outputs.backend }}
+          SHARD_1: ${{ needs.tier1-1.result }}
+          SHARD_2: ${{ needs.tier1-2.result }}
+          SHARD_3: ${{ needs.tier1-3.result }}
+          SHARD_4: ${{ needs.tier1-4.result }}
+        run: |
+          if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped; then
+            exit 0
+          fi
+          test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success
+
+  tier1-1:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    name: tier 1 evals 1/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -144,11 +362,176 @@ jobs:
       - name: Make the job's database skip durable commits
         run: make db-throwaway
       - name: Run the tier 1 evals
+        env:
+          PYTEST_ADDOPTS: --shard=1/4
         run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
       - name: Run the kernel contract tests against the real kernel
+        env:
+          PYTEST_ADDOPTS: --shard=1/4
+        run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
+
+  tier1-2:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    name: tier 1 evals 2/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    services:
+      postgres:
+        # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
+        # pull limit; the same official image from its ECR Public mirror on self-hosted runners.
+        image: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'public.ecr.aws/docker/library/postgres:16' || 'postgres:16' }}
+        ports: ["5433:5432"]
+        env:
+          POSTGRES_USER: desk_admin
+          POSTGRES_PASSWORD: change-me-admin
+          POSTGRES_DB: desk
+        options: >-
+          --health-cmd "pg_isready -U desk_admin"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
+          fi
+      - name: Use the local settings
+        run: |
+          cp .env.example .env
+          grep -E '^[A-Z][A-Z0-9_]*=' .env >> "$GITHUB_ENV"
+      - name: Check the migrations have one head
+        run: test "$(cd backend && uv run alembic heads | wc -l)" -eq 1
+      - name: Migrate
+        run: cd backend && uv run alembic upgrade head
+      - name: Set the role passwords
+        run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
+      - name: Run the tier 1 evals
+        env:
+          PYTEST_ADDOPTS: --shard=2/4
+        run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
+      - name: Run the kernel contract tests against the real kernel
+        env:
+          PYTEST_ADDOPTS: --shard=2/4
+        run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
+
+  tier1-3:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    name: tier 1 evals 3/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-3"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    services:
+      postgres:
+        # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
+        # pull limit; the same official image from its ECR Public mirror on self-hosted runners.
+        image: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'public.ecr.aws/docker/library/postgres:16' || 'postgres:16' }}
+        ports: ["5433:5432"]
+        env:
+          POSTGRES_USER: desk_admin
+          POSTGRES_PASSWORD: change-me-admin
+          POSTGRES_DB: desk
+        options: >-
+          --health-cmd "pg_isready -U desk_admin"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
+          fi
+      - name: Use the local settings
+        run: |
+          cp .env.example .env
+          grep -E '^[A-Z][A-Z0-9_]*=' .env >> "$GITHUB_ENV"
+      - name: Check the migrations have one head
+        run: test "$(cd backend && uv run alembic heads | wc -l)" -eq 1
+      - name: Migrate
+        run: cd backend && uv run alembic upgrade head
+      - name: Set the role passwords
+        run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
+      - name: Run the tier 1 evals
+        env:
+          PYTEST_ADDOPTS: --shard=3/4
+        run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
+      - name: Run the kernel contract tests against the real kernel
+        env:
+          PYTEST_ADDOPTS: --shard=3/4
+        run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
+
+  tier1-4:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
+    name: tier 1 evals 4/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-4"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    services:
+      postgres:
+        # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
+        # pull limit; the same official image from its ECR Public mirror on self-hosted runners.
+        image: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'public.ecr.aws/docker/library/postgres:16' || 'postgres:16' }}
+        ports: ["5433:5432"]
+        env:
+          POSTGRES_USER: desk_admin
+          POSTGRES_PASSWORD: change-me-admin
+          POSTGRES_DB: desk
+        options: >-
+          --health-cmd "pg_isready -U desk_admin"
+          --health-interval 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-desk
+      # make db-roles uses psql. GitHub-hosted runners have it; elsewhere it comes from apt.
+      - name: Install the Postgres client if the runner has none
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -o DPkg::Lock::Timeout=300 update -q
+            sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends postgresql-client
+          fi
+      - name: Use the local settings
+        run: |
+          cp .env.example .env
+          grep -E '^[A-Z][A-Z0-9_]*=' .env >> "$GITHUB_ENV"
+      - name: Check the migrations have one head
+        run: test "$(cd backend && uv run alembic heads | wc -l)" -eq 1
+      - name: Migrate
+        run: cd backend && uv run alembic upgrade head
+      - name: Set the role passwords
+        run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
+      - name: Run the tier 1 evals
+        env:
+          PYTEST_ADDOPTS: --shard=4/4
+        run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
+      - name: Run the kernel contract tests against the real kernel
+        env:
+          PYTEST_ADDOPTS: --shard=4/4
         run: uv run --project tools python -m desk_tools.gate --name kernel-contract --run-if backend/tests/kernel_contract/conftest.py --required-if backend/desk/api/kernel_client.py -- make kernel-contract
 
   tier2:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: tier 2 results
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
@@ -163,16 +546,46 @@ jobs:
       - name: Check the tier 2 results
         env:
           RESULTS_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          FORCED: ${{ github.event_name == 'push' && github.event.forced || false }}
         run: |
+          if [ "$FORCED" = "true" ]; then
+            echo "::error::a force-push to main replaced history that CI can't check for rewritten rates or waivers"
+            exit 1
+          fi
+          HISTORY_SINCE=""
           if [ -z "$RESULTS_BASE" ]; then
             RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            HISTORY_SINCE="$RESULTS_BASE"
           fi
-          uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE"
+          uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE" HISTORY_SINCE="$HISTORY_SINCE"
 
   web:
     name: web tests
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
-    timeout-minutes: 25
+    timeout-minutes: 5
+    needs: [changes, web-1, web-2, web-3, web-4, web-e2e]
+    if: always()
+    steps:
+      - name: Require every shard and the end-to-end test to pass
+        env:
+          NEEDED: ${{ needs.changes.outputs.web }}
+          SHARD_1: ${{ needs.web-1.result }}
+          SHARD_2: ${{ needs.web-2.result }}
+          SHARD_3: ${{ needs.web-3.result }}
+          SHARD_4: ${{ needs.web-4.result }}
+          E2E: ${{ needs.web-e2e.result }}
+        run: |
+          if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped && test "$E2E" = skipped; then
+            exit 0
+          fi
+          test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success && test "$E2E" = success
+
+  web-1:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests 1/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -190,11 +603,119 @@ jobs:
           cache-suffix: ${{ github.job }}
           ignore-nothing-to-cache: true
       - name: Run the web type check and unit tests
+        env:
+          WEB_TEST_ARGS: --shard=1/4 --maxWorkers=2
         run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+
+  web-2:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests 2/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - name: Run the web type check and unit tests
+        env:
+          WEB_TEST_ARGS: --shard=2/4 --maxWorkers=2
+        run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+
+  web-3:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests 3/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-3"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - name: Run the web type check and unit tests
+        env:
+          WEB_TEST_ARGS: --shard=3/4 --maxWorkers=2
+        run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+
+  web-4:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests 4/4
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-4"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
+      - name: Run the web type check and unit tests
+        env:
+          WEB_TEST_ARGS: --shard=4/4 --maxWorkers=2
+        run: uv run --project tools python -m desk_tools.gate --name web --run-if web/package.json -- make web-test
+
+  web-e2e:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
+    name: web tests e2e
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web-e2e"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No npm cache: this job runs before web/package-lock.json exists.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ${{ github.job }}
+          ignore-nothing-to-cache: true
       - name: Build the web app and run the mocked end-to-end test
-        run: uv run --project tools python -m desk_tools.gate --name web-e2e --run-if web/playwright.config.ts --required-if web/e2e -- make web-e2e
+        run: uv run --project tools python -m desk_tools.gate --name web-e2e --run-if web/playwright.config.ts --required-if web/e2e -- make web-deps web-e2e
 
   infra:
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     name: infra synth
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-infra"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25

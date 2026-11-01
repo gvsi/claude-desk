@@ -14,8 +14,9 @@ from desk.contracts import MCP_TOOLS, Effect, NormalizedAction, ResourceRef, Rev
 from desk.db.models import Tool
 from desk.kernel_service.adapters import profile_sha256
 from desk.kernel_service.adapters.base import AdapterResult, ExecCtx, Normalized, NormalizeCtx
+from desk.kernel_service import jev
 from desk.kernel_service.decisions import (REVIEW_MODEL, SOFT_PROMISE_MODEL, CallUsage, DecisionsBackend,
-                                           ReviewInput, Reviewed, SoftPromiseInput, SoftPromiseVerdict)
+                                           ReviewInput, Reviewed, SearchHit, SoftPromiseInput, SoftPromiseVerdict, WEB_SEARCH_MODEL)
 
 
 class FrozenClock:
@@ -142,6 +143,16 @@ class FakeDecisions:
                                                                          denies_being_ai=False)
         self.soft_inputs: list[SoftPromiseInput] = []
         self.soft_backend: DecisionsBackend | None = None
+        self.search_answer: list[SearchHit] | None = None
+        self.search_inputs: list[str] = []
+        self.search_usage = CallUsage(model=WEB_SEARCH_MODEL, status="ok", input_tokens=1200,
+                                      output_tokens=200, latency_ms=800)
+
+    async def web_search(self, query: str) -> tuple[list[SearchHit] | None, CallUsage | None]:
+        self.search_inputs.append(query)
+        status = "ok" if self.search_answer is not None else "error"
+        self.search_usage = self.search_usage.model_copy(update={"status": status})
+        return self.search_answer, self.search_usage
 
     async def review(self, data: ReviewInput) -> Reviewed:
         self.inputs.append(data)
@@ -154,6 +165,21 @@ class FakeDecisions:
             return await self.soft_backend.soft_promise(data)
         status = "ok" if self.soft_answer is not None else "error"
         return self.soft_answer, CallUsage(status=status, **self.SOFT_USAGE)
+
+
+class FakeJev:
+    """One scripted Jev verdict with captured inputs; patches `jev.evaluate`, never the network."""
+
+    def __init__(self, *, top: float = 0.0, status: str = "ok"):
+        scores = {name: 0.0 for name in jev.STATEMENTS}
+        scores["claims_done"] = top
+        self.result = jev.Result(status=status, scores=scores if status == "ok" else None,
+                                 blocked=status == "ok" and top >= jev.JEV_BLOCK_AT, latency_ms=10)
+        self.inputs: list[tuple[str, list[str], list[str]]] = []
+
+    async def evaluate(self, prose, cards, next_steps, *, api_key):
+        self.inputs.append((prose, cards, next_steps))
+        return self.result
 
 
 def model_message(text: str | None, *, stop_reason: str = "end_turn", model: str = "claude-sonnet-5-5",

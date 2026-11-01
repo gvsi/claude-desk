@@ -21,6 +21,13 @@ async function mockApiPlugins(): Promise<PluginOption[]> {
 const fs = { allow: [searchForWorkspaceRoot(process.cwd()), '../docs'] };
 
 /**
+ * Streamdown imports `rehype-raw` for default plugins Claude's replies never use, since
+ * `ChatMarkdown` renders HTML in the text as text. Every mode takes a do-nothing stand-in, so its
+ * HTML parser stays out of the bundle and nothing can parse raw HTML into elements.
+ */
+const noRawHtml = { find: /^rehype-raw$/, replacement: fileURLToPath(new URL('./src/ds/components/ChatMarkdown/noRawHtml.ts', import.meta.url)) };
+
+/**
  * Mode `mock` (`npm run dev:mock`) serves the mock API from the dev server's own process, so every
  * tab of a browser shares one demo copy: its plugin is loaded in that mode only and applies only to
  * `vite dev`, never to a build. Mode `test` (the screen tests) serves the mock's service worker
@@ -28,12 +35,13 @@ const fs = { allow: [searchForWorkspaceRoot(process.cwd()), '../docs'] };
  */
 export default defineConfig(async ({ mode }) => ({
   plugins: [react(), ...(mode === 'mock' ? await mockApiPlugins() : [])],
+  resolve: { alias: [noRawHtml] },
   publicDir: mode === 'test' ? 'mock-public' : 'public',
   // The screen tests run the design system's board checks (`src/test/boards.ts`), which import
   // `storybook/test`, the share kit draws its QR code with `qrcode`, and the knowledge tests check
-  // answers against the contracts with Ajv: all bundled up front, so a fresh cache doesn't reload
+  // answers against the contracts with Ajv, and component tests run axe, and Claude's replies render with Streamdown: all bundled up front, so a fresh cache doesn't reload
   // the page mid-run.
-  optimizeDeps: mode === 'test' ? { include: ['storybook/test', 'qrcode', 'ajv/dist/2020.js'] } : {},
+  optimizeDeps: mode === 'test' ? { include: ['storybook/test', 'qrcode', 'ajv/dist/2020.js', 'axe-core', 'streamdown'] } : {},
   // `npm run dev` talks to the API process on its own port; the browser sees one origin. In mode
   // `mock` the dev server answers `/api/` itself and forwards nothing.
   server: mode === 'mock' ? { fs } : { fs, proxy: { '/api': 'http://127.0.0.1:8700' } },

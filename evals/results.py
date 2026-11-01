@@ -37,26 +37,30 @@ key whatever its tree held. That is read from what the pass recorded before its 
 the uncommitted gated changes it found and whether it built the kernel: `PassResult.start`), never
 from `config.results` alone, and the inputs it names must be its commit's, read from git, so a
 `pass.json` edited to claim `--results` or relabelled to another commit is refused. It holds rows,
-never text, codes or ids beyond scenario ids. It lists the gated map as [object id, path] pairs sorted by path
+never text, codes or ids beyond scenario ids and the names of waiver signers. It lists the gated map as [object id, path] pairs sorted by path
 (`gated_pairs`), never as an object, so CI's secret scan reads no path and object id as a secret.
 
-**`results-check --base <ref>`** (`make evals-results-check`), with no database, network or key:
+**`results-check --base <ref> [--history-since <rev>]`** (`make evals-results-check`), with no database, network or key:
 exit 0 when `git diff --no-renames -z --name-only <ref>...HEAD` touches no gated path and leaves
-`recorded_rates.json` and `evals/results/` alone (without renames, moving a gated file out lists its
+`recorded_rates.json`, `evals/waivers.json` and `evals/results/` alone (without renames, moving a gated file out lists its
 old path too; `-z` keeps non-ASCII paths unquoted). When every committed head scenario requires a
 plan its committed `landed.toml` lacks (`unarmed`), no results file is needed or regenerated: the
-head's rate history must be empty, its history must still extend the base's unchanged, its landed
-plans must keep the base's, its splits must hold its suite, and any added or edited results JSON
-must validate. `merge_ready` uses the same rule over both sides' scenarios (both requirements for a shared id) against the union of
+head's rate history must be empty, its history must still extend the base's unchanged,
+its waiver history must extend the base's unchanged, its landed plans must keep the base's,
+its splits must hold its suite, and any added or edited results JSON must validate.
+`merge_ready` uses the same rule over both sides' scenarios (both requirements for a shared id) against the union of
 their landed plans and over the actual merge tree, with neither side holding a recorded rate. The
 merge tree must also pass the checks that need no runs: suite and splits loading and consistency,
-empty recorded-rate history, history growth and kept landed plans.
+empty recorded-rate history, append-only rate and waiver histories, and kept landed plans.
+On every readiness path, the actual merge tree must also have exactly one Alembic head when its
+migrations directory exists; revision metadata is parsed as literals without executing migrations.
 Once any scenario can run, the strict check is unchanged: stopping at the first failure, the
 committed file for the head's key exists, validates and is gating evidence, its suite hash,
 held-out hash and recorded rate are the head's (a rate that is gating evidence), it holds exactly
 one row per head scenario and repeat (a scenario that `requires` a plan the head's `landed.toml`
-lacks is listed in `pending` with no rows), the head's rate history extends the base's unchanged and
-its `landed.toml` keeps every plan the base lists, and the gate recomputed from the rows passes. The
+lacks is listed in `pending` with no rows), the head's rate history extends the base's unchanged,
+its waiver history must extend the base's unchanged, its `landed.toml` keeps every plan the base lists,
+and the gate recomputed from the rows and the head's committed waivers passes. The
 stored `gate` is never trusted. A passing line counts the runs that skipped checks while a plan hadn't
 landed, as the gate's summary line does (`gate.skipped_summary`), so such a file never reads as clean.
 Every file it reads is read from git at the head and the base, never from the working tree, so the
@@ -66,6 +70,27 @@ gating evidence, suite, hashes, rate and rows) are `reconcile(file, root, rev)`.
 The push-to-main check uses the root commit as its base, so it validates every historical results
 file still under `evals/results/` against today's schema. A results-file schema change must migrate
 or delete those old files; incompatible historical files fail closed.
+`--history-since <rev>` additionally checks rate, waiver and landed-plan histories against every
+first-parent commit in `<rev>..HEAD` that changes those files. Earlier rate and waiver histories must
+be prefixes of the head's, and every earlier landed plan must be kept. Unreadable files fail closed.
+CI supplies the repository's root commit on pushes and manual runs, so cancelled runs cannot hide a
+rewrite. A force-push to main fails CI because its replaced commits cannot be checked. Pull requests
+use only their normal results base.
+
+**Owner-signed AI-denial waivers.** Only `disclosure.denial` can be waived, for one pass, scenario,
+run and message with its exact text hash and transcript-derived hit count. The gate subtracts the
+oracle only when distinct messages' waiver hit counts sum exactly to the scored row's count;
+partial sets retain the violations and mismatches fail closed.
+The head's committed waivers are read from git, never the working tree. Waivers are outside
+`GATED_PATHS`: signing leaves a pass's inputs key unchanged. Once any scenario can run, a waivers-only
+change needs a results file and gate recomputation; while every scenario is pending, results-check
+still holds the waivers history append-only. Every waived result names its count and signers.
+
+**Limits.** Results files are self-attested: CI recomputes their rows but cannot prove they came
+from a real run, since it holds no model credentials. CI checks summed waiver hits against rows but
+cannot check message ids, hashes or per-message hit counts: results files contain neither ids nor
+hashes and must not start to. Local `waive`, `gate --pass`, results export and report commands check
+ids, hashes and per-message hit counts against transcripts.
 
 **The final gate** (`gate --pass <id> --final`, `final_gate`) certifies only a whole, current, local
 pass: it refuses a pass of part of the suite (`--suite`, `--split` or `--only`), a dry,
@@ -73,7 +98,8 @@ null-baseline or `--base-url` pass, one that isn't gating evidence, one that was
 pass by what it recorded (so nothing checked that its tree held its commit's gated inputs or built
 the kernel from them), and one made at other gated inputs than the head's; it builds the pass's
 results file, reconciles it with the head as `results-check` would (so it judges against the head's
-committed rate), and judges the rows against the head's whole suite.
+committed rate), and judges the rows against the head's whole suite and committed waivers. Local
+or supplied waiver entries for that pass must match the head's; otherwise commit the registry first.
 
 **A recorded rate** (`record-rate`, `passes.record_rate`) sets the bar every later pass is judged
 against, so it comes only from a pass the final gate would accept as standing for the head: the
@@ -85,10 +111,11 @@ written. It never lowers the bar quietly: a lower bound on the same held-out set
 doesn't load), and `results-check` names each lowered rate a change adds (`lowered_notice`).
 """
 
+import ast
 import json
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import zip_longest
 from pathlib import Path
@@ -107,13 +134,14 @@ from pydantic import (
     field_validator,
 )
 
-from evals.gate import SHOWN, GateInput, GateResult, RunRow, Target, coverage_problems, skipped_summary
+from evals.gate import SHOWN, GateInput, GateResult, RunRow, Target, coverage_problems, skipped_summary, waiver_summary
 from evals.gate import gate as gate_of
 from evals.oracles.canonical import sha256_hex
 from evals.tier1.harness import load_landed
 from evals.tier2.runner import DESK_MODELS, KERNEL_CHECK_MODELS
 from evals.tier2.schema import Provider, RecordedRate, RecordedRates
 from evals.tier2.simulator import ATTACKER_MODEL, VISITOR_MODEL
+from evals.waivers import WAIVERS_PATH, Waiver, checked_waivers, load_waivers
 from evals.tier2.suite import (
     heldout_sha256,
     load_recorded_rates,
@@ -129,6 +157,7 @@ RATES_PATH = "evals/recorded_rates.json"
 LANDED_PATH = "evals/tier1/landed.toml"
 SCENARIOS_PATH = "evals/tier2/scenarios"
 SPLITS_PATH = "evals/splits.yaml"
+MIGRATIONS_PATH = "backend/alembic/versions"
 # The owner's scope (owner decision, 2026-10-30): the kernel, the prompts, the policies, the model settings,
 # and the tier 2 scenarios and judges. Everything else relies on tier 1 and CI.
 GATED_PATHS = (
@@ -138,6 +167,7 @@ GATED_PATHS = (
     "backend/desk/kernel_api.py",           # the requests the kernel decides on and the answers it gives
     "backend/desk/contracts.py",            # the cards, decisions and labels the kernel checks and renders
     "backend/desk/rewrites.py",             # the violations a rewrite can fix: when a handoff opens
+    "backend/desk/next_steps.py",           # the fixed session capabilities exempted by the soft check
     "backend/desk/mockpay",                 # the payment server behind the kernel's money tools
     # The prompts.
     "backend/desk/api/prompts.py",          # every fixed string the Desk's model sees
@@ -225,7 +255,7 @@ def is_gated(path: str) -> bool:
 
 
 def _needs_results(path: str) -> bool:
-    return is_gated(path) or path == RATES_PATH or path.startswith(RESULTS_DIR + "/")
+    return is_gated(path) or path in (RATES_PATH, WAIVERS_PATH) or path.startswith(RESULTS_DIR + "/")
 
 
 def unarmed(rev: str = "HEAD", root: Path = REPO_ROOT, *, other_rev: str | None = None) -> bool:
@@ -247,11 +277,84 @@ def unarmed(rev: str = "HEAD", root: Path = REPO_ROOT, *, other_rev: str | None 
     return all(required - landed for required in requirements)
 
 
+def _migration_revision(raw: bytes, path: str) -> tuple[str, tuple[str, ...]]:
+    """Read only module-level literal metadata, without importing or executing a migration."""
+    try:
+        module = ast.parse(raw, filename=path)
+    except SyntaxError as error:
+        raise GitError(f"migration {path!r} doesn't parse: {error}") from None
+    values: dict[str, Any] = {}
+    for statement in module.body:
+        if isinstance(statement, ast.Assign):
+            targets = statement.targets
+        elif isinstance(statement, ast.AnnAssign):
+            targets = [statement.target]
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in ("revision", "down_revision"):
+                try:
+                    values[target.id] = ast.literal_eval(statement.value)
+                except (ValueError, TypeError) as error:
+                    raise GitError(f"migration {path!r} has non-literal {target.id}: {error}") from None
+    if "revision" not in values or "down_revision" not in values:
+        raise GitError(f"migration {path!r} must assign literal revision and down_revision at module level")
+    revision, parent = values["revision"], values["down_revision"]
+    if not isinstance(revision, str) or not revision:
+        raise GitError(f"migration {path!r} revision must be a nonempty string")
+    parents = () if parent is None else (parent,) if isinstance(parent, str) else parent
+    if not isinstance(parents, (tuple, list)) or any(not isinstance(p, str) or not p for p in parents):
+        raise GitError(f"migration {path!r} down_revision must be None, a string, or a tuple/list of revision strings")
+    return revision, tuple(parents)
+
+
+def _migration_heads(root: Path, tree: str) -> list[str] | None:
+    """Heads in the merged git tree, or None when the migrations directory is absent."""
+    entry = git(root, "ls-tree", "-z", tree, "--", MIGRATIONS_PATH).rstrip("\0")
+    if not entry:
+        return None
+    if entry.split("\t", 1)[0].split()[1] != "tree":
+        raise GitError(f"{MIGRATIONS_PATH} can't be read as a directory in the merge tree")
+    revisions: set[str] = set()
+    parents: set[str] = set()
+    # Like Alembic: only the folder's own .py files, not subfolders, and never an `__init__` file.
+    paths = git(root, "ls-tree", "-z", "--name-only", tree, "--", MIGRATIONS_PATH + "/").split("\0")
+    for path in paths:
+        if not path.endswith(".py") or path.rsplit("/", 1)[-1].startswith("__"):
+            continue
+        raw = show(root, tree, path)
+        if raw is None:
+            raise GitError(f"migration {path!r} can't be read from the merge tree")
+        revision, down_revisions = _migration_revision(raw, path)
+        if revision in revisions:
+            raise GitError(f"migration {path!r} duplicates revision {revision!r}")
+        revisions.add(revision)
+        parents.update(down_revisions)
+    return sorted(revisions - parents)
+
+
 def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
-    """An unarmed union and merge with no recorded rates are ready; otherwise apply the both-sides rule."""
+    """Require one merged migration head, then apply the unarmed or both-sides results rule."""
     head_commit = git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{head}^{{commit}}").strip()
     main_commit = git(root, "rev-parse", "--verify", "--quiet", "origin/main^{commit}").strip()
     base = git(root, "merge-base", head_commit, main_commit).strip()
+    done = subprocess.run(
+        ["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only", "-z", head_commit, main_commit],
+        capture_output=True, text=True,
+    )
+    if done.returncode == 1:
+        # With -z, the tree id and conflicted paths precede an empty field and the messages.
+        paths = done.stdout.split("\0\0", 1)[0].split("\0")[1:]
+        return False, ("not ready: the PR conflicts with origin/main in "
+                       f"{', '.join(repr(path) for path in paths)}; rebase onto origin/main")
+    if done.returncode != 0:
+        raise GitError(f"git merge-tree failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
+    merged = done.stdout.split("\0", 1)[0].strip()
+    heads = _migration_heads(root, merged)
+    if heads is not None and len(heads) != 1:
+        return False, (f"not ready: merged Alembic migrations have {len(heads)} heads: "
+                       f"{', '.join(repr(head) for head in heads) or 'none'}; "
+                       "re-chain the PR's migration onto origin/main's head")
 
     def changed_inputs(commit: str) -> list[str]:
         paths = git(root, "diff", "--no-renames", "-z", "--name-only", f"{base}..{commit}").split("\0")
@@ -271,18 +374,6 @@ def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
         except ValueError as error:
             raise GitError(f"merge readiness {RATES_PATH} doesn't load: {error}") from None
         if pending_only and not any(histories):
-            done = subprocess.run(
-                ["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only", "-z", head_commit, main_commit],
-                capture_output=True, text=True,
-            )
-            if done.returncode == 1:
-                # With -z, the tree id and conflicted paths precede an empty field and the messages.
-                paths = done.stdout.split("\0\0", 1)[0].split("\0")[1:]
-                return False, ("not ready: the PR conflicts with origin/main in "
-                               f"{', '.join(repr(path) for path in paths)}; rebase onto origin/main")
-            if done.returncode != 0:
-                raise GitError(f"git merge-tree failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
-            merged = done.stdout.split("\0", 1)[0].strip()
             try:
                 merged_pending_only = unarmed(merged, root)
             except CheckFailed as error:
@@ -517,12 +608,17 @@ def results_file(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT) -> Res
         raise ResultsRefused(refusal)
     if problems := coverage_problems(p.gate_input(), pass_target(p, root)):
         raise ResultsRefused(f"pass {p.pass_id} doesn't cover the suite: " + "; ".join(problems))
+    try:
+        waivers = checked_waivers(p, load_waivers(root), root=root)
+    except (OSError, ValueError) as error:
+        raise ResultsRefused(f"pass {p.pass_id}'s waivers can't be checked: {error}") from None
     return ResultsFile(
         schema=1, inputs=p.inputs, gated=gated_pairs(p.gated), git_sha=p.git_sha, created_at=p.created_at,
         pass_id=p.pass_id, runs_per_scenario=p.config.runs, served_models=p.served_models,
         providers=ResultsProviders(api=p.providers.api, simulator=p.providers.simulator, kernel_checks="anthropic"),
         model_ids=p.model_ids, landed=list(p.landed), suite_sha256=p.suite_sha256, heldout_sha256=p.heldout_sha256,
-        recorded_rate=rate_ref(rates), runs=list(p.runs), pending=dict(p.pending), gate=gate_of(p, rates),
+        recorded_rate=rate_ref(rates), runs=list(p.runs), pending=dict(p.pending),
+        gate=gate_of(p, rates, waivers=waivers),
     )
 
 
@@ -608,6 +704,7 @@ class Reconciled:
     rates: RecordedRates
     landed: tuple[str, ...]
     target: Target
+    waivers: tuple[Waiver, ...] = ()
 
 
 def reconcile(file: ResultsFile, root: Path = REPO_ROOT, rev: str = "HEAD", *, name: str | None = None) -> Reconciled:
@@ -632,6 +729,7 @@ def reconcile(file: ResultsFile, root: Path = REPO_ROOT, rev: str = "HEAD", *, n
             rates = load_recorded_rates(tree / RATES_PATH) if (tree / RATES_PATH).exists() \
                 else RecordedRates(history=[])
             landed = load_landed(tree / LANDED_PATH)
+            waivers = load_waivers(tree)
         except ValueError as error:
             raise CheckFailed(f"{whose} eval files don't load: {error}") from None
     if problems := split_problems(suite, splits):
@@ -651,7 +749,7 @@ def reconcile(file: ResultsFile, root: Path = REPO_ROOT, rev: str = "HEAD", *, n
     target = Target.of(suite, splits, landed)
     if problems := coverage_problems(file.gate_input(), target):
         raise CheckFailed(f"the rows don't cover {whose} suite: {problems[0]}")
-    return Reconciled(rates=rates, landed=landed, target=target)
+    return Reconciled(rates=rates, landed=landed, target=target, waivers=tuple(waivers))
 
 
 # What a pass that stands for the head is held to: the final gate's and a recorded rate's words for it.
@@ -663,8 +761,28 @@ _USES = {
 }
 
 
+def checked_committed_waivers(p: Any, *, root: Path = REPO_ROOT,
+                              committed: Sequence[Waiver] | None = None,
+                              supplied: Sequence[Waiver] | None = None) -> list[Waiver]:
+    """Bind this pass's local/supplied waivers to HEAD, then check its transcript evidence."""
+    if committed is None:
+        committed = TypeAdapter(list[Waiver]).validate_json(show(root, "HEAD", WAIVERS_PATH) or "[]")
+
+    def entries_for_pass(entries: Sequence[Waiver]) -> list[str]:
+        return sorted(w.model_dump_json() for w in entries if w.pass_id == p.pass_id)
+
+    offered: list[Sequence[Waiver]] = [load_waivers(root)]
+    if supplied is not None:
+        offered.append(supplied)
+    if any(entries_for_pass(entries) != entries_for_pass(committed) for entries in offered):
+        raise ResultsRefused(f"pass {p.pass_id}'s local or supplied waivers differ from the head's; "
+                             "commit evals/waivers.json first")
+    return checked_waivers(p, list(committed), root=root)
+
+
 def reconcile_pass(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
-                   use: Literal["final gate", "recorded rate"]) -> Reconciled:
+                   use: Literal["final gate", "recorded rate"],
+                   waivers: Sequence[Waiver] | None = None) -> Reconciled:
     """Whether a finished pass (`PassResult`) stands for the head, as the final gate and a recorded rate
     both need, judged against `rates` (the working tree's): returns what its results file was reconciled
     with at the head, or raises `ResultsRefused` with the first reason it doesn't, in this order. The pass
@@ -675,7 +793,8 @@ def reconcile_pass(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
     results file can be written (`results_file`, which reconciles it with the whole suite at its commit);
     and that file reconciles with the head as `results-check` would (`reconcile`, so `rates` must name the
     head's current rate; `record_rate` also holds the whole of `rates` to the returned history with
-    `history_refusal`). `use` names the caller in the reasons."""
+    `history_refusal`). Local or supplied waivers for this pass must equal the head's committed entries,
+    which are checked against transcripts before returning. `use` names the caller in the reasons."""
     who, lead, at_inputs = _USES[use]
     if refusal := p.config.whole_pass_refusal():
         raise ResultsRefused(f"{lead} a pass that could write the results file, and pass {p.pass_id} couldn't: "
@@ -687,7 +806,9 @@ def reconcile_pass(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
             raise ResultsRefused(f"pass {p.pass_id} ran at gated inputs {p.inputs}, and the head's are {head}: "
                                  f"{at_inputs}; run a new pass")
         file = results_file(p, rates, root=root)
-        return reconcile(file, root, "HEAD", name=f"pass {p.pass_id}'s results file")
+        at_head = reconcile(file, root, "HEAD", name=f"pass {p.pass_id}'s results file")
+        checked_committed_waivers(p, root=root, committed=at_head.waivers, supplied=waivers)
+        return at_head
     except CheckFailed as failure:
         raise ResultsRefused(str(failure)) from None
     except GitError as failure:
@@ -730,20 +851,27 @@ def lowered_notice(rate: RecordedRate) -> str | None:
             f"{rate.completion_lower_95:.3f} from pass {rate.run_id} (reason: {rate.reason})")
 
 
-def final_gate(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT) -> GateResult:
+def final_gate(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
+               waivers: Sequence[Waiver] | None = None) -> GateResult:
     """`gate --pass <id> --final`: whether a finished pass certifies the head, the commit that ships.
     Refused unless the pass stands for the head (`reconcile_pass`, the checks a recorded rate shares);
-    then its rows are judged against the head's committed rate and whole suite."""
-    at_head = reconcile_pass(p, rates, root=root, use="final gate")
-    return gate_of(p, at_head.rates, final=True, target=at_head.target)
+    then its rows are judged against the head's committed rate, waivers and whole suite. Local or
+    supplied entries for this pass must match the committed entries; other passes don't affect it."""
+    at_head = reconcile_pass(p, rates, root=root, use="final gate", waivers=waivers)
+    return gate_of(p, at_head.rates, final=True, target=at_head.target, waivers=at_head.waivers)
 
 
 # The check CI runs
 
-def results_check(base: str, root: Path = REPO_ROOT) -> tuple[bool, str]:
-    """`make evals-results-check BASE=<ref>`: (passed, the reason). See the module docstring for the order."""
+def results_check(base: str, root: Path = REPO_ROOT, *, history_since: str | None = None) -> tuple[bool, str]:
+    """Judge results against `base`, and with `history_since` hold the head's histories to every
+    first-parent commit since that revision."""
     try:
-        return True, _check(base, root)
+        reason = _check(base, root)
+        if history_since is not None:
+            _check_histories_since(history_since, root)
+            reason += f"; rate, waiver and landed-plan histories extend every first-parent commit since {history_since}"
+        return True, reason
     except CheckFailed as failure:
         return False, str(failure)
     except GitError as failure:
@@ -757,7 +885,7 @@ def _check(base: str, root: Path) -> str:
     changed = [path for path in git(root, "diff", "--no-renames", "-z", "--name-only", f"{base}...HEAD").split("\0")
                if path]
     if not any(_needs_results(path) for path in changed):
-        return f"no gated path, recorded rate or results file changed since {base}; no results file needed"
+        return f"no gated path, recorded rate, waivers or results file changed since {base}; no results file needed"
     pending_only = unarmed(root=root)
     name = f"{RESULTS_DIR}/{inputs_key('HEAD', root)}.json"
     if pending_only:
@@ -788,15 +916,18 @@ def _check(base: str, root: Path) -> str:
         head = reconcile(file, root, "HEAD", name=name)
         rates, landed = head.rates, head.landed
     before = _check_history(rates, landed, base, root)
-    result = gate_of(file, rates)
+    _check_waiver_history("HEAD", base, root)
+    result = gate_of(file, rates, waivers=head.waivers)
     if not result.passed:
-        raise CheckFailed(f"the gate recomputed from {name}'s rows fails: {result.reasons[0]}")
+        notice = f"; {waiver_summary(result)}" if result.waived_violations else ""
+        raise CheckFailed(f"the gate recomputed from {name}'s rows fails: {result.reasons[0]}{notice}")
     # Runs that skipped checks while a plan hadn't landed are counted as the gate's summary line counts them, so
     # a file whose rows were made before that plan never reads as clean.
     skipped = [skipped_summary(len(result.skipped_runs), result.skipped_checks)] if result.skipped_runs else []
     lowered = [notice for entry in rates.history[len(before):] if (notice := lowered_notice(entry))]
+    waived = [waiver_summary(result)] if result.waived_violations else []
     return "; ".join([f"{name} passes: {len(file.runs)} runs, {len(file.pending)} scenarios pending, "
-                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *lowered])
+                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *waived, *lowered])
 
 
 def _check_unarmed(rev: str, base: str, root: Path) -> None:
@@ -809,6 +940,7 @@ def _check_unarmed(rev: str, base: str, root: Path) -> None:
             rates = load_recorded_rates(tree / RATES_PATH) if (tree / RATES_PATH).exists() \
                 else RecordedRates(history=[])
             landed = load_landed(tree / LANDED_PATH)
+            load_waivers(tree)
         except (OSError, ValueError) as error:
             raise CheckFailed(f"{whose} eval files don't load: {error}") from None
         try:
@@ -818,10 +950,28 @@ def _check_unarmed(rev: str, base: str, root: Path) -> None:
         if problems := split_problems(suite, splits):
             raise CheckFailed(f"{whose} splits don't hold its suite: " + "; ".join(problems))
     _check_history(rates, landed, base, root)
+    _check_waiver_history(rev, base, root)
     if rates.history:
         subject = "the head" if rev == "HEAD" else rev
         raise CheckFailed(f"recorded_rates.json has a recorded rate, so {subject} cannot pass as unarmed; "
                           "a recorded rate means the gate was armed once")
+
+
+def _check_waiver_history(rev: str, base: str, root: Path) -> None:
+    """Preserve raw attestations, including timestamp spelling, even without results rows."""
+    histories = []
+    for at in (base, rev):
+        raw = show(root, at, WAIVERS_PATH)
+        try:
+            entries = json.loads(raw) if raw is not None else []
+        except ValueError as error:
+            raise CheckFailed(f"{at}'s {WAIVERS_PATH} doesn't load: {error}") from None
+        if not isinstance(entries, list):
+            raise CheckFailed(f"{at}'s waivers.json isn't a list")
+        histories.append([json.dumps(entry, sort_keys=True, ensure_ascii=False) for entry in entries])
+    before, after = histories
+    if after[:len(before)] != before:
+        raise CheckFailed(f"waivers.json rewrites the history {base} holds; it only grows at its end")
 
 
 def _check_history(rates: RecordedRates, landed: tuple[str, ...], base: str, root: Path) -> list[dict[str, Any]]:
@@ -840,11 +990,32 @@ def _check_history(rates: RecordedRates, landed: tuple[str, ...], base: str, roo
     return before
 
 
+def _check_histories_since(since: str, root: Path) -> None:
+    """Every first-parent commit since `since` that changed a history file holds rate and waiver histories that
+    are prefixes of the head's, and landed plans the head keeps: the same checks a base gets, so a rewrite whose
+    own run was cancelled or ignored still fails every later run. A file that doesn't load fails closed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        head = _materialize(root, "HEAD", Path(tmp), only=(RATES_PATH, LANDED_PATH))
+        try:
+            rates = load_recorded_rates(head / RATES_PATH) if (head / RATES_PATH).exists() \
+                else RecordedRates(history=[])
+            landed = load_landed(head / LANDED_PATH) if (head / LANDED_PATH).exists() else ()
+        except ValueError as error:
+            raise CheckFailed(f"the head's rate or landed-plan history doesn't load: {error}") from None
+    commits = git(root, "rev-list", "--first-parent", f"{since}..HEAD", "--", RATES_PATH, WAIVERS_PATH, LANDED_PATH)
+    for commit in commits.split():
+        try:
+            _check_history(rates, landed, commit, root)
+        except ValueError as error:
+            raise CheckFailed(f"{commit}'s rate or landed-plan history doesn't load: {error}") from None
+        _check_waiver_history("HEAD", commit, root)
+
+
 def _materialize(root: Path, rev: str, into: Path, only: tuple[str, ...] | None = None) -> Path:
     """The eval files at `rev` written under `into`: the scenarios, splits, landed plans and rates. Every
     name in the scenarios tree is listed with `-z`, so a non-ASCII name is read as it is, and one that git
     lists but can't show (a submodule) raises `GitError`, so no scenario file is left out."""
-    paths = list(only or (SPLITS_PATH, LANDED_PATH, RATES_PATH))
+    paths = list(only or (SPLITS_PATH, LANDED_PATH, RATES_PATH, WAIVERS_PATH))
     scenarios: list[str] = []
     if only is None:
         listed = git(root, "ls-tree", "-z", "--name-only", f"{rev}:{SCENARIOS_PATH}")

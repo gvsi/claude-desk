@@ -4,6 +4,7 @@ import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
 import { chen, rivera } from '../../fixtures/index.ts';
+import { ANIMATION_DEADLINE_MS, animationLabel, animationWithin } from '../../test/animationWithin.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
 import { Notice } from '../Notice/Notice.tsx';
@@ -383,17 +384,29 @@ function readLanding(root: HTMLElement, status: Element, moments: readonly numbe
  * card's outgoing layer, its status line and focus, then the settle at each of `moments` (ms from
  * its start), every animation of it paused there in turn. Then the settle finishes.
  */
-function land(root: HTMLElement, update: Partial<ApprovalCardProps>, moments: readonly number[]): Promise<Landing> {
-  return new Promise((resolve) => {
-    const observer = new MutationObserver(() => {
-      const status = root.querySelector('.cd-approval-card__status-line[role="status"]');
-      if (status === null || status.textContent === HELD_LINE) return;
-      observer.disconnect();
-      resolve(readLanding(root, status, moments));
-    });
-    observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
-    updateScreen(root, update);
-  });
+async function land(root: HTMLElement, update: Partial<ApprovalCardProps>, moments: readonly number[]): Promise<Landing> {
+  let observer: MutationObserver | undefined;
+  try {
+    return await animationWithin(
+      new Promise<Landing>((resolve, reject) => {
+        observer = new MutationObserver(() => {
+          const status = root.querySelector('.cd-approval-card__status-line[role="status"]');
+          if (status === null || status.textContent === HELD_LINE) return;
+          observer?.disconnect();
+          try {
+            resolve(readLanding(root, status, moments));
+          } catch (error) {
+            reject(error);
+          }
+        });
+        observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
+        updateScreen(root, update);
+      }),
+      'cd-approval-card answer landing',
+    );
+  } finally {
+    observer?.disconnect();
+  }
 }
 
 /** The settle's moments: its start, mid-crossfade, the crossfade done, into the ease, the pulse at its widest, and its end. */
@@ -527,7 +540,7 @@ export const TwoPlainButtons: Story = {
     await expect(card).toHaveTextContent('Waiting for your answer');
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
     await expect(canvas.getByText('Web chat, 2 min ago')).toBeVisible();
-    // Claude's summary of the request is in serif; the rule that held it follows.
+    // The kernel's reason for the hold is in serif; the rule that held it follows.
     expectComputed(canvas.getByText(held.reason_plain), { fontFamily: /Source Serif 4/, fontSize: '18px', lineHeight: '27px' });
     await expect(card).toHaveTextContent(`Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`);
     await expect(card).toHaveTextContent('From the visitor: “How much to clear a clogged drain? Can I get 15% off if I pay cash?”');
@@ -1535,9 +1548,20 @@ export const EnterLands: Story = {
     await waitFor(() => expect(status).toHaveTextContent("You allowed this. It's done."));
     // Once every animation of the settle is done, and a frame after: focus is on the status line,
     // where the answers' focus goes, never on the page or the outgoing layer.
-    await Promise.allSettled(card.getAnimations({ subtree: true }).filter(settleMotion).map((animation) => animation.finished));
-    await waitFor(() => expect(card.querySelector('.cd-approval-card__layer--leaving')).toBeNull());
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await Promise.all(
+      card.getAnimations({ subtree: true }).filter(settleMotion).map((animation) =>
+        animationWithin(animation.finished.catch(() => undefined), animationLabel(animation)),
+      ),
+    );
+    await waitFor(() => expect(card.querySelector('.cd-approval-card__layer--leaving'), 'cd-approval-card leaving layer is removed').toBeNull(), { timeout: ANIMATION_DEADLINE_MS });
+    let frame = 0;
+    try {
+      await animationWithin(new Promise((resolve) => {
+        frame = requestAnimationFrame(resolve);
+      }), 'cd-approval-card focus frame');
+    } finally {
+      cancelAnimationFrame(frame);
+    }
     await expect(status).toHaveFocus();
   },
 };
@@ -1568,10 +1592,27 @@ export const Unknown: Story = {
 
 export const RulesChanged: Story = {
   args: { decision: rivera.decisions.refused_at_execution, waiting: 'Web chat, 4 min ago' },
-  parameters: { canvasNote: "No board shows an answered request; the final line takes the place of 'Waiting for your answer'." },
+  parameters: { canvasNote: "Signed owner refusal reason board: the kernel's owner-only line takes the place of 'Waiting for your answer'." },
   play: async ({ canvasElement }) => {
     // rules_changed_has_no_answers
     await expectFinal(canvasElement, rivera.decisions.refused_at_execution, "Your rules changed before this ran, so it wasn't done.", 'refused');
+  },
+};
+
+export const NotShared: Story = {
+  args: {
+    decision: { ...rivera.decisions.refused_at_execution, owner_plain: 'Not shared: their session ended when their contact changed' },
+    waiting: 'Web chat, 4 min ago',
+  },
+  play: async ({ canvasElement, args }) => {
+    await expectFinal(canvasElement, args.decision, 'Not shared: their session ended when their contact changed', 'refused');
+  },
+};
+
+export const RefusedWithoutOwnerReason: Story = {
+  args: { decision: { ...rivera.decisions.refused_at_execution, owner_plain: null }, waiting: 'Web chat, 4 min ago' },
+  play: async ({ canvasElement, args }) => {
+    await expectFinal(canvasElement, args.decision, "Your rules changed before this ran, so it wasn't done.", 'refused');
   },
 };
 

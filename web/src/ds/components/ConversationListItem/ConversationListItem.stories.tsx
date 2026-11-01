@@ -173,3 +173,67 @@ export const Recorded: Story = {
     await expect(Math.round(link.getBoundingClientRect().height)).toBe(49);
   },
 };
+
+export const Quoted: Story = {
+  args: { name: 'Visitor', time: '1:55 am', status: undefined, quote: 'Tuesday at 2 works.' },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'P8-02, UXC-P802-After (#artboard-a4106a75e939): Today’s Live now quotes what an unnamed visitor last wrote, under who it is.',
+  },
+  play: async ({ canvas }) => {
+    // The quote is part of the row's one link, after who and when.
+    const link = canvas.getByRole('link', { name: 'Visitor 1:55 am “Tuesday at 2 works.”' });
+    await expect(link.querySelector('.cd-status-dot')).toBeNull();
+
+    // Their own words, quoted, in meta type and secondary.
+    const quote = canvas.getByText('“Tuesday at 2 works.”');
+    await expect(quote).toHaveAttribute('data-copy', 'user');
+    await expect(quote).toHaveClass('cd-type-meta');
+    expectComputed(quote, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
+
+    // Under the first line, 2 px down from it and at its left edge; the row grows to hold it.
+    const top = link.querySelector('.cd-conversation-item__top')?.getBoundingClientRect();
+    await expect(Math.round(quote.getBoundingClientRect().top - (top?.bottom ?? 0))).toBe(2);
+    await expect(Math.round(quote.getBoundingClientRect().left)).toBe(Math.round(top?.left ?? -1));
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(52);
+  },
+};
+
+export const QuotedLong: Story = {
+  args: {
+    name: 'Visitor',
+    time: '1:55 am',
+    status: undefined,
+    quote: '<b>Can someone come today?</b> The water is up to the kitchen door and the shutoff under the sink won’t turn.',
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'Nearest board UXC-P802-After (#artboard-a4106a75e939). A longer message, which may look like markup: it shows as written, on one line that ends in an ellipsis.',
+  },
+  play: async ({ args, canvasElement }) => {
+    // Untrusted words are text, never markup.
+    const quote = canvasElement.querySelector('.cd-conversation-item__quote');
+    await expect(quote?.textContent).toBe(`“${args.quote ?? ''}”`);
+    await expect(quote?.querySelector('b')).toBeNull();
+
+    // One line, ellipsized, and the row never scrolls sideways.
+    expectComputed(quote!, { whiteSpace: 'nowrap', overflowX: 'hidden', textOverflow: 'ellipsis' });
+    await expect(quote!.scrollWidth).toBeGreaterThan(quote!.clientWidth);
+    const link = canvasElement.querySelector('a')!;
+    await expect(link.scrollWidth).toBeLessThanOrEqual(link.clientWidth);
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(52);
+  },
+};
+
+export const StatusOverQuote: Story = {
+  args: { name: 'Visitor', time: '10:58 am', status: { tone: 'held', text: 'Needs you' }, quote: 'Can I get 15% off if I pay cash?' },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'Nearest board UXC-P802-After (#artboard-a4106a75e939): a held conversation keeps "Needs you" in its place, so status wins over the quote.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('link', { name: 'Visitor 10:58 am Needs you' })).toBeVisible();
+    await expect(canvas.queryByText(/15% off/)).toBeNull();
+    await expect(canvasElement.querySelector('.cd-conversation-item__quote')).toBeNull();
+  },
+};

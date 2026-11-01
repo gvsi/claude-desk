@@ -198,7 +198,7 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
                                     {"item_id": "drain", "title": "Drain clearing", "unit_cents": 19_000},
                                     {"item_id": "leak", "title": "Leak repair", "unit_cents": 25_000},
                                     {"item_id": "camera", "title": "Camera inspection", "unit_cents": 30_000}]},
-         ["camera", "drain", "heater"]),
+         ["camera", "drain", "heater", "pipe", "short-notice"]),
         ("calendar", {"calendar_slots": [slot_body(slot) for slot in slots[1:]] + [new_slot]},
          sorted([slots[0].slot_id, new_slot["slot_id"]])),
         ("people", {"upsert": [{"ref": "eve", "display_name": "Eve Santos", "contact": "+1 (510) 555-0123"}]},
@@ -217,7 +217,9 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
     assert (business.name, business.owner_display_name, business.timezone, business.brand) == (
         "Rivera Plumbing and Drains", "Maria Rivera", "America/Denver", {"primary": "#22524D"})
     charter = await facts_of(app, copy, "charter")
-    assert set(charter) == {"charter:contact", "charter:policy:service_area", "charter:hours"}   # the rest replaced
+    # the rest replaced, and the seed's starters kept, as the hours are
+    assert set(charter) == {"charter:contact", "charter:policy:service_area", "charter:hours",
+                            *(f"charter:starter:{n}:{lang}" for n in (1, 2, 3) for lang in ("en", "es"))}
     assert charter["charter:contact"].claims == [Claim(key="contact", kind="text", value="(510) 555-0199")]
     assert all(fact.readers == ["public"] and fact.source == "kernel" for fact in charter.values())
     prices = await rows_of(app, copy.copy_id, select(PriceRow).order_by(PriceRow.item_id))
@@ -877,7 +879,7 @@ async def test_preview_session_gets_visitor_tools_with_answering_off(app, client
     previewed = await context_of(client, owner_preview.session_id, owner_preview.headers)
     answering_off = await context_of(client, stranger.session_id, stranger.headers)
     assert tools(previewed.tools) == visitor_tools
-    assert tools(answering_off.tools) == ["native.capture_lead", "native.request_callback"]
+    assert tools(answering_off.tools) == ["desk.emergency-callback", "native.capture_lead", "native.request_callback"]
     assert tools(answering_off.tools_declared) == tools(previewed.tools_declared)
     args = {"items": [{"item_id": "drain", "qty": 1}]}
     assert (await decided(client, owner_preview, "native.quote", args)).outcome == "allow"

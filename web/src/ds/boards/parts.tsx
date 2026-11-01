@@ -196,7 +196,7 @@ export const THINGS_TO_TRY = {
   chat: {
     icon: 'conversations',
     title: 'Chat as a customer',
-    detail: 'Your public page opens in a new tab. Ask about a leak, a price or a time.',
+    detail: 'Your public page opens in a new tab. Ask about a price or a time.',
     action: 'Open your public page',
   },
   breakIt: {
@@ -1150,7 +1150,7 @@ export const GENERAL_DETAILS: readonly DetailItem[] = [
  * The Answering switch's line, the same on a laptop and a phone: the short line N-Run2-Settings-Phone
  * writes (owner decision, 2026-10-30), where N-Run2-Settings-General adds a second sentence.
  */
-export const ANSWERING_LINE = 'Claude answers under your rules.';
+export const ANSWERING_LINE = 'Within your rules';
 
 /** Deleting a Desk, in the board's words: the line beside the button, and the dialog's body. */
 export const DELETE_DESK_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
@@ -1186,8 +1186,10 @@ export function GeneralSettings({ answering, onDelete = fn() }: { answering: str
         <SectionHeader id="board-settings-business" title="Your business" />
         <DetailList items={GENERAL_DETAILS} />
       </section>
-      <Card as="section" label="Answering">
-        <Switch label="Answering" description={answering} checked onChange={fn()} />
+      <Card as="section" label="Claude acts for you" padding={0}>
+        <div className="board-settings__answering">
+          <Switch label="Claude acts for you" description={answering} checked onChange={fn()} />
+        </div>
       </Card>
       <section aria-labelledby="board-settings-delete" className="board-settings__section board-settings__delete">
         <SectionHeader id="board-settings-delete" title="Delete this Desk" />

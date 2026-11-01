@@ -4,13 +4,13 @@
 
 ## When to use
 
-- A setting that takes effect at once and can be turned back: "Answering" in the sidebar, "Customers can see this" on a knowledge note.
-- Not for a choice between named options (use `SegmentedControl`), and not for an action that needs confirming (use a `Button`, then a `Dialog`).
+- A setting that can be turned back: "Claude acts for you" in the sidebar, "Customers can see this" on a knowledge note. The owner layout confirms changes to "Claude acts for you" with a `Dialog` before saving.
+- Not for a choice between named options (use `SegmentedControl`). Actions that aren't settings use a `Button`, followed by a `Dialog` when they need confirmation.
 
 ## What the consumer provides
 
 - `label`, the setting's name. It is the switch's accessible name.
-- `description`, one line saying what "on" means ("Claude answers under your rules"). It is the accessible description, so the name stays short.
+- `description`, one line saying what "on" means ("Within your rules"). It is the accessible description, so the name stays short.
 - `checked` and `onChange`. The switch is controlled: it calls `onChange` with the new value and shows the `checked` the screen passes back, so a screen that is still saving can keep the old value until the save lands. While it saves, `waiting` makes the switch ignore presses.
 
 ## Props

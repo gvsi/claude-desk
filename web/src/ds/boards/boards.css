@@ -1093,13 +1093,6 @@
   background: var(--bg-panel);
 }
 
-/* Customers while the list loads: a hairline where the first section's head would sit, then the line. */
-.board-people__loading {
-  margin-top: var(--space-28);
-  padding-top: var(--space-16);
-  border-top: 1px solid var(--line-hairline);
-}
-
 /* Customers on a phone (N-Run2-People-Phone): 16 px under the top bar, sections 16 px apart, and the
    footer right under the list rather than at the window's foot. */
 @media (max-width: 767.98px) {
@@ -1438,6 +1431,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
+}
+
+/* The switch adds 8 px at each side; these 8 px align its words with the business details. */
+.board-settings__answering {
+  padding: var(--space-20) var(--space-8);
 }
 
 /* A vision note: the Pill, then its line 12 px after it. */

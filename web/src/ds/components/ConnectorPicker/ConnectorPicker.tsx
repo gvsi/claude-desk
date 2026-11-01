@@ -1,5 +1,6 @@
 import { useId } from 'react';
 
+import { afterName } from '../../../lib/names.ts';
 import { Button } from '../Button/Button.tsx';
 import type { ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { ConnectorSummary } from '../ConnectorName/ConnectorSummary.tsx';
@@ -65,7 +66,7 @@ export function ConnectorPicker({ business, builtIn, external, note, onChoose, o
         </span>
       </div>
       <p id={introId} className="cd-connector-picker__intro cd-type-body">
-        Add what fits {business}. Each tool you add starts at Ask me first unless one of your rules already covers it, and you review
+        Add what fits {business}{afterName(business, '.')} Each tool you add starts at Ask me first unless one of your rules already covers it, and you review
         them before anything turns on.
       </p>
       <PickerGroup id={`${ids}-built-in`} heading="Claude Desk" items={builtIn} verb="Add" onChoose={onChoose} />

@@ -120,6 +120,7 @@ export const TOOL_NAMES = {
   'payments.create_refund': { name: 'Refund', line: 'Refunds a payment to the card it came from.' },
   'native.fetch_website': { name: 'Website reading', line: 'Reads your website to learn about your business.' },
   'native.read_memory': { name: 'Memory reading', line: 'Reads the notes you brought in to learn about your business.' },
+  'native.web_search': { name: 'Web search', line: 'Searches the web to learn how businesses like yours work.' },
 } as const satisfies Record<ToolName, ToolWords>;
 
 /** Whether a tool has the kernel's name for a Desk's own business tool. */
@@ -199,6 +200,7 @@ export const TOOL_RESOURCES = {
   'payments.create_refund': 'charge',
   'native.fetch_website': 'desk',
   'native.read_memory': 'desk',
+  'native.web_search': 'desk',
 } as const satisfies Record<ToolName, ToolProfile['resource_kind']>;
 
 /**

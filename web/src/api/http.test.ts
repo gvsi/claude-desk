@@ -78,6 +78,17 @@ function call(n: number): { url: string; init: RequestInit } {
   return { url: String(args[0]), init: args[1] ?? {} };
 }
 
+it('carries only a refused public line key, never its internal reason', async () => {
+  reply({ status: 422, body: { error: 'line_refused', key: 'policy:pricing', reason: 'internal untrusted text' } });
+  const err = await failure(request('setupPublicLinesConfirm', { params: { id: 'i1' }, body: { keys: ['policy:pricing'], revision: 'revision-1' } }));
+  expect(err.lineKey).toBe('policy:pricing');
+  expect(JSON.stringify(err)).not.toContain('internal untrusted text');
+  replies = [{ status: 500, body: { error: 'line_refused', key: 'policy:pricing' } }];
+  expect((await failure(request('setupPublicLines', { params: { id: 'i1' } }))).lineKey).toBeNull();
+  replies = [{ status: 422, body: { error: 'line_refused', key: { bad: true } } }];
+  expect((await failure(request('setupPublicLines', { params: { id: 'i1' } }))).lineKey).toBeNull();
+});
+
 const draft: RulesDraft = {
   version: 8,
   cards: [rivera.ruleCards['rv-quote']],
@@ -100,6 +111,19 @@ afterEach(() => {
 });
 
 describe('request', () => {
+  it('async_answers_and_decisions_require_a_state_body_without_a_proving_retry', async () => {
+    for (const key of ['setupAnswer', 'setupProposal'] as const) {
+      const sendTurn = () => key === 'setupAnswer'
+        ? request('setupAnswer', { params: { id: 's1' }, body: { question: 'what_you_do', text: 'Yes' } })
+        : request('setupProposal', { params: { id: 's1', proposal_id: 'p1' }, body: { accept: true } });
+      const state = { interview_id: 's1', busy: true, pending_card: 'p1', question: null };
+      replies = [{ status: 202, body: state }];
+      await expect(sendTurn()).resolves.toEqual(state);
+      replies = [{ status: 202 }];
+      await expect(sendTurn()).rejects.toMatchObject({ kind: 'unavailable' });
+    }
+  });
+
   it('consent_202_requires_and_returns_the_interview_without_a_proving_retry', async () => {
     const state = { interview_id: 's1', step: 'questions', consent: true, question: null, busy: true, messages: [] };
     reply({ status: 202, body: state });
@@ -107,6 +131,46 @@ describe('request', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     replies = [{ status: 202 }];
     await expect(request('setupConsent', { params: { id: 's1' }, body: { allow: true } })).rejects.toMatchObject({ kind: 'unavailable' });
+  });
+
+  it('opts_into_cards_on_all_five_setup_reads_and_mutations_but_not_start', async () => {
+    const requests = [
+      () => request('setup', { params: { id: 'i1' }, query: { after: 'marker', cards: '0' } }),
+      () => request('setupConsent', { params: { id: 'i1' }, body: { allow: true } }),
+      () => request('setupAnswer', { params: { id: 'i1' }, body: { question: 'what_you_do', text: 'Tax returns' } }),
+      () => request('setupProposal', { params: { id: 'i1', proposal_id: 'p1' }, body: { accept: true } }),
+      () => request('setupSuggestions', { params: { id: 'i1' }, body: {} }),
+      () => request('startSetup', { body: { description: 'CPA firm', timezone: 'UTC', idempotency_key: 'cards' } }),
+      () => request('setupTools', { params: { id: 'i1' } }),
+      () => request('me'),
+    ];
+    reply({ status: 200, body: {} });
+    for (const send of requests) await send();
+    for (let index = 0; index < requests.length; index += 1) {
+      const query = new URL(call(index).url, 'https://example.test').searchParams;
+      expect(query.get('cards'), call(index).url).toBe(index < 5 ? '1' : null);
+      if (index === 0) expect(query.get('after')).toBe('marker');
+    }
+  });
+
+  it('sends_setup_suggestions_as_an_empty_object', async () => {
+    reply({ status: 200, body: { step: 'tools' } });
+    await request('setupSuggestions', { params: { id: 'i1' }, body: {} });
+    expect(call(0).url).toBe('/api/owner/setup/i1/suggestions?cards=1');
+    expect(call(0).init.method).toBe('POST');
+    expect(call(0).init.body).toBe('{}');
+  });
+
+  it('sends_setup_decisions_with_both_encoded_path_parameters', async () => {
+    reply({ status: 200, body: { step: 'questions' } });
+    await request('setupProposal', {
+      params: { id: 'interview /1', proposal_id: 'p/2' },
+      body: { accept: true, title: 'Intro consult' },
+    });
+    expect(call(0).url).toBe('/api/owner/setup/interview%20%2F1/proposals/p%2F2?cards=1');
+    expect(call(0).init.method).toBe('POST');
+    expect(call(0).init.credentials).toBe('same-origin');
+    expect(JSON.parse(String(call(0).init.body))).toEqual({ accept: true, title: 'Intro consult' });
   });
 
   it('maps_status_to_error_kind', async () => {

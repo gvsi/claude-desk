@@ -8,8 +8,9 @@
  * before the reply does, and they attach under the reply, after the reply's own check, because the
  * reply is the message they explain. Any receipt after a reply attaches to the last row; one before
  * any row is kept as `leading`. In the visitor's chat, a decision's newer status replaces its older
- * receipt wherever that one is, however far the conversation has gone on. The owner's view keeps
- * later receipts beside earlier ones.
+ * receipt wherever that one is, however far the conversation has gone on, except that an approved
+ * receipt stays and its outcome joins below it under the same message. The owner's view keeps
+ * all later receipts beside earlier ones.
  *
  * Claude can also start a turn no one's words began (the API wakes it after the visitor confirmed
  * it's them). Live, its `writing` event says so; a stored conversation keeps no writing events, so
@@ -55,9 +56,10 @@ export type RowPart<Row, R> =
   /**
    * A checkpoint result. With `beside`, a receipt already in the conversation that this one
    * follows, it attaches in the same place; when that one isn't there, as any other receipt.
-   * With `replaces`, it takes that receipt's place (the visitor's newer decision status).
+   * With `after`, it inserts directly after that receipt, keeping a visitor's outcome just below
+   * its approval. With `replaces`, it takes that receipt's place (a newer decision status).
    */
-  | { kind: 'receipt'; receipt: R; beside?: R | undefined; replaces?: R | undefined };
+  | { kind: 'receipt'; receipt: R; beside?: R | undefined; after?: R | undefined; replaces?: R | undefined };
 
 export function emptyGroups<Row, R>(): RowGroups<Row, R> {
   return { rows: [], leading: [], pending: [], awaitingReply: false };
@@ -80,18 +82,22 @@ export function settle<Row, R>(groups: RowGroups<Row, R>): RowGroups<Row, R> {
   return { ...attach({ ...groups, pending: [] }, groups.pending), awaitingReply: false };
 }
 
-/** `groups` with `receipt` added where `beside` is (a row, the turn's waiting receipts or `leading`), or null when it isn't there. */
-function placeBeside<Row, R>(groups: RowGroups<Row, R>, receipt: R, beside: R): RowGroups<Row, R> | null {
+/** Adds to the list holding `beside`, directly after it when asked; null when it isn't there. */
+function placeBeside<Row, R>(groups: RowGroups<Row, R>, receipt: R, beside: R, directlyAfter = false): RowGroups<Row, R> | null {
+  const insert = (receipts: R[]) => {
+    const index = directlyAfter ? receipts.indexOf(beside) + 1 : receipts.length;
+    return [...receipts.slice(0, index), receipt, ...receipts.slice(index)];
+  };
   for (let i = groups.rows.length - 1; i >= 0; i -= 1) {
     const row = groups.rows[i];
     if (row?.receipts.includes(beside)) {
       const rows = [...groups.rows];
-      rows[i] = { ...row, receipts: [...row.receipts, receipt] };
+      rows[i] = { ...row, receipts: insert(row.receipts) };
       return { ...groups, rows };
     }
   }
-  if (groups.pending.includes(beside)) return { ...groups, pending: [...groups.pending, receipt] };
-  if (groups.leading.includes(beside)) return { ...groups, leading: [...groups.leading, receipt] };
+  if (groups.pending.includes(beside)) return { ...groups, pending: insert(groups.pending) };
+  if (groups.leading.includes(beside)) return { ...groups, leading: insert(groups.leading) };
   return null;
 }
 
@@ -131,6 +137,8 @@ export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>
     case 'receipt': {
       const replaced = part.replaces === undefined ? null : replaceReceipt(groups, part.receipt, part.replaces);
       if (replaced !== null) return replaced;
+      const after = part.after === undefined ? null : placeBeside(groups, part.receipt, part.after, true);
+      if (after !== null) return after;
       const placed = part.beside === undefined ? null : placeBeside(groups, part.receipt, part.beside);
       if (placed !== null) return placed;
       if (groups.awaitingReply) return { ...groups, pending: [...groups.pending, part.receipt] };
@@ -140,13 +148,15 @@ export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>
 }
 
 /**
- * Whether the stored item at `index` is a decision's status (an action's outcome or a hold, not a
- * later answer) that comes before a reply of Claude's with no one's words between them: it belongs
- * to that reply's turn, which Claude may have started on its own. `items` are in their `n` order.
+ * Whether the stored item at `index` is a decide-time receipt or hold, rather than an owner's
+ * later approval or a resolved outcome, that comes before Claude's reply with no one's words
+ * between them: it belongs to that reply's turn, which Claude may have started on its own.
+ * `items` are in their `n` order: the visitor's transcript or the owner's, whose items have kinds of their own.
  */
-export function opensAReply(items: readonly TranscriptItem[], index: number): boolean {
-  const type = items[index]?.event?.type;
-  if (type !== 'receipt' && type !== 'held') return false;
+export function opensAReply(items: readonly (Pick<TranscriptItem, 'event'> & { kind: string })[], index: number): boolean {
+  const event = items[index]?.event;
+  if (event?.type !== 'receipt' && event?.type !== 'held') return false;
+  if (event.type === 'receipt' && event.state === 'approved') return false;
   const next = items.slice(index + 1).find((item) => item.kind !== 'status');
   return next?.kind === 'delivered' && next.event?.type === 'message' && next.event.author !== 'owner';
 }

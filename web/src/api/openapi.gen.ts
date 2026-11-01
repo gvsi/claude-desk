@@ -2,7 +2,7 @@
 // Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.
 // Only the API-owned schemas are here; contract types come from src/api/contracts.ts.
 
-import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
+import type { BusinessToolDef, Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
 
 /**
  * An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI.
@@ -47,13 +47,28 @@ export interface AgentRunStarted {
   run_id: string;
 }
 /**
- * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), which carries nothing, since
- * the agent's own words are never shown (the panel titles it), or the Desk's answer to it, with the blocks and
- * signed statuses the kernel checked and the Desk showed the agent.
+ * Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
+ * the business type setup stored for it (`other` without one). A key, never words: the page holds every word.
+ */
+export interface AgentTasks {
+  task_set: "rivera" | "trade" | "office" | "landlord" | "other";
+}
+/**
+ * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
+ * with the blocks and signed statuses the kernel checked and the Desk showed the agent.
+ *
+ * An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
+ * 2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is
+ * (owner decision, 2026-11-01). The agent's model writes it from a fixed task line that code picks from signed
+ * templates, keyed by the Desk's setup business type, with no owner or visitor text, and the Desk's kernel-checked
+ * replies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the
+ * Desk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
+ * blocks and statuses.
  */
 export interface AgentTurn {
   author: "agent" | "desk";
   n: number;
+  text: string | null;
   blocks: RenderedBlock[];
   receipts: (EvReceipt | EvHeld | EvResolved)[];
 }
@@ -143,8 +158,8 @@ export interface Attempt {
     | null;
 }
 /**
- * A stopped attempt, summarized for the owner (route `triage`): what the person seemed to be after, and a
- * category for the Safety page's filters. AI-written, for the owner alone.
+ * A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk
+ * did, and a category for the Safety page's filters. AI-written, for the owner alone.
  */
 export interface Triage {
   /**
@@ -152,13 +167,14 @@ export interface Triage {
    */
   summary: string;
   /**
-   * What kind of attempt it was.
+   * The subject of the checkpoint event.
    */
-  category: "impersonation" | "discount_push" | "private_data" | "code_redirect" | "injection" | "over_limit" | "other";
+  category: "prices" | "records" | "codes" | "instructions" | "limits" | "wording" | "other";
 }
 /**
- * "Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of
- * the full list (`BriefingList`).
+ * "Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `answers` counts the
+ * list's `answer` items, the conversations Claude answered alone; `total` is the length of the full list
+ * (`BriefingList`).
  */
 export interface Briefing {
   since: string;
@@ -166,6 +182,7 @@ export interface Briefing {
   bookings: number;
   leads: number;
   turned_down: number;
+  answers: number;
   total: number;
   newest: BriefingNewest;
 }
@@ -307,11 +324,15 @@ export interface ConnectorProposal {
    */
   why: string;
   connectable: boolean;
+  connected?: boolean;
 }
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
  * anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
- * preview.
+ * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+ * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
+ * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
+ * written yet.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -324,6 +345,8 @@ export interface ConversationSummary {
     [k: string]: number;
   };
   owner_preview: boolean;
+  latest_visitor_text: string | null;
+  replayed?: boolean;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -426,7 +449,7 @@ export interface HealthOut {
   ok: boolean;
   kernel: Health | null;
 }
-export interface IntakeConfig {
+export interface IntakeProposalConfig {
   block: "intake";
   /**
    * 1 to 5 intake questions, each 1 to 120 characters.
@@ -463,9 +486,10 @@ export interface JobProposal {
   how: string;
   autonomy: "auto" | "ask";
   can_do_today: boolean;
-  config: (IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig) | null;
+  config:
+    (IntakeProposalConfig | TypedBookingProposalConfig | PurposePaymentProposalConfig | UrgentProposalConfig) | null;
 }
-export interface TypedBookingConfig {
+export interface TypedBookingProposalConfig {
   block: "typed_booking";
   /**
    * Appointment name, 1 to 60 characters.
@@ -476,7 +500,7 @@ export interface TypedBookingConfig {
    */
   minutes: number;
 }
-export interface PurposePaymentConfig {
+export interface PurposePaymentProposalConfig {
   block: "purpose_payment";
   /**
    * Payment purpose, 1 to 60 characters.
@@ -484,7 +508,7 @@ export interface PurposePaymentConfig {
   purpose: string;
   amount_cents: number | null;
 }
-export interface UrgentConfig {
+export interface UrgentProposalConfig {
   block: "urgent";
   /**
    * When a request is urgent, 1 to 300 characters.
@@ -509,7 +533,7 @@ export interface KnowledgeRow {
   title: string | null;
   text: string | null;
   readers: string[];
-  source: "website" | "upload" | "setup" | "memory_import";
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
   created_at: string | null;
 }
 /**
@@ -520,6 +544,7 @@ export interface Lead {
   display_name: string | null;
   note: string | null;
   created_at: string;
+  replayed?: boolean;
 }
 /**
  * 202: the visitor's message is stored; Claude's answer arrives on the event stream.
@@ -542,8 +567,13 @@ export interface MoneyCapIn {
 /**
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
  * applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
- * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
- * thing they wrote (untrusted).
+ * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
+ * wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
+ * characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
+ * AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
+ * shown as "Claude's note on a stopped reply: {summary}" and never quoted as the visitor's), else None. A held
+ * request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
+ * AI-written text: a visitor could steer a summary to sway an approval.
  */
 export interface NeedsYouItem {
   decision: Decision | null;
@@ -552,6 +582,7 @@ export interface NeedsYouItem {
   handoff: Handoff | null;
   session: NeedsYouSession;
   from_the_visitor: string | null;
+  claude_summary: string | null;
 }
 /**
  * Who a held request or a callback request came from. `display_name` is the verified person's, else the name
@@ -582,6 +613,7 @@ export interface OwnerTranscript {
   state: SessionState;
   items: OwnerTranscriptItem[];
   typing_until: string | null;
+  replayed?: boolean;
 }
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
@@ -770,7 +802,7 @@ export interface RulesView {
  */
 export interface ToolRow {
   tool: string;
-  source: "native" | "mcp";
+  source: "native" | "mcp" | "business";
   effects: string[];
   reversible: boolean;
   status: "enabled" | "needs_review" | "disabled";
@@ -779,6 +811,7 @@ export interface ToolRow {
   pending_definition_text: string | null;
   pending_sha256: string | null;
   cards: CoveringCard[];
+  business?: BusinessToolDef | null;
 }
 /**
  * `POST /api/owner/policy/setup/{id}/safety_check`: what a bad actor would try against the drafted rules,
@@ -820,6 +853,7 @@ export interface SetupAnswerIn {
         | "documents_and_payments"
         | "money_limit"
         | "contact_and_after_hours"
+        | "test_client"
       )
     | null;
   card?: string | null;
@@ -843,6 +877,62 @@ export interface SetupMessage {
   card?: ProposalCard | null;
 }
 /**
+ * The owner's decision on a setup proposal, with optional changes when accepting it.
+ */
+export interface SetupProposalIn {
+  accept: boolean;
+  title?: string | null;
+  amount_cents?: number | null;
+  autonomy?: ("auto" | "ask") | null;
+}
+export interface SetupPublicHours {
+  source: "owner" | "suggested";
+  windows: HoursWindow[];
+}
+/**
+ * A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's
+ * public-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay
+ * off the charter until the owner rewords it.
+ */
+export interface SetupPublicLine {
+  key: string;
+  text: string;
+  source: "owner" | "suggested";
+  editable: boolean;
+  held: boolean;
+}
+export interface SetupPublicLineError {
+  error: "line_refused" | "not_editable" | "not_suggested";
+  key?: string | null;
+  reason?: string[] | null;
+}
+export interface SetupPublicLineIn {
+  key: string;
+  text: string;
+}
+export interface SetupPublicLines {
+  revision: string;
+  lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+}
+export interface SetupPublicPrices {
+  source: "owner" | "suggested";
+  items: SetupPublicPriceItem[];
+}
+export interface SetupPublicPriceItem {
+  item_id: string;
+  title: string;
+  unit_cents: number;
+}
+export interface SetupPublicLinesConfirmIn {
+  /**
+   * @minItems 1
+   */
+  keys: [string, ...string[]];
+  revision: string;
+}
+/**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
  * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
  * the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
@@ -858,9 +948,9 @@ export interface SetupStartIn {
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
- * conversation so far. Its messages start at Claude's consent
- * question: the owner's opening description isn't shown back to them.
+ * before consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end
+ * waits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's
+ * consent question: the owner's opening description isn't shown back to them.
  */
 export interface SetupState {
   interview_id: string;
@@ -877,12 +967,21 @@ export interface SetupState {
         | "documents_and_payments"
         | "money_limit"
         | "contact_and_after_hours"
+        | "test_client"
       )
     | null;
   pending_card?: string | null;
   busy?: boolean;
+  /**
+   * Charter claim keys, such as a policy line or the public contact, withheld by the kernel's public-text checks; empty when nothing was held at the latest charter write.
+   */
+  held_policy_keys: string[];
   messages: SetupMessage[];
 }
+/**
+ * Finish setup questions with the current suggestions; no additional answers are supplied.
+ */
+export interface SetupSuggestionsIn {}
 /**
  * `GET /api/owner/setup/{id}/tools`: the new Desk's tools, and the connection it can still add (the
  * mock payments server, until it is connected).
@@ -907,6 +1006,7 @@ export interface SimulateChangeIn {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }
@@ -1028,36 +1128,9 @@ export interface ToolDecisions {
 export interface ToolsConfirmIn {
   /**
    * @minItems 1
-   * @maxItems 13
+   * @maxItems 22
    */
-  tools:
-    | [ToolPin]
-    | [ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
-    | [
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin,
-        ToolPin
-      ];
+  tools: [ToolPin, ...ToolPin[]];
   enable: boolean;
 }
 /**
@@ -1154,10 +1227,18 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
+  "GET /api/owner/setup/{id}/events": { 200: null },
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
+  "POST /api/owner/setup/{id}/proposals/{proposal_id}": { 200: "SetupState", 202: "SetupState" },
+  "POST /api/owner/setup/{id}/suggestions": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
+  "GET /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
+  "PUT /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
+  "POST /api/owner/setup/{id}/public_lines/confirm": { 200: "SetupPublicLines" },
+  "DELETE /api/owner/setup/{id}/public_lines/{key}": { 200: "SetupPublicLines" },
+  "DELETE /api/owner/setup/{id}/public_lines/prices/{item_id}": { 200: "SetupPublicLines" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
   "GET /api/public/desks/{slug}/agent_card": { 200: "AgentCardOut" },
   "POST /api/public/desks/{slug}/sessions": { 200: "VisitorSession" },
@@ -1170,6 +1251,7 @@ export const API_OPERATIONS = {
   "POST /api/public/desks/{slug}/verify/check": { 200: "VerifyChecked" },
   "GET /api/public/desks/{slug}/demo_inbox": { 200: "DemoInboxEntry[]" },
   "POST /api/public/desks/{slug}/agents/key": { 200: "DemoAgentIssued" },
+  "GET /api/public/desks/{slug}/agent_tasks": { 200: "AgentTasks" },
   "POST /api/public/desks/{slug}/send_agent": { 202: "AgentRunStarted" },
   "GET /api/public/desks/{slug}/send_agent/{run_id}": { 200: "DemoAgentRun" },
   "GET /api/d/{token}": { 200: null },

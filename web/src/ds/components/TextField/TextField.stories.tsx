@@ -170,6 +170,12 @@ export const Multiline: Story = {
 
 export const ReadOnly: Story = {
   name: 'Read only',
+  render: (args) => (
+    <>
+      <Controlled {...args} />
+      <Controlled {...args} label="Business name" multiline={false} value="Rivera Plumbing" hint="Customers see this name at the top of your public page." maxLength={undefined} />
+    </>
+  ),
   args: {
     label: 'Your business',
     multiline: true,
@@ -180,28 +186,42 @@ export const ReadOnly: Story = {
   },
   parameters: {
     canvasNote:
-      'No board draws a read-only field. Setup’s description is read-only while a start whose answer was lost is tried again with its words as they were (plan 04, Task 12), and it keeps the editable field’s look; the nearest boards are the setup frame’s, such as N-R2-Setup-04-Answer-Failed.',
+      'Held fields use the muted fill of N-Explore-ReadOnly-B (owner, 2026-10-31, option B): a line-control outline on fill-secondary, with readable, selectable text and the focus ring. Setup’s description is held while a start whose answer was lost is tried again with its words as they were (plan 04, Task 12).',
   },
   play: async ({ args, canvas, userEvent }) => {
-    const field = canvas.getByRole('textbox', { name: 'Your business' }) as HTMLTextAreaElement;
-    await expect(field).toHaveAttribute('readonly');
-    await expect(field).not.toBeDisabled();
+    const multiline = canvas.getByRole('textbox', { name: 'Your business' }) as HTMLTextAreaElement;
+    const singleLine = canvas.getByRole('textbox', { name: 'Business name' }) as HTMLInputElement;
+    for (const [field, value] of [[multiline, args.value], [singleLine, 'Rivera Plumbing']] as const) {
+      await expect(field).toHaveAttribute('readonly');
+      await expect(field).not.toBeDisabled();
+      expectComputed(field, {
+        borderTopColor: 'rgba(250, 249, 245, 0.22)',
+        backgroundColor: 'rgba(250, 249, 245, 0.1)',
+        color: 'rgba(250, 249, 245, 0.92)',
+        opacity: '1',
+        cursor: 'default',
+      });
 
-    // Typing and pasting change nothing, and nothing is reported.
-    await userEvent.click(field);
-    await userEvent.keyboard('{End} We clear drains.');
-    await userEvent.paste(' And water heaters.');
-    await expect(field).toHaveValue(args.value);
-    await expect(args.onChange).not.toHaveBeenCalled();
+      // Typing and pasting change nothing, and nothing is reported.
+      await userEvent.click(field);
+      await userEvent.keyboard('{End} We clear drains.');
+      await userEvent.paste(' And water heaters.');
+      await expect(field).toHaveValue(value);
+      await expect(args.onChange).not.toHaveBeenCalled();
 
-    // The text stays selectable, to read or copy.
-    await expect(getComputedStyle(field).userSelect).not.toBe('none');
-    field.select();
-    await expect([field.selectionStart, field.selectionEnd]).toEqual([0, args.value.length]);
+      // The text stays selectable, to read or copy.
+      await expect(getComputedStyle(field).userSelect).not.toBe('none');
+      field.select();
+      await expect([field.selectionStart, field.selectionEnd]).toEqual([0, value.length]);
+    }
 
-    // It stays in the tab order: Tab from the page lands on it.
-    field.blur();
+    // Both stay in the tab order and keep the focus ring.
+    multiline.focus();
     await userEvent.tab();
-    await expect(field).toHaveFocus();
+    await expect(singleLine).toHaveFocus();
+    expectComputed(singleLine, { outlineStyle: 'solid', outlineWidth: '2px', outlineOffset: '2px', outlineColor: 'rgb(126, 174, 218)' });
+    await userEvent.tab({ shift: true });
+    await expect(multiline).toHaveFocus();
+    expectComputed(multiline, { outlineStyle: 'solid', outlineWidth: '2px', outlineOffset: '2px', outlineColor: 'rgb(126, 174, 218)' });
   },
 };

@@ -1,4 +1,5 @@
 import type { LedgerEvent, LedgerPage } from '../../../api/contracts.ts';
+import { handoffEntryOf, type HandoffEntry } from '../../../api/handoffEntry.ts';
 import type { StatusTone } from '../StatusDot/StatusDot.tsx';
 
 /** What each kind of ledger entry records, in plain words. A kind missing here is a compile error. */
@@ -8,7 +9,7 @@ const KIND_LINES = {
   verify: 'A step in confirming who someone is.',
   decide: 'A decision on an action Claude asked to take.',
   review: "The auto reviewer's second look at an action.",
-  breaker: 'A blocked attempt counted against the chat.',
+  breaker: 'A turned-down request counted against the chat.',
   approval: 'A request held for you, or your answer to it.',
   execute: 'An action being carried out, or its result.',
   payment: 'A step in a test payment.',
@@ -22,7 +23,22 @@ const KIND_LINES = {
   agent_auth: "A check of a visiting agent's signature.",
   head_checkpoint: 'A signed checkpoint of the record so far.',
   desk_data: "A change to your Desk's details.",
+  web_search: 'Web search.',
+  business_tools: "A change to your Desk's jobs.",
 } as const satisfies Record<LedgerEvent['kind'], string>;
+
+/**
+ * Handoff entries share the owner's history rule and read the owner's history row names, each as a
+ * sentence: one line per handoff state.
+ */
+const HANDOFF_LINES = {
+  opened: 'Chat handed to you.',
+  done: 'Chat marked done.',
+  replaced: 'Chat moved to a call-back.',
+  took_over: 'Handoff closed when you took over.',
+  wrote: 'Handoff closed when you wrote in the chat.',
+  booked: 'Handoff closed when they booked a time.',
+} as const satisfies Record<HandoffEntry, string>;
 
 /** Who wrote the entry: the checkpoint, or the chat service, whose report is recorded as it arrived, unchecked. */
 const ORIGIN_LINES = {
@@ -31,12 +47,15 @@ const ORIGIN_LINES = {
 } as const satisfies Record<LedgerEvent['origin'], string>;
 
 /**
- * The trace's plain line: what the entry records, then who recorded it. A kind this build doesn't
- * know reads as "An entry in the record."; an origin it doesn't know reads as reported, never as
- * checked.
+ * The trace's plain line: what the entry records (handoffs have their own line), then who recorded
+ * it. A kind this build doesn't know reads as "An entry in the record."; an origin it doesn't
+ * know reads as reported, never as checked.
  */
-export function traceLine(event: Pick<LedgerEvent, 'kind' | 'origin'>): string {
-  const what = Object.hasOwn(KIND_LINES, event.kind) ? KIND_LINES[event.kind] : 'An entry in the record.';
+export function traceLine(event: Pick<LedgerEvent, 'kind' | 'origin' | 'summary'>): string {
+  const handoff = handoffEntryOf(event);
+  const what = handoff !== null
+    ? HANDOFF_LINES[handoff]
+    : Object.hasOwn(KIND_LINES, event.kind) ? KIND_LINES[event.kind] : 'An entry in the record.';
   const who = event.origin === 'kernel' ? ORIGIN_LINES.kernel : ORIGIN_LINES.api;
   return `${what} ${who}`;
 }

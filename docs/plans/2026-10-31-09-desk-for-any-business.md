@@ -1,6 +1,6 @@
 # Plan 09: a Desk worth wanting, for any business
 
-> **For agentic workers:** each lane runs its own tasks with `executing-implementation-plans`, in a worktree on its own branch. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** each area runs its own tasks with `executing-implementation-plans`, in a worktree on its own branch. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** setup becomes a consultant that understands any business, shapes the Desk's tools and rules to it and proposes the apps the owner already uses; the visitor agent knows how that business works; reviewers can start from four strong businesses. By Monday 2026-11-02.
 
@@ -15,7 +15,7 @@
 - Safety invariants 1 to 6 in `AGENTS.md` are unchanged. A limit comes only from the owner's own words on that limit's own question, in a turn that never reads website, memory, connector or fact text (`LIMIT_QUESTIONS`, `setup._turn_message`). Rules come only from cards compiled by code.
 - A model never writes an executable tool. Business tools are configurations of four kernel blocks; the kernel derives their effects and resource from the block, pins the configuration by hash, and starts them `needs_review`.
 - A limit question's choices are built by code (`LIMIT_CHOICES`), never by the model.
-- New words a person sees go to Giovanni through 88. Setup's web changes are design PRs: canvas boards and his sign-off before code.
+- New words a person sees go to Giovanni for approval. Setup's web changes are design PRs: canvas boards and his sign-off before code.
 - Token saving mode: implementers on GPT-6.1 Sol at high; reviews keep two seats (Opus 5.5 and Sol), and kernel, money and verification tasks never drop to one.
 - A change under a gated path (`evals/results.py` `GATED_PATHS`: prompts.py, the kernel, setup_templates.py, presets, model settings) ships a fresh results file (`make evals-tier2 MAX_USD=0` while every scenario is pending; spending needs Giovanni's go) and bumps `PROMPT_VERSION` above main's when prompts.py changes.
 - Cut order if time runs short: connector proposals beyond payments, then the blocks fall back to words only and web search waits (A5, B1 to B4, A1b, B6), then A6, A7 and C2. The consultant (A1 to A4), the visitor agent (C1) and the starters (D3) always ship.
@@ -30,7 +30,7 @@
 
 ---
 
-## Seams (the contracts lanes build against; changed only through af)
+## Seams (shared contracts owned by the setup API; changes reviewed with the affected areas)
 
 ### The setup conversation (engine A1c, A2a, A2b, A3 ↔ web D2)
 
@@ -101,7 +101,7 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 ---
 
-## Lane af: setup (`backend/desk/api/setup.py`, the setup section of `prompts.py`, `routes/setup.py`)
+## Setup API (`backend/desk/api/setup.py`, the setup section of `prompts.py`, `routes/setup.py`)
 
 ### Task A0: specs and this plan (0.5 h, must)
 
@@ -155,7 +155,7 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 **Interfaces:**
 - Every turn model gains `next_topic: QuestionKey | Literal["done"]`, `question: str ≤ 300`, `choices: list[str] ≤ 4`, `skip: list[QuestionKey] ≤ 7`. Code ignores `question` and `choices` when `next_topic` is a limit topic, and uses `question_text(key, business_type)` and `LIMIT_CHOICES[key](business_type)` instead.
-- `LIMIT_CHOICES: dict[QuestionKey, Callable[[BusinessType], list[str]]]` for the four limit topics, built from `SUGGESTED_MONEY_CAP_CENTS` and fixed amounts; each list starts with the always-ask choice. Exact words go to Giovanni through 88 before merge.
+- `LIMIT_CHOICES: dict[QuestionKey, Callable[[BusinessType], list[str]]]` for the four limit topics, built from `SUGGESTED_MONEY_CAP_CENTS` and fixed amounts; each list starts with the always-ask choice. Exact words go to Giovanni for approval before merge.
 - `Interview.covered: set[QuestionKey]`, stored. A skipped limit topic is covered with its safe default: its limit `None` (asks), `documents` `"ask"`, the cap 0.
 - `use_suggestions(owner, engine, interview_id) -> SetupState`: covers every remaining topic (facts as they stand, limits at their safe defaults), then the step moves to `tools` as after the last answer.
 
@@ -186,9 +186,9 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 ### Task A4: publish what setup learned for the visitor agent (1.5 h, must)
 
-**Files:** Modify `prompts.py` (`SetupAnswers` gains `pricing`, `intake`, `urgent`, each `str | None ≤ 500`; the fact turn fields), `setup.py` (`seed_parts`). Test `test_setup_rules.py`.
+**Files:** Modify `prompts.py` (`SetupAnswers` gains `pricing`, `intake`, `urgent`, each `str | None ≤ 500`, stored-only `how_we_help` ≤ 1500 for the finish step, and code-only `suggested_fields: list[str]`, default empty; each policy is a field only of the turns of the questions that ask for it: `pricing` on `what_you_do` and the quote question, `intake` on `what_you_do`, `urgent` on `what_you_do` and `contact_and_after_hours`, and `after_hours` on `hours_and_area` and `contact_and_after_hours`, with `website` on every question but `contact_and_after_hours` and no hours on `what_you_do`, so no turn has more than 20 top-level properties and every turn's strict schema compiles), `setup.py` (`seed_parts`). Test `test_setup_rules.py` and `test_setup_questions.py`. Policy descriptions and the consultant prompt keep amounts, percentages, times, days and numbers out of policy text, leave hours to their topic, and keep `after_hours` customer-facing, without private owner instructions or personal phone numbers. Limit turns read no stored policies; of the limit turns, only the existing quote turn may set `pricing`, from the owner's answer alongside its `price_items`.
 
-**Interfaces:** `seed_parts` writes text claims `policy:about` (the summary), `policy:service_area`, `policy:pricing`, `policy:intake`, `policy:after_hours`, `policy:urgent`, and `contact`, each only when set. Consumed by C1.
+**Interfaces:** `seed_parts` uses one `SETUP_POLICY_CLAIMS` field-to-key map to write trimmed, nonblank text claims `policy:about` (the summary), `policy:service_area`, `policy:pricing`, `policy:intake`, `policy:after_hours`, `policy:urgent`, and `policy:how_we_help`. Fields in `suggested_fields` publish no policy claim until owner confirmation. `contact` comes from `public_contact`; hours keep their own part. Consumed by C1. The kernel policy-text check (B7) must ship with these claims. The public contact is held like a policy line. The kernel checks the contact first, so a refusal naming only the contact drops it without using up a policy retry. The first other detailed refusal drops its named keys and retries; a cap refusal or detail naming no charter key drops every policy claim instead. A second detailed refusal drops every policy claim left and any other key it names. At most four charter PUTs occur when the contact is refused on its own and three otherwise, nothing is re-sent unchanged (a refusal with nothing left to drop propagates), and other failures propagate. The dropped keys reach `SetupState.held_policy_keys`.
 
 - [ ] **Test** `test_seed_parts_publish_policy_claims`: answers with every field give exactly those keys, kind `text`, values trimmed; unset fields give no claim.
 - [ ] Implement; run `test_setup_rules.py test_setup_questions.py -q`; commit `feat(api): publish setup's business summary and policies to the Desk`.
@@ -211,21 +211,21 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 ### Task A7: keep a setup Desk's calendar open (1.5 h, could)
 
-**Files:** `backend/desk/api/jobs.py`, `setup.py` (`calendar_slots`). A daily job PUTs the next 14 days of slots from the Desk's hours for every setup-made live Desk. Test `test_jobs.py`: `test_the_calendar_is_refreshed_from_the_hours`.
+**Files:** `backend/desk/calendar.py` (new: `calendar_slots`, moved from `setup.py` so the kernel can share it), `backend/desk/kernel_service/desks.py` (`extend_calendar`, `extend_calendars`, `keep_calendars_open`), `app.py` (the lifespan task), `repo.py` (`limit_lock_waits`, the lock order). The kernel's lifespan runs a pass at its start and then daily, beside the kernel and cancelled at shutdown. Each live Desk with hours that setup made (its version 1 came from the `ask_first` preset, which `POST /desks` activates; Rivera's seed starts from `rivera`) gets, in a transaction of its own under its Desk row, the slots its hours give for the days after its latest slot, up to 14 days ahead in the business's time zone. It only inserts: booked slots, slots a waiting request names and the owner's changes inside the covered days stay as they are, while a trimmed tail or a cleared calendar is filled again (wish #596). Each extension is ledgered as the owner's calendar write is, `desk_data` `{part: "calendar", refs, extended_from: "hours"}`. An API job was rejected because API jobs hold no credential and never call the kernel. Test `backend/tests/kernel/test_calendar_refresh.py`: `test_the_calendar_is_refreshed_from_the_hours`.
 
 ### Task A8: the run's fixes (in flight)
 
-Branch `fix/setup-live-run`: #295, #305, #306 (setup side), #311; #304's cause routed through 88. One PR, two-seat panel, merge before A2b to keep conflicts small.
+Branch `fix/setup-live-run`: #295, #305, #306 (setup side), #311; #304's cause reported for review. One PR, two-seat panel, merge before A2b to keep conflicts small.
 
 ---
 
-## Lane kernel (14 / 4b): the contract setup consumes, and the gaps
+## Kernel: the contract setup consumes, and the gaps
 
-### B0: per-Desk sample memory (#303) (14, in progress)
+### B0: per-Desk sample memory (#303) (in progress)
 
 As agreed: `PUT /desks/{desk_id}/memory`, whole replace, owner-only, canary-checked, ledgered without text; `native.read_memory` reads the Desk's own memory, Rivera's seed keeps the fixture, any other unwritten Desk reads empty.
 
-### B1 to B4: four building blocks (kernel lane designs the internals; 13 h together, should)
+### B1 to B4: four building blocks (the kernel owns the internals; 13 h together, should)
 
 The seam setup needs:
 - `PUT /desks/{desk_id}/business_tools` exactly as in Seams.
@@ -243,7 +243,7 @@ The seam setup needs:
 
 ---
 
-## Lane cb: the visitor agent
+## Visitor prompt and demo-agent API
 
 ### C1: a business-aware section (3 h, must; consumes A4)
 
@@ -251,11 +251,17 @@ The seam setup needs:
 
 ### C2: the demo agent's tasks from the Desk (1.5 h, could)
 
-`DEMO_TASKS` drawn from the Desk's own tools and catalog instead of a water heater visit on every Desk.
+Instead of a water heater visit on every Desk, `DEMO_TASKS` holds a fixed line for each task in each `DemoTaskSet` (#572):
+- `rivera` for the copy's seeded Desk, its three lines unchanged;
+- `trade`, `office`, `landlord` and `other` for a Desk setup made, picked by code from its `app.setup_interviews.business_type` alone (`agents.demo_task_set`); a Desk with no known type reads `other`.
+
+`GET /api/public/desks/{slug}/agent_tasks` answers that key, and the agents page words its task chips from its own copy for it. The owner signed the lines and the chips on 2026-11-01. Two other designs were rejected:
+- (a) Lines built from the Desk's business tool titles or catalog names: that owner text would reach the agent's model, whose requests its launcher sees unchecked, widening that recorded exception.
+- (b) Hiding the agent's words for Desk-built tasks: it would undo the owner's decision to show them.
 
 ---
 
-## Lane cd: setup's web
+## Setup web app
 
 ### D1: canvas boards (3 h plus sign-off, must)
 
@@ -267,45 +273,45 @@ Render `SetupMessage.card` (accept, rename, decline through A3's route) and `Set
 
 ### D3: four starter businesses (2 h, must)
 
-One click fills the start description: a hair salon (name to choose), Rivera Plumbing, Maple Street Rentals, Chen & Co. CPA. af writes the four descriptions; Giovanni signs off the words.
+One click fills the start description: a hair salon (name to choose), Rivera Plumbing, Maple Street Rentals, Chen & Co. CPA. The setup API defines the four descriptions; Giovanni signs off the words.
 
 ---
 
 ## Schedule and what can be cut
 
-| Task | Lane | Hours | Ships by Monday |
+| Task | Owner | Hours | Ships by Monday |
 |---|---|---|---|
-| A0 specs and plan | af | 0.5 | must |
-| A1 sample memory, connected apps | af | 2 | must |
-| A1b web search in setup | af | 1.5 | should (cut 2) |
-| A2a understanding turn | af | 3 | must |
-| A2b Claude-led topics, choices, suggestions | af | 4 | must |
-| A3 proposals | af | 3 | must |
-| A4 policy claims | af | 1.5 | must |
-| A5 business tools | af | 2 | should (cut 2) |
-| A6 test client | af | 2 | could (cut 3) |
-| A7 calendar refresh | af | 1.5 | could (cut 3) |
-| A8 the run's fixes | af | in flight | must |
-| B0 memory route | 14 | in flight | must |
-| B1 to B4 blocks | 14 / 4b | 13 | should (cut 2) |
-| B5 booking words | 14 / 4b | 1 | must |
-| B6 web search read | 14 / 4b | 2.5 | should (cut 2) |
-| C1 business-aware prompt | cb | 3 | must |
-| C2 demo tasks | cb | 1.5 | could (cut 3) |
-| D1 boards | cd | 3 + sign-off | must |
-| D2 cards and choices | cd | 5 | must |
-| D3 starters | cd | 2 | must |
+| A0 specs and plan | Setup API | 0.5 | must |
+| A1 sample memory, connected apps | Setup API | 2 | must |
+| A1b web search in setup | Setup API | 1.5 | should (cut 2) |
+| A2a understanding turn | Setup API | 3 | must |
+| A2b Claude-led topics, choices, suggestions | Setup API | 4 | must |
+| A3 proposals | Setup API | 3 | must |
+| A4 policy claims | Setup API | 1.5 | must |
+| A5 business tools | Setup API | 2 | should (cut 2) |
+| A6 test client | Setup API | 2 | could (cut 3) |
+| A7 calendar refresh | Kernel | 1.5 | could (cut 3) |
+| A8 the run's fixes | Setup API | in flight | must |
+| B0 memory route | Kernel | in flight | must |
+| B1 to B4 blocks | Kernel | 13 | should (cut 2) |
+| B5 booking words | Kernel | 1 | must |
+| B6 web search read | Kernel | 2.5 | should (cut 2) |
+| C1 business-aware prompt | Visitor prompt and demo-agent API | 3 | must |
+| C2 demo tasks | Visitor prompt and demo-agent API | 1.5 | could (cut 3) |
+| D1 boards | Setup web app | 3 + sign-off | must |
+| D2 cards and choices | Setup web app | 5 | must |
+| D3 starters | Setup web app | 2 | must |
 
-Order inside af: A8, A0, A1, A2a, A2b, A3, A4, then A5 when B lands. D2 can build against A3's schemas once A3's PR is open.
+Setup API task order: A8, A0, A1, A2a, A2b, A3, A4, then A5 when B lands. D2 can build against A3's schemas once A3's PR is open.
 
 ---
 
 ## Round 1 decisions (these win over any task text above)
 
-Lanes, as staffed: 76 (A2a, A2b), the cards lane (A3 and the finish step), 19 (A1c, A1, A1b, A5, A6), 83 (B6, then the blocks core with B1, B2, B4, B3), 4b [6d0ec3] (the web's async consent, D2, D3, D4), the prompt lab (the consultant prompts), cb (A4, C1), 4b kernel safety (B5, B7), 34 (D1) and 14 (B0). af leads and reports to 88.
+Work is divided by system area: the setup API owns the conversation engine, cards and publication of policy claims; the kernel owns memory, search, building blocks and reply checks; the visitor prompt uses the published business context; the setup web app owns boards, asynchronous consent, cards and starters. Consultant prompt changes belong to the setup API.
 
-**Setup engine (76, the cards lane, 19)**
-- **A1c, asynchronous consent (19):** as in Seams. Consent "no" runs the understanding on the description alone.
+**Setup API engine and cards**
+- **A1c, asynchronous consent:** as in Seams. Consent "no" runs the understanding on the description alone.
 - **Limit turns don't plan.** Limit-topic turn models have no `next_topic`, `question`, `choices` or `skip`. After a limit topic finishes, a consultant "next step" call reads the business context and has no limit fields at all. It picks the next topic and writes its question and choices, or writes the closing plan. The closing plan never comes from a limit turn. Test: finish setup right after each limit topic.
 - **No amount reaches the owner from untrusted text before a limit question.** When the next topic is a limit, code drops the preceding reply if the reply check's number scan finds an amount, a percentage or a number word. The fixed question still asks.
 - **Limit choices:** `LIMIT_CHOICES[key](business_type)` returns `LimitChoice{text, values}` built by code, with choices for both two-field questions (`documents_and_payments`, `money_limit`). An answer that exactly matches a live choice's text applies its values and overrides the model's patch. Test: the model returns a larger amount, and the choice's amount is stored.
@@ -331,34 +337,34 @@ Lanes, as staffed: 76 (A2a, A2b), the cards lane (A3 and the finish step), 19 (A
   - A1 updates README.md's "real, mocked and unfinished" row: the memory is drafted from the owner's description, connected apps are simulated, and web search is real.
 - **A1b:** search text reaches only the understanding turn. Queries are about the kind of business (Giovanni), at most 3.
 - **A6:** people only, with no document. The contact comes from the owner's answer on that turn, never `public_contact`.
-- **A7 moves to the kernel lane** (the kernel extends a Desk's slots from its hours, as the Rivera seed does), as a could. The API job worker never calls the kernel.
+- **A7 belongs to the kernel** (the kernel extends a Desk's slots from its hours, as the Rivera seed does), as a could. The API job worker never calls the kernel.
 
-**Kernel (83, 4b kernel safety)**
-- **Blocks core:** 83's design note (`.plan-runs/lane-briefs/plan09-kernel-blocks-design.md`) is the contract:
+**Kernel**
+- **Blocks core:** the kernel stores each business tool with a configuration hash, derives its adapter and Cedar effects from its block, and requires review after a change. Configuration changes invalidate stale decisions; the contract is specified below:
   - Business tools are `kernel.tools` rows with source "business".
   - `AnyToolName` covers the natives plus `desk.*`.
   - The compiler generates per-Desk Cedar actions in the block's effect groups.
   - `adapters.resolve` looks up a business tool's adapter per Desk.
   - The hash covers {title, description, config}, so a change sends the tool back to `needs_review` and fails stale decisions closed.
   - It adds rule targets for `desk.*`, a `business_tools` ledger kind and the `web_search` knowledge source.
-  - The master plan amendment goes through 88.
+  - Record shared-contract changes in the master plan before implementation.
 - **Description template:** `description_confirmed` is built from a fixed template per block, with the config quoted as data. Test: an instruction planted in `how` appears only inside quotes.
 - **Money:** `moves_money` and `auto_money` become effect-based for business tools (B3).
 - **Urgent alerts:** urgent alerts reach the owner's Demo inbox at once, whatever the notification settings (see Owner rulings after round 1) (B4).
 - **B6:**
-  - Up to 3 searches per setup, a 20 s deadline each, on `claude-sonnet-5-5`, with usage ledgered.
+  - Up to 3 searches per setup, a 30 s deadline each, on `claude-sonnet-5-5`, with usage ledgered. (Raised from 20 s on 2026-11-01: twelve measured searches took 15.1 s at the median and 18.2 s at most, before the hosted network hop, and a search lost costs setup more than ten seconds' wait.)
   - What it returns is Claude's cited summary, labelled as such.
   - Search spend follows Giovanni's approval of 3 per setup.
-- **B7, new (4b kernel safety):** `PUT /desks/{id}/charter` refuses a `policy:` text claim that holds an amount, a percentage, or discount, refund or guarantee words (the reply check's lexicon). Setup pre-filters with the same function and drops an offending claim, logged by key. Tier 1 rows, with no model calls:
+- **B7, new, kernel policy-text checks:** `PUT /desks/{id}/charter` refuses a `policy:` text claim that holds an amount, a percentage, or discount, refund or guarantee words (the reply check's lexicon). Setup pre-filters with the same function and drops an offending claim, logged by key. Tier 1 rows, with no model calls:
   - A website discount never reaches a policy card.
   - A business tool config stays quoted.
   - A visitor's text can't change a block's amount.
   - Each new booking word (en/es).
   - Search text never reaches a charter claim.
 
-**Visitor agent (cb):** `after_hours` is written as customer-facing text, never the owner's private instruction. C1 names its files and tests (the prompt section; `policy:` claims reach the model wrapped in `<desk_context>`). The tier 2 rate stays unmeasured until plan 02's scenarios run, which is a known gap.
+**Visitor prompt:** `after_hours` is written as customer-facing text, never the owner's private instruction. C1 names its files and tests (the prompt section; `policy:` claims reach the model wrapped in `<desk_context>`). The tier 2 rate stays unmeasured until plan 02's scenarios run, which is a known gap.
 
-**Web (4b [6d0ec3], 34):**
+**Setup web app and boards:**
 - A purpose-payment card needs an amount before accept.
 - Card actions are disabled while an answer is in flight.
 - **D4, new:** business tools render by title, with their config shown, in the Tools step, Rules, Needs you and visitor receipts (after B1).
@@ -419,4 +425,4 @@ Lanes, as staffed: 76 (A2a, A2b), the cards lane (A3 and the finish step), 19 (A
 
 | Round | Seats | Findings | What changed |
 |---|---|---|---|
-| 1 | Sol, Opus | Sol 3 P1 + 9 P2; Opus 6 P1 + 12 P2 + 9 P3, overlapping | Seams v2 (busy, `?cards=1`, autonomy, code-owned capabilities, the finish step, amounts entered by the owner); limit turns don't plan; `LimitChoice`; suggested facts; transcript storage; effect-based money for business tools; B7 policy-claim scan; A7 moved to the kernel; D4 added. No P1 left open. Not re-reviewed (round cap 1); lanes build against these decisions. |
+| 1 | Sol, Opus | Sol 3 P1 + 9 P2; Opus 6 P1 + 12 P2 + 9 P3, overlapping | Seams v2 (busy, `?cards=1`, autonomy, code-owned capabilities, the finish step, amounts entered by the owner); limit turns don't plan; `LimitChoice`; suggested facts; transcript storage; effect-based money for business tools; B7 policy-claim scan; A7 moved to the kernel; D4 added. No P1 left open. Not re-reviewed (round cap 1); each area builds against these decisions. |

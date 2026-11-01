@@ -1,12 +1,13 @@
 /**
- * What setup's steps share: the rules draft's read, the line around the business's name, and how
- * to tell the client's own proving give-up from the server's answer.
+ * What setup's steps share: the rules draft's read, the line around the business's name, how to
+ * tell the client's own proving give-up from the server's answer, and each step opening at its top.
  */
-import { Fragment, createElement, type ReactNode } from 'react';
+import { Fragment, createElement, useLayoutEffect, useRef, type ReactNode } from 'react';
 
 import { ApiError, request } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import { SETUP_STEPS, type SetupStep } from '../api/views.ts';
+import { afterName } from '../lib/names.ts';
 import { SETUP_COPY } from './copy.ts';
 
 /**
@@ -15,7 +16,7 @@ import { SETUP_COPY } from './copy.ts';
  * setup step, so each one, as it settles, has them read again (the app's providers), even once
  * setup has closed: one still out when the owner left lands later.
  */
-export const MOVES_SETUP: ReadonlySet<RouteKey> = new Set<RouteKey>(['setupAnswer', 'setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm', 'goLive']);
+export const MOVES_SETUP: ReadonlySet<RouteKey> = new Set<RouteKey>(['setupAnswer', 'setupProposal', 'setupSuggestions', 'setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm', 'goLive']);
 
 /** The step each request that moves an interview on has it at in the API once it succeeds. */
 export const SETUP_REACHES: Readonly<Partial<Record<RouteKey, SetupStep>>> = {
@@ -45,10 +46,13 @@ export function setupRulesQuery(id: string) {
 /**
  * A line around the business's name: the name is the owner's own words (`data-copy="user"`), never
  * read as the screen's; "your business" until the API names it.
+ * When the name already ends a sentence ('.', '!' or '?'), the line's own leading '.' is dropped,
+ * so 'Chen & Co.' doesn't read 'Chen & Co..'.
  */
 export function aroundBusiness([before, after]: readonly [string, string] | readonly string[], business: string): ReactNode {
   const name = business === '' ? SETUP_COPY.yourBusiness : createElement('span', { 'data-copy': 'user' }, business);
-  return createElement(Fragment, null, before, name, after);
+  const suffix = after === undefined ? after : afterName(business, after);
+  return createElement(Fragment, null, before, name, suffix);
 }
 
 /**
@@ -58,4 +62,20 @@ export function aroundBusiness([before, after]: readonly [string, string] | read
  */
 export function gaveUp(err: unknown): boolean {
   return err instanceof ApiError && err.code === 'rules_cannot_be_checked' && err.status === null;
+}
+
+/**
+ * Brings the window to its top, at once, whenever `screen` changes to another of setup's screens:
+ * each opens at its top with its title in view, rather than where the owner had scrolled on the one
+ * before (on a phone, its end, where its main button is), while what it reads is still out and once
+ * it lands. The first screen keeps where the window is, and `null` (no screen yet) moves nothing.
+ */
+export function useOpensAtTop(screen: string | number | null): void {
+  const shown = useRef(screen);
+  useLayoutEffect(() => {
+    if (screen === null || screen === shown.current) return;
+    const first = shown.current === null;
+    shown.current = screen;
+    if (!first) window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [screen]);
 }

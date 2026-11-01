@@ -1,0 +1,42 @@
+/* Both cards share labels at left, public words in the middle and actions at right. */
+.cd-public-lines__row {
+  display: grid;
+  grid-template-columns: calc(3 * var(--space-40)) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-16);
+  padding: var(--space-14) 0;
+}
+
+.cd-public-lines__row:first-child { padding-top: 0; }
+.cd-public-lines__row:last-child { padding-bottom: 0; }
+.cd-public-lines__row + .cd-public-lines__row { border-top: 1px solid var(--line-hairline); }
+.cd-public-lines__label { color: var(--text-secondary); }
+.cd-public-lines__text { min-width: 0; overflow-wrap: anywhere; }
+.cd-public-lines__row--readonly .cd-public-lines__text { grid-column: 2 / -1; }
+.cd-public-lines__text p { margin: 0; }
+.cd-public-lines__text p + p { margin-top: var(--space-4); }
+.cd-public-lines__editor {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+@media (max-width: 639.98px) {
+  .cd-public-lines__row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-6) var(--space-16); }
+  .cd-public-lines__label { grid-column: 1 / -1; }
+  .cd-public-lines__editor { grid-column: 1 / -1; }
+  .cd-public-lines__row--readonly .cd-public-lines__text { grid-column: 1 / -1; }
+}
+
+.cd-public-lines__actions { display: flex; gap: var(--space-4); margin-block: calc(-1 * var(--space-6)); }
+.cd-public-lines-suggested__heading { display: flex; align-items: center; gap: var(--space-8); }
+.cd-public-lines-suggested__intro { color: var(--text-secondary); margin: var(--space-2) 0 var(--space-14); }
+@media (max-width: 639.98px) {
+  .cd-public-lines-suggested .cd-public-lines__row { row-gap: var(--space-4); }
+  .cd-public-lines-suggested .cd-public-lines__row--continuation { row-gap: var(--space-8); }
+  .cd-public-lines-suggested .cd-public-lines__text { grid-column: 1 / -1; }
+  .cd-public-lines-suggested .cd-public-lines__actions { grid-column: 1 / -1; margin: var(--space-2) 0 0; }
+  .cd-public-lines-suggested .cd-public-lines__label:empty { display: none; }
+}

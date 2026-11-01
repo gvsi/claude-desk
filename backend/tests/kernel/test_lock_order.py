@@ -10,8 +10,8 @@ their reconciliation (a private action's too, once its session closed: its adapt
 the action withheld, refused or left unknown by what it answers), answers, cancels and reads, a
 verification start allowed or approved, a right code checked, a document link opened, a person
 removed or given another contact, a Desk deleted, a reply check that opens a handoff for its card,
-and a handoff closed, after the Desk row an owner's write holds first; and Plan 01c's payment
-paths, over the real adapters and the mock payments server.
+a booking that closes the card's handoff, and a handoff closed, after the Desk row an owner's write
+holds first; and Plan 01c's payment paths, over the real adapters and the mock payments server.
 """
 
 import asyncio
@@ -30,13 +30,14 @@ from desk.contracts import Decision, ExecResult, NormalizedAction
 from desk.contracts import PolicyVersion as PolicyVersionContract
 from desk.db.models import CalendarSlot, DemoInboxEntry, Execution, PaymentLink, PolicyVersion
 from desk.db.session import database_url, libpq_url
-from desk.kernel_service import demo_inbox, execute
+from desk.kernel_service import demo_inbox, desks, execute
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
 
 from .fakes import FakeAdapter
 from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
 from .test_adapters import book, rivera, visitor_of
 from .test_approvals import ASK_QUOTES, answered, held_on, post_answer, post_cancel
+from .test_calendar_refresh import setup_calendar, setup_desk
 from .test_compiler import card
 from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode, set_session
 from .test_desk_writes import slot_body, updated
@@ -389,6 +390,21 @@ async def test_a_reply_check_keeps_the_lock_order(app, client, frozen_clock):
     assert log.transactions == [["sessions", "ledger_heads"]]
 
 
+@pytest.mark.parametrize("prose", ["Here is your quote.", "Here is $20."])
+async def test_a_reply_with_rechecked_cards_keeps_the_lock_order(app, client, prose):
+    from .test_reply_check import clause, own_quote
+
+    _, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    # No clock advance: the explicit session lock must work even without a last-seen UPDATE.
+    with lock_log(app) as log:
+        verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
+    assert [b.template for b in verdict.blocks if b.kind == "card"] == ["quote"]
+    # Handoffs are held before facts even if the refresh later drops the last card.
+    assert log.transactions == [["sessions", "handoffs", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
 async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, client, frozen_clock):
     _, visitor = await visitor_of(app, client)
     frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written
@@ -592,6 +608,22 @@ async def test_a_booking_runs_in_the_lock_order(app, client, reviewer):
     assert all(in_lock_order(tables) for tables in log.transactions), log.transactions
 
 
+async def test_a_booking_closing_a_card_handoff_runs_in_the_lock_order(app, client, reviewer):
+    _, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    reviewer.answer = PASS
+    allowed = await book(client, visitor, "S-20261102-1400")
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    # T2, holding the session row FOR UPDATE: the slot it books FOR SHARE and its booking (an adapter's own
+    # rows), then the session's open card handoff, closed, then the facts (the handoff's, none, and the
+    # booking's), then the closing's entry and the outcome
+    t2 = [tables for tables in log.transactions if "calendar_slots" in tables]
+    assert t2 == [["sessions", "decisions", "executions", "calendar_slots", "handoffs", "facts", "ledger_heads"]], (
+        log.transactions)
+    assert all(in_lock_order(tables) for tables in log.transactions), log.transactions
+
+
 async def test_a_calendar_write_runs_in_the_lock_order(app, client):
     copy, _ = await visitor_of(app, client)
     slots = [slot_body(slot) for slot in await rows_of(app, copy.copy_id, select(CalendarSlot)
@@ -600,6 +632,29 @@ async def test_a_calendar_write_runs_in_the_lock_order(app, client):
         await updated(client, copy, "calendar", {"calendar_slots": slots[1:]})
     # an owner's write to the Desk's data: the Desk row first, then the Desk's slots, then the entry
     assert log.transactions == [["desks", "calendar_slots", "ledger_heads"]], log.transactions
+
+
+async def test_a_calendar_refresh_runs_in_the_lock_order(app, client):
+    desk = await setup_desk(app, client, await rivera(app, client), setup_calendar(days_ago=11))
+    on_slots: list[str] = []
+
+    def slot_statement(conn, cursor, statement: str, parameters, context, executemany) -> None:
+        if "kernel.calendar_slots" in statement:
+            on_slots.append(" ".join(statement.split()))
+
+    engine = app.state.kernel.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", slot_statement)
+    try:
+        with lock_log(app, ("desks", *(table for table in LOCK_ORDER if table != "calendar_slots"))) as log:
+            assert list(await desks.extend_calendars(app.state.kernel)) == [desk.desk_id]
+    finally:
+        event.remove(engine, "before_cursor_execute", slot_statement)
+    # the Desk row, as an owner's calendar write takes it, then the ledger head
+    assert log.transactions == [["desks", "ledger_heads"]], log.transactions
+    # the Desk's slots are only read, and the new ones inserted under fresh keys: no slot is locked
+    read, *inserts = on_slots
+    assert read.startswith("SELECT") and " FOR " not in read, read
+    assert inserts and all(statement.startswith("INSERT") for statement in inserts), inserts
 
 
 # ---- Plan 01c's payment paths ---------------------------------------------------------------------

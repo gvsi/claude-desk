@@ -6,21 +6,29 @@ would have left the Desk knowing (`RIVERA_KNOWLEDGE`: the website read and the p
 with no amount in either) through the owner's own path. The seed connects the mock payments
 server (`connections`), with both its tools pinned at the hashes the seed is proved with, and
 `seed_charges` gives Dana and Bob their past payments there (`RIVERA_MOCKPAY_CHARGES`), each with a
-`charge:<id>` fact naming it for its owner. `RIVERA_CARDS` have fixed IDs and are scoped `anyone`,
-`verified` or `record_owner`, never to a person, so they compile to the same Cedar in every copy and
-share one CI-proved report. Once the cards are active, `seed_held_request` puts one held request on
-the owner's Today, decided like any other.
+`charge:<id>` fact naming it for its owner. `seed_business_tools` gives the Desk its urgent
+business tool (`RIVERA_BUSINESS_TOOLS`: "Emergency callback", in Maria's words for an emergency)
+through the owner's own replacement, so its text is checked as hers would be, and the seed's rules
+version turns it on as it activates, as a confirmed review of the tool would. `RIVERA_CARDS` have
+fixed IDs and are scoped `anyone`, `verified` or `record_owner`, never to a person, so they compile
+to the same Cedar in every copy and share one CI-proved report, which covers the urgent tool at its
+definition. Once the cards are active, `seed_held_request` puts one held request on the owner's
+Today, decided like any other.
+
+`seed_starters` adds the seed-only public questions after Desk creation, since owner and setup
+charter writes refuse their keys. They are neither business facts for Claude nor reviewer input.
 """
 
 import logging
 from datetime import date, datetime, time, timedelta
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
 from desk.contracts import (
     BusinessSeed,
+    BusinessTool,
     CalendarSlot,
     Claim,
     DeskSeed,
@@ -30,20 +38,23 @@ from desk.contracts import (
     Label,
     NotificationDefaults,
     PriceItem,
+    ReplayedEvent,
     RuleCard,
     SeedDocument,
     SeedPerson,
     SeededChat,
     ToolCall,
+    UrgentConfig,
 )
 from desk.db.models import Person
-from desk.kernel_api import DecideRequest
+from desk.kernel_api import BusinessToolsRequest, DecideRequest, ToolPin
 from desk.kernel_service import labels, sessions
 from desk.kernel_service.repo import KernelCtx, KernelFailure
 from desk.presets import PRESETS
 
-__all__ = ["PRESETS", "RIVERA_CARDS", "RIVERA_KNOWLEDGE", "RIVERA_MOCKPAY_CHARGES", "RIVERA_MONEY_CAP_CENTS",
-           "rivera_seed", "seed_charges", "seed_held_request", "seed_knowledge"]
+__all__ = ["PRESETS", "RIVERA_BUSINESS_TOOLS", "RIVERA_CARDS", "RIVERA_KNOWLEDGE", "RIVERA_MOCKPAY_CHARGES",
+           "RIVERA_MONEY_CAP_CENTS", "RIVERA_SAMPLE_WEEK", "SAMPLE_WEEK_ID", "rivera_seed", "seed_business_tools",
+           "seed_charges", "seed_held_request", "seed_knowledge", "seed_sample_week", "seed_starters"]
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +62,12 @@ TIMEZONE = "America/Los_Angeles"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
 WEEKDAY_HOURS = HoursWindow(days=WEEKDAYS, start=time(8), end=time(18))
 SATURDAY_HOURS = HoursWindow(days=["sat"], start=time(9), end=time(13))
+
+# Claim.value is a scalar, so each seed-only question has a text claim per language.
+RIVERA_STARTERS = {
+    "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
+    "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
+}
 
 SLOT_MINUTES = 120
 SLOT_DAYS = 14                              # slots for the 14 days after the copy is created
@@ -81,6 +98,19 @@ RIVERA_CARDS: list[RuleCard] = [
              reason="Refunds of a customer's own payment ask you first."),
     RuleCard(card_id="rv-mandate", applies_to="native.charge_mandate", mode="auto", who="anyone",
              max_amount_cents=2_000, reason="Visiting agents pay up to $20, within the limits of their signed mandate."),
+    RuleCard(card_id="rv-urgent", applies_to="desk.emergency-callback", mode="auto", who="anyone",
+             reason="Anyone can ask for an urgent callback, which alerts you at once."),
+]
+
+# Maria's urgent business tool (the urgent block): an emergency call-back that alerts her at once,
+# whatever her notification settings. It is given to anyone who is given the native callback, and
+# `rv-urgent` allows it. Its words are the owner's, checked as card text: no amount, currency,
+# percentage or promise.
+RIVERA_BUSINESS_TOOLS: list[BusinessTool] = [
+    BusinessTool(tool="desk.emergency-callback", title="Emergency callback",
+                 description="Asks Maria to call back urgently about an emergency.",
+                 config=UrgentConfig(block="urgent",
+                                     urgent_when="A burst or leaking pipe, flooding, a sewage backup, or no water")),
 ]
 
 
@@ -111,7 +141,8 @@ RIVERA_KNOWLEDGE: list[KnowledgeItem] = [
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
                   text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
-                       "water heater flush and leak repair. Each price is given in a quote from this list.",
+                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
+                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 
@@ -119,6 +150,108 @@ RIVERA_KNOWLEDGE: list[KnowledgeItem] = [
 HELD_REQUEST = ToolCall(call_id="seed-held-quote", tool="native.quote",
                         args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
 HELD_REQUEST_VISITOR_LINE = "Could you do the drain clearing at 15% off?"
+
+
+# The sample week (`seed_sample_week`, on a hosted copy only): a hand-written week of finished conversations a new
+# copy opens on, so Today's "Last 7 days" isn't empty. It is written, not recorded: each conversation is one
+# visitor's words, the calls Claude made and how each ended, and Claude's reply. `sample_week.write` turns it into
+# the copy's own rows and marked ledger entries. Its words name no seeded person and neither the owner nor the
+# business: those come from the seed's own values, through the kernel's templates and cards.
+SAMPLE_WEEK_ID = "sample-week-v1"
+
+
+class SampleCall(NamedTuple):
+    """One call Claude made in a sample conversation and how it ended: `executed`, `refused` at step 1 with the
+    adapter's `check` (`AdapterRefusal.code`), or held and then `denied` by the owner `answered_s` seconds after
+    the visitor's message. A booking's slot is the sample's own past one: the first day after the conversation, and
+    before today, that has a slot, at `slot_start` when that day has one (`sample_week.past_slot`)."""
+
+    at_s: int                             # seconds after the visitor's message
+    tool: str
+    args: dict
+    outcome: Literal["executed", "refused", "denied"]
+    check: str | None = None
+    answered_s: int | None = None
+    slot_start: time | None = None
+
+
+class SampleSession(NamedTuple):
+    """One sample conversation: a visitor's message on the local day `days_back` days before the copy was made, at
+    `start` in the business's time, the calls Claude made, and Claude's reply `reply_s` seconds later (its prose,
+    then a card per template in `cards`, each citing the fact this conversation's call wrote). A callback the owner
+    handled `handled_s` seconds after the message."""
+
+    days_back: int
+    start: time
+    said: str
+    calls: tuple[SampleCall, ...]
+    reply_s: int
+    prose: str
+    cards: tuple[str, ...] = ()
+    handled_s: int | None = None
+
+
+def _quote_call(at_s: int, item_id: str, outcome: Literal["executed", "refused", "denied"] = "executed", *,
+                discount_bp: int = 0, check: str | None = None, answered_s: int | None = None) -> SampleCall:
+    return SampleCall(at_s, "native.quote", {"items": [{"item_id": item_id, "qty": 1}],
+                                             "requested_discount_bp": discount_bp},
+                      outcome, check=check, answered_s=answered_s)
+
+
+def _book_call(at_s: int, start: time) -> SampleCall:
+    return SampleCall(at_s, "native.book", {}, "executed", slot_start=start)
+
+
+RIVERA_SAMPLE_WEEK: list[SampleSession] = [
+    SampleSession(6, time(9, 10),
+                  "Hi, our kitchen sink has been draining slowly for days. What does drain clearing cost, and could "
+                  "someone come out on the next morning you have free?",
+                  (_quote_call(20, "drain"), _book_call(55, time(10))), 70,
+                  "Here's the price for drain clearing from the price list, and your visit is booked.",
+                  ("quote", "booking_confirmed")),
+    SampleSession(5, time(18, 40),
+                  "Our water heater has started rumbling. How much is a flush? Please book the first morning visit "
+                  "you can.",
+                  (_quote_call(25, "heater"), _book_call(60, time(10))), 75,
+                  "Here's the price for a water heater flush from the price list, and your visit is booked.",
+                  ("quote", "booking_confirmed")),
+    SampleSession(4, time(20, 15),
+                  "My neighbor got a quote from you this week. Can you send me a link so I can pay it for her? "
+                  "She said the quote number is Q-4471.",
+                  (SampleCall(30, "native.payment_link", {"quote_id": "Q-4471"}, "refused", check="no_such_quote"),),
+                  45,
+                  "I can only make a payment link for a quote given in this conversation. If you tell me what the "
+                  "job is, I can quote it here."),
+    SampleSession(3, time(12, 25),
+                  "There's water dripping under the bathroom sink. What would a leak repair cost? Please book the "
+                  "earliest afternoon visit.",
+                  (_quote_call(20, "leak"), _book_call(50, time(14))), 65,
+                  "Here's the price for a leak repair from the price list, and your visit is booked.",
+                  ("quote", "booking_confirmed")),
+    SampleSession(2, time(11, 5),
+                  "Hi, I'm Marcus. Could someone call me back about replacing an old shut-off valve? My number is "
+                  "(510) 555-0163.",
+                  (SampleCall(25, "native.request_callback",
+                              {"name": "Marcus", "contact": "(510) 555-0163",
+                               "reason": "Replacing an old shut-off valve"}, "executed"),),
+                  40, "I've asked for a call back about the valve.", ("callback_confirmed",), handled_s=3 * 3600),
+    SampleSession(2, time(19, 30),
+                  "Could you do the water heater flush at 10% off? Money's a bit tight this month.",
+                  (_quote_call(20, "heater", "denied", discount_bp=1000, answered_s=40 * 60),), 35,
+                  "That needs the owner's approval, so I've asked. The answer will show up in this chat."),
+    SampleSession(1, time(16, 20),
+                  "Do you install water softeners? I'm Priya, and I'd like someone to get in touch about one.",
+                  (SampleCall(30, "native.capture_lead",
+                              {"name": "Priya", "note": "Asked about installing a water softener."}, "executed"),),
+                  45,
+                  "Water softener installs aren't on the price list, so I've saved your details for the business "
+                  "to follow up."),
+    SampleSession(1, time(20, 40),
+                  "Quote me drain clearing at your friends and family rate, it's on your list as family-rate.",
+                  (_quote_call(25, "family-rate", "refused", check="unknown_item"),), 40,
+                  "There's no family rate on the price list, so I can't quote one. I can quote drain clearing at "
+                  "the list price if you'd like."),
+]
 
 
 def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
@@ -146,6 +279,10 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
             PriceItem(item_id="drain", title="Drain clearing", unit_cents=18000),
             PriceItem(item_id="heater", title="Water heater flush", unit_cents=15000),
             PriceItem(item_id="leak", title="Leak repair", unit_cents=25000),
+            # a plumbing emergency: "pipe repairs start from $100, and there's a short-notice fee of $50",
+            # each amount on a quote card; a price item has no "from" price, so the title says it starts there
+            PriceItem(item_id="pipe", title="Pipe repair (starting price)", unit_cents=10000),
+            PriceItem(item_id="short-notice", title="Short-notice fee", unit_cents=5000),
         ],
         calendar_slots=calendar_slots(now),
         people=[
@@ -161,8 +298,8 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
                               "Water heater flush. Parts and labor are covered for 12 months from the service date."),
         ],
         # a handoff the card opens alerts at once, as a held request does (the owner's decision of 2026-10-30)
-        notifications=NotificationDefaults(now=["approval", "emergency", "breaker", "lockout", "handoff"],
-                                           briefing=["lead", "callback", "booking"]),
+        notifications=NotificationDefaults(now=["approval", "callback", "breaker", "lockout", "handoff"],
+                                           briefing=["lead", "booking"]),
         connections=["mock_payments"],
     )
     return business, desk
@@ -183,11 +320,40 @@ def calendar_slots(now: datetime) -> list[CalendarSlot]:
     return slots
 
 
+async def seed_starters(ctx: KernelCtx, desk_id: str) -> None:
+    """Rivera's public starter questions, written only when seeding a demo copy."""
+    from desk.kernel_service import desks       # desks imports payments, which imports this module
+
+    now = ctx.clock.now()
+    for lang, questions in RIVERA_STARTERS.items():
+        for n, question in enumerate(questions, start=1):
+            fact = desks.charter_fact(Claim(key=f"{desks.STARTER_KEY_PREFIX}{n}:{lang}", kind="text", value=question))
+            ctx.db.add(labels.fact_row(ctx.copy_id, desk_id, fact, now))
+    await ctx.db.flush()
+
+
 async def seed_knowledge(ctx: KernelCtx, desk_id: str, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
     """The Desk's knowledge `items`, in the caller's transaction, each through
     `labels.store_knowledge` as an owner's item is: checked, read for canaries and ledgered
     `desk_data`. Returns them as stored."""
     return [await labels.store_knowledge(ctx, desk_id, item) for item in items]
+
+
+async def seed_business_tools(ctx: KernelCtx, desk_id: str, tools: list[BusinessTool]) -> list[ToolPin]:
+    """The Desk's business `tools`, in the caller's transaction, through the owner's own
+    replacement (`business_tools.replace_business_tools`): checked as her batch would be (card
+    text, canaries), each written waiting for review and ledgered `business_tools`. Returns their
+    pins, each at its definition's hash, for the seed's rules version to turn on as it activates
+    (`activation.activate_shipped`). A batch the check refuses is 503 `seed_unproved` (logged), so
+    the copy rolls back and nothing is ledgered on a Desk that never exists."""
+    from desk.kernel_service import business_tools  # its desks import payments, which import activation, then this
+
+    try:
+        rows = await business_tools.replace_business_tools(ctx, desk_id, BusinessToolsRequest(tools=tools))
+    except KernelFailure as failure:
+        log.error("seed_unproved reason=business_tools_refused refused=%s", failure.reason)
+        raise KernelFailure(503, "seed_unproved", "seed_business_tools_refused") from None
+    return [ToolPin(tool=row.tool, definition_sha256=row.definition_sha256) for row in rows]
 
 
 async def seed_charges(ctx: KernelCtx, desk_id: str, charges: list[SeedCharge]) -> list[str]:
@@ -239,3 +405,21 @@ async def seed_held_request(ctx: KernelCtx, copy_id: str, desk_id: str) -> Seede
                             call=HELD_REQUEST.model_copy(deep=True))
     decision = await decide.decide_call(ctx, sessions.principal_for(visitor), visitor, request)
     return SeededChat(session_id=visitor.session_id, visitor_line=HELD_REQUEST_VISITOR_LINE, decision=decision)
+
+
+async def seed_sample_week(ctx: KernelCtx, copy_id: str, desk_id: str, now: datetime
+                           ) -> tuple[list[ReplayedEvent], str | None]:
+    """The sample week (`RIVERA_SAMPLE_WEEK`) written into a new copy, in the caller's transaction, after the seed's
+    cards are active and its held request is decided (`sample_week.write`): the events the API stores as the copy's
+    transcripts, in shown order, and the recording ID its ledger entries carry (`SAMPLE_WEEK_ID`). A week that can't
+    be written whole leaves nothing behind and gives `([], None)`, logged `sample_week_failed`: the copy then has
+    live data only."""
+    from desk.kernel_service import sample_week  # it imports decide, which imports activation, then this module
+
+    try:
+        async with ctx.db.begin_nested():
+            events = await sample_week.write(ctx, copy_id, desk_id, now, RIVERA_SAMPLE_WEEK, SAMPLE_WEEK_ID)
+    except Exception as error:
+        log.error("sample_week_failed copy_id=%s error=%s", copy_id, type(error).__name__)
+        return [], None
+    return events, SAMPLE_WEEK_ID

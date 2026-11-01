@@ -30,3 +30,4 @@
 | `limit` | `string` | The formatted amount limit of an auto card. |
 | `shared` | `{ appliesTo: string }` | For a rule on an effect group. |
 | `onChangeOutcome` | `(mode: RuleMode) => void` | Makes the outcome a menu. |
+| `fade` | `boolean` | Where a confirmed change landed (a `ToolRulesCard` with `landed`): when its reason or words change, the old fade out over the new as they fade in, on `motion-base`, only the new ones read; at once under reduced motion. |

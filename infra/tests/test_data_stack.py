@@ -160,16 +160,21 @@ SECRET_NAMES = {
     "desk/signing-seed",
     "desk/mockpay-key",
     "desk/anthropic-api-key",
+    "desk/typesafe-api-key",
     "desk/passcode-hash",
 }
 
 
-def test_secrets_are_generated_never_literal(data_template):
+def test_secrets_are_generated_except_optional_disabled_placeholder(data_template):
     secrets = _resources(data_template, "AWS::SecretsManager::Secret").values()
 
     assert {secret["Properties"]["Name"] for secret in secrets} == SECRET_NAMES
     for secret in secrets:
         props = secret["Properties"]
+        if props["Name"] == "desk/typesafe-api-key":
+            assert props["SecretString"] == "unset"
+            assert "GenerateSecretString" not in props
+            continue
         assert "SecretString" not in props, props["Name"]
         assert "GenerateSecretString" in props, props["Name"]
         if props["Name"].startswith("desk/db/"):
@@ -200,13 +205,16 @@ GENERATORS = {
     "desk/signing-seed": _HEX_64,
     "desk/mockpay-key": _HEX_64,
     "desk/anthropic-api-key": _PLACEHOLDER,
+    "desk/typesafe-api-key": {"SecretString": "unset"},
     "desk/passcode-hash": _PLACEHOLDER,
 }
 
 
 def test_each_secrets_generator_is_frozen(data_template):
     secrets = _resources(data_template, "AWS::SecretsManager::Secret").values()
-    generators = {secret["Properties"]["Name"]: secret["Properties"]["GenerateSecretString"] for secret in secrets}
+    generators = {secret["Properties"]["Name"]: (
+        {"SecretString": secret["Properties"]["SecretString"]} if "SecretString" in secret["Properties"]
+        else secret["Properties"]["GenerateSecretString"]) for secret in secrets}
     assert generators == GENERATORS
 
 

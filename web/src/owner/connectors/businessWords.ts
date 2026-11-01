@@ -12,7 +12,24 @@ export const BUSINESS_WORDS = {
 
 export interface BusinessSetupRow { label: string; value: string }
 
+/**
+ * The owner's own line per block, signed by the project owner.
+ * The kernel's description_confirmed is Claude-facing and never shown to the owner.
+ */
+export const BUSINESS_OWNER_LINES = {
+  intake: "Saves the person's name, contact details and answers to your questions, so you can follow up.",
+  typed_booking: 'Books one open time on your calendar for this kind of appointment.',
+  purpose_payment: 'Sends a secure payment link for this purpose, for the amount you set.',
+  urgent: 'Takes an urgent callback request and alerts you right away.',
+} as const satisfies Record<BusinessToolDef['config']['block'], string>;
+
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export function businessOwnerLine(config: unknown): string | null {
+  if (!record(config) || typeof config.block !== 'string' || !Object.hasOwn(BUSINESS_OWNER_LINES, config.block)) return null;
+  return BUSINESS_OWNER_LINES[config.block as keyof typeof BUSINESS_OWNER_LINES];
+}
+
 // Pydantic's string bounds count Unicode code points, including empty and whitespace-only strings.
 const boundedText = (value: unknown, maximum: number): value is string => typeof value === 'string' && [...value].length <= maximum;
 const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]) => Object.keys(value).every((key) => keys.includes(key));

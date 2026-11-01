@@ -39,7 +39,8 @@ describe('the reason of a card lowered to the payment limit', () => {
     // copy in (`OWNER_LANGUAGE` in backend/desk/api/rules.py).
     expect(OWNER_LANGUAGE).toBe('en');
     expect(/^OWNER_LANGUAGE\s*(?::[^=\n]*)?=\s*["'](\w+)["']/m.exec(RULES_PY)?.[1]).toBe(OWNER_LANGUAGE);
-    expect(RULES_PY).toMatch(/lower_to_cap\([^)]*\bOWNER_LANGUAGE\s*\)/);
+    // OWNER_LANGUAGE is the last positional argument; keyword arguments (the Desk's money tools) may follow it.
+    expect(RULES_PY).toMatch(/lower_to_cap\([^)]*\bOWNER_LANGUAGE\s*(?:\)|,\s*\w+\s*=)/);
   });
 
   it('states_the_new_limit_in_either_language', () => {

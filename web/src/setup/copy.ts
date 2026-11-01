@@ -3,7 +3,7 @@
  * owner UI is English and plain. Words that come from the shared rules helpers (`ruleWords`,
  * `moneyLimitLine`, `checkStatus`, `RuleDraftReview`) aren't repeated here.
  */
-import type { QuestionKey, SetupStep } from '../api/views.ts';
+import type { SetupStep } from '../api/views.ts';
 import { SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, type CopyLanguage } from '../ds/index.ts';
 
 /**
@@ -130,6 +130,9 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
 /** The steps, as the bar lists them. */
 export const STEP_NAMES = ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'] as const;
 
+/** The public About panel's charter claims, in setup's signed order. Labels come from cardChrome. */
+export { SETUP_PUBLIC_LINE_KEYS as PUBLIC_LINE_KEYS } from '../api/views.ts';
+
 /** Where each interview step sits in the bar. */
 export const STEP_INDEX: Readonly<Record<SetupStep, number>> = {
   questions: 0,
@@ -140,17 +143,6 @@ export const STEP_INDEX: Readonly<Record<SetupStep, number>> = {
   preview: 4,
   live: 4,
 };
-
-/** The interview's questions in the order the API asks them (plan 02b Task 6, `QUESTION_KEYS`). */
-export const QUESTION_ORDER: readonly QuestionKey[] = [
-  'what_you_do',
-  'hours_and_area',
-  'quote_limit',
-  'discounts',
-  'documents_and_payments',
-  'money_limit',
-  'contact_and_after_hours',
-];
 
 export const SETUP_COPY = {
   stepsLabel: 'Set up your Desk',
@@ -169,8 +161,11 @@ export const SETUP_COPY = {
 
   questions: {
     title: 'A few questions',
-    beforeConsent: "About seven. Answer in your own words; I'll turn them into rules you can check.",
-    counter: (n: number, of: number) => `Question ${n} of ${of}`,
+    suggestions: 'Use your suggestions',
+    suggestionsLine: 'Skip the rest. I’ll fill it in from what I’ve proposed, and every limit asks you first.',
+    dismiss: 'Dismiss', other: 'Something else…',
+    upArrow: 'Up arrow', downArrow: 'Down arrow',
+    move: 'to move', pick: 'to pick', send: 'to send', typeInstead: 'to type instead',
     allow: 'Yes, use it',
     decline: "No, I'll type it",
     composerLabel: 'Your answer',
@@ -180,6 +175,21 @@ export const SETUP_COPY = {
     conversation: 'Setup questions',
     putting: 'Putting together what I’d have your Desk do. This can take a minute or so.',
     loading: 'Opening your setup',
+  },
+
+  proposal: {
+    changed: 'Changed below',
+    connect: 'Connect', connected: 'Connected',
+    setItUp: 'Set it up', setUp: 'Set up',
+    amount: 'Amount', amountHint: 'In dollars. The payment link asks for this amount.', amountError: 'Enter an amount to accept this.',
+    failed: 'I couldn’t save that just now. Try again.', tryAgain: 'Try again',
+    decline: 'Not now', later: 'Coming later',
+    who: 'Who', usesLabel: 'Uses', nextLabel: 'Next for you', asks: 'Asks',
+    uses: { schedule: 'Your opening hours', payment: 'Stripe', price: 'Your prices', urgent: 'Alerts you right away' },
+    next: {
+      schedule: { auto: 'The booking shows in Today, with their answers', ask: 'You approve each request in Needs you' },
+      intake: 'Their answers show on the booking', payment: 'Each payment shows in Today',
+    },
   },
 
   tools: {
@@ -244,15 +254,31 @@ export const SETUP_COPY = {
     changedSince: 'Your rules changed since this was drafted. Check the new version.',
   },
 
+  publicLines: {
+    suggestedTitle: 'Suggested by Claude, please check',
+    suggestedIntro: 'Claude found these in your memory and online. Customers see them only once you choose “Looks right”.',
+    remove: 'Remove',
+    hours: 'Hours',
+    prices: 'Price list',
+    title: 'What customers will read',
+    subtitle: 'Your Desk answers customers from these. Check them before the safety check.',
+    edit: 'Edit',
+    save: 'Save',
+    cancel: 'Cancel',
+    refused: "This line can't state a price, a time or a promise. Prices come from your price list, and times from your opening hours.",
+  },
+
   live: {
     previewTitle: 'Try it as a customer before anyone else can',
-    previewSubtitle: 'Answering stays off until you go live. Only you can see this preview.',
+    /** The launch bar's two lines under the preview, the first after an info dot. */
+    previewAnsweringOff: 'Claude takes messages only until you go live.',
+    previewOnlyYou: 'Only you can see this preview.',
     goLive: 'Go live',
     /** After the business's name. */
     isLive: ' is live',
     yourDeskIsLive: 'Your Desk is live',
     liveSubtitle: 'Customers and their agents can reach your Desk at this link, day or night.',
-    answeringNow: 'Answering now',
+    answeringNow: 'Acting for you now',
     open: 'Open',
     goToToday: 'Go to Today',
     shareIt: 'Share it',

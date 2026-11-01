@@ -12,6 +12,7 @@ import { Transcript } from '../Transcript/Transcript.tsx';
 import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
 import { MarginReceipt } from './MarginReceipt.tsx';
+import { RulesReceipt } from './RulesReceipt.tsx';
 import { receiptFromEvent } from './receiptTone.ts';
 
 /** The one event of `type` in a stored SSE sequence. */
@@ -408,5 +409,48 @@ export const ReplyIgnoresReason: Story = {
     await expect(canvas.queryByText(rivera.decisions.held.reason_plain, { exact: false })).toBeNull();
     expectComputed(receipt, { color: await restingColor(receipt) });
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
+  },
+};
+
+/** Claude's answer in Ask Claude, the drafted change it introduced now confirmed. */
+const CONFIRMED_ANSWER = "Here's that change: quotes stay automatic on weekdays, and on weekends they wait for your answer. Nothing changes until you confirm it.";
+
+export const RulesConfirmed: Story = {
+  render: () => (
+    // Ask Claude's conversation: Claude's answer, and under it the receipt that replaced the review.
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-8)', width: 352, maxWidth: '100%' }}>
+      <ClaudeMessage
+        blocks={[{ kind: 'prose', template: null, text: CONFIRMED_ANSWER, fact_id: null, title: null, lines: [], href: null, options: [] }]}
+        language="en"
+        ownerName={rivera.business.ownerName}
+      />
+      <RulesReceipt version={8} />
+    </div>
+  ),
+  parameters: {
+    canvas: 'N-Conn-12-Chat',
+    canvasNote:
+      "The signed board draws the change's review before it is confirmed; the review board UXC-P701-After draws this moment after Confirm change, with the receipt landing under Claude's message. Storybook shows the motion your system asks for: under reduced motion it is there at once.",
+  },
+  play: async ({ canvasElement }) => {
+    const line = canvasElement.querySelector<HTMLElement>('.cd-margin-receipt');
+    if (!line) throw new Error('no receipt');
+    // The version from the confirm's answer, led by the owner's word in primary ink; plain text, no trace to open.
+    await expect(line).toHaveTextContent('Confirmed. Version 8 of your rules, checked against the always-on rules.');
+    await expect(line.tagName).toBe('P');
+    await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
+    expectComputed(line.querySelector('.cd-margin-line__lead') ?? line, { color: TEXT_PRIMARY });
+    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: TEXT_SECONDARY });
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      for (const el of [line, dotIn(canvasElement)]) expectComputed(el, { animationName: 'none' });
+    } else {
+      expectComputed(line, { animationName: 'cd-margin-line-land', animationDuration: '0.2s' });
+      expectComputed(dotIn(canvasElement), { animationName: 'cd-margin-line-dot', animationDuration: '0.2s' });
+      await Promise.all(line.getAnimations({ subtree: true }).map((landing) => landing.finished));
+    }
+    // Landed, it sits space-8 under Claude's message, as receipts sit under their message.
+    const message = canvasElement.querySelector('.cd-claude-message');
+    if (!message) throw new Error('no message');
+    await expect(Math.round(line.getBoundingClientRect().top - message.getBoundingClientRect().bottom)).toBe(8);
   },
 };

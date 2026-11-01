@@ -1,7 +1,7 @@
 /* PublicChat: what the page adds inside the design system's PublicShell (the ghost "Cancel this
-   request" under the receipts of the message that holds the request, the notices under the
-   conversation), and the plain page shown while the Desk loads or when it isn't there. Gutters
-   are 40 px, 16 px on a phone. */
+   request" under the receipts of the message that holds the request, the line above the composer
+   while that request's receipt is out of view, the notices under the conversation), and the plain
+   page shown while the Desk loads or when it isn't there. Gutters are 40 px, 16 px on a phone. */
 
 /* 12 px under the last receipt, as the board sets it: the margin's 8 px gap and 4 more. */
 .cd-public-chat__cancel {
@@ -10,6 +10,41 @@
   align-items: flex-start;
   gap: var(--space-8);
   padding-top: var(--space-4);
+}
+
+/* Above the composer, in its area, while a held request's receipt is out of view: the receipt's
+   dot and line beside "View request", one row for each such request, under a hairline. A quiet
+   line, never a card. */
+.cd-public-chat__waiting {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+}
+
+.cd-public-chat__waiting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+/* The dot stays on the caption's first line when a long name wraps it. */
+.cd-public-chat__waiting-line {
+  align-items: flex-start;
+  overflow-wrap: anywhere;
+}
+
+.cd-public-chat__waiting-line > .cd-status-dot {
+  margin-top: var(--space-6);
+}
+
+/* "View request": a ghost button, a 44 px target, its words ending 8 px in from the composer's edge. */
+.cd-public-chat__waiting-row > .cd-button {
+  flex: none;
+  min-height: calc(var(--space-40) + var(--space-4));
+  padding-inline: var(--space-8);
 }
 
 .cd-public-chat__notices {
@@ -43,6 +78,17 @@
   }
 }
 
+/* Inside an owner screen (setup's preview): the region, its body and the shapes that hold the page's
+   place while it opens are the height of the frame that holds them, so the shell and its skeleton
+   (each the height of what holds it, embedded) fill a frame with a set height. In a frame that grows
+   with what it holds, as on a phone on its side, these heights come to nothing and the page grows
+   with the chat. */
+.cd-public-chat-screen--embedded,
+.cd-public-chat-screen--embedded > .cd-skeleton-screen__body,
+.cd-public-chat-screen--embedded > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+  height: 100%;
+}
+
 /* The page around the shell: nothing of its own while the Demo inbox has no column, then the
    shell and the inbox's column side by side, the column as wide as the owner's sidebar. */
 .cd-public-chat-page {
@@ -53,4 +99,13 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--size-sidebar);
   align-items: start;
+}
+
+/* While a reply comes in (its words revealed, then its cards and receipts), the chat places the
+   conversation itself (useNewestInView), so the browser's scroll anchoring stays out of it: an
+   anchor the browser picked mid-arrival made the next change of size, such as the composer
+   growing, jump the conversation. Once the reply is in, the browser picks its anchor afresh. */
+.cd-public-shell__scroll:has(.cd-claude-message--revealing, .cd-claude-message--following, .cd-transcript-row--following),
+.cd-public-shell--short:has(.cd-claude-message--revealing, .cd-claude-message--following, .cd-transcript-row--following) {
+  overflow-anchor: none;
 }

@@ -22,6 +22,8 @@ function cityReceipts(seq: number, source: ReceiptSource, plain: string) {
  */
 export function CityOfficePage() {
   const { brand, ownerName } = brandFrom(CITY_DESK);
+  // Messages name the owner as the Desk serves the name; the shell's head asks for `ownerName`.
+  const staff = CITY_DESK.owner_display_name;
   const t = CITY_TURNS;
   const s = CITY_SOURCES;
   const composerLabel = `Message ${brand.name}`;
@@ -45,15 +47,15 @@ export function CityOfficePage() {
               <VisitorMessage text={t.status} />
             </TranscriptRow>
             <TranscriptRow margin={cityReceipts(51, s.executed, t.codeSent)}>
-              <ClaudeMessage blocks={[...proseOf(t.verifyFirst), CITY_VERIFY_PROMPT]} language="en" ownerName={ownerName} />
+              <ClaudeMessage plainProse blocks={[...proseOf(t.verifyFirst), CITY_VERIFY_PROMPT]} language="en" ownerName={staff} />
             </TranscriptRow>
             <SystemLine text={t.verified} />
             <TranscriptRow margin={cityReceipts(53, s.executed, t.readFile)}>
               {/* One answer: Claude's words lead into each fact card. */}
               <div className="cd-vision-city__answer">
-                <ClaudeWords text={t.stands} ownerName={ownerName} />
+                <ClaudeWords text={t.stands} ownerName={staff} />
                 <FactCard {...CITY_PERMIT.status} />
-                <ClaudeWords text={t.next} ownerName={ownerName} />
+                <ClaudeWords text={t.next} ownerName={staff} />
                 <FactCard {...CITY_PERMIT.nextSteps} />
               </div>
             </TranscriptRow>
@@ -61,13 +63,13 @@ export function CityOfficePage() {
               <VisitorMessage text={t.inspector} />
             </TranscriptRow>
             <TranscriptRow margin={cityReceipts(55, s.executed, t.readCalendar)}>
-              <ClaudeMessage blocks={[...proseOf(t.times), CITY_INSPECTION_TIMES]} language="en" ownerName={ownerName} />
+              <ClaudeMessage plainProse blocks={[...proseOf(t.times), CITY_INSPECTION_TIMES]} language="en" ownerName={staff} />
             </TranscriptRow>
             <TranscriptRow>
               <VisitorMessage text={t.garage} />
             </TranscriptRow>
             <TranscriptRow margin={cityReceipts(57, s.held, t.waitingForStaff)}>
-              <ClaudeWords text={t.staffDecides} ownerName={ownerName} />
+              <ClaudeWords text={t.staffDecides} ownerName={staff} />
             </TranscriptRow>
           </Transcript>
           {/* A vision page makes no requests: a suggestion goes nowhere, and its first pick says so. */}

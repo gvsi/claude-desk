@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import type { RuleCard } from '../../../api/contracts.ts';
+import type { NormalizedAction, RuleCard } from '../../../api/contracts.ts';
 import { groupsOverlap, rulesForTool } from './toolRules.ts';
 
 function card(fields: Partial<RuleCard> & Pick<RuleCard, 'card_id' | 'applies_to'>): RuleCard {
@@ -29,6 +29,13 @@ const documents = { tool: 'native.release_document', effects: ['private_data', '
 const ids = (cards: readonly RuleCard[]) => cards.map((c) => c.card_id);
 
 describe('rulesForTool', () => {
+  test('matches_a_generated_business_action_to_its_own_rule', () => {
+    const action: Pick<NormalizedAction, 'tool' | 'effects'> = { tool: 'desk.intake', effects: ['change'] };
+    const own = card({ card_id: 'intake', applies_to: 'desk.intake', mode: 'never' });
+    const group = card({ card_id: 'changes', applies_to: 'effect:change', mode: 'ask' });
+    expect(ids(rulesForTool(action, [group, own]))).toEqual(['intake']);
+  });
+
   test('a_tool_card_hides_the_group_rule_it_outranks', () => {
     // A tool card is more specific than an effect card at the same level, and covers everyone the
     // group card does, so the group card governs nothing on that tool.

@@ -10,7 +10,7 @@ This was a read-only look at the claude.ai web app's UI conventions, in one agen
 
 A neutral-gray variant of the theme was active; both palettes are recorded below.
 
-The classic claude.ai palette (warm `#faf9f5`, `#262624`, `#141413`) is still in the stylesheets as the `[data-theme=claude]` base. **Claude Design (claude.ai/design) still uses the warm palette** (`#1c1b19` app background). The prototype should pick one family and not mix them.
+The classic claude.ai palette (warm `#faf9f5`, `#262624`, `#141413`) is still in the stylesheets as the `[data-theme=claude]` base. **Claude Design still uses the warm palette** (`#1c1b19` app background). The prototype should pick one family and not mix them.
 
 ---
 
@@ -344,7 +344,7 @@ In dark mode, rings switch from outer to **inset** (`--cds-ring-outer 0, --cds-r
   - "Context" section: secondary 14px heading + search icon; file tile 157×128, radius 8, 1px border, filename 12px, size 10px, "MD" chip.
   - "Scheduled" section with a + button and a 12px secondary hint.
 
-**Claude Design shell (claude.ai/design).**
+**Claude Design shell.**
 - Warm palette.
 - Full-width announcement bar: clay 16% tint (`rgba(224,137,104,.16)`), 13px text, clay link `#efad94`, close X.
 - Top bar: serif "Claude Design" 20px with a tiny "Beta" (10px, muted) under it, avatar at the right, hairline bottom border. No left sidebar.

@@ -11,8 +11,11 @@ file, and each answer counted against what the case expects.
 against the case file as it is now (each case's expectation, and whether the code check blocks it, in
 this tree) and prints the table; a case the run never asked about is not run, and a case whose input
 (its language, prose and cards) isn't the one the run recorded is stale, its answers never scored.
-It spends money: each call is one Haiku 5.5 call on the Claude API, estimated at $0.0005
-(`PER_CALL_USD`, over four times the master plan's $0.00011 for one check, so an estimate errs high).
+`python -m evals.calibration.soft_promise_experiment` runs a frozen old/new experiment
+with one shared allowance and records both input shapes; `not_ai` measures only the AI flag.
+It spends money: the default is production Sonnet 5.5 on the Claude API, estimated at $0.0026
+(`SONNET_PER_CALL_USD`, 1.5 times the measured $0.0017 mean). Historical Haiku arms keep their
+$0.0005 allowance (`PER_CALL_USD`).
 
 The call. Each is the kernel's own `AnthropicDecisions.soft_promise` (backend/desk/kernel_service/
 decisions.py), the call the reply check makes, over the SDK client: the same model, schema, effort,
@@ -23,7 +26,7 @@ run), or the text of `--prompt-file` without its surrounding whitespace.
 
 Before any call it refuses, saying why:
 1. without `--max-usd` (and `make evals-soft-promise` without MAX_USD);
-2. when its estimate, cases × samples × `PER_CALL_USD`, is over `--max-usd`;
+2. when its estimate, cases × samples × the selected model's allowance, is over `--max-usd`;
 3. when this month's Claude API spend in the shared eval spend file plus the estimate would pass the
    monthly limit less the demo reserve (`evals/budget.toml`), as a tier 2 pass does;
 4. without `ANTHROPIC_API_KEY` in the environment, with one that isn't one key (printable ASCII with
@@ -40,7 +43,7 @@ while the spend so far and the bounds of the calls in flight leave room under `-
 bound: at the cap no call starts, and the run says so and exits 1. Should a call still cost more than
 its bound and take the spend past `--max-usd`, the run says so too and exits 1.
 
-Spend. A call is charged its usage at its model's list prices (`PRICES`, Haiku 5.5's from the master
+Spend. A call is charged its usage at its model's list prices (`PRICES`, from the master
 plan's "Model cost and latency budget"), or its bound when its usage can't be priced: it left none
 (a timeout or an error) or another model answered. The run appends one row to the shared eval spend
 file, with tier 2's columns and `append_spend`: pass_id `calibration-soft-promise-<label>-<time>`,
@@ -78,6 +81,7 @@ every sample asked for.
 import argparse
 import ast
 import asyncio
+import copy
 import hashlib
 import json
 import math
@@ -93,11 +97,13 @@ from typing import Annotated, Any, Literal
 
 import anthropic
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field, field_validator
 
 from desk.kernel_service import decisions, reply_check
 from desk.kernel_service.decisions import AnthropicDecisions, CallUsage, SoftPromiseInput, SoftPromiseVerdict
+from desk.next_steps import BUSINESS_BLOCK_STEPS, NEXT_STEPS
 from evals import results
+from evals.pricing import PRICES as MODEL_PRICES, NoPrice, cost_usd, price_of
 from evals.tier2.passes import (
     CALIBRATION_PREFIX,
     PassRefused,
@@ -120,19 +126,41 @@ CHARS_PER_TOKEN = 2
 REQUEST_TOKENS = 1_000
 # List prices in US dollars per million tokens, by model: input, cache read, 5-minute cache write and
 # output (the master plan's "Model cost and latency budget").
-PRICES: dict[str, dict[str, float]] = {
-    "claude-haiku-5-5": {"input": 0.10, "cache_read": 0.01, "cache_write": 0.125, "output": 0.50},
-}
+PRICES = {model: {kind: float(getattr(price, kind))
+                  for kind in ("input", "cache_read", "cache_write", "output")}
+          for model, price in MODEL_PRICES["anthropic"].items()}
+SONNET_MODEL = "claude-sonnet-5-5"
+HAIKU_MODEL = "claude-haiku-5-5"
+HAIKU_TIMEOUT_S = 2.0  # frozen historical experiment arms, independent of production
+Candidate = Literal["haiku", "sonnet"]
+
+
+def candidate_model(candidate: Candidate) -> str:
+    return SONNET_MODEL if candidate == "sonnet" else HAIKU_MODEL
+
+
+SONNET_PER_CALL_USD = 0.0026     # 1.5x the measured mean of the first Sonnet run (220 checks, $0.00171 each)
+
+
+def per_call_usd(candidate: Candidate) -> float:
+    if candidate == "sonnet":
+        return SONNET_PER_CALL_USD
+    # Keep the existing Haiku token allowance, scaled by the candidate's list prices.
+    base = price_of(HAIKU_MODEL, "anthropic")
+    price = price_of(candidate_model(candidate), "anthropic")
+    return PER_CALL_USD * float(max(price.input / base.input, price.output / base.output))
 VERDICTS = ("pass", "flag", "flag_ai", "flag_both", "error")
 # A sample meets `flag` when promises_beyond_cards is set and `flag_ai` when denies_being_ai is,
 # whatever the other flag says: either one blocks the reply, so `flag_both` meets both.
-MEETS = {"pass": {"pass"}, "flag": {"flag", "flag_both"}, "flag_ai": {"flag_ai", "flag_both"}}
+MEETS = {"pass": {"pass"}, "flag": {"flag", "flag_both"}, "flag_ai": {"flag_ai", "flag_both"},
+         "not_ai": {"pass", "flag"}}
 # The header every results file opens with (`RunResult.about`).
 RESULTS_ABOUT = (
     "One run of the soft-promise check: its answers to each case. Each case's expected, code_blocked and outcome "
     "are as of the run, from the case file and the code check as they were then. `python -m "
     "evals.calibration.soft_promise --rescore <this file>` scores the answers against the case file as it is now "
-    "and is the authority; a case whose input_sha256 (of the language, prose and cards its calls sent) the case "
+    "and is the authority; a case whose input_sha256 (of its arm's language, prose, cards and, in the new shape, "
+    "next_steps) the case "
     "file no longer matches is stale there, and its answers aren't scored.")
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 API_KEY = re.compile(r"[!-~]+")          # one run of printable ASCII, as the kernel takes a key
@@ -154,7 +182,17 @@ class Case(BaseModel):
     language: Literal["en", "es"]
     prose: str = Field(min_length=1)
     cards: list[str]
-    expected: Literal["pass", "flag", "flag_ai", "code"]
+    expected: Literal["pass", "flag", "flag_ai", "code", "not_ai"]
+    majority_required: bool = False
+    next_steps: list[str] = Field(default_factory=list)
+    note: str = ""
+
+    @field_validator("next_steps")
+    @classmethod
+    def fixed_steps(cls, steps: list[str]) -> list[str]:
+        if set(steps) - (set(NEXT_STEPS.values()) | set(BUSINESS_BLOCK_STEPS.values())):
+            raise ValueError("next_steps contains a phrase outside the fixed mapping")
+        return steps
 
 
 def load_cases(path: Path) -> list[Case]:
@@ -262,18 +300,25 @@ def prompt_in(source: str, where: str) -> str:
 # The calls
 
 class _Messages:
-    def __init__(self, messages: Any, system: str):
+    def __init__(self, messages: Any, system: str, request_hashes: frozenset[str] | None = None):
         self._messages, self._system = messages, system
+        self._request_hashes = request_hashes
+        self.diverged = False
 
     async def create(self, **request: Any) -> Any:
-        return await self._messages.create(**{**request, "system": self._system})
+        wire = copy.deepcopy({**request, "system": self._system})
+        actual = hashlib.sha256(json.dumps(wire, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        if self._request_hashes is not None and actual not in self._request_hashes:
+            self.diverged = True
+            raise Refused("actual request differs from the recorded experiment hashes")
+        return await self._messages.create(**wire)
 
 
 class WithSystem:
     """The SDK client with a system prompt override, also used by the reviewer runner."""
 
-    def __init__(self, client: Any, system: str):
-        self.messages = _Messages(client.messages, system)
+    def __init__(self, client: Any, system: str, request_hashes: frozenset[str] | None = None):
+        self.messages = _Messages(client.messages, system, request_hashes)
 
 
 def anthropic_client(key: str) -> Any:
@@ -285,39 +330,61 @@ def anthropic_client(key: str) -> Any:
 def priced(usage: CallUsage | None) -> float | None:
     """A call's cost at its model's list prices, or None when it can't be priced: no usage, no
     tokens, or a model `PRICES` doesn't hold."""
-    if usage is None or (rates := PRICES.get(usage.model)) is None:
+    if usage is None:
         return None
     if not (usage.input_tokens or usage.cached_tokens or usage.cache_write_tokens or usage.output_tokens):
         return None
-    return (usage.input_tokens * rates["input"] + usage.cached_tokens * rates["cache_read"]
-            + usage.cache_write_tokens * rates["cache_write"] + usage.output_tokens * rates["output"]) / 1_000_000
+    try:
+        # SDK output_tokens already includes thinking; never add thinking_tokens again.
+        return cost_usd(usage.model_dump(), usage.model, "anthropic")
+    except NoPrice:
+        return None
 
 
-def call_input(case: Case) -> SoftPromiseInput:
+class HistoricalHaikuSoftPromise(AnthropicDecisions):
+    """Keep the measured Haiku arms reproducible after production moves to Sonnet."""
+
+    async def soft_promise(self, data: BaseModel) -> tuple[SoftPromiseVerdict | None, CallUsage]:
+        return await self._ask(
+            SoftPromiseVerdict, data, model=HAIKU_MODEL, max_tokens=decisions.SOFT_PROMISE_MAX_TOKENS,
+            system=decisions.SOFT_PROMISE_SYSTEM, schema=decisions.SOFT_PROMISE_SCHEMA,
+            thinking={"type": "disabled"}, timeout_s=HAIKU_TIMEOUT_S, failed="soft_promise_failed")
+
+
+class OldSoftPromiseInput(BaseModel):
+    """The baseline wire shape, intentionally omitting next_steps."""
+    language: Literal["en", "es"]
+    prose: str
+    cards: list[str]
+
+
+def call_input(case: Case, shape: Literal["old", "new"] = "new") -> SoftPromiseInput | OldSoftPromiseInput:
     """What the kernel's check reads for the case: its language, its prose as the scan reads it, and
     its cards' texts."""
-    return SoftPromiseInput(language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards))
+    data = dict(language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards))
+    return (OldSoftPromiseInput(**data) if shape == "old"
+            else SoftPromiseInput(**data, next_steps=list(case.next_steps)))
 
 
-def request_message(data: SoftPromiseInput) -> str:
+def request_message(data: SoftPromiseInput | OldSoftPromiseInput) -> str:
     """The request's one message, as the kernel sends it: `data` as JSON with its keys sorted."""
     return json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
 
 
-def input_sha256(data: SoftPromiseInput) -> str:
+def input_sha256(data: SoftPromiseInput | OldSoftPromiseInput) -> str:
     """The sha256 of the input a call sends: the request's one message, which holds the reply's
     language, its prose and its cards' texts."""
     return hashlib.sha256(request_message(data).encode()).hexdigest()
 
 
-def call_bound(system: str, data: SoftPromiseInput) -> float:
+def call_bound(system: str, data: SoftPromiseInput | OldSoftPromiseInput, candidate: Candidate = "sonnet") -> float:
     """An upper bound on one call's cost, in dollars: at most one input token for every
     `CHARS_PER_TOKEN` characters of the system prompt and of the request's one message (`data` as
     the kernel sends it), plus `REQUEST_TOKENS`, all at the higher of the input and cache-write
     prices, and the most the check may answer, `SOFT_PROMISE_MAX_TOKENS` at the output price."""
     message = request_message(data)
     input_tokens = math.ceil((len(system) + len(message)) / CHARS_PER_TOKEN) + REQUEST_TOKENS
-    rates = PRICES[decisions.SOFT_PROMISE_MODEL]
+    rates = PRICES[candidate_model(candidate)]
     return (input_tokens * max(rates["input"], rates["cache_write"])
             + decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"]) / 1_000_000
 
@@ -328,6 +395,7 @@ class SpendMeter:
     def __init__(self, cap: float):
         self.cap, self.spent, self.reserved, self.calls, self.estimated = cap, 0.0, 0.0, 0, 0
         self.estimated_usd = 0.0
+        self.usage: list[CallUsage] = []
 
     def start(self, bound: float) -> bool:
         """Whether a call with this bound may start: the spend so far, the bounds of the calls in
@@ -341,6 +409,8 @@ class SpendMeter:
 
     def end(self, bound: float, usage: CallUsage | None) -> None:
         self.reserved -= bound
+        if usage is not None:
+            self.usage.append(usage)
         usd = priced(usage)
         if usd is None:
             usd, self.estimated = bound, self.estimated + 1
@@ -369,6 +439,7 @@ class CaseResult(BaseModel):
     language: str
     input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")      # what the calls sent (`input_sha256`)
     expected: str
+    majority_required: bool = False
     code_blocked: bool
     requested: int = Field(ge=1)                              # the samples the run asked for
     verdicts: dict[str, int] = Field(default_factory=lambda: dict.fromkeys(VERDICTS, 0))
@@ -435,6 +506,8 @@ class RunResult(BaseModel):
     over_cap: bool              # the spend went past --max-usd: a call cost more than its bound
     spend_row: str
     cases: list[CaseResult]
+    input_shape: Literal["old", "new"] = "old"
+    call_usage: list[CallUsage] = Field(default_factory=list)
 
 
 class Config(BaseModel):
@@ -447,6 +520,8 @@ class Config(BaseModel):
     prompt_file: Path | None = None
     label: str | None = None
     concurrency: int = Field(4, ge=1)
+    input_shape: Literal["old", "new"] = "new"
+    candidate: Candidate = "sonnet"
 
 
 @dataclass
@@ -497,18 +572,23 @@ def month_guard(deps: Deps, spend_file: Path, estimate: float) -> None:
                       f"${max(allowed - spent, 0):.4f} remains")
 
 
-async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
+async def run(config: Config, deps: Deps, *, cases: tuple[Case, ...] | None = None,
+              prompt: Prompt | None = None,
+              request_hashes: frozenset[str] | None = None) -> tuple[RunResult, Path]:
     """Measure the check as the module docstring says; the run and where its results file is."""
-    cases = load_cases(deps.cases)
-    prompt = load_prompt(deps.root, ref=config.prompt_ref, file=config.prompt_file)
+    if cases is None:
+        cases = tuple(load_cases(deps.cases))
+    if prompt is None:
+        prompt = load_prompt(deps.root, ref=config.prompt_ref, file=config.prompt_file)
     label = config.label or default_label(config)
     if not LABEL.fullmatch(label):
         raise Refused("--label is up to 64 letters, digits, '.', '_' and '-', starting with a letter or digit")
     planned = len(cases) * config.samples
-    estimate = round(planned * PER_CALL_USD, 6)
+    unit_estimate = per_call_usd(config.candidate)
+    estimate = round(planned * unit_estimate, 6)
     if estimate > config.max_usd + EPSILON:
         raise Refused(f"the estimate ${estimate:.4f} for {planned} calls ({len(cases)} cases, {config.samples} "
-                      f"samples each, at ${PER_CALL_USD:.4f} a call) is over --max-usd ${config.max_usd:.4f}")
+                      f"samples each, at ${unit_estimate:.4f} a call) is over --max-usd ${config.max_usd:.4f}")
     spend_file = deps.spend_file or shared_spend_file(deps.root)
     month_guard(deps, spend_file, estimate)
     key = api_key()
@@ -519,13 +599,15 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
 
     now = deps.now()
     stamp = now.astimezone(UTC).strftime("%Y%m%d-%H%M%S")
-    inputs = {case.id: call_input(case) for case in cases}
+    inputs = {case.id: call_input(case, config.input_shape) for case in cases}
     tallies = {case.id: CaseResult(id=case.id, group=case.group, language=case.language,
                                    input_sha256=input_sha256(inputs[case.id]), expected=case.expected,
-                                   code_blocked=code_blocked(case), requested=config.samples) for case in cases}
-    checker = AnthropicDecisions(WithSystem(deps.client(key), prompt.text))
+                                   code_blocked=code_blocked(case), majority_required=case.majority_required,
+                                   requested=config.samples) for case in cases}
+    wire_client = WithSystem(deps.client(key), prompt.text, request_hashes)
+    checker = (AnthropicDecisions if config.candidate == "sonnet" else HistoricalHaikuSoftPromise)(wire_client)
     meter = SpendMeter(config.max_usd)
-    bounds = {case.id: call_bound(prompt.text, inputs[case.id]) for case in cases}
+    bounds = {case.id: call_bound(prompt.text, inputs[case.id], config.candidate) for case in cases}
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next
     position = 0
 
@@ -538,6 +620,8 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
                 verdict, usage = await checker.soft_promise(inputs[case.id])
             finally:   # a call cut short is charged its bound
                 meter.end(bounds[case.id], usage)
+            if wire_client.messages.diverged:
+                raise Refused("actual request differs from the recorded experiment hashes")
             tallies[case.id].count(verdict, usage)
 
     row_id = f"{CALIBRATION_PREFIX}soft-promise-{label}-{stamp}"
@@ -559,11 +643,12 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
     outcome = RunResult(
         label=label, created_at=now, git_sha=git_sha,
         prompt=PromptRecord(source=prompt.source, sha256=prompt.sha256, text=prompt.text),
-        model=decisions.SOFT_PROMISE_MODEL, samples=config.samples, concurrency=config.concurrency,
-        max_usd=config.max_usd, per_call_usd=PER_CALL_USD, estimate_usd=estimate, spend_usd=round(meter.spent, 6),
+        model=candidate_model(config.candidate), samples=config.samples, concurrency=config.concurrency,
+        max_usd=config.max_usd, per_call_usd=unit_estimate, estimate_usd=estimate, spend_usd=round(meter.spent, 6),
         calls=meter.calls, estimated_calls=meter.estimated, stopped_by_cap=meter.calls < len(jobs),
         over_cap=meter.over, spend_row=row_id + ("-estimated" if meter.estimated else ""),
         cases=list(tallies.values()),
+        input_shape=config.input_shape, call_usage=meter.usage,
     )
     deps.out_dir.mkdir(parents=True, exist_ok=True)
     path = deps.out_dir / f"{label}-{stamp}.json"
@@ -680,6 +765,7 @@ class _SavedRun(BaseModel):
     calls: int = Field(ge=0)
     prompt: PromptRecord
     cases: list[_SavedCase]
+    input_shape: Literal["old", "new"] = "old"
 
 
 def rescore(saved: Path, cases_file: Path) -> list[str]:
@@ -701,8 +787,9 @@ def rescore(saved: Path, cases_file: Path) -> list[str]:
     case_results = []
     for case in cases:
         result = CaseResult(id=case.id, group=case.group, language=case.language,
-                            input_sha256=input_sha256(call_input(case)), expected=case.expected,
-                            code_blocked=code_blocked(case), requested=run_.samples)
+                            input_sha256=input_sha256(call_input(case, run_.input_shape)), expected=case.expected,
+                            code_blocked=code_blocked(case), majority_required=case.majority_required,
+                            requested=run_.samples)
         if (answers := answered.get(case.id)) is not None:
             if answers.input_sha256 != result.input_sha256:
                 result.stale = "unrecorded" if answers.input_sha256 is None else "changed"

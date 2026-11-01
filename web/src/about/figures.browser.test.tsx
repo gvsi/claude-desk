@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
+import { contrastRatio } from '../ds/contrast.ts';
 import { assertCleanCopy } from '../ds/test/copy.ts';
 import { AXE_TAGS, tokenColor } from '../test/screen.ts';
 import { ABOUT_DOCUMENTS, type Block } from './documents.ts';
@@ -16,6 +17,8 @@ import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale, readinessRows } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { forgetPlayedFigures } from './figures/usePlayOnce.ts';
+
+import './paper.css';
 
 const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
@@ -311,7 +314,7 @@ describe('ArchitectureFigure', () => {
       // The caption: the figure's number, the reader's own words, and the name.
       const caption = screen.container.querySelector('figcaption');
       expect(caption?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-        `Figure 1 v1 architecture: two processes, two checkpoints. ${name}.`,
+        `Figure 1 The first release’s architecture: two processes, two checkpoints. ${name}.`,
       );
       await screen.unmount();
     }
@@ -500,6 +503,9 @@ describe('MeasuresTable', () => {
   });
 });
 
+/** The reading pages' ground: the About set's paper, the app's tokens pointed at it (paper.css). */
+const PAPER = 'cd-about-paper cd-about-paper--app';
+
 describe('the figures together', () => {
   it('figures_pass_axe', async () => {
     const readiness = READINESS;
@@ -509,8 +515,9 @@ describe('the figures together', () => {
       [PHONE, true],
     ] as const) {
       await page.viewport(size.width, size.height);
+      // On the paper the reading pages draw them on, so axe reads their text against it.
       const screen = await render(
-        <main>
+        <main className={PAPER}>
           <ArchitectureFigure compact={compact} />
           <Tau3Chart compact={compact} />
           <ReadinessScale table={readiness} compact={compact} />
@@ -524,6 +531,74 @@ describe('the figures together', () => {
       expect(violations, `${size.width} wide`).toEqual([]);
       // Nothing runs past the window's width.
       expect(document.documentElement.scrollWidth, `${size.width} wide`).toBeLessThanOrEqual(size.width);
+      await screen.unmount();
+    }
+  });
+});
+
+describe('the figures on paper', () => {
+  it('figure_marks_hold_on_paper', async () => {
+    // On the reading pages' paper, every mark a reader needs to read a figure holds 3:1 against what it is drawn
+    // on, and the charts' own words (SVG text, which axe doesn't read) hold 4.5:1; so does a focus ring. The
+    // status dots echo the word in their pill, and the hairlines, gridlines and track are structure, so neither
+    // is held to it.
+    const measures = tableOf(ABOUT_DOCUMENTS.proposal.blocks, null);
+    for (const [size, compact] of [
+      [DESKTOP, false],
+      [PHONE, true],
+    ] as const) {
+      const where = `${size.width} wide`;
+      await page.viewport(size.width, size.height);
+      const screen = await render(
+        <main className={PAPER}>
+          <ArchitectureFigure compact={compact} />
+          <Tau3Chart compact={compact} />
+          <ReadinessScale table={READINESS} compact={compact} />
+          <MeasuresTable table={measures} compact={compact} />
+        </main>,
+      );
+      const root = screen.container.querySelector('main') as HTMLElement;
+      const paper = getComputedStyle(root).backgroundColor;
+      expect(paper, where).toBe('rgb(244, 242, 236)');
+      const ground = (el: Element) => {
+        const frame = el.closest('.cd-about-frame');
+        return frame ? getComputedStyle(frame).backgroundColor : paper;
+      };
+      const all = (selector: string) => {
+        const found = [...root.querySelectorAll(selector)];
+        expect(found, `${where}: ${selector}`).not.toEqual([]);
+        return found;
+      };
+      const marks: [string, (el: Element) => string][] = [
+        // The chart: the releases, the top score's ring, Opus 5's ring, the fit, the bar, the prediction date's
+        // rule, and the key's dot and dash.
+        ['[data-point="claude"]', (el) => getComputedStyle(el).fill],
+        ['[data-point="top"]', (el) => getComputedStyle(el).stroke],
+        ['[data-ring]', (el) => getComputedStyle(el).stroke],
+        ['[data-tau3-part="fit"]', (el) => getComputedStyle(el).stroke],
+        ['.cd-about-chart__bar', (el) => getComputedStyle(el).stroke],
+        ['.cd-about-chart__rule', (el) => getComputedStyle(el).stroke],
+        ['.cd-about-chart__key-dot', (el) => getComputedStyle(el).backgroundColor],
+        ['.cd-about-chart__key-dash', (el) => getComputedStyle(el).borderTopColor],
+        // The architecture: the arrows between its parts and the kernel's outline.
+        ['.cd-about-arch__connector', (el) => getComputedStyle(el).stroke],
+        ['.cd-about-arch__kernel', (el) => /rgba?\([^)]*\)/.exec(getComputedStyle(el).boxShadow)?.[0] ?? ''],
+        // The readiness scale: each axis's four steps and its rating.
+        ['.cd-about-readiness__stop:not(.cd-about-readiness__stop--on)', (el) => /rgba?\([^)]*\)/.exec(getComputedStyle(el).boxShadow)?.[0] ?? ''],
+        ['.cd-about-readiness__stop--on', (el) => getComputedStyle(el).backgroundColor],
+      ];
+      for (const [selector, color] of marks) {
+        for (const el of all(selector)) {
+          expect(contrastRatio(color(el), ground(el)), `${where}: ${selector}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+      for (const text of all('svg text')) {
+        expect(contrastRatio(getComputedStyle(text).fill, ground(text)), `${where}: ${text.textContent}`).toBeGreaterThanOrEqual(4.5);
+      }
+      // A focus ring, in the paper's link color, on the paper and on a figure's card.
+      const ring = tokenColor('--accent-blue', root);
+      expect(ring, where).toBe('rgb(45, 91, 138)');
+      for (const on of [paper, ground(all('.cd-about-frame')[0] as Element)]) expect(contrastRatio(ring, on), where).toBeGreaterThanOrEqual(3);
       await screen.unmount();
     }
   });
