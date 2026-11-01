@@ -3738,10 +3738,18 @@ async def go_live(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, publi
 # Tools -------------------------------------------------------------------------------------------------------------
 
 
-async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupTools:
+async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
+                      business_tools_enabled: bool = False) -> SetupTools:
     """The new Desk's tools as the kernel lists them, each with the active rules' cards that cover it, and the mock
     payments server while it isn't connected."""
-    desk_id = await interview_desk(owner, engine, interview_id)
+    async with engine.connect() as conn:
+        interview = await _load(conn, owner.copy_id, interview_id)
+    desk_id = owner.desk(interview.desk_id)
+    if (business_tools_enabled and interview.step != "questions"
+            and any(job.config is not None for job in accepted_jobs(interview))
+            and not await owner.ro.rows("tools", desk_id=desk_id, source="business")):
+        interview.business_tools_enabled = business_tools_enabled
+        await after_finish(owner, interview)
     rows = await tool_rows(owner, desk_id, version_from_row(await active_row(owner, desk_id)).cards)
     connected = any(row.tool in MCP_TOOLS for row in rows)
     return SetupTools(tools=rows, connectable=[] if connected else ["mock_payments"])

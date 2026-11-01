@@ -303,6 +303,62 @@ async def test_accepted_jobs_become_business_tools_needing_review(app, browser, 
     assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
 
 
+@pytest.mark.parametrize("failure", ["422", "timeout", "restart"])
+async def test_tools_step_recovers_a_missing_business_tools_write(
+    app, browser, kernel_http, model, engine, fake, monkeypatch, failure,
+):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine)
+    if failure == "restart":
+        async def interrupted(*args):
+            pass
+        with monkeypatch.context() as patch:
+            patch.setattr(desk_setup, "after_finish", interrupted)
+            await finish_business_jobs(owner, state, model)
+    else:
+        fake.fail("PUT /desks/{id}/business_tools", failure, times=1)
+        await finish_business_jobs(owner, state, model)
+    assert not any(tool.source == "business" for tool in fake.desks[state["desk_id"]].tools.values())
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert {row["tool"] for row in reply.json()["tools"] if row["source"] == "business"} == {
+        "desk.take-repair-requests", "desk.flag-urgent-help"}
+    assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == (
+        1 if failure == "restart" else 2)
+
+
+@pytest.mark.parametrize("failure", ["404", "422", "409", "timeout"])
+async def test_tools_step_still_lists_tools_when_the_retry_fails(
+    app, browser, kernel_http, model, engine, fake, monkeypatch, caplog, failure,
+):
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    monkeypatch.setitem(fake_kernel.FAILURE_CODES, "404", "not_found")
+    fake.fail("PUT /desks/{id}/business_tools", failure, times=2)
+    await finish_business_jobs(owner, state, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["tools"] and not any(row["source"] == "business" for row in reply.json()["tools"])
+    assert len(fake.called("PUT /desks/{id}/business_tools")) == 2
+    assert "setup business tools" in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+@pytest.mark.parametrize("unfinished", [True, False])
+async def test_tools_step_skips_unfinished_or_configless_jobs(
+    app, browser, kernel_http, model, engine, fake, unfinished,
+):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine)
+    if not unfinished:
+        async with engine.begin() as conn:
+            interview = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
+            for card in interview.transcript[-1].planned:
+                card.job.config = None
+            await desk_setup._save(conn, interview)
+        await finish_business_jobs(owner, state, model)
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    assert not fake.called("PUT /desks/{id}/business_tools")
+
+
 @pytest.mark.parametrize(("titles", "names"), [
     (["Take, repair: requests!", "123 Requests 45!", "a" * 39 + " " + "b" * 20,
       "Repair requests", "Repair requests!", "Repair requests-2", "123 !!!", "123 ???", "Ignored"],
