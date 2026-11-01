@@ -931,18 +931,49 @@ const conversationRead = (sessionId: string) => ROUTES.conversation.path.replace
  * A fresh copy's list, which replays recorded history into the copy: the mock's own list with the
  * seeded hold's chat marked replayed, so the page says "Includes recorded history" under its title.
  */
-async function withRecordedHistory(): Promise<void> {
+async function withRecordedHistory(now = new Date()): Promise<void> {
   const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
   if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the conversations');
   const list = answer.body as ConversationSummary[];
+  const clock = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', hourCycle: 'h23',
+  });
+  const date = clock.formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(date.find(part => part.type === type)!.value);
+  const utcNoon = Date.UTC(part('year'), part('month') - 1, part('day'), 12);
+  // At UTC noon, Rivera's clock is already past either daylight-saving change. Its hour tells
+  // how far forward local noon is, using that day's offset rather than the offset at midnight.
+  const hour = Number(clock.formatToParts(new Date(utcNoon)).find(part => part.type === 'hour')!.value);
+  const noon = utcNoon + (12 - hour) * 3_600_000;
   mockStore.inject({
     route: 'conversations',
     status: 200,
     times: 10_000,
     // Keep all three rows on Today even around midnight, preserving the seed's order.
-    body: list.map((s, i) => ({ ...s, last_activity: new Date(Date.now() - i * 1_000).toISOString(), ...(s.session_id === SEEDED_HOLD ? { replayed: true } : {}) })),
+    body: list.map((s, i) => ({ ...s, last_activity: new Date(noon - i * 1_000).toISOString(), ...(s.session_id === SEEDED_HOLD ? { replayed: true } : {}) })),
   });
 }
+
+it('recorded_history_stays_on_riveras_day_at_midnight_and_clock_changes', async () => {
+  // Explicit inputs exercise day boundaries without changing the browser's real clock. Normal
+  // screen fixtures use the current date, even when the machine's own date differs from Rivera's.
+  for (const [at, noon] of [
+    ['2026-11-01T07:00:00.500Z', '2026-11-01T20:00:00.000Z'],
+    ['2026-11-01T07:00:01.500Z', '2026-11-01T20:00:00.000Z'],
+    ['2026-03-08T08:00:00.500Z', '2026-03-08T19:00:00.000Z'],
+    ['2026-11-02T07:59:59.500Z', '2026-11-01T20:00:00.000Z'],
+  ] as const) {
+    mockStore.reset('rivera');
+    await withRecordedHistory(new Date(at));
+    const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in answer || answer.status !== 200) throw new Error('the mock reads recorded conversations');
+    const rows = answer.body as ConversationSummary[];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.map(row => row.last_activity), at).toEqual(
+      rows.map((_, i) => new Date(new Date(noon).getTime() - i * 1_000).toISOString()),
+    );
+  }
+});
 
 /** The list's parts the skeleton draws: the caption, the first day, and the seed's first and last rows. */
 const LIST_ANCHORS: readonly SkeletonAnchor[] = [
