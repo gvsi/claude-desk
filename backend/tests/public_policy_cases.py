@@ -1,6 +1,9 @@
 """Public policy examples shared by scanner, service and both contract targets."""
 
 AMENITY_REFUSALS = [
+    ("Parking is free.", "lex.en.promise"),
+    ("Free on-site inspections.", "lex.en.promise"),
+    ("Free covered parking and repairs.", "lex.en.promise"),
     ("Calentador de agua" + " " * 189 + "y café gratis.", "lex.es.promise"),
     ("Free" + " " * 195 + "water heater inspection.", "lex.en.promise"),
     *[(text, "lex.en.promise") for text in (
@@ -14,7 +17,13 @@ AMENITY_REFUSALS = [
         "Calentador de agua gratis.", "Revisión y agua gratis.", "Instalación y café gratis.",
     )],
 ]
-AMENITY_ACCEPTED = ["Free parking for consultations.", "Ofrecemos café gratis."]
+AMENITY_ACCEPTED = [
+    "Free parking for consultations.", "Ofrecemos café gratis.",
+    "Free on-site parking.", "Free street parking.",
+    "Free parking; ask us for directions.", "Free coffee, tea and water, while you wait.",
+    "Free parking; estimates by appointment.",
+    "Free covered parking.", "Free secure parking.", "Free high-speed wi-fi.", "Free hot coffee.",
+]
 
 AI_DENIAL_REFUSALS = [(text, "policy.ai_denial") for text in (
     "Hablarás con una persona.", "Vas a hablar con una persona.",
