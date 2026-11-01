@@ -109,14 +109,14 @@ class UrgentAdapter(request_callback.RequestCallbackAdapter):
         self.profile = profile(stored.tool, stored.business).model_copy(update={"status": "enabled", "review_reason": None})
 
     async def execute(self, xctx: ExecCtx, action, args: RequestCallbackArgs) -> AdapterResult:
-        async def alert(window):
+        async def alert(window):                    # unscheduled: no time to give, only who and why
             await demo_inbox.deliver(
                 xctx.ctx, copy_id=action.copy_id, desk_id=action.desk_id, to="owner", person_id=None,
                 kind="alert", preview=render.owner_preview("urgent"),
                 body=f"Reported as urgent through {quoted(self.profile.business.title)}. "
-                     + request_callback.alert_body(window, args))
+                     + request_callback.claudes_note((args.name, args.contact, args.reason)))
 
-        return await request_callback.open_callback(xctx, action, args, alert=alert)
+        return await request_callback.open_callback(xctx, action, args, alert=alert, scheduled=False)
 
 
 BLOCK_ADAPTERS: dict[Block, type] = {"intake": BlockAdapter, "urgent": UrgentAdapter}

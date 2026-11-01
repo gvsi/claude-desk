@@ -3001,12 +3001,11 @@ class FakeKernelState:
                                           source='kernel', claims=claims, label=Label(readers=['owner'])))
         elif ((urgent := self._business_profile(desk, tool)) is not None
               and urgent.business.config.block == 'urgent'):
-            from desk.kernel_service import desks
-            from desk.kernel_service.adapters.base import quoted
-            from desk.kernel_service.adapters.request_callback import RequestCallbackArgs, alert_body, window_claims
+            from desk.kernel_service.adapters.base import claudes_note, quoted
+            from desk.kernel_service.adapters.request_callback import PREVIEW_UNSCHEDULED_TTL
 
-            window = desks.next_open_window(desk.hours, ZoneInfo(desk.timezone), self.now)
-            start, end = window or (None, None)
+            # urgent: unscheduled, so no next-open-hour window and no claims; a preview's card lasts a day
+            expires = self.now + PREVIEW_UNSCHEDULED_TTL if session.preview else None
             handoff_id = new_id('handoff')
             closed = [] if session.preview else [row for row in self.handoffs.values() if row['desk_id'] == desk.desk_id
                       and row['session_id'] == session.session_id and row['status'] == 'open']
@@ -3019,12 +3018,12 @@ class FakeKernelState:
             self.handoffs[handoff_id] = {
                 'handoff_id': handoff_id, **ids, 'session_id': session.session_id,
                 'reason': f"{args['name']} · {args['contact']} · {args['reason']}",
-                'callback_window': f'{start.isoformat()}/{end.isoformat()}' if start and end else None,
+                'callback_window': None,
                 'status': 'done' if session.preview else 'open', 'kind': 'callback'}
             self._put('handoffs', (handoff_id,), dict(self.handoffs[handoff_id]))
             callback_label = Label(readers=['owner', f'session:{session.session_id}']) if session.preview else label
             facts.append(Fact(fact_id=f'handoff:{handoff_id}', kind='handoff', status='committed', source='kernel',
-                              label=callback_label, claims=window_claims(window), expires_at=end))
+                              label=callback_label, claims=[], expires_at=expires))
             view = {'fact_id': facts[0].fact_id, 'handoff_id': handoff_id}
             for row in closed:
                 self.append(desk, 'desk_data', {'part': 'handoffs', 'refs': [row['handoff_id']],
@@ -3034,7 +3033,7 @@ class FakeKernelState:
                 self.inbox.append((desk.copy_id, DemoInboxEntry(
                     entry_id=new_id('inbox'), to='owner', kind='alert', created_at=self.now,
                     body=f'Reported as urgent through {quoted(urgent.business.title)}. '
-                         + alert_body(window, RequestCallbackArgs(**args)))))
+                         + claudes_note((args['name'], args['contact'], args['reason'])))))
         elif tool == "native.request_callback":
             # one open handoff per session: the open ones close first, the card's or an earlier call-back's
             handoff_id = new_id("handoff")
