@@ -195,6 +195,10 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
     second.release();
     await expect.element(panel.getByText(long, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // The final answer takes the growing one's place; the owner is still where they scrolled to.
+    expect(growing(panel)).toBeNull();
+    expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
   });
 
   it('closes_the_stream_with_the_panel', async () => {

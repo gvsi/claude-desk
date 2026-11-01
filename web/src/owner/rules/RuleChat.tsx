@@ -132,12 +132,14 @@ function revealExchange(log: HTMLElement, lead: HTMLElement, turn: HTMLElement, 
  * and "Keep my rules" are a scroll away below them. Only a new turn scrolls, and only the
  * conversation: the owner's own scrolling is left alone.
  */
-function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonly ChatTurn[]): void {
+function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonly ChatTurn[], follow: { current: Follow }): void {
   const last = turns.at(-1);
   const lastId = last?.id;
   const leadId = turns.findLast((turn) => turn.kind === 'owner')?.id;
   const drafted = last?.kind === 'claude' && last.draft !== null;
   useEffect(() => {
+    // The owner scrolled away while this exchange's answer was written: its final turn leaves them there.
+    if (follow.current.lead === leadId && follow.current.mode === 'off') return undefined;
     const turnOf = (id: number | undefined) => (id === undefined ? null : (root.current?.querySelector<HTMLElement>(`[data-turn="${id}"]`) ?? null));
     const turn = turnOf(lastId);
     const log = turn?.closest<HTMLElement>('[role="log"]');
@@ -160,19 +162,29 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
     });
     observer.observe(turn, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [root, lastId, leadId, drafted]);
+  }, [root, lastId, leadId, drafted, follow]);
+}
+
+/**
+ * How the answer being written is followed: for which question (the owner's turn that leads it),
+ * and whether it follows the exchange, keeps to the conversation's end, or stays where the owner
+ * scrolled; `at` is where it last left the conversation.
+ */
+interface Follow {
+  lead: number | undefined;
+  mode: 'reveal' | 'end' | 'off';
+  at: number | null;
 }
 
 /**
  * Keeps the end of the answer being written in view as it grows, as a new turn is brought into
  * view, never taking the owner's words that lead the exchange above the conversation's top, and
  * never scrolling up. Once the owner scrolls the conversation themselves, it stays where they put
- * it, until they scroll back to its end (from then it keeps to the end) or ask something new.
+ * it, the final answer's turn included, until they scroll back to its end (from then it keeps to
+ * the end) or ask something new.
  */
-function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly ChatTurn[], growing: string | null): void {
+function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly ChatTurn[], growing: string | null, follow: { current: Follow }): void {
   const leadId = turns.findLast((turn) => turn.kind === 'owner')?.id;
-  /** How the growing answer is followed, for which question, and where it last left the conversation. */
-  const follow = useRef<{ lead: number | undefined; mode: 'reveal' | 'end' | 'off'; at: number | null }>({ lead: undefined, mode: 'reveal', at: null });
 
   useEffect(() => {
     const log = root.current?.querySelector<HTMLElement>('[role="log"]');
@@ -186,7 +198,7 @@ function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly
     };
     log.addEventListener('scroll', onScroll, { passive: true });
     return () => log.removeEventListener('scroll', onScroll);
-  }, [root]);
+  }, [root, follow]);
 
   useEffect(() => {
     const now = follow.current;
@@ -207,7 +219,7 @@ function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly
       revealExchange(log, lead, answer, answer, { upward: false });
     }
     now.at = log.scrollTop;
-  }, [root, leadId, growing]);
+  }, [root, leadId, growing, follow]);
 }
 
 /**
@@ -218,10 +230,12 @@ function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly
 export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleChat({ deskId, ownerName, turns, busy, growing = null, onSend, onClose, onSettled }, ref) {
   const root = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => root.current as HTMLDivElement, []);
-  useRevealNewTurns(root, turns);
+  // Shared by the growing answer and the turn that ends it, so the final answer keeps the owner's place.
+  const follow = useRef<Follow>({ lead: undefined, mode: 'reveal', at: null });
+  useRevealNewTurns(root, turns, follow);
   // The answer's words, once one is whole, take the writing dots' place.
   const writing = growing !== null && settledWords(growing) !== '' ? growing : null;
-  useRevealGrowing(root, turns, writing);
+  useRevealGrowing(root, turns, writing, follow);
   return (
     <div ref={root} className="cd-rule-chat">
       <AskClaudePanel onClose={onClose} onSend={onSend} busy={busy}>
