@@ -520,11 +520,17 @@ export class MockStore {
     this.oneCopy().server.streams.setupTurns = on;
   }
 
-  /** The pace and any planned stream for Ask Claude's answer in the copy the owner cookie names. */
-  ruleChatStream(cookies: Record<string, string> = {}): { wordMs: number; plan: OwnerStreamPlan | null } {
+  /**
+   * The pace and any planned stream for Ask Claude's answer in the copy the owner cookie names, and
+   * the answer written before its change was refused for the payment limit, if it was.
+   */
+  ruleChatStream(cookies: Record<string, string> = {}): { wordMs: number; plan: OwnerStreamPlan | null; refusedAnswer: string | null } {
     const reached = this.reach('ruleChat', {}, cookies);
-    if (isFailure(reached) || reached.server === null) return { wordMs: this.streams.wordMs, plan: null };
-    return { wordMs: reached.server.streams.wordMs, plan: reached.server.takePlan('ruleChat') };
+    if (isFailure(reached) || reached.server === null) return { wordMs: this.streams.wordMs, plan: null, refusedAnswer: null };
+    const { server } = reached;
+    const refusedAnswer = server.refusedAnswer;
+    server.refusedAnswer = null;
+    return { wordMs: server.streams.wordMs, plan: server.takePlan('ruleChat'), refusedAnswer };
   }
 
   /**

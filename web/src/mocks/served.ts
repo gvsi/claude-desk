@@ -292,6 +292,12 @@ export class Server {
   readonly streams: StreamSettings;
   /** Streams a test planned, each taken by the next stream of its kind. */
   private readonly plans: Record<OwnerStreamKind, OwnerStreamPlan[]> = { ruleChat: [], setup: [] };
+  /**
+   * Claude's answer to the last rule chat, kept when the change it drafted is refused for the
+   * payment limit: as on the API, a streamed chat has written the answer by then, and the refusal
+   * follows it.
+   */
+  refusedAnswer: string | null = null;
   private readonly turns = new Map<string, { queue: Scheduled[]; timer: ReturnType<typeof setTimeout> | null }>();
 
   constructor(
@@ -661,8 +667,12 @@ const SERVED: ServedRoutes = {
       })
       .reverse();
     const reply = ruleChatReply(text, desk.policy.cards, held);
+    sv.refusedAnswer = null;
     if (reply.add.length === 0) return ok({ answer: reply.answer, draft: null } satisfies RuleChatOut);
-    return aboveMoneyCap(desk, reply.add) ?? ok({ answer: reply.answer, draft: sv.world.draft(desk, reply.add) } satisfies RuleChatOut);
+    const refused = aboveMoneyCap(desk, reply.add);
+    if (refused === null) return ok({ answer: reply.answer, draft: sv.world.draft(desk, reply.add) } satisfies RuleChatOut);
+    sv.refusedAnswer = reply.answer;
+    return refused;
   },
   suggestions(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);

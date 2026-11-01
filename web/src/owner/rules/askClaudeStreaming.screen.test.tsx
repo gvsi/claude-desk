@@ -20,6 +20,8 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.
 const RULES = `/app/${RIVERA.deskId}/rules`;
 const ASK = 'Stop quoting on weekends';
 const ANSWER = "Here's that change: quotes stay automatic on weekdays, and on weekends they wait for your answer. Nothing changes until you confirm it.";
+/** A change Claude drafts that would take money on its own above the payment limit. */
+const PAYMENT_LINKS = 'Send payment links on your own up to $800';
 
 const requests = (key: RouteKey) => mockStore.requests.filter((r) => r.key === key);
 
@@ -120,6 +122,23 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(growing(panel)).toBeNull();
     expect(requests('ruleChat')).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
+  });
+
+  it.each([
+    { cap: null, line: "That's above your limit of $500. Raise the limit first." },
+    { cap: 0, line: "You haven't set a limit for taking money without asking. Set one first." },
+  ])('refuses_a_money_rule_over_the_limit_after_its_answer_streamed_with_cap_$cap', async ({ cap, line }) => {
+    if (cap !== null) mockStore.world.desk(RIVERA.deskId)!.policy.auto_money_cap_cents = cap;
+    const held = gate();
+    mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
+    const { panel } = await ask(viewport, PAYMENT_LINKS);
+    // The answer streams first: the limit is checked once the change is drafted, after it.
+    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+    held.release();
+    await expect.element(panel.getByText(line, { exact: true })).toBeVisible();
+    expect(growing(panel)).toBeNull();
+    expect(panel.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
+    expect(requests('ruleChat')).toHaveLength(1);
   });
 
   it('asks_again_as_json_when_the_stream_breaks_off', async () => {

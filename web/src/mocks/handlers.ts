@@ -224,12 +224,17 @@ export function createHandlers(store: MockStore): HttpHandler[] {
       cookies,
       epoch,
     });
-    if ('network' in answer || answer.status !== 200) return toResponse(answer);
-    const out = answer.body as RuleChatOut;
-    const { wordMs, plan } = store.ruleChatStream(cookies);
+    if ('network' in answer) return toResponse(answer);
+    const { wordMs, plan, refusedAnswer } = store.ruleChatStream(cookies);
+    // A change over the payment limit is refused once it is drafted, after the answer has streamed,
+    // with the JSON route's error body; any other refusal comes before any stream, as JSON.
+    const overLimit = answer.status === 422 && refusedAnswer !== null;
+    if (answer.status !== 200 && !overLimit) return toResponse(answer);
+    const out = overLimit ? null : (answer.body as RuleChatOut);
+    const refusal = overLimit ? { status: 422, ...(answer.body as { error: string }) } : undefined;
     return postedStream((send, end, breakOff) =>
       playReply(
-        { text: out.answer, wordMs, plan },
+        { text: out?.answer ?? refusedAnswer ?? '', wordMs, plan: refusal ? { ...plan, fail: refusal, failAfter: undefined } : plan },
         {
           event(ev) {
             if (ev.name === 'delta') send('delta', { text: ev.text });
@@ -241,7 +246,7 @@ export function createHandlers(store: MockStore): HttpHandler[] {
             }
           },
           end(how) {
-            if (how === 'done') send('final', out);
+            if (how === 'done' && out !== null) send('final', out);
             if (how === 'drop') breakOff();
             else end();
           },
