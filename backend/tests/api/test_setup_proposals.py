@@ -763,6 +763,22 @@ WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "10:00", "18:00")
     ([WEEKDAYS], [WEEKDAYS, ("sat", "10:00", "14:00")], "Call 415-555-0118. Sat 10am-2pm too.", True),
     ([WEEKDAYS], [WEEKDAYS, ("sat", "10:00", "14:00")],
      "Llámanos al 415-555-0118. También abrimos los sábados de 10am a 2pm.", True),
+    # Days with the same hours may come grouped in one window: only the added days need naming and stating.
+    ([WEEKDAYS], [("mon", "tue", "wed", "thu", "fri", "sat", "10:00", "18:00")],
+     "Call 415-555-0118. Also open Saturdays 10am to 6pm.", True),
+    ([WEEKDAYS], [("mon", "tue", "wed", "thu", "fri", "sat", "sun", "10:00", "18:00")],
+     "Call 415-555-0118. Also open Saturdays 10am to 6pm.", False),
+    # A daily expression names every day.
+    ([WEEKDAYS], [("mon", "tue", "wed", "thu", "fri", "sat", "sun", "10:00", "18:00")],
+     "Call 415-555-0118. Now open daily 10am to 6pm.", True),
+    ([WEEKDAYS], [("mon", "tue", "wed", "thu", "fri", "sat", "sun", "10:00", "18:00")],
+     "Call 415-555-0118. Open every day, 10am to 6pm.", True),
+    ([WEEKDAYS], [("mon", "tue", "wed", "thu", "fri", "sat", "sun", "10:00", "18:00")],
+     "Call 415-555-0118. We're open 7 days a week, 10am to 6pm.", True),
+    ([WEEKDAYS], [("mon", "tue", "wed", "thu", "fri", "sat", "sun", "10:00", "18:00")],
+     "Llámanos al 415-555-0118. Abrimos todos los días de 10am a 6pm.", True),
+    ([WEEKDAYS], [("mon", "tue", "wed", "thu", "fri", "sat", "sun", "10:00", "18:00")],
+     "Llámanos al 415-555-0118. Abrimos a diario de 10am a 6pm.", True),
 ])
 def test_a_backed_hours_addition_keeps_every_stored_day(stored, patched, said, supported):
     def answers(windows):

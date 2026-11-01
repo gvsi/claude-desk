@@ -1740,7 +1740,10 @@ def _only_removes_hours(before: SetupAnswers, named: list[HoursAnswer]) -> bool:
 
 
 # The words that name each day in an owner's answer, in English or Spanish, singular or plural ("weekdays" and
-# "weekends" name theirs): a day added to the owner's hours off their home question is named in that answer.
+# "weekends" name theirs, and a daily expression all seven): a day added to the owner's hours off their home question
+# is named in that answer.
+_DAILY = re.compile(r"(?<!\w)(?:daily|every\s+day|7\s+days\s+a\s+week|seven\s+days\s+a\s+week|todos\s+los\s+d[ií]as"
+                    r"|a\s+diario)(?!\w)")
 _DAY_NAMES: dict[str, tuple[str, ...]] = {
     "mon": ("monday", "mon", "lunes", "weekday", "entre semana"),
     "tue": ("tuesday", "tue", "tues", "martes", "weekday", "entre semana"),
@@ -1754,7 +1757,8 @@ _DAY_NAMES: dict[str, tuple[str, ...]] = {
 
 def _names_day(day: str, text: str) -> bool:
     folded = text.casefold()
-    return any(re.search(rf"(?<!\w){re.escape(word)}s?(?!\w)", folded) for word in _DAY_NAMES[day])
+    return (_DAILY.search(folded) is not None
+            or any(re.search(rf"(?<!\w){re.escape(word)}s?(?!\w)", folded) for word in _DAY_NAMES[day]))
 
 
 def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: SetupAnswers | None = None) -> set[str]:
@@ -1771,15 +1775,15 @@ def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: Se
         value = getattr(patch, name)
         days_named = True
         if name == "hours" and value and before is not None and name not in before.suggested_fields:
+            # Each window as one (day, start, end) per day, so days grouped with the same hours compare one by one.
             stored = {(day, window.start, window.end) for window in before.hours for day in window.days}
-            patched = {(day, window.start, window.end) for answer in value for window in [answer.window()]
+            patched = {(day, window.start, window.end): answer for answer in value for window in [answer.window()]
                        for day in window.days}
-            added = [answer for answer in value if any((day, window.start, window.end) not in stored
-                                                       for window in [answer.window()] for day in window.days)]
-            if added and stored <= patched:
-                # A pure addition: only its new windows need stating, as only new or changed prices do.
-                value = added
-                days_named = all(_names_day(day, said) for answer in added for day in answer.days)
+            added = [(day, answer) for (day, *times), answer in patched.items() if (day, *times) not in stored]
+            if added and stored <= set(patched):
+                # A pure addition: only its new days need stating, as only new or changed prices do.
+                value = [HoursAnswer(days=[day], start=answer.start, end=answer.end) for day, answer in added]
+                days_named = all(_names_day(day, said) for day, _ in added)
         if name == "price_items" and value and before is not None:
             if name in before.suggested_fields:
                 # A held list stays held until every retained item is backed, not just this turn's correction.
