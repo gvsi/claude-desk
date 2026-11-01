@@ -1796,19 +1796,40 @@ POLICY_AI_DENIAL_CASES = [
     for verb in ("chatting", "talking", "speaking")
     for preposition in ("with", "to")
     for person in ("a human", "a real person", "a live person")
-] + [f"A {adjective} {role}." for adjective in ("human", "real", "live")
-     for role in ("receptionist", "agent", "assistant", "person")] + [
-    "Not a bot.", "Not a robot.", "Not AI.", "Not an AI.",
-    "I am a human.", "I'm a human.", "I am a real person.", "I'm a real person.",
-    "I’m a human.", "You’re talking to a human.",
-    "Persona real.", "Recepcionista humano.", "Recepcionista humana.",
-    "Agente humano.", "Agente humana.", "Asistente humano.", "Asistente humana.",
-    "No soy un bot.", "No soy un robot.", "No soy una IA.",
+] + [
+    "You’re talking to a human.", "YOU’RE CHATTING WITH A HUMAN RECEPTIONIST.",
+    "You are talking with an actual human.", "You're not talking to a bot.", "You aren't chatting with an AI.",
+    "I am a human.", "I'm a human.", "I’m a human.", "I'm human.", "I'm a human, not a bot.",
+    "I am a real person.", "I'm a real person.",
+    "I'm not a bot.", "I am not a robot.", "I'm not an AI.", "I’m not AI.",
+    "This is not an AI.", "This is not a bot.", "This isn't a chatbot.",
+    "This is a real person.", "This is a human receptionist.", "This is a human.",
+    "You've reached a real person.", "You have reached a live agent.",
     "Está hablando con una persona.", "ESTA HABLANDO CON UNA PERSONA.",
-    "YOU’RE CHATTING WITH A HUMAN RECEPTIONIST.",
     # Informal and plural Spanish forms of the same claim.
     "Estás hablando con una persona.", "Estas hablando con una persona.", "Estáis hablando con una persona.",
     "Están hablando con una persona.", "Está hablando con un humano.", "Estás hablando con un humano.",
+    "Está chateando con un ser humano.", "Estás hablando con una agente humana.",
+    "No estás hablando con un bot.", "No está hablando con una IA.",
+    "Soy una persona real.", "Soy una persona de verdad.", "Soy humano.", "Soy humana.", "Soy un ser humano.",
+    "No soy un bot.", "No soy un robot.", "No soy una IA.",
+    "Esto no es un bot.", "Este chat no es una IA.",
+    "Quien le responde es una persona real.", "Este asistente es una persona.",
+]
+# Directions to reach a person, explicit AI disclosures and role words that name no speaker.
+POLICY_HONEST_PERSON_CASES = [
+    "Talk to a real person by phone.", "Call to speak with a live agent.",
+    "This is an AI assistant, not a real person.", "I'm an AI assistant, not a person.",
+    "A human receptionist answers our phone line.", "A real person reads every message.",
+    "Maria is a real person.", "I'm a human resources consultant.", "I am a human rights lawyer.",
+    "A real person will call back in the morning.", "Call to speak with a live person.",
+    "Our photos are not AI-generated.", "This is not AI-generated.", "This is a human-run business.",
+    "Una persona real le devolverá la llamada.",
+    "You'll be talking to a real person when you call.", "You're not talking to a real person.",
+    "Habla con una persona real por teléfono.", "Llame para hablar con un agente humano.",
+    "Este asistente es una IA, no una persona real.", "No soy una persona real, soy una IA.",
+    "No está hablando con una persona: soy un asistente de IA.",
+    "Para nosotros eres una persona, no un número.", "Recepcionista humana.", "Persona real.",
 ]
 POLICY_FREE_PRICE_CASES = [
     "Consultations cost nothing.", "It costs nothing.", "At no cost.", "No cost to you.",
@@ -1823,6 +1844,7 @@ POLICY_FREE_PRICE_CASES = [
 
 @pytest.mark.parametrize(("text", "rules"), [
     *[(text, ["policy.ai_denial"]) for text in POLICY_AI_DENIAL_CASES],
+    *[(text, []) for text in POLICY_HONEST_PERSON_CASES],
     *[(text, (["lex.en.promise"] if text in {"At no cost.", "No cost to you."} else [])
        + ["policy.free_price"]) for text in POLICY_FREE_PRICE_CASES],
     ("Human resources consulting", []),
@@ -1838,6 +1860,11 @@ POLICY_FREE_PRICE_CASES = [
     ("Dinner is on the house", ["lex.en.promise"]),
     ("No cobramos por adelantado.", []),
     ("No cobramos nada más que lo acordado.", []),
+    # Payment timing is not a free price.
+    ("Nothing to pay until the job is done.", []),
+    ("You have nothing to pay before you approve the work.", []),
+    ("Nada que pagar hasta que el trabajo esté hecho.", []),
+    ("No tiene nada que pagar antes de aprobar el trabajo.", []),
     ("Hablamos con cada persona antes de empezar.", []),
 ])
 def test_public_policy_ai_denial_and_free_price_phrases(text, rules):

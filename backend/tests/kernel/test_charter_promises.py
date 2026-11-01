@@ -30,6 +30,11 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
     ("Las consultas no cuestan nada.", "policy.free_price"),
     ("No cobramos nada por la visita.", "policy.free_price"),
     ("Estás hablando con una persona.", "policy.ai_denial"),
+    ("You are chatting with a human.", "policy.ai_denial"),
+    ("I'm not a bot.", "policy.ai_denial"),
+    ("This is not an AI.", "policy.ai_denial"),
+    ("Soy una persona real.", "policy.ai_denial"),
+    ("No soy un bot.", "policy.ai_denial"),
 ])
 async def test_policy_phrase_refusal_names_only_the_bad_line_and_guards_legacy_reads(app, client, text, rule):
     copy = await rivera(app, client)
@@ -257,6 +262,19 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
     "Atención personalizada",
     "No cobramos por adelantado.",
     "No cobramos nada más que lo acordado.",
+    # Directions to reach a person, an AI disclosure and payment timing.
+    "Talk to a real person by phone.",
+    "Call to speak with a live agent.",
+    "Call to speak with a live person.",
+    "This is an AI assistant, not a real person.",
+    "A real person will call back in the morning.",
+    "I'm a human resources consultant.",
+    "I am a human rights lawyer.",
+    "Our photos are not AI-generated.",
+    "Nothing to pay until the job is done.",
+    "Habla con una persona real por teléfono.",
+    "Una persona real le devolverá la llamada.",
+    "Nada que pagar hasta que el trabajo esté hecho.",
     "We work with small businesses and families.",
     "Tell us what you need and we'll suggest next steps.",
     "Ask about our services.",

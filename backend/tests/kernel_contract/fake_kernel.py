@@ -878,14 +878,35 @@ def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
 
 
+# The kernel's policy-only phrase lists (`lexicon/policy_ai_denial.txt`, `lexicon/policy_free_price.txt`),
+# one entry per line, read on the accent-folded text.
+POLICY_AI_DENIAL = (
+    r"you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+an?\s+(?:(?:real|live|actual)\s+)?(?:human|person)",
+    r"you(?:\s+are\s+not|['’]re\s+not|\s+aren['’]t)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
+    r"(?:this\s+is|you(?:['’]ve|\s+have)\s+reached)\s+an?\s+(?:(?:human|real|live|actual)\s+(?:receptionist|agent|assistant|person|human)|human(?=\s*(?:[^\w\s-]|$)))",
+    r"I(?:\s+am|['’]m)\s+(?:a\s+(?:real|live|actual)\s+(?:person|human)|(?:a\s+)?human(?!-|\s+(?:resources|rights)\b))",
+    r"(?:I(?:\s+am|['’]m)\s+not|this\s+(?:is\s+not|isn['’]t))\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
+    r"(?<!no\s)esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con\s+(?:una\s+persona|un\s+(?:ser\s+)?humano|una?\s+(?:agente|asistente|recepcionista)\s+human[oa])",
+    r"no\s+(?:esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con|soy)\s+(?:un\s+(?:bot|robot|chatbot)|una\s+(?:IA|maquina))(?!-)",
+    r"(?<!no\s)soy\s+(?:una\s+persona\s+(?:real|de\s+verdad)|un\s+(?:ser\s+)?humano|human[oa])",
+    r"(?:esto|este\s+chat)\s+no\s+es\s+(?:un\s+(?:bot|robot|chatbot)|una\s+IA)(?!-)",
+    r"(?:este\s+(?:chat|asistente)|quien\s+(?:(?:le|te|les)\s+)?(?:responde|atiende|contesta|escribe))\s+es\s+(?:una\s+persona|un\s+(?:ser\s+)?humano)",
+)
+POLICY_FREE_PRICE = (
+    r"costs?\s+nothing",
+    r"at\s+no\s+cost",
+    r"no\s+cost\s+to\s+you",
+    r"nothing\s+to\s+pay(?!\s+(?:until|till|before|now|today|upfront|up\s+front|in\s+advance)\b)",
+    r"won['’]t\s+cost\s+you\s+anything",
+    r"cuestan?\s+nada(?!\s+mas)",
+    r"cobra(?:mos|n)?\s+nada(?!\s+mas)",
+    r"nada\s+que\s+pagar(?!\s+(?:hasta|antes|ahora|hoy|por\s+adelantado)\b)",
+)
+
+
 PUBLIC_POLICY_PATTERNS = (
-    ("policy.ai_denial", r"\b(?:you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+"
-     r"(?:a\s+human|a\s+(?:real|live)\s+person)|a\s+(?:human|real|live)\s+(?:receptionist|agent|assistant|person)|"
-     r"not\s+(?:a\s+(?:bot|robot)|(?:an?\s+)?AI)|I(?:\s+am|['’]m)\s+(?:a\s+human|a\s+real\s+person)|"
-     r"persona\s+real|(?:recepcionista|agente|asistente)\s+human[oa]|"
-     r"no\s+soy\s+(?:un\s+(?:bot|robot)|una\s+IA)|esta(?:s|is|n)?\s+hablando\s+con\s+(?:una\s+persona|un\s+humano))\b"),
-    ("policy.free_price", r"\b(?:costs?\s+nothing|at\s+no\s+cost|no\s+cost\s+to\s+you|nothing\s+to\s+pay|"
-     r"won['’]t\s+cost\s+you\s+anything|(?:cuestan?|cobra(?:mos|n)?)\s+nada(?!\s+mas)|nada\s+que\s+pagar)\b"),
+    ("policy.ai_denial", r"(?<!\w)(?:" + "|".join(POLICY_AI_DENIAL) + r")(?!\w)"),
+    ("policy.free_price", r"(?<!\w)(?:" + "|".join(POLICY_FREE_PRICE) + r")(?!\w)"),
     ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
      r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"

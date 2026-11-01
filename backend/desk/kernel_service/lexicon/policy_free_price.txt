@@ -2,8 +2,8 @@
 folded	costs?\s+nothing
 folded	at\s+no\s+cost
 folded	no\s+cost\s+to\s+you
-folded	nothing\s+to\s+pay
+folded	nothing\s+to\s+pay(?!\s+(?:until|till|before|now|today|upfront|up\s+front|in\s+advance)\b)
 folded	won['’]t\s+cost\s+you\s+anything
 folded	cuestan?\s+nada(?!\s+mas)
 folded	cobra(?:mos|n)?\s+nada(?!\s+mas)
-folded	nada\s+que\s+pagar
+folded	nada\s+que\s+pagar(?!\s+(?:hasta|antes|ahora|hoy|por\s+adelantado)\b)

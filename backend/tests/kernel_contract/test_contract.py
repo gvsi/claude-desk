@@ -2542,6 +2542,11 @@ async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, 
     ("Las consultas no cuestan nada.", "policy.free_price"),
     ("No cobramos nada por la visita.", "policy.free_price"),
     ("Estás hablando con una persona.", "policy.ai_denial"),
+    ("You are chatting with a human.", "policy.ai_denial"),
+    ("I'm not a bot.", "policy.ai_denial"),
+    ("This is not an AI.", "policy.ai_denial"),
+    ("Soy una persona real.", "policy.ai_denial"),
+    ("No soy un bot.", "policy.ai_denial"),
 ])
 async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel, text, rule):
     http, _, _ = kernel
@@ -2720,6 +2725,18 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
     ("Service area: Portland, Beaverton, Hillsboro, Tigard", "Cash, card, Venmo accepted",
      "Emergency service available"),
     ("No cobramos por adelantado.", "No cobramos nada más que lo acordado."),
+    ("Talk to a real person by phone.",),
+    ("Call to speak with a live agent.",),
+    ("Call to speak with a live person.",),
+    ("This is an AI assistant, not a real person.",),
+    ("A real person will call back in the morning.",),
+    ("I'm a human resources consultant.",),
+    ("I am a human rights lawyer.",),
+    ("Our photos are not AI-generated.",),
+    ("Nothing to pay until the job is done.",),
+    ("Habla con una persona real por teléfono.",),
+    ("Una persona real le devolverá la llamada.",),
+    ("Nada que pagar hasta que el trabajo esté hecho.",),
 ])
 async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro_read, parts):
     http, schema, _ = kernel
