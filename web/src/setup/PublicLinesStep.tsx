@@ -194,14 +194,17 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
           || (remaining.length === 0 ? saved.prices !== null : saved.prices?.source !== 'suggested');
       } else changed = key === 'hours' ? saved.hours !== null : saved.lines.some((line) => line.key === key);
       queryClient.setQueryData(queryKey, saved);
+      returnRemoveFocus.current = { revision: saved.revision, index: removeRows.indexOf(row) };
       if (changed) setError(CHANGED_REFRESHED.en);
-      else returnRemoveFocus.current = { revision: saved.revision, index: removeRows.indexOf(row) };
     } catch (err) {
       if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'not_suggested'))) {
         const current = await reread();
         if (current && (current.step === 'rules' || current.step === 'situations')) {
           const refreshed = await lines.refetch();
-          if (refreshed.isSuccess) setError(CHANGED_REFRESHED.en);
+          if (refreshed.isSuccess) {
+            returnRemoveFocus.current = { revision: refreshed.data.revision, index: removeRows.indexOf(row) };
+            setError(CHANGED_REFRESHED.en);
+          }
         }
         if (current === null) setError(ownerErrorCopy(err));
       } else setError(ownerErrorCopy(err));

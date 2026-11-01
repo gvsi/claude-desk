@@ -87,12 +87,14 @@ it('natively dims Looks right and every Remove while a row is open', async () =>
   }
 });
 
-it('announces a successful stale Remove refresh with the shared changed line', async () => {
+it.each([409, 422])('announces a successful stale Remove refresh with the shared changed line after %s', async (status) => {
   const { screen, state } = await openLines();
   await mockStore.dispatch('setupPublicLine', { params: { id: state.interview_id }, body: { key: 'contact', text: 'office@example.com' } });
+  if (status === 409) mockStore.inject({ route: 'removePublicLine', status, body: { error: 'conflict' } });
   await screen.getByRole('button', { name: /^Remove/ }).first().click();
   await expect.element(screen.getByText('office@example.com', { exact: true })).toBeVisible();
   await expect.element(screen.getByRole('alert')).toHaveTextContent(CHANGED_REFRESHED.en);
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove', exact: true }).first().element());
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
 });
 
@@ -109,6 +111,7 @@ it('adopts changed remaining prices from a successful Remove and asks for review
   await expect.element(screen.getByText('Updated bookkeeping, $175', { exact: true })).toBeVisible();
   expect(screen.getByText('Business tax return, $600', { exact: true }).elements()).toHaveLength(0);
   expect(screen.getByText('Monthly bookkeeping, $150', { exact: true }).elements()).toHaveLength(0);
+  expect(document.activeElement === screen.getByRole('button', { name: 'Remove', exact: true }).nth(3).element()).toBe(true);
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
 });
 
