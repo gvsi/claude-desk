@@ -36,7 +36,7 @@ The workflow has nine required checks, in this order. `backend tests` and `tier 
 
 The additional `changed paths` check runs first for scoped suites. `secret scan` and `repo checks` start alongside it with no dependency and always run. The nine required check names stay unchanged. Pushes to `main` and manual runs run every suite; only `pull_request` events can skip suites.
 
-The classifier ([`tools/desk_tools/changed_paths.py`](../tools/desk_tools/changed_paths.py)) checks out the PR's merge commit with `fetch-depth: 2` and reads `git diff --name-only HEAD^1 HEAD`, where the first parent is the base branch. Git rename detection is disabled for this command so both the old and new paths count. It applies these rules:
+The classifier ([`tools/desk_tools/changed_paths.py`](../tools/desk_tools/changed_paths.py)) checks out the PR's merge commit with `fetch-depth: 2`. Before reading `git diff --name-only HEAD^1 HEAD`, it verifies that HEAD has exactly two parents and its second parent matches the event's `PR_HEAD_SHA`; otherwise it runs every suite. The first parent is the base branch. Git rename detection is disabled for the diff so both the old and new paths count. It applies these rules:
 
 - Backend shards, tier 1 shards, kernel tests, proofs, tier 2 results and infra synth are skipped only when every changed file is under `web/`.
 - Web tests are skipped only when no changed file is under `web/`, `docs/`, `.github/` or `tools/`, at the repository root (a path without `/`, including dotfiles), or in the external input list below.

@@ -51,12 +51,19 @@ def main() -> None:
     paths = []
     if event == "pull_request":
         try:
-            # Keep both endpoints of a rename: moving backend code into web/ is not web-only.
-            result = subprocess.run(
-                ["git", "-c", "diff.renames=false", "diff", "--name-only", "HEAD^1", "HEAD"],
+            parents = subprocess.run(
+                ["git", "show", "-s", "--format=%P", "HEAD"],
                 check=True, capture_output=True, text=True, timeout=30,
-            )
-            paths = result.stdout.splitlines()
+            ).stdout.split()
+            if len(parents) == 2 and parents[1] == os.environ.get("PR_HEAD_SHA", ""):
+                # Keep both endpoints: moving backend code into web/ is not web-only.
+                result = subprocess.run(
+                    ["git", "-c", "diff.renames=false", "diff", "--name-only", "HEAD^1", "HEAD"],
+                    check=True, capture_output=True, text=True, timeout=30,
+                )
+                paths = result.stdout.splitlines()
+            else:
+                print("HEAD is not the expected PR merge; running every suite.")
         except (OSError, subprocess.SubprocessError, UnicodeError):
             print("Changed paths unavailable; running every suite.")
     needs = classify(paths, event)

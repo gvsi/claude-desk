@@ -45,6 +45,7 @@ jobs:
         id: classify
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: PYTHONPATH=tools python3 -m desk_tools.changed_paths
 
   backend:

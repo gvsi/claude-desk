@@ -142,7 +142,10 @@ def test_changed_paths_job_checks_out_the_merge_base_and_writes_both_outputs():
     assert is_checkout(checkout)
     assert checkout["with"] == {"persist-credentials": False, "fetch-depth": 2}
     assert classify["id"] == "classify"
-    assert classify["env"] == {"GITHUB_EVENT_NAME": "${{ github.event_name }}"}
+    assert classify["env"] == {
+        "GITHUB_EVENT_NAME": "${{ github.event_name }}",
+        "PR_HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+    }
     assert classify["run"] == SCOPE_COMMAND
     assert job["outputs"] == {flag: "${{ steps.classify.outputs." + flag + " }}" for flag in ["backend", "web"]}
 

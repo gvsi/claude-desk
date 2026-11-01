@@ -197,6 +197,27 @@ def test_only_pull_requests_are_scoped(event, paths):
     assert classify(paths, event) == {"backend": True, "web": True}
 
 
+@pytest.mark.parametrize("parents, head", [
+    (["base"], "pr-head"),
+    (["base", "another-head"], "pr-head"),
+    (["base", "pr-head", "third-parent"], "pr-head"),
+    (["base", "pr-head"], ""),
+])
+def test_unverified_merge_head_runs_every_suite(tmp_path, monkeypatch, parents, head):
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("PR_HEAD_SHA", head)
+
+    def git(command, **kwargs):
+        assert command == ["git", "show", "-s", "--format=%P", "HEAD"], "Unverified HEAD must not be diffed"
+        return subprocess.CompletedProcess(command, 0, stdout=" ".join(parents) + "\n")
+
+    monkeypatch.setattr(subprocess, "run", git)
+    main()
+    assert output.read_text() == "backend=true\nweb=true\n"
+
+
 @pytest.mark.parametrize("diff, backend, web", [
     ("web/src/App.tsx\n", "false", "true"),
     ("backend/desk/api/app.py\n", "true", "false"),
@@ -212,12 +233,15 @@ def test_job_writes_explicit_outputs_or_runs_everything_on_git_error(tmp_path, m
     output.write_text("existing=value\n")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("PR_HEAD_SHA", "pr-head")
 
     def git(command, **kwargs):
-        assert command == ["git", "-c", "diff.renames=false", "diff", "--name-only", "HEAD^1", "HEAD"]
         assert kwargs == {"check": True, "capture_output": True, "text": True, "timeout": 30}
         if isinstance(diff, Exception):
             raise diff
+        if command == ["git", "show", "-s", "--format=%P", "HEAD"]:
+            return subprocess.CompletedProcess(command, 0, stdout="base pr-head\n")
+        assert command == ["git", "-c", "diff.renames=false", "diff", "--name-only", "HEAD^1", "HEAD"]
         return subprocess.CompletedProcess(command, 0, stdout=diff)
 
     monkeypatch.setattr(subprocess, "run", git)
@@ -248,12 +272,12 @@ def test_merge_diff_includes_the_old_path_of_a_rename_into_web(tmp_path, monkeyp
         return subprocess.run(
             ["git", *args], cwd=repo, check=True, capture_output=True, text=True,
             env={"PATH": os.environ["PATH"], "HOME": str(tmp_path),
+                 "GIT_AUTHOR_NAME": "CI test", "GIT_AUTHOR_EMAIL": "ci@example.test",
+                 "GIT_COMMITTER_NAME": "CI test", "GIT_COMMITTER_EMAIL": "ci@example.test",
                  "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"},
         ).stdout
 
     git("init", "-b", "main")
-    git("config", "user.name", "CI test")
-    git("config", "user.email", "ci@example.test")
     backend = repo / "backend"
     backend.mkdir()
     (backend / "input.txt").write_text("a backend input\n")
@@ -264,6 +288,7 @@ def test_merge_diff_includes_the_old_path_of_a_rename_into_web(tmp_path, monkeyp
     (backend / "input.txt").rename(repo / "web/input.txt")
     git("add", ".")
     git("commit", "-m", "move input")
+    monkeypatch.setenv("PR_HEAD_SHA", git("rev-parse", "HEAD").strip())
     git("checkout", "main")
     git("merge", "--no-ff", "change", "-m", "merge")
     output = tmp_path / "outputs"
