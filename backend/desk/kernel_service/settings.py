@@ -26,8 +26,11 @@ class KernelSettings:
 
     @classmethod
     def from_env(cls) -> "KernelSettings":
+        typesafe_key = os.environ.get("TYPESAFE_API_KEY", "")
+        if typesafe_key.strip().lower() in ("", "unset"):
+            typesafe_key = ""
         return cls(database_url=database_url("KERNEL"), env=os.environ.get("DESK_ENV", "dev"),
                    decisions=os.environ.get("DESK_DECISIONS", "anthropic"),
                    mockpay_url=os.environ.get("MOCKPAY_URL") or MOCKPAY_URL,
                    mockpay_key=os.environ.get("MOCKPAY_KEY", ""), mockpay_spawn=os.environ.get("MOCKPAY_SPAWN") == "1",
-                   typesafe_api_key=os.environ.get("TYPESAFE_API_KEY", ""))
+                   typesafe_api_key=typesafe_key)

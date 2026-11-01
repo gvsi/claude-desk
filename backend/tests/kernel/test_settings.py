@@ -21,3 +21,9 @@ def test_typesafe_key_is_optional_and_one_printable_token(monkeypatch):
         assert key not in str(error.value)
         with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
             KernelSettings(database_url="unused", typesafe_api_key=key)
+
+
+@pytest.mark.parametrize("placeholder", ["", "unset", "UNSET", " UnSeT ", " "])
+def test_typesafe_unset_placeholder_is_off(monkeypatch, placeholder):
+    monkeypatch.setenv("TYPESAFE_API_KEY", placeholder)
+    assert KernelSettings.from_env().typesafe_api_key == ""

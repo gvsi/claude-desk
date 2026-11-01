@@ -2,6 +2,7 @@
 
 import asyncio
 import functools
+import logging
 from dataclasses import replace
 
 import httpx2
@@ -9,6 +10,7 @@ import pytest
 
 from desk.kernel_service import jev, ledger
 from desk.kernel_service.decisions import SoftPromiseVerdict
+from desk.kernel_service.settings import KernelSettings
 
 from .fakes import FakeJev
 from .helpers import kernel_ctx
@@ -66,7 +68,13 @@ async def test_jev_only_adds_blocks(app, client, reviewer, monkeypatch, sonnet_b
     assert entry.event.summary["soft_checks"]["sonnet"]["blocked"] == sonnet_blocks
 
 
-async def test_no_key_never_calls_jev_or_logs_a_warning(app, client, monkeypatch, caplog):
+@pytest.mark.parametrize("placeholder", ["", "unset"])
+async def test_no_key_never_calls_jev_or_logs_a_warning(app, client, monkeypatch, caplog, placeholder):
+    # ECS injects the literal DeskData SecretString until the owner sets a real key.
+    monkeypatch.setenv("TYPESAFE_API_KEY", placeholder)
+    settings = replace(app.state.kernel.settings, typesafe_api_key=KernelSettings.from_env().typesafe_api_key)
+    app.state.kernel = replace(app.state.kernel, settings=settings)
+    caplog.set_level(logging.DEBUG)
     assert not app.state.kernel.settings.typesafe_api_key
 
     async def forbidden(*args, **kwargs):

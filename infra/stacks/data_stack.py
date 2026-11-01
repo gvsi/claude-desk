@@ -1,7 +1,7 @@
 """DeskData: what the app stands on and what outlives a deploy.
 
 A VPC with public and isolated subnets and no NAT gateway (tasks reach images, Secrets Manager
-and the Anthropic API through public IPs); private, encrypted Postgres; every secret generated
+and the Anthropic API through public IPs); private, encrypted Postgres; secrets managed
 by Secrets Manager; the security groups, database rules included, so no rule waits on the
 service; the CloudFront origin-facing prefix list, looked up at deploy; the ECS cluster; and the
 one-off admin task that migrates and sets role passwords.
@@ -10,7 +10,7 @@ one-off admin task that migrates and sets role passwords.
 import json
 from dataclasses import dataclass
 
-from aws_cdk import CfnOutput, Duration, Fn, RemovalPolicy, Stack
+from aws_cdk import CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_iam as iam
@@ -102,7 +102,12 @@ class DeskData(Stack):
             signing_seed=self._hex_secret("SigningSeed", "desk/signing-seed", "The ledger's Ed25519 signing seed"),
             mockpay_key=self._hex_secret("MockpayKey", "desk/mockpay-key", "The kernel's mock payments key"),
             anthropic=self._owner_secret("AnthropicApiKey", "desk/anthropic-api-key", "The Anthropic API key"),
-            typesafe=self._owner_secret("TypesafeApiKey", "desk/typesafe-api-key", "The TypeSafe Jev API key"),
+            typesafe=secretsmanager.Secret(
+                self, "TypesafeApiKey", secret_name="desk/typesafe-api-key",
+                description="The TypeSafe Jev API key; set by the owner with infra/scripts/set_secret.py",
+                secret_string_value=SecretValue.unsafe_plain_text("unset"),
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
             passcode_hash=self._owner_secret("PasscodeHash", "desk/passcode-hash", "The demo passcode's hash"),
         )
 
