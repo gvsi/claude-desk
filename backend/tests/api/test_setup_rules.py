@@ -354,8 +354,8 @@ async def test_cards_cut_short_are_unavailable_even_when_their_text_fits(app, br
 QUOTE_LIMIT = "max_amount_cents must be set and at most quote_auto_max_cents in <answers> (0 when unanswered)"
 DISCOUNT_LIMIT = "max_discount_bp is above discount_auto_max_bp in <answers> (0 when unanswered)"
 DOCUMENTS_RULE = 'documents go out on their own only when documents in <answers> is "verified_owner"'
-LINK_LIMIT = ("max_amount_cents is above payment_link_auto_max_cents in <answers> or the money cap, whichever is lower "
-              "(0 when unanswered)")
+LINK_LIMIT = ("max_amount_cents must be set and at most the lower of payment_link_auto_max_cents in <answers> "
+              "and the money cap (0 when unanswered)")
 # An owner's "never" answer, which the template keeps with a `never` card: any other card on what it covers is refused.
 DOCUMENTS_NONE = 'documents is "none" in <answers>: a card on documents uses never'
 REFUNDS_NEVER = 'refunds is "never" in <answers>: a card on money going out uses never'

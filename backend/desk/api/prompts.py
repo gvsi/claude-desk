@@ -462,7 +462,9 @@ _JOBS = """\
 Jobs (reference)
 - Kinds: answer, intake, schedule, price, documents, status, payment, urgent. Plan "answer" only when answering \
 questions is itself a main job, titled by what it answers.
-- Each job has: job (its kind); title, a short name in the owner's words, at most 60 characters; who, who it's \
+- Each job has: job (its kind); title, a short name in the owner's words, at most 60 characters, with no amounts, numbers or promise words \
+("free" is fine: "Book a free intro call", never "Free 20-minute intro call"), since the kernel refuses the \
+whole set of business tools when one title has them; who, who it's \
 for in a few words ("New clients", "Tenants"), empty when it's for everyone, at most 60; why, the value in the \
 owner's terms, at most 200; how: one plain line on what happens, in the third person with no "you" or "your", and with no \
 prices, "free", durations, times, days or numbers, since customers read it and those come from the price list and \
@@ -484,11 +486,12 @@ Every app connects when the owner accepts it (simulated in this preview)."""
 _TOPICS = """\
 Topics (reference)
 - what_you_do: the services, who the customers are, and anything the business doesn't do.
-- hours_and_area: opening hours, and where the business works or where customers come.
+- hours_and_area: two parts, one at a time. First the opening hours, then where the business works or where \
+customers come. Covered only once both are answered.
 - contact_and_after_hours: two parts, one at a time. First the contact customers see, a real email or phone \
 number (and the name customers should ask for, if none is known; never take a person's name from the business \
-name, memory or website). Then what the Desk does with messages after hours, and what counts as urgent. Covered \
-only once both are answered.
+name, memory or website). Then what the Desk does with messages after hours, and, as its own question only if \
+it isn't clear yet, what counts as urgent. Covered only once these are answered.
 - quote_limit (a limit): the business's set prices and how much the Desk may quote without asking. Customers ask \
 about prices more than anything, and most trades, salons and walkers have set prices for common jobs even when \
 bigger work is priced after a visit, so ask. Skip it only when the owner says every job is priced after a consult \
@@ -506,7 +509,8 @@ Choosing what comes next (reference)
 "job", "job": its id}) or app ({"kind": "connector", "connector": its app key}), only when the message says the \
 client shows cards; or {"kind": "done"} once the accepted jobs have what they need and nothing planned is worth \
 asking. For a client without cards, choose only topics.
-- question: for a topic, your question (at most 300 characters), with a few words on why it matters when that \
+- question: for a topic, your question (at most 300 characters), about one thing only: never join two questions \
+with "and", with a few words on why it matters when that \
 isn't obvious. For a job or app, one short line asking whether to set it up; its card shows the why and how, so \
 don't repeat them. Ask it plainly and vary how, for example "Want customers to book visits themselves?", "Should \
 the Desk take each new tenant's details first?" or "How about an alert for burst pipes after hours?" For a limit topic, leave question and choices empty: code asks its own question at once and \
@@ -618,7 +622,8 @@ what you're asking. When you've heard enough, set step_done true, and in reply g
 fit, grounded in their own words and numbers: where a Desk would save them time (for example "the hour or two a \
 day you said goes to calls about prices and timing"), and where it wouldn't help much, if anywhere. Then the jobs \
 and apps you'd suggest as a short list, and an invitation to say what doesn't fit. Drop or add planned jobs to \
-match what you heard. Then next is the first thing those jobs need.
+match what you heard. Then next is the first thing those jobs need. The ask right after the fit view is a \
+fact topic or a card; limit topics come on a later turn.
 
 What you get
 - On a fact question: the business type, <question_asked> (what you actually asked), the topics covered and left, \
@@ -1383,7 +1388,8 @@ money always asks.
 - An auto card stays within the limits in <answers>, whether it names the tool or an effect the tool has: quotes \
 (native.quote, effect:change) need max_amount_cents of at most quote_auto_max_cents and max_discount_bp of at most \
 discount_auto_max_bp; documents (native.release_document, effect:private_data) go out on their own only when \
-documents is "verified_owner"; payment links (native.payment_link, effect:charge) need max_amount_cents of at most \
+documents is "verified_owner"; every money tool, including payment links, charge mandates and business money tools \
+(native.payment_link, native.charge_mandate, effect:charge), needs max_amount_cents set and at most the lower of \
 payment_link_auto_max_cents and the money cap. A limit the owner didn't answer is 0.
 - Refunds and other money going out (effect:pay_out, and any tool that pays out) are never auto: ask or never.
 - When documents is "none" in <answers>, a card on documents (native.release_document, effect:private_data) uses \
@@ -1405,8 +1411,8 @@ CARD_ERRORS = {
     "quote_limit": "max_amount_cents must be set and at most quote_auto_max_cents in <answers> (0 when unanswered)",
     "discount_limit": "max_discount_bp is above discount_auto_max_bp in <answers> (0 when unanswered)",
     "documents": 'documents go out on their own only when documents in <answers> is "verified_owner"',
-    "link_limit": ("max_amount_cents is above payment_link_auto_max_cents in <answers> or the money cap, whichever is "
-                   "lower (0 when unanswered)"),
+    "link_limit": ("max_amount_cents must be set and at most the lower of payment_link_auto_max_cents in <answers> "
+                   "and the money cap (0 when unanswered)"),
     "documents_none": 'documents is "none" in <answers>: a card on documents uses never',
     "refunds_never": 'refunds is "never" in <answers>: a card on money going out uses never',
 }

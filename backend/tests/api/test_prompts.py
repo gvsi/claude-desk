@@ -176,6 +176,15 @@ def test_setup_planning_prompts_ask_prerequisites_before_proposing_jobs():
         assert "each job's prerequisites before it" in system
 
 
+def test_setup_asks_one_thing_at_a_time_and_keeps_limits_after_the_fit_view():
+    for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert "hours_and_area: two parts, one at a time. First the opening hours" in system
+        assert "Covered only once both are answered" in system
+        assert "as its own question only if it isn't clear yet, what counts as urgent" in system
+        assert 'about one thing only: never join two questions with "and"' in system
+    assert "The ask right after the fit view is a fact topic or a card; limit topics come on a later turn" in SETUP_TURN_SYSTEM
+
+
 def test_typed_setup_card_prompt_answers_questions_and_revises_proposals():
     system = SETUP_CARD_ANSWER_SYSTEM
     for rule in (
@@ -221,6 +230,14 @@ def test_setup_job_cards_use_short_names_and_one_plain_line():
     assert "who, who it's for in a few words" in system
     assert "empty when it's for everyone, at most 60" in system
     assert "Never say the Desk reads or uses a connected app's data" in system
+
+
+def test_setup_job_titles_avoid_rejecting_the_business_tools_batch():
+    for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_TURN_SYSTEM,
+                   SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert "with no amounts, numbers or promise words" in system
+        assert '("free" is fine: "Book a free intro call", never "Free 20-minute intro call")' in system
+        assert "the kernel refuses the whole set of business tools" in system
 
 
 def test_job_how_is_written_for_customers_too():
@@ -270,6 +287,14 @@ def test_drafting_prompts_leave_verification_to_the_built_in_rule():
             assert rule in system, rule
     assert "never draft a card on native.start_verification" in CARD_DRAFT_SYSTEM
     assert "keep any card on native.start_verification exactly as it is, and never add one" in RULES_CHAT_SYSTEM
+
+
+def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
+    assert "every money tool, including payment links, charge mandates and business money tools" in CARD_DRAFT_SYSTEM
+    assert prompts.CARD_ERRORS["link_limit"] == (
+        "max_amount_cents must be set and at most the lower of payment_link_auto_max_cents in <answers> "
+        "and the money cap (0 when unanswered)"
+    )
 
 
 PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
