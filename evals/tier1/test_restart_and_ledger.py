@@ -52,7 +52,7 @@ from evals.tier1.test_reply_golden import (
     NUMBER_PROSE,
     QUOTE_PROSE,
     check_reply,
-    handed_off,
+    offered,
     passes,
     signing_key,
 )
@@ -452,7 +452,7 @@ async def test_every_decision_reply_and_verification_attempt_is_ledgered(k: Kern
     ]
     verdicts = [
         await check_reply(k, visitor, CLEAN_EN, expect=passes(visitor, ["prose"])),
-        await check_reply(k, visitor, NUMBER_PROSE, expect=handed_off(visitor, "number_in_prose")),
+        await check_reply(k, visitor, NUMBER_PROSE, expect=offered(visitor, "number_in_prose")),
     ]
     if k.landed("01b"):
         caller = await open_caller(k, desk, "visitor")

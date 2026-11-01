@@ -56,12 +56,14 @@ from evals.tier1.test_labels_and_injection import (
     dumped,
 )
 from evals.tier1.test_reply_golden import (
+    FRENCH_PROSE,
     HANDED_OFF,
     KEEP_ALIVE_S,
     NUMBER_PROSE,
     STAND_IN_CANARY,
     check_reply,
     handed_off,
+    offered,
     ledger_head,
     ledgered_since,
     passes,
@@ -653,14 +655,19 @@ async def open_handoffs(records: Any, desk: GoldenDesk) -> list[tuple[str, str, 
 @pytest.mark.requires("01b")
 async def test_a_blocked_reply_leaves_one_open_handoff_for_the_owner(k: KernelHarness, records):
     """The handoff card opens a handoff the owner sees (the owner's decision of 2026-10-30): a
-    reply the check blocks shows the visitor the handoff card, and leaves one open handoff on the
-    session, of kind `card` with no call-back window, in what the owner's handoffs read lists. A
-    second blocked reply in the same session shows the card again and leaves still one: the owner
-    already has the conversation."""
+    reply the check blocks for what no rewrite fixes (another language) shows the visitor the
+    handoff card, and leaves one open handoff on the session, of kind `card` with no call-back
+    window, in what the owner's handoffs read lists. A second blocked reply in the same session
+    shows the card again and leaves still one: the owner already has the conversation. A reply
+    blocked only for its prose with no card to keep asks first, with the call-back offer the
+    golden Desk has, and opens none (the owner's decision of 2026-11-01)."""
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
+    await check_reply(k, visitor, NUMBER_PROSE, expect=offered(visitor, "number_in_prose"))
+    if k.is_real:
+        assert await open_handoffs(records, desk) == [], "the call-back offer opened a handoff"
     for _ in range(2):
-        await check_reply(k, visitor, NUMBER_PROSE, expect=handed_off(visitor, "number_in_prose"))
+        await check_reply(k, visitor, FRENCH_PROSE, expect=handed_off(visitor, "unsupported_language"))
         if k.is_real:
             opened = await open_handoffs(records, desk)
             assert opened == [(visitor.state.session_id, "card", None)], f"the open handoffs are {opened}"
