@@ -2427,12 +2427,12 @@ FREE_SERVICE_CASES = [
 
 
 def test_public_policy_many_gratis_scan_is_bounded():
-    from time import perf_counter
+    from time import process_time   # CPU time: the scan is pure computation, and wall time varies with load
 
     text = ("gratis " * 1_143)[:8_000]
-    start = perf_counter()
+    start = process_time()
     fields = reply_check.scan_public_policies({"policy:about": text})
-    elapsed = perf_counter() - start
+    elapsed = process_time() - start
     assert "lex.es.promise" in fields["policy:about"]
     print(f"8,000-character gratis policy: {elapsed:.6f}s")
     assert elapsed < 0.75
