@@ -1,13 +1,13 @@
 {
  "schema": 1,
- "inputs": "91b0c6ab8d8c0074",
+ "inputs": "278a4b9ebc26487a",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
    "backend/desk/api/model.py"
   ],
   [
-   "ad1acc96db6f4e702a11ca1edcf54d591ca1d964",
+   "2f1a4100a88b23185ae03fb5578705248713d6df",
    "backend/desk/api/prompts.py"
   ],
   [
@@ -15,15 +15,15 @@
    "backend/desk/api/setup_templates.py"
   ],
   [
-   "c3ff47555fa1838574c1cfa958a07a6022b1261c",
+   "f823ef58f932580505ef5f1151493af1c42a8e10",
    "backend/desk/contracts.py"
   ],
   [
-   "3f85b452a28586c9ce63121ca7b7fca7b1497625",
+   "d5a8348145beb88c920b3ab36f49196e452b5ce8",
    "backend/desk/kernel_api.py"
   ],
   [
-   "11288b182dfa47e18fc30cf27a5f6664f1760e59",
+   "d6750bb7eca38f905510aeabccb4a73565f8e52d",
    "backend/desk/kernel_service"
   ],
   [
@@ -39,11 +39,15 @@
    "backend/desk/presets.py"
   ],
   [
+   "b065a5b6c684b35f804f0d247d8b7523e62e76b5",
+   "backend/desk/rewrites.py"
+  ],
+  [
    "9eb26bec1e88bf87827445aeee8465f33931ac20",
    "evals/oracles"
   ],
   [
-   "6bb694423fdda972f0884b255fd11637d4f3dae7",
+   "160a728bccac37a3225016b3fdb22794371ae5f9",
    "evals/splits.yaml"
   ],
   [
@@ -59,7 +63,7 @@
    "evals/tier2/runner.py"
   ],
   [
-   "a7a73c30524a1b8d305b9e5697d8a7d03b79698b",
+   "7608def3ecd4069c6521b2f173c7b591815049ff",
    "evals/tier2/scenarios"
   ],
   [
@@ -67,7 +71,7 @@
    "evals/tier2/schema.py"
   ],
   [
-   "567fb4e3e31ce3359cb0c7c2a7ea5f1265d45e66",
+   "e240be92890bbe52962609689ab14cf6111e8458",
    "evals/tier2/simulator.py"
   ],
   [
@@ -79,9 +83,9 @@
    "kernel"
   ]
  ],
- "git_sha": "ecec6f205f533f8f091b9c49e961416a7b4ed3fa",
- "created_at": "2026-10-31T18:41:38.304340Z",
- "pass_id": "20261031-184138-fb7a61",
+ "git_sha": "bfa35649a7cd870cb10f46128ad93e90ff9f7eff",
+ "created_at": "2026-11-01T01:05:59.575088Z",
+ "pass_id": "20261101-010559-cc6121",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -110,8 +114,8 @@
   "01c-setup",
   "02a"
  ],
- "suite_sha256": "c808dd083a8607e9594c4bb50aefba1e38f21a05107434300d277734c566da19",
- "heldout_sha256": "1f6ca621fb37798c00ab5a087ee0ccc0b937a3334126d6672a013899d8a64198",
+ "suite_sha256": "b9ecd738aecf0b46289e85819f96f19e58741c7b08328ddc50ea5540cd7fdb96",
+ "heldout_sha256": "c9d17180f4d447964fc30ee134db0fa56c92692181f0a8aecef245d077155791",
  "recorded_rate": null,
  "runs": [],
  "pending": {
@@ -162,7 +166,6 @@
   "atk-verify-change-contact": "02",
   "atk-verify-claims-dana": "02",
   "atk-verify-es-soy-dana": "02",
-  "atk-verify-guess-codes": "02",
   "atk-verify-im-the-owner": "02",
   "atk-verify-read-me-the-code": "02",
   "atk-verify-support-script": "02",
@@ -258,7 +261,6 @@
    "atk-verify-change-contact": "02",
    "atk-verify-claims-dana": "02",
    "atk-verify-es-soy-dana": "02",
-   "atk-verify-guess-codes": "02",
    "atk-verify-im-the-owner": "02",
    "atk-verify-read-me-the-code": "02",
    "atk-verify-support-script": "02",
