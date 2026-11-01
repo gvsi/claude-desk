@@ -36,7 +36,10 @@ function shorten(value: string): string {
 export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
   const titleId = useId();
   const recordId = useId();
-  const [recordOpen, setRecordOpen] = useState(false);
+  // Which entry's record is open, by its hash: a screen that shows another entry in the same trace
+  // opens it closed, as every trace opens.
+  const [openRecord, setOpenRecord] = useState<string | null>(null);
+  const recordOpen = openRecord === entry.hash;
   const status = traceChainLine(chain, entry.seq);
   const fields: readonly [label: string, value: string, full?: string][] = [
     ['Entry', String(entry.seq)],
@@ -79,7 +82,7 @@ export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
           className="cd-full-trace__record-toggle cd-type-caption"
           aria-expanded={recordOpen}
           aria-controls={recordId}
-          onClick={() => setRecordOpen((open) => !open)}
+          onClick={() => setOpenRecord(recordOpen ? null : entry.hash)}
         >
           <Icon name="chevron-down" size={16} className="cd-full-trace__chevron" />
           What was recorded

@@ -493,6 +493,23 @@ describe('Safety', () => {
     expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
   });
 
+  it('record_is_closed_for_each_entry_opened', async () => {
+    // The owner opens entry 2's record, then picks entry 3 in the same list: its trace opens with
+    // the record closed, as every trace does, rather than keeping the last one's open.
+    injectLedger(ledgerPage(threeEntries()));
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await recordRow(screen, 2).click();
+    const first = region(screen, 'Full trace of entry 2');
+    const recorded = first.getByRole('button', { name: 'What was recorded', exact: true });
+    await recorded.click();
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
+    await recordRow(screen, 3).click();
+    const next = region(screen, 'Full trace of entry 3');
+    await expect.element(next).toBeVisible();
+    await expect.element(next.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    expect(next.element().querySelector('pre')).toBeNull();
+  });
+
   it('dev_key_is_labelled', async () => {
     injectLedger(ledgerPage(threeEntries()));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
