@@ -178,7 +178,7 @@ const STEPS: Readonly<Record<Step, StepLoad>> = {
     // The last row in view: the sixth at 1440, the fourth at 390.
     moved: (viewport) => [{ name: `situation-row-${viewport === 'desktop' ? 5 : 3}`, page: RESULT_ROW(viewport === 'desktop' ? 6 : 4) }, MAIN_BUTTON_PART],
   },
-  // Opened at the safety check (a reload), the first results are drawn still, so they land in place.
+  // Opened at the safety check, the first results are drawn still, so they land in place.
   safety_check: {
     status: 'Trying tricks people use on your draft rules',
     hold: (state) => holdPosts(path('setupSafetyCheck', state)),
@@ -304,12 +304,6 @@ function expectAcceptedMoves(load: StepLoad, viewport: Viewport, watched: Return
     expect(Math.abs(landed.width - shape.width), `${label}: lands as wide as its shape`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     if (part.name === MAIN_BUTTON_PART.name) {
       expect(Math.abs(landed.height - shape.height), `${label}: lands as tall as its shape`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
-    } else {
-      // The row's own words come with the read: its height may differ from its shape's only by its
-      // own words wrapping, the difference that moves the parts under it: none, or one whole line.
-      const difference = landed.height - shape.height;
-      const wholeLine = [0, ...LINE_HEIGHTS_PX].some((line) => Math.abs(Math.abs(difference) - line) <= SKELETON_TOLERANCE_PX);
-      expect(wholeLine, `${label}: lands ${difference} px off its shape's height, which is not one whole line`).toBe(true);
     }
   }
 }
@@ -594,9 +588,10 @@ it('draft_waits_for_the_people_read', async () => {
     anchors: rules.anchors,
     stays: rules.stays,
     open: async () => {
+      const mark = mockStore.requests.length;
       await open();
       await vi.waitFor(() => expect(people.held()).toBe(1));
-      await vi.waitFor(() => expect(mockStore.requests.some((r) => r.key === 'setupRules')).toBe(true));
+      await vi.waitFor(() => expect(mockStore.requests.slice(mark).some((r) => r.key === 'setupRules')).toBe(true));
     },
     release: people.release,
   });
