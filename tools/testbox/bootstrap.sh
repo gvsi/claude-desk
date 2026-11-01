@@ -7,7 +7,7 @@ exec 9>/run/desk-testbox-bootstrap.lock
 flock 9
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y build-essential pkg-config libssl-dev curl unzip git rsync openssh-server postgresql-16 postgresql-client-16 python3 acl iproute2 iptables socat
+apt-get install -y build-essential pkg-config libssl-dev curl unzip git rsync openssh-server postgresql-16 postgresql-client-16 python3 acl iproute2 iptables socat fonts-liberation
 install -d -o ubuntu -g ubuntu /srv/testbox /srv/testbox/lanes /srv/testbox/cache
 install -d -o root -g root /opt/testbox
 # This server holds only disposable test data. Never apply these settings elsewhere.
@@ -109,6 +109,11 @@ if [ ! -x cvc5/bin/cvc5 ]; then
 fi
 # Browser binaries are shared, browser profiles and test output remain per lane.
 PLAYWRIGHT_BROWSERS_PATH=/opt/testbox/browsers npx --yes playwright@1.64.0 install --with-deps chromium webkit
+# The minimal arm64 CI image installs Fontconfig with Playwright's font set, without
+# DejaVu. The server AMI supplies DejaVu first, changing system-ui/serif fallback
+# metrics in browser tests. Match CI's installed fonts, without browser overrides.
+apt-get remove -y fonts-dejavu-core fonts-dejavu-mono
+fc-cache -f
 chmod -R a+rX /opt/testbox
 chown -R ubuntu:ubuntu /opt/testbox/browsers
 # Ubuntu's AppArmor user namespace restriction otherwise prevents Chromium sandbox startup.

@@ -55,7 +55,8 @@ nonignored untracked source files, including
 uncommitted edits and deletions. It excludes environment files (except `.env.example`),
 private local directories, credential/key files and local build outputs. Do not put
 secrets in source files or command arguments. Git history at HEAD and origin/main travels
-as a bundle, including unpushed commits, without copying local Git configuration or hooks.
+as an incremental bundle when either ref changes, including unpushed commits, without copying
+local Git configuration or hooks.
 HEAD and the index match the caller while uncommitted working files remain intact.
 Changing branches removes stale synced files and invalidates affected build/schema caches.
 Remote test reports remain in the lane; source files are never copied back automatically.
@@ -93,3 +94,7 @@ retiring the old instance first. Never disable termination protection as routine
 The bootstrap pins Rust 1.99.1, uv 0.13.0, Python 3.13, cvc5 1.4.2 and Node 24.21.0.
 cvc5 is verified against [the repository checksums](../tools/cvc5.sha256). Playwright's
 Chromium/WebKit and system dependencies are installed for the version in the web lockfile.
+The font inventory matches the minimal arm64 CI image: Playwright’s font packages, without
+DejaVu from the server AMI. DejaVu changes the fallback text metrics in layout tests.
+Bootstrap removes its core and mono packages after installing the browser fonts, so normal
+`make web-test` runs need no font or browser overrides.
