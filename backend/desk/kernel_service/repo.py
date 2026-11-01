@@ -61,7 +61,8 @@ of a slot it drops or moves either commits first or waits for it. The kernel's d
 refresh holds the Desk row the same way, one Desk to a transaction (`desks.extend_calendar`), then
 only reads the Desk's slots and inserts new ones under fresh keys before it takes the ledger head:
 every write that changes or deletes a slot holds the Desk row first, so a booking holding its slot
-`FOR SHARE` and the refresh never wait on each other. Closing a handoff holds a Desk row too: it
+`FOR SHARE` and the refresh never wait on each other for a slot; like any two writes to one Desk,
+they take turns only at its ledger head. Closing a handoff holds a Desk row too: it
 reads which Desk the handoff is on without a lock, holds that Desk's row (`desks.held_desk`), then
 takes the handoff (step 10), its fact and the ledger head. Nothing that holds one of the rows above
 asks for a Desk or business row.

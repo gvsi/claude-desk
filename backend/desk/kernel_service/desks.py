@@ -726,10 +726,11 @@ async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
     In the caller's transaction, bound to the Desk's copy, it holds the Desk row `FOR UPDATE`, read
     afresh, as an owner's calendar write does, so the two take turns (`repo.py`). Every write that
     changes or deletes a slot holds that row first, so the Desk's slots are read without a lock,
-    and a booking holding its slot `FOR SHARE` neither waits for the refresh nor holds it up. The
-    new slots go in under fresh keys, then the ledger head is taken for the entry an owner's write
-    leaves, `desk_data` `{part: "calendar", refs}`, with `extended_from: "hours"` saying the kernel
-    added them from the hours."""
+    and a booking holding its slot `FOR SHARE` and the refresh never wait on each other for a slot;
+    like any two writes to one Desk, they take turns only at its ledger head. The new slots go in
+    under fresh keys, then the ledger head is taken for the entry an owner's write leaves,
+    `desk_data` `{part: "calendar", refs}`, with `extended_from: "hours"` saying the kernel added
+    them from the hours."""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id).with_for_update()
                                                      .execution_options(populate_existing=True)))).one_or_none()
     if (desk_row is None or desk_row.deleted_at is not None or not desk_row.answering or not desk_row.hours

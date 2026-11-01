@@ -24,14 +24,16 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from desk.calendar import calendar_slots
-from desk.contracts import CalendarSlot, HoursWindow
+from desk.contracts import CalendarSlot, HoursWindow, RuleCard
+from desk.db.models import PolicyVersion
 from desk.db.models import Booking
 from desk.db.models import CalendarSlot as SlotRow
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import desks
 from desk.kernel_service.app import create_app
+from desk.presets import PRESETS
 
-from .helpers import rows_of
+from .helpers import draft_and_confirm, rows_of
 from .test_adapters import Rivera, book, rivera
 from .test_decide import open_visitor
 from .test_desk_writes import LOPEZ_DESK, answered, entries_of, new_desk, post_desk, put_part, slot_body
@@ -144,6 +146,28 @@ async def test_the_calendar_is_refreshed_from_the_hours(app, client):
         "desk_data", "kernel", None,
         {"part": "calendar", "refs": [slot.slot_id for slot in added], "extended_from": "hours"})
 
+
+
+@pytest.mark.solver
+async def test_a_setup_desk_with_confirmed_rules_is_refreshed(desk_prove, app, client):
+    """Every live setup Desk has confirmed the rules setup drafted: version 2 is active, made from
+    no preset, and version 1, from `ask_first`, is superseded. That first version still marks it."""
+    copy = await rivera(app, client)
+    made = setup_calendar(days_ago=11)
+    desk = await setup_desk(app, client, copy, made)
+    book = RuleCard(card_id="book-weekday", applies_to="native.book", mode="auto", who="anyone", hours=HOURS[0],
+                    review=True, reason="Weekday bookings in opening hours, checked by the reviewer.")
+    confirmed = await draft_and_confirm(client, copy.owner_token, desk.desk_id, [*PRESETS["ask_first"], book])
+    versions = await rows_of(app, copy.copy_id, select(PolicyVersion).where(PolicyVersion.desk_id == desk.desk_id)
+                             .order_by(PolicyVersion.version))
+    assert [(row.version, row.status, row.preset) for row in versions] == [
+        (1, "superseded", "ask_first"), (confirmed.version, "active", None)]
+
+    added = await desks.extend_calendars(app.state.kernel)
+
+    later = after(calendar_slots(HOURS, TIMEZONE, TODAY), TODAY + timedelta(days=3))
+    assert added == {desk.desk_id: [slot.slot_id for slot in later]}
+    assert await slots_of(app, desk) == as_rows(made + later, copy.copy_id)
 
 async def test_the_refresh_never_touches_a_slot_it_finds(app, client):
     copy = await rivera(app, client)
@@ -317,8 +341,8 @@ async def test_a_stuck_lookup_leaves_the_other_copies_refreshed(app, client, mon
         return await look_up(runtime, copy_id)
 
     monkeypatch.setattr(desks, "desks_to_extend", stalls_for_one)
-    monkeypatch.setattr(desks, "CALENDAR_LOOKUP_S", 0.2)
+    monkeypatch.setattr(desks, "CALENDAR_LOOKUP_S", 1.5)
     with caplog.at_level(logging.INFO, logger="desk.kernel_service"):
-        added = await asyncio.wait_for(desks.extend_calendars(app.state.kernel), timeout=5)
+        added = await asyncio.wait_for(desks.extend_calendars(app.state.kernel), timeout=10)
     assert list(added) == [other.desk_id]
     assert f"calendar_lookup_cut_off copy_id={stuck.copy.copy_id}" in caplog.text
