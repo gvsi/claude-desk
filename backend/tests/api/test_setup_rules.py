@@ -55,6 +55,7 @@ from desk.api.prompts import (
     SetupAnswers,
     SituationDraft,
     SituationTool,
+    dollars,
 )
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
@@ -230,7 +231,11 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_typ
     await consent(owner, state["interview_id"], False, model)
     for key in QUESTION_KEYS:
         patch = {name: changes.get(name, value) for name, value in PATCHES[key].items()}
-        reply = await answer(owner, model, state["interview_id"], f"About {key}.",
+        # The fixture is a completed owner interview: structured facts must be typed, not just model patches.
+        typed = [f"About {key}.", patch.get("public_contact") or ""]
+        typed += [f"{window.start} to {window.end}" for window in patch.get("hours") or []]
+        typed += [f"{item.title}: {dollars(item.unit_cents)}" for item in patch.get("price_items") or []]
+        reply = await answer(owner, model, state["interview_id"], " ".join(typed),
                              turn(**{name: value for name, value in patch.items() if value is not None}))
         assert reply.status_code == 200, reply.text
     state = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()

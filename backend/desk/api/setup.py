@@ -112,6 +112,7 @@ import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
 from functools import partial
 from time import monotonic
 from typing import Literal, TypeVar, cast, get_args
@@ -193,6 +194,7 @@ from desk.api.prompts import (
     DraftedRules,
     DraftedSituations,
     DraftOutput,
+    HoursAnswer,
     JobDraft,
     JobProposal,
     MemoryDraft,
@@ -1581,12 +1583,71 @@ def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> l
     return prices
 
 
-def _owner_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
+def owner_supports(field: Literal["public_contact", "price_items", "hours"],
+                   value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str) -> bool:
+    """Whether the owner's typed text contains every structured value, independent of model or read text."""
+    if not value:
+        return True
+    folded = owner_text.casefold()
+    if field == "public_contact":
+        contact = cast(str, value)
+        digits = re.sub(r"\D", "", contact)
+        return contact.casefold() in folded or bool(
+            len(digits) >= 7 and re.fullmatch(r"[+\d\s().-]+", contact)
+            and digits in re.sub(r"\D", "", owner_text))
+    if field == "price_items":
+        amounts = {int(Decimal(match.group(0).replace("$", "").replace(",", "")) * 100)
+                   for match in re.finditer(r"(?<![\w.])\$?\d+(?:,\d{3})*(?:\.\d{1,2})?(?!\w|\.\d|,\d)",
+                                            owner_text)}
+        return all(item.unit_cents in amounts for item in cast(list[PriceAnswer], value))
+
+    def has_time(clock: str) -> bool:
+        hour, minute = map(int, clock.split(":"))
+        period = "am" if hour < 12 else "pm"
+        minutes = r"(?::00)?" if minute == 0 else f":{minute:02d}"
+        clock_forms = rf"(?:{re.escape(clock)}|{hour % 12 or 12}{minutes})"
+        matching_period = rf"{period[0]}\.?m\.?"
+        no_period = r"(?!\s*[ap]\.?m\.?(?!\w))"
+        return re.search(rf"(?<![\w:]){clock_forms}(?:\s*{matching_period}|{no_period})"
+                         rf"(?![\w:]|\.\d)", folded) is not None
+
+    return all(has_time(window.start) and has_time(window.end) for window in cast(list[HoursAnswer], value))
+
+
+FACT_TOPICS: dict[str, QuestionKey] = {
+    "summary": "what_you_do", "hours": "hours_and_area", "service_area": "hours_and_area",
+    "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
+    "price_items": "quote_limit",
+}
+
+
+def _fact_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
     """Only fact fields this question is allowed to merge, including explicit empty lists."""
     return [name for name, value in patch
             if name in SetupPatch.model_fields and name not in LIMIT_QUESTIONS
             and value is not None and not (isinstance(value, str) and not value.strip())
             and (key not in LIMIT_QUESTIONS.values() or LIMIT_TURN_FACTS.get(name) == key)]
+
+
+def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswers,
+                        after: SetupAnswers, owner_text: str) -> list[str]:
+    """Keep explicit clears, topic-matched prose and owner-supported structured facts as owner answers."""
+    fields = []
+    for name in _fact_patch_fields(patch, key):
+        value = getattr(patch, name)
+        if name not in FACT_TOPICS or value == []:
+            fields.append(name)
+            continue
+        if FACT_TOPICS[name] != key:
+            continue
+        if name in before.suggested_fields and getattr(before, name) == getattr(after, name):
+            continue
+        # Quote turns add/update prices by title; held items left in that list need support too.
+        checked = after.price_items if name == "price_items" else value
+        if name in {"public_contact", "price_items", "hours"} and not owner_supports(name, checked, owner_text):
+            continue
+        fields.append(name)
+    return fields
 
 
 def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupAnswers:
@@ -1622,7 +1683,6 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
             value = " ".join(value.split()) or None
         if value is not None:
             values[name] = value
-            values["suggested_fields"] = [field for field in values["suggested_fields"] if field != name]
     return SetupAnswers.model_validate(values)
 
 
@@ -1996,8 +2056,17 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             else:
                 said.website = site[0]                   # kept as text: nothing is read without consent
         await _rename(ctx, desk_id, patch)
-        said.owner_fields = _owner_patch_fields(patch, key)
-        interview.answers = merged(interview.answers, patch, key)
+        updated = merged(interview.answers, patch, key)
+        owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
+        said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text)
+        for name in _fact_patch_fields(patch, key):
+            if name not in FACT_TOPICS:
+                continue
+            if name in said.owner_fields:
+                updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
+            elif name not in updated.suggested_fields:
+                updated.suggested_fields.append(name)
+        interview.answers = updated
         interview.transcript += entries
         if turn.step_done:
             interview.cover([key])
@@ -2107,11 +2176,8 @@ def finish(interview: Interview) -> None:
     remaining = set(QUESTION_KEYS) - interview.covered
     suggested = interview.suggested
     if suggested is not None:
-        topics = {"hours": "hours_and_area", "service_area": "hours_and_area", "price_items": "quote_limit",
-                  "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
-                  "pricing": "what_you_do"}
         patch = SetupPatch.model_validate({name: value for name, value in suggested
-                                          if topics.get(name) in remaining and name not in interview.owner_fields
+                                          if FACT_TOPICS.get(name) in remaining and name not in interview.owner_fields
                                           and value and not getattr(interview.answers, name)})
         # A fact merge drops every limit, even if a stored suggestion somehow carries one.
         suggested_fields = interview.answers.suggested_fields + sorted(patch.model_fields_set)

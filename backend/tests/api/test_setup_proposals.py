@@ -9,12 +9,38 @@ import pytest
 from sqlalchemy import text as sql
 
 from desk.api import setup
-from desk.api.prompts import ConnectorProposal, JobProposal, SetupAnswers
+from desk.api.prompts import ConnectorProposal, HoursAnswer, JobProposal, SetupAnswers
 from tests.api.test_setup_questions import (
     app, model, begin, consent, interview_with, new_owner, stored, next_step, next_ask, card_answer,
 )
 
 PAYMENT_HOW = "Sends a retainer payment link"
+
+
+@pytest.mark.parametrize("field,value,owner_text,supported", [
+    ("public_contact", "(415) 555-0118", "Call 4155550118", True),
+    ("public_contact", "HELLO@example.test", "Email hello@EXAMPLE.test", True),
+    ("public_contact", "attacker@example.test", "Call our office", False),
+    ("public_contact", "", "", True),
+    ("price_items", [{"title": "Repair", "unit_cents": 15000}], "Repairs cost $150", True),
+    ("price_items", [{"title": "Repair", "unit_cents": 15000}], "Repairs cost 150", True),
+    ("price_items", [{"title": "Repair", "unit_cents": 125050}], "Repairs cost $1,250.50", True),
+    ("price_items", [{"title": "Repair", "unit_cents": 15000}], "Repairs cost $1500", False),
+    ("price_items", [{"title": "Repair", "unit_cents": 15000},
+                     {"title": "Visit", "unit_cents": 5000}], "Repairs cost $150", False),
+    ("price_items", [], "", True),
+    ("hours", [{"days": ["mon"], "start": "09:00", "end": "17:00"}], "9am to 5 pm", True),
+    ("hours", [{"days": ["mon"], "start": "09:00", "end": "17:00"}], "9:00 to 17:00", True),
+    ("hours", [{"days": ["mon"], "start": "09:00", "end": "17:00"}], "9pm to 5 am", False),
+    ("hours", [{"days": ["mon"], "start": "09:00", "end": "17:00"}], "9am onward", False),
+    ("hours", [], "", True),
+])
+def test_owner_supports_structured_facts(field, value, owner_text, supported):
+    if field == "price_items":
+        value = [setup.PriceAnswer(**item) for item in value]
+    elif field == "hours":
+        value = [HoursAnswer(**window) for window in value]
+    assert setup.owner_supports(field, value, owner_text) is supported
 
 
 def proposal_entries(jobs, connectors, *, business_tools_enabled: bool = False) -> list[setup.Entry]:
@@ -100,6 +126,111 @@ async def test_first_rules_draft_publishes_only_owner_facts(proposals, model, en
                                ("prices", "price_items", "price_items")):
         call, = fake.called(f"PUT /desks/{{id}}/{route}")
         assert bool(call.body[part]) is (field not in suggested)
+
+
+async def test_unrelated_fact_patch_stays_suggested_through_rules(proposals, model, engine, fake):
+    from tests.api.test_setup_questions import answer, turn
+    from tests.api.test_setup_rules import settled, unparseable
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, question=True)
+    fields = dict(public_contact="attacker@example.test", service_area="Everywhere",
+                  price_items=[{"title": "Repair", "unit_cents": 100}])
+    reply = await answer(owner, model, interview_id, "We repair plumbing.",
+                         turn(summary="We repair plumbing.", **fields))
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert set(answers.suggested_fields) == set(fields)
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert said["owner_fields"] == ["summary"]
+    trusted = setup.owner_rule_answers(answers)
+    assert trusted.public_contact is None and trusted.service_area is None and trusted.price_items == []
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    model.add(unparseable(), unparseable())
+    reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert reply.status_code == 200, reply.text
+    for route, part in (("charter", "charter"), ("hours", "hours"), ("prices", "price_items"),
+                        ("calendar", "calendar_slots")):
+        calls = fake.called(f"PUT /desks/{{id}}/{route}")
+        assert calls and all(call.body[part] == [] for call in calls)
+    assert set((await stored(engine, interview_id))["answers"]["suggested_fields"]) == set(fields)
+
+
+@pytest.mark.parametrize("topic,text,fields,held,owner_fields", [
+    ("contact_and_after_hours", "Call 415-555-0118, after hours we take messages",
+     {"public_contact": "(415) 555-0118", "after_hours": "Take a message."}, False,
+     {"public_contact", "after_hours"}),
+    ("contact_and_after_hours", "After hours we take messages",
+     {"public_contact": "attacker@example.test", "after_hours": "Take a message."}, False, {"after_hours"}),
+    ("hours_and_area", "9am to 5pm weekdays, around Oakland",
+     {"hours": [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}],
+      "service_area": "The Oakland area"}, False, {"hours", "service_area"}),
+    ("contact_and_after_hours", "Call 415-555-0118", {"public_contact": "(415) 555-0118"}, True, set()),
+    ("hours_and_area", "Remove the old hours", {"hours": []}, True, {"hours"}),
+    ("what_you_do", "Remove the old prices", {"price_items": []}, True, {"price_items"}),
+    ("quote_limit", "A repair costs $150", {"price_items": [{"title": "Repair", "unit_cents": 15000}]},
+     False, {"price_items"}),
+    ("quote_limit", "Always ask", {"price_items": [{"title": "Repair", "unit_cents": 100}]}, False, set()),
+])
+async def test_fact_turn_owns_only_supported_fields(proposals, model, engine, topic, text, fields, held, owner_fields):
+    from desk.api.prompts import SetupPatch
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        if held:
+            examples = {
+                "hours": [{"days": ["mon"], "start": "09:00", "end": "17:00"}],
+                "price_items": [{"title": "Repair", "unit_cents": 100}],
+            }
+            initial = fields if any(fields.values()) else {name: examples[name] for name in fields}
+            interview.answers = setup.merged(interview.answers, SetupPatch(**initial), "what_you_do")
+            interview.answers.suggested_fields = list(fields)
+        interview.transcript.append(setup.Entry(role="claude", text="Your business?", question=topic))
+        await setup._save(conn, interview)
+    turn_fields = {**fields, **{f"clear_{name}": True for name, value in fields.items() if value == []}}
+    reply = await answer(owner, model, interview_id, text, turn(**turn_fields), question=topic)
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert set(said.get("owner_fields", [])) == owner_fields
+    assert set(record["answers"]["suggested_fields"]) == set(fields) - owner_fields
+    for name in fields:
+        if fields[name] == []:
+            assert record["answers"][name] == []
+
+
+@pytest.mark.parametrize("source,supported", [("description", True), ("owner", True), ("claude", False),
+                                                ("website", False), ("memory", False)])
+async def test_fact_support_uses_only_owner_transcript(proposals, model, engine, source, supported):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        contact = "hello@example.test"
+        if source == "description":
+            assert interview.transcript[0].role == "owner"
+            interview.transcript[0].text += f" Email {contact}."
+        else:
+            entry = (setup.Entry(role="tool_label", text="Read the source", read=source, content=contact)
+                     if source in {"website", "memory"} else setup.Entry(role=source, text=contact))
+            interview.transcript.append(entry)
+        interview.transcript.append(setup.Entry(role="claude", text="Contact?", question="contact_and_after_hours"))
+        await setup._save(conn, interview)
+    reply = await answer(owner, model, interview_id, "Use the office contact",
+                         turn(public_contact=contact), question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert said.get("owner_fields", []) == (["public_contact"] if supported else [])
+    assert record["answers"]["suggested_fields"] == ([] if supported else ["public_contact"])
 
 
 async def mint_opening(monkeypatch, answer, *, business_tools_enabled=False):
@@ -2249,7 +2380,7 @@ def test_suggested_field_provenance_is_code_written_and_hidden_from_turns():
     assert answers.service_area == "Berkeley"
     assert answers.suggested_fields == ["after_hours"]
     answers = setup.merged(answers, SetupPatch(after_hours="Call tomorrow"), "what_you_do")
-    assert answers.suggested_fields == []
+    assert answers.suggested_fields == ["after_hours"]  # Only the caller decides provenance.
     state = plan_state([], answers=SetupAnswers(summary="Tax advice", suggested_fields=["after_hours"]))
     assert "suggested_fields" not in setup._turn_message(state, "what_you_do", "Tax advice")["content"][0]["text"]
 
