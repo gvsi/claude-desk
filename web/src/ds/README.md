@@ -56,7 +56,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ### Motion
 
-- Keep transitions between 60 and 200 ms: `motion-instant` for color, `motion-fast` for press feedback, `motion-base` for a check that draws once or a reveal. Ease with `motion-ease`, or `motion-ease-emphasis` for a screen's one small moment. Results that arrive one by one are `motion-stagger` apart. Each new word of Claude's reply settles in over `motion-settle` as it streams or is revealed (`ChatMarkdown`).
+- Keep transitions between 60 and 200 ms: `motion-instant` for color, `motion-fast` for press feedback, `motion-base` for a check that draws once or a reveal. Ease with `motion-ease`, or `motion-ease-emphasis` for a screen's one small moment. Results that arrive one by one are `motion-stagger` apart. Each new word of Claude's reply settles in over `motion-settle` as it streams or is revealed (`ChatMarkdown`). After a revealed reply's words, its cards and then their receipts fade and rise in over `motion-base`, `motion-follow` apart (`ClaudeMessage`, `TranscriptRow`).
 - A drawn check goes short arm first, as a hand writes one. The check icon's path starts at the long arm's tip, so its dash offset runs from minus its dash length to 0. `expectDrawsShortArmFirst` (`test/`) pins it in a story.
 - The only loops are `motion-breathe` for presence glyphs, `motion-writing` for a person's typing dots and line and for the skeleton's sweep while a page loads, `motion-dots` for Claude's writing dots, and `motion-spin` for a busy button's spinner.
 - Allow at most one small moment per screen. Motion explains a change; it never decorates.

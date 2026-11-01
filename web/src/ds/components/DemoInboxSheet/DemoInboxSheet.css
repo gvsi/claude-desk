@@ -54,6 +54,10 @@
   gap: var(--space-8);
 }
 
+.cd-demo-inbox-sheet__button--quiet {
+  gap: var(--space-6);
+}
+
 .cd-demo-inbox-sheet__close {
   display: flex;
   flex: none;

@@ -352,7 +352,7 @@ Work is divided by system area: the setup API owns the conversation engine, card
 - **Money:** `moves_money` and `auto_money` become effect-based for business tools (B3).
 - **Urgent alerts:** urgent alerts reach the owner's Demo inbox at once, whatever the notification settings (see Owner rulings after round 1) (B4).
 - **B6:**
-  - Up to 3 searches per setup, a 20 s deadline each, on `claude-sonnet-5-5`, with usage ledgered.
+  - Up to 3 searches per setup, a 30 s deadline each, on `claude-sonnet-5-5`, with usage ledgered. (Raised from 20 s on 2026-11-01: twelve measured searches took 15.1 s at the median and 18.2 s at most, before the hosted network hop, and a search lost costs setup more than ten seconds' wait.)
   - What it returns is Claude's cited summary, labelled as such.
   - Search spend follows Giovanni's approval of 3 per setup.
 - **B7, new, kernel policy-text checks:** `PUT /desks/{id}/charter` refuses a `policy:` text claim that holds an amount, a percentage, or discount, refund or guarantee words (the reply check's lexicon). Setup pre-filters with the same function and drops an offending claim, logged by key. Tier 1 rows, with no model calls:

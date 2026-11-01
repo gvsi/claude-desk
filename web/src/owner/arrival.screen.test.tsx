@@ -6,7 +6,7 @@
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { page, userEvent } from 'vitest/browser';
+import { page, userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { newIdempotencyKey, observeRequests } from '../api/http.ts';
@@ -203,9 +203,12 @@ describe('Arrival', () => {
     await startTheDemo(screen);
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
-    // Each of Today's reads had been answered, once and successfully, before it started to leave.
-    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 1 });
+    // Each of Today's reads had been answered, once and successfully, before it started to leave. The
+    // Demo inbox is the demo bar's, read once the frame draws, not ahead with Today.
+    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 0 });
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(1);
   });
 
   it('returning_owner_opens_today_drawn', async () => {
@@ -611,9 +614,8 @@ describe('Arrival', () => {
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY);
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
-    // Today keeps its own skeleton while that read is out (plan 08c, decision 7): the frame lands at
-    // the read ahead's deadline, and Today's sections wait for the inbox.
-    await expectTodayHoldsForItsInbox();
+    // Today opens without it; the demo bar draws the inbox once its read is in.
+    await expectTodayOpensWithoutItsInbox();
     mockStore.reset('rivera', { signedIn: false });
     await expect.poll(() => router.state.location.pathname).toBe('/');
     await expect.element(introDialog(screen)).toBeVisible();
@@ -632,7 +634,7 @@ describe('Arrival', () => {
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
-    // Time for a read on mount to go out, had Today sent one: the new copy's inbox was read once, ahead.
+    // Time for another read to go out, had anything sent one: the new copy's bar read its inbox once.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(1);
   });
@@ -641,9 +643,9 @@ describe('Arrival', () => {
     const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
     await startTheDemo(screen);
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
-    const card = screen.getByRole('heading', { level: 2, name: 'Your public page' });
-    await expect.element(card).toBeVisible();
+    // "Chat as a customer" at the right of the greeting's line, the public page a new tab away.
     await expect.element(screen.getByRole('link', { name: 'Chat as a customer' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Chat as a customer' }).element().closest('.cd-greeting')).not.toBeNull();
     // Let Today poll a few times, then look: no chat, panel or sheet, and nothing asked of the public side.
     await expect.poll(() => requests('today').length, { timeout: 5_000 }).toBeGreaterThan(2);
     expectNoChatOnToday();
@@ -1191,8 +1193,8 @@ describe('OwnerLayout', () => {
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
-    // Today keeps its own skeleton while that read is out (plan 08c, decision 7).
-    await expectTodayHoldsForItsInbox();
+    // Today opens without it; the demo bar draws the inbox once its read is in.
+    await expectTodayOpensWithoutItsInbox();
 
     // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
     const newInbox = holdReads(ROUTES.ownerInbox.path);
@@ -1215,12 +1217,12 @@ describe('OwnerLayout', () => {
     newInbox.release();
     newDesks.release();
 
-    // The new copy's Today reads its own inbox ahead with the rest of it, so it opens with its one
-    // entry counted, never with the inbox still opening.
+    // The new copy's bar reads its own inbox, and draws it with its one entry counted, never with the
+    // inbox still opening.
     await expect.element(heldCard(screen)).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
     expect(sawItOpening()).toBe(false);
-    // Time for a read on mount to go out, had Today sent one: the old copy's read and the new one's.
+    // Time for another read to go out, had anything sent one: the old copy's read and the new one's.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(2);
 
@@ -1298,7 +1300,7 @@ describe('OwnerLayout', () => {
         controls: (screen: RenderResult) => [
           screen.getByRole('button', { name: 'Copy your Desk link' }),
           screen.getByRole('button', { name: 'Hide this list' }),
-          screen.getByRole('button', { name: 'Show me ideas' }),
+          rowStep(thingsToTry(screen), 'Show me ideas', 'Try to break it'),
         ],
       },
       {
@@ -1340,10 +1342,16 @@ describe('Today', () => {
     const things = screen.getByRole('region', { name: 'Things to try' });
     await expect.element(things).toBeVisible();
     const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
-    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Create your own Desk']);
-    // Let Today poll a few times: nothing is held, so the item stays away.
+    const all = ['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk'];
+    expect(titles()).toEqual(all);
+    // Let Today poll a few times: nothing is held, so the item says where a request will show, with
+    // no next step and no held dot.
     await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(2);
-    expect(titles()).toHaveLength(3);
+    expect(titles()).toEqual(all);
+    const waiting = things.getByRole('listitem').nth(2);
+    await expect.element(waiting.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
+    expect(waiting.getByRole('button').elements()).toHaveLength(0);
+    expect(waiting.element().querySelector('.cd-status-dot--held')).toBeNull();
 
     // A visitor on the public page asks for 50% off, and the Desk holds it for Maria.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
@@ -1418,7 +1426,7 @@ describe('Today', () => {
   it('phone_width_fits', async () => {
     const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
-    await screen.getByRole('button', { name: 'Show me ideas' }).click();
+    await rowStep(thingsToTry(screen), 'Show me ideas', 'Try to break it').click();
     expectNoHorizontalScroll();
     // The right column stacks under the page.
     const aside = document.querySelector('.cd-today-aside');
@@ -1469,7 +1477,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
     const item = row.element();
     const watching = watchTheList(item, things.element(), screen.getByRole('region', { name: 'Needs you' }).element(), ANSWERED_LINE);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
@@ -1525,7 +1533,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
     const allow = heldCard(screen).getByRole('button', { name: 'Allow this time' });
     allow.element().scrollIntoView({ block: 'center' });
     const needsYou = screen.getByRole('region', { name: 'Needs you' }).element();
@@ -1543,7 +1551,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Try to break it');
-    await row.getByRole('button', { name: 'Show me ideas' }).click();
+    await rowStep(row, 'Show me ideas', 'Try to break it').click();
     await expect.element(row.getByRole('group', { name: 'Ideas to try' })).toBeVisible();
     const needsYou = screen.getByRole('region', { name: 'Needs you' }).element();
 
@@ -1582,17 +1590,17 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
     const needsYou = screen.getByRole('region', { name: 'Needs you' }).element();
     const watching = watchTheList(row.element(), things.element(), needsYou, ANSWERED_LINE);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
     const frames = await watching;
 
-    // The row never keeps a height: Needs you takes its new place in the frame the row ticks.
+    // The row never keeps a height. From 640 px its card shares its row's height, so Needs you stays put.
     expect(frames.every((frame) => frame.kept === '')).toBe(true);
     const from = frames[0]?.below ?? 0;
     const to = frames.at(-1)?.below ?? 0;
-    expect(to).toBeLessThan(from - 4);
+    expect(to).toBeCloseTo(from, 0);
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5 || Math.abs(frame.below - to) < 0.5)).toBe(true);
   });
 
@@ -1673,7 +1681,7 @@ describe('Things to try ticks off', () => {
     const animated = watchListAnimations();
     await router.navigate(TODAY);
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
     // The late read lands, from before the answer: it was asked before Today opened, so it isn't
     // Today's first read. Today's own reads, after the answer, are, and the row is done at load.
     late.release();
@@ -1722,7 +1730,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
     const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === rivera.decisions.held.reason_plain)?.decision;
     if (!held) throw new Error('the seed holds the 15% quote');
     mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...held, state, answers: [] } } });
@@ -1759,7 +1767,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
     const held = seededHoldNow();
     mockStore.inject({ route: 'answer', status: 200, body: { decision: { ...held, state, answers: [] }, execution_state: null, card_diff: null } });
     const item = row.element() as HTMLElement;
@@ -1785,7 +1793,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
     const held = seededHoldNow();
     const confirming = 'You allowed this. Still confirming whether it went through.';
     mockStore.inject({ route: 'answer', status: 200, body: { decision: { ...held, state: 'unknown', answers: [] }, execution_state: 'unknown', card_diff: null } });
@@ -1807,7 +1815,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
     const item = row.element() as HTMLElement;
     const held = seededHoldNow();
     mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...held, state: 'expired', answers: [] } } });
@@ -1829,7 +1837,7 @@ describe('Things to try ticks off', () => {
     // A new request is held: the same row waits for it again.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I get 50% off if I pay cash?' } });
-    await expect.element(row.getByRole('button', { name: 'Open the request' }), { timeout: 3_000 }).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request'), { timeout: 3_000 }).toBeVisible();
     expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
     expect(row.getByText(EXPIRED_ROW_LINE, { exact: true }).elements()).toHaveLength(0);
   });
@@ -1880,7 +1888,7 @@ describe('Things to try ticks off', () => {
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I get 50% off if I pay cash?' } });
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' }), { timeout: 3_000 }).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request'), { timeout: 3_000 }).toBeVisible();
     const next = [...mockStore.world.decisions.values()].find((d) => d.decision.state === 'held' && d.decision.reason_plain !== rivera.decisions.held.reason_plain)?.decision;
     if (!next) throw new Error('a new request is held');
     const card = screen.getByRole('article', { name: `Held for you: ${next.reason_plain}`, exact: true });
@@ -1900,7 +1908,7 @@ describe('Things to try ticks off', () => {
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.emergenciesSlug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.emergenciesSlug }, body: { text: 'Can I get 50% off if I pay cash?' } });
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' }), { timeout: 3_000 }).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request'), { timeout: 3_000 }).toBeVisible();
     const held = [...mockStore.world.decisions.values()].find((d) => d.deskId === RIVERA.emergenciesDeskId && d.decision.state === 'held')?.decision;
     if (!held) throw new Error('Emergencies holds a request');
     const card = screen.getByRole('article', { name: `Held for you: ${held.reason_plain}`, exact: true });
@@ -1932,7 +1940,7 @@ describe('Things to try ticks off', () => {
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.emergenciesSlug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.emergenciesSlug }, body: { text: 'Can I get 50% off if I pay cash?' } });
     const row = thingRow(screen, 'Answer a held request');
-    await expect.element(row.getByRole('button', { name: 'Open the request' }), { timeout: 3_000 }).toBeVisible();
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request'), { timeout: 3_000 }).toBeVisible();
     const held = [...mockStore.world.decisions.values()].find((d) => d.deskId === RIVERA.emergenciesDeskId && d.decision.state === 'held')?.decision;
     if (!held) throw new Error('Emergencies holds a request');
     const card = screen.getByRole('article', { name: `Held for you: ${held.reason_plain}`, exact: true });
@@ -1971,7 +1979,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Try to break it');
-    await expect.element(row.getByRole('button', { name: 'Show me ideas' })).toBeVisible();
+    await expect.element(rowStep(row, 'Show me ideas', 'Try to break it')).toBeVisible();
 
     // The owner's new tab opens a preview of the Desk, and the checkpoint stops a reply there.
     await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
@@ -1991,7 +1999,7 @@ describe('Things to try ticks off', () => {
     const { screen } = await renderRoute(TODAY);
     const row = thingRow(screen, 'Try to break it');
     vi.spyOn(window, 'open').mockReturnValue({ opener: window } as unknown as Window);
-    await row.getByRole('button', { name: 'Show me ideas' }).click();
+    await rowStep(row, 'Show me ideas', 'Try to break it').click();
     const idea = row.getByRole('group', { name: 'Ideas to try' }).getByRole('button').first();
     await idea.click();
     await expect.element(row.getByText(OPENED, { exact: true })).toBeVisible();
@@ -2091,24 +2099,25 @@ describe('Things to try ticks off', () => {
     const things = thingsToTry(screen);
     const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
     await expect.element(things).toBeVisible();
-    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Create your own Desk']);
+    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
 
-    // The owner chats in a preview and Claude replies: one of the four is done, though only three show.
+    // The owner chats in a preview and Claude replies: one of the four is done, and all four show.
     await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
     await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
     await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    // Nothing is held, so "Answer a held request" still waits.
+    // Nothing is held, so "Answer a held request" still waits, in its place.
     await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(2);
-    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Create your own Desk']);
+    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
   });
 
   it('second_desk_reads_the_desk_the_copy_started_with', async () => {
     const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
     const things = thingsToTry(screen);
     await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
-    // Nothing is held on Emergencies, so "Answer a held request" waits.
-    expect(thingRow(screen, 'Answer a held request').elements()).toHaveLength(0);
+    // Nothing is held on Emergencies, so "Answer a held request" waits, with no next step.
+    await expect.element(thingRow(screen, 'Answer a held request').getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
+    expect(thingRow(screen, 'Answer a held request').getByRole('button').elements()).toHaveLength(0);
 
     // The owner chats in a preview of the main line, the Desk the copy started with.
     await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
@@ -2183,10 +2192,10 @@ function mainLinePath(key: 'conversations' | 'ledger'): string {
  * Today's frame is up (after the read ahead's deadline) with Today still on its own skeleton, its
  * sections waiting for the copy's Demo inbox.
  */
-async function expectTodayHoldsForItsInbox(): Promise<void> {
-  await vi.waitFor(() => expect(document.querySelector('nav[aria-label="Main"]')).not.toBeNull(), { timeout: READ_AHEAD_MS + 2_000 });
-  expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer')).not.toBeNull();
-  expect(document.querySelector('.cd-needs-you')).toBeNull();
+/** Today opens with the copy's Demo inbox read still out: the demo bar draws no inbox button meanwhile. */
+async function expectTodayOpensWithoutItsInbox(): Promise<void> {
+  await vi.waitFor(() => expect(document.querySelector('.cd-needs-you')).not.toBeNull(), { timeout: READ_AHEAD_MS + 2_000 });
+  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
 }
 
 function watchListAnimations(): () => string[] {
@@ -2284,6 +2293,17 @@ function thingsToTry(screen: RenderResult) {
 }
 
 /** A row of Things to try, by its title. */
+/**
+ * A Things to try row's next step: its button, named `label`, from 640 px; on a phone the row itself,
+ * named by its `title`.
+ */
+function rowStep(row: Locator, label: string, title: string): Locator {
+  return window.innerWidth < 640 ? row.getByRole('button', { name: title, exact: true }) : row.getByRole('button', { name: label, exact: true });
+}
+
+/** From 640 px the cards of a row share its height, so a card that ticks or settles moves nothing under the list. */
+const cardsShareTheirRow = () => window.innerWidth >= 640;
+
 function thingRow(screen: RenderResult, title: string) {
   return thingsToTry(screen)
     .getByRole('listitem')
@@ -2329,6 +2349,13 @@ const TOO_SMALL_TO_EASE = 4;
 function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): void {
   const from = frames[0]?.below ?? 0;
   const to = frames.at(-1)?.below ?? 0;
+  // A card whose row keeps its height (its open ideas didn't make it the tallest) moves nothing.
+  if (cardsShareTheirRow() && Math.abs(to - from) < 0.5) {
+    expect(frames.some((frame) => frame.checkDrawing), 'the check drew').toBe(true);
+    expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
+    expect(row.style.minHeight).toBe('');
+    return;
+  }
   for (const [i, frame] of frames.entries()) {
     if (frame.checkDrawing) expect(Math.abs(frame.below - from), `held while the check drew, frame ${i}`).toBeLessThan(0.5);
   }
@@ -2362,6 +2389,11 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement):
   expect(first).toBeGreaterThan(-1);
   expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
+  if (cardsShareTheirRow()) {
+    expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
+    expect(row.style.minHeight).toBe('');
+    return;
+  }
   for (const [i, frame] of frames.entries()) {
     const step = frame.below - (frames[i - 1]?.below ?? frame.below);
     expect(step, `moved down at frame ${i}`).toBeLessThan(0.5);

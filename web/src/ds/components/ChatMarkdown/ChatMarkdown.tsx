@@ -71,6 +71,12 @@ export interface ChatMarkdownProps {
   streaming?: boolean;
   /** Visitor reveal: `text` is whole; reveal it word by word (about 200 chars/s, at most about 3 s). Default false. */
   reveal?: boolean;
+  /**
+   * With `reveal`, when `text` is one of several blocks of a reply revealed one after another: the
+   * whole reply's length, which sets the pace, so the reply takes at most about 3 s in all. Default:
+   * the length of `text`.
+   */
+  revealLength?: number;
   /** Called once when everything in `text` is shown (at once when not revealing, or with reduce-motion on). */
   onRevealed?: () => void;
   /**
@@ -253,9 +259,9 @@ function useRevealedOnce(whole: boolean, onRevealed: (() => void) | undefined): 
  * HTML, links only to http, https and mailto. A growing text shows up to its last whole word, with
  * unfinished Markdown closed; a revealed one shows a growing start of itself, word by word.
  */
-export function ChatMarkdown({ text, streaming = false, reveal = false, onRevealed, links = 'inert' }: ChatMarkdownProps) {
+export function ChatMarkdown({ text, streaming = false, reveal = false, revealLength, onRevealed, links = 'inert' }: ChatMarkdownProps) {
   const reduced = useReducedMotion();
-  const { shown, whole } = useReveal(text, streaming, reveal && !reduced);
+  const { shown, whole } = useReveal(text, streaming, reveal && !reduced, revealLength);
   useRevealedOnce(whole, onRevealed);
   return (
     <Streamdown

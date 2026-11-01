@@ -39,7 +39,7 @@ it('reviewer_shape_measures_the_control_with_different_font_metrics', async () =
   onTestFinished(() => { root.unmount(); host.remove(); metrics.remove(); });
   flushSync(() => root.render(<><ReviewerBar ownerName="Maria Rivera" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
   const real = host.querySelector('.cd-button')!;
-  const shape = host.querySelector('.cd-reviewer-bar > .cd-skeleton')!;
+  const shape = host.querySelector('.cd-reviewer-bar__actions > .cd-skeleton:last-child')!;
   expect(shape.textContent).toBe('');
   await expect.poll(() => Math.abs(real.getBoundingClientRect().width - shape.getBoundingClientRect().width)).toBeLessThanOrEqual(2);
 });
@@ -58,7 +58,7 @@ it('reviewer_shape_remeasures_when_its_font_loads_after_mount', { timeout: 15_00
   onTestFinished(() => { root.unmount(); host.remove(); document.fonts.delete(late); });
   flushSync(() => root.render(<><ReviewerBar ownerName="Maria Rivera" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
   const real = host.querySelector('.cd-button')!;
-  const shape = host.querySelector('.cd-reviewer-bar > .cd-skeleton')!;
+  const shape = host.querySelector('.cd-reviewer-bar__actions > .cd-skeleton:last-child')!;
   await expect.poll(() => Math.abs(real.getBoundingClientRect().width - shape.getBoundingClientRect().width)).toBeLessThanOrEqual(2);
   const [realBar, shapeBar] = host.querySelectorAll('.cd-reviewer-bar');
   await expect.poll(() => Math.abs(realBar!.getBoundingClientRect().height - shapeBar!.getBoundingClientRect().height)).toBeLessThanOrEqual(2);
@@ -101,7 +101,7 @@ it('reviewer_shape_follows_natural_text_wrapping_between_breakpoints', async () 
       expect(Math.abs(line.getBoundingClientRect().width - (i === 0 ? Math.min(available, 430) : available * 0.75))).toBeLessThanOrEqual(0.02);
     });
     const action = real!.querySelector('.cd-button')!.getBoundingClientRect();
-    const control = shape!.querySelector(':scope > .cd-skeleton')!.getBoundingClientRect();
+    const control = shape!.querySelector('.cd-reviewer-bar__actions > .cd-skeleton:last-child')!.getBoundingClientRect();
     expect(Math.abs(action.left - control.left), `control left at ${width}px`).toBeLessThanOrEqual(2);
     expect(Math.abs((action.top - real!.getBoundingClientRect().top) - (control.top - shape!.getBoundingClientRect().top)), `control top at ${width}px`).toBeLessThanOrEqual(2);
     expect(shape!.textContent).toBe('');
