@@ -11,7 +11,7 @@ import base64
 import binascii
 import json
 from collections.abc import Iterable
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import Any, get_args
 
 from pydantic import ValidationError
@@ -64,7 +64,7 @@ from desk.api.versions import (
 from desk.contracts import MONEY_TOOLS, Effect, HoursWindow, PolicyVersion, RuleCard
 from desk.kernel_api import PolicyConfirmRequest
 from desk.money_cap import Language, lower_to_cap
-from desk.presets import PRESETS, PresetName
+from desk.presets import PRESETS, PresetName, preset_cards
 
 # The language the owner reads the rules in, for the rule copy code writes (a lowered card's reason). The owner app
 # renders rules copy in English today (its rules chat shows Claude's answers with language "en"), and `kernel_ro`
@@ -94,9 +94,6 @@ TOOL_LABELS = {
 SUGGESTION_TEXT = "You approved {count} {label} requests. Let me handle these?"
 SUGGESTED_REASON = "{label} requests go ahead without asking you."
 SUGGESTED_MONEY_REASON = "{label} requests up to {amount} go ahead without asking you."
-# "Recommended rules" books weekdays in the Desk's own hours (`preset_cards`): its booking card, and the days it keeps.
-PRESET_BOOKING_CARD = "preset-book-weekday"
-WEEKDAYS = ("mon", "tue", "wed", "thu", "fri")
 
 
 class AboveMoneyCap(AnswerError):
@@ -121,46 +118,9 @@ def card_diff(before: list[RuleCard], after: list[RuleCard]) -> CardDiff:
                              if card.card_id in old and old[card.card_id] != card])
 
 
-def weekday_windows(hours: Iterable[HoursWindow]) -> list[HoursWindow]:
-    """The weekday part of a Desk's opening hours: each window's days cut to Monday to Friday, a window left with none
-    dropped (a Saturday's, say), and windows with the same start and end merged, their days in week order; an end of
-    00:00 stays midnight. They come by their first day, then their start, then their end (midnight last), however the
-    Desk keeps its windows, so the same hours always give the same list."""
-    merged_days: dict[tuple[time, time], set[str]] = {}
-    for window in hours:
-        weekdays = set(window.days) & set(WEEKDAYS)
-        if weekdays:
-            merged_days.setdefault((window.start, window.end), set()).update(weekdays)
-    windows = [HoursWindow(days=[day for day in WEEKDAYS if day in days], start=start, end=end)
-               for (start, end), days in merged_days.items()]
-    return sorted(windows, key=lambda window: (WEEKDAYS.index(window.days[0]), window.start, window.end == time(0),
-                                               window.end))
-
-
-def preset_cards(name: PresetName, hours: Iterable[HoursWindow]) -> list[RuleCard]:
-    """The preset's cards for a Desk with these opening hours. "Recommended rules" books weekdays in the Desk's own
-    hours: its weekday booking card takes the Desk's weekday windows (`weekday_windows`), one card per window in that
-    order, in the card's place, each the preset's card in all but its hours (its reason names none) and, for several
-    windows, its ID, numbered `-1`, `-2` and on. With no weekday hours, or exactly the card's own (Monday to Friday,
-    09:00 to 17:00), and for "Ask me first", which books nothing, they are the preset's cards as they are, so a draft
-    of them hits the proofs shipped for them; other hours make cards the kernel proves like any owner draft. The
-    preset is read when this runs, never copied."""
-    cards = list(PRESETS[name])
-    booking = next((card for card in cards if card.card_id == PRESET_BOOKING_CARD), None)
-    windows = weekday_windows(hours)
-    if booking is None or not windows or windows == [booking.hours]:
-        return cards
-    card_ids = ([booking.card_id] if len(windows) == 1
-                else [f"{booking.card_id}-{number}" for number in range(1, len(windows) + 1)])
-    at = cards.index(booking)
-    return [*cards[:at], *(booking.model_copy(update={"card_id": card_id, "hours": window})
-                           for card_id, window in zip(card_ids, windows, strict=True)), *cards[at + 1:]]
-
-
-def preset_of(cards: Iterable[RuleCard], hours: Iterable[HoursWindow]) -> PresetName | None:
+def preset_of(cards: Iterable[RuleCard], hours: list[HoursWindow]) -> PresetName | None:
     """The preset the owner cards are, exactly (default asks aside, in any order), as a Desk with these opening hours
     drafts it (`preset_cards`), else None."""
-    hours = list(hours)
     owned = sorted((card for card in cards if not card.is_default), key=lambda card: card.card_id)
     for name in PRESETS:
         if owned == sorted(preset_cards(name, hours), key=lambda card: card.card_id):

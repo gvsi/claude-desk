@@ -40,7 +40,7 @@ from desk.api.prompts import (
     RuleChat,
 )
 from desk.api.ratelimit import LIMITS, Limit
-from desk.api.rules import card_diff, chat_view, preset_cards, preset_of, rule_card
+from desk.api.rules import card_diff, chat_view, preset_of, rule_card
 from desk.api.schemas import (
     CardDiff,
     CoveringCard,
@@ -73,7 +73,7 @@ from desk.kernel_api import (
     PolicyDraftRequest,
     ToolsSimulateChangeRequest,
 )
-from desk.presets import PRESETS
+from desk.presets import PRESETS, preset_cards
 from tests.api.fakes import ScriptedModel, gated
 from tests.api.test_copies import production_settings, usage_row
 from tests.api.test_owner_desks import Owner, new_desk, new_owner

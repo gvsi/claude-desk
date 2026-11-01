@@ -20,14 +20,13 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.api.rules import preset_cards
 from desk.contracts import LedgerEvent, PolicyVersion, RuleCard, ToolProfile
 from desk.db.models import LedgerEntry, Person, Tool
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import activation, compiler, desks, ledger
 from desk.kernel_service.repo import new_id
 from desk.kernel_service.seed import RIVERA_CARDS, SATURDAY_HOURS, WEEKDAY_HOURS
-from desk.presets import PRESETS
+from desk.presets import PRESETS, preset_cards
 
 from .helpers import (TEST_CAP, CopyRows, compile_at, draft_and_confirm, draft_refusals, kernel_ctx, make_copy_rows,
                       rows_of)
@@ -140,7 +139,7 @@ async def test_draft_is_proved_with_every_obligation(desk_prove, app, client):
 
 @pytest.mark.solver
 async def test_recommended_rules_in_a_desks_own_hours_prove(desk_prove, app, client):
-    """"Recommended rules" as the API drafts it for Rivera's Desk (`desk.api.rules.preset_cards`): its weekday
+    """"Recommended rules" as the API drafts it for Rivera's Desk (`desk.presets.preset_cards`): its weekday
     booking card in Rivera's 08:00 to 18:00 weekday hours, not the shipped 09:00 to 17:00, misses the shipped proof,
     so the kernel compiles and proves it like any owner draft, every obligation holding, and it activates."""
     copy = await rivera(app, client)
