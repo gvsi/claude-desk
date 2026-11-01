@@ -2,11 +2,13 @@
 Plan 02a, Task 5).
 
 `run_turn(conn, caller, model)` answers what is waiting in a session. It reads the session's mode and generation
-from the kernel (`GET /whoami`) and its tools and facts (`GET /context`), brings the model context up to date
-(a `desk_context` row when the facts change, tool changes, or a fresh context, which a changed system prompt opens
-too), then calls Claude on the system prompt and tools the context froze, and acts on each response by its stop
-reason. Claude only proposes: every tool call goes through `/decide` (`tools.route_call`),
-and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
+from the kernel (`GET /whoami`), sends it the visitor's or agent's newest message so it renders the turn in that
+message's language (`POST /sessions/{session_id}/turn`, before a paused or over-budget turn's handoff too, and again
+before a model call that places a newer message), reads the session's tools and facts (`GET /context`), brings the
+model context up to date (a `desk_context` row when the facts change, tool changes, or a fresh context, which a
+changed system prompt opens too), then calls Claude on the system prompt and tools the context froze, and acts on
+each response by its stop reason. Claude only proposes: every tool call goes through `/decide`
+(`tools.route_call`), and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
 
 `run_pending(caller, model, ...)` is how a request starts turns (Task 6): one session's turns run one at a time,
 under the turn lock (`turn_lock`), until no work is waiting (an agent's request runs one turn at most).
@@ -34,6 +36,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from desk.api.deliver import run_lock
 from desk.api.jobs import defer_turn_annotations
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.metrics import RevealMetric, TurnMetric, over_daily_budget, record_model_call
@@ -44,6 +47,7 @@ from desk.api.ro import KernelRO
 from desk.api.sse import append_metric, emit
 from desk.api.store import (
     OpenToolUse,
+    Said,
     append_assistant,
     append_message,
     append_stopped_draft,
@@ -57,7 +61,9 @@ from desk.api.store import (
     delivered_reply,
     last_context_hash,
     latest_pending,
+    latest_said,
     lock_key,
+    newest_row,
     prepare_model_input,
     start_fresh_context,
     unanswered_tool_use,
@@ -81,7 +87,7 @@ from desk.api.tools import (
 from desk.api.triage import Stopped
 from desk.contracts import SessionState
 from desk.events import EvError, EvTurnEnd, EvWriting
-from desk.kernel_api import SessionContext
+from desk.kernel_api import TURN_TEXT_CHARS, SessionContext, TurnRequest
 
 TurnOutcome = Literal["done", "fenced", "session_ended", "kernel_unavailable", "handoff", "turn_over", "not_ai",
                       "internal"]
@@ -193,6 +199,8 @@ class _Turn:
     system: list[dict] = field(default_factory=list)   # the system prompt this turn rendered
     rebound: bool = False                              # a thinking-binding 400 started a fresh context this turn
     recovered: bool = False                            # the turn `_drain` runs so Claude reads recovered results
+    said_n: int | None = None                          # the newest message sent to `/turn` this turn, by its `n`
+    annotates: bool = True                             # False for a handoff with no model call: none for the owner
 
     @property
     def visitor(self) -> bool:
@@ -206,9 +214,13 @@ class _Turn:
         self.generation = session.generation
         if session.mode == "owner":                        # the owner took over: Claude stays quiet
             return "not_ai"
+        refused = await self._tell_waiting()               # first, even for a handoff: it speaks the turn's language
+        if refused is not None:
+            return refused
         if session.mode == "paused":                       # the breaker tripped: the kernel's handoff, no model call
             await clear_wake(conn, caller.session_id)
             await conn.commit()
+            self.annotates = False
             return await self._hand_off()
         if self.production:                                # past today's model budget: the handoff, no model call
             over = await over_daily_budget(conn, self.clock)
@@ -216,10 +228,10 @@ class _Turn:
                 await clear_wake(conn, caller.session_id)
             await conn.commit()
             if over:
+                self.annotates = False
                 return await self._hand_off()
         if self.visitor:
-            await emit(conn, caller.ids, EvWriting(type="writing"))
-            await conn.commit()
+            await self._writing()
         try:
             context = await caller.kernel.call("GET /context/{session_id}?desk_id=",
                                                path={"session_id": caller.session_id})
@@ -231,12 +243,60 @@ class _Turn:
         await self._bring_up_to_date(context, self.system)
         await conn.commit()
         while True:
-            if self.model_calls >= MAX_MODEL_CALLS:
-                return await self._hand_off()
+            if self.model_calls >= MAX_MODEL_CALLS:            # out of calls: the handoff, unless it is on screen
+                return self._ended() if self.delivered == "handoff" else await self._hand_off()
             response = await self._call()
+            if isinstance(response, str):                  # the kernel refused a newer message's `/turn`
+                return response
             outcome = await self._act(response)
             if outcome is not None:
                 return outcome
+
+    async def _writing(self) -> None:
+        """Show the visitor that Claude is writing, only while the session is still at the generation the turn read:
+        a take-over landing since showed `owner_joined`, and a `writing` after it would read as Claude having the chat
+        again. Checked under the run lock a take-over holds around its mode change and its event (`deliver.run_lock`),
+        with the generation read from `kernel_ro` after the lock, as `deliver()` reads it; the lock goes at the commit,
+        before any kernel call. A turn that skips it goes on, and the kernel fences what it does at the old
+        generation."""
+        conn, caller = self.conn, self.caller
+        await run_lock(conn, caller.session_id)
+        session = await KernelRO(conn, caller.copy_id, caller.ro_schema).session(caller.session_id)
+        if session is not None and session["generation"] == self.generation:
+            await emit(conn, caller.ids, EvWriting(type="writing"))
+        await conn.commit()
+
+    async def _tell_waiting(self, through: int | None = None) -> TurnOutcome | None:
+        """Tell the kernel the turn's language before anything is rendered in it (GitHub issue #121): the newest
+        visitor or agent message waiting for the next model call (`store.latest_said`, up to `through` when given),
+        whether or not it woke the turn, goes to `POST /sessions/{session_id}/turn` (`_tell`), and the kernel keeps
+        the language it detects as the session's, which the turn's receipts and cards and the reply check's fallback
+        then speak. The turn calls it right after the session and mode checks, so a paused or over-budget turn's
+        handoff speaks it too, and before each model call (`_call`), where it sends only a message newer than the last
+        it sent. Nothing waiting, nothing sent. How the turn ends when the kernel refuses, as it would on `/context`,
+        else None."""
+        said = await latest_said(self.conn, self.caller.session_id, through=through)
+        await self.conn.commit()
+        return await self._tell(said)
+
+    async def _tell(self, said: Said | None) -> TurnOutcome | None:
+        """Send `said` to `POST /sessions/{session_id}/turn`, cut to the contract's `TURN_TEXT_CHARS`, unless the turn
+        already sent it or a newer message: once per newer message, which the route detects again by design. The text
+        is untrusted and goes only to the kernel's detector: nothing here logs or keeps it. How the turn ends when the
+        kernel refuses, as it would on `/context` (`_failed`), else None."""
+        if said is None or (self.said_n is not None and said.n <= self.said_n):
+            return None
+        caller = self.caller
+        try:
+            await caller.kernel.call("POST /sessions/{session_id}/turn",
+                                     TurnRequest(generation=self.generation, text=said.text[:TURN_TEXT_CHARS]),
+                                     path={"session_id": caller.session_id})
+        except KernelFailed as failure:
+            return _failed(failure)
+        except KernelUnavailable:
+            return "kernel_unavailable"
+        self.said_n = said.n
+        return None
 
     async def _bring_up_to_date(self, context: SessionContext, system: list[dict]) -> None:
         """A `desk_context` row when the facts or knowledge changed, then the tool changes `/context` calls for:
@@ -274,14 +334,26 @@ class _Turn:
         if fresh:
             await start_fresh_context(conn, ids, model_tools(context), system=system)
 
-    async def _call(self) -> ModelResponse | None:
+    async def _call(self) -> ModelResponse | TurnOutcome | None:
         """One model call on the context as it stands (the system prompt and tools it froze, and its messages), its
         usage recorded at once; None when the model was unavailable. A 400 saying a replayed thinking block is bound
         to a different conversation calls once more on a fresh context (`_rebind`); a second one, like any other
-        failure, is None."""
+        failure, is None.
+
+        A visitor or agent message newer than the one the turn last sent `/turn` (one sent while the turn ran) joins
+        this call, so it goes to `/turn` first (`_tell_waiting`), while it still waits: a refusal leaves it waiting
+        for a turn, as `/context`'s does, and ends this one (its outcome is returned in place of a response). The
+        call places rows only up to a cutoff read just before the look (`store.newest_row`), which first waits out any
+        message still being written, under the events lock it holds until `_tell_waiting` commits, before `/turn`. So
+        every message up to the cutoff is seen by the look, and one written after it keeps waiting for the next call,
+        which tells the kernel first."""
         conn, caller = self.conn, self.caller
         while True:
-            model_input = await prepare_model_input(conn, caller.session_id)
+            through = await newest_row(conn, caller.session_id)      # this call places nothing written after it
+            refused = await self._tell_waiting(through)
+            if refused is not None:
+                return refused
+            model_input = await prepare_model_input(conn, caller.session_id, through=through)
             await conn.commit()
             self.model_calls += 1
             try:
@@ -480,11 +552,14 @@ class _Turn:
             return None
 
     async def _reply(self, tool_input: object, call_id: str | None) -> ToolOutcome:
-        """One reply of Claude's at the turn's attempt (`tools.send_reply`). A draft the check stopped that Claude may
-        rewrite is kept for the owner here, in the turn's transaction, which the caller commits with the result Claude
-        reads and before any other kernel call (`_tool_use`, `_end_turn`)."""
+        """One reply of Claude's at the turn's attempt (`tools.send_reply`), which Claude may still rewrite only on
+        attempt 1 while the turn has a model call left (`call_left`; any other check is `final` for the kernel, in
+        every kind of session). A draft the check stopped that Claude may rewrite is kept for the owner here, in the
+        turn's transaction, which the caller commits with the result Claude reads and before any other kernel call
+        (`_tool_use`, `_end_turn`)."""
         attempt = self.attempt
-        outcome = await send_reply(self.conn, self.caller, self.generation, tool_input, attempt, call_id=call_id)
+        outcome = await send_reply(self.conn, self.caller, self.generation, tool_input, attempt,
+                                   call_left=self.model_calls < MAX_MODEL_CALLS, call_id=call_id)
         if outcome.kept is not None:
             await append_stopped_draft(self.conn, self.caller.ids, outcome.kept)
         self._note(outcome)
@@ -498,7 +573,9 @@ class _Turn:
 
     async def finish(self, outcome: TurnOutcome) -> None:
         """Show why the turn failed, if it did, record the turn's metrics and, for a visitor, end the turn on its
-        stream (silent ends included); then leave the turn's triage and translations for the job queue."""
+        stream (silent ends included); then leave the turn's triage and translations for the job queue, unless it
+        handed off with no model call (paused, or past today's budget), which sets off no model call for the owner
+        either: its handoff card, in the visitor's language, isn't translated."""
         conn, ids = self.conn, self.caller.ids
         if outcome in ERROR_CODES:
             await emit(conn, ids, EvError(type="error", code=ERROR_CODES[outcome]))
@@ -511,6 +588,8 @@ class _Turn:
         if self.visitor:
             await emit(conn, ids, EvTurnEnd(type="turn_end"))
         await conn.commit()
+        if not self.annotates:
+            return
         await defer_turn_annotations(self.jobs, conn, ids, self.stopped, self.replied, limiter=self.limiter,
                                      ledger=RateLimitLedger(self.caller.kernel, desk_id=ids.desk_id,
                                                             session_id=ids.session_id))

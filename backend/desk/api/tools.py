@@ -5,7 +5,11 @@ Claude only proposes. Every tool call but `send_reply` goes to `/decide` with th
 and runs only on the kernel's allow, through `/execute`; a hold returns at once. The visitor sees each decision
 once, as the kernel signed it (`Status`, through `deliver()`), and an execution's Demo inbox notices meant for it (a
 code sent), code-free; a decision's own notices are owner alerts and never reach it. `send_reply` goes to
-`/check_reply`, and only what the kernel passed, or its handoff, reaches the visitor, through `deliver()`.
+`/check_reply`, and only what the kernel passed, or its handoff, reaches the visitor, through `deliver()`. A
+check is `final` (`CheckReplyRequest.final`) unless it is a first attempt the turn could still rewrite: the kernel
+opens the owner's handoff for a blocked final check, and the API shows that check's handoff at once, so what the
+kernel opens is what the session sees. The kinds a rewrite fixes are `desk.rewrites.REWRITABLE`, which the kernel
+reads too.
 
 Failures fail closed ("Fail-closed behavior"): nothing is decided twice (a lost `/decide` answer is found by call
 ID, a lost `/execute` answer by polling the decision), an `/execute` answered 409 `conflict` (the kernel has no
@@ -62,6 +66,7 @@ from desk.contracts import (
     money_tool,
 )
 from desk.kernel_api import CheckReplyRequest, DecideRequest, ExecuteRequest, SessionContext
+from desk.rewrites import REWRITABLE
 
 # How a change to the session's tools reaches Claude. "append": a `role: "system"` message of `tool_addition` and
 # `tool_removal` blocks, appended to the same context. "fresh_context": a new context with the new tools and a
@@ -174,9 +179,6 @@ SEND_REPLY = SEND_REPLY_TOOL["name"]
 # After an /execute timeout the decision is read each second for ten seconds ("Fail-closed behavior").
 EXECUTE_POLL_S, EXECUTE_POLLS = 1.0, 10
 EXECUTED = frozenset({"executed", "failed", "unknown"})
-# Violations Claude gets one rewrite for; any other kind hands off at once.
-REGENERABLE = frozenset({"number_in_prose", "promise_word", "soft_promise", "unknown_fact", "stale_fact",
-                         "unentitled_fact"})
 NOT_RUN = {"outcome": "not_run"}
 UNAVAILABLE = {"outcome": "unavailable"}
 REFUSED = {"outcome": "refused"}
@@ -568,12 +570,14 @@ def _blocked(violations: list[dict], **timing: int) -> ToolOutcome:
                        **timing)
 
 
-async def _check(caller: Caller, generation: int, prose: str, clauses: list[Clause]) -> ReplyVerdict | ToolOutcome:
+async def _check(caller: Caller, generation: int, prose: str, clauses: list[Clause], *,
+                 final: bool = True) -> ReplyVerdict | ToolOutcome:
     """The kernel's verdict on a draft, or how the turn ends when there is none: a refused check shows nothing and
-    ends the turn."""
+    ends the turn. `final` false tells the kernel a block of only rewritable kinds won't be shown (Claude rewrites
+    it), so it opens no owner handoff for it."""
     draft = ReplyDraft(session_id=caller.session_id, generation=generation, prose=prose, clauses=clauses)
     try:
-        return await caller.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
+        return await caller.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft, final=final))
     except KernelFailed as failure:
         if failure.refuses_call:
             return ToolOutcome(dict(REFUSED), True, turn_over=True)
@@ -609,34 +613,38 @@ async def hand_off(conn: AsyncConnection, caller: Caller, generation: int, *,
 
 
 async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, tool_input: Any, attempt: int, *,
-                     call_id: str | None = None) -> ToolOutcome:
+                     call_left: bool = True, call_id: str | None = None) -> ToolOutcome:
     """Claude's reply: checked by the kernel, then shown through `deliver()` only as the kernel passed it.
 
-    A reply blocked on attempt 1 with only kinds a rewrite can fix shows nothing and sends Claude the violations and
-    `REWRITE_INSTRUCTION`. An immediate-handoff kind (`canary`, `unsupported_language`, `session_paused`), or a block
-    on attempt 2, shows the verdict's blocks, the handoff clause, with no further kernel call. Input that doesn't
-    fit the tool never reaches the kernel: Claude gets one rewrite, then the handoff. `call_id` is the `send_reply`
-    call's `tool_use` ID; without one (Claude's plain text) the reply is the API's.
+    Claude may rewrite only attempt 1, and only while the turn has a model call left (`call_left`); that check alone
+    is sent with `final` false, every other one final, for every kind of session. A non-final reply blocked with
+    only kinds a rewrite can fix (`desk.rewrites.REWRITABLE`) shows nothing and sends Claude the violations and
+    `REWRITE_INSTRUCTION`. Any other block, an immediate-handoff kind (`canary`, `unsupported_language`,
+    `session_paused`) or a final check's, shows the verdict's blocks, the handoff clause, with no further kernel
+    call: the handoff the kernel opened for the owner. Input that doesn't fit the tool never reaches the kernel:
+    Claude gets one rewrite while it can, then the handoff. `call_id` is the `send_reply` call's `tool_use` ID;
+    without one (Claude's plain text) the reply is the API's.
 
     A draft the check stopped is kept for the owner (module docstring): committed with the handoff shown in its place,
     or, on a block Claude may rewrite, carried on the outcome (`kept`) for the caller to keep with the call's result.
     Nothing is left open on `conn` either way, so no lock of the session outlives the call."""
     if attempt not in (1, 2):
         raise ValueError("a reply has two attempts")
+    final = attempt != 1 or not call_left
     draft = _draft(tool_input)
     if isinstance(draft, list):
-        if attempt == 1:
+        if not final:
             return _blocked(draft)
         return await hand_off(conn, caller, generation, call_id=call_id)
     started = time.monotonic()
-    verdict = await _check(caller, generation, *draft)
+    verdict = await _check(caller, generation, *draft, final=final)
     timing = {"check_reply_ms": _ms(started)}
     if isinstance(verdict, ToolOutcome):
         return replace(verdict, **timing)
     if verdict.ok:
         return await _show(conn, caller, verdict, call_id, {"outcome": "delivered", "message_id": verdict.message_id},
                            "reply", **timing)
-    if attempt == 1 and all(violation.kind in REGENERABLE for violation in verdict.violations):
+    if not final and all(violation.kind in REWRITABLE for violation in verdict.violations):
         return replace(_blocked([{"kind": violation.kind, "span": violation.span}
                                  for violation in verdict.violations], **timing), stopped=_stopped(verdict),
                        kept=_kept(*draft, verdict, rewritable=True))

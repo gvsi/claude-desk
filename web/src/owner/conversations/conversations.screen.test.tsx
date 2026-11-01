@@ -10,6 +10,7 @@ import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision, StatusEvent } from '../../api/contracts.ts';
 import type { ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
+import { ROUTES } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { typingPingMs } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
@@ -21,6 +22,7 @@ import { expectOwnerBoard } from '../../test/boards.ts';
 import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
+import { holdReads } from '../../test/holdReads.ts';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -194,6 +196,202 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it.each(['scroll', 'focus'] as const)('a_first_callback_on_a_later_poll_leaves_her_%s_in_place', async (place) => {
+    const chat = named(DANA_LIVE, DANA);
+    const last = lengthen(chat);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
+    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    await expect.poll(() => region.scrollHeight - region.clientHeight - region.scrollTop).toBeLessThanOrEqual(1);
+    if (place === 'scroll') {
+      region.scrollTop = 300;
+      await expect.poll(() => region.scrollTop).toBe(300);
+    } else {
+      const trace = log(screen).element().querySelector<HTMLButtonElement>('button')!;
+      trace.focus({ preventScroll: true });
+      expect(document.activeElement).toBe(trace);
+    }
+    const focused = document.activeElement;
+    const placeAt = region.scrollTop;
+    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Call Dana later', callbackWindow: null, lead: DANA });
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeInTheDocument();
+    await readsMore('needsYou', 2);
+    expect(region.scrollTop).toBeGreaterThan(0);
+    expect(card.element().getBoundingClientRect().bottom).toBeLessThan(region.getBoundingClientRect().top);
+    expect(region.scrollTop).toBe(placeAt);
+    if (place === 'focus') expect(document.activeElement).toBe(focused);
+  });
+
+  it('late_callback_reveals_its_card_then_scrolling_to_the_end_follows_arrivals', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const last = lengthen(chat);
+    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
+    const held = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
+    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const endGap = () => region.scrollHeight - region.clientHeight - region.scrollTop;
+    await expect.poll(endGap).toBeLessThanOrEqual(1);
+    expect(region.scrollTop).toBeGreaterThan(0);
+    await expect.poll(held.held).toBeGreaterThan(0);
+    held.release();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeInTheDocument();
+    await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
+    expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
+    expect(region.scrollTop).toBe(0);
+    // Reading to the end resumes following even though the handoff is still open.
+    region.scrollTop = region.scrollHeight;
+    await expect.poll(endGap).toBeLessThanOrEqual(1);
+    mockStore.world.visitorText(chat, 'Please use the side gate.');
+    await expect.element(log(screen).getByText('Please use the side gate.', { exact: true })).toBeInTheDocument();
+    await expect.poll(endGap).toBeLessThanOrEqual(1);
+    // A second card on a later poll doesn't pull her away from earlier words.
+    region.scrollTop = 300;
+    await expect.poll(() => region.scrollTop).toBe(300);
+    const place = region.scrollTop;
+    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'A second call-back', callbackWindow: null, lead: DANA });
+    await expect.element(screen.getByText('A second call-back', { exact: true })).toBeInTheDocument();
+    await readsMore('needsYou', 2);
+    expect(region.scrollTop).toBe(place);
+    expect(region.scrollTop).toBeLessThan(region.scrollHeight - region.clientHeight - 48);
+  });
+
+  it.each(['desktop', 'phone'] as const)('cached_callback_opens_at_its_card_on_%s', async (viewport) => {
+    const chat = named(DANA_LIVE, DANA);
+    lengthen(chat);
+    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
+    const { screen } = await renderRoute(LIST, { viewport, pollScale: 100 });
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    await row.click();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeInTheDocument();
+    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
+    expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
+    expect(region.scrollHeight).toBeGreaterThan(region.clientHeight);
+    expect(region.scrollTop).toBe(0);
+    await card.getByRole('button', { name: 'Mark done' }).click();
+    await expect.element(card).not.toBeInTheDocument();
+    await expect.poll(() => document.activeElement).toBe(screen.getByRole('heading', { level: 2, name: DANA }).element());
+    expect(region.scrollTop).toBe(0);
+  });
+
+  it('callback_stays_after_takeover_and_fits_390px', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Dana Whitfield · (510) 555-0118 · Leaking water heater', callbackWindow: null, lead: DANA });
+    const { screen } = await renderRoute(LIST, { viewport: 'phone', pollScale: 100 });
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+    await row.click();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    await screen.getByRole('button', { name: 'Take over', exact: true }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toBeVisible();
+    await expect.element(card).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+    for (const el of screen.container.querySelectorAll('.cd-conversation__scroll, .cd-conversations__open')) {
+      expect(el.scrollWidth).toBeLessThanOrEqual(el.clientWidth);
+    }
+    await screen.getByRole('link', { name: 'All conversations', exact: true }).click();
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+
+    // Recorded history has nobody to answer, even if Needs you carries the same session id.
+    const read = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
+    mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, replayed: true } });
+    const recorded = await renderRoute(conversation(DANA_LIVE), { viewport: 'phone', pollScale: 100 });
+    await expect.element(recorded.screen.getByText('Recorded history, replayed into your copy. It happened before you arrived.', { exact: true })).toBeVisible();
+    expect(recorded.screen.getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('owner_message_closes_the_card_handoff_and_refreshes_needs_you', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    chat.state = { ...chat.state, mode: 'owner' };
+    mockStore.world.reply(chat, [rivera.blocks.handoff.en], 'en');
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    const reads = requests('needsYou').length;
+    await screen.getByRole('textbox', { name: 'Write to them' }).fill('I can help with that.');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.element(card).not.toBeInTheDocument();
+    expect(requests('needsYou').length).toBeGreaterThan(reads);
+    await expect.element(log(screen).getByText('I can help with that.', { exact: true })).toBeVisible();
+  });
+
+  it('takeover_closes_the_card_handoff_and_refreshes_needs_you', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    mockStore.world.reply(chat, [rivera.blocks.handoff.en], 'en');
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    await expect.element(card.getByText('The Desk handed this to you.', { exact: true })).toBeVisible();
+    expect(card.element().textContent).toContain('From the visitor:');
+    expect(card.element().textContent).not.toMatch(/call back/i);
+    const reads = requests('needsYou').length;
+    await screen.getByRole('button', { name: 'Take over', exact: true }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toBeVisible();
+    await expect.element(card).not.toBeInTheDocument();
+    expect(requests('needsYou').length).toBeGreaterThan(reads);
+    await expect.element(screen.getByRole('navigation', { name: 'Conversations' }).getByText("You're in this chat", { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('callback_keeps_its_mark_when_a_later_needs_you_read_fails', async () => {
+    // A read that fails after one that worked leaves the handoff open: the row keeps "Wants you".
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('the visitor has a chat');
+    chat.displayName = DANA;
+    await expect.poll(() => [...mockStore.world.handoffs.values()].some((h) => h.handoff.session_id === chat.state.session_id)).toBe(true);
+    // Needs you is read every 150 ms here, and a failed read is retried at once.
+    const { screen } = await renderRoute(LIST, { retryScale: 0 });
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    mockStore.inject({ route: 'needsYou', status: 500, times: 10_000 });
+    // Several failed reads later.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(row.element().textContent).toContain('Wants you');
+    expect(row.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+  });
+
+  it('callback_marks_the_list_and_closes_in_the_chat_with_focus_on_its_name', async () => {
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('the visitor has a chat');
+    chat.displayName = DANA;
+    await expect.poll(() => [...mockStore.world.handoffs.values()].some((h) => h.handoff.session_id === chat.state.session_id)).toBe(true);
+    const { screen } = await renderRoute(LIST, { pollScale: 100 });
+    const list = screen.getByRole('navigation', { name: 'Conversations' });
+    const row = list.getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+    await row.click();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    expect(card.getByRole('button', { name: 'Join the chat' }).elements()).toHaveLength(0);
+    expect(card.getByRole('button').elements()).toHaveLength(1);
+    const header = log(screen).element().querySelector('.cd-transcript-header');
+    expect(header).not.toBeNull();
+    expect(card.element().compareDocumentPosition(header!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.element().parentElement?.parentElement).toHaveClass('cd-conversation__scroll');
+    await expectScreenBasics(screen.container, { owner: true });
+    await card.getByRole('button', { name: 'Mark done' }).click();
+    await expect.element(card).not.toBeInTheDocument();
+    await expect.element(row.getByText('Visitor', { exact: true })).toBeVisible();
+    const heading = screen.getByRole('heading', { level: 2, name: DANA });
+    await expect.poll(() => document.activeElement).toBe(heading.element());
+    expect(getComputedStyle(heading.element()).outlineStyle).toBe('none');
+  });
+
   it('conversation_matches_its_board', async () => {
     named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
@@ -1039,10 +1237,14 @@ describe('Conversations', () => {
 
   it('paused_offers_resume', async () => {
     // Claude paused the chat after repeated blocked attempts: nobody answers until the owner acts.
-    const chat = session(DANA_LIVE);
+    const chat = named(DANA_LIVE, DANA);
     mockStore.world.pause(chat);
+    mockStore.world.reply(chat, [rivera.blocks.handoff.en], 'en');
     const { generation } = chat.state;
     const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Paused after blocked attempts', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('article', { name: 'Wants you', exact: true })).toBeInTheDocument();
     await expect.element(screen.getByText('Claude paused this chat after repeated blocked attempts.', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
     // No composer while paused: whispers steer no one, and her words need a take-over first.

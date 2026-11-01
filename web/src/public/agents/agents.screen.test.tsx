@@ -947,11 +947,12 @@ describe('agents page', () => {
     // Opening the page moves no focus.
     expect(document.activeElement).toBe(document.body);
 
-    // Enter on "Try again": the opening line takes the notice's place while the page is read again,
+    // Enter on "Try again": the shapes take the notice's place while the page is read again,
     // and the button goes with the notice.
     tryAgain.element().focus();
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('status')).toHaveTextContent('Opening the page for AI agents');
+    await expect.element(screen.getByRole('status')).toHaveClass('cd-sr-only');
     expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
 
     // The read fails again: focus moves to the new "Try again" rather than falling to the page, so
@@ -967,7 +968,7 @@ describe('agents page', () => {
     expect(document.activeElement).toBe(document.body);
 
     // Focus put somewhere else while the page is read again stays there when the read fails. Nothing
-    // on the opening line takes focus, so here it is a control the test puts outside the page.
+    // in the shapes takes focus, so here it is a control the test puts outside the page.
     let fail: (value?: unknown) => void = () => {};
     const failed = new Promise((resolve) => {
       fail = resolve;
@@ -979,7 +980,8 @@ describe('agents page', () => {
     await expect.element(movedTryAgain).toBeVisible();
     movedTryAgain.element().focus();
     await userEvent.keyboard('{Enter}');
-    await expect.element(moved.screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    await expect.element(moved.screen.getByRole('status')).toHaveTextContent('Opening the page for AI agents');
+    await expect.element(moved.screen.getByRole('status')).toHaveClass('cd-sr-only');
     const elsewhere = document.body.appendChild(document.createElement('button'));
     onTestFinished(() => elsewhere.remove());
     elsewhere.focus();
@@ -1001,7 +1003,8 @@ describe('agents page', () => {
     await expect.element(unfocusedTryAgain).toBeVisible();
     expect(document.activeElement).toBe(document.body);
     (unfocusedTryAgain.element() as HTMLButtonElement).click();
-    await expect.element(unfocused.screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    await expect.element(unfocused.screen.getByRole('status')).toHaveTextContent('Opening the page for AI agents');
+    await expect.element(unfocused.screen.getByRole('status')).toHaveClass('cd-sr-only');
     drop();
     await expect.element(unfocusedTryAgain).toBeVisible();
     expect(document.activeElement).toBe(document.body);
@@ -1531,8 +1534,9 @@ describe('agents page', () => {
     expect(name.length).toBeLessThanOrEqual(80);
     await plantDesk({ business_name: name });
     const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
-    await expect.element(screen.getByRole('heading', { level: 1 })).toBeVisible();
-    expect(screen.getByRole('heading', { level: 1 }).element().textContent).toContain(name);
+    const heading = screen.getByRole('heading', { level: 1, name: `${name} for AI agents` });
+    await expect.element(heading).toBeVisible();
+    expect(heading.element().textContent).toContain(name);
     expectNoHorizontalScroll();
     await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();

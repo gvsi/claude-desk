@@ -97,7 +97,10 @@ async def relabel_on_verify(ctx: KernelCtx, session_row: ActorSession, person_id
     """The session has just verified as `person_id`: the facts adapters wrote in it before, labelled
     for the session, become the person's too (`person:<id>` joins their readers, and the person is
     their record owner if they had none), so the person reads them from any session they verify
-    in. Later facts get the same from `new_fact_label`. Runs in the verification's transaction."""
+    in. Preview sessions are excluded, so a quiet preview call-back never becomes a real visitor's
+    promise. Later facts get the same from `new_fact_label`. Runs in the verification's transaction."""
+    if session_row.preview:
+        return
     session_reader, person_reader = f"session:{session_row.session_id}", f"person:{person_id}"
     rows = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == session_row.desk_id, FactRow.session_id == session_row.session_id,

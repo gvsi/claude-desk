@@ -7,8 +7,9 @@ sessions. These cases add the rest Plan 01b's merge gate names (its Task 7): one
 session; a masked or shared contact on `PUT /desks/{id}/people`; a removed person verifying; a
 deleted Desk's held request answered; a document's canary split by spaces, case or width, in a
 rendered card and in a tool's `model_view`; a document link opened twice, after a day, or cited by
-another session; a handoff marked done, and by another copy's owner; and a preview session opened
-without the owner. The money cap on each rules version (Plan 01b's Task 3b) is drafted through
+another session; a handoff marked done, and by another copy's owner; a blocked reply's handoff card
+leaving one open handoff for the owner, however many follow; and a preview session opened without
+the owner. The money cap on each rules version (Plan 01b's Task 3b) is drafted through
 this plan's routes, so the drafts it refuses run now: an auto money card above its draft's cap, one
 at a cap of 0, and a cap past the platform's ceiling. What the cap does to money is judged through
 payment links, Plan 01c's tool, so those rows run once that plan lands: links below, at and above
@@ -57,6 +58,7 @@ from evals.tier1.test_labels_and_injection import (
 from evals.tier1.test_reply_golden import (
     HANDED_OFF,
     KEEP_ALIVE_S,
+    NUMBER_PROSE,
     STAND_IN_CANARY,
     check_reply,
     handed_off,
@@ -285,8 +287,9 @@ async def test_an_owner_approval_releases_no_document_to_a_session_that_ended(k:
     """Dana, verified, asks for her invoice, which the owner's rules hold; the owner then gives Dana another
     contact (or removes her), which ends the session that asked, and approves the held release. It is refused
     at execution with nothing run: the decision's status line, which Dana's session reads, is the state's own
-    and never says why the session ended; the answer is ledgered as refused because the session ended; and no
-    document link entry is written."""
+    and never says why the session ended, while the owner's answer and her read of the decision say why
+    (`owner_plain`); the answer is ledgered as refused because the session ended; and no document link entry
+    is written."""
     desk = await golden_desk(k)
     await confirm_cards(k, desk, [ASK_FOR_DOCUMENTS])
     dana = await open_caller(k, desk, "dana")
@@ -297,14 +300,18 @@ async def test_an_owner_approval_releases_no_document_to_a_session_that_ended(k:
     if change == "contact":
         await put_people(k, desk, upsert=[person("dana", "Dana Whitfield", "dana.again@example.net")],
                          expect=updated(desk))
+        why = "Not shared: their session ended when their contact changed"
     else:
         await put_people(k, desk, remove=["dana"], expect=updated(desk))
+        why = "Not shared: they were removed from your records"
     async with assert_ledgered(records, desk.copy, desk.desk_id, "approval") as new:
         await k.call("POST /approvals/{decision_id}/answer", path={"decision_id": held.decision_id},
                      body={"answer": "allow_once"}, auth=desk.owner, expect=Expect(fields={
                          "decision.decision_id": held.decision_id, "decision.state": "refused_at_execution",
                          "decision.visitor_plain": "The rules changed, so this didn't go ahead",
-                         "execution": None}))
+                         "decision.owner_plain": why, "execution": None}))
+    await k.call("GET /decisions/{id}", path={"id": held.decision_id}, auth=desk.owner, expect=Expect(fields={
+        "decision_id": held.decision_id, "state": "refused_at_execution", "owner_plain": why}))
     if k.is_real:
         refused = [(entry.event.summary.get("state"), entry.event.summary.get("reason"), entry.event.summary.get("check"))
                    for entry in new if entry.event.ref_id == held.decision_id]
@@ -633,6 +640,30 @@ async def test_a_handoff_is_marked_done_once_by_its_own_owner(k: KernelHarness, 
         assert await handoff_status(records, a, handoff_id) == "done", "the owner's mark left the handoff open"
         summaries = [entry.event.summary for entry in marked if entry.event.kind == "desk_data"]
         assert summaries == [{"part": "handoffs", "refs": [handoff_id]}], f"the mark is ledgered as {summaries}"
+
+
+async def open_handoffs(records: Any, desk: GoldenDesk) -> list[tuple[str, str, str | None]]:
+    """The Desk's open handoffs (`kernel_ro.handoffs`, what the owner's Needs you lists), as
+    (session id, kind, call-back window); real kernel only."""
+    return [(row["session_id"], row["kind"], row["callback_window"])
+            for row in await records.handoffs(desk.copy.copy_id)
+            if row["desk_id"] == desk.desk_id and row["status"] == "open"]
+
+
+@pytest.mark.requires("01b")
+async def test_a_blocked_reply_leaves_one_open_handoff_for_the_owner(k: KernelHarness, records):
+    """The handoff card opens a handoff the owner sees (the owner's decision of 2026-10-30): a
+    reply the check blocks shows the visitor the handoff card, and leaves one open handoff on the
+    session, of kind `card` with no call-back window, in what the owner's handoffs read lists. A
+    second blocked reply in the same session shows the card again and leaves still one: the owner
+    already has the conversation."""
+    desk = await golden_desk(k)
+    visitor = await open_caller(k, desk, "visitor")
+    for _ in range(2):
+        await check_reply(k, visitor, NUMBER_PROSE, expect=handed_off(visitor, "number_in_prose"))
+        if k.is_real:
+            opened = await open_handoffs(records, desk)
+            assert opened == [(visitor.state.session_id, "card", None)], f"the open handoffs are {opened}"
 
 
 # The owner's preview

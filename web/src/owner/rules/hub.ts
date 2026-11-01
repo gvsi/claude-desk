@@ -6,7 +6,7 @@
  * (`holdQuestion`). It reads the rules and decides nothing: the kernel decides every request.
  */
 import { MONEY_EFFECTS, type PolicyVersion, type RuleCard, type ToolName } from '../../api/contracts.ts';
-import type { NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
+import type { AnyToolName, NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import {
   describeEffects,
   ruleWordsLine,
@@ -17,7 +17,7 @@ import {
   type ToolSummaryView,
 } from '../../ds/index.ts';
 import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
-import { CONNECTORS, TOOL_NAMES, connectorOn, toolNoun, toolState, type ConnectorKey } from '../connectors/catalog.ts';
+import { CONNECTORS, TOOL_NAMES, businessTools, connectorOn, isCatalogTool, toolDisplayName, toolNoun, toolState, type BusinessTools, type ConnectorKey } from '../connectors/catalog.ts';
 import { heldOldestFirst } from '../useDesks.ts';
 import { coveredTools } from './changeRows.ts';
 import { toolOutcome } from './outcome.ts';
@@ -68,7 +68,12 @@ const LINE_SAYS_THE_EFFECT: Partial<Record<ToolName, 'undo' | 'nothing'>> = {
  * connected tool's changed definition shows what it does now. A built-in tool whose line already
  * says what it changes adds only whether it can be undone, or nothing, as the board words it.
  */
-function toolLine(row: Pick<ToolRow, 'tool' | 'effects' | 'reversible'>): string {
+export function toolLine(row: Pick<ToolRow, 'tool' | 'effects' | 'reversible' | 'source' | 'business'>): string {
+  if (!isCatalogTool(row.tool)) {
+    const business = businessTools([row]);
+    const description = business.get(row.tool)?.description ?? targetWords(row.tool, business);
+    return `${description} ${describeEffects(row.effects, row.reversible)}`;
+  }
   const { line } = TOOL_NAMES[row.tool];
   const said = row.reversible ? 'Can be undone.' : "Can't be undone.";
   switch (LINE_SAYS_THE_EFFECT[row.tool]) {
@@ -84,21 +89,28 @@ function toolLine(row: Pick<ToolRow, 'tool' | 'effects' | 'reversible'>): string
 /** Every tool the connectors list, in their order: the tools Rules shows, never the setup interview's own. */
 const CONNECTOR_TOOLS: readonly ToolName[] = CONNECTORS.flatMap((connector) => connector.tools);
 
-/** The Desk's tools on its connectors, in the connectors' order: the tools a shared rule's line can name. */
-function onConnectors(tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): Pick<ToolRow, 'tool' | 'effects'>[] {
-  return tools.filter((row) => CONNECTOR_TOOLS.includes(row.tool)).sort((a, b) => CONNECTOR_TOOLS.indexOf(a.tool) - CONNECTOR_TOOLS.indexOf(b.tool));
+/** The tool rows whose names a shared rule can list: connector tools first, then known business tools. */
+type NamedToolRow = Pick<ToolRow, 'tool' | 'effects' | 'source' | 'business'>;
+
+/** Shared coverage keeps connector order, then the order of the Desk's own business tools. */
+function sharedTools(tools: readonly NamedToolRow[], business: BusinessTools): NamedToolRow[] {
+  const order: readonly string[] = CONNECTOR_TOOLS;
+  const connected = tools.filter((row) => isCatalogTool(row.tool) && order.includes(row.tool));
+  connected.sort((a, b) => order.indexOf(a.tool) - order.indexOf(b.tool));
+  return [...connected, ...tools.filter((row) => business.has(row.tool))];
 }
 
 /**
  * A shared rule's line under each tool it governs: its group and the tools it covers on this Desk
- * (`coveredTools`, among the Desk's tools on its connectors), "Applies to every tool that charges
+ * (`coveredTools`, among the Desk's connector and business tools), "Applies to every tool that charges
  * money: Payment link and Charge within a signed limit.", or its group alone when it covers none
  * of them.
  */
-function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): string {
-  const group = targetWords(card.applies_to);
+function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly NamedToolRow[]): string {
+  const business = businessTools(tools);
+  const group = targetWords(card.applies_to, business);
   const lower = `${group.charAt(0).toLowerCase()}${group.slice(1)}`;
-  const names = coveredTools(card, cards, onConnectors(tools)).map((tool) => TOOL_NAMES[tool].name);
+  const names = coveredTools(card, cards, sharedTools(tools, business)).map((tool) => targetWords(tool, business));
   return names.length === 0 ? `Applies to ${lower}.` : `Applies to ${lower}: ${listWords(names)}.`;
 }
 
@@ -113,7 +125,7 @@ export function toolRuleRows(
   row: Pick<ToolRow, 'tool' | 'effects'>,
   active: ActiveCards,
   people: PeopleOut | null | undefined,
-  tools: readonly Pick<ToolRow, 'tool' | 'effects'>[],
+  tools: readonly NamedToolRow[],
 ): RuleRowProps[] {
   return governingRules(row, active).map((card): RuleRowProps => {
     const limit = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
@@ -171,7 +183,7 @@ const ALWAYS_ON_TOOL: ToolName = 'native.start_verification';
  * A tool's rule words on the hub: "Always on" for Confirm it's them; one rule's own words
  * ("Anyone · No discounts"); "{n} rules", then " · {k} shared" when some are shared; "No rule yet".
  */
-function summaryOf(tool: ToolName, rules: readonly RuleCard[], people: PeopleOut | null | undefined): string {
+function summaryOf(tool: AnyToolName, rules: readonly RuleCard[], people: PeopleOut | null | undefined): string {
   if (tool === ALWAYS_ON_TOOL) return 'Always on';
   const [only] = rules;
   if (only === undefined) return 'No rule yet';
@@ -187,7 +199,7 @@ function toolSummary(row: ToolRow, key: ConnectorKey, active: ActiveCards, peopl
   const limit = mode === 'auto' && limitCents !== null ? formatCents(limitCents) : undefined;
   return {
     key: row.tool,
-    name: TOOL_NAMES[row.tool].name,
+    name: toolDisplayName(row.tool, businessTools([row])) ?? 'A connected tool',
     description: toolLine(row),
     summary: summaryOf(row.tool, rules, people),
     mode,

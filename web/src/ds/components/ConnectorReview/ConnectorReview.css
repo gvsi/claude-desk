@@ -1,5 +1,5 @@
 /* ConnectorReview: the 44 px tile, centered on the serif title and its lead line, the card of tools
-   (each under a hairline, the first too, and padded 14 px above and below: its name at weight 520, its line and what covers it in secondary meta, and its
+   (separated by hairlines and padded 14 px above and below: its name at weight 520, its line and what covers it in secondary meta, and its
    outcome at the right), then Turn it on, Cancel and the hint on one line. Each tool lays out by
    its own width: under 640 px its outcome sits on its own line under its words. */
 
@@ -33,10 +33,13 @@
   min-width: 0;
 }
 
+/* A title that wraps balances its lines, as page titles do (`PageHeader`), so a long connector name
+   doesn't leave its last word, or its badge, on a line of its own. */
 .cd-connector-review__title {
   margin: 0;
   color: var(--text-primary);
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .cd-connector-review__title .cd-connector-name__built-in,
@@ -61,9 +64,50 @@
   list-style: none;
 }
 
+.cd-connector-review__setup-title {
+  margin: 0 0 var(--space-10);
+  color: var(--text-primary);
+}
+
+.cd-connector-review__setup {
+  container: cd-job-setup / inline-size;
+  margin: 0;
+}
+
+.cd-connector-review__setup-row {
+  display: grid;
+  grid-template-columns: calc(var(--space-24) * 4) minmax(0, 1fr);
+  gap: var(--space-16);
+  padding: var(--space-10) 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-connector-review__setup-row + .cd-connector-review__setup-row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-connector-review__setup-row dt {
+  color: var(--text-secondary);
+}
+
+.cd-connector-review__setup-row dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+@container cd-job-setup (max-width: 479.98px) {
+  .cd-connector-review__setup-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-8);
+  }
+}
+
 .cd-connector-review__tool {
   container: cd-connector-review-tool / inline-size;
   padding: var(--space-14) 0;
+}
+
+.cd-connector-review__tool + .cd-connector-review__tool {
   border-top: 1px solid var(--line-hairline);
 }
 

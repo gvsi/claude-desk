@@ -66,19 +66,24 @@ class KernelRO:
         if self.own_transactions and self.conn.in_transaction():
             await self.conn.rollback()
 
-    async def rows(self, view: str, *, order_by: tuple[str, ...] = (), **equals: Any) -> list[dict[str, Any]]:
-        """The view's rows in this copy where each named column equals its value (any of them, for a list)."""
+    async def rows(self, view: str, *, order_by: tuple[str, ...] = (), nulls_first: tuple[str, ...] = (),
+                   **equals: Any) -> list[dict[str, Any]]:
+        """The view's rows in this copy where each named column equals its value (any of them, for a list).
+        Order in SQL, with NULLs first for the named ordering columns; other columns keep PostgreSQL's default."""
         source = ro_view(self.schema, view)
-        for name in (*equals, *order_by):
+        for name in (*equals, *order_by, *nulls_first):
             if name not in source.c:
                 raise ValueError(f"kernel_ro.{view} has no column {name!r}")
+        if any(name not in order_by for name in nulls_first):
+            raise ValueError("nulls_first columns must be named in order_by")
         conditions = [source.c.copy_id == self.copy_id]
         for name, value in equals.items():
             conditions.append(source.c[name].in_(list(value)) if isinstance(value, _MANY) else source.c[name] == value)
         try:
             await set_copy(self.conn, self.copy_id)
             result = await self.conn.execute(select(source).where(*conditions)
-                                             .order_by(*(source.c[n] for n in order_by)))
+                                             .order_by(*(source.c[n].nulls_first() if n in nulls_first else source.c[n]
+                                                         for n in order_by)))
             return [dict(row._mapping) for row in result]
         finally:
             await self.done()
@@ -99,13 +104,16 @@ class KernelRO:
 
 def replayed(entry: dict | None) -> bool:
     """Whether a ledger entry is recorded history: a kernel entry whose summary carries the `replayed` mark, which only
-    the kernel's replay writes (Plan 01d). A missing entry is not, so this is for an entry the caller has read; a read
+    the kernel's replay writes (Plan 01d). Malformed events or summaries count as replayed conservatively.
+    A missing entry is not, so this is for an entry the caller has read; a read
     about a decision, whether it keeps the decision from a model or labels it for the owner (a booking, a charge, a
     refusal, a tool's decision), asks `decision_replayed`, which fails closed."""
     if entry is None:
         return False
-    event = entry["event"] or {}
-    return event.get("origin", "kernel") == "kernel" and isinstance((event.get("summary") or {}).get("replayed"), dict)
+    event = entry.get("event")
+    if not isinstance(event, dict) or not isinstance(event.get("summary"), dict):
+        return True
+    return event.get("origin", "kernel") == "kernel" and isinstance(event["summary"].get("replayed"), dict)
 
 
 def decision_replayed(decision: dict[str, Any], entry: dict[str, Any] | None) -> bool:

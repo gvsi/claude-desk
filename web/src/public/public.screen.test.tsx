@@ -22,7 +22,8 @@ import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../test/screen.ts';
-import { CAUGHT_UP_AFTER_MS } from './PublicChatProvider.tsx';
+import { CAUGHT_UP_AFTER_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
+import { PublicPage } from './PublicPage.tsx';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -246,9 +247,8 @@ describe('public chat page', () => {
     await expect.element(cards).toBeVisible();
     expect(cards.elements()).toHaveLength(1);
     await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
-    const [message] = messagesOf(chatEvents()) as [EvMessage];
-    // The reply's own check comes first under it, then the quote's: the kernel's lines, as written.
-    expect(receiptsOf(rowOf(cards.element()))).toEqual([message.visitor_plain, "Quoted from Maria Rivera's price list"]);
+    // The quote's kernel receipt stays under the reply; the reply check's own line is omitted.
+    expect(receiptsOf(rowOf(cards.element()))).toEqual(["Quoted from Maria Rivera's price list"]);
   });
 
   it('booked_card_uses_the_kernel_lines', async () => {
@@ -268,7 +268,7 @@ describe('public chat page', () => {
     // The page adds nothing to a card: no date tile, price, link or calendar action.
     expect(card.querySelectorAll('time, button, a')).toHaveLength(0);
     expect(card.textContent).not.toContain('$');
-    expect(receiptsOf(rowOf(card))).toEqual(["Reply checked against Maria Rivera's rules", "Booked on Maria Rivera's calendar"]);
+    expect(receiptsOf(rowOf(card))).toEqual(["Booked on Maria Rivera's calendar"]);
   });
 
   it('prose_has_no_prices_or_dates', async () => {
@@ -309,23 +309,129 @@ describe('public chat page', () => {
     expectReceiptsUnderTheirMessages(phone.screen);
   });
 
+  it('reply_check_visibility_follows_owner_preview_live_and_after_reload', async () => {
+    const observed: { ownerPreview: boolean; language: string; live: string[]; reloaded: string[] }[] = [];
+    const expected: typeof observed = [];
+    for (const ownerPreview of [false, true]) {
+      for (const language of ['en', 'es'] as const) {
+        // Today's "Chat as a customer" opens this preview address as the signed-in owner.
+        const path = ownerPreview ? `${PAGE}?preview=${RIVERA.deskId}` : PAGE;
+        const options = {
+          language: language === 'es' ? 'es-MX' : 'en-US',
+          viewport: language === 'es' ? 'phone' as const : 'desktop' as const,
+        };
+        const first = await renderRoute(path, { ...options, seed: { name: 'rivera', signedIn: ownerPreview } });
+        await ready(first.screen);
+        await say(first.screen, language === 'en' ? 'Can I get 15% off if I pay cash?' : '¿Me hacen un descuento?');
+        const chat = mockStore.visitorSession(RIVERA.slug);
+        if (!chat) throw new Error('the session is open');
+        expect(chat.state.kind).toBe('visitor');
+        expect(chat.ownerPreview).toBe(ownerPreview);
+        expect(requests('openPreview')).toHaveLength(ownerPreview ? 1 : 0);
+        expect(requests('openSession')).toHaveLength(ownerPreview ? 0 : 1);
+        mockStore.world.takeOver(chat);
+        mockStore.world.say(chat, language === 'en' ? 'Hi, it is Maria.' : 'Hola, soy Maria.');
+        const waiting = language === 'en' ? 'Waiting for Maria Rivera to approve' : 'Esperando la aprobación de Maria Rivera';
+        const written = language === 'en' ? 'Written by Maria Rivera' : 'Escrito por Maria Rivera';
+        const checked = language === 'en' ? "Reply checked against Maria Rivera's rules" : 'Respuesta revisada con las reglas de Maria Rivera';
+        await expect.element(first.screen.getByText(written, { exact: true })).toBeVisible();
+        await expect.element(first.screen.getByText(waiting, { exact: true })).toBeVisible();
+        expect(shownMessages()).toHaveLength(2);
+        const live = first.screen.getByText(checked, { exact: true }).elements().map((el) => el.textContent ?? '');
+        const before = document.querySelector('[role="log"]')?.textContent;
+
+        const second = await renderRoute(path, options);
+        await ready(second.screen);
+        await expect.element(second.screen.getByText(written, { exact: true })).toBeVisible();
+        await expect.element(second.screen.getByText(waiting, { exact: true })).toBeVisible();
+        expect(shownMessages()).toHaveLength(2);
+        expect(document.querySelector('[role="log"]')?.textContent).toBe(before);
+        expect(mockStore.visitorSession(RIVERA.slug)?.state.session_id).toBe(chat.state.session_id);
+        expect(requests('openPreview')).toHaveLength(ownerPreview ? 1 : 0);
+        observed.push({ ownerPreview, language, live, reloaded: second.screen.getByText(checked, { exact: true }).elements().map((el) => el.textContent ?? '') });
+        expected.push({ ownerPreview, language, live: ownerPreview ? [checked] : [], reloaded: ownerPreview ? [checked] : [] });
+      }
+    }
+    expect(observed).toEqual(expected);
+  }, 20_000);
+
   it('held_request_shows_the_kernel_line', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);
     await say(screen, 'Can I get 15% off if I pay cash?');
     const held = screen.getByText(rivera.decisions.held.visitor_plain, { exact: true });
     await expect.element(held).toBeVisible();
-    // Under Claude's checked reply, which says Maria decides (no card), after the reply's own
-    // line, and the ghost cancel under that.
+    // Under Claude's checked reply, which says Maria decides (no card), with the ghost cancel
+    // under the waiting line.
     const row = rowOf(held.element());
     expect([...row.querySelectorAll('.cd-claude-message__prose')].map((p) => p.textContent)).toEqual([HELD_PROSE.en]);
     expect(row.querySelectorAll('article')).toHaveLength(0);
-    expect(receiptsOf(row)).toEqual(["Reply checked against Maria Rivera's rules", rivera.decisions.held.visitor_plain]);
+    expect(receiptsOf(row)).toEqual([rivera.decisions.held.visitor_plain]);
     const cancel = screen.getByRole('button', { name: 'Cancel this request' });
     await expect.element(cancel).toBeVisible();
     expect(cancel.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(held.element().getBoundingClientRect().bottom);
     // Receipts are lines to read, never controls.
     expect(screen.container.querySelectorAll('.cd-margin-receipt button, button.cd-margin-receipt')).toHaveLength(0);
+  });
+
+  it('approved_request_has_no_cancel_while_its_outcome_is_pending', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).toBeVisible();
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    const record = held?.type === 'held' ? mockStore.world.decisions.get(held.decision_id) : undefined;
+    if (!chat || !record) throw new Error('the discount was held');
+    mockStore.world.answer(record, 'allow_once');
+    const approved = record.approved;
+    if (!approved) throw new Error('the owner approved the discount');
+    // The approve request can time out: only approval reaches the visitor until a later request.
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').status('receipt', approved));
+    await expect.element(screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(chatEvents().some(({ ev }) => ev.type === 'resolved')).toBe(false);
+    expect(screen.getByText(record.decision.visitor_plain, { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Cancel this request' }).elements()).toHaveLength(0);
+    expectNoHorizontalScroll();
+
+    const phone = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(phone.screen);
+    await expect.element(phone.screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(phone.screen.getByText(record.decision.visitor_plain, { exact: true }).elements()).toHaveLength(0);
+    expect(phone.screen.getByRole('button', { name: 'Cancel this request' }).elements()).toHaveLength(0);
+    expectNoHorizontalScroll();
+  });
+
+  it('allowed_request_keeps_approval_then_outcome_under_the_message_live_and_reloaded', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    const waiting = screen.getByText(rivera.decisions.held.visitor_plain, { exact: true });
+    const heldRow = rowOf(waiting.element());
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    await request('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } });
+    const approved = screen.getByText('Maria Rivera approved this', { exact: true });
+    const outcome = screen.getByText("Quoted from Maria Rivera's price list", { exact: true });
+    await expect.element(approved).toBeVisible();
+    await expect.element(outcome).toBeVisible();
+    expect(rowOf(approved.element())).toBe(heldRow);
+    expect(rowOf(outcome.element())).toBe(heldRow);
+    // A stranger's public chat leaves out the reply check's own line, so the approval comes first.
+    const expected = ['Maria Rivera approved this', "Quoted from Maria Rivera's price list"];
+    expect(receiptsOf(heldRow)).toEqual(expected);
+    expect(outcome.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(approved.element().getBoundingClientRect().bottom);
+    await expect.element(waiting).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(shownMessages()).toHaveLength(2));
+    expect(receiptsOf(heldRow)).toEqual(expected);
+
+    const phone = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(phone.screen);
+    const loadedApproval = phone.screen.getByText('Maria Rivera approved this', { exact: true });
+    await expect.element(loadedApproval).toBeVisible();
+    expect(receiptsOf(rowOf(loadedApproval.element()))).toEqual(expected);
+    expectNoHorizontalScroll();
   });
 
   it('cancelled_line_under_a_landed_reply_shows_at_once', async () => {
@@ -365,10 +471,7 @@ describe('public chat page', () => {
     expect(resolved).toMatchObject({ decision_id: held.decision_id, state: 'cancelled' });
     const line = resolved?.type === 'resolved' ? resolved.visitor_plain : '';
     await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
-    expect(receiptsOf(rowOf(screen.getByText(line, { exact: true }).element()))).toEqual([
-      "Reply checked against Maria Rivera's rules",
-      line,
-    ]);
+    expect(receiptsOf(rowOf(screen.getByText(line, { exact: true }).element()))).toEqual([line]);
     expect(rowOf(screen.getByText(line, { exact: true }).element()).textContent).not.toContain(held.visitor_plain);
 
     // In a second chat the visitor goes on after the hold: the cancel stays under the held
@@ -381,7 +484,7 @@ describe('public chat page', () => {
     const heldRow = rowOf(heldLine);
     const bookedRow = rowOf(second.screen.getByRole('article', { name: 'Booked' }).element());
     const booked = receiptsOf(bookedRow);
-    expect(booked).toEqual(["Reply checked against Maria Rivera's rules", "Booked on Maria Rivera's calendar"]);
+    expect(booked).toEqual(["Booked on Maria Rivera's calendar"]);
     const cancel = second.screen.getByRole('button', { name: 'Cancel this request' });
     await expect.element(cancel).toBeVisible();
     const box = cancel.element().getBoundingClientRect();
@@ -391,7 +494,7 @@ describe('public chat page', () => {
 
     await cancel.click();
     await expect.element(second.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
-    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(["Reply checked against Maria Rivera's rules", 'Cancelled']));
+    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(['Cancelled']));
     expect(heldRow.textContent).not.toContain(held.visitor_plain);
     expect(receiptsOf(bookedRow)).toEqual(booked);
 
@@ -432,6 +535,41 @@ describe('public chat page', () => {
     );
     const states = chatEvents().flatMap(({ ev }) => (ev.type === 'resolved' ? [[ev.decision_id, ev.state]] : []));
     expect(states).toEqual(holds.map((id) => [id, 'cancelled']));
+  });
+
+  it('uncertain_cancel_sets_no_failure_when_the_transcript_holds_approval', async () => {
+    let chat: VisitorChatView | undefined;
+    function ObservedPage() {
+      chat = useVisitorChat(RIVERA.slug);
+      return <PublicPage />;
+    }
+    const { screen } = await renderRoute(PAGE, { routes: [{ path: '/d/:slug', Component: ObservedPage }] });
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    const session = mockStore.visitorSession(RIVERA.slug);
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    const record = held?.type === 'held' ? mockStore.world.decisions.get(held.decision_id) : undefined;
+    if (!session || !record) throw new Error('the discount was held');
+
+    let release = () => {};
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'cancelRequest', status: 'network', until });
+    await screen.getByRole('button', { name: 'Cancel this request' }).click();
+    await vi.waitFor(() => expect(requests('cancelRequest')).toHaveLength(1));
+    mockStore.world.answer(record, 'allow_once');
+    const approved = record.approved;
+    if (!approved) throw new Error('the owner approved the discount');
+    mockStore.world.emit(session, mockStore.world.context(session, 'en', '').status('receipt', approved));
+    await expect.element(screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(chatEvents().some(({ ev }) => ev.type === 'resolved')).toBe(false);
+
+    const reads = requests('visitorSession').length;
+    release();
+    await vi.waitFor(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await vi.waitFor(() => expect(chat?.cancelling).toBeNull());
+    expect(chat?.cancelFailed).toBeNull();
+    expect(chat?.state.openHolds).toEqual([]);
   });
 
   it('error_event_shows_static_copy', async () => {
@@ -1104,6 +1242,8 @@ describe('public chat page', () => {
       const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
       await ready(screen);
       for (const text of LONG_CHAT) await say(screen, text);
+      // Without the reply-check lines, one more booking keeps this fixture over two viewports.
+      await say(screen, 'Book the first one');
       await vi.waitFor(
         () => {
           expectHeaderAndDisclosureInView(screen, `${viewport}, at the end of the chat`);
@@ -1187,7 +1327,7 @@ describe('public chat page', () => {
     // shown as it was sent, doesn't.
     await expect.element(quote()).toBeVisible();
     expect(landed.rows()).toEqual([rowOf(quote().element())]);
-    expect(receiptsOf(rowOf(quote().element()))).toHaveLength(2);
+    expect(receiptsOf(rowOf(quote().element()))).toHaveLength(1);
 
     // It lands once: leaving the page and coming back to the same chat draws it still.
     await router.navigate('/d/nobody-here');
@@ -1754,7 +1894,7 @@ describe('public chat page', () => {
     expect(card.element().querySelector('.cd-reply-card__headline')?.textContent).toBe(
       'Maria Rivera will call you back on Monday, between 8:00 am and 9:00 am',
     );
-    expect(receiptsOf(rowOf(card.element()))).toEqual(["Reply checked against Maria Rivera's rules", 'Callback request saved for Maria Rivera']);
+    expect(receiptsOf(rowOf(card.element()))).toEqual(['Callback request saved for Maria Rivera']);
 
     await say(screen, 'Please call me tonight');
     const cards = screen.getByRole('article', { name: 'Callback set' });
@@ -1933,7 +2073,8 @@ describe('public chat page', () => {
     await expect.element(about.getByRole('article', { name: 'Hours' })).toBeVisible();
     const charter = rivera.publicDesk.en.charter;
     const cards = [...about.element().querySelectorAll('article')];
-    expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Contact', 'Policy', 'Policy', 'Policy']);
+    // The service area's policy card says what it is; the Desk's other policies stay "Policy".
+    expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Contact', 'Service area', 'Policy', 'Policy']);
     // The kernel's words, verbatim: each card's title, then its lines.
     expect(cards.map((card) => [...card.querySelectorAll('.cd-reply-card__data p')].map((p) => p.textContent))).toEqual(
       charter.map((block) => [block.title, ...(block.lines ?? [])]),
@@ -2318,8 +2459,9 @@ describe('public chat page', () => {
   });
 
   it('break_it_idea_leaves_focus_where_the_visitor_put_it', async () => {
-    // The chat opens late, and meanwhile the visitor has moved to a link in the about column: the
-    // idea is typed in, and focus stays on the link.
+    // The chat opens late. Its whole first view waits for the session read, so its about links
+    // aren't usable yet. A visitor who focuses a link elsewhere keeps that focus when the idea
+    // is typed in; nothing in the skeleton itself can take focus.
     let release = (): void => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -2335,13 +2477,16 @@ describe('public chat page', () => {
       }),
     );
     const { screen } = await renderRoute(`${PAGE}?try=${handOff()}`);
-    const link = screen.getByRole('link', { name: 'What agents can do here' });
-    await expect.element(link).toBeVisible();
-    (link.element() as HTMLElement).focus();
+    await vi.waitFor(() => expect(held).toBe(true));
+    const link = document.body.appendChild(document.createElement('a'));
+    link.href = '#elsewhere';
+    link.textContent = 'A link elsewhere';
+    onTestFinished(() => link.remove());
+    link.focus();
     release();
     await expect.element(chatBox(screen)).toHaveValue(IDEA);
     await frames();
-    expect(document.activeElement).toBe(link.element());
+    expect(document.activeElement).toBe(link);
   });
 
   it('break_it_idea_stays_with_its_desk', async () => {
@@ -3060,8 +3205,8 @@ function chatOpened(streams: StreamCount): { sessions: number; reads: number; st
 }
 
 /**
- * Each message's receipts are the kernel's lines for it, word for word (its reply check, then the
- * turn's actions), each one under the message and above the next row, with no clock time.
+ * Each message's visible receipts are the kernel's lines for it, word for word, each one under
+ * the message and above the next row, with no clock time. External replies omit their own check.
  */
 function expectReceiptsUnderTheirMessages(screen: RenderResult): void {
   const expected: string[][] = [];
@@ -3069,7 +3214,8 @@ function expectReceiptsUnderTheirMessages(screen: RenderResult): void {
   for (const { ev } of chatEvents()) {
     if (ev.type === 'receipt' || ev.type === 'held' || ev.type === 'resolved') turn.push(ev.visitor_plain);
     if (ev.type === 'message') {
-      expected.push([ev.visitor_plain, ...turn]);
+      const own = ev.author === 'owner' || ev.handoff ? [ev.visitor_plain] : [];
+      expected.push([...own, ...turn]);
       turn = [];
     }
   }

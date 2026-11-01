@@ -1,10 +1,12 @@
 /**
  * Safety's words and the few rules behind them: what each kind of record entry is called, where an
- * entry came from, what an attempt was about, which checkpoint stopped it, the one entry an attempt
- * is shown with, the one time an entry shows, and whether the week stopped anything at all.
+ * entry came from, what an attempt was about, why a request was turned down, which checkpoint
+ * stopped it, the one entry an attempt is shown with, the one time an entry shows, and whether the
+ * week stopped or turned down anything at all.
  */
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
-import type { Attempt, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
+import { handoffEntryOf, takeoverEntryOf, type HandoffEntry } from '../../api/handoffEntry.ts';
+import type { Attempt, RefusalCause, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
 
@@ -29,6 +31,7 @@ export const LEDGER_KIND_COPY = {
   agent_auth: 'Agent signature',
   head_checkpoint: 'Record checkpoint',
   desk_data: 'Desk details changed',
+  web_search: 'Web search',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**
@@ -51,6 +54,45 @@ export const CATEGORY_COPY = {
   other: 'Other',
 } as const satisfies Record<TriageCategory, string>;
 
+/**
+ * Why a request was turned down, by its cause, in the owner's signed words: the label beside a
+ * refused entry. A cause missing here, or one the API's document adds, is a compile error.
+ */
+export const CAUSE_COPY = {
+  owner_rule: 'Your rule says no',
+  not_verified: 'Not verified yet',
+  not_their_record: 'Only for the person it belongs to',
+  recipient: 'Only to you or a contact on record',
+  no_such_slot: "That time isn't open",
+  unknown_item: 'Not on the price list',
+  over_quote_ceiling: 'Over the $10,000 quote ceiling',
+  quote_unpayable: "That quote can't be paid now",
+  no_such_charge: "Couldn't find that payment",
+  not_refundable: "That payment can't be refunded",
+  no_such_document: 'No such document',
+  no_amount: 'Not a valid amount',
+  tool_not_available: 'Not a tool this chat can use',
+  incomplete_request: "The request wasn't in a form I can use",
+  paused: 'The chat was paused',
+  no_rules: 'No rules turned on yet',
+  rules_unchecked: "Your rules couldn't be checked, so I said no",
+  agent_pay_out: "Agents can't send money out",
+  agent_limit: "Outside the agent's spending limit",
+  other_copy: 'Not a record on this Desk',
+  no_rule: 'No rule covers this yet',
+} as const satisfies Record<RefusalCause, string>;
+
+/**
+ * The label beside a refused entry, saying why it was turned down, or null: for an entry with no
+ * cause (the API couldn't place it, or sent none), a cause this build has no words for yet, and
+ * anything but a refused request, since a stopped draft or a hold was never turned down.
+ */
+export function causeLabel(a: Pick<Attempt, 'kind' | 'cause'>): string | null {
+  const { cause } = a;
+  if (a.kind !== 'refused' || cause === null || !Object.hasOwn(CAUSE_COPY, cause)) return null;
+  return CAUSE_COPY[cause];
+}
+
 /** An attempt Claude hasn't sorted into a category yet. */
 export const NOT_SORTED = 'Not sorted yet';
 
@@ -70,6 +112,35 @@ export function kindCopy(kind: string): string {
   return Object.hasOwn(LEDGER_KIND_COPY, kind) ? LEDGER_KIND_COPY[kind as LedgerEvent['kind']] : 'Other entry';
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The `desk_data` entries about a conversation handed to the owner (`part: "handoffs"`), by
+ * `handoffEntryOf`, in the owner's signed words: the handoff card handing one over, the owner
+ * marking one done, and the kernel closing one when a call-back request replaced it, the owner
+ * took the chat over, or the owner wrote in it.
+ */
+export const HANDOFF_ENTRY_COPY = {
+  opened: 'Chat handed to you',
+  done: 'Chat marked done',
+  replaced: 'Chat moved to a call-back',
+  took_over: 'Handoff closed when you took over',
+  wrote: 'Handoff closed when you wrote in the chat',
+} as const satisfies Record<HandoffEntry, string>;
+
+/**
+ * An entry's name as a row of the record names it: its kind's, but a `desk_data` entry about a
+ * handoff says which one it is, and a mode change back to Claude says so. Every other entry, a
+ * handoffs entry this build doesn't know or a mode change with no readable direction among them,
+ * keeps its kind's name.
+ */
+export function entryCopy(event: Pick<LedgerEvent, 'kind' | 'summary'>): string {
+  const handoff = handoffEntryOf(event);
+  if (handoff !== null) return HANDOFF_ENTRY_COPY[handoff];
+  if (takeoverEntryOf(event) === 'handback') return 'Hand back to Claude';
+  return kindCopy(event.kind);
+}
+
 /** The checkpoint that stopped an attempt: a blocked reply at the reply checkpoint, anything else at the action checkpoint. */
 export function stoppedBy(a: Pick<Attempt, 'kind'>): Checkpoint {
   return a.kind === 'reply_blocked' ? 'reply' : 'action';
@@ -79,8 +150,6 @@ export function stoppedBy(a: Pick<Attempt, 'kind'>): Checkpoint {
 export function entryFor(a: Pick<Attempt, 'ledger_seq'>, page: Pick<LedgerPage, 'entries'> | undefined): LedgerEntry | null {
   return page?.entries.find((entry) => entry.seq === a.ledger_seq) ?? null;
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * The replay marker inside the signed entry (`event.summary.replayed`, which only the kernel's
@@ -123,9 +192,10 @@ export function categoryLabel(a: Pick<Attempt, 'triage'>): string {
   return Object.hasOwn(CATEGORY_COPY, triage.category) ? CATEGORY_COPY[triage.category] : CATEGORY_COPY.other;
 }
 
-/** Safety's headline, in Claude's voice, for `n` attempts stopped in the last seven days. */
-export function stoppedHeadline(n: number): string {
-  return n === 1 ? '1 attempt to talk me around was stopped this week.' : `${n} attempts to talk me around were stopped this week.`;
+/** Safety's headline, in Claude's voice, for the `n` requests the kernel refused in the last seven days. */
+export function turnedDownHeadline(n: number): string {
+  if (n === 0) return "I didn't turn down any requests this week.";
+  return n === 1 ? 'I turned down 1 request this week.' : `I turned down ${n} requests this week.`;
 }
 
 /**
@@ -137,9 +207,22 @@ export function stoppedHeadline(n: number): string {
  * have. A hold is the one kind that isn't stopped, so a kind this build doesn't know yet counts.
  */
 export function anythingStoppedIn(attempts: readonly Pick<Attempt, 'kind' | 'created_at'>[], week: Pick<ThisWeek, 'timezone' | 'start'>): boolean {
-  return attempts.some((a) => {
-    if (a.kind === 'held') return false;
-    const date = localDate(a.created_at, week.timezone);
-    return date === null || date >= week.start;
-  });
+  return attempts.some((a) => a.kind !== 'held' && maybeThisWeek(a, week));
+}
+
+/**
+ * Whether a request may have been turned down in the last seven days, by the same clock as
+ * `anythingStoppedIn`: a refused request this week (or newer than the week Today last read, or at
+ * a time that can't be read), or a kind this build doesn't know yet. A draft of Claude's the reply
+ * check stopped is no request anyone made, and a hold isn't turned down, so neither counts; the
+ * week is never said to have turned nothing down when it may have.
+ */
+export function anythingTurnedDownIn(attempts: readonly Pick<Attempt, 'kind' | 'created_at'>[], week: Pick<ThisWeek, 'timezone' | 'start'>): boolean {
+  return attempts.some((a) => a.kind !== 'held' && a.kind !== 'reply_blocked' && maybeThisWeek(a, week));
+}
+
+/** An attempt from `week.start` on, by its `created_at`'s local date in the week's time zone, or at a time that can't be read. */
+function maybeThisWeek(a: Pick<Attempt, 'created_at'>, week: Pick<ThisWeek, 'timezone' | 'start'>): boolean {
+  const date = localDate(a.created_at, week.timezone);
+  return date === null || date >= week.start;
 }

@@ -2,7 +2,7 @@
 // Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.
 // Only the API-owned schemas are here; contract types come from src/api/contracts.ts.
 
-import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, Violation } from './contracts.ts';
+import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
 
 /**
  * An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI.
@@ -99,10 +99,13 @@ export interface ApprovalAnswerOut {
   card_diff: RuleCard[] | null;
 }
 /**
- * An attempt the checkpoint stopped (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
+ * A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
  * `decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the
  * kernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;
- * `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b).
+ * `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a
+ * closed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`
+ * and the session's verified state;
+ * the web holds its words. It is null for held requests, stopped drafts and unmapped refusals.
  */
 export interface Attempt {
   ref_id: string;
@@ -113,6 +116,31 @@ export interface Attempt {
   created_at: string;
   triage: Triage | null;
   ledger_seq: number;
+  cause:
+    | (
+        | "owner_rule"
+        | "not_verified"
+        | "not_their_record"
+        | "recipient"
+        | "no_such_slot"
+        | "unknown_item"
+        | "over_quote_ceiling"
+        | "quote_unpayable"
+        | "no_such_charge"
+        | "not_refundable"
+        | "no_such_document"
+        | "no_amount"
+        | "tool_not_available"
+        | "incomplete_request"
+        | "paused"
+        | "no_rules"
+        | "rules_unchecked"
+        | "agent_pay_out"
+        | "agent_limit"
+        | "other_copy"
+        | "no_rule"
+      )
+    | null;
 }
 /**
  * A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk
@@ -137,30 +165,57 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
-  blocked: number;
+  turned_down: number;
   total: number;
   newest: BriefingNewest;
 }
 /**
- * The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none.
+ * The newest refused request, booking, and lead or answer (the lead when both share a time); None when none.
  */
 export interface BriefingNewest {
-  blocked: BriefingItem | null;
+  turned_down: BriefingItem | null;
   booking: BriefingItem | null;
   lead_or_answer: BriefingItem | null;
 }
 /**
- * One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,
+ * One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,
  * the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
- * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None.
+ * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
+ * and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
+ * refusals. Stopped drafts stay on Safety and out of the briefing.
  */
 export interface BriefingItem {
-  kind: "blocked" | "booking" | "lead" | "answer";
+  kind: "turned_down" | "booking" | "lead" | "answer";
   at: string;
   session_id: string | null;
   display_name: string | null;
   ref_id: string;
   line: string | null;
+  cause:
+    | (
+        | "owner_rule"
+        | "not_verified"
+        | "not_their_record"
+        | "recipient"
+        | "no_such_slot"
+        | "unknown_item"
+        | "over_quote_ceiling"
+        | "quote_unpayable"
+        | "no_such_charge"
+        | "not_refundable"
+        | "no_such_document"
+        | "no_amount"
+        | "tool_not_available"
+        | "incomplete_request"
+        | "paused"
+        | "no_rules"
+        | "rules_unchecked"
+        | "agent_pay_out"
+        | "agent_limit"
+        | "other_copy"
+        | "no_rule"
+      )
+    | null;
 }
 /**
  * `GET /api/owner/desks/{desk_id}/briefing`: every item since last night, newest first.
@@ -234,11 +289,24 @@ export interface CheckedDraft {
   prose: string;
   clauses: Clause[];
 }
+export interface Choice {
+  text: string;
+  recommended: boolean;
+}
 /**
  * `POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms.
  */
 export interface ConfirmRulesIn {
   version: number;
+}
+export interface ConnectorProposal {
+  app: "google_calendar" | "gmail" | "google_drive" | "quickbooks" | "stripe" | "square" | "calendly";
+  label: string;
+  /**
+   * Why this helps, at most 200 characters.
+   */
+  why: string;
+  connectable: boolean;
 }
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
@@ -330,8 +398,18 @@ export interface GenerationIn {
   generation: number;
 }
 /**
- * An open callback request (`kernel_ro.handoffs`). `reason` is "<name> · <contact> · <reason>" as the visitor
- * typed them (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
+ * A conversation handed to the owner (`kernel_ro.handoffs`), of one of two kinds:
+ *
+ * - `callback`: a visitor's call-back request. `reason` is "<name> · <contact> · <reason>" as the visitor typed them
+ *   (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
+ * - `card`: the handoff card the session saw (a passed reply citing it, or a blocked final draft or one no rewrite
+ *   fixes). `reason` is the kernel's own template ("The Desk handed this to you."), and `callback_window` is None:
+ *   no call back was promised.
+ *
+ * A null window alone can't tell them apart; `kind` does, and a row's kind never changes. A card handoff opens
+ * none in the owner's preview, while a held request awaits the owner, or while the session has an open handoff. A
+ * call-back request closes the session's open card handoff (it reads `done` from then on) and opens its own
+ * `callback` row with a new ID.
  */
 export interface Handoff {
   handoff_id: string;
@@ -339,6 +417,7 @@ export interface Handoff {
   reason: string;
   callback_window: string | null;
   status: "open" | "done";
+  kind: "callback" | "card";
 }
 /**
  * `GET /api/health`: 200 with the kernel's health, or 503 with `ok` false and no kernel field.
@@ -347,6 +426,71 @@ export interface HealthOut {
   ok: boolean;
   kernel: Health | null;
 }
+export interface IntakeConfig {
+  block: "intake";
+  /**
+   * 1 to 5 intake questions, each 1 to 120 characters.
+   *
+   * @minItems 1
+   * @maxItems 5
+   *
+   * Items: 1 to 120 characters.
+   */
+  questions:
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string];
+}
+export interface JobProposal {
+  job: "answer" | "intake" | "schedule" | "price" | "documents" | "status" | "payment" | "urgent";
+  /**
+   * Title, at most 60 characters.
+   */
+  title: string;
+  /**
+   * Who this is for, at most 60 characters; empty if unclear.
+   */
+  who?: string;
+  /**
+   * Why this helps, at most 200 characters.
+   */
+  why: string;
+  /**
+   * How the Desk helps, at most 300 characters.
+   */
+  how: string;
+  autonomy: "auto" | "ask";
+  can_do_today: boolean;
+  config: (IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig) | null;
+}
+export interface TypedBookingConfig {
+  block: "typed_booking";
+  /**
+   * Appointment name, 1 to 60 characters.
+   */
+  appointment_type: string;
+  /**
+   * Appointment length, 15 to 60 minutes.
+   */
+  minutes: number;
+}
+export interface PurposePaymentConfig {
+  block: "purpose_payment";
+  /**
+   * Payment purpose, 1 to 60 characters.
+   */
+  purpose: string;
+  amount_cents: number | null;
+}
+export interface UrgentConfig {
+  block: "urgent";
+  /**
+   * When a request is urgent, 1 to 300 characters.
+   */
+  urgent_when: string;
+}
 /**
  * `POST /api/owner/desks/{desk_id}/knowledge`: something the owner tells Claude about the business (untrusted
  * text, never policy), owner-only (`Label(readers=["owner"])`) or public (`Label(readers=["public"])`); posting an
@@ -354,6 +498,19 @@ export interface HealthOut {
  */
 export interface KnowledgeIn {
   item: KnowledgeItem;
+}
+/**
+ * An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view
+ * masks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows
+ * without a timestamp. Every field is always sent.
+ */
+export interface KnowledgeRow {
+  item_id: string;
+  title: string | null;
+  text: string | null;
+  readers: string[];
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
+  created_at: string | null;
 }
 /**
  * Details a visitor left: the name and note as they typed them (untrusted text, either may be missing).
@@ -385,7 +542,8 @@ export interface MoneyCapIn {
 /**
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
  * applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
- * an open callback request (`handoff`), never both; who it came from, and the last thing they wrote (untrusted).
+ * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
+ * thing they wrote (untrusted).
  */
 export interface NeedsYouItem {
   decision: Decision | null;
@@ -428,6 +586,7 @@ export interface OwnerTranscript {
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
  * draft of Claude's the reply check stopped.
+ * `owner_plain` is always present: the owner-only reason for this exact execution refusal, or null.
  *
  * `cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto
  * it, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest
@@ -455,6 +614,10 @@ export interface OwnerTranscriptItem {
   owner_translation: string | null;
   triage: Triage | null;
   stopped_draft: StoppedDraft | null;
+  /**
+   * Owner-only execution refusal reason for this exact status, fetched with the owner's credential; never part of the stored or signed visitor event.
+   */
+  owner_plain: string | null;
 }
 /**
  * A reply of Claude's the kernel's reply check stopped (Plan 02b): the draft as the check had it, and each
@@ -499,6 +662,14 @@ export interface PersonOnRecord {
  */
 export interface PresetIn {
   preset: "ask_first" | "auto";
+}
+export interface ProposalCard {
+  proposal_id: string;
+  kind: "job" | "connector";
+  state: "proposed" | "accepted" | "declined" | "changed";
+  superseded_by?: string | null;
+  job: JobProposal | null;
+  connector: ConnectorProposal | null;
 }
 /**
  * 202: the rules are still being drafted or checked. Send `retry` again in a few seconds: it picks up the same
@@ -636,18 +807,22 @@ export interface SendAgentIn {
   idempotency_key: string;
 }
 /**
- * `POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
- * (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it.
+ * `POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
+ * Naming the ask prevents a repeated answer from answering the next one.
  */
 export interface SetupAnswerIn {
-  question:
-    | "what_you_do"
-    | "hours_and_area"
-    | "quote_limit"
-    | "discounts"
-    | "documents_and_payments"
-    | "money_limit"
-    | "contact_and_after_hours";
+  question?:
+    | (
+        | "what_you_do"
+        | "hours_and_area"
+        | "quote_limit"
+        | "discounts"
+        | "documents_and_payments"
+        | "money_limit"
+        | "contact_and_after_hours"
+      )
+    | null;
+  card?: string | null;
   text: string;
 }
 /**
@@ -658,11 +833,14 @@ export interface SetupConsentIn {
 }
 /**
  * One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
- * owner's memory or website (`tool_label`).
+ * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
+ * only to a card message, with role `claude` and empty text.
  */
 export interface SetupMessage {
   role: "claude" | "owner" | "tool_label";
   text: string;
+  choices?: Choice[];
+  card?: ProposalCard | null;
 }
 /**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
@@ -680,7 +858,8 @@ export interface SetupStartIn {
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent and after the last one) and the conversation so far. Its messages start at Claude's consent
+ * before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
+ * conversation so far. Its messages start at Claude's consent
  * question: the owner's opening description isn't shown back to them.
  */
 export interface SetupState {
@@ -700,6 +879,8 @@ export interface SetupState {
         | "contact_and_after_hours"
       )
     | null;
+  pending_card?: string | null;
+  busy?: boolean;
   messages: SetupMessage[];
 }
 /**
@@ -726,6 +907,7 @@ export interface SimulateChangeIn {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }
@@ -764,9 +946,8 @@ export interface Suggestion {
  * "Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
  * `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
  * booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
- * one `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the
- * reply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the
- * drafts.
+ * one `end`. `stopped` counts refused requests from visitors and agents (owner decision, 2026-10-31).
+ * Safety lists Claude's stopped drafts too, without counting them; the briefing omits them.
  */
 export interface ThisWeek {
   timezone: string;
@@ -781,8 +962,8 @@ export interface ThisWeek {
   days: WeekDay[];
 }
 /**
- * One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,
- * not Claude's own drafts the reply check stopped.
+ * One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` counts refused requests that day
+ * (owner decision, 2026-10-31). Claude's stopped drafts are listed on Safety but not counted.
  */
 export interface WeekDay {
   date: string;
@@ -826,6 +1007,10 @@ export interface ToolDecisionRow {
     | "unknown"
     | "refused_at_execution";
   reason_plain: string;
+  /**
+   * Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise.
+   */
+  owner_plain: string | null;
   created_at: string;
   ledger_seq: number;
   replayed: boolean;
@@ -837,6 +1022,60 @@ export interface ToolDecisionRow {
 export interface ToolDecisions {
   items: ToolDecisionRow[];
   next_before: string | null;
+}
+/**
+ * The shared batch review body; the checked Desk ID comes from the route.
+ */
+export interface ToolsConfirmIn {
+  /**
+   * @minItems 1
+   * @maxItems 14
+   */
+  tools:
+    | [ToolPin]
+    | [ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ];
+  enable: boolean;
 }
 /**
  * One transcript entry as the visitor sees it: their own words, or an event the API delivered or emitted.
@@ -932,8 +1171,8 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
-  "POST /api/owner/setup/{id}/consent": { 200: "SetupState" },
-  "POST /api/owner/setup/{id}/answer": { 200: "SetupState" },
+  "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
+  "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
@@ -966,6 +1205,7 @@ export const API_OPERATIONS = {
   "GET /api/owner/desks/{desk_id}/tools/{tool}/decisions": { 200: "ToolDecisions" },
   "POST /api/owner/desks/{desk_id}/tools/connect": { 200: "ToolRow[]" },
   "POST /api/owner/desks/{desk_id}/tools/simulate_change": { 200: "ToolProfile" },
+  "GET /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeRow[]" },
   "POST /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeItem" },
   "POST /api/owner/desks/{desk_id}/documents": { 201: "DocumentCreated" },
   "POST /api/owner/policy/{desk_id}/chat": { 200: "RuleChatOut", 202: "ProvingPending" },
@@ -973,5 +1213,6 @@ export const API_OPERATIONS = {
   "POST /api/owner/policy/{desk_id}/preset": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/suggestions/{tool}": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/money_cap": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/tools/confirm": { 200: "ToolConfirmed", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
 } as const;

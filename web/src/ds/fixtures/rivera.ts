@@ -4,6 +4,8 @@
 // are the kernel's visitor templates, word for word, except that an executed receipt has its tool's
 // own line (`executedLine` in receipts.ts).
 
+import type { AnyToolName } from '../../api/views.ts';
+
 import type {
   CardBlock,
   CardOption,
@@ -25,7 +27,6 @@ import type {
   SessionState,
   SseEvent,
   StatusEvent,
-  ToolName,
   ToolProfile,
   VerifyStarted,
 } from '../../api/contracts';
@@ -729,6 +730,7 @@ const heldQuote = {
   card_ids: ['rv-quote'],
   review: null,
   reason_plain: 'A visitor not on record asked for a drain clearing quote at 15% off, $153.00 instead of $180.00.',
+  owner_plain: null,
   visitor_plain: plain.en.held,
   answers: ['allow_once', 'deny_once'],
   expires_at: '2026-10-31T17:04:05.123456Z',
@@ -772,6 +774,7 @@ const allowedQuote = {
   card_ids: ['rv-quote'],
   review: null,
   reason_plain: 'A visitor asked for a drain clearing quote at list price, $180.00.',
+  owner_plain: null,
   visitor_plain: plain.en.allowed,
   answers: [],
   expires_at: '2026-10-30T19:05:05.123456Z',
@@ -809,6 +812,7 @@ const refusedDocument = {
   review: null,
   reason_plain:
     "A visitor not on record asked for Bob Okafor's warranty. Documents go only to their own verified customer, so nothing was shared.",
+  owner_plain: null,
   visitor_plain: plain.en.refused,
   answers: [],
   expires_at: '2026-10-30T18:12:40.218307Z',
@@ -828,7 +832,7 @@ const decisions = {
   executed: afterHold('executed', 6),
   failed: afterHold('failed', 6),
   unknown: afterHold('unknown', 6),
-  refused_at_execution: afterHold('refused_at_execution', 5),
+  refused_at_execution: { ...afterHold('refused_at_execution', 5), owner_plain: "Your rules changed before this ran, so it wasn't done." },
 } satisfies Record<DecisionState, Decision>;
 
 /**
@@ -866,6 +870,7 @@ const heldVerified = {
   review: null,
   reason_plain:
     'Dana Whitfield, verified with a code, asked to book Saturday, November 7 at 2:00 pm. Your Saturday bookings run 9:00 am to 1:00 pm.',
+  owner_plain: null,
   visitor_plain: plain.en.held,
   answers: ['allow_once', 'deny_once', 'allow_person'],
   expires_at: '2026-10-31T16:40:00.552013Z',
@@ -907,6 +912,7 @@ const heldRefund = {
   card_ids: ['rv-refund'],
   review: null,
   reason_plain: 'Dana Whitfield, verified with a code, asked for a refund of her $180.00 payment from Monday, October 12.',
+  owner_plain: null,
   visitor_plain: plain.en.held,
   answers: ['allow_once', 'deny_once', 'allow_person', 'deny_always'],
   expires_at: '2026-10-31T17:20:14.302518Z',
@@ -1590,7 +1596,7 @@ function cardSide(id: keyof typeof ruleWords, card: RuleCard): NonNullable<Chang
 }
 
 /** Each of Rivera's rule targets' effects, as the master plan's tool table lists them. */
-const TOOL_EFFECTS: Partial<Record<ToolName, Effect[]>> = {
+const TOOL_EFFECTS: Partial<Record<AnyToolName, Effect[]>> = {
   'native.quote': ['change'],
   'native.book': ['change'],
   'native.release_document': ['private_data', 'send_message'],
@@ -1620,6 +1626,7 @@ const utilityCards = [
   }),
   rule({ card_id: 'preset-fetch-website', applies_to: 'native.fetch_website', mode: 'auto', who: 'anyone', reason: 'Claude can read your website to learn about your business.' }),
   rule({ card_id: 'preset-read-memory', applies_to: 'native.read_memory', mode: 'auto', who: 'anyone', reason: 'Claude can read the notes you brought in to learn about your business.' }),
+  rule({ card_id: 'preset-web-search', applies_to: 'native.web_search', mode: 'auto', who: 'anyone', reason: 'Claude can search the web to learn how businesses like yours work.' }),
 ];
 
 const recommendedCards = [

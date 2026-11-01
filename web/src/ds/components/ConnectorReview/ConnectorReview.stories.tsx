@@ -1,10 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import { chenBusinessTools } from '../../../mocks/businessTools.ts';
+import { businessGlyph, businessRows } from '../../../owner/connectors/businessWords.ts';
+import { reviewTool } from '../../../setup/ToolsStep.tsx';
+
 import { chen, rivera } from '../../fixtures';
+import { expectBalancedLines } from '../../test/expectBalancedLines.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
+import type { ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { ConnectorReview } from './ConnectorReview.tsx';
 
 const HINT = "You'll see the change to your rules before anything runs.";
@@ -50,6 +56,7 @@ export const ChenPayments: Story = {
     await expect(rows).toHaveLength(2);
     for (const [index, tool] of args.tools.entries()) {
       const row = rows[index] as HTMLElement;
+      expectComputed(row, { borderTopWidth: index === 0 ? '0px' : '1px' });
       await expect(within(row).getByText(tool.name)).toBeVisible();
       await expect(within(row).getByText(tool.description)).toBeVisible();
       await expect(within(row).getByText('Covered by your always-on rule: No money moves without your rule or a signed limit')).toBeVisible();
@@ -180,5 +187,90 @@ export const Phone: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
+  },
+};
+
+/**
+ * A connector with a long name. The demo's connectors are named in a word or two, so this stands
+ * for a long one: Google Calendar's view, named for the business's calendar. Wrapped greedily, its
+ * title would leave the Mock badge alone on the last line, on a laptop and on a phone.
+ */
+const LONG_NAMED: ConnectorView = { ...rivera.googleCalendar.view, name: 'Google Calendar for Bayview Heating & Plumbing' };
+const LONG_TITLE = `Review what Claude could do with ${LONG_NAMED.name} Mock`;
+
+export const LongName: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  args: { connector: LONG_NAMED, tools: rivera.googleCalendar.review.tools },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws a connector name this long; the demo\'s are a word or two. The nearest is N-Conn-09-GCal-Review. The title balances its lines, so its Mock badge doesn\'t sit alone on the second.',
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(1440);
+    await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_TITLE, 2);
+  },
+};
+
+export const LongNameOnAPhone: Story = {
+  name: 'Long name on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: { connector: LONG_NAMED, tools: rivera.googleCalendar.review.tools },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws a connector name this long, or this review on a phone. The nearest is N-Conn-09-GCal-Review, at the canvas\'s width; on a phone the title takes four lines beside its tile, balanced too.',
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_TITLE);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+const introCall = chenBusinessTools[0]!;
+const introDef = introCall.business!;
+
+export const BusinessJob: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  args: {
+    connector: undefined,
+    job: { title: introDef.title, glyph: businessGlyph(introDef.config)!, rows: businessRows(introDef, 'ask') },
+    tools: [reviewTool(introCall, [])], onChangeOutcome: undefined,
+  },
+  render: (args) => <div style={{ maxWidth: 720 }}><ConnectorReview {...args} /></div>,
+  parameters: { canvas: 'none', canvasNote: 'Signed D4 board p09-d4review-1512, with the corrected rows and starting outcome; not yet in the reference registry.' },
+  play: async ({ args, canvas, userEvent }) => {
+    await expect(canvas.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
+    await expect(canvas.queryByText(/built-in connector/)).toBeNull();
+    const setup = canvas.getByRole('region', { name: 'How it’s set up' });
+    await expect(within(setup).queryByText('Who')).toBeNull();
+    await expect(within(setup).getByText('Your opening hours', { exact: true })).toBeVisible();
+    await expect(within(setup).getByText('You approve each request in Needs you')).toBeVisible();
+    const turnOn = canvas.getByRole('button', { name: 'Turn it on' });
+    turnOn.focus();
+    await expect(turnOn).toHaveFocus();
+    await userEvent.tab();
+    await expect(canvas.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onCancel).toHaveBeenCalledTimes(1);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const BusinessJobPhone: Story = {
+  ...BusinessJob,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'Signed D4 board p09-d4review-390, not yet in the reference registry.' },
+  play: async (context) => {
+    await BusinessJob.play?.(context);
+    for (const row of context.canvasElement.querySelectorAll('.cd-connector-review__setup-row')) {
+      const label = row.querySelector('dt')!;
+      const value = row.querySelector('dd')!;
+      await expect(value.getBoundingClientRect().left).toBe(label.getBoundingClientRect().left);
+      await expect(value.getBoundingClientRect().top).toBeGreaterThan(label.getBoundingClientRect().bottom);
+    }
+    const text = context.canvasElement.querySelector('.cd-connector-review__text')!;
+    await expect(context.canvas.getByText('Ask me first', { exact: true }).getBoundingClientRect().top).toBeGreaterThanOrEqual(text.getBoundingClientRect().bottom);
   },
 };

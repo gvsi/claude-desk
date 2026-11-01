@@ -80,9 +80,13 @@ export const AddPayments: Story = {
 export const Writing: Story = {
   args: { busy: true, children: <VisitorMessage text={OWNER_WORDS} /> },
   play: async ({ canvas }) => {
-    // While Claude writes, the line says so inside the log, and no draft shows.
+    // While Claude writes, three dots show inside the log, with words for screen readers and no draft.
     const log = canvas.getByRole('log');
-    await expect(within(log).getByText('Claude is writing')).toBeVisible();
+    const writing = within(log).getByRole('status');
+    await expect(writing).toHaveTextContent('Claude is writing');
+    await expect(writing).toBeVisible();
+    await expect(writing.querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
+    await expect(within(writing).getByText('Claude is writing')).toHaveClass('cd-sr-only');
     await expect(within(log).queryByText(CLAUDE_WORDS)).toBeNull();
   },
 };

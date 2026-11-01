@@ -10,7 +10,7 @@
 
 ## What it shows
 
-- `name` as the page's `h1` in serif `.cd-type-page-title`, then `description` 4 px under it in body type, `text-secondary`.
+- `name` as the page's `h1` in serif `.cd-type-page-title`, balanced when it wraps (see Long names), then `description` 4 px under it in body type, `text-secondary`.
 - The source line, 8 px under that, in `.cd-type-meta`: the connector's `ConnectorIcon` at `inline` size (a built-in connector's 24 px tile, or a third-party connector's 20 px mark), "From {name}" with "Built in" or the Mock badge (`ConnectorName` at `inline` size), and 16 px on, the status in words with its dot:
   - `enabled`: handled "On", followed by " · {definitionNote}" when given ("On · Definition unchanged").
   - `needs_review`: info "Off until you review a change".
@@ -18,6 +18,10 @@
   - A status this build doesn't know reads "Off until you review a change", never "On".
 - On a narrow line the status wraps under the source.
 - The demo's strip, 20 px under the source line, only for an external connector's tool while it is `enabled` and only with `onSimulateChange`: a bordered row (`line-card`, `radius-card`, no fill, padding 10 px 14 px) with "Demo only. Changes this tool's definition on the mock {connector name} server, so you can see what happens." in `.cd-type-meta`, `text-secondary`, at the left, and a ghost `Button` "Simulate a tool change" at the right. On a narrow line the button wraps under the caption. A built-in tool has no mock server, and a tool that is off or waiting for a review has nothing to simulate, so neither gets the strip.
+
+## Long names
+
+A name that wraps balances its lines (`text-wrap: balance`), as `PageHeader`'s title does: the browser evens them out rather than filling each in turn, so a long tool name doesn't leave its last word on a line of its own. On a phone, "Refund a deposit to the card it came from when a customer cancels a visit" takes three even lines, not two full ones and "visit". On a laptop it fits the page's line and stays on one. The name keeps the number of lines it would take anyway, so nothing under it moves. A word with no break in it still breaks rather than leaving the line (`overflow-wrap: anywhere`).
 
 ## Simulating a change
 
@@ -34,7 +38,7 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `name` | `string` | Required. |
+| `name` | `string` | Required. Balanced when it wraps. |
 | `description` | `string` | Required. What it does, then its effects (`describeEffects`). |
 | `connector` | `ConnectorView` | Required. |
 | `status` | `ToolStatus` | Required. The profile's status. |

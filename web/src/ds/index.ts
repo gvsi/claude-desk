@@ -43,6 +43,14 @@ export {
 export { EmptyState, type EmptyStateProps } from './components/EmptyState/EmptyState.tsx';
 export { DisclosureLine, type DisclosureLineProps } from './components/DisclosureLine/DisclosureLine.tsx';
 export { LoadingLine, type LoadingLineProps } from './components/LoadingLine/LoadingLine.tsx';
+export {
+  Skeleton,
+  SkeletonCard,
+  type SkeletonCardProps,
+  type SkeletonProps,
+  type SkeletonText,
+} from './components/Skeleton/Skeleton.tsx';
+export { SKELETON_DELAY_MS, SkeletonScreen, type SkeletonScreenProps } from './components/Skeleton/SkeletonScreen.tsx';
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
@@ -85,6 +93,8 @@ export {
   type PublicShellScrollerDetail,
 } from './components/PublicShell/PublicShell.tsx';
 export { PublicBrandHeader, type PublicBrandHeaderProps } from './components/PublicShell/PublicBrandHeader.tsx';
+export { PublicShellSkeleton } from './components/PublicShell/PublicShellSkeleton.tsx';
+export { PublicBrandHeaderSkeleton } from './components/PublicShell/PublicBrandHeaderSkeleton.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
 // Vision pages
@@ -154,7 +164,7 @@ export { DemoInboxSheet, type DemoInboxSheetProps } from './components/DemoInbox
 // Setup
 export { SituationRow, type SituationRowProps } from './components/SituationRow/SituationRow.tsx';
 export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyCheckRow/SafetyCheckRow.tsx';
-export { SetupToolsList, type SetupToolsListProps, type SetupToolsRow } from './components/SetupToolsList/SetupToolsList.tsx';
+export { SetupToolsList, type SetupToolsListProps, type SetupToolsRow, type SetupJobRow } from './components/SetupToolsList/SetupToolsList.tsx';
 
 // Agents
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
@@ -317,3 +327,7 @@ export {
 
 // Icons
 export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from './icons/index.tsx';
+
+export { SidebarSkeleton } from './components/Sidebar/SidebarSkeleton.tsx';
+export { ReviewerBarSkeleton } from './components/ReviewerBar/ReviewerBarSkeleton.tsx';
+export { PageHeaderSkeleton, type PageHeaderSkeletonProps } from './components/PageHeader/PageHeaderSkeleton.tsx';

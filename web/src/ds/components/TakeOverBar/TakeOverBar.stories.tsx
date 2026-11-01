@@ -144,6 +144,24 @@ export const Answering: Story = {
   },
 };
 
+export const AvailableWidth: Story = {
+  args: { visitorName: 'Visitor' },
+  decorators: [(Story) => <div style={{ width: 'var(--size-reading)', maxWidth: '100%' }}><Story /></div>],
+  parameters: {
+    canvasNote: 'The bar at the composer width: the controls wrap below the lead and the hint uses the whole row, wrapping only when its words no longer fit.',
+  },
+  play: async ({ canvasElement }) => {
+    const line = lineReading(canvasElement, 'Visitor sees “Maria Rivera joined the chat.”');
+    const action = line.parentElement as HTMLElement;
+    const bar = action.parentElement as HTMLElement;
+    await expect(action.getBoundingClientRect().width).toBe(bar.getBoundingClientRect().width);
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    await expect(new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size).toBe(1);
+    expectComputed(line, { whiteSpace: 'normal' });
+  },
+};
+
 export const InChat: Story = {
   args: { mode: 'owner', visitorName: lucia.name },
   render: (args) => <Screen {...args} />,

@@ -2,10 +2,12 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useRef } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
+import { expectBalancedLines } from '../../test/expectBalancedLines.ts';
+import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
-import { lineWords } from '../../test/lineWords.ts';
 import { Button } from '../Button/Button.tsx';
 import { PresetMenu } from '../PresetMenu/PresetMenu.tsx';
+import { PageHeaderSkeleton as HeaderShapes } from './PageHeaderSkeleton.tsx';
 import { PageHeader, type PageHeaderProps } from './PageHeader.tsx';
 
 const runCheck = fn();
@@ -178,12 +180,8 @@ const setupColumn: NonNullable<Story['decorators']> = [
  * number of lines it would take anyway.
  */
 async function expectBalancedTitle(title: HTMLElement, lines: number): Promise<void> {
-  expectComputed(title, { textWrapStyle: 'balance' });
-  const words = lineWords(title);
-  await expect(words.flat().join(' ')).toBe(`${LONG_NAME} is live`);
-  await expect(words, 'the title keeps its lines').toHaveLength(lines);
+  await expectBalancedLines(title, `${LONG_NAME} is live`, lines);
   await expect(title.getBoundingClientRect().height).toBe(lines * 32);
-  await expect(words.at(-1)?.length ?? 0, `the last line holds more than one word: ${JSON.stringify(words)}`).toBeGreaterThan(1);
 }
 
 export const LongTitle: Story = {
@@ -262,5 +260,66 @@ export const FocusableTitle: Story = {
     await expect(tryAgain).toHaveFocus();
     await userEvent.tab({ shift: true });
     await expect(title).not.toHaveFocus();
+  },
+};
+
+export const PageHeaderSkeleton: Story = {
+  beforeEach: loadWebFonts,
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'P12-01, UXC-P1201-After (#artboard-dec46cf506e4): page shapes follow PageHeader line boxes and responsive actions.',
+  },
+  render: () => (
+    <div>
+      {[false, true].map((below) => (
+        <section key={String(below)} data-header-pair aria-label={below ? 'Actions below the title' : 'Actions beside the title'}>
+          <div data-real-header>
+            <PageHeader
+              title="Safety"
+              subtitle={RULES_LINE}
+              actions={
+                <div style={{ width: 140, height: 'var(--size-control)' }}>
+                  <Button variant="secondary">Run a check</Button>
+                </div>
+              }
+              actionsBelowOnPhone={below}
+              hideSubtitleOnPhone={below}
+            />
+          </div>
+          <div data-shaped-header aria-hidden="true">
+            <HeaderShapes subtitleLines={{ wide: 1, phone: 2 }} actions actionsBelowOnPhone={below} hideSubtitleOnPhone={below} />
+          </div>
+        </section>
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    for (const pair of canvasElement.querySelectorAll('[data-header-pair]')) {
+      const real = pair.querySelector<HTMLElement>('[data-real-header]')!;
+      const shapes = pair.querySelector<HTMLElement>('[data-shaped-header]')!;
+      for (const selector of ['.cd-page-header', '.cd-page-header__title', '.cd-page-header__subtitle', '.cd-page-header__actions']) {
+        const a = real.querySelector(selector)!.getBoundingClientRect();
+        const b = shapes.querySelector(selector)!.getBoundingClientRect();
+        if (a.height === 0 && b.height === 0) continue;
+        for (const [edge, delta] of [
+          ['top', real.getBoundingClientRect().top - shapes.getBoundingClientRect().top],
+          ['left', 0],
+          ['height', 0],
+        ] as const) {
+          await expect(Math.abs(a[edge] - b[edge] - delta), `${selector} ${edge}`).toBeLessThanOrEqual(2);
+        }
+        if (selector === '.cd-page-header__actions') await expect(Math.abs(a.width - b.width)).toBeLessThanOrEqual(2);
+      }
+    }
+  },
+};
+
+export const PageHeaderSkeletonPhone: Story = {
+  ...PageHeaderSkeleton,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'P12-01 phone, UXC-P1201-After-Phone (#artboard-1a93c5a1f31f): subtitle lines and actions follow PageHeader phone rules.',
   },
 };

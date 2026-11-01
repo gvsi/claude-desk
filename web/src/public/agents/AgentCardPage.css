@@ -12,6 +12,26 @@
   color: var(--text-primary);
 }
 
+.cd-agents-page .cd-agents-skeleton__phone-line {
+  display: none;
+}
+
+.cd-agents-page--skeleton {
+  --cd-agents-skeleton-address: var(--size-control-main);
+  --cd-agents-skeleton-code: calc(9 * var(--space-20) + 2 * var(--space-12));
+}
+
+@media (max-width: 767.98px) {
+  .cd-agents-page .cd-agents-skeleton__phone-line {
+    display: flex;
+  }
+
+  .cd-agents-page--skeleton {
+    --cd-agents-skeleton-address: calc(2 * var(--size-control-main) + var(--space-18));
+    --cd-agents-skeleton-code: calc(16 * var(--space-20) + 2 * var(--space-12));
+  }
+}
+
 .cd-agents-page__main {
   display: flex;
   flex: 1 0 auto;
@@ -46,7 +66,8 @@
   margin-top: var(--space-16);
 }
 
-.cd-agents-page__main > .cd-concept-footer {
+.cd-agents-page__main > .cd-concept-footer,
+.cd-agents-skeleton__footer {
   margin-top: auto;
   padding-top: var(--space-16);
 }

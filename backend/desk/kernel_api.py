@@ -47,6 +47,7 @@ from desk.contracts import (
     SessionCreated,
     SessionMode,
     SessionState,
+    SignedTime,
     ToolCall,
     ToolName,
     ToolProfile,
@@ -78,6 +79,28 @@ class DeskBusinessRequest(KernelRequest):     # PUT /desks/{id}/business
 
 class DeskCharterRequest(KernelRequest):      # PUT /desks/{id}/charter
     charter: list[Claim]
+
+class MemoryItem(BaseModel):
+    """An untrusted simulated owner note, shared by the write contract and memory reader."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    id: str = Field(pattern=r"^[a-z][a-z-]{0,59}$")
+    title: str = Field(min_length=1, max_length=200)
+    topics: list[Annotated[str, StringConstraints(min_length=1, max_length=60)]] = Field(max_length=10)
+    text: str = Field(min_length=1, max_length=2000)
+
+class DeskMemoryRequest(KernelRequest):       # PUT /desks/{id}/memory
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    about: str = Field(min_length=1, max_length=500)
+    items: list[MemoryItem] = Field(max_length=20)
+
+    @model_validator(mode="after")
+    def _unique_ids(self) -> Self:
+        if len({item.id for item in self.items}) != len(self.items):
+            raise ValueError("memory item ids must be unique")
+        return self
 
 class DeskHoursRequest(KernelRequest):        # PUT /desks/{id}/hours (the kernel rewrites fact "charter:hours")
     hours: list[HoursWindow]
@@ -167,6 +190,8 @@ class AnswerRequest(KernelRequest):           # POST /approvals/{decision_id}/an
 
 class CheckReplyRequest(KernelRequest):       # POST /check_reply
     draft: ReplyDraft
+    final: bool = True                    # false: a first attempt the API rewrites if every violation is rewritable
+                                          # (desk.rewrites), so its handoff clause opens no owner handoff then
 
 class OwnerMessageRequest(KernelRequest):     # POST /owner/messages (the kernel ledgers both kinds)
     session_id: str
@@ -198,6 +223,12 @@ class ToolPin(BaseModel):                  # a tool and the hash the owner revie
     tool: ToolName
     definition_sha256: Sha256Hex
 
+def each_tool_once(tools: list[ToolPin]) -> list[ToolPin]:
+    """The batch rule /tools/confirm and the owner API's body share: a batch names each tool once."""
+    if len({pin.tool for pin in tools}) != len(tools):
+        raise ValueError("a batch names each tool once")
+    return tools
+
 class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole connector in one batch, one tool a list of one
     desk_id: str
     tools: list[ToolPin] = Field(min_length=1, max_length=len(get_args(ToolName)))
@@ -205,8 +236,7 @@ class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole con
 
     @model_validator(mode="after")
     def _each_tool_once(self) -> Self:
-        if len({pin.tool for pin in self.tools}) != len(self.tools):
-            raise ValueError("a batch names each tool once")
+        each_tool_once(self.tools)
         return self
 
 class ToolsSimulateChangeRequest(KernelRequest):   # POST /tools/simulate_change (demo)
@@ -234,7 +264,7 @@ class LedgerAppendRequest(KernelRequest):     # POST /ledger/append: origin "api
         return self
 
 KERNEL_REQUESTS: tuple[type[BaseModel], ...] = (
-    CreateCopyRequest, CreateDeskRequest, DeskBusinessRequest, DeskCharterRequest, DeskHoursRequest,
+    CreateCopyRequest, CreateDeskRequest, DeskBusinessRequest, DeskCharterRequest, DeskMemoryRequest, DeskHoursRequest,
     DeskPricesRequest, DeskCalendarRequest, DeskPeopleRequest, DeskNotificationsRequest,
     DeskAnsweringRequest, DocumentUploadRequest, CreateSessionRequest, ModeRequest, TurnRequest, VerifyStartRequest,
     VerifyCheckRequest, DecideRequest, ExecuteRequest, CancelRequest, AnswerRequest, CheckReplyRequest,
@@ -267,7 +297,15 @@ class WhoAmI(BaseModel):                  # GET /whoami: the API's only source f
     desk_ids: list[str]
     session: SessionState | None
 
+class ContextClock(BaseModel):            # public kernel time, with no data label
+    as_of_utc: SignedTime
+    local_now: str                        # ISO 8601 with the business's offset, to the minute
+    local_date: str                       # YYYY-MM-DD in the business's time zone
+    weekday: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    timezone: str                        # the business's IANA time zone
+
 class SessionContext(BaseModel):          # GET /context/{session_id}; facts and knowledge filtered by labels
+    clock: ContextClock
     tools: list[ToolProfile]              # the profiles this session may call now
     tools_declared: list[ToolProfile]     # every profile a session of its kind could ever be given
     facts: list[Fact]
@@ -366,6 +404,7 @@ KERNEL_ROUTES: dict[str, tuple[type[BaseModel] | None, type | None]] = {
     "POST /desks": (CreateDeskRequest, DeskCreated),
     "PUT /desks/{id}/business": (DeskBusinessRequest, DeskUpdated),
     "PUT /desks/{id}/charter": (DeskCharterRequest, DeskUpdated),
+    "PUT /desks/{id}/memory": (DeskMemoryRequest, DeskUpdated),
     "PUT /desks/{id}/hours": (DeskHoursRequest, DeskUpdated),
     "PUT /desks/{id}/prices": (DeskPricesRequest, DeskUpdated),
     "PUT /desks/{id}/calendar": (DeskCalendarRequest, DeskUpdated),

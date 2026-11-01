@@ -116,6 +116,12 @@
   min-width: 0;
 }
 
+.cd-setup-start__field .cd-text-field__input {
+  field-sizing: content;
+  min-height: calc(4lh + var(--space-20));
+  max-height: calc(10lh + var(--space-20));
+}
+
 .cd-setup-start__examples {
   display: flex;
   flex-direction: column;

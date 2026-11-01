@@ -4,6 +4,7 @@ mirror."""
 
 from collections.abc import AsyncIterator
 from datetime import timedelta
+from hashlib import sha256
 
 import httpx
 import psycopg
@@ -11,22 +12,29 @@ import pytest
 from pydantic import ValidationError
 
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
-from desk.contracts import CopyCreated, NormalizedAction, ResourceRef, SessionCreated
-from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health
+from desk.contracts import CopyCreated, NormalizedAction, Probe, ResourceRef, SessionCreated, ToolCall
+from desk.kernel_api import (
+    CreateCopyRequest, CreateSessionRequest, DecideRequest, DemoAgentRequest, Health, PolicyProbeRequest, ToolPin,
+    ToolsConfirmRequest, ToolsConnectRequest, TurnRequest,
+)
 from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO
 from tests.kernel_contract.test_contract import (
     LINK_ROUTES,
+    a_new_desk,
     answer,
     check_reply,
     checkout,
     context,
     decide,
+    demo_agent,
     execute,
     issue_payment_link,
+    open_agent_session,
     quote_args,
     read_decision,
     refused,
+    turn_view,
 )
 
 BY_CALL = "GET /decisions/by_call?session_id=&generation=&call_id="
@@ -43,6 +51,68 @@ async def copy_and_visitor(http: KernelHttp, state: FakeKernelState) -> tuple[Co
     copy = await http.public().call("POST /copies", CreateCopyRequest())
     slug = state.desks[copy.desk_ids[0]].slug
     return copy, await http.public().call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor"))
+
+
+async def test_pending_tool_enables_are_available_to_draft_probes_only():
+    state = FakeKernelState()
+    async with KernelHttp("http://fake-kernel", transport=httpx.ASGITransport(app=fake_kernel_app(state))) as http:
+        copy = await http.public().call("POST /copies", CreateCopyRequest())
+        owner = http.owner(copy.owner_token)
+        created = await owner.call("POST /desks", a_new_desk())
+        desk_id = created.desk_id
+        profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(desk_id=desk_id, server="mock_payments"))
+        pin = next(profile for profile in profiles if profile.tool == "payments.list_charges")
+        reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=desk_id, enable=True, tools=[
+            ToolPin(tool=pin.tool, definition_sha256=pin.definition_sha256)]))
+        probe = PolicyProbeRequest(desk_id=desk_id, probes=[Probe(
+            actor="visitor", who="record_owner", resource_kind="charge", resource_owner="caller",
+            call=ToolCall(call_id="draft-charges", tool=pin.tool, args={}))])
+        result = await owner.call("POST /policy/{version}/probe", probe, path={"version": reviewed.draft.version})
+        assert result[0].outcome == "hold"
+        assert result[0].card_ids == ["default-payments.list_charges"]
+        result = await owner.call("POST /policy/{version}/probe", probe,
+                                  path={"version": state.desks[desk_id].policy_version})
+        assert result[0].outcome == "refuse"
+        assert state.desks[desk_id].tools[pin.tool].status == "needs_review"
+
+
+async def test_native_tool_review_uses_the_served_pin_and_cannot_disable_verification():
+    state = FakeKernelState()
+    async with KernelHttp("http://fake-kernel", transport=httpx.ASGITransport(app=fake_kernel_app(state))) as http:
+        copy = await http.public().call("POST /copies", CreateCopyRequest())
+        owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+        profile = state.desks[desk_id].tools["native.book"]
+        pin = ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256)
+        disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+            desk_id=desk_id, enable=False, tools=[pin]))
+        assert disabled.draft is None and disabled.profiles[0].status == "disabled"
+        reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+            desk_id=desk_id, enable=True, tools=[pin]))
+        assert reviewed.draft is not None and reviewed.profiles[0].status == "disabled"
+        verification = state.desks[desk_id].tools["native.start_verification"]
+        assert await refused(owner.call("POST /tools/confirm", ToolsConfirmRequest(
+            desk_id=desk_id, enable=False, tools=[ToolPin(
+                tool=verification.tool, definition_sha256=verification.definition_sha256)]))) == (422, "invalid")
+
+@pytest.mark.parametrize("preview", [True, False], ids=["owner-preview", "visitor"])
+async def test_callback_mirror_leaves_no_open_item_for_the_owners_preview(fake, ro_read, preview):
+    """The fake mirrors a preview's call-back as already done, keeping its fact for the card."""
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    if preview:
+        visitor = await http.owner(copy.owner_token).call("POST /sessions", CreateSessionRequest(
+            desk_slug=state.desks[copy.desk_ids[0]].slug, kind="visitor", preview=True))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    decision = await decide(view, session_id, 0, "call-1", "native.request_callback", {
+        "name": "Sam Lee", "contact": "sam@example.com", "reason": "Water heater"})
+    result = await execute(view, decision, 0)
+    assert result.state == "succeeded"
+    [fact] = result.facts
+    assert fact.fact_id == f"handoff:{result.model_view['handoff_id']}" and fact.status == "committed"
+    assert ro_read(FAKE_RO_SCHEMA, copy.copy_id,
+                   "SELECT handoff_id, session_id, status FROM {ro}.handoffs WHERE session_id = %s", (session_id,)) == [
+        {"handoff_id": result.model_view["handoff_id"], "session_id": session_id,
+         "status": "done" if preview else "open"}]
 
 
 async def test_failures_answer_before_anything_changes(fake):
@@ -91,6 +161,38 @@ async def test_a_dropped_answer_commits_then_times_out(fake):
     assert found.state == "allowed"
     assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args("drain"))) == found
     assert [len(state.called(route)) for route in ("/decide", "GET /decisions/by_call")] == [2, 1]
+
+
+@pytest.mark.parametrize("kind", ["visitor", "agent"])
+async def test_only_owner_answers_carry_a_refusal_line(fake, kind):
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    desk_id = copy.desk_ids[0]
+    if kind == "agent":
+        slug = state.desks[desk_id].slug
+        issued = await demo_agent(http, copy)
+        visitor, _ = await open_agent_session(http, issued, slug)
+        view = turn_view(http, issued, slug, visitor.state.session_id, "Please quote with a discount")
+    else:
+        view = http.session(visitor.session_token)
+    session_id = visitor.state.session_id
+    args = quote_args("drain", 1500)
+    held = await decide(view, session_id, 0, "call-1", "native.quote", args)
+    assert (held.state, held.owner_plain) == ("held", None)
+    state.never(desk_id, "native.quote")
+
+    owner = http.owner(copy.owner_token)
+    result = await answer(owner, held.decision_id, "allow_once")
+
+    line = "Your rules changed before this ran, so it wasn't done."
+    assert (result.decision.state, result.decision.owner_plain) == ("refused_at_execution", line)
+    assert await read_decision(owner, held.decision_id) == result.decision
+    reads = [await read_decision(view, held.decision_id),
+             await decide(view, session_id, 0, "call-1", "native.quote", args),
+             await view.call(BY_CALL, query={"session_id": session_id, "generation": 0, "call_id": "call-1"})]
+    for read in reads:
+        assert read.owner_plain is None and line not in read.model_dump_json()
+        assert read.model_copy(update={"owner_plain": line}) == result.decision
 
 
 async def test_scripts_override_outcomes_and_results(fake):
@@ -259,6 +361,21 @@ async def test_expiry_follows_the_fakes_clock(fake):
     assert state.decisions[held.decision_id].decision.state == "expired"
 
 
+async def test_a_turn_leaves_the_sessions_activity_alone(fake):
+    """The kernel's turn route reads the session without marking it seen, so starting a turn keeps no idle
+    conversation open: the fake's `/turn` leaves `last_seen` as it was, while any other session call moves it."""
+    http, state = fake
+    _, visitor = await copy_and_visitor(http, state)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    seen = state.sessions[session_id].last_seen
+    state.now += timedelta(minutes=5)
+    started = await view.call("POST /sessions/{session_id}/turn",
+                              TurnRequest(generation=0, text="Hola, ¿tienen citas?"), path={"session_id": session_id})
+    assert started.language == "es" and state.sessions[session_id].last_seen == seen
+    await context(view, session_id)
+    assert state.sessions[session_id].last_seen == state.now
+
+
 async def test_the_mirror_is_copy_scoped_and_read_only(fake, api_conn):
     http, state = fake
     first, _ = await copy_and_visitor(http, state)
@@ -365,3 +482,33 @@ async def test_demo_agents_are_minted_for_the_desk_and_limited_per_copy(fake):
     assert state.desks[desk_id].ledger[-1].event.kind == "rate_limit"
     state.now += timedelta(hours=1)
     assert (await owner.call("POST /agents/demo", DemoAgentRequest(desk_id=desk_id))).mandate.desk_id == desk_id
+
+
+async def test_owner_web_search_is_canned_and_visitor_cannot_call_it(fake):
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    owner = http.owner(copy.owner_token)
+    session = (await owner.whoami()).session
+    desk_id = copy.desk_ids[0]
+    assert "native.web_search" in [p.tool for p in (await context(owner, session.session_id, desk_id)).tools]
+    assert "native.web_search" not in [p.tool for p in (await context(
+        http.session(visitor.session_token), visitor.state.session_id)).tools]
+    decision = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=0, desk_id=desk_id,
+        call={"call_id": "search", "tool": "native.web_search", "args": {"query": "plumber services"}}))
+    assert decision.outcome == "allow"
+    result = await execute(owner, decision, 0)
+    assert result.state == "succeeded"
+    assert result.model_view["simulated"] is False and result.model_view["kind"] == "cited_excerpts"
+    assert result.model_view["results"] == [{"title": "Plumbing services", "url": "https://plumbing.example/services",
+                                               "snippet": "Plumbers repair leaks and clear drains."}]
+    stored = [item for item in state.desks[desk_id].knowledge.values() if item.source == "web_search"]
+    assert [item.model_dump() for item in stored] == [{
+        "item_id": "search-" + sha256(b"https://plumbing.example/services").hexdigest()[:16],
+        "source": "web_search", "title": "Web search: Plumbing services",
+        "text": "Plumbers repair leaks and clear drains.", "label": {"readers": ["owner"], "record_owner": None}}]
+    assert not {item.item_id for item in stored} & {item.item_id for item in (await context(
+        http.session(visitor.session_token), visitor.state.session_id)).knowledge}
+    refused = await decide(http.session(visitor.session_token), visitor.state.session_id, 0, "visitor-search",
+                           "native.web_search", {"query": "plumber services"})
+    assert refused.outcome == "refuse"

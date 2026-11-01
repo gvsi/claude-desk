@@ -425,6 +425,19 @@ def test_demo_inbox_decision_id_is_optional():
     assert "decision_id" not in export_schema()["$defs"]["DemoInboxEntry"]["required"]   # optional in the web's too
 
 
+def test_a_decisions_owner_reason_is_optional_and_unsigned():
+    # why an action didn't run, for the owner alone: None unless the kernel filled it, so a kernel that doesn't
+    # and every answer to a session still validate; it sits beside reason_plain, and the signature leaves it out
+    assert list(Decision.model_fields).index("owner_plain") == list(Decision.model_fields).index("reason_plain") + 1
+    assert Decision.model_fields["owner_plain"].annotation == str | None
+    assert Decision.model_fields["owner_plain"].default is None
+    assert "owner_plain" not in export_schema()["$defs"]["Decision"]["required"]     # optional in the web's too
+    source = inspect.getsource(Decision)
+    assert re.search(r"^ +owner_plain: str \| None = None +# owner-facing kernel template", source, re.MULTILINE)
+    assert re.search(r"owner_plain.*\n(?:.*\n)*? +signature: str +#.*\{decision_id, session_id, state, visitor_plain, "
+                     r"ledger_seq\}\)$", source, re.MULTILINE)
+
+
 def test_owner_typing_carries_no_free_text():
     # Presence after a take-over: the owner's display name and how long the dots show, never what they type.
     assert set(EvOwnerTyping.model_fields) == {"type", "name", "until"}
@@ -702,3 +715,12 @@ def test_a_copy_without_a_replay_carries_nothing_replayed():
 
 def test_schema_export_is_current():
     assert export_schema() == json.loads(Path("desk/contracts.schema.json").read_text())
+
+
+def test_knowledge_sources_share_one_contract_type():
+    from desk.contracts import KnowledgeItem, KnowledgeSource
+    from desk.api.schemas import KnowledgeRow
+
+    assert get_args(KnowledgeSource) == ("website", "upload", "setup", "memory_import", "web_search")
+    assert KnowledgeItem.model_fields["source"].annotation is KnowledgeSource
+    assert KnowledgeRow.model_fields["source"].annotation is KnowledgeSource

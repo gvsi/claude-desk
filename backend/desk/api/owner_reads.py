@@ -6,8 +6,13 @@ owner's `WhoAmI` answer named, filtered by the path Desk, and the API's own rows
 route has already checked that the Desk is one of the copy's (`OwnerCtx.desk`). The Desk list's unfinished setups are
 the one read across the copy's Desks: the API's own interview rows, filtered by that copy and its Desks. Only the
 Desk's visitor and agent sessions count, the owner's previews among them; the owner's own session (its setup calls)
-never does. Nothing here writes or commits, and nothing is kept between reads: each one is computed from the rows as
-they stand.
+never does. Nothing here writes or commits. Reads are computed from the current rows, except final execution
+refusal reasons: a bounded process-local cache avoids reading the same immutable kernel reason on each poll.
+
+The unfinished-setup guard assumes no Desk is made outside setup between a start's boundary read and its create
+call (the web never makes Desks outside setup), and the kernel's clock does not step backwards during a start.
+An outside Desk in that gap can take the claim; a backwards clock can leave the start's own Desk reading live.
+Identifying the exact Desk without those assumptions requires a kernel request tag on the Desk.
 
 Names, notes, reasons and texts a visitor typed are passed on as they are, for the owner's screens to show as
 untrusted text; nothing here reaches a visitor or a model.
@@ -20,7 +25,8 @@ never count as needing the owner, so "needs you" is never flagged.
 """
 
 import asyncio
-from collections import Counter
+import logging
+from collections import Counter, OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -30,6 +36,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from desk.api.deps import OwnerCtx
+from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.ro import decision_replayed, replayed
 from desk.api.schemas import (
     Attempt,
@@ -43,6 +50,7 @@ from desk.api.schemas import (
     NeedsYouItem,
     NeedsYouSession,
     RecordedHistory,
+    RefusalCause,
     Reports,
     ThisWeek,
     Today,
@@ -50,19 +58,28 @@ from desk.api.schemas import (
 )
 from desk.api.setup import INTERVIEWS
 from desk.api.store import MESSAGES, triaged
-from desk.contracts import Decision
+from desk.contracts import Decision, DecisionState
+
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
 OWNER_NOTES = ("triage", "annotation")              # what the API writes later for the owner: never activity
 LIVE_FOR = timedelta(minutes=5)                    # Today's "Live now": activity this recent
 BRIEFING_FROM = time(18)                           # "Since last night": from 18:00 yesterday
 WEEK_DAYS = 7                                      # "Last 7 days": today and the six dates before it
-KIND_ORDER = {"blocked": 0, "booking": 1, "lead": 2, "answer": 3}
+KIND_ORDER = {"turned_down": 0, "booking": 1, "lead": 2, "answer": 3}
+REFUSAL_CACHE_SIZE = 1024
+# Exact final decision version -> (session, reason); the session is still checked on every cache hit.
+_REFUSAL_REASONS: OrderedDict[tuple[str, int], tuple[str, str | None]] = OrderedDict()
 # The owner's line for a reply of Claude's the checkpoint stopped, and why: by rule ID where one says more than its
 # violation kind (a booking claim, which is a `promise_word`), else by the kind.
 REPLY_STOPPED = "A reply was stopped before it was shown"
 BOOKING_CLAIM = "it said a booking was made instead of showing the card"
-REPLY_WHY_BY_RULE = {"lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM}
+REPLY_WHY_BY_RULE = {
+    "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
+    # Proposed wording awaiting the owner's sign-off.
+    "soft.unavailable": "the checkpoint wasn't available",
+    "soft.denies_ai": "it said it wasn't an AI",
+}
 REPLY_WHY = {
     "number_in_prose": "it wrote a number outside a checked card",
     "promise_word": "it made a promise the rules don't back",
@@ -129,6 +146,40 @@ async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str]) ->
     return {session_id: text for session_id, text in rows}          # the last row of each session stays
 
 
+async def refusal_reason(ctx: OwnerCtx, decision_id: str, session_id: str, state: DecisionState,
+                         ledger_seq: int) -> str | None:
+    """Read the owner-only reason for a copy-scoped status, never from a visitor-readable stored row.
+
+    Match the exact state and ledger entry being displayed, so a later read cannot annotate an older status.
+    An unavailable or refused kernel read leaves the reason null and logs only the error type.
+    Matching final reasons are cached for this process's life, up to 1,024 entries, evicting the least recently used;
+    failures and mismatches are retried on later reads. The caller has already scoped the session or decision row
+    to the owner's Desks.
+    """
+    if state != "refused_at_execution":
+        return None
+    key = (decision_id, ledger_seq)
+    if key in _REFUSAL_REASONS:
+        cached_session, reason = _REFUSAL_REASONS[key]
+        if cached_session != session_id:
+            return None
+        _REFUSAL_REASONS.move_to_end(key)
+        return reason
+    try:
+        decision = await ctx.kernel.call("GET /decisions/{id}", path={"id": decision_id})
+    except (KernelFailed, KernelUnavailable) as error:
+        logging.getLogger(__name__).warning("Owner refusal reason unavailable: %s", type(error).__name__)
+        return None
+    if (decision.decision_id, decision.session_id, decision.state, decision.ledger_seq) != (
+            decision_id, session_id, state, ledger_seq):
+        return None
+    _REFUSAL_REASONS[key] = (session_id, decision.owner_plain)
+    _REFUSAL_REASONS.move_to_end(key)
+    if len(_REFUSAL_REASONS) > REFUSAL_CACHE_SIZE:
+        _REFUSAL_REASONS.popitem(last=False)
+    return decision.owner_plain
+
+
 async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> dict[str, str | None]:
     """The reason of the rule card that held each decision: its first `card_ids` entry, in the policy version it was
     decided under (default cards included), by decision ID."""
@@ -145,7 +196,9 @@ async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> di
 
 async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     """The Desk's held requests, each read from the kernel with the owner's credential (which applies expiry, so a
-    request that expired meanwhile drops out), oldest first, then its open callback requests."""
+    request that expired meanwhile drops out), oldest first, then its open handoffs, call-back requests and the handoff
+    card's, each with its kind. A card's handoff has no action: its kernel row's `action_id`, which no view shows,
+    names the handoff itself."""
     who = await people(ctx, desk_id)
     held_rows = [row for row in await ctx.ro.rows("decisions", desk_id=desk_id, state="held",
                                                   order_by=("created_at", "decision_id"))
@@ -168,7 +221,7 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     for row in handoffs:
         if (session := who.brief(row["session_id"])) is not None:
             handoff = Handoff(handoff_id=row["handoff_id"], session_id=row["session_id"], reason=row["reason"],
-                              callback_window=row["callback_window"], status=row["status"])
+                              callback_window=row["callback_window"], status=row["status"], kind=row["kind"])
             items.append(NeedsYouItem(decision=None, held_by=None, held_at=None, handoff=handoff, session=session,
                                       from_the_visitor=texts.get(row["session_id"])))
     return items
@@ -239,6 +292,100 @@ class Stopped(Timed):
     card_ids: tuple[str, ...] = ()
     origin: Literal["kernel", "api"] = "kernel"
     ledger_seq: int = 0
+    cause: RefusalCause | None = None
+
+
+REFUSAL_REASONS: dict[str, RefusalCause] = {
+    "paused": "paused", "unknown_tool": "tool_not_available", "not_given": "tool_not_available",
+    "invalid_args": "incomplete_request", "no_active_version": "no_rules",
+    "version_unloadable": "rules_unchecked", "version_outdated": "rules_unchecked",
+    "evaluation_error": "rules_unchecked",
+}
+REFUSAL_CHECKS: dict[str, RefusalCause] = {
+    "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
+    "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
+    "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
+    "no_such_document": "no_such_document",
+}
+# In precedence order, after any owner never card. The private-data cause depends on session verification.
+BASELINE_CAUSES: dict[str, RefusalCause] = {
+    "B.same_copy": "other_copy", "B.private_data_record_owner": "not_verified",
+    "B.recipient_owner_or_verified_contact": "recipient", "B.no_agent_pay_out": "agent_pay_out",
+    "B.agent_charge_within_mandate": "agent_limit", "B.money_has_amount": "no_amount",
+}
+
+
+def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCause | None:
+    """A refused decision's cause, from its row and the already-read kernel-built `decide` entry.
+
+    Exact codes only; never inspect or echo owner/visitor prose. Early `reason` wins, including an unknown one.
+    For evaluated refusals, take the first match in the policy precedence below, regardless of the IDs' row order.
+    Unknown codes/IDs and a missing, malformed or mismatched entry have no label. A valid entry has a `decide`
+    event with matching `ref_id` and `session_id`, a dict summary with outcome `refuse`, and a matching summary
+    decision ID when present. Early refusals omit the summary decision ID, so the event reference is required.
+    The web holds the labels.
+
+    Source                                           Cause                 Signed label
+    reason: paused                                   paused                The chat was paused
+    reason: unknown_tool, not_given                  tool_not_available    Not a tool this chat can use
+    reason: invalid_args                             incomplete_request    The request wasn't in a form I can use
+    reason: no_active_version                        no_rules              No rules turned on yet
+    reason: version_unloadable, version_outdated,
+            evaluation_error                         rules_unchecked       Your rules couldn't be checked, so I said no
+    reason: adapter_refused, by check:
+      no_such_slot                                   no_such_slot          That time isn't open
+      unknown_item                                   unknown_item          Not on the price list
+      over_limit                                     over_quote_ceiling    Over the $10,000 quote ceiling
+      no_such_quote, quote_paid, quote_paying         quote_unpayable       That quote can't be paid now
+      no_such_charge                                 no_such_charge        Couldn't find that payment
+      not_refundable                                 not_refundable        That payment can't be refunded
+      no_such_document                               no_such_document      No such document
+      not_verified, no_mandate, mandate_exhausted,
+      not_an_agent_with_a_mandate (unreachable),
+      search_limit (execution only)                   null                  (no label)
+    policy precedence:
+      F.never.*                                      owner_rule            Your rule says no
+      B.same_copy                                    other_copy            Not a record on this Desk
+      B.private_data_record_owner, unverified        not_verified          Not verified yet
+      B.private_data_record_owner, verified          not_their_record      Only for the person it belongs to
+      B.recipient_owner_or_verified_contact          recipient             Only to you or a contact on record
+      B.no_agent_pay_out                             agent_pay_out         Agents can't send money out
+      B.agent_charge_within_mandate                  agent_limit           Outside the agent's spending limit
+      B.money_has_amount                             no_amount             Not a valid amount
+    no reason, empty policy_ids and card_ids         no_rule               No rule covers this yet
+    anything else                                    null                  (no label)
+    """
+    if entry is None:
+        return None
+    event = entry.get("event")
+    if not isinstance(event, dict) or event.get("kind") != "decide":
+        return None
+    if event.get("ref_id") != row["decision_id"] or event.get("session_id") != row["session_id"]:
+        return None
+    summary = event.get("summary")
+    if not isinstance(summary, dict) or summary.get("outcome") != "refuse":
+        return None
+    if "decision_id" in summary and summary["decision_id"] != row["decision_id"]:
+        return None
+    if any(key in summary and not isinstance(summary[key], str) for key in ("reason", "check")):
+        return None
+    if "reason" in summary:
+        if summary["reason"] == "adapter_refused":
+            return REFUSAL_CHECKS.get(summary.get("check"))
+        return REFUSAL_REASONS.get(summary["reason"])
+    policies = row["policy_ids"]
+    if any(policy.startswith("F.never.") for policy in policies):
+        return "owner_rule"
+    for policy, cause in BASELINE_CAUSES.items():
+        if policy in policies:
+            # tools_given gives private-data tools only after verification; an unverified caller gets
+            # not_given before evaluation. Verification binds a person once and never clears/rebinds them,
+            # so a historical private-data refusal cannot predate that binding. Reading verified in the same
+            # snapshot as the decision is safe: this verified person's refusal means another person's record.
+            if policy == "B.private_data_record_owner" and verified:
+                return "not_their_record"
+            return cause
+    return None if policies or row["card_ids"] else "no_rule"
 
 
 def reply_violations(summary: dict) -> list[tuple[str, str | None]]:
@@ -276,6 +423,7 @@ class Activity:
     stepped: list[Timed]                       # the owner stepping into a session
     texts: list[Timed]                         # visitor and agent text rows
     replies: list[Timed]                       # Claude's delivered replies, a handoff clause left out
+    handoffs: list[Timed]                      # Claude's delivered replies carrying a handoff clause
 
 
 def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[str, dict]) -> list[Stopped]:
@@ -289,17 +437,21 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
         if row["outcome"] != "refuse" or row["session_id"] not in sessions:
             continue
         entry = entries.get(row["ledger_seq"])
-        origin = (entry["event"] or {}).get("origin", "kernel") if entry else "kernel"
+        event = entry.get("event") if entry else None
+        origin = event.get("origin", "kernel") if isinstance(event, dict) else "kernel"
         found.append(Stopped(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"],
                              line=row["reason_plain"], replayed=decision_replayed(row, entry), kind="refused",
                              reason_plain=row["reason_plain"], card_ids=tuple(row["card_ids"] or ()), origin=origin,
-                             ledger_seq=row["ledger_seq"]))
+                             ledger_seq=row["ledger_seq"],
+                             cause=refusal_cause(row, entry, verified=sessions[row["session_id"]]["verified"])))
     for entry in ledger:
-        event = entry["event"] or {}
-        summary = event.get("summary") or {}
-        violations = reply_violations(summary)
+        event = entry.get("event")
+        if not isinstance(event, dict) or not isinstance(event.get("summary"), dict):
+            continue
+        summary = event["summary"]
         if event.get("kind") != "reply" or summary.get("author") != "claude" or event.get("session_id") not in sessions:
             continue
+        violations = reply_violations(summary)
         if not [kind for kind, _ in violations if kind != "session_paused"]:
             continue
         found.append(Stopped(at=entry_time(entry), session_id=event.get("session_id"), ref_id=str(entry["seq"]),
@@ -379,7 +531,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.created_at >= start,
                MESSAGES.c.kind.in_((*VISITOR_TEXT, "delivered", "owner_say", "whisper")))
         .order_by(MESSAGES.c.n))
-    texts, replies, stepped = [], [], _stepped_in(decisions, ledger)
+    texts, replies, handoffs, stepped = [], [], [], _stepped_in(decisions, ledger)
     for row in rows:
         if row.session_id not in who.sessions:
             continue
@@ -389,9 +541,11 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
             texts.append(at)
         elif row.author == "owner":
             stepped.append(at)                         # a say, a whisper, or a say delivered
-        elif row.kind == "delivered" and row.author == "claude" and not any(
-                block.template == "handoff" for block in row.blocks or []):
-            replies.append(at)
+        elif row.kind == "delivered" and row.author == "claude":
+            if any(block.template == "handoff" for block in row.blocks or []):
+                handoffs.append(at)
+            else:
+                replies.append(at)
     bookings = executed("native.book")
     return Activity(
         people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
@@ -401,7 +555,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         stopped=_stopped_attempts(decisions, ledger, who.sessions),
         holds=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"])
                for row in decisions if row["outcome"] == "hold"],
-        stepped=stepped, texts=texts, replies=replies)
+        stepped=stepped, texts=texts, replies=replies, handoffs=handoffs)
 
 
 def _within(things: Iterable[Timed], start: datetime, end: datetime) -> list[Timed]:
@@ -413,7 +567,7 @@ def _sessions(things: Iterable[Timed]) -> set[str]:
 
 
 def _newest_first(items: list[BriefingItem]) -> list[BriefingItem]:
-    """By `at`, newest first, then by kind (blocked, booking, lead, answer), then by `ref_id` descending."""
+    """By `at`, newest first, then by kind (turned_down, booking, lead, answer), then by `ref_id` descending."""
     items = sorted(items, key=lambda item: item.ref_id, reverse=True)
     items.sort(key=lambda item: KIND_ORDER[item.kind])
     items.sort(key=lambda item: item.at, reverse=True)
@@ -422,11 +576,12 @@ def _newest_first(items: list[BriefingItem]) -> list[BriefingItem]:
 
 @dataclass(frozen=True)
 class Counted:
-    """What the briefing from `start` to `end` counts: the stopped attempts, bookings and leads, the conversations'
+    """What the briefing from `start` to `end` counts: the refused requests, bookings and leads, the conversations'
     text rows, and each conversation Claude answered alone (a reply it delivered, other than the handoff clause, and no
-    booking, lead, hold, stopped attempt or callback) at its newest such reply, by session."""
+    booking, lead, hold, refused request, callback or delivered handoff) at its newest such reply, by session.
+    Stopped drafts do not make a conversation busy."""
 
-    stopped: list[Timed]
+    stopped: list[Stopped]
     bookings: list[Timed]
     leads: list[Timed]
     texts: list[Timed]
@@ -434,10 +589,10 @@ class Counted:
 
 
 def briefing_counts(done: Activity, start: datetime, end: datetime) -> Counted:
-    stopped = _within(done.stopped, start, end)
+    stopped = [attempt for attempt in _within(done.stopped, start, end) if attempt.kind == "refused"]
     bookings, leads = _within(done.bookings, start, end), _within(done.leads, start, end)
     busy = _sessions([*stopped, *bookings, *leads, *_within(done.holds, start, end),
-                      *_within(done.callbacks, start, end)])
+                      *_within(done.callbacks, start, end), *_within(done.handoffs, start, end)])
     texts = _within(done.texts, start, end)
     conversations = _sessions(texts)
     newest: dict[str, Timed] = {}
@@ -449,16 +604,17 @@ def briefing_counts(done: Activity, start: datetime, end: datetime) -> Counted:
 
 
 def briefing_items(done: Activity, start: datetime, end: datetime) -> list[BriefingItem]:
-    """Every briefing item from `start` to `end`, newest first: each stopped attempt, booking and lead, and each
+    """Every briefing item from `start` to `end`, newest first: each refused request, booking and lead, and each
     conversation Claude answered alone, at its newest such reply (`briefing_counts`)."""
     who = done.people
 
-    def item(kind: str, thing: Timed, ref_id: str | None = None, line: str | None = None) -> BriefingItem:
+    def item(kind: str, thing: Timed, ref_id: str | None = None, line: str | None = None,
+             cause: RefusalCause | None = None) -> BriefingItem:
         return BriefingItem(kind=kind, at=thing.at, session_id=thing.session_id,
-                            display_name=who.name(thing.session_id), ref_id=ref_id or thing.ref_id, line=line)
+                            display_name=who.name(thing.session_id), ref_id=ref_id or thing.ref_id, line=line, cause=cause)
 
     counted = briefing_counts(done, start, end)
-    items = [item("blocked", attempt, line=attempt.line) for attempt in counted.stopped]
+    items = [item("turned_down", attempt, line=attempt.line, cause=attempt.cause) for attempt in counted.stopped]
     items += [item("booking", booking, line=booking.line) for booking in counted.bookings]
     items += [item("lead", lead, line=lead.line) for lead in counted.leads]
     items += [item("answer", reply, ref_id=session_id) for session_id, reply in counted.answers.items()]
@@ -474,8 +630,8 @@ def briefing(done: Activity, frame: Windows) -> Briefing:
     return Briefing(
         since=frame.since, conversations=len(_sessions(_within(done.texts, frame.since, frame.now))),
         bookings=sum(item.kind == "booking" for item in items), leads=sum(item.kind == "lead" for item in items),
-        blocked=sum(item.kind == "blocked" for item in items), total=len(items),
-        newest=BriefingNewest(blocked=first("blocked"), booking=first("booking"),
+        turned_down=sum(item.kind == "turned_down" for item in items), total=len(items),
+        newest=BriefingNewest(turned_down=first("turned_down"), booking=first("booking"),
                               lead_or_answer=first("lead", "answer")))
 
 
@@ -485,7 +641,7 @@ class WeekCounted:
     text rows, the bookings, the requests the kernel refused, and the owner stepping into those conversations; and
     from them, how many conversations there were, how many the owner stepped into and how many Claude handled alone.
     `stopped` holds the refused requests only: a draft of Claude's the reply check stopped is no attempt anyone made,
-    so it is listed on Safety and in the briefing but never counted here."""
+    so it is listed on Safety but omitted from the briefing and never counted here."""
 
     texts: list[Timed]
     bookings: list[Timed]
@@ -679,33 +835,68 @@ async def today(ctx: OwnerCtx, desk_id: str, now: datetime) -> Today:
 
 
 async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
-    """The Desk's stopped attempts (Today's "Stopped"), newest first, each with its AI-written triage once one is
-    written (Plan 02b, Task 10), else None."""
+    """The Desk's refused requests and Claude's stopped drafts, newest first, each with its AI-written triage once
+    written (Plan 02b, Task 10), else None. Only refusals count in Today; their nullable `cause` maps the decision's
+    `policy_ids`, its already-read ledger decide summary's `reason`/`check` and the session's verified state
+    through `refusal_cause`.
+    Sessions, decisions and ledger entries share one snapshot so a newly verified session's refusal cannot be
+    labelled with an older verification state. No kernel call runs while the snapshot is open."""
+    conn = ctx.ro.conn
+    await conn.commit()
+    await conn.execution_options(isolation_level="REPEATABLE READ")   # reset when the connection is pooled again
     sessions = {row["session_id"]: row for row in await ctx.ro.rows("sessions", desk_id=desk_id)}
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     triage = await triaged(ctx.ro.conn, ctx.copy_id, desk_id=desk_id)
+    await conn.commit()
     found = sorted(_stopped_attempts(decisions, ledger, sessions), key=lambda attempt: attempt.ref_id, reverse=True)
     found.sort(key=lambda attempt: attempt.at, reverse=True)
     return [Attempt(ref_id=attempt.ref_id, kind=attempt.kind, reason_plain=attempt.reason_plain,
                     card_ids=list(attempt.card_ids), origin=attempt.origin, created_at=attempt.at,
-                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq) for attempt in found]
+                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq,
+                    cause=attempt.cause) for attempt in found]
 
 
 # The Desk list (#233) -----------------------------------------------------------------------------------------
 
 
-async def unfinished_setups(ctx: OwnerCtx) -> dict[str, DeskSetup]:
+async def unfinished_setups(ctx: OwnerCtx, desks: list[dict]) -> dict[str, DeskSetup]:
     """The setup interviews of the copy's Desks that haven't gone live, by Desk ID, so the owner can go back into one.
     Only the copy's own interview rows are read, for its Desks. A Desk made outside setup has no interview, and one
-    whose interview is `live` has finished; a row still starting names no Desk yet. Each Desk has one interview, the
-    setup that made it; were there more, the newest would stand."""
+    whose interview is `live` has finished. Pending keyed starts, in created order, each cover at most one unlinked
+    Desk: the earliest after their kernel-clock boundary that no earlier row claimed. A definite kernel refusal
+    with no linked Desk claims nothing. Deleted Desks keep their claims, so deletion cannot move a claim to another
+    Desk; only active Desks are returned. Each Desk's actual interview wins; were there more, the newest would stand.
+    """
     if not ctx.desk_ids:
         return {}
     rows = await ctx.ro.conn.execute(
-        select(INTERVIEWS.c.desk_id, INTERVIEWS.c.interview_id, INTERVIEWS.c.step)
-        .where(INTERVIEWS.c.copy_id == ctx.copy_id, INTERVIEWS.c.desk_id.in_(sorted(ctx.desk_ids)))
+        select(INTERVIEWS.c.desk_id, INTERVIEWS.c.interview_id, INTERVIEWS.c.step,
+               INTERVIEWS.c.idempotency_key, INTERVIEWS.c.desk_requested_at, INTERVIEWS.c.start_error)
+        .where(INTERVIEWS.c.copy_id == ctx.copy_id,
+               INTERVIEWS.c.desk_id.in_([desk["desk_id"] for desk in desks]) | (
+                   INTERVIEWS.c.desk_id.is_(None) & INTERVIEWS.c.idempotency_key.is_not(None)
+                   & INTERVIEWS.c.desk_requested_at.is_not(None)))
         .order_by(INTERVIEWS.c.created_at, INTERVIEWS.c.interview_id))
-    newest = {desk_id: (interview_id, step) for desk_id, interview_id, step in rows}   # each Desk's last row stays
-    return {desk_id: DeskSetup(interview_id=interview_id, step=step)
-            for desk_id, (interview_id, step) in newest.items() if step != "live"}
+    rows = rows.mappings().all()
+    newest = {row["desk_id"]: row for row in rows if row["desk_id"] is not None}
+    found = {desk_id: DeskSetup(interview_id=row["interview_id"], step=row["step"])
+             for desk_id, row in newest.items() if row["step"] != "live"}
+    unlinked = sorted((desk for desk in desks if desk["desk_id"] not in newest),
+                      key=lambda desk: (utc(desk["created_at"]), desk["desk_id"]))
+    for row in rows:
+        if row["desk_id"] is not None or (row["start_error"] or {}).get("kernel") == "failed":
+            continue
+        for desk in unlinked:
+            if desk["desk_id"] not in found and utc(desk["created_at"]) > utc(row["desk_requested_at"]):
+                # desk_requested_at is the newest pre-request Desk timestamp in the kernel's clock domain,
+                # not Postgres's request time. Strict ordering excludes all Desks that already existed.
+                # Fail safe: if both link writes are lost (a stopped process or database outage), this Desk
+                # stays in setup indefinitely. Desks created before the request keep their live status.
+                # Assumes no outside-setup Desk is made between the boundary read and POST /desks (the web
+                # never does that), and the kernel clock never steps backwards during the start. The former
+                # can steal the claim; the latter can leave the start's Desk reading live. Exact ownership
+                # needs a kernel request tag on the Desk.
+                found[desk["desk_id"]] = DeskSetup(interview_id=row["interview_id"], step="questions")
+                break
+    return {desk_id: setup for desk_id, setup in found.items() if desk_id in ctx.desk_ids}

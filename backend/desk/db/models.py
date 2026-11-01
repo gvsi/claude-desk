@@ -117,6 +117,9 @@ class Desk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Private setup notes; never included in kernel_ro.desks.
+    simulated_memory: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+
 
 class Person(Base):
     __tablename__ = "people"
@@ -356,6 +359,8 @@ class Decision(Base):
     card_ids: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=EMPTY_LIST)
     review: Mapped[c.Review | None] = mapped_column(ContractJSON(c.Review))
     reason_plain: Mapped[str] = mapped_column(Text)
+    # why it was refused at execution, for the owner alone (`decide.set_state`); None in every other state
+    owner_plain: Mapped[str | None] = mapped_column(Text)
     visitor_plain: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ledger_seq: Mapped[int] = mapped_column(BigInteger)
@@ -549,8 +554,13 @@ class PaymentLink(Base):
 
 
 class Handoff(Base):
-    """A callback a visitor asked for: one per `native.request_callback` action, `open` until the
-    owner marks it `done` (01b_2_handoffs)."""
+    """A conversation handed to the owner, `open` until the owner marks it `done`: one the handoff
+    card opened, or a callback a visitor asked for (`native.request_callback`, 01b_2_handoffs),
+    which first closes the session's open ones. A row's kind never changes. The kernel keeps one
+    open handoff per session, of either kind, under the session row, not by a constraint, so rows
+    from before may hold several (01b_2b_handoff_kind). A call-back in the owner's own preview
+    inserts its row already `done`, with no closing entry or alert, so it leaves no Needs-you item;
+    its fact still backs the preview's card and its row stays for reconciliation."""
 
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}
@@ -561,9 +571,11 @@ class Handoff(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     callback_window: Mapped[str | None] = mapped_column(Text)    # ISO 8601 "<start>/<end>", or None
     status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
-    action_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)                      # "callback" or "card"; the kernel names it
+    action_id: Mapped[str] = mapped_column(Text)                 # a call-back's action; a card's own handoff_id
     window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null without a window
     window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null on rows from before
 
 
 class NotificationPref(Base):
@@ -678,9 +690,10 @@ class SetupInterview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     # A start's client key (migration api_idempotency): unique per copy, with its body's hash, the answer it failed
-    # with, if it did, and when it asked the kernel for the Desk. The failure is kept for diagnosis: a repeat answers
-    # 409 `key_spent` from its presence, never from its content. Every start sends a key now; a row written without a
-    # key, before the key was required, leaves all four null.
+    # with, if it did, and the copy's newest kernel created_at when it asked for the Desk (1970-01-01 UTC if none
+    # existed). A repeat answers 409 `key_spent` from the failure's presence. The Desk-list guard also reads
+    # `"kernel": "failed"` from start_error: a definite refusal with no kept Desk ID claims no Desk.
+    # Every start sends a key now; a row written without a key, before it was required, leaves all four null.
     idempotency_key: Mapped[str | None] = mapped_column(Text)
     request_sha256: Mapped[str | None] = mapped_column(Text)
     start_error: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))

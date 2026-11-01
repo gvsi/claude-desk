@@ -168,7 +168,9 @@ const HOLDS_CARDS_FILE = 'public/agents/SendAgentPanel.tsx';
 
 // An owner's reason on a receipt: the decision's `reason_plain` and the receipt props that show it
 // to the owner. The visitor's page shows each receipt's `visitor_plain` and nothing else.
-const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b/;
+const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b|\bowner_plain\b|\bownerPlain\b/;
+// Imported aliases still name the original export; renamed wrappers still import the owner path.
+const OWNER_RECEIPT_PATH = /\bApprovalCard\b|\buseOwnerReceipt\b|\b(?:from\s*|import\s*(?:\(\s*)?)['"][^'"]*\bowner\//;
 
 // The open status: the kernel's object, passed on as it came, and its times read in one place.
 const SHELL_FILE = 'ds/components/PublicShell/PublicShell.tsx';
@@ -225,16 +227,18 @@ function everyFileButThisOne(): string[] {
 }
 
 // The Claude Desk mark's fixed colors and its parts' classes, only in the mark's folder; clay, the
-// intro illustration's field, only in the intro dialog's. Unlike the guards above, this one reads every
+// intro illustration's field, the About app icon's field and Claude's writing dots, only in their
+// allowed folders and files. Unlike the guards above, this one reads every
 // text file under `src/`, the design system included, but the token sources and the tables and tests
 // that list every token or prove the design system's own guards.
 const MARK_PARTS = /(?<![\w-])--mark-[a-z-]*[a-z]|\bcd-mark__[a-z-]*|#d97757\b|217\s*,\s*119\s*,\s*87/i;
 const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/i;
 const MARK_FOLDER = 'ds/components/Mark/';
 // Clay is the intro illustration's field and the field of the About pages' app icon, which counts as
-// part of the mark (owner, 2026-10-30).
+// part of the mark (owner, 2026-10-30), plus Claude's writing dots and their story's computed color check.
 const CLAY_FOLDERS = ['ds/components/IntroDialog/', MARK_FOLDER] as const;
-const mayUseClay = (file: string) => CLAY_FOLDERS.some((folder) => file.startsWith(folder));
+const CLAY_FILES = ['ds/components/WritingIndicator/WritingIndicator.css', 'ds/components/WritingIndicator/WritingIndicator.stories.tsx'];
+const mayUseClay = (file: string) => CLAY_FOLDERS.some((folder) => file.startsWith(folder)) || CLAY_FILES.includes(file);
 const COLOR_TABLES = ['ds/tokens.json', 'ds/tokens.css', 'ds/contrast.ts', 'ds/tokens.test.ts', 'ds/guards.test.ts'];
 
 // A JavaScript name, and a reference to one of `names`: the name itself, or a namespace's member
@@ -357,6 +361,11 @@ const LIB_IMPORT = /\bfrom\s+['"](?:\.\.\/)+lib\/([\w.-]+)['"]/g;
 function libModulesOf(visitor: Source[], all: Source[] = sources): Source[] {
   const files = new Set(visitor.flatMap(({ text }) => [...text.matchAll(LIB_IMPORT)].map((m) => `lib/${m[1]}`)));
   return all.filter((s) => files.has(s.file));
+}
+
+/** Owner annotations and owner-only rendering paths in visitor code and its library modules. */
+function ownerReasonLeaks(scanned: Source[]): string[] {
+  return [...hits(OWNER_REASON, scanned), ...hits(OWNER_RECEIPT_PATH, scanned)];
 }
 
 /** Object literals (or types) that pair `open:` with `text:`: an open status the page made itself. */
@@ -889,11 +898,17 @@ describe('app source guards', () => {
   });
 
   it('visitor_code_never_shows_owner_reasons', () => {
-    const visitor = (s: Source) => s.file.startsWith('public/');
-    const bad = '<MarginReceipt {...receipt} reason={decision.reason_plain} cardBelow />';
-    expect(hits(OWNER_REASON, sample(bad))).toHaveLength(3);
+    const visitor = sources.filter((s) => s.file.startsWith('public/'));
+    const bad = '<MarginReceipt {...receipt} reason={decision.reason_plain} cardBelow />; decision.owner_plain; const ownerPlain = line;';
+    expect.soft(hits(OWNER_REASON, sample(bad))).toHaveLength(5);
     expect(hits(OWNER_REASON, sample('<MarginReceipt {...receipt} onOpenTrace={open} />; const why = reasonPlain;'))).toEqual([]);
-    expect(hits(OWNER_REASON, sources.filter(visitor))).toEqual([]);
+    expect.soft(ownerReasonLeaks(sample("import { ApprovalCard as CustomerCard } from '../ds/index.ts'; <CustomerCard {...decision} />"))).not.toEqual([]);
+    const wrapper: Source[] = [{ file: 'lib/receipt.ts', text: "export { useOwnerReceipt as receiptFor } from '../owner/conversations/ownerReceipt.ts';" }];
+    expect.soft(ownerReasonLeaks(libModulesOf(sample("import { receiptFor } from '../lib/receipt.ts';"), wrapper))).not.toEqual([]);
+    expect.soft(ownerReasonLeaks(sample("import { View as CustomerReceipt } from '../owner/Receipt.tsx'; <CustomerReceipt />"))).not.toEqual([]);
+    expect(ownerReasonLeaks([...visitor, ...libModulesOf(visitor)])).toEqual([]);
+    // Leak assertions in public tests may name the key; tests already sit outside this source scan.
+    expect(isScanned('public/leak.test.ts')).toBe(false);
   });
 
   it('open_status_comes_from_the_ds_once_it_has_the_slot', () => {
@@ -1249,8 +1264,11 @@ describe('app source guards', () => {
     for (const file of ['ds/components/Mark/Mark.css', 'ds/components/IntroDialog/IntroDialog.css', 'ds/boards/parts.tsx', 'ds/README.md', 'about/reader.css']) {
       expect(files, file).toContain(file);
     }
-    // Clay's allowlist is two folders: the intro dialog's, and the mark's for the app icon's field.
+    // Clay's allowlist is the intro dialog's and mark's folders, plus the writing dots' CSS and story.
     expect(mayUseClay('ds/components/Mark/Mark.css')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/WritingIndicator.css')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/WritingIndicator.stories.tsx')).toBe(true);
+    expect(mayUseClay('ds/components/WritingIndicator/Other.css')).toBe(false);
     expect(mayUseClay('ds/components/MarkBanner/MarkBanner.css')).toBe(false);
     expect(mayUseClay('about/reader.css')).toBe(false);
     const plantedClay: Source[] = [{ file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' }];
@@ -1259,6 +1277,9 @@ describe('app source guards', () => {
     expect(hits(MARK_PARTS, everything.filter(({ file }) => file.startsWith(MARK_FOLDER))).length).toBeGreaterThan(0);
     for (const folder of CLAY_FOLDERS) {
       expect(hits(CLAY_PARTS, everything.filter(({ file }) => file.startsWith(folder))).length, folder).toBeGreaterThan(0);
+    }
+    for (const allowed of CLAY_FILES) {
+      expect(hits(CLAY_PARTS, everything.filter(({ file }) => file === allowed)).length, allowed).toBeGreaterThan(0);
     }
     expect(hits(MARK_PARTS, everything.filter(({ file }) => !file.startsWith(MARK_FOLDER)))).toEqual([]);
     expect(hits(CLAY_PARTS, everything.filter(({ file }) => !mayUseClay(file)))).toEqual([]);

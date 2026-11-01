@@ -97,6 +97,7 @@ export const VISITOR_PLAIN = {
 const NO_EXECUTED_LINE = {
   'native.fetch_website': true,
   'native.read_memory': true,
+  'native.web_search': true,
 } as const satisfies Record<Exclude<ToolName, ExecutedTool>, true>;
 
 function hasExecutedLine(tool: ToolName): tool is ExecutedTool {
@@ -275,6 +276,11 @@ export interface DecisionSpec {
   /** For an `allow`: the action ran, so the decision is `executed`. */
   executed: boolean;
   cardIds: string[];
+  /**
+   * The policies that decided it, as the kernel names them, when they aren't the cards' own (a
+   * baseline refusal): Safety's cause is read from them, as the API reads it.
+   */
+  policyIds?: string[];
   reasonPlain: string;
   /** A refusal with the kernel's more specific visitor status line. */
   visitorStatus?: 'refused_over_mandate';
@@ -460,8 +466,11 @@ export interface TurnContext {
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
-  /** A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the visitor gets the handoff. */
-  reply(blocks: RenderedBlock[], opts?: { blocked?: boolean }): EvMessage;
+  /**
+   * A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the
+   * visitor gets the handoff, and `paused` when the check stopped it because the chat is paused.
+   */
+  reply(blocks: RenderedBlock[], opts?: { blocked?: boolean; paused?: boolean }): EvMessage;
   /**
    * Sends a demo code to `person`'s contact on record, as the kernel's `/verify/start` does: the
    * challenge the code answers, a Demo inbox entry for this session with the code in its body, and
@@ -538,6 +547,12 @@ export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact
 
 /** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
 const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+
+/**
+ * A turn in a chat the breaker paused, as the API runs one: no model call and no "writing", only
+ * the kernel's handoff, which its check stops as paused.
+ */
+export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([blocks.handoff[ctx.language]], { paused: true })];
 
 export const SCRIPT: readonly ScriptRule[] = [
   {
@@ -688,7 +703,7 @@ export function afterVerify(allTools: boolean): readonly Step[] {
  * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
  * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
  * stopped and the visitor got the handoff card. A fresh copy keeps that stopped reply, which
- * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
+ * Safety shows; a discount asked in a live chat gets the discount row's reply.
  */
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
   (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
@@ -758,23 +773,36 @@ export function allows(answer: ApprovalAnswer): boolean {
   return answer === 'allow_once' || answer === 'allow_person';
 }
 
+/** The owner annotation never enters a queued visitor turn, even when it is null. */
+export function visitorSafe(decision: Decision): Decision {
+  const { owner_plain: _ownerPlain, ...visitor } = decision;
+  return visitor;
+}
+
 /**
- * What the visitor's chat gets once the owner has answered: the resolved receipt, then Claude's
- * follow-up, which reports what ran (the discounted quote, or the refund) or hands off to Maria.
- * The receipt reports what the answer already did, so a take-over doesn't fence it; the follow-up
+ * What the visitor's chat gets once the owner has answered: the signed approved receipt when
+ * allowed, then the resolved outcome, then Claude's follow-up (the quote, refund or handoff).
+ * The receipts report what the answer already did, so a take-over doesn't fence them; the follow-up
  * is Claude's, so it does.
  */
-export function afterAnswer(answer: ApprovalAnswer, decision: Decision): Step[] {
+export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved: Decision | null): Step[] {
+  decision = visitorSafe(decision);
+  // As in the API's resume_after_answer, only an earlier approval for this decision can precede it.
+  if (approved !== null && (approved.decision_id !== decision.decision_id
+    || approved.state !== 'approved' || approved.ledger_seq >= decision.ledger_seq)) approved = null;
+  if (approved !== null) approved = visitorSafe(approved);
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
+  if (decision.state === 'refused_at_execution') return [resolved];
   if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {
-    return [resolved, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
+    return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
   }
   // The quote at the discount Maria allowed, the one the visitor asked for.
   const listCents = decision.action?.list_cents ?? DECISIONS.heldQuote.listCents;
   const discountBp = decision.action?.discount_bp ?? DEFAULT_DISCOUNT_BP;
   const quote = { listCents, discountBp, amountCents: decision.action?.amount_cents ?? discountedCents(listCents, discountBp) };
-  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
+  return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
 }
 
 /**
