@@ -527,7 +527,7 @@ async def test_parallel_calls_with_mixed_outcomes_share_one_tool_result_message(
         response(tool_use("native__quote", DRAIN, id="toolu_quote"),
                  tool_use("native__quote", {**DRAIN, "requested_discount_bp": 5000}, id="toolu_half"),
                  tool_use("native__release_document", {"document_id": "doc-1"}, id="toolu_invoice")),
-        lambda request: response(reply("Here's your quote. I've asked Maria Rivera about the discount.",
+        lambda request: response(reply(prompts.STATUS_LINES["check_status"]["en"],
                                        {"template": "quote", "fact_id": quote_fact(request)})),
     ])
     async with KernelHttp("http://fake-kernel", transport=Watching(fake, {"/decide"}, together)) as http:
@@ -648,7 +648,7 @@ async def test_held_result_returns_without_waiting(api_conn, caller, fake):
     await said(api_conn, caller, "Can I get the drain clearing at half price?")
     model = ScriptedModel([
         response(tool_use("native__quote", {**DRAIN, "requested_discount_bp": 5000}, id="toolu_half")),
-        response(reply("I've asked Maria Rivera, and her answer will show up here.")),
+        response(reply(prompts.STATUS_LINES["check_status"]["en"])),
     ])
 
     assert await run_turn(api_conn, caller, model) == "done"
@@ -665,6 +665,150 @@ async def test_held_result_returns_without_waiting(api_conn, caller, fake):
         api_conn, caller.session_id)] == [("writing", None), ("held", decision_id), ("message", None),
                                           ("turn_end", None)]
     assert fake.decisions[decision_id].decision.state == "held"
+
+    assert "Keep helping with anything else you can do while it waits." in model.requests[0].system[0]["text"]
+    await said(api_conn, caller, "While that waits, can you help me with a leaking tap?")
+    later = ScriptedModel([response(reply("Could you tell me a little more about what you need?"))])
+    assert await run_turn(api_conn, caller, later) == "done"
+    assert len(later.requests) == 1
+    assert fake.decisions[decision_id].decision.state == "held"
+    assert len(fake.called("/decide")) == 1
+    assert fake.called("/execute") == [] and fake.called("/decisions/{id}") == []
+    assert fake.handoffs == {}
+    checks = fake.called("/check_reply")
+    assert len(checks) == 2
+    assert all(call.body["draft"]["clauses"] == [] for call in checks)
+    shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert len(shown) == 2
+    assert shown[-1].blocks[0].text == "Could you tell me a little more about what you need?"
+
+
+@pytest.mark.parametrize("blocked", [True, False], ids=["blocked-draft", "claude-handoff"])
+async def test_a_delivered_handoff_allows_a_checked_later_turn(api_conn, caller, fake, blocked):
+    """A scripted handoff does not pause the visitor or replay owner contact on the next turn."""
+    await said(api_conn, caller, "Please ask the owner to help with this.")
+    if blocked:
+        fake.violation("canary")  # staged immediate handoff, orchestration only
+    clauses = [] if blocked else [{"template": "handoff"}]
+    first = ScriptedModel([response(reply("Please help with this.", *clauses)), response()])
+    assert await run_turn(api_conn, caller, first) == ("handoff" if blocked else "done")
+    if blocked:
+        (result,) = tool_results(first.requests[1])
+        assert result["content"] == {"outcome": "delivered_handoff"}
+    else:
+        assert len(first.requests) == 1
+        assert fake.called("/check_reply")[0].body["draft"]["clauses"] == [{"template": "handoff", "fact_id": None}]
+    assert len(fake.handoffs) == 1 and card_handoffs(fake, caller) == ["open"]
+    handoff_ids = set(fake.handoffs)
+    assert "don't use the handoff clause again for the same request" in first.requests[0].system[0]["text"]
+
+    await said(api_conn, caller, "Can you still help me describe the problem?")
+    later = ScriptedModel([response(reply("Where is the leak coming from?"))])
+    assert await run_turn(api_conn, caller, later) == "done"
+    assert len(later.requests) == 1
+    checks = fake.called("/check_reply")
+    assert len(checks) == 2
+    assert checks[-1].body["draft"]["prose"] == "Where is the leak coming from?"
+    assert checks[-1].body["draft"]["clauses"] == []
+    shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert len(shown) == 2
+    assert sum(block.template == "handoff" for event in shown for block in event.blocks) == 1
+    assert shown[-1].blocks[0].text == "Where is the leak coming from?" and not shown[-1].handoff
+    assert fake.called("/decide") == []
+    assert set(fake.handoffs) == handoff_ids and card_handoffs(fake, caller) == ["open"]
+
+
+@pytest.mark.parametrize("accepted", [True, False], ids=["accepted", "declined"])
+async def test_optional_callback_offer_records_work_only_when_accepted(api_conn, caller, fake, accepted):
+    """Scripted choices prove orchestration, not that a live model chooses these words or tools."""
+    await said(api_conn, caller, "I'm Alex Kim, alex@example.com. I need help describing a leak.")
+    offer = ScriptedModel([response(reply(prompts.STATUS_LINES["offer_callback"]["en"] + " " +
+                                            prompts.STATUS_LINES["reply_wait"]["en"]))])
+    assert await run_turn(api_conn, caller, offer) == "done"
+    assert fake.called("/decide") == [] and fake.handoffs == {}
+    assert "Ask before you bring Maria Rivera in for something optional" in offer.requests[0].system[0]["text"]
+    assert "If they'd rather not, say what you can still do and keep going." in offer.requests[0].system[0]["text"]
+    args = {"name": "Alex Kim", "contact": "alex@example.com", "reason": "Help describing a leak"}
+    if accepted:
+        await said(api_conn, caller, "Yes, please arrange that.")
+
+        def confirm(request):
+            (result,) = tool_results(request)
+            assert result["content"]["outcome"] == "done" and not result["is_error"]
+            return response(reply("Here are the details of your request.", {
+                "template": "callback_confirmed", "fact_id": result["content"]["result"]["fact_id"]}))
+
+        choice = ScriptedModel([response(tool_use("native__request_callback", args)), confirm])
+    else:
+        await said(api_conn, caller, "No, please keep helping me here.")
+        choice = ScriptedModel([response(reply("Where is the leak coming from?"))])
+    assert await run_turn(api_conn, caller, choice) == "done"
+    assert len(fake.called("/decide")) == len(fake.called("/execute")) == int(accepted)
+    assert len(fake.handoffs) == int(accepted)
+    if accepted:
+        (decision,) = fake.called("/decide")
+        assert decision.body["call"]["tool"] == "native.request_callback"
+        assert decision.body["call"]["args"] == args
+        (work,) = fake.handoffs.values()
+        assert work["session_id"] == caller.session_id and work["status"] == "open"
+        (result,) = tool_results(choice.requests[1])
+        fact_id = result["content"]["result"]["fact_id"]
+        assert fact_id == "handoff:" + work["handoff_id"]
+        check = fake.called("/check_reply")[-1].body["draft"]
+        assert check["clauses"] == [{"template": "callback_confirmed", "fact_id": fact_id}]
+        shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"][-1]
+        (card,) = [block for block in shown.blocks if block.template == "callback_confirmed"]
+        assert card.fact_id == fact_id
+
+    await said(api_conn, caller, "Can I describe where the water is coming from?")
+    later = ScriptedModel([response(reply("Please tell me where you see the water."))])
+    assert await run_turn(api_conn, caller, later) == "done"
+    checks = fake.called("/check_reply")
+    assert len(checks) == 3 and checks[-1].body["draft"]["clauses"] == []
+    assert all(clause["template"] != "handoff" for check in checks for clause in check.body["draft"]["clauses"])
+    assert len(fake.handoffs) == int(accepted)
+
+
+@pytest.mark.parametrize("callback", [False, True], ids=["reply-without-handoff", "all-set-with-callback"])
+async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, callback):
+    """The staged soft verdict proves fail-closed orchestration, not soft-check classification."""
+    await said(api_conn, caller, "Yes, please ask the owner to help. I'm Alex, alex@example.com.")
+    prose = "You're all set" if callback else "The owner will reply here"
+    fact_ids = []
+
+    def flagged_reply(request):
+        if callback and not fact_ids:
+            (result,) = tool_results(request)
+            assert result["content"]["outcome"] == "done"
+            fact_ids.append(result["content"]["result"]["fact_id"])
+        clauses = [{"template": "callback_confirmed", "fact_id": fact_ids[0]}] if callback else []
+        return response(reply(prose, *clauses))
+
+    script = [response(tool_use("native__request_callback", {
+        "name": "Alex", "contact": "alex@example.com", "reason": "Help with the request"}))] if callback else []
+    fake.violation("soft_promise", times=2)
+    model = ScriptedModel([*script, flagged_reply, flagged_reply, response()])
+    assert await run_turn(api_conn, caller, model) == "handoff"
+    checks = fake.called("/check_reply")
+    assert len(checks) == 2
+    assert all(check.body["draft"]["prose"] == prose for check in checks)
+    assert all(check.body["draft"]["clauses"] == (
+        [{"template": "callback_confirmed", "fact_id": fact_ids[0]}] if callback else []) for check in checks)
+    shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert len(shown) == 1
+    assert [block.template for block in shown[0].blocks] == ["handoff"]
+    assert prose not in [block.text for block in shown[0].blocks]
+    stopped = await rows(api_conn, caller.session_id, "stopped_draft", "text")
+    assert len(stopped) == 2
+    (blocked,) = tool_results(model.requests[-2])
+    assert blocked["is_error"] and blocked["content"] == {"outcome": "blocked", "instruction": REWRITE_INSTRUCTION,
+                                                          "violations": [{"kind": "soft_promise", "span": prose}]}
+    assert len(fake.handoffs) == 1
+    (work,) = fake.handoffs.values()
+    assert work["session_id"] == caller.session_id and work["status"] == "open"
+    assert work["kind"] == ("callback" if callback else "card")
+    if callback:
+        assert fact_ids == ["handoff:" + work["handoff_id"]]
 
 
 async def test_reply_only_response_ends_the_turn(api_conn, caller, fake):
