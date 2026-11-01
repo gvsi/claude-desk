@@ -83,7 +83,8 @@ contract test, before the task that first uses them.
   unknown time zone. `PUT /desks/{id}/people` (Plan 01b) upserts and removes people by `ref`, refusing a contact that
   looks masked (422). `DELETE /desks/{id}` (Plan 01b) closes the Desk's sessions; then its public page is 404, the
   owner's `/whoami` no longer lists it, and opening a session on it or an owner route naming it answers 409 `closed`;
-  its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy. An owner
+  its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy; its
+  call-back writes its handoff already `done`, keeping its fact but leaving no Needs-you item. An owner
   session is given the setup tools alone, on any Desk of its copy, and executes its own setup decisions:
   `native.read_memory` answers from `MEMORY_ITEMS` (the simulated memory) and `native.fetch_website` reads any
   `.example` site as `WEBSITE_TEXT` (the fetch guard refuses every other address, so the call fails), each storing
@@ -2643,7 +2644,7 @@ class FakeKernelState:
             self.handoffs[handoff_id] = {
                 "handoff_id": handoff_id, **ids, "session_id": session.session_id,
                 "reason": f"{args['name']} · {args['contact']} · {args['reason']}", "callback_window": None,
-                "status": "open", "kind": "callback"}
+                "status": "done" if session.preview else "open", "kind": "callback"}
             self._put("handoffs", (handoff_id,), dict(self.handoffs[handoff_id]))
             facts.append(Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
                               label=label, claims=[Claim(key="handoff", kind="ref", value=handoff_id)]))

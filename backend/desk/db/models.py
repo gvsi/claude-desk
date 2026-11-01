@@ -555,7 +555,9 @@ class Handoff(Base):
     card opened, or a callback a visitor asked for (`native.request_callback`, 01b_2_handoffs),
     which first closes the session's open ones. A row's kind never changes. The kernel keeps one
     open handoff per session, of either kind, under the session row, not by a constraint, so rows
-    from before may hold several (01b_2b_handoff_kind)."""
+    from before may hold several (01b_2b_handoff_kind). A call-back in the owner's own preview
+    inserts its row already `done`, with no closing entry or alert, so it leaves no Needs-you item;
+    its fact still backs the preview's card and its row stays for reconciliation."""
 
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}
