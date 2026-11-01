@@ -717,12 +717,17 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money
     With `enables` (the seed's business tools, waiting for review), the version turns those tools
     on as a confirmed `/tools/confirm` draft does: it is compiled over the enabled profiles plus
     each of them pinned at its hash (`draft_profiles`), so the shipped report covers them; each pin
-    is checked again as `confirm` checks it (`mcp_pins.check_enables`; one that isn't current is
-    503 `seed_unproved`); the version stores them, and they are turned on in this transaction
-    (`mcp_pins.enable_tools`), their `tool_pin` `enabled` events ledgered after the `policy` entry."""
+    is checked again as `confirm` checks it (`mcp_pins.check_enables`); the version stores them, and
+    they are turned on in this transaction (`mcp_pins.enable_tools`), their `tool_pin` `enabled`
+    events ledgered after the `policy` entry. A stored profile that no longer matches its pin, or a
+    pin that isn't current, is the set left unproved, as a miss is (`SeedUnproved`, logged
+    `seed_unproved` with the reason)."""
     cards = SHIPPED_PRESETS[preset]
     cap = auto_money_cap_cents
-    profiles = await draft_profiles(ctx, desk_id, enables)
+    try:
+        profiles = await draft_profiles(ctx, desk_id, enables)
+    except mcp_pins.BusinessProfileChanged:
+        raise _unproved_seed(ctx, preset, "profile_changed") from None
     schema = compiler.desk_schema(profiles)
     compiled = compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap)
     hashes = version_hashes(compiled, schema, profiles, cards=cards, auto_money_cap_cents=cap)
@@ -733,8 +738,7 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money
                   " ".join(f"{field}={value}" for field, value in hashes._asdict().items()))
         raise SeedUnproved(preset)
     if enables and (await mcp_pins.check_enables(ctx, desk_id, enables)).state != "ok":
-        log.error("seed_unproved preset=%s reason=pin_changed", preset)
-        raise KernelFailure(503, "seed_unproved", "seed_pin_changed")
+        raise _unproved_seed(ctx, preset, "pin_changed")
     row = version_row(copy_id=ctx.copy_id, desk_id=desk_id, version=1, parent_version=None, compiled=compiled,
                       a0=compiler.compile_cards(cards, profiles, auto_money_cap_cents=cap, review=False).A,
                       schema=schema, hashes=hashes, auto_money_cap_cents=cap, status="active", proof=report,
@@ -748,6 +752,14 @@ async def activate_shipped(ctx: KernelCtx, desk_id: str, preset: str, auto_money
     for event in events:
         await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=event)
     return version_contract(row)
+
+
+def _unproved_seed(ctx: KernelCtx, preset: str, reason: str) -> SeedUnproved:
+    """A shipped set whose tools can't be turned on at the pins it was proved with: listed in
+    `Health.unproved_seeds` and logged `seed_unproved` with the reason, as a missing report is."""
+    ctx.policies.unproved_seeds.add(preset)
+    log.error("seed_unproved preset=%s reason=%s", preset, reason)
+    return SeedUnproved(preset)
 
 
 async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | None:

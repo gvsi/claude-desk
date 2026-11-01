@@ -6,13 +6,14 @@ once, whatever her notification settings, instead of waiting for a Monday call-b
 from datetime import datetime
 
 import psycopg
+import pytest
 from sqlalchemy import select
 
 from desk.contracts import BusinessToolDef, RuleCard
 from desk.db.models import DemoInboxEntry, Handoff, NotificationPref, PolicyVersion, Tool
 from desk.db.session import database_url, libpq_url
 from desk.kernel_api import ToolPin
-from desk.kernel_service import activation, business_tools, reply_check, seed
+from desk.kernel_service import activation, business_tools, mcp_pins, reply_check, seed
 from desk.kernel_service.adapters import blocks
 from desk.kernel_service.repo import storable
 
@@ -138,6 +139,36 @@ async def test_a_seed_tool_the_card_text_check_refuses_creates_no_copy(app, clie
     response = await client.post("/copies", json={})
     assert (response.status_code, response.json()) == (503, {"code": "seed_unproved"})
     assert any(r.getMessage().startswith("seed_unproved reason=business_tools_refused") for r in caplog.records)
+    with psycopg.connect(libpq_url(database_url("ADMIN"))) as admin:
+        counts = {table: admin.execute(f"SELECT count(*) FROM kernel.{table}").fetchone()[0]
+                  for table in ("copies", "desks", "tools", "policy_versions", "ledger_entries")}
+    assert counts == dict.fromkeys(counts, 0)
+
+
+@pytest.mark.parametrize("fault", ["pin_changed", "profile_changed"])
+async def test_a_seed_tool_its_version_cannot_turn_on_creates_no_copy(app, client, monkeypatch, caplog, fault):
+    """The seed's version turns its urgent tool on only at the pin it was proved with: a pin that is no
+    longer current, or a stored profile that no longer matches its definition, is the shipped set left
+    unproved, as a missing report is (503 `seed_unproved`, the preset listed in `/health`), with
+    nothing written."""
+    if fault == "pin_changed":
+        async def changed(ctx, desk_id, enables):
+            return mcp_pins.EnablesCheck("changed")
+
+        monkeypatch.setattr(mcp_pins, "check_enables", changed)
+    else:
+        pinned = mcp_pins.pinned_profile
+
+        def stale(tool, definition_sha256, stored=None):
+            if tool == TOOL:
+                raise mcp_pins.BusinessProfileChanged("business_profile_changed")
+            return pinned(tool, definition_sha256, stored)
+
+        monkeypatch.setattr(mcp_pins, "pinned_profile", stale)
+    response = await client.post("/copies", json={})
+    assert (response.status_code, response.json()) == (503, {"code": "seed_unproved"})
+    assert (await client.get("/health")).json()["unproved_seeds"] == ["rivera"]
+    assert any(r.getMessage().startswith(f"seed_unproved preset=rivera reason={fault}") for r in caplog.records)
     with psycopg.connect(libpq_url(database_url("ADMIN"))) as admin:
         counts = {table: admin.execute(f"SELECT count(*) FROM kernel.{table}").fetchone()[0]
                   for table in ("copies", "desks", "tools", "policy_versions", "ledger_entries")}
