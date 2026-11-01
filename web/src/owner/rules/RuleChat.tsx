@@ -12,7 +12,7 @@ import { askRuleChat } from '../../api/ruleChatStream.ts';
 import type { RuleChatOut, RulesDraft } from '../../api/views.ts';
 import { AskClaudePanel, ClaudeMessage, Notice, VisitorMessage, type NoticeTone } from '../../ds/index.ts';
 import { aboveMoneyCapCopy } from '../../lib/format.ts';
-import { GrowingReply } from '../../lib/GrowingReply.tsx';
+import { GrowingReply, settledWords } from '../../lib/GrowingReply.tsx';
 import { draftFromDiff, type RuleDraft } from './drafts.ts';
 import { land } from './landing.ts';
 import { RuleDraftReview, rulesQuery } from './RuleDraftReview.tsx';
@@ -186,8 +186,8 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
   const root = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => root.current as HTMLDivElement, []);
   useRevealNewTurns(root, turns);
-  // The answer's words, once it has some, take the writing dots' place.
-  const writing = growing !== null && growing.trim() !== '' ? growing : null;
+  // The answer's words, once one is whole, take the writing dots' place.
+  const writing = growing !== null && settledWords(growing) !== '' ? growing : null;
   useRevealGrowing(root, turns, writing);
   return (
     <div ref={root} className="cd-rule-chat">

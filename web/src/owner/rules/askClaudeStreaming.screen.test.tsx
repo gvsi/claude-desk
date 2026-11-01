@@ -50,7 +50,8 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
     const { panel } = await ask(viewport);
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change: quotes");
+    // Four words sent: the fourth waits for what follows it.
+    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
     // Claude's words take the writing dots' place, in its serif, and nothing it drafted shows yet.
     expect(panel.element().querySelector('.cd-writing-indicator')).toBeNull();
     expect(getComputedStyle(growing(panel)!.querySelector('p')!).fontFamily).toContain('Source Serif 4');
@@ -67,12 +68,26 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(requests('ruleChat')).toHaveLength(1);
   });
 
+  it('keeps_the_writing_dots_until_a_word_is_whole', async () => {
+    const held = gate();
+    mockStore.planStream('ruleChat', { pauseAfter: 1, until: held.until });
+    const { panel } = await ask(viewport);
+    await expect.element(panel.getByRole('status').filter({ hasText: 'Claude is writing' })).toBeInTheDocument();
+    // The first word alone could still be cut off, so nothing shows of it yet.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(growing(panel)).toBeNull();
+    expect(panel.element().querySelector('.cd-writing-indicator')).not.toBeNull();
+    held.release();
+    await expect.element(panel.getByText(ANSWER, { exact: true })).toBeVisible();
+  });
+
   it('starts_the_answer_again_on_a_reset', async () => {
     const held = gate();
-    mockStore.planStream('ruleChat', { resetAfter: 3, pauseAfter: 4, until: held.until });
+    mockStore.planStream('ruleChat', { resetAfter: 3, pauseAfter: 5, until: held.until });
     const { panel } = await ask(viewport);
-    // Three words, then a reset, then the first word again.
+    // Three words, then a reset, then the first two again, the second waiting for what follows it.
     await expect.poll(() => growing(panel)?.textContent).toBe("Here's");
+    expect(panel.getByText("Here's that change:", { exact: false }).elements()).toHaveLength(0);
     held.release();
     await expect.element(panel.getByText(ANSWER, { exact: true })).toBeVisible();
   });
@@ -106,7 +121,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 2, until: held.until });
     const { screen, panel } = await ask(viewport);
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that");
+    await expect.poll(() => growing(panel)?.textContent).toBe("Here's");
     await panel.getByRole('button', { name: 'Close' }).click();
     await expect.element(panel).not.toBeInTheDocument();
     held.release();
