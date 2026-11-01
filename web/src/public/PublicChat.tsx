@@ -247,6 +247,36 @@ function hiddenUnderComposer(end: HTMLElement, composer: HTMLElement): number {
   return end.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
 }
 
+/** The design system's classes for a reply of Claude's whose words are being revealed, and for its prose. */
+const MESSAGE = '.cd-claude-message';
+const REVEALING = '.cd-claude-message--revealing';
+const PROSE = '.cd-claude-message__prose';
+
+/**
+ * The top of what `scroller` shows: its own top, below the chat's head, or, where the head sticks
+ * to the top inside it (a short shell), below the head, which the scroller pads its top for.
+ */
+function visibleTop(scroller: Element): number {
+  const top = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top + scroller.clientTop;
+  return top + (Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0);
+}
+
+/**
+ * How much of the newest part of the conversation is hidden under the composer. That is its end,
+ * except while a reply's words are being revealed: its cards, still to come, wait unseen below
+ * them, so it is the last of those words, and never more than would take the reply's own start
+ * above the top of the view, when the reply is taller than what the view shows.
+ */
+function newestHidden(end: HTMLElement, composer: HTMLElement): number {
+  const reply = [...(end.parentElement?.querySelectorAll(REVEALING) ?? [])].at(-1);
+  const words = reply === undefined ? undefined : [...reply.querySelectorAll(PROSE)].at(-1);
+  if (reply === undefined || words === undefined) return hiddenUnderComposer(end, composer);
+  const area = composer.closest(COMPOSER_AREA) ?? composer;
+  const hidden = words.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
+  const room = reply.getBoundingClientRect().top - visibleTop(scrollerOf(end));
+  return Math.min(hidden, Math.max(0, room));
+}
+
 /**
  * Renders nothing, and calls `before` each time the component that renders it renders again, as
  * React is about to change the page and while the page is still as the visitor sees it. Only a
@@ -277,8 +307,10 @@ interface NewestInView {
  * Keeps the newest message in view, as a chat does: while the visitor is at the end of the
  * conversation, whatever arrives (a reply, its receipts, "Claude is writing", a notice) scrolls up
  * to sit just above the composer, and so does the end when the page changes size (the window
- * narrows and the rows rewrap, the composer grows). A visitor who has scrolled back to read stays
- * where they are until they send.
+ * narrows and the rows rewrap, the composer grows). While a reply's words are being revealed, its
+ * newest words sit there instead, with its cards, still to come, waiting below, and the reply's
+ * start never scrolls above the top of the view; once its words are whole, the end comes back. A
+ * visitor who has scrolled back to read stays where they are until they send.
  *
  * Where the visitor is comes from the page's scroll events, and again just before each change the
  * page makes (`beforeChange`) if the conversation has scrolled since the page last knew: a scroll
@@ -338,7 +370,7 @@ function useNewestInView(
   // visitor is at the end of a conversation that has started, and notes that they still are.
   const pin = useCallback(() => {
     if (!started || !atTheEnd.current || !end.current || !composer.current) return;
-    const hidden = hiddenUnderComposer(end.current, composer.current);
+    const hidden = newestHidden(end.current, composer.current);
     if (hidden > 0) {
       const scroller = scrollerOf(end.current);
       if (scroller === document.scrollingElement) window.scrollBy({ top: hidden, behavior: 'instant' });
@@ -349,7 +381,7 @@ function useNewestInView(
 
   // Whether the visitor is at the end, as the page stands now.
   const notePlace = useCallback(() => {
-    if (end.current && composer.current) atTheEnd.current = hiddenUnderComposer(end.current, composer.current) <= AT_THE_END_PX;
+    if (end.current && composer.current) atTheEnd.current = newestHidden(end.current, composer.current) <= AT_THE_END_PX;
     noteSeen();
   }, [end, composer, noteSeen]);
 
@@ -392,7 +424,9 @@ function useNewestInView(
   // The page changing size moves the end without a render: the shell rewraps when the window or
   // the panel around it resizes, and the composer area grows with what is typed. So does the shell
   // switching which of its parts scrolls the conversation, which it says with its own event, and the
-  // conversation growing as a reply's words are revealed. Watched while the shell is `shown`.
+  // conversation growing as a reply's words are revealed. And once a revealed reply's words are
+  // whole, its cards come next, in space it already held: the end comes back, though nothing
+  // changed size. Watched while the shell is `shown`.
   useEffect(() => {
     const shell = shown ? end.current?.closest(SHELL) : null;
     const area = composer.current?.closest(COMPOSER_AREA);
@@ -403,9 +437,17 @@ function useNewestInView(
     observer?.observe(shell);
     if (area) observer?.observe(area);
     if (conversation) observer?.observe(conversation);
+    const replies =
+      typeof MutationObserver === 'undefined'
+        ? null
+        : new MutationObserver((changes) => {
+            if (changes.some(({ target }) => target instanceof Element && target.matches(MESSAGE))) pin();
+          });
+    if (conversation) replies?.observe(conversation, { subtree: true, attributes: true, attributeFilter: ['class'] });
     return () => {
       shell.removeEventListener(PUBLIC_SHELL_SCROLLER_EVENT, pin);
       observer?.disconnect();
+      replies?.disconnect();
     };
   }, [shown, end, composer, pin]);
 

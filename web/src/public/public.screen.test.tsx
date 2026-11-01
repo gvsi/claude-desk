@@ -1834,6 +1834,53 @@ describe('public chat page', () => {
     }
   });
 
+  it('on_a_phone_the_newest_revealed_words_stay_in_view_above_cards_still_to_come', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
+    await ready(screen);
+    for (const text of LONG_CHAT.slice(0, 2)) await say(screen, text);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    const { composer, conversation } = conversationAndComposer(screen);
+    const scroller = chatScroller();
+    const head = document.querySelector('.cd-public-shell__chat-head');
+    // Each time the conversation grows while the reply's words come in, once the page has answered
+    // it: where the newest words end, and where the reply starts, against the region they show in.
+    const seen: { words: number; top: number; above: number; below: number }[] = [];
+    const watch = new ResizeObserver(() => {
+      const reply = conversation.querySelector('.cd-claude-message--revealing');
+      const words = [...(reply?.querySelectorAll('.cd-claude-message__prose') ?? [])].at(-1);
+      if (!reply || !words) return;
+      seen.push({
+        words: words.getBoundingClientRect().bottom,
+        top: reply.getBoundingClientRect().top,
+        above: Math.max(scroller.getBoundingClientRect().top, head?.getBoundingClientRect().bottom ?? 0),
+        below: composer.getBoundingClientRect().top,
+      });
+    });
+    watch.observe(conversation);
+    onTestFinished(() => watch.disconnect());
+
+    // A reply whose cards, held unseen until its words are whole, are taller than the region.
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const cards = [rivera.blocks.booking_options.en, rivera.blocks.quote.en, rivera.blocks.booking_confirmed.en, rivera.blocks.booking_options.en];
+    const reply = watchReveal();
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock(REVEALED_LINES), ...cards]));
+    const frames = await reply;
+    watch.disconnect();
+    expect(frames.filter((frame) => frame.revealing).length).toBeGreaterThan(2);
+
+    // As the words came in, the newest of them stayed in view, just above the composer, and the
+    // reply's start never left the top: the cards still to come waited below.
+    expect(seen.length).toBeGreaterThan(2);
+    for (const { words, top, above, below } of seen) {
+      expect(words, `the newest words end at ${words}, the composer starts at ${below}`).toBeLessThanOrEqual(below + 2);
+      expect(words, `the newest words end at ${words}, the region starts at ${above}`).toBeGreaterThan(above);
+      expect(top, `the reply starts at ${top}, the region at ${above}`).toBeGreaterThanOrEqual(above - 2);
+    }
+    // Once the cards have come in, the end of the conversation is back above the composer.
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+  });
+
   it('reload_during_a_take_over_shows_the_owner_joined', async () => {
     // Dana asks for Maria, and Maria takes the chat over while the page is open.
     const first = await renderRoute(PAGE);
