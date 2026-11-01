@@ -36,7 +36,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   moved on like any other.
 - **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
   their Claude memory (`native.read_memory`), reads the named website (`native.fetch_website`) and runs up to three
-  keyword web searches (`native.web_search`) on yes. On no it skips every read. `_after_consent` appends the consultant
+  keyword web searches (`native.web_search`) concurrently within `HOMEWORK_BUDGET_S` on yes. On no it skips every
+  read. `_after_consent` appends the consultant
   opening and first fact question; the labels and reply are saved together. Web search content reaches only that
   opening's understanding call. A website the owner names later after no is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
@@ -310,6 +311,8 @@ TURN_MAX_TOKENS = 4096
 SETUP_TIMEOUT_S = 60.0
 UNDERSTAND_TIMEOUT_S = 60.0
 UNDERSTAND_MAX_TOKENS = 8192
+HOMEWORK_BUDGET_S = 25       # all consent reads share this budget, leaving time for understanding and commit
+WEB_SEARCH_EXECUTE_TIMEOUT_S = 22  # the kernel's 20 s search deadline plus transport slack
 TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
 TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
 TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
@@ -829,10 +832,12 @@ async def _ask_drafts(model: ModelClient, record: Record, system: str, messages:
 # Setup tools -------------------------------------------------------------------------------------------------------
 
 
-async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict) -> ExecResult | None:
+async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict, *,
+                         timeout_s: float | None = None) -> ExecResult | None:
     """Run an owner setup tool on `desk_id` as the owner: only a tool in the owner's `/context` for the Desk, then
     `/decide`, and `/execute` on an allow. None when it isn't given, is held or refused, or the kernel refuses or
-    can't be reached: nothing ran that the kernel didn't allow, and setup goes on."""
+    can't be reached: nothing ran that the kernel didn't allow, and setup goes on. `timeout_s` overrides only
+    execution's transport deadline; context and decision calls retain the client's default."""
     session_id, generation = owner.owner_session_id, owner.owner_generation
     try:
         context = await owner.kernel.call("GET /context/{session_id}?desk_id=", path={"session_id": session_id},
@@ -847,7 +852,8 @@ async def run_setup_tool(owner: OwnerCtx, desk_id: str, tool: str, args: dict) -
             logger.info("the setup tool %s was decided %s", tool, decision.outcome)
             return None
         return await owner.kernel.call("POST /execute", ExecuteRequest(decision_id=decision.decision_id,
-                                                                       session_id=session_id, generation=generation))
+                                                                       session_id=session_id, generation=generation),
+                                       timeout_s=timeout_s)
     except KernelFailed as failure:
         logger.warning("the setup tool %s was refused (%s)", tool, failure.code)
     except KernelUnavailable:
@@ -883,7 +889,8 @@ async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> E
 
 async def _search_web(owner: OwnerCtx, desk_id: str, query: str) -> Entry:
     """Keep the search's plain result lines as untrusted homework for the understanding call alone."""
-    result = await run_setup_tool(owner, desk_id, "native.web_search", {"query": query})
+    result = await run_setup_tool(owner, desk_id, "native.web_search", {"query": query},
+                                  timeout_s=WEB_SEARCH_EXECUTE_TIMEOUT_S)
     if result is None or result.state != "succeeded":
         return Entry(role="tool_label", text=WEB_SEARCH_FAILED_LABEL, read="web_search")
     results = result.model_view.get("results")
@@ -891,6 +898,29 @@ async def _search_web(owner: OwnerCtx, desk_id: str, query: str) -> Entry:
              for key in ("title", "url", "snippet") if isinstance(item.get(key), str)]
     return Entry(role="tool_label", text=WEB_SEARCH_LABEL.format(query=query[:80]), read="web_search",
                  content="\n".join(lines)[:READ_TEXT_MAX])
+
+
+async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
+    """Read together under one budget; cancel unfinished reads and keep labels in their display order."""
+    desk_id = interview.desk_id
+    reads = [(_read_memory(owner, desk_id), Entry(role="tool_label", text=MEMORY_FAILED_LABEL, read="memory"))]
+    site = website_url(interview.transcript[0].website)
+    if site is not None:
+        url, host = site
+        reads.append((_read_website(owner, desk_id, url, host),
+                      Entry(role="tool_label", text=WEBSITE_FAILED_LABEL.format(host=host), read="website", website=url)))
+    reads.extend((_search_web(owner, desk_id, query),
+                  Entry(role="tool_label", text=WEB_SEARCH_FAILED_LABEL, read="web_search"))
+                 for query in (interview.transcript[0].search_queries or [])[:3])
+    tasks = [asyncio.create_task(read) for read, _ in reads]
+    try:
+        await asyncio.wait(tasks, timeout=HOMEWORK_BUDGET_S)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    return [failed if task.cancelled() else task.result() for task, (_, failed) in zip(tasks, reads, strict=True)]
 
 
 # The interview -----------------------------------------------------------------------------------------------------
@@ -1429,12 +1459,13 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
 
     async def run() -> SetupState:
         nonlocal pending
+        interview.turn_deadline = asyncio.get_running_loop().time() + TURN_RUN_TIMEOUT_S
         run_id = secrets.token_hex(8)
         busy = None
         committed = False
         try:
             async with contextlib.AsyncExitStack() as stack:
-                async with asyncio.timeout(TURN_RUN_TIMEOUT_S):
+                async with asyncio.timeout_at(interview.turn_deadline):
                     ctx = await stack.enter_async_context(detached(owner, engine, ro_schema))
                     slug = await _slug(ctx, desk_id)
                     staged = stage(interview)
@@ -1521,14 +1552,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         return [Entry(role="owner", text=CONSENT_ANSWERS[allow], cards=cards)]
 
     async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
-        entries = []
-        if allow:
-            entries.append(await _read_memory(ctx, interview.desk_id))
-            site = website_url(interview.transcript[0].website)
-            if site is not None:
-                entries.append(await _read_website(ctx, interview.desk_id, *site))
-            for query in (interview.transcript[0].search_queries or [])[:3]:
-                entries.append(await _search_web(ctx, interview.desk_id, query))
+        entries = await _homework(ctx, interview) if allow else []
         interview.transcript += entries
         interview.business_tools_enabled = business_tools_enabled
         await _after_consent(ctx, engine, model, interview, entries)
