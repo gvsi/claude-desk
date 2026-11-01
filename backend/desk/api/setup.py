@@ -2118,19 +2118,17 @@ def finish(interview: Interview) -> None:
         interview.answers = merged(interview.answers, patch, "what_you_do")
         interview.answers.suggested_fields = list(dict.fromkeys(suggested_fields))
     interview.cover(remaining)
-    jobs = [(" ".join(job.title.split()), " ".join(job.how.split()))
-            for job in accepted_jobs(interview) if job.can_do_today]
-    # Reserve complete titles and separators before sharing the remaining space between descriptions.
     included = []
-    reserved = 0
-    for title, how in jobs:
-        needed = len(title) + 2 + bool(included)
-        if reserved + needed <= 1500:
-            included.append((title, how))
-            reserved += needed
-    how_budget = (1500 - reserved) // len(included) if included else 0
-    interview.answers.how_we_help = "\n".join(f"{title}: {how[:how_budget]}"
-                                             for title, how in included) or None
+    used = 0
+    for job in accepted_jobs(interview):
+        if not job.can_do_today:
+            continue
+        how = " ".join(job.how.split())
+        needed = len(how) + bool(included)
+        if how and used + needed <= 1500:
+            included.append(how)
+            used += needed
+    interview.answers.how_we_help = "\n".join(included) or None
     interview.step = "tools"
 
 

@@ -312,22 +312,38 @@ def test_finish_accepts_still_proposed_cards_and_keeps_declines():
 
 
 def test_finish_writes_how_we_help():
-    entries = setup.proposal_entries([job(), job("answer", title="Answer questions", config=None)], [])
+    entries = setup.proposal_entries([
+        job(title="Book a free intro call 2", how="  Offer\n an  open slot  "),
+        job("answer", title="Answer questions", config=None),
+    ], [])
     entries[1].card.state = "declined"
     state = plan_state(entries)
     setup.settle_plan(state)
     setup.finish(state)
-    assert state.answers.how_we_help == "Book an intro: Book a free slot"
-    titles = [str(index) + "T" * 59 for index in range(5)]
-    entries = setup.proposal_entries([job(title=title, how="H" * 300) for title in titles], [])
+    assert state.answers.how_we_help == "Offer an open slot"
+
+
+@pytest.mark.parametrize("last_length, included_count", [(300, 4), (296, 5)])
+def test_finish_keeps_whole_how_lines_within_budget(last_length, included_count):
+    descriptions = [letter * 300 for letter in "ABCD"] + ["E" * last_length]
+    entries = setup.proposal_entries([job(how=how) for how in descriptions], [])
     state = plan_state(entries)
     setup.settle_plan(state)
     setup.finish(state)
-    lines = state.answers.how_we_help.splitlines()
-    assert len(lines) == 5
-    assert all(line.startswith(title + ": ") and line[len(title) + 2:]
-               for title, line in zip(titles, lines, strict=True))
+    assert state.answers.how_we_help.splitlines() == descriptions[:included_count]
     assert len(state.answers.how_we_help) <= 1500
+
+
+@pytest.mark.parametrize("descriptions, expected", [
+    (["", " \n\t "], None),
+    (["", "Offer an open slot", " \n\t ", "Answer questions"], "Offer an open slot\nAnswer questions"),
+])
+def test_finish_omits_empty_how_lines(descriptions, expected):
+    entries = setup.proposal_entries([job(how=how) for how in descriptions], [])
+    state = plan_state(entries)
+    setup.settle_plan(state)
+    setup.finish(state)
+    assert state.answers.how_we_help == expected
 
 
 @pytest.mark.parametrize("app_key", list(setup.CONNECTOR_LABELS))
@@ -372,7 +388,7 @@ async def test_connected_apps_add_no_jobs_facts_tools_or_rule_claims(monkeypatch
                                       jobs=setup.owner_job_answers(interview)) is version
     assert len(with_app.connected) == (0 if app_key == "stripe" else 1)
     assert baseline.answers == with_app.answers
-    assert baseline.answers.how_we_help == "Book an intro: Book a free slot"
+    assert baseline.answers.how_we_help == "Book a free slot"
     assert messages[0] == messages[1]
     assert posted[0] == posted[1]
     assert tool_jobs[0] == tool_jobs[1]
@@ -1092,7 +1108,7 @@ def test_how_we_help_omits_jobs_unavailable_today(kind):
     state = plan_state(entries)
     setup.settle_plan(state)
     setup.finish(state)
-    assert state.answers.how_we_help == "Book an intro: Book a free slot"
+    assert state.answers.how_we_help == "Book a free slot"
 
 
 def test_finish_declines_an_unpriced_purpose_payment():
@@ -1105,7 +1121,7 @@ def test_finish_declines_an_unpriced_purpose_payment():
     setup.finish(state)
     assert entries[0].card.state == "declined"
     assert [accepted.title for accepted in setup.accepted_jobs(state)] == ["Book an intro"]
-    assert state.answers.how_we_help == "Book an intro: Book a free slot"
+    assert state.answers.how_we_help == "Book a free slot"
 
 
 @pytest.mark.parametrize("title, expected", [
@@ -1288,7 +1304,7 @@ def test_finish_reads_shown_and_unshown_items():
         setup.Entry(role='claude', text='Understanding', planned=[entry.card.model_copy(deep=True) for entry in entries]),
         entries[0], entries[2]])
     setup.finish(state)
-    assert state.answers.how_we_help == 'Shown: Book a free slot\nUnshown: Book a free slot'
+    assert state.answers.how_we_help == 'Book a free slot\nBook a free slot'
     assert entries[2].card.state == 'proposed'
     before = setup._stored(state)
     setup.finish(state)
@@ -1677,7 +1693,7 @@ def test_finish_preserves_changed_cards_and_summarizes_only_the_accepted_replace
     assert [card.model_dump(mode="json") for entry in state.transcript for card in [*entry.planned, entry.card]
             if card is not None] == before
     assert old.state == "changed" and old.superseded_by == replacement.proposal_id
-    assert state.answers.how_we_help == ("Revised intro: Ask before booking a call" if accepted else None)
+    assert state.answers.how_we_help == ("Ask before booking a call" if accepted else None)
     assert [card.job.who for card in state.planned] == ["Original clients", "New clients"]
     assert state.step == "tools"
 
@@ -1717,7 +1733,7 @@ async def test_suggestions_keep_a_typed_revision_and_summarize_its_replacement(p
     assert cards[replacement_id]["state"] == "accepted"
     assert cards[replacement_id]["job"]["who"] == "New clients"
     row = await stored(engine, interview_id)
-    assert row["answers"]["how_we_help"] == "Revised intro: Ask before booking a call"
+    assert row["answers"]["how_we_help"] == "Ask before booking a call"
     assert (await owner.browser.get(path + "?cards=1")).json() == reply.json()
 
 
@@ -1883,7 +1899,7 @@ def test_finish_with_business_tools_off_omits_payments_and_normalizes_job_lines(
     setup.finish(state)
     assert [card.state for card in state.planned if card.job.job == "payment"] == ["declined"]
     assert all(accepted.job != "payment" for accepted in setup.accepted_jobs(state))
-    assert state.answers.how_we_help == "Book an intro: Offer an open slot"
+    assert state.answers.how_we_help == "Offer an open slot"
 
 
 async def test_suggestions_clear_stored_configs_before_settling_when_tools_are_off(
