@@ -16,7 +16,7 @@ import httpx
 from desk.api.kernel_client import CredentialView
 from desk.api.ratelimit import LIMITS, Limit
 from desk.api.store import Ids, append_message
-from desk.contracts import CopyCreated, Decision, ExecResult, ToolCall
+from desk.contracts import BRAND_PALETTE, CopyCreated, Decision, ExecResult, ToolCall
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DecideRequest, ExecuteRequest
 from tests.kernel_contract.fake_kernel import NOTIFICATIONS, RIVERA_TZ
 from tests.kernel_contract.ro_tables import mark_replayed
@@ -409,6 +409,41 @@ async def test_reports_flag_a_payment_from_recorded_history(api, browser, fake, 
         marked = (await owner.browser.get(reports_path)).json()
         assert marked == {"bookings": 0, "paid_cents": 2000, "handled_by_claude": 0, "needed_you": 0,
                           "recorded_history": True}, kind
+
+
+async def test_a_brand_palette_pick_goes_to_the_kernel_and_back_on_the_owners_read(api, browser, fake, kernel_http):
+    owner = await new_owner(api, browser, fake, kernel_http)
+    names = {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": TIMEZONE}
+    url = f"/api/owner/desks/{owner.desk_id}/business"
+
+    async def brand_read() -> dict:
+        (business,) = (await owner.browser.get("/api/owner/desks")).json()
+        return business["brand"]
+
+    teal = {"palette": "teal", **BRAND_PALETTE["teal"]}
+    assert await brand_read() == teal                                    # the seed's pick
+    updated = await owner.browser.put(url, json=names | {"brand_palette": "plum"})
+    assert updated.status_code == 200, updated.text
+    # passed on as it came: the kernel alone turns the key into colours
+    (call,) = fake.called("PUT /desks/{id}/business")
+    assert (call.body["brand_palette"], call.body["brand"]) == ("plum", {})
+    assert await brand_read() == {"palette": "plum", **BRAND_PALETTE["plum"]}
+    # "none", no colours, is a pick; a Desk that stored nothing reads as teal
+    assert (await owner.browser.put(url, json=names | {"brand_palette": "none"})).status_code == 200
+    assert await brand_read() == {"palette": "none"}
+    assert (await owner.browser.put(url, json=names | {"brand_palette": None, "brand": {}})).status_code == 200
+    assert await brand_read() == teal
+    # a free-form brand from before the palette reads as stored
+    legacy = {"primary": "#0F3D3A", "accent": "#C2410C"}
+    assert (await owner.browser.put(url, json=names | {"brand": legacy})).status_code == 200
+    assert await brand_read() == legacy
+
+    # a key outside the palette, or a pick beside colours of its own, never reaches the kernel
+    for bad in ({"brand_palette": "magenta"}, {"brand_palette": "navy", "brand": {"primary": "#000000"}},
+                {"brand": {"palette": "magenta"}}):
+        refused = await owner.browser.put(url, json=names | bad)
+        assert (refused.status_code, refused.json()) == (422, {"error": "invalid"}), bad
+    assert len(fake.called("PUT /desks/{id}/business")) == 4
 
 
 async def test_each_desk_part_goes_to_the_kernel_as_the_owner(api, browser, fake, kernel_http):

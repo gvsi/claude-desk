@@ -81,7 +81,8 @@ class DeskBusinessRequest(KernelRequest):     # PUT /desks/{id}/business
     timezone: str
     brand: Brand = {}
     brand_palette: BrandPalette | None = None   # a pick: the kernel stores its key and BRAND_PALETTE's colours, so
-                                                # brand stays {}; None writes brand as before ({} for no colours)
+                                                # brand stays {}; "none" is the pick of no colours; None writes brand
+                                                # as before ({} stores nothing, which reads as the default pick)
 
     @model_validator(mode="after")
     def _one_source_of_colours(self) -> Self:

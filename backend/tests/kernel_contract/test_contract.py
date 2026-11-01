@@ -2516,8 +2516,9 @@ async def test_owner_renames_the_business(kernel, ro_read):
 @pytest.mark.kernel_plan("01b")
 async def test_a_brand_palette_pick_stores_the_tables_colours(kernel, ro_read):
     """`PUT /desks/{id}/business` with `brand_palette` stores the key and `BRAND_PALETTE`'s colours as the brand, and
-    a brand passed back with a pick takes the table's colours, never its own; the API's view and the public page read
-    the brand as stored, and the ledger names the key. No pick and an empty brand clears it."""
+    a brand passed back with a pick takes the table's colours, never its own; the API's view holds the brand as
+    stored, the public page serves it as `effective_brand` reads it, and the ledger names the key. "none" is the pick
+    of no colours; no pick and an empty brand store nothing, which reads as teal."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     owner = http.owner(copy.owner_token)
@@ -2542,8 +2543,10 @@ async def test_a_brand_palette_pick_stores_the_tables_colours(kernel, ro_read):
     await owner.call("PUT /desks/{id}/business", passed_back, path=path)
     slate = {"palette": "slate", **BRAND_PALETTE["slate"]}
     assert await brand_read() == (slate, slate)
+    await owner.call("PUT /desks/{id}/business", DeskBusinessRequest(**names, brand_palette="none"), path=path)
+    assert await brand_read() == ({"palette": "none"}, {"palette": "none"})
     await owner.call("PUT /desks/{id}/business", DeskBusinessRequest(**names), path=path)
-    assert await brand_read() == ({}, {})
+    assert await brand_read() == ({}, {"palette": "teal", **BRAND_PALETTE["teal"]})
 
 
 @pytest.mark.kernel_plan("01b")

@@ -61,6 +61,11 @@ export interface BusinessOut {
   owner_display_name: string;
   /** IANA time zone; owner times are formatted in it. */
   timezone: string;
+  /**
+   * The brand as the public page serves it: a palette pick's key and colours, teal when none was
+   * stored. Sent by the API and typed optional, so a reply without it draws as before.
+   */
+  brand?: Record<string, string>;
   desks: DeskSummary[];
 }
 

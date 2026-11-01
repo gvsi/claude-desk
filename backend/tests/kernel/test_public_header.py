@@ -455,16 +455,24 @@ async def test_ordinary_names_pass(app, client):
     assert response.status_code == 200, response.text
 
 
-async def test_a_palette_pick_shows_on_the_public_page_until_cleared(app, client):
+async def test_the_public_page_serves_a_pick_a_free_form_brand_or_teal(app, client):
     copy = await rivera(app, client)
-    # the header's brand is the pick as stored: its key and the table's colours
-    for key in ("plum", "teal"):
+    teal = {"palette": "teal", **BRAND_PALETTE["teal"]}
+    assert (await public_page(client, copy)).brand == teal                       # the seed's pick
+    # a pick shows as its key and the table's colours
+    for key in ("plum", "clay"):
         await updated(client, copy, "business", business(brand={}, brand_palette=key))
         assert (await public_page(client, copy)).brand == {"palette": key, **BRAND_PALETTE[key]}, key
     # a brand passed back with a pick shows the table's colours, never the colours it sent
     await updated(client, copy, "business", business(brand={"palette": "navy", "primary": "#000000"}))
     assert (await public_page(client, copy)).brand == {"palette": "navy", **BRAND_PALETTE["navy"]}
-    # cleared, the page has no brand, so the web draws its own fallback
-    await updated(client, copy, "business", business(brand={}, brand_palette=None))
-    assert (await public_page(client, copy)).brand == {}
+    # "none", no colours: the key alone, so the web draws its neutral header
+    await updated(client, copy, "business", business(brand={}, brand_palette="none"))
+    assert (await public_page(client, copy)).brand == {"palette": "none"}
+    # nothing stored reads as teal; free-form colours from before the palette show as stored
+    await updated(client, copy, "business", business(brand={}))
+    assert (await public_page(client, copy)).brand == teal
+    legacy = {"primary": "#0F3D3A", "accent": "#C2410C"}
+    await store_business(app, copy, brand=legacy)
+    assert (await public_page(client, copy)).brand == legacy
     assert await withheld_alerts(app, copy) == []

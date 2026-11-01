@@ -197,6 +197,7 @@ from desk.contracts import (
     Violation,
     money_tool,
     money_tools_of,
+    effective_brand,
     moves_money,
     stored_brand,
 )
@@ -2372,7 +2373,7 @@ class FakeKernelState:
         card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
-                          owner_display_name=desk.owner_display_name, brand=dict(desk.brand), charter=charter,
+                          owner_display_name=desk.owner_display_name, brand=effective_brand(desk.brand), charter=charter,
                           agent_card=card, open_status=self._open_status(desk, language),
                           starters=self._starters(desk, language))
 

@@ -652,7 +652,7 @@ async def test_a_palette_pick_stores_the_tables_colours_and_ledgers_its_key(app,
     copy = await rivera(app, client)
     assert await stored_brand(app, copy) == picked("teal")              # the seed's pick
     [business] = await rows_of(app, copy.copy_id, select(Business))
-    for key in ("navy", "teal", "slate"):
+    for key in ("navy", "clay", "none", "teal"):
         before = len(await entries_of(app, copy))
         await updated(client, copy, "business", RIVERA_NAMES | {"brand_palette": key})
         assert await stored_brand(app, copy) == picked(key), key
@@ -666,7 +666,10 @@ async def test_a_palette_pick_stores_the_tables_colours_and_ledgers_its_key(app,
     await updated(client, copy, "business", RIVERA_NAMES | {"brand": {"palette": "plum", "accent": "#FFFFFF",
                                                                        "extra": "#123456"}})
     assert await stored_brand(app, copy) == picked("plum")
-    # no colour at all is a choice too: no pick and an empty brand, ledgered as any other business write
+    # "none", no colours, is stored as its key alone, and passed back keeps no colours
+    await updated(client, copy, "business", RIVERA_NAMES | {"brand": {"palette": "none", "primary": "#000000"}})
+    assert await stored_brand(app, copy) == picked("none") == {"palette": "none"}
+    # no pick and an empty brand store nothing (read as teal), ledgered as any other business write
     before = len(await entries_of(app, copy))
     await updated(client, copy, "business", RIVERA_NAMES | {"brand_palette": None, "brand": {}})
     assert await stored_brand(app, copy) == {}
@@ -677,8 +680,9 @@ async def test_a_palette_pick_stores_the_tables_colours_and_ledgers_its_key(app,
 async def test_a_palette_pick_is_one_of_the_tables_keys_and_the_only_source(app, client):
     copy = await rivera(app, client)
     refused = [RIVERA_NAMES | {"brand_palette": key} for key in ("magenta", "Teal", "", "#1F4E4A")]
-    refused += [RIVERA_NAMES | {"brand_palette": "navy", "brand": brand}    # a pick takes its colours from the table
-                for brand in ({"primary": "#1F3A5C"}, {"palette": "navy"}, picked("navy"))]
+    refused += [RIVERA_NAMES | {"brand_palette": key, "brand": brand}       # a pick takes its colours from the table
+                for key, brand in (("navy", {"primary": "#1F3A5C"}), ("navy", {"palette": "navy"}),
+                                   ("navy", picked("navy")), ("none", {"palette": "none"}))]
     refused += [RIVERA_NAMES | {"brand": {"palette": key, **BRAND_PALETTE["teal"]}} for key in ("magenta", "", "TEAL")]
     brand_before, entries_before = await stored_brand(app, copy), len(await entries_of(app, copy))
     for body in refused:

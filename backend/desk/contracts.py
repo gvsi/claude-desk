@@ -116,10 +116,12 @@ class NotificationDefaults(BaseModel):    # alerts are delivered to the owner's 
 # A Desk's brand colours, picked from a fixed palette: the owner picks a key and the kernel stores it with this
 # table's colours, never colours of the request's, so every pick keeps the public page's header readable
 # (tests/test_brand_palette.py holds each primary to 4.5:1 under both of the header's text tokens).
-BrandPalette = Literal["teal", "navy", "forest", "plum", "rust", "slate"]   # in display order
-DEFAULT_BRAND_PALETTE: BrandPalette = "teal"
+BrandPalette = Literal["none", "teal", "clay", "navy", "forest", "plum", "rust", "slate"]   # in display order
+DEFAULT_BRAND_PALETTE: BrandPalette = "teal"            # what a business that stored no brand reads as
 BRAND_PALETTE: dict[BrandPalette, dict[str, str]] = {   # the one table: the header's field and the rule under it
+    "none": {},                                         # no colours: the web draws its neutral header
     "teal": {"primary": "#1F4E4A", "accent": "#B87333"},
+    "clay": {"primary": "#773624", "accent": "#D97757"},
     "navy": {"primary": "#1F3A5C", "accent": "#C9A24B"},
     "forest": {"primary": "#28452B", "accent": "#B5A05E"},
     "plum": {"primary": "#4A2D4D", "accent": "#C98FA3"},
@@ -145,6 +147,17 @@ def stored_brand(brand: Mapping[str, str], palette: BrandPalette | None = None) 
         return dict(brand)
     if key not in BRAND_PALETTE:
         raise ValueError(BRAND_PALETTE_UNLISTED)
+    return {"palette": key, **BRAND_PALETTE[key]}
+
+def effective_brand(stored: Mapping[str, str]) -> dict[str, str]:
+    """The brand a read serves (the public page, the owner's business read) for a stored one: a pick's key and
+    BRAND_PALETTE's colours as they are now ("none": the key alone); free-form colours from before the palette, as
+    stored; and the default pick, teal, for a business that stored no colours, or a key the table no longer has."""
+    key = stored.get("palette")
+    if key is None and ("primary" in stored or "accent" in stored):
+        return dict(stored)
+    if key not in BRAND_PALETTE:
+        key = DEFAULT_BRAND_PALETTE
     return {"palette": key, **BRAND_PALETTE[key]}
 
 class BusinessSeed(BaseModel):

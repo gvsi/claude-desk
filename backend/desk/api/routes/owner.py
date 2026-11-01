@@ -57,7 +57,8 @@ from desk.api.schemas import (
 )
 from desk.api.sse import RUN_EVENTS, append_control, emit
 from desk.api.store import MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending, transcript
-from desk.contracts import CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState
+from desk.contracts import (CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState,
+                            effective_brand)
 from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
 from desk.kernel_api import (
     AnswerRequest,
@@ -281,7 +282,8 @@ async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOu
         if business["business_id"] not in listed:
             listed[business["business_id"]] = BusinessOut(
                 business_id=business["business_id"], name=business["name"],
-                owner_display_name=business["owner_display_name"], timezone=business["timezone"], desks=[])
+                owner_display_name=business["owner_display_name"], timezone=business["timezone"],
+                brand=effective_brand(business["brand"] or {}), desks=[])
         listed[business["business_id"]].desks.append(_summary(desk, business, setups))
     return list(listed.values())
 
