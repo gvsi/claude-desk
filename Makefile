@@ -1,5 +1,11 @@
 .PHONY: kernel test db-roles db-throwaway web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
 
+# Run this worktree's tests/builds on the isolated SSM test machine (docs/testbox.md).
+.PHONY: remote
+remote:
+	$(if $(strip $(value CMD)),,$(error remote: give CMD="make kernel"))
+	tools/testbox/run sh -c '$(subst ','"'"',$(value CMD))'
+
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
 # CVC5 or PATH.
@@ -273,6 +279,7 @@ evals-tier1:
 # CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
 # rate or results file changed since BASE (renames count both paths), else when the committed file for
 # the head's inputs is complete and its gate passes, or every head scenario is pending (no recorded rate).
+# HISTORY_SINCE preserves rate, waiver and landed-plan histories from every first-parent commit since it.
 # evals-merge-ready refuses a merge when both HEAD and origin/main changed results inputs since
 # their merge base and a scenario can run under their combined landed plans or in their merge.
 # Recorded rates also prevent the unarmed shortcut. Fetch origin first; rebase and regenerate when refused.
@@ -281,6 +288,7 @@ evals-tier1:
 RUNS ?= 1
 MAX_USD ?= 40
 BASE ?= origin/main
+HISTORY_SINCE ?=
 HEAD ?= HEAD
 
 evals-tier2:
@@ -290,7 +298,7 @@ evals-key:
 	@$(EVALS) python -m evals.run key
 
 evals-results-check:
-	@$(EVALS) python -m evals.run results-check --base $(BASE)
+	@$(EVALS) python -m evals.run results-check --base $(BASE) $(if $(HISTORY_SINCE),--history-since "$(HISTORY_SINCE)")
 
 evals-merge-ready:
 	@$(EVALS) python -m evals.run merge-ready --head "$(HEAD)"

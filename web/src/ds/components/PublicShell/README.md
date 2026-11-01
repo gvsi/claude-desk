@@ -20,6 +20,9 @@
   - "Chat with {name}" and, under it, the AI disclosure. It can't be turned off:
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {ownerName} cuando quieras."
+
+    When `{name}` already ends in '.', '!' or '?', the period after it is left out (`afterName`), so 'Chen & Co.' reads 'Chen & Co. Ask for …'.
+
   - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
   - **While the owner is in the chat** (`ownerInChat`, take-over option A, N-R2-TakeOver-A-1512-EN and N-R2-TakeOver-A-390-EN), the disclosure's line says so instead, in the same element, type and place, and "Ask for {ownerName}" isn't shown:
     - "{ownerName} is in this chat. Claude, an AI, is paused until {ownerName} hands it back."
