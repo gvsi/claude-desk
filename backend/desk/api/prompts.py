@@ -560,7 +560,8 @@ question or propose one job or app from your plan, whose card the owner accepts,
 propose a job, make sure you have what it needs to work, since a job the owner accepts but can't run is a broken \
 promise: bookings need the opening hours, quotes need the business's prices, and payment links need a payment app \
 (propose stripe first, then the payment job). When you need something the owner may have written down, such as a \
-price list, offer to read their website; code reads it if they give the address.
+price list, offer to read their website; code reads it if they give the address on any question but the contact \
+one.
 
 Dig deeper rather than skipping. A missing detail is a reason to ask, not to leave a job out. Notice signals and \
 say what you noticed: an owner who already takes payments with Square or Stripe likely wants quotes and payment \
@@ -803,10 +804,11 @@ short follow-up question instead. If the owner raises something new, answer it a
 topic you were on waits for a later turn.
 - Fields: everything this answer tells you, read with this question's exchange, even a fact for another topic, in \
 the field this turn has for it (a phone number given while you asked about services goes in public_contact). A \
-turn has only the fields its question records, such as website on what_you_do and after_hours on \
-contact_and_after_hours; a fact with no field on this turn waits for its own topic. Leave a text empty, a list \
-empty, clear_hours and clear_price_items false and anything else null when the answer doesn't give it. Use memory \
-and website only for facts about the business, never for limits.
+turn has only the fields its question records, such as after_hours on the hours and contact questions and website \
+on every question but the contact one. A fact with no field on this turn isn't recorded on this turn: don't say it \
+back as noted; its own topic asks for it if it has one. Leave a text empty, a list empty, clear_hours and \
+clear_price_items false and anything else null when the answer doesn't give it. Use memory and website only for \
+facts about the business, never for limits.
 - pricing, intake and urgent record what the owner's answers and the business's own text say about how it works, \
 never limits.
 - For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, times, \
@@ -1157,16 +1159,18 @@ LIMIT_TURN_FACTS: dict[str, QuestionKey] = {"pricing": "quote_limit", "price_ite
 # The fields each taken only on the turns of the questions that ask for them, so no other turn's schema has them: the
 # API compiles a turn's schema into a grammar and refuses one too large, and a turn of more than 20 top-level
 # properties was refused (tests/api/test_schema_budget.py). what_you_do, where the owner describes the business, takes
-# how it prices, what new customers are asked, what counts as urgent and a website they name, but no hours, which
-# hours_and_area always asks; the quote question takes pricing too (with `LIMIT_TURN_FACTS`), and
-# contact_and_after_hours takes what happens after hours and what counts as urgent. Code drops one any other turn's
-# patch carries (`setup.merged`).
+# how it prices, what new customers are asked and what counts as urgent, but no hours, which hours_and_area always
+# asks; the quote question takes pricing too (with `LIMIT_TURN_FACTS`); hours_and_area and contact_and_after_hours
+# take what happens after hours, and contact_and_after_hours what counts as urgent. A website the owner names is
+# read on every question but the contact one, the only turn without room for it, since a later question, such as
+# the quote one, is often where the owner gives the address. Code drops a patch field any other turn carries
+# (`setup.merged`).
 FIELD_TURNS: dict[str, frozenset[QuestionKey]] = {
     "pricing": frozenset({"what_you_do", "quote_limit"}),
     "intake": frozenset({"what_you_do"}),
     "urgent": frozenset({"what_you_do", "contact_and_after_hours"}),
-    "after_hours": frozenset({"contact_and_after_hours"}),
-    "website": frozenset({"what_you_do"}),
+    "after_hours": frozenset({"hours_and_area", "contact_and_after_hours"}),
+    "website": frozenset(QUESTION_KEYS) - {"contact_and_after_hours"},
     "hours": frozenset({"hours_and_area", "contact_and_after_hours"}),
     "clear_hours": frozenset({"hours_and_area", "contact_and_after_hours"}),
 }
@@ -1512,7 +1516,8 @@ def _turn_fields() -> dict[str, tuple[object, Any]]:
 
 class SetupTurn(DraftOutput):
     """One answer turn (route `setup`): the base of each question's own model in `SETUP_TURNS`, which has the reply,
-    the fields that question's turn may set (what_you_do's include a website named) and step_done."""
+    the fields that question's turn may set (on every question but the contact one, a website named) and
+    step_done."""
 
     model_config = ConfigDict(extra="forbid")
 

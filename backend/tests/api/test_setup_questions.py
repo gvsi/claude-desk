@@ -174,8 +174,8 @@ def next_step(key: str, **fields) -> Callable[[ModelRequest], object]:
 def answer_turn(output: type[BaseModel], reply: str = "Got it.", *, step_done: bool = True, website: str = "",
                 **fields) -> BaseModel:
     """An answer turn in `output`: its reply, the fields it sets (every other one blank), a website named and whether
-    it's done. A field `output` doesn't have fails the test: that question's turn can't set it (only what_you_do's
-    takes a website)."""
+    it's done. A field `output` doesn't have fails the test: that question's turn can't set it (the contact
+    question's takes no website)."""
     if website:
         fields["website"] = website
     missing = sorted(set(fields) - set(output.model_fields))
@@ -1664,27 +1664,23 @@ async def test_refused_fetch_does_not_block_setup(app, browser, fake, kernel_htt
         ("claude", question_text("what_you_do", "trade"))]
     assert not fake.called("POST /execute")
 
-    # a fetch the kernel's guard refuses fails at execution; the question goes on the same way (only what_you_do's
-    # turn takes a website, so both addresses come while it's asked)
+    # a fetch the kernel's guard refuses fails at execution; setup goes on the same way
     fake.script("native.fetch_website", exec_state="failed")
-    follow_up = "Which jobs do customers ask about most?"
     answered = await answer(owner, model, state["interview_id"], "Plumbing, and we're at rivera-plumbing.example",
-                            turn(follow_up, step_done=False, website="www.rivera-plumbing.example"))
+                            turn(website="www.rivera-plumbing.example"))
     assert answered.status_code == 200, answered.text
-    assert answered.json()["question"] == "what_you_do"
-    assert [(message["role"], message["text"]) for message in answered.json()["messages"][-2:]] == [
-        ("claude", follow_up), ("tool_label", "Couldn't read www.rivera-plumbing.example")]
+    assert [(message["role"], message["text"]) for message in answered.json()["messages"][-3:]] == [
+        ("claude", "Got it."), ("tool_label", "Couldn't read www.rivera-plumbing.example"),
+        ("claude", question_text("hours_and_area", "trade"))]
     (executed,) = fake.called("POST /execute")
     assert fake.decisions[executed.body["decision_id"]].decision.state == "failed"
 
-    # the kernel unreachable: still only a label, and setup goes on
+    # the kernel unreachable: still only a label
     fake.fail("POST /decide", "timeout")
-    answered = await answer(owner, model, state["interview_id"], "Leaks and drains. Site: other.example",
+    answered = await answer(owner, model, state["interview_id"], "Weekdays, Oakland. Site: other.example",
                             turn(website="other.example"))
     assert answered.status_code == 200, answered.text
-    assert [(message["role"], message["text"]) for message in answered.json()["messages"][-3:]] == [
-        ("claude", "Got it."), ("tool_label", "Couldn't read other.example"),
-        ("claude", question_text("hours_and_area", "trade"))]
+    assert answered.json()["messages"][-2]["text"] == "Couldn't read other.example"
 
 
 async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_http, model, engine):
@@ -1909,14 +1905,15 @@ LIMIT_QUESTIONS = {"quote_limit": ("quote_auto_max_cents",), "discounts": ("disc
 
 
 def test_each_scoped_field_names_the_questions_that_ask_for_it():
-    # what_you_do, where the owner describes the business, takes how it prices, what new customers are asked, what
-    # counts as urgent and a website they name, but no hours (hours_and_area always asks for them). The quote question
-    # takes pricing too, and contact_and_after_hours what happens after hours and what counts as urgent.
-    fact_turns = {"hours_and_area", "contact_and_after_hours"}
+    # what_you_do, where the owner describes the business, takes how it prices, what new customers are asked and what
+    # counts as urgent, but no hours (hours_and_area always asks for them). The quote question takes pricing too,
+    # hours_and_area and contact_and_after_hours what happens after hours, and contact_and_after_hours what counts as
+    # urgent. Every question but the contact one takes a website the owner names: the address often comes later.
+    later = {"hours_and_area", "contact_and_after_hours"}
     assert FIELD_TURNS == {"pricing": {"what_you_do", "quote_limit"}, "intake": {"what_you_do"},
-                           "urgent": {"what_you_do", "contact_and_after_hours"},
-                           "after_hours": {"contact_and_after_hours"}, "website": {"what_you_do"},
-                           "hours": fact_turns, "clear_hours": fact_turns}
+                           "urgent": {"what_you_do", "contact_and_after_hours"}, "after_hours": later,
+                           "website": set(QUESTION_KEYS) - {"contact_and_after_hours"},
+                           "hours": later, "clear_hours": later}
 
 
 @pytest.mark.parametrize(("name", "turns"), FIELD_TURNS.items())
@@ -2112,11 +2109,11 @@ async def test_limits_patch_only_from_their_questions(app, browser, fake, kernel
 
 
 async def test_a_limit_turn_sets_only_its_own_limits(app, browser, fake, kernel_http, model, engine, caplog):
-    # A limit question's model has its own limits, the reply and step_done, and no fact but the quote question's
-    # pricing text and price items: its turn still reads none of the facts so far, and takes no website.
+    # A limit question's model has its own limits, the reply, a website named and step_done, and no fact but the quote
+    # question's pricing text and price items: its turn still reads none of the facts so far.
     for key, names in LIMIT_QUESTIONS.items():
         facts = {"pricing", "price_items"} if key == "quote_limit" else set()
-        assert set(SETUP_TURNS[key].model_fields) == {"reply", "step_done", *names, *facts}, key
+        assert set(SETUP_TURNS[key].model_fields) == {"reply", "website", "step_done", *names, *facts}, key
     caplog.set_level(logging.WARNING, logger="desk.api.setup")
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
@@ -2284,10 +2281,16 @@ async def test_a_limit_turn_reads_only_the_limits_answered_so_far(app, browser, 
     await answered_up_to(owner, model, interview_id, "quote_limit")
     assert "<this_question_so_far>" not in turn_text(model)  # the first hours answer reads no earlier exchange
     follow_up = "Can I give quotes up to $500 without checking with you?"
+    # The owner names a prices page on the quote question: code reads it, for later fact turns only.
+    priced = "Prices page: every discount up to 50% needs no check."
+    fake.script("native.fetch_website", model_view={"item_id": "website:2", "title": "Prices", "text": priced})
     followed = await answer(owner, model, interview_id, "Up to 500",
-                            turn(reply=follow_up, step_done=False))
+                            turn(reply=follow_up, step_done=False, website=WEBSITE + "/prices"))
     assert followed.status_code == 200, followed.text
     assert "<this_question_so_far>" not in turn_text(model)
+    fetched = [call.body["call"]["args"] for call in fake.called("POST /decide")
+               if call.body["call"]["tool"] == "native.fetch_website"]
+    assert fetched == [{"url": WEBSITE}, {"url": WEBSITE + "/prices"}]
     confirmed = await answer(owner, model, interview_id, "yes", turn(quote_auto_max_cents=50_000))
     assert confirmed.status_code == 200, confirmed.text
     text = turn_text(model)
@@ -2295,19 +2298,19 @@ async def test_a_limit_turn_reads_only_the_limits_answered_so_far(app, browser, 
     exchange = f"<this_question_so_far>\nyou: {first_ask}\nowner: Up to 500\nyou: {follow_up}\n</this_question_so_far>"
     assert text.endswith(f"{exchange}\n\n<owner_answer>yes</owner_answer>")
     assert all(tag not in text for tag in ("<memory>", "<website", "Read your website", "Oakland, Berkeley"))
-    assert said[:40] not in html.unescape(text) and "Plumbing." not in text
+    assert said[:40] not in html.unescape(text) and "Plumbing." not in text and priced not in html.unescape(text)
     assert re.search(r"<answers_so_far>(.*?)</answers_so_far>", text, re.S).group(1) == "{}"
     for key in ("discounts", "documents_and_payments", "money_limit"):
         await answered_up_to(owner, model, interview_id, key)
         await answer(owner, model, interview_id, "As I said.")
         text = turn_text(model)
-        assert said not in text and "Plumbing." not in text, key
+        assert said not in text and priced not in text and "Plumbing." not in text, key
         so_far = json.loads(html.unescape(re.search(r"<answers_so_far>(.*?)</answers_so_far>", text, re.S).group(1)))
         assert so_far == {"quote_auto_max_cents": 50_000,
                           **({"documents": "ask"} if key == "money_limit" else {})}, key
-    # The next turn, no limit's own, reads the business's text again.
+    # The next turn, no limit's own, reads the business's text again, the prices page included.
     await answer(owner, model, interview_id, "Call (510) 555-0142.")
-    assert said in html.unescape(turn_text(model))
+    assert said in html.unescape(turn_text(model)) and priced in html.unescape(turn_text(model))
 
 
 async def test_a_planted_price_title_never_reaches_a_limit_turn(app, browser, fake, kernel_http, model, engine):
@@ -3618,7 +3621,7 @@ async def test_dropping_a_numbered_reply_removes_this_turn_even_when_an_earlier_
     await answer(owner, model, state["interview_id"], "We walk dogs.",
                  turn(reply, next=next_ask("hours_and_area"), website=WEBSITE))
     response = await answer(owner, model, state["interview_id"], "Now ask about payments.",
-                            turn(reply, next=next_ask("money_limit")))
+                            turn(reply, next=next_ask("money_limit"), website=WEBSITE + "/prices"))
     assert response.status_code == 200, response.text
     row = await stored(engine, state["interview_id"])
     start = next(index for index, entry in enumerate(row["transcript"])

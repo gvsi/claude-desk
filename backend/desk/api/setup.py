@@ -48,8 +48,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   any other turn's patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
   fact either (its turn reads none of the facts so far), and code drops a fact from a limit turn's patch too, but for
   the quote question's pricing text and price items, named from the owner's answer alone (the turn reads neither):
-  code replaces the pricing text and updates or adds price items by title, never removing one. Some facts (pricing,
-  intake, urgent, after_hours, hours and a website named) are fields only of the questions that ask for them
+  code replaces the pricing text and updates or adds price items by title, never removing one. Some fields (pricing,
+  intake, urgent, after_hours, hours and a website named) are only on the questions that ask for them
   (`FIELD_TURNS`), and code drops one from any other turn's patch too, so each turn's schema stays small enough to
   compile. A fact question clears the hours or the prices only by its flag, since an empty list leaves them as they
   are. A new website is read only with consent; a new owner or business
@@ -1803,7 +1803,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
         if reply.text:
             entries.append(reply)
-        site = website_url(getattr(turn, "website", ""))  # only what_you_do's model has it (`FIELD_TURNS`)
+        site = website_url(getattr(turn, "website", ""))  # the contact question's model has none (`FIELD_TURNS`)
         if site is not None and site[0] not in interview.tried_websites():
             if interview.consent:
                 entries.append(await _read_website(ctx, desk_id, *site))
