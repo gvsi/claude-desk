@@ -325,7 +325,7 @@ describe('design tokens', () => {
     add(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'bg-app');
     add(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'bg-surface');
     add(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5);
-    const marks = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'];
+    const marks = ['accent-blue', 'status-handled', 'status-held', 'status-refused', 'status-info'];
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
     // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone

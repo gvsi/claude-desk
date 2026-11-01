@@ -1,6 +1,6 @@
 /* Composer: a raised surface at the composer radius, an inset hairline and the composer's shadow.
-   The whole box takes the focus ring while its text box has focus, and only then: a button inside
-   it shows its own ring, so there is never a ring inside a ring. */
+   Its text box with focus shows only the caret, as every text field does (base.css): nothing on the
+   box changes. A button inside it shows its own ring on keyboard focus. */
 
 .cd-composer {
   display: flex;
@@ -17,12 +17,6 @@
   box-shadow:
     inset 0 0 0 1px var(--line-hairline),
     var(--shadow-composer);
-}
-
-/* The canvas's 55% ring is 2.9:1, so the composer takes the full focus ring instead. */
-.cd-composer__box:has(> .cd-composer__input:focus) {
-  outline: 2px solid var(--ring-composer);
-  outline-offset: 2px;
 }
 
 /* Owner: the text on top, the controls in a row under it. */
@@ -55,11 +49,6 @@
   resize: none;
   overflow-y: auto;
   overflow-wrap: anywhere;
-}
-
-/* The box draws the ring for the text box. */
-.cd-composer__input:focus-visible {
-  outline: none;
 }
 
 .cd-composer__input:disabled {

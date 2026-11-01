@@ -131,7 +131,7 @@ function pairs(
 
 const TEXT = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'] as const;
 
-const MARKS = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
+const MARKS = ['accent-blue', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
 const SURFACES = ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'] as const;
 
 export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([

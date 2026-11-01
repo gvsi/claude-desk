@@ -35,6 +35,14 @@ a {
   outline-offset: 2px;
 }
 
+/* Text entry (a text field, a text area, a composer's text box) shows only its caret when it has
+   focus, by pointer or keyboard: no ring, and nothing around it changes either. Browsers match
+   :focus-visible on a text field even when it was clicked, so it is turned off here. */
+:is(textarea, input:not([type='button'], [type='checkbox'], [type='color'], [type='file'], [type='image'], [type='radio'], [type='range'], [type='reset'], [type='submit'])):focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+
 ::placeholder {
   color: var(--text-tertiary);
   opacity: 1;

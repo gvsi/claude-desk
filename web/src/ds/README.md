@@ -120,7 +120,7 @@ The spinner's arc is a graphic, 3:1, drawn in the busy label color at full stren
 
 In Deny's menu on a held request, `button-danger-text` reads 7.2 on `bg-surface` and 6.0 on `fill-hover` over it (an item hovered or focused). Allow's items use `text-primary` and every item's line `text-secondary`, already listed on `bg-surface` and on `fill-hover` over it.
 
-Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
+Focus rings and status dots, 3:1:
 
 | Ground | `accent-blue` | `status-handled` | `status-held` | `status-refused` | `status-info` |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -142,7 +142,7 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 
 - Don't put `text-tertiary` or a link on `fill-secondary-hover`: those pairs aren't listed.
 - `line-hairline`, `line-card`, `line-control`, `line-control-hover`, `scrim`, `clay` (the intro illustration's field and the app icon's), `illustration-line`, `illustration-arc`, `mark-hairline` and the connector brand colors (`connector-stripe`, `connector-google-blue`) are decorative (`DECORATIVE_COLORS`): they separate, dim or outline things that are identified otherwise, or carry nothing. `line-control` is flagged: it is 2.0:1 on `bg-app`, under the 3:1 for control borders, which is acceptable only because a chip or pill, or the recorded-history link it underlines, is identified by its own text. Never make an outline the only cue that something is a control.
-- Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. The composer shows `ring-composer` while its text box has focus, solid too, because a translucent ring falls under 3:1; a button inside the composer shows its own ring instead, so only one ring ever shows.
+- Show focus with a solid 2 px `accent-blue` outline at a 2 px offset on every focusable element; the base stylesheet sets it. Text entry is the exception: a text field, a text area or a composer's text box with focus shows only its caret, by pointer or keyboard, with no ring and no change to its outline, border or shadow (owner, 2026-11-01); the base stylesheet turns the ring off for them. A button inside the composer shows its own ring.
 - Never show status by color alone: a dot always sits beside words that say the same thing, and the dot is `aria-hidden`.
 - A `ul` or `ol` drawn without markers says `role="list"`: Safari drops a list's semantics when its markers are removed, and a screen reader then gives no list navigation or count. `expectListsKeepTheirRole` (`test/expectListRoles.ts`) checks it in one story per component.
 - Put replies and receipts inside the transcript's `role="log"` so screen readers announce them. Chat, approvals and take-over all work from the keyboard.

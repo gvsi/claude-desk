@@ -11,7 +11,7 @@
 ## What it shows
 
 - The label above the field, in control type. It always shows and names the field, so the outline is never the only sign that this is a field.
-- The field on the page's own ground: a 1 px `line-field` outline at `radius-control`, `size-control-main` tall, with the text in `body` type. The outline is the field's boundary, so it reads 3:1 against the ground (3.2 on `bg-app`, 3.1 on `bg-surface`), on hover too. Focus shows the 2 px `accent-blue` ring at a 2 px offset.
+- The field on the page's own ground: a 1 px `line-field` outline at `radius-control`, `size-control-main` tall, with the text in `body` type. The outline is the field's boundary, so it reads 3:1 against the ground (3.2 on `bg-app`, 3.1 on `bg-surface`), on hover too. With focus, by pointer or keyboard, the field shows only its caret: no ring, and its outline stays as it is (owner, 2026-11-01).
 - With `multiline`, a text area four lines tall. Enter adds a line, it can be dragged taller but never wider, and long words wrap.
 - The hint under the field in `meta` type, `text-secondary`.
 - With `maxLength`, a counter at the right of the hint line from 90% of the limit ("1350 / 1500"), in `caption` type, `text-secondary`. It is numbers only, so it reads the same in English and Spanish, and it shows "1500 / 1500" when the field is full.
@@ -19,7 +19,7 @@
 
 ## Held fields
 
-A read-only field, single or multiline, uses a `line-control` outline on `fill-secondary`, with a default cursor. Its words stay at full `text-primary` contrast, selectable and in the tab order, with the same focus ring. The muted fill says the words are held while a request settles; they can still be read and copied, so the field does not look disabled (owner, 2026-10-31, option B, “muted fill”; N-Explore-ReadOnly-B).
+A read-only field, single or multiline, uses a `line-control` outline on `fill-secondary`, with a default cursor. Its words stay at full `text-primary` contrast, selectable and in the tab order, and with focus it too shows only its caret. The muted fill says the words are held while a request settles; they can still be read and copied, so the field does not look disabled (owner, 2026-10-31, option B, “muted fill”; N-Explore-ReadOnly-B).
 
 ## Accessibility
 
@@ -53,4 +53,4 @@ A read-only field, single or multiline, uses a `line-control` outline on `fill-s
 | `readOnly` | `boolean` | Shows the text but takes no typing. |
 | `fieldRef` | `Ref<HTMLInputElement \| HTMLTextAreaElement>` | The input or text area, for moving focus to it. |
 
-Nothing moves: the outline keeps its color on hover, and focus shows the ring.
+Nothing moves: the outline keeps its color on hover and with focus, which shows only the caret.
