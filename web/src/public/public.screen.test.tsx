@@ -18,13 +18,13 @@ import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, PUBLIC_SHELL_SCROLLER_EVENT, RATE_LIMI
 import { BREAK_IT_IDEAS, HANDOFF_MAX_AGE_MS, forgetTakenBreakItHandoffs, handOffBreakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
-import { DEMO_CODE, HELD_PROSE, SCRIPT, matchRule, turnEnd, type RuleName } from '../mocks/script.ts';
+import { DEMO_CODE, HELD_PROSE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, type RuleName } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 import { CAUGHT_UP_AFTER_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
 import { PublicPage } from './PublicPage.tsx';
 
@@ -3005,6 +3005,261 @@ describe('public chat page', () => {
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: false });
   });
+});
+
+/**
+ * A request Maria still has to answer stays findable as the visitor goes on chatting: while its
+ * receipt is out of view, a quiet line above the composer says what the receipt says, beside
+ * "View request", which goes back to it.
+ */
+describe('a waiting request stays findable', () => {
+  /** A discount Maria has to answer. */
+  const HELD = 'Could you do the drain clearing at 15% off?';
+  /** What the visitor asks after it, as on the board: enough to scroll the request away on any window. */
+  const MORE = ['How much is drain clearing?', 'Can someone come Tuesday?', 'Is that the regular price?'] as const;
+  /** The kernel's line for a held request, as the receipt under it says it. */
+  const WAITING = rivera.decisions.held.visitor_plain;
+
+  /** The held request's receipts in the conversation, in order. */
+  const heldReceipts = () =>
+    [...document.querySelectorAll<HTMLElement>('[role="log"] .cd-margin-receipt')].filter((el) => el.textContent?.trim() === WAITING);
+
+  /** The lines above the composer for requests whose receipt is out of view, as the visitor reads them. */
+  function waitingLines(): { line: string; dot: boolean; action: string }[] {
+    return [...document.querySelectorAll('.cd-public-chat__waiting-row')].map((row) => ({
+      line: row.querySelector('.cd-type-caption')?.textContent ?? '',
+      dot: row.querySelector('.cd-status-dot--held[aria-hidden="true"]') !== null,
+      action: row.querySelector('button')?.textContent ?? '',
+    }));
+  }
+
+  /** One line for a request waiting on Maria, as the receipt says it. */
+  const waitingOn = (line = WAITING) => ({ line, dot: true, action: 'View request' });
+
+  it('waiting_line_shows_only_while_the_receipt_is_out_of_view', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      await say(screen, HELD);
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+      const [receipt] = heldReceipts();
+      if (!receipt) throw new Error('the discount was held');
+      // With the request's receipt in view, nothing waits above the composer.
+      await frames();
+      expect(shownIn(receipt, chatScroller()), viewport).toBe(true);
+      expect(waitingLines(), viewport).toEqual([]);
+
+      // The chat goes on and the receipt scrolls away: the line above the composer says what it
+      // said, and the newest message still ends right above it.
+      for (const text of MORE) await say(screen, text);
+      await vi.waitFor(() => expect(waitingLines(), viewport).toEqual([waitingOn()]), { timeout: 1_000 });
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+      expect(shownIn(receipt, chatScroller()), viewport).toBe(false);
+      const row = document.querySelector('.cd-public-chat__waiting-row');
+      const composer = chatBox(screen).element().closest('.cd-composer');
+      expect(row?.closest('.cd-public-shell__composer'), 'the line is in the composer area').not.toBeNull();
+      expect(row && composer ? row.getBoundingClientRect().bottom <= composer.getBoundingClientRect().top : false, 'above the composer').toBe(true);
+      await expect.element(chatBox(screen)).toBeEnabled();
+
+      // Scrolled back to the receipt, the line goes; back at the end, it comes back.
+      const region = chatScroller();
+      receipt.scrollIntoView({ block: 'center', behavior: 'instant' });
+      await vi.waitFor(() => expect(waitingLines(), viewport).toEqual([]), { timeout: 1_000 });
+      expect(shownIn(receipt, region), viewport).toBe(true);
+      region.scrollTo({ top: region.scrollHeight, behavior: 'instant' });
+      await vi.waitFor(() => expect(waitingLines(), viewport).toEqual([waitingOn()]), { timeout: 1_000 });
+
+      // Back on the page, the chat opens at its newest message, and the line is there from the start.
+      const again = await renderRoute(PAGE, { viewport });
+      await ready(again.screen);
+      await vi.waitFor(() => expect(waitingLines(), viewport).toEqual([waitingOn()]), { timeout: 1_000 });
+      expectNoHorizontalScroll();
+    }
+  }, 30_000);
+
+  it('waiting_line_goes_when_the_request_is_answered_cancelled_or_expires', async () => {
+    const outcomes = [
+      { outcome: 'answered', viewport: 'desktop', line: 'Maria Rivera approved this' },
+      { outcome: 'cancelled', viewport: 'phone', line: rivera.decisions.cancelled.visitor_plain },
+      { outcome: 'expired', viewport: 'desktop', line: rivera.decisions.expired.visitor_plain },
+    ] as const;
+    for (const { outcome, viewport, line } of outcomes) {
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      await say(screen, HELD);
+      for (const text of MORE) await say(screen, text);
+      await vi.waitFor(() => expect(waitingLines(), outcome).toEqual([waitingOn()]), { timeout: 1_000 });
+      const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+      if (held?.type !== 'held') throw new Error('the discount was held');
+      const [receipt] = heldReceipts();
+      if (!receipt) throw new Error('the held receipt is in the conversation');
+      const row = rowOf(receipt);
+      // The visitor is on "View request" as the request ends.
+      (screen.getByRole('button', { name: 'View request' }).element() as HTMLElement).focus();
+
+      if (outcome === 'answered') {
+        await request('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } });
+      } else if (outcome === 'cancelled') {
+        // Cancelled from where it is, without bringing it into view first.
+        (screen.getByRole('button', { name: 'Cancel this request' }).element() as HTMLElement).click();
+      } else {
+        mockStore.emit(RIVERA.slug, { ...held, type: 'resolved', state: 'expired', visitor_plain: line, ledger_seq: held.ledger_seq + 100 });
+      }
+      // What the request came to replaces the waiting line under its message, out of view, and the
+      // line above the composer goes with it; the visitor's place moves to the composer.
+      await vi.waitFor(() => expect(receiptsOf(row), outcome).toContain(line), { timeout: 3_000 });
+      expect(receiptsOf(row), outcome).not.toContain(WAITING);
+      expect(waitingLines(), outcome).toEqual([]);
+      expect(shownIn(row.querySelector('.cd-transcript-row__margin') ?? row, chatScroller()), outcome).toBe(false);
+      await expect.element(chatBox(screen)).toHaveFocus();
+    }
+  }, 30_000);
+
+  it('view_request_brings_the_request_back_and_focuses_its_cancel', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      await say(screen, HELD);
+      for (const text of MORE) await say(screen, text);
+      await vi.waitFor(() => expect(waitingLines(), viewport).toEqual([waitingOn()]), { timeout: 1_000 });
+      const [receipt] = heldReceipts();
+      if (!receipt) throw new Error('the held receipt is in the conversation');
+      const region = chatScroller();
+      const cancel = screen.getByRole('button', { name: 'Cancel this request' });
+      // A draft waits in the composer.
+      await chatBox(screen).fill('Thanks, one more thing');
+      const before = { cancels: requests('cancelRequest').length, sends: requests('sendMessage').length, events: chatEvents().length };
+
+      await screen.getByRole('button', { name: 'View request' }).click();
+      // The request is in view with its cancel, focus is on that cancel, and the line has gone.
+      expect(shownIn(receipt, region), viewport).toBe(true);
+      expect(shownIn(cancel.element(), region), viewport).toBe(true);
+      await expect.element(cancel).toHaveFocus();
+      await vi.waitFor(() => expect(waitingLines(), viewport).toEqual([]), { timeout: 1_000 });
+      // It stays there: the chat doesn't take the visitor back down to the newest message.
+      await frames(3);
+      expect(shownIn(receipt, region), viewport).toBe(true);
+      await expect.element(cancel).toHaveFocus();
+      // Nothing else happened: no cancel, no message, nothing new in the chat, the draft as it was.
+      expect({ cancels: requests('cancelRequest').length, sends: requests('sendMessage').length, events: chatEvents().length }, viewport).toEqual(before);
+      await expect.element(chatBox(screen)).toHaveValue('Thanks, one more thing');
+      expect(receiptsOf(rowOf(receipt)), viewport).toEqual([WAITING]);
+      expectNoHorizontalScroll();
+    }
+  }, 30_000);
+
+  it('two_waiting_requests_each_lead_to_their_own', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      await say(screen, HELD);
+      await say(screen, 'How much is drain clearing?');
+      await say(screen, 'Can I get 15% off if I pay cash?');
+      for (const text of MORE) await say(screen, text);
+      const holds = chatEvents().flatMap(({ ev }) => (ev.type === 'held' ? [ev.decision_id] : []));
+      expect(holds, viewport).toHaveLength(2);
+      // One line for each, oldest first, as the receipts say them.
+      await vi.waitFor(() => expect(waitingLines(), viewport).toEqual([waitingOn(), waitingOn()]), { timeout: 1_000 });
+      const receipts = heldReceipts();
+      const cancels = screen.getByRole('button', { name: 'Cancel this request' }).elements();
+      expect(receipts, viewport).toHaveLength(2);
+      expect(cancels, viewport).toHaveLength(2);
+      const region = chatScroller();
+
+      // Each "View request" goes to its own request, newest last.
+      for (const index of [1, 0]) {
+        region.scrollTo({ top: region.scrollHeight, behavior: 'instant' });
+        await vi.waitFor(() => expect(waitingLines(), viewport).toHaveLength(2), { timeout: 1_000 });
+        await screen.getByRole('button', { name: 'View request' }).nth(index).click();
+        expect(document.activeElement, `${viewport}: request ${index}`).toBe(cancels[index]);
+        expect(shownIn(receipts[index] as Element, region), `${viewport}: request ${index}`).toBe(true);
+      }
+    }
+  }, 40_000);
+
+  it('waiting_line_is_a_quiet_line_with_a_44px_view_request', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      await say(screen, HELD);
+      for (const text of MORE) await say(screen, text);
+      await vi.waitFor(() => expect(waitingLines(), viewport).toEqual([waitingOn()]), { timeout: 1_000 });
+      const group = document.querySelector('.cd-public-chat__waiting');
+      const line = group?.querySelector('.cd-status-label.cd-type-caption');
+      const view = screen.getByRole('button', { name: 'View request' }).element();
+      const composer = chatBox(screen).element().closest('.cd-composer');
+      if (!group || !line || !composer) throw new Error('the waiting line and the composer are drawn');
+      // A hairline over it, 8 px above its words, in secondary ink, with no fill of its own.
+      const style = getComputedStyle(group);
+      expect(
+        { border: `${style.borderTopWidth} ${style.borderTopStyle} ${style.borderTopColor}`, paddingTop: style.paddingTop, color: style.color, fill: style.backgroundColor },
+        viewport,
+      ).toEqual({ border: `1px solid ${tokenColor('--line-hairline')}`, paddingTop: '8px', color: tokenColor('--text-secondary'), fill: 'rgba(0, 0, 0, 0)' });
+      expect(getComputedStyle(line).columnGap, viewport).toBe('8px');
+      expect(getComputedStyle(line).color, viewport).toBe(tokenColor('--text-secondary'));
+      // "View request" is a ghost button, at least 44 px each way, ending where the composer ends,
+      // 8 px above it.
+      expect(view.classList.contains('cd-button--ghost'), viewport).toBe(true);
+      const target = view.getBoundingClientRect();
+      const box = composer.getBoundingClientRect();
+      expect(target.height, viewport).toBeGreaterThanOrEqual(44);
+      expect(target.width, viewport).toBeGreaterThanOrEqual(44);
+      expect(Math.round(box.right - target.right), viewport).toBe(0);
+      expect(Math.round(box.top - group.getBoundingClientRect().bottom), viewport).toBe(8);
+      expect(Math.round(view.getBoundingClientRect().top + target.height / 2), viewport).toBe(
+        Math.round(line.getBoundingClientRect().top + line.getBoundingClientRect().height / 2),
+      );
+    }
+  }, 30_000);
+
+  it('view_request_jumps_at_once_with_or_without_reduced_motion', async () => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    onTestFinished(() => reduceMotion(reduced));
+    for (const { reduce, viewport } of [
+      { reduce: true, viewport: 'desktop' },
+      { reduce: false, viewport: 'phone' },
+      { reduce: true, viewport: 'phone' },
+      { reduce: false, viewport: 'desktop' },
+    ] as const) {
+      await reduceMotion(reduce);
+      const where = `${viewport}, reduced motion ${reduce}`;
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      await say(screen, HELD);
+      for (const text of MORE) await say(screen, text);
+      await vi.waitFor(() => expect(waitingLines(), where).toEqual([waitingOn()]), { timeout: 1_000 });
+      const [receipt] = heldReceipts();
+      if (!receipt) throw new Error('the held receipt is in the conversation');
+      const cancel = screen.getByRole('button', { name: 'Cancel this request' }).element();
+      const view = screen.getByRole('button', { name: 'View request' }).element() as HTMLElement;
+      // In the click itself, before the browser draws another frame: nothing glides there.
+      view.click();
+      expect(shownIn(receipt, chatScroller()), where).toBe(true);
+      expect(document.activeElement, where).toBe(cancel);
+    }
+  }, 40_000);
+
+  it('waiting_line_passes_the_screen_checks_in_english_and_spanish', async () => {
+    const es = await renderRoute(PAGE, { language: 'es-MX', viewport: 'phone', seed: 'rivera' });
+    await ready(es.screen);
+    for (const text of ['¿Me haces un descuento en destapar el desagüe?', '¿Cuánto cuesta destapar un desagüe?', '¿Puede venir alguien el martes?', '¿Es el precio normal?']) {
+      await say(es.screen, text);
+    }
+    const esperando = VISITOR_PLAIN.es.held;
+    await vi.waitFor(() => expect(waitingLines()).toEqual([{ line: esperando, dot: true, action: 'Ver solicitud' }]), { timeout: 1_000 });
+    await expect.element(es.screen.getByRole('button', { name: 'Ver solicitud' })).toHaveAccessibleDescription(esperando);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(es.screen.container, { owner: false });
+
+    const { screen } = await renderRoute(PAGE, { viewport: 'desktop', seed: 'rivera' });
+    await ready(screen);
+    await say(screen, HELD);
+    for (const text of MORE) await say(screen, text);
+    await vi.waitFor(() => expect(waitingLines()).toEqual([waitingOn()]), { timeout: 1_000 });
+    await expect.element(screen.getByRole('button', { name: 'View request' })).toHaveAccessibleDescription(WAITING);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: false });
+  }, 30_000);
 });
 
 /**
