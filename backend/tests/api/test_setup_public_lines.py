@@ -11,7 +11,7 @@ from sqlalchemy import text as sql
 
 from desk.api import setup
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp, KernelUnavailable
-from desk.api.prompts import SetupAnswers
+from desk.api.prompts import SETUP_POLICY_CLAIMS, SUGGESTED_FIELD_NAMES, SetupAnswers
 from desk.kernel_api import DeskCharterRequest
 from tests.api.test_setup_questions import app, begin, model, new_owner, stored
 
@@ -59,6 +59,12 @@ async def test_get_lists_nonblank_lines_in_board_order(lines_setup, engine):
         {"key": "policy:how_we_help", "text": "We answer questions.", "source": "owner", "editable": False},
     ]], "hours": None, "prices": None}
     assert await stored(engine, state["interview_id"]) == before
+
+
+def test_line_keys_follow_the_setup_claim_map():
+    # Board order is the board's own; the keys, their fields and the suggestion names are setup's.
+    assert setup.PUBLIC_LINE_KEYS == {"public_contact": "contact", **SETUP_POLICY_CLAIMS}
+    assert {*setup.PUBLIC_LINE_KEYS, "hours", "price_items"} == set(SUGGESTED_FIELD_NAMES)
 
 
 async def patch_answers(engine, state, **patch):
@@ -1280,20 +1286,30 @@ async def test_confirm_owns_only_listed_lines_and_publishes(lines_setup, engine,
         "policy:service_area", "policy:how_we_help"}
 
 
-async def confirm_shown(client, path, keys=None):
-    shown = await client.get(path)
-    if shown.status_code == 200:
-        public = shown.json()
+async def confirm_shown(client, path, keys=None, public=None):
+    if public is None:
+        shown = await client.get(path)
+        public = shown.json() if shown.status_code == 200 else None
+    if public is not None:
         listed = [line["key"] for line in public["lines"]]
         listed.extend(key for key in ("hours", "prices") if public[key] is not None)
         body = {"keys": listed if keys is None else keys, "revision": public["revision"]}
     else:
-        # Admission tests still send a valid body when the projection cannot be read.
+        # Ownership tests still send a valid body when the projection cannot be read.
         body = {"keys": ["policy:pricing"], "revision": "unavailable"}
     return await client.post(f"{path}/confirm", json=body)
 
 
-async def request_lines(client, path, method):
+async def displayed(owner, engine, state, path):
+    """A suggested price and the real projection, read before admission changes: a write sent with them can only be
+    refused by the step or the turn guard, never by a stale revision or a missing price."""
+    await patch_answers(engine, state, price_items=PRICES)
+    shown = await owner.browser.get(path)
+    assert shown.status_code == 200, shown.text
+    return shown.json()
+
+
+async def request_lines(client, path, method, public=None):
     if method == "get":
         return await client.get(path)
     if method == "put":
@@ -1302,21 +1318,20 @@ async def request_lines(client, path, method):
         return await client.delete(f"{path}/prices/visit", params=PRICES[0])
     if method == "delete":
         return await client.delete(f"{path}/policy:pricing")
-    return await confirm_shown(client, path)
+    return await confirm_shown(client, path, public=public)
 
 
 @pytest.mark.parametrize("step", ["questions", "tools", "rules", "situations", "safety_check", "preview", "live"])
 @pytest.mark.parametrize("method", ["get", "put", "confirm", "delete", "delete_price"])
 async def test_public_lines_only_at_rules_or_situations(lines_setup, engine, fake, step, method):
     owner, state, path = lines_setup
-    if method == "delete_price":
-        await patch_answers(engine, state, price_items=PRICES)
+    public = await displayed(owner, engine, state, path)
     async with engine.begin() as conn:
         await conn.execute(sql("UPDATE app.setup_interviews SET step = :step WHERE interview_id = :id"),
                            {"step": step, "id": state["interview_id"]})
     before = await stored(engine, state["interview_id"])
     published = charter(fake, state["desk_id"])
-    reply = await request_lines(owner.browser, path, method)
+    reply = await request_lines(owner.browser, path, method, public)
     if step in ("rules", "situations"):
         assert reply.status_code == 200, reply.text
         assert (await stored(engine, state["interview_id"]))["step"] == step
@@ -1442,10 +1457,11 @@ async def test_another_owners_busy_interview_is_not_found(lines_setup, app, brow
 @pytest.mark.parametrize("method", ["get", "put", "confirm", "delete", "delete_price"])
 async def test_public_lines_share_the_interview_guard(lines_setup, engine, fake, method):
     owner, state, path = lines_setup
+    public = await displayed(owner, engine, state, path)
     before = await stored(engine, state["interview_id"])
     published = charter(fake, state["desk_id"])
     with setup._turn(state["interview_id"]):
-        reply = await request_lines(owner.browser, path, method)
+        reply = await request_lines(owner.browser, path, method, public)
     assert reply.status_code == 409, reply.text
     assert reply.json() == {"error": "conflict"}
     assert await stored(engine, state["interview_id"]) == before

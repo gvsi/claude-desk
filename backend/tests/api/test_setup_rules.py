@@ -797,7 +797,7 @@ async def test_first_and_repeated_rules_hold_suggestions_until_selected_confirm(
     app, browser, fake, kernel_http, model, engine,
 ):
     owner, state = await ready(app, browser, kernel_http, model)
-    # The stored result of choosing suggestions; this branch has no finish/suggestions route yet.
+    # The stored state accepting suggestions leaves (the suggestions route's own tests cover how it gets there).
     async with engine.begin() as conn:
         await conn.execute(sql("UPDATE app.setup_interviews SET answers = answers || CAST(:patch AS jsonb)"
                                " WHERE interview_id = :id"), {
@@ -806,19 +806,22 @@ async def test_first_and_repeated_rules_hold_suggestions_until_selected_confirm(
             }),
         })
     before = await stored(engine, state["interview_id"])
-    model.add(drafted(*GOOD_CARDS))
-    for _ in range(2):
+    # The first draft fails after the parts are written, so the second request writes them again.
+    model.add(cut_short(DraftedRules(cards=GOOD_CARDS)), drafted(*GOOD_CARDS))
+    for expected in (503, 200):
         reply = await settled(owner, policy(state, "rules"))
-        assert reply.status_code == 200, reply.text
+        assert reply.status_code == expected, reply.text
         desk = fake.desks[state["desk_id"]]
         assert desk.hours == [] and desk.prices == {} and desk.slots == {}
         assert "charter:contact" not in desk.facts
         assert "charter:policy:service_area" not in desk.facts
         assert (await stored(engine, state["interview_id"]))["answers"] == before["answers"]
     for route, field in (("hours", "hours"), ("prices", "price_items"), ("calendar", "calendar_slots")):
-        assert [call.body for call in fake.called(f"PUT /desks/{{id}}/{route}")] == [{field: []}]
-    (charter_call,) = fake.called("PUT /desks/{id}/charter")
-    assert not {"contact", "policy:service_area"} & {claim["key"] for claim in charter_call.body["charter"]}
+        assert [call.body for call in fake.called(f"PUT /desks/{{id}}/{route}")] == [{field: []}] * 2
+    charter_calls = fake.called("PUT /desks/{id}/charter")
+    assert len(charter_calls) == 2
+    for charter_call in charter_calls:
+        assert not {"contact", "policy:service_area"} & {claim["key"] for claim in charter_call.body["charter"]}
     path = f'/api/owner/setup/{state["interview_id"]}/public_lines'
     shown = (await owner.browser.get(path)).json()
     confirmed = await owner.browser.post(f"{path}/confirm", json={"keys": ["contact"], "revision": shown["revision"]})
