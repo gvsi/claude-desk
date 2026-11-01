@@ -14,6 +14,10 @@ from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_
 
 @pytest.mark.kernel_plan("01c")
 @pytest.mark.parametrize('title,config,accepted', [
+    ('AED and CPR training', {'block': 'intake', 'questions': ['What?']}, True),
+    ('CAD drafting consult', {'block': 'intake', 'questions': ['What?']}, True),
+    ('Pay 50 CAD', {'block': 'intake', 'questions': ['What?']}, False),
+    ('CHF 20 deposit', {'block': 'intake', 'questions': ['What?']}, False),
     ('Book a free intro consult', {'block': 'intake', 'questions': ['What?']}, True),
     ('Intro consult', {'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 30}, True),
     ('Intro consult', {'block': 'typed_booking', 'appointment_type': 'Consultas gratuitas', 'minutes': 30}, True),

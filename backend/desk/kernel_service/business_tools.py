@@ -20,8 +20,10 @@ FREE_WORDS = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "
 # Owner decision (2026-10-31): payment titles may say neither free nor complimentary.
 PAYMENT_TITLE_REFUSED_WORDS = frozenset({"free", "complimentary"})
 
-# Currency codes are unsafe even without an amount. Keep this local until the shared B7 check lands.
-CURRENCY_CODE = re.compile(r"\b(?:USD|EUR|GBP|CAD|AUD|MXN|JPY|INR|CHF|CNY|HKD|NZD|SGD|BRL|ZAR|AED|SAR|KRW)\b")
+# Keep ordinary technical/medical acronyms usable until the shared B7 check replaces this shim.
+CURRENCY_CODE = re.compile(r"\b(?:USD|EUR|GBP|MXN|JPY|HKD|NZD|KRW)\b")
+AMBIGUOUS_CURRENCY_CODES = r"(?:AED|AUD|BRL|CAD|CHF|CNY|INR|SAR|SGD|ZAR)"
+AMOUNT_CURRENCY_CODE = re.compile(rf"\b{AMBIGUOUS_CURRENCY_CODES}\s*\d|\d\s*{AMBIGUOUS_CURRENCY_CODES}\b")
 
 # Mirror B7's policy-only other_promises.txt until its shared scanner is available here.
 # Spanish/Italian "gratis" remains subject to the field-scoped FREE_WORDS exception;
@@ -96,7 +98,8 @@ def public_promise_fields(values: Mapping[str, str], *,
     if (any(OTHER_PROMISE.search(reading) for reading in reply_check._readings(combined))
             or ACCENTED_PROMISE.search(accented)):
         return list(values)
-    if CURRENCY_CODE.search(combined) or any(unicodedata.category(ch) == "Sc" for ch in combined):
+    if (CURRENCY_CODE.search(combined) or AMOUNT_CURRENCY_CODE.search(combined)
+            or any(unicodedata.category(ch) == "Sc" for ch in combined)):
         return list(values)
     if not hits:
         return []

@@ -540,6 +540,29 @@ async def test_currency_codes_do_not_refuse_ordinary_business_titles(app, client
         assert (await business_rows(app, copy))['desk.new-enquiry'].definition_sha256 == original
 
 
+@pytest.mark.parametrize('title,status', [
+    ('AED and CPR training', 200),
+    ('CAD drafting consult', 200),
+    ('CHF care intake', 200),
+    ('SAR training', 200),
+    ('AUD support', 200),
+    ('INR testing', 200),
+    ('CNY decorations', 200),
+    ('SGD modelling consult', 200),
+    ('Pay 50 CAD', 422),
+    ('CHF 20 deposit', 422),
+    ('USD', 422),
+    ('EUR', 422),
+    ('GBP', 422),
+    ('MXN', 422),
+])
+async def test_ambiguous_currency_codes_need_an_adjacent_amount(app, client, title, status):
+    copy = await rivera(app, client)
+    response = await put(client, copy, [intake(title=title)])
+    assert response.status_code == status, response.text
+    assert bool(await business_rows(app, copy)) is (status == 200)
+
+
 async def test_card_fields_refuse_hidden_characters_and_other_language_commitments(app, client):
     from desk.kernel_service.business_tools import public_promise_fields
 
@@ -649,7 +672,7 @@ async def test_put_rejects_unsafe_titles_before_they_can_reach_a_signed_receipt(
 
     copy = await rivera(app, client)
     for title in ('Pay $twenty', 'twenty dollars', '20 percent', 'guaranteed', 'USD',
-                  '$', 'CHF', 'Tomorrow intake', 'Intake \u202edeetnaraug\u202c'):
+                  '$', 'GBP', 'Tomorrow intake', 'Intake \u202edeetnaraug\u202c'):
         response = await put(client, copy, [intake(title=title)])
         assert response.status_code == 422, (title, response.text)
         assert await business_rows(app, copy) == {}
