@@ -6,12 +6,13 @@
  */
 import { useEffect, useRef, useState } from 'react';
 
-import { canFollowSetup, openSetupEvents, type SetupStreamEvent } from '../api/setupEvents.ts';
+import { canFollowSetup, openSetupEvents, type SetupRead, type SetupStreamEvent } from '../api/setupEvents.ts';
 import type { SetupState } from '../api/views.ts';
 
 /** What a running turn shows so far: the finished reads' labels, in order, and the reply's words. */
 export interface Growing {
-  labels: readonly string[];
+  /** One label per read, in the order the reads ended: the saved `tool_label` message's words. */
+  labels: readonly { read: SetupRead; text: string }[];
   /** Claude's reply so far; empty before its first word and after a reset. */
   text: string;
 }
@@ -40,8 +41,13 @@ export function stepSetupStream(now: Growing, event: SetupStreamEvent | { type: 
     case 'reading':
       // A read in progress shows as Claude writing, as the setup boards draw it.
       return { growing: now, next: 'read_on' };
-    case 'label':
-      return { growing: { labels: [...now.labels, event.text], text: now.text }, next: 'read_on' };
+    case 'label': {
+      // Keyed by what was read: the reads run at once and end in any order, each shown once.
+      const label = { read: event.read, text: event.text };
+      const known = now.labels.some(({ read }) => read === event.read);
+      const labels = known ? now.labels.map((shown) => (shown.read === event.read ? label : shown)) : [...now.labels, label];
+      return { growing: { labels, text: now.text }, next: 'read_on' };
+    }
     case 'done':
       if (event.run === null) return { growing: now, next: inFlight ? 'reopen' : 'refetch_idle' };
       return { growing: now, next: inFlight ? 'wait' : 'refetch' };
@@ -135,6 +141,9 @@ export function useSetupStream(id: string, watching: boolean, inFlight: boolean,
         } else if (step.next === 'refetch' || step.next === 'refetch_idle') {
           const idle = step.next === 'refetch_idle';
           void rereadRef.current().finally(() => {
+            // The saved turn is the interview's now, even while it still reads busy for a moment
+            // as the API unlocks it: its words never show twice.
+            if (live) show(NOTHING_YET);
             // Still busy with no turn this stream can see: the step's own reads carry on alone.
             if (idle) {
               if (live && watchingRef.current) setFellBack(true);

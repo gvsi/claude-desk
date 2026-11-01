@@ -38,7 +38,7 @@ describe('stepSetupStream', () => {
         { type: 'delta', run, text: "Here's what I'd" },
         { type: 'reset', run },
       ]),
-    ).toEqual({ growing: { labels: ['Searched your Claude memory'], text: '' }, next: 'read_on' });
+    ).toEqual({ growing: { labels: [{ read: 'memory', text: 'Searched your Claude memory' }], text: '' }, next: 'read_on' });
   });
 
   it('shows_nothing_new_while_a_read_runs_and_each_label_once_it_ends', () => {
@@ -50,7 +50,29 @@ describe('stepSetupStream', () => {
         { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
         { type: 'label', run, read: 'website', text: 'Read chenco-cpa.example' },
       ]).growing,
-    ).toEqual({ labels: ['Searched your Claude memory', 'Read chenco-cpa.example'], text: '' });
+    ).toEqual({
+      labels: [
+        { read: 'memory', text: 'Searched your Claude memory' },
+        { read: 'website', text: 'Read chenco-cpa.example' },
+      ],
+      text: '',
+    });
+  });
+
+  it('keys_each_read_by_what_it_reads_whichever_ends_first', () => {
+    // The reads run at once: the website's can end first, and a read's label is never shown twice.
+    expect(
+      through([
+        { type: 'reading', run, read: 'memory', host: null },
+        { type: 'reading', run, read: 'website', host: 'chenco-cpa.example' },
+        { type: 'label', run, read: 'website', text: 'Read chenco-cpa.example' },
+        { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
+        { type: 'label', run, read: 'website', text: 'Read chenco-cpa.example, 3 pages' },
+      ]).growing.labels,
+    ).toEqual([
+      { read: 'website', text: 'Read chenco-cpa.example, 3 pages' },
+      { read: 'memory', text: 'Searched your Claude memory' },
+    ]);
   });
 
   it('reads_the_saved_turn_on_done_and_keeps_the_text_till_it_comes', () => {

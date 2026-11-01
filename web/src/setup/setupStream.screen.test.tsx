@@ -70,11 +70,32 @@ describe('useSetupStream', () => {
     expect(reread).not.toHaveBeenCalled();
     release();
     await vi.waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
-    // The words stay until the saved turn takes their place.
-    expect(hook.result.current.growing?.text).toBe('Got it: leaks and blocked drains.');
     expect(allClosed()).toBe(true);
     await hook.rerender({ watching: false, inFlight: false });
     expect(hook.result.current).toEqual({ growing: null, fellBack: false });
+  });
+
+  it('keeps_the_words_till_the_saved_turn_is_read_and_drops_them_once_it_is', async () => {
+    let answer: (state: SetupState) => void = () => {};
+    const read = new Promise<SetupState>((resolve) => {
+      answer = resolve;
+    });
+    worker.use(
+      sse<Named>(EVENTS_URL, ({ client }) => {
+        client.send({ event: 'delta', data: { run: 'r_8', text: 'Got it.' } });
+        client.send({ event: 'done', data: { run: 'r_8' } });
+      }),
+    );
+    const reread = vi.fn(() => read);
+    const hook = await follow({ watching: true, inFlight: false }, reread);
+    await vi.waitFor(() => expect(reread).toHaveBeenCalledTimes(1));
+    // Till the saved turn is read, the words it wrote stay.
+    expect(hook.result.current.growing?.text).toBe('Got it.');
+    // Read, it is in the interview, which may still read busy for a moment as the API unlocks it:
+    // its words go, so they never show twice.
+    answer({ busy: true } as SetupState);
+    await vi.waitFor(() => expect(hook.result.current.growing).toBeNull());
+    expect(hook.result.current.fellBack).toBe(false);
   });
 
   it('shows_the_reads_labels_and_clears_the_text_on_reset', async () => {
@@ -87,7 +108,7 @@ describe('useSetupStream', () => {
       }),
     );
     const hook = await follow({ watching: true, inFlight: false });
-    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: ['Searched your Claude memory'], text: '' }));
+    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: [{ read: 'memory', text: 'Searched your Claude memory' }], text: '' }));
   });
 
   it('closes_its_stream_when_watching_ends_and_on_unmount', async () => {
