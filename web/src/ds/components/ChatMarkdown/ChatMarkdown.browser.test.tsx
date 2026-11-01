@@ -236,6 +236,17 @@ it('growing_text_that_stops_mid_table_shows_no_pipes_or_broken_rows', () => {
   ]);
 });
 
+it('a_reference_link_keeps_its_address_from_another_paragraph', () => {
+  // Streamdown renders each block alone, so a definition in its own paragraph vanished and the
+  // link showed as "[Book][1]". The reply renders as one block when it defines a reference.
+  const text = 'You can [Book][1] here.\n\nAnything else?\n\n[1]: https://example.com/book';
+  const open = reply(mount(<ChatMarkdown text={text} />));
+  expect([...open.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([['Book', 'https://example.com/book']]);
+  expect([...open.children].map((block) => block.textContent)).toEqual(['You can Book here.', 'Anything else?']);
+  rerender(<ChatMarkdown text={text} links="inert" />);
+  expect([...reply(mounted?.host as HTMLElement).children].map((block) => block.textContent)).toEqual(['You can Book (https://example.com/book) here.', 'Anything else?']);
+});
+
 it('a_row_wider_than_its_header_keeps_every_word', () => {
   // GitHub Markdown drops cells past the header's; the header gains empty cells instead.
   const md = reply(mount(<ChatMarkdown text={'| Item |\n| --- |\n| Service | Do not book yet |\n| Deposit |'} />));

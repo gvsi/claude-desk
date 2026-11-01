@@ -1,7 +1,7 @@
 import { createElement, type JSX, useLayoutEffect, useRef } from 'react';
 import { harden } from 'rehype-harden';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import { type Components, defaultRemarkPlugins, type ExtraProps, Streamdown, type StreamdownProps } from 'streamdown';
+import { type Components, defaultRemarkPlugins, type ExtraProps, parseMarkdownIntoBlocks, Streamdown, type StreamdownProps } from 'streamdown';
 
 import { everyTableCell } from './everyTableCell.ts';
 import { footnotesAsText } from './footnotesAsText.ts';
@@ -35,6 +35,18 @@ const REHYPE_PLUGINS: StreamdownProps['rehypePlugins'] = [
  * words and every table cell kept.
  */
 const REMARK_PLUGINS: StreamdownProps['remarkPlugins'] = [...Object.values(defaultRemarkPlugins), footnotesAsText, everyTableCell];
+
+/** A reference definition, `[1]: https://…`, which may sit in its own paragraph. */
+const REFERENCE_DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
+
+/**
+ * Streamdown renders a reply block by block, so a reference definition in its own paragraph
+ * would vanish and its link show as `[Book][1]`, losing the address. A reply that defines a
+ * reference renders as one block, as Streamdown already does for footnotes.
+ */
+function blocksOf(markdown: string): string[] {
+  return REFERENCE_DEFINITION.test(markdown) ? [markdown] : parseMarkdownIntoBlocks(markdown);
+}
 
 /**
  * A hard break is one `<br>`. By default a newline follows it too, which the paragraph's
@@ -241,6 +253,7 @@ export function ChatMarkdown({ text, streaming = false, reveal = false, onReveal
       className="cd-md cd-type-reply"
       components={COMPONENTS[links]}
       remarkPlugins={REMARK_PLUGINS}
+      parseMarkdownIntoBlocksFn={blocksOf}
       remarkRehypeOptions={TO_HTML}
       rehypePlugins={REHYPE_PLUGINS}
       parseIncompleteMarkdown={streaming || !whole}
