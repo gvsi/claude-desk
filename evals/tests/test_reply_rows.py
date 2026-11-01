@@ -276,7 +276,7 @@ async def run_quote_row(monkeypatch: pytest.MonkeyPatch, card: RenderedBlock, ro
 
     fake = FakeAnthropic()
     calls = []
-    monkeypatch.setattr(fake, "calls", lambda model=None: calls)
+    monkeypatch.setattr(fake, "calls", lambda model=None, schema=None: calls)   # the soft check's calls alone
 
     async def returns(value):
         return value
