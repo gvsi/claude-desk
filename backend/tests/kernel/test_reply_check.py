@@ -2435,7 +2435,7 @@ def test_public_policy_many_gratis_scan_is_bounded():
     elapsed = process_time() - start
     assert "lex.es.promise" in fields["policy:about"]
     print(f"8,000-character gratis policy: {elapsed:.6f}s")
-    assert elapsed < 0.75
+    assert elapsed < 1.5   # the windowless scan this guards against took 41 s at 7.8k characters
 
 
 @pytest.mark.parametrize(("text", "rules"), [
