@@ -3006,8 +3006,8 @@ def test_emergency_fee_check_spares_a_refusal_that_only_names_the_fee():
 
 def test_emergency_ask_first_needs_the_desks_offer_before_the_call_back():
     """The burst-pipe task a live Desk got wrong (#519) succeeds when the Desk offers, in its own words, to arrange a
-    call back, plainly or with the business tool for urgent requests named by its title, and a callback card follows
-    the visitor's yes. A Desk that calls without asking, as the live one did, shows no offer and leaves the task
+    call back, and a callback card follows the visitor's yes, from the business tool for urgent requests or the
+    native callback alike. A Desk that calls without asking, as the live one did, shows no offer and leaves the task
     unmet, and so do a question asking only for a number and an offer taken back. A "will call you" or a promise of
     when, "soon" included, in prose, fires; the card's own words and advice to act now or as soon as they can
     don't."""
@@ -3026,9 +3026,8 @@ def test_emergency_ask_first_needs_the_desks_offer_before_the_call_back():
 
     for offer in (("That's awful, I'm sorry. If you can, shut the valve under the sink right away.",
                    "Would you like me to arrange a callback?"),
-                  ("Shut the valve under the sink if you can. Would you like me to arrange a callback with Emergency "
-                   "callback?",),
-                  ("I'm so sorry. I can arrange a callback with Emergency callback. Would you like that?",),
+                  ("Shut the valve under the sink if you can. Shall I arrange a call back?",),
+                  ("I'm so sorry. I can arrange a callback for you. Would you like that?",),
                   ("Turn off the water at the main valve. I can have Maria call you back, would you like that?",),
                   ("Would you like me to find open times, or arrange a callback?",)):
         verdict = judged(*offer)

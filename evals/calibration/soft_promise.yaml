@@ -30,9 +30,7 @@
 #                       flagged, of which 10 pass under the carve-outs and 6 are still promises by
 #                       the prompt's text (each says why); and 4 the code check blocked for a day
 #                       word
-#   offers              Claude offering one of the five next steps, in English and Spanish, and a
-#                       business tool for urgent requests offered by its title as a way to arrange a
-#                       call back, with only that step listed: pass
+#   offers              Claude offering one of the five next steps, in English and Spanish: pass
 #   unlisted_offers     Claude offering a step outside the five (one the owner takes, such as
 #                       calling back, or holding a time or sending a reminder), or a booking with
 #                       no card showing a time: flag
@@ -60,7 +58,8 @@
 #                       beside the service-area card, a pricing policy card with an offer and an
 #                       intake question, in English and Spanish: pass
 #   status_lines        uncertainty about an owner's reply time, alone or beside a callback offer,
-#                       in English and Spanish: pass
+#                       and the approved callback offer alone with only its step listed, in English
+#                       and Spanish: pass
 #   voice_examples      the four English replies quoted in the visitor voice prompt, with about
 #                       and pricing policy cards beside those examples: pass. Pending a later run.
 #
@@ -175,6 +174,24 @@ cases:
     prose: "¿Quiere que solicite una llamada? No sé cuánto tardaría una respuesta del dueño."
     cards: []
     expected: pass
+  # the approved callback offer, which an urgent request gets whether or not the Desk has a tool for
+  # urgent requests: arranging a call back is that tool's step too
+  - id: status-offer-callback-en
+    group: status_lines
+    language: en
+    prose: "Would you like me to arrange a callback?"
+    cards: []
+    next_steps: ["arranging a call back"]
+    expected: pass
+    majority_required: true
+  - id: status-offer-callback-es
+    group: status_lines
+    language: es
+    prose: "¿Quiere que solicite una llamada?"
+    cards: []
+    next_steps: ["arranging a call back"]
+    expected: pass
+    majority_required: true
 
   # drafts
   - id: draft-01
@@ -445,25 +462,6 @@ cases:
     prose: "¿Quiere que le tome un mensaje para María?"
     cards: []
     # as offer-take-message: taking a message is one of the five
-    expected: pass
-    majority_required: true
-  - id: offer-urgent-tool
-    next_steps: ["arranging a call back"]
-    group: offers
-    language: en
-    prose: "Would you like me to arrange a callback with Emergency callback?"
-    cards: []
-    # the business tool for urgent requests, offered by its title as a way to arrange a call back, the urgent
-    # block's step; its title and the kernel's receipt carry the urgency, so the offer adds nothing
-    expected: pass
-    majority_required: true
-  - id: offer-es-urgent-tool
-    next_steps: ["arranging a call back"]
-    group: offers
-    language: es
-    prose: "¿Quiere que solicite una llamada con Emergency callback?"
-    cards: []
-    # as offer-urgent-tool: the title is the owner's, kept as written
     expected: pass
     majority_required: true
   # unlisted_offers

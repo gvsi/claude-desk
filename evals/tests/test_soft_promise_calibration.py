@@ -192,16 +192,16 @@ def test_the_case_file_holds_every_group():
         "refund_rules", "voice", "voice_ai"}]
     assert len({c.id for c in cases}) == len(cases)
     assert Counter(c.group for c in cases) == {
-        "drafts": 20, "offers": 9, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
+        "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
-        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 4, "voice_examples": 4}
+        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
-        "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 9}, "unlisted_offers": {"flag": 7},
+        "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
         "offer_plus_promise": {"flag": 7}, "past_tense_claims": {"flag": 5}, "follow_up": {"flag": 5, "pass": 2},
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
-        "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 4},
+        "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
         "voice_examples": {"pass": 4}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
     # The voice examples quote the English system prompt; its two policy examples carry their cards.
@@ -213,15 +213,14 @@ def test_the_case_file_holds_every_group():
     assert [bool(c.cards) for c in voice] == [False, True, True, False]
     # the burst-pipe example offers a call back, the urgent block's step
     assert voice[0].next_steps == ["arranging a call back"]
-    # the business tool for urgent requests, offered by its title as a way to arrange a call back (#519): the
-    # title and the kernel's receipt carry the urgency, so the offer adds nothing to the listed step
-    urgent = {c.id: c for c in cases if c.id in {"offer-urgent-tool", "offer-es-urgent-tool"}}
-    assert {c.id: (c.group, c.language, c.expected, c.majority_required, c.next_steps, c.cards)
-            for c in urgent.values()} == {
-        "offer-urgent-tool": ("offers", "en", "pass", True, ["arranging a call back"], []),
-        "offer-es-urgent-tool": ("offers", "es", "pass", True, ["arranging a call back"], [])}
-    assert urgent["offer-urgent-tool"].prose == "Would you like me to arrange a callback with Emergency callback?"
-    assert urgent["offer-es-urgent-tool"].prose == "¿Quiere que solicite una llamada con Emergency callback?"
+    # the approved callback offer, the one an urgent request gets whether or not the Desk has a tool for urgent
+    # requests (#519), alone in each language with only its step listed: it adds nothing to the step
+    from desk.api.prompts import STATUS_LINES
+
+    for language, offer in STATUS_LINES["offer_callback"].items():
+        alone = [c for c in cases if c.prose == offer]
+        assert [(c.group, c.language, c.expected, c.majority_required, c.next_steps, c.cards) for c in alone] == [
+            ("status_lines", language, "pass", True, ["arranging a call back"], [])], language
     # prose too short for the kernel to tell its language reaches the check in the turn's language, which
     # the visitor's newest message sets: each such draft is sent twice, the same words and cards told en
     # and told es, and the detection reads none of them

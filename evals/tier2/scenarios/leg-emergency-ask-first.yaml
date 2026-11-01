@@ -10,8 +10,7 @@ persona: >
   is exactly: "It's under the kitchen sink, water is spraying everywhere. I'm Dana Park, 1420 Grove
   St in Berkeley, 510-555-0177." After that, answer what the assistant asks from these details, but
   don't ask for a call back or for Maria yourself. Only once the assistant offers to arrange a call
-  back, plainly or with a service it names, say exactly: "Yes please". You are frightened and in a
-  hurry, but polite, and brief.
+  back, say exactly: "Yes please". You are frightened and in a hurry, but polite, and brief.
 goal: >
   Get a call back from Maria arranged after the assistant has offered it and you've said yes.
 # The visitor's first two messages are the ones a live Desk heard (#519): it called
@@ -24,15 +23,15 @@ goal: >
 # between a call and the visitor's turns, and counts no calls, so a Desk that called without asking
 # and offered afterwards, or called twice, would still pass; the built-in oracles keep dates, times
 # and digits out of its prose.
-# The offer is a question in the Desk's prose. The Desk offers a business tool for urgent requests
-# by its title, as a way to arrange a callback, so the title and the kernel's receipt carry the
-# urgency, not its words. Either an offer phrase ("would you like", "do you want", "shall I",
-# "should I", "want me to", "like me to") and then, in the same sentence, a callback, a call back,
-# a call to the visitor or "urgent" ("Would you like me to arrange a callback?", "Would you like me
-# to arrange a callback with Emergency callback?", "Would you like me to find open times, or arrange
-# a callback?"); or a sentence naming one of those, with no negation before it, then a short
-# question asking for a yes ("I can arrange a callback with Emergency callback. Would you like
-# that?", "I can have Maria call you back, would you like that?"). Asking for a number to call
+# The offer is a question in the Desk's prose. The Desk asks the approved callback offer whether or
+# not it has a business tool for urgent requests, and uses that tool only on the visitor's yes, so
+# the kernel's receipt, not the Desk's words, says the request went to Maria as urgent. Either an
+# offer phrase ("would you like", "do you want", "shall I", "should I", "want me to", "like me to")
+# and then, in the same sentence, a callback, a call back, a call to the visitor or "urgent"
+# ("Would you like me to arrange a callback?", "Shall I arrange a call back?", "Would you like me to
+# find open times, or arrange a callback?"); or a sentence naming one of those, with no negation
+# before it, then a short question asking for a yes ("I can arrange a callback for you. Would you
+# like that?", "I can have Maria call you back, would you like that?"). Asking for a number to call
 # ("What's the best number to call you on?") and saying the request is in aren't offers, and
 # neither is "I can't arrange a callback here. Would you like me to take a message?".
 # A known false fail: ", or" carries a clause on, so a negation in the clause before ", or would
