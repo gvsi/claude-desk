@@ -3,6 +3,9 @@ import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { cleanup } from 'vitest-browser-react';
+import { useRef } from 'react';
+import { useTextLines } from '../lib/useTextLines.ts';
+import { page } from 'vitest/browser';
 
 import { newIdempotencyKey, observeRequests, OWNER_ERROR_COPY, TIMEOUT_MS } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
@@ -26,6 +29,49 @@ import { TodaySkeleton } from './today/TodaySkeleton.tsx';
 beforeAll(loadWebFonts);
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
+
+it('text_measurement_keeps_fractional_content_width_and_requests_its_font', async () => {
+  const words = 'Wrap these words exactly';
+  const host = document.createElement('div');
+  document.body.append(host);
+  const probe = document.createElement('span');
+  probe.className = 'cd-type-body';
+  probe.style.display = 'block';
+  probe.style.width = 'max-content';
+  probe.textContent = words;
+  host.append(probe);
+  const natural = probe.getBoundingClientRect().width;
+  const spacing = (Math.ceil(natural) + 0.25 - natural) / words.length;
+  host.style.letterSpacing = `${spacing}px`;
+  const width = probe.getBoundingClientRect().width + 0.05;
+  probe.remove();
+  const load = vi.spyOn(document.fonts, 'load');
+  const root = createRoot(host);
+  onTestFinished(() => { root.unmount(); host.remove(); load.mockRestore(); });
+  function Measured() {
+    const box = useRef<HTMLDivElement>(null);
+    const summary = useRef<HTMLDivElement>(null);
+    const lines = useTextLines(box, { parts: [words], className: 'cd-type-body' }, 1);
+    useTextLines(summary, { parts: ['A measured serif summary'], className: 'cd-type-summary' }, 1);
+    return <><div ref={box} style={{ width: width + 8, boxSizing: 'border-box', padding: 3, border: '1px solid transparent' }}>
+      <p className="cd-type-body" style={{ margin: 0 }}>{words}</p>
+    </div><div ref={summary} style={{ width }} /><output>{lines}</output></>;
+  }
+  flushSync(() => root.render(<Measured />));
+  await nextFrames();
+  expect(host.querySelector('p')!.getBoundingClientRect().height).toBe(20);
+  expect(host.querySelector('output')!.textContent).toBe('1');
+  expect(load.mock.calls.some(([, text]) => text === words)).toBe(true);
+  expect(load.mock.calls.some(([, text]) => text === 'A measured serif summary'), 'request the serif face even when variation settings prevent font shorthand serialization').toBe(true);
+  const box = host.querySelector('div')!;
+  const append = vi.spyOn(box, 'append');
+  onTestFinished(() => append.mockRestore());
+  host.dataset.state = 'leaving';
+  box.style.width = `${width + 108}px`;
+  document.fonts.dispatchEvent(new Event('loadingdone'));
+  await nextFrames();
+  expect(append, 'font and resize events do not remeasure an outgoing layer').not.toHaveBeenCalled();
+});
 
 /** Count even waiting layers mounted during a navigation, including one removed before the next frame. */
 function watchTodayLayers(): () => number {
@@ -188,9 +234,10 @@ const TODAY_WIDTH_ANCHORS: readonly SkeletonAnchor[] = [
   ...TODAY_ANCHORS,
   { name: 'live-title', page: '.cd-today__section:has(.cd-live) .cd-section-header__heading' },
   { name: 'week-bar-6', page: '.cd-week__day:last-child .cd-week__bar' },
+  { name: 'week-card', page: '.cd-today-aside > .cd-card:last-child', size: true },
 ].map((anchor) => ({ ...anchor, dimensions: ['height', ...(anchor.dimensions ?? [])] as const }));
 
-it.each([620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s', async (width) => {
+it.each([320, 620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s', async (width) => {
   const mounted = vi.spyOn(QueryClient.prototype, 'mount');
   onTestFinished(() => mounted.mockRestore());
   const { screen, router } = await renderRoute(`/app/${RIVERA.deskId}/conversations`, {
@@ -232,7 +279,7 @@ it.each([620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s', asyn
   expectNoWindowScroll();
 });
 
-it.each([620, 820, 1024, 1279, 1512])('today_content_reload_lands_in_place at %s', async (width) => {
+it.each([320, 620, 820, 1024, 1279, 1512])('today_content_reload_lands_in_place at %s', async (width) => {
   const reads = [ROUTES.desks.path, ROUTES.today.path.replace('{desk_id}', RIVERA.deskId), ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId)].map(holdReads);
   onTestFinished(() => reads.forEach((read) => read.release()));
   const gaps = watchSkeletonGaps('.cd-greeting__title');
@@ -255,6 +302,89 @@ it.each([620, 820, 1024, 1279, 1512])('today_content_reload_lands_in_place at %s
   expect(gaps()).toBe(0);
   expectNoHorizontalScroll();
   expectNoWindowScroll();
+});
+
+it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %s', async (viewport) => {
+  // Width recipes are frozen from bd2dd10d3, before wrapping measurement changed the painting.
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
+  await renderRoute(TODAY, { viewport, pollScale: 100 });
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  await nextFrames();
+  const today = document.querySelector('.cd-today--skeleton')!;
+  const lines = (selector: string, container: string, widths: readonly (string | number)[], height?: number) => {
+    const room = today.querySelector(container)!.getBoundingClientRect();
+    const boxes = [...today.querySelectorAll<HTMLElement>(selector)];
+    expect(boxes, selector).toHaveLength(widths.length);
+    boxes.forEach((box, i) => {
+      const width = typeof widths[i] === 'number' ? widths[i] as number : room.width * Number.parseFloat(widths[i] as string) / 100;
+      const rect = box.getBoundingClientRect();
+      const pill = box.querySelector('.cd-skeleton-line__pill')!.getBoundingClientRect();
+      expect(Math.abs(rect.width - width), `${selector} line ${i} box width`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      expect(Math.abs(pill.width - width), `${selector} line ${i} painted width`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      expect(Math.abs(pill.left - rect.left), `${selector} line ${i} pill alignment`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      if (height !== undefined) expect(rect.height).toBe(height);
+    });
+  };
+  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-today__main', ['100%'], 44);
+  lines('.cd-greeting .cd-skeleton-line--body', '.cd-today__main', ['80%'], 22);
+  expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link)')).toBeNull();
+  lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
+  lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
+  [2, 3, 3, 2].forEach((count, i) => {
+    const item = `.cd-things__item:nth-child(${i + 1})`;
+    lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
+    lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
+  });
+  lines('.cd-things__vision .cd-skeleton-line', '.cd-things__vision', ['75%']);
+  for (const child of [3, 4, 5]) lines(`.cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
+  lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
+  lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '75%']);
+  lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
+  lines('.cd-today-skeleton__rule .cd-skeleton-line', '.cd-today-skeleton__rule', viewport === 'phone' ? ['100%', '75%'] : ['75%']);
+  lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', ['100%', '100%', '75%']);
+  lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', ['75%']);
+  for (const child of [1, 2]) {
+    lines(`.cd-briefing__item:nth-child(${child}) .cd-skeleton-line--caption`, `.cd-briefing__item:nth-child(${child}) .cd-briefing-row`, [86]);
+    lines(`.cd-briefing__item:nth-child(${child}) .cd-status-label .cd-skeleton-line`, `.cd-briefing__item:nth-child(${child}) .cd-status-label`, [58]);
+  }
+  lines('.cd-live .cd-skeleton-line--control', '.cd-conversation-item__top', ['55%']);
+  lines('.cd-live .cd-skeleton-line--caption', '.cd-conversation-item__top', ['20%']);
+  lines('.cd-today-aside__public .cd-skeleton-line--section', '.cd-today-aside__public', [130]);
+  lines('.cd-today-aside__public .cd-skeleton-line--meta', '.cd-today-aside__public', ['65%', '100%', '75%']);
+  lines('.cd-week__head .cd-skeleton-line', '.cd-week__head', [110]);
+  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--figure', '.cd-week__part:nth-child(2)', ['45%']);
+  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['70%']);
+  for (let child = 1; child <= 7; child += 1) lines(`.cd-week__day:nth-child(${child}) .cd-skeleton-line`, `.cd-week__day:nth-child(${child})`, ['50%']);
+  lines('.cd-week__part:nth-child(3) .cd-skeleton-line--control', '.cd-week__part:nth-child(3)', ['70%']);
+  lines('.cd-week__part:nth-child(3) .cd-skeleton-line--meta', '.cd-week__part:nth-child(3)', ['100%']);
+  lines('.cd-week__part:last-child .cd-skeleton-line--meta', '.cd-week__part:last-child', ['65%', '30%']);
+  lines('.cd-week__part:last-child .cd-skeleton-line--control', '.cd-week__part:last-child', ['70%']);
+});
+
+it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
+  const reads = [ROUTES.desks.path, ROUTES.today.path.replace('{desk_id}', RIVERA.deskId), ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId)].map(holdReads);
+  onTestFinished(() => reads.forEach((read) => read.release()));
+  const gaps = watchSkeletonGaps('.cd-greeting__title');
+  let before: DOMRect[] = [];
+  await expectSkeletonLoad({
+    status: 'Opening your Desk', anchors: TODAY_WIDTH_ANCHORS,
+    open: async () => {
+      await renderRoute(TODAY, { pollScale: 100 });
+      await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+      await page.viewport(620, 900);
+      await nextFrames();
+    },
+    release: () => {
+      before = TODAY_WIDTH_ANCHORS.map(({ name }) => document.querySelector(`[data-skeleton-anchor="${name}"]`)!.getBoundingClientRect());
+      reads.forEach((read) => read.release());
+    },
+  });
+  TODAY_WIDTH_ANCHORS.forEach(({ name, page: selector }, i) => {
+    const after = landedRect(selector);
+    for (const edge of ['top', 'bottom'] as const) expect(Math.abs(before[i]![edge] - after[edge]), `${name} ${edge} after resize`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  });
+  expect(gaps()).toBe(0);
 });
 
 /**

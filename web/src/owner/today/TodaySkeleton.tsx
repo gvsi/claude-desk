@@ -1,10 +1,12 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
+import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { publicLink } from '../customerLink.ts';
+import { handledCount, steppedInCount, TODAY_COPY } from './copy.ts';
 
 import './Today.css';
 
@@ -13,43 +15,58 @@ const BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control
 // Decision 15: these are the fresh copy's words, used only in invisible measurement probes.
 // A different Desk's names, request, rule or recorded activity may land with one accepted move.
 const DETAILS = [
-  'Your public page opens in a new tab. Ask about a price or a time.',
-  "Ask for a discount, another customer's address or Maria's home number. Safety shows what was refused and why.",
-  'A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.',
-  'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',
+  TODAY_COPY.chatDetail,
+  `${TODAY_COPY.breakBeforeOwner}${rivera.business.ownerName.split(' ')[0]}${TODAY_COPY.breakAfterOwner}`,
+  `${TODAY_COPY.waiting} ${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`,
+  TODAY_COPY.createDetail,
 ] as const;
 
 /** Intrinsic grid/flex columns take the words' width in the real font, rather than a pill's width. */
 function useWordWidth(box: RefObject<HTMLElement | null>, words: string | readonly TextPart[], className: string, intrinsic: boolean) {
   const [width, setWidth] = useState<number>();
+  const key = JSON.stringify(typeof words === 'string' ? [words] : words);
   useLayoutEffect(() => {
     const element = box.current;
-    if (!element || !intrinsic || typeof words !== 'string') return;
+    if (!element || !intrinsic) return;
     let live = true;
     const measure = () => {
-      if (!live || !element.isConnected) return;
+      if (!live || !element.isConnected || element.closest('[data-state="leaving"]')) return;
       const probe = document.createElement('span');
       probe.className = className;
       probe.inert = true;
       probe.setAttribute('aria-hidden', 'true');
-      Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', display: 'block', width: 'max-content', maxWidth: 'none' });
-      probe.textContent = words;
+      Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', width: 'max-content', maxWidth: 'none' });
+      for (const part of JSON.parse(key) as TextPart[]) {
+        if (typeof part === 'string') probe.append(part);
+        else {
+          const span = document.createElement('span');
+          span.className = part.className;
+          span.textContent = part.text;
+          probe.append(span);
+        }
+      }
       element.append(probe);
-      // Text probes use clientWidth; round up so a fractional intrinsic width doesn't add a line.
-      try { setWidth(Math.ceil(probe.getBoundingClientRect().width)); }
+      try {
+        setWidth(probe.getBoundingClientRect().width);
+        const own = getComputedStyle(probe);
+        return own.font || `${own.fontStyle} ${own.fontWeight} ${own.fontSize} ${own.fontFamily}`;
+      }
       finally { probe.remove(); }
     };
-    measure();
+    const font = measure();
+    const text = (JSON.parse(key) as TextPart[]).map((part) => typeof part === 'string' ? part : part.text).join('');
+    if (font) void document.fonts.load(font, text).then(measure, measure);
     void document.fonts.ready.then(measure);
     document.fonts.addEventListener('loadingdone', measure);
     return () => { live = false; document.fonts.removeEventListener('loadingdone', measure); };
-  }, [box, words, className, intrinsic]);
+  }, [box, key, className, intrinsic]);
   return intrinsic ? width : undefined;
 }
 
 /** Measure known words in their real type and wrapping rules, without leaving words in the layer. */
-function TextLines({ words, text = 'meta', className = '', probeClassName = className, anchor, intrinsic = false }: {
+function TextLines({ words, text = 'meta', className = '', probeClassName = className, anchor, intrinsic = false, lineWidth = '100%', lastWidth = '75%', singleLineClassName }: {
   words: string | readonly TextPart[]; text?: SkeletonText; className?: string; probeClassName?: string; anchor?: string; intrinsic?: boolean;
+  lineWidth?: string | number; lastWidth?: string | number; singleLineClassName?: string;
 }) {
   const box = useRef<HTMLSpanElement>(null);
   const width = useWordWidth(box, words, `${probeClassName} cd-type-${text}`, intrinsic);
@@ -60,10 +77,99 @@ function TextLines({ words, text = 'meta', className = '', probeClassName = clas
   return (
     <span ref={box} className={`${className} cd-today-skeleton__text`} style={width === undefined ? undefined : { width }} data-skeleton-anchor={anchor}>
       {Array.from({ length: count }, (_, i) => (
-        <Skeleton key={i} shape="line" text={text} width={i === count - 1 ? '75%' : '100%'} />
+        <Skeleton key={i} shape="line" text={text} width={i === count - 1 ? lastWidth : lineWidth}
+          className={`${typeof lineWidth === 'number' ? 'cd-today-skeleton__fixed-line' : ''} ${count === 1 ? singleLineClassName ?? '' : ''}`} />
       ))}
     </span>
   );
+}
+
+const PRESENCE: readonly TextPart[] = [
+  { text: '', className: 'cd-today-skeleton__glyph-room' },
+  'One person is talking to your Desk right now.',
+];
+
+function GreetingWords() {
+  const box = useRef<HTMLDivElement>(null);
+  const greeting = `${greetingFor(new Date(), 'America/Los_Angeles')}, ${rivera.business.ownerName.split(' ')[0]}`;
+  const title = useWordWidth(box, greeting, 'cd-greeting__title cd-type-greeting', true);
+  const presence = useWordWidth(box, PRESENCE, 'cd-greeting__presence cd-type-body', true);
+  return <div ref={box} className="cd-greeting__text" style={{ flexBasis: Math.max(title ?? 0, presence ?? 0) }}>
+    <TextLines words={greeting} text="greeting" probeClassName="cd-greeting__title" anchor="greeting" lastWidth="100%" />
+    <TextLines words={PRESENCE} text="body" probeClassName="cd-greeting__presence" lastWidth="80%" lineWidth="80%" singleLineClassName="cd-today-skeleton__presence" />
+  </div>;
+}
+
+function WordRoom({ words, probeClassName = 'cd-type-meta' }: { words: string; probeClassName?: string }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const width = useWordWidth(box, words, probeClassName, true);
+  return <span ref={box} className="cd-today-skeleton__word-room" style={{ width }} />;
+}
+
+function useRows(box: RefObject<HTMLElement | null>) {
+  const [rows, setRows] = useState(1);
+  useLayoutEffect(() => {
+    const element = box.current!;
+    const measure = () => {
+      if (element.closest('[data-state="leaving"]')) return;
+      setRows(new Set([...element.children].map((child) => child.getBoundingClientRect().top)).size);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return rows;
+}
+
+/** Reserve the real flex items, then paint the signed full-width pill on each occupied row. */
+function Legend() {
+  const box = useRef<HTMLDivElement>(null);
+  const rows = useRows(box);
+  return <div className="cd-today-skeleton__legend">
+    <div ref={box} className="cd-week__legend cd-type-meta cd-today-skeleton__legend-room">
+      {[handledCount(2), steppedInCount(1)].map((words) => <span key={words} className="cd-week__legend-item"><span className="cd-status-dot" /><WordRoom words={words} /></span>)}
+    </div>
+    <div className="cd-today-skeleton__legend-paint">
+      {Array.from({ length: rows }, (_, i) => <Skeleton key={i} shape="line" text="meta" />)}
+    </div>
+  </div>;
+}
+
+/** A fresh hold's status and age can also wrap to two rows in the card's narrow column. */
+function ApprovalTop() {
+  const box = useRef<HTMLDivElement>(null);
+  const rows = useRows(box);
+  return <div className="cd-today-skeleton__approval-top">
+    <div ref={box} className="cd-approval-card__top cd-type-caption cd-today-skeleton__legend-room">
+      <span className="cd-approval-card__status"><span className="cd-status-dot" /><WordRoom words="Waiting for your answer" probeClassName="cd-approval-card__status-line" /></span>
+      <span className="cd-approval-card__waiting"><WordRoom words="Web chat, 12 min ago" probeClassName="cd-type-caption" /></span>
+    </div>
+    <div className="cd-today-skeleton__approval-top-paint">
+      {Array.from({ length: rows }, (_, i) => <Skeleton key={i} shape="line" text="caption" width="80%" />)}
+    </div>
+  </div>;
+}
+
+function AnswerRoom({ label }: { label: string }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const className = 'cd-button cd-button--secondary cd-button--main cd-type-control';
+  const width = useWordWidth(box, label, className, true);
+  return <span ref={box} className={className} style={{ minWidth: width }} />;
+}
+
+/** A narrow font/platform can put each answer on its own row; the real controls decide that. */
+function ApprovalAnswers() {
+  const box = useRef<HTMLDivElement>(null);
+  const rows = useRows(box);
+  return <div className="cd-today-skeleton__answers">
+    <div ref={box} className="cd-approval-card__row cd-today-skeleton__legend-room">
+      <AnswerRoom label="Allow this time" /><AnswerRoom label="Deny this time" />
+    </div>
+    <div className="cd-approval-card__row cd-today-skeleton__answers-paint">
+      {[0, 1].map((i) => <Skeleton key={i} shape="block" width={rows > 1 ? '100%' : '46%'} height="var(--size-control-main)" className="cd-today-skeleton__answer" />)}
+    </div>
+  </div>;
 }
 
 function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: boolean }) {
@@ -84,15 +190,7 @@ export function TodaySkeleton() {
       <div className="cd-today__main">
         <div className="cd-today__greeting">
           <div className="cd-greeting">
-            <div className="cd-greeting__text">
-              <TextLines words={`${greetingFor(new Date(), 'America/Los_Angeles')}, Maria`} text="greeting" probeClassName="cd-greeting__title" anchor="greeting" intrinsic />
-              <div className="cd-greeting__presence">
-                <span className="cd-greeting__glyphs">
-                  <Skeleton shape="block" radius="full" width="calc(var(--size-avatar) - var(--space-6))" height="calc(var(--size-avatar) - var(--space-6))" />
-                </span>
-                <TextLines words="One person is talking to your Desk right now." text="body" intrinsic />
-              </div>
-            </div>
+            <GreetingWords />
             <Skeleton
               shape="block"
               className="cd-today-skeleton__link"
@@ -110,7 +208,7 @@ export function TodaySkeleton() {
         </div>
         <div className="cd-things">
           <div className="cd-things__head">
-            <TextLines words="Things to try" text="section" className="cd-things__title" anchor="things-title" intrinsic />
+            <TextLines words="Things to try" text="section" className="cd-things__title" anchor="things-title" intrinsic lineWidth={85} lastWidth={85} />
             <TextLines words={doneCaption(0)} className="cd-things__caption" />
             <div className="cd-things__hide">
               <Skeleton shape="block" measure={{ label: 'Hide this list', className: 'cd-button cd-button--ghost cd-button--inline cd-type-control' }} height="var(--size-control)" anchor="things-hide" />
@@ -122,7 +220,7 @@ export function TodaySkeleton() {
                 <div key={i} className={`cd-things__item cd-today-skeleton__thing-${i}`}>
                   <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor={`thing-tile-${i}`} />
                   <div className="cd-things__text">
-                    <TextLines words={THINGS_TO_TRY[i]!.title} text="control" className="cd-things__item-title" />
+                    <TextLines words={THINGS_TO_TRY[i]!.title} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
                     <TextLines words={DETAILS[i]!} className="cd-things__detail" />
                   </div>
                   <div className="cd-things__action">
@@ -132,25 +230,20 @@ export function TodaySkeleton() {
               ))}
             </div>
           </SkeletonCard>
-          <TextLines words="Vision: where a Desk could go next" className="cd-things__vision" />
+          <TextLines words={TODAY_COPY.vision} className="cd-things__vision" />
         </div>
         <div className="cd-today__section">
           <SectionTitle anchor="needs-title" />
           <SkeletonCard anchor="held-card">
-            <div className="cd-approval-card__top">
-              <Skeleton shape="line" text="caption" width="80%" />
-            </div>
-            <TextLines words="A visitor not on record asked for a drain clearing quote at 15% off, $153.00 instead of $180.00." text="summary" className="cd-approval-card__reason" />
-            <TextLines words="From the visitor: “How much to clear a clogged drain? Can I get 15% off if I pay cash?”" className="cd-approval-card__context" />
+            <ApprovalTop />
+            <TextLines words={rivera.decisions.held.reason_plain} text="summary" className="cd-approval-card__reason" />
+            <TextLines words={`From the visitor: “${rivera.conversations.visitor.turns.find((turn) => turn.kind === 'visitor')?.text ?? ''}”`} className="cd-approval-card__context" />
             <div className="cd-approval-card__held-by">
               <Skeleton shape="block" width={16} height={16} />
-              <TextLines words="Held by your rule: Quotes from your price list, at list price." className="cd-today-skeleton__rule" />
+              <TextLines words={`${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`} className="cd-today-skeleton__rule" />
             </div>
             <div className="cd-approval-card__answers">
-              <div className="cd-approval-card__row">
-                <Skeleton shape="block" width="46%" height="var(--size-control-main)" className="cd-today-skeleton__answer" />
-                <Skeleton shape="block" width="46%" height="var(--size-control-main)" className="cd-today-skeleton__answer" />
-              </div>
+              <ApprovalAnswers />
             </div>
           </SkeletonCard>
         </div>
@@ -172,21 +265,22 @@ export function TodaySkeleton() {
               {['booking', 'answer'].map((kind) => (
                 <div key={kind} className="cd-briefing__item">
                   <div className="cd-briefing-row">
+                    {/* Decision 15: the time column depends on the copy's opening clock; it may land once at a different width. */}
                     <Skeleton shape="line" text="caption" width={86} />
                     <span className="cd-briefing-row__kind cd-type-meta">
                       <span className="cd-status-label">
                         <Skeleton shape="circle" size={6} />
-                        <Skeleton shape="line" text="meta" width={58} />
+                        <TextLines words={kind === 'booking' ? 'Booked' : 'Answered'} intrinsic lineWidth={58} lastWidth={58} />
                       </span>
                     </span>
                     <div className="cd-briefing-row__words">
                       {kind === 'booking' ? (
                         <>
-                          <TextLines words="Dana Whitfield" />
-                          <TextLines words="A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours." className="cd-briefing-row__line" />
+                          <TextLines words={rivera.people.dana.name} lastWidth="100%" />
+                          <TextLines words={rivera.bookingReasonPlain} className="cd-briefing-row__line" />
                         </>
                       ) : (
-                        <TextLines words={['Claude answered ', { text: "Alex Kim's assistant", className: 'cd-user-name' }, '.']} className="cd-briefing-row__line" />
+                        <TextLines words={['Claude answered ', { text: rivera.conversations.alexAgent.name, className: 'cd-user-name' }, '.']} className="cd-briefing-row__line" />
                       )}
                     </div>
                   </div>
@@ -200,15 +294,15 @@ export function TodaySkeleton() {
         <SkeletonCard padding={16} anchor="public-card">
           <div className="cd-today-aside__public">
             <Skeleton shape="line" text="section" width={130} />
-            <TextLines words={publicLink('rivera-plumbing-abc123')} className="cd-today-aside__link" />
-            <TextLines words="Chats on it are real conversations with your Desk. They show up in Conversations." className="cd-today-aside__text" />
+            <TextLines words={publicLink('rivera-plumbing-abc123')} className="cd-today-aside__link" lineWidth="65%" lastWidth="65%" />
+            <TextLines words={TODAY_COPY.publicDescription} className="cd-today-aside__text" />
             <div className="cd-today-aside__action">
               <Skeleton shape="block" measure={{ label: 'Chat as a customer', className: BUTTON, tagName: 'a' }} height="var(--size-control)" anchor="public-page-action" />
             </div>
           </div>
         </SkeletonCard>
         <Skeleton shape="block" measure={{ label: 'Demo inbox', className: BUTTON, contentClassName: 'cd-demo-inbox-sheet__button', suffix: { label: '1', className: 'cd-count-pill cd-type-count' } }} height="var(--size-control)" anchor="inbox" />
-        <SkeletonCard padding={16}>
+        <SkeletonCard padding={16} anchor="week-card">
           <div className="cd-week">
             <div className="cd-week__head">
               <Skeleton shape="line" text="section" width={110} anchor="week-title" />
@@ -233,13 +327,13 @@ export function TodaySkeleton() {
               </div>
             </div>
             <div className="cd-week__part">
-              <TextLines words="Handled by Claude, or by you" text="control" className="cd-week__title" />
+              <TextLines words={TODAY_COPY.handledTitle} text="control" className="cd-week__title" lineWidth="70%" lastWidth="70%" />
               <Skeleton shape="block" height="var(--space-6)" />
-              <TextLines words="Claude handled 2 You stepped in 1 time" className="cd-week__legend" />
+              <Legend />
             </div>
             <div className="cd-week__part">
               <Skeleton shape="line" text="control" width="70%" />
-              <TextLines words="Nothing turned down in the last 7 days." className="cd-week__line" />
+              <TextLines words={TODAY_COPY.turnedDownEmpty} className="cd-week__line" lineWidth="65%" lastWidth="65%" />
               <Skeleton shape="line" text="meta" width="30%" />
             </div>
           </div>
