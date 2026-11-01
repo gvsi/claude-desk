@@ -1,7 +1,7 @@
 """GET /context/{session_id}: what Claude is given for one session, the tools it may call now and
 the facts and knowledge its labels let it read.
 
-Most tests read a Rivera Plumbing copy as `POST /copies` seeds it, as a stranger with their
+Most tests read a Turner Plumbing copy as `POST /copies` seeds it, as a stranger with their
 session token or as the owner with the copy's owner token and a Desk of the copy; the rest put
 scripted adapters (`FakeAdapter`) on a Desk to cover tools this plan has no adapter for.
 """
@@ -85,7 +85,7 @@ def fact_ids(facts) -> list[str]:
     return [fact.fact_id for fact in facts]
 
 
-# What every session on a Rivera Plumbing copy reads: its catalog, then its public charter.
+# What every session on a Turner Plumbing copy reads: its catalog, then its public charter.
 PUBLIC_CHARTER = ["catalog", "charter:contact", "charter:hours", "charter:policy:arrival",
                   "charter:policy:first_visit", "charter:policy:service_area"]
 
@@ -105,7 +105,7 @@ STANDING_FAKES = {
 
 
 async def test_tools_follow_the_session_kind(app, client, registry):
-    # a stranger on Rivera Plumbing gets every native tool a stranger is given, and the seed's urgent
+    # a stranger on Turner Plumbing gets every native tool a stranger is given, and the seed's urgent
     # tool beside the native callback, all declared
     copy, stranger = await visitor_of(app, client)
     seen = await context_of(client, stranger.session_id, stranger.headers)
@@ -463,7 +463,7 @@ async def test_the_follow_up_can_cite_the_approved_booking(app, client, frozen_c
     assert held.state == "held", held.reason_plain
     assert fact_ids((await context_of(client, visitor.session_id, visitor.headers)).facts) == PUBLIC_CHARTER
 
-    frozen_clock.advance(600)                                        # Maria answers ten minutes later
+    frozen_clock.advance(600)                                        # Mike answers ten minutes later
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
     assert result.decision.state == "executed"
     [booking] = result.execution.facts
@@ -478,7 +478,7 @@ async def test_the_follow_up_can_cite_the_approved_booking(app, client, frozen_c
     assert fact_ids((await context_of(client, stranger.session_id, stranger.headers)).facts) == PUBLIC_CHARTER
 
 
-# The Rivera seed's price list as the catalog names it: each item's ID and title, in ID order.
+# The Turner seed's price list as the catalog names it: each item's ID and title, in ID order.
 RIVERA_CATALOG = [("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
                   ("leak", "Leak repair"), ("pipe", "Pipe repair (starting price)"),
                   ("short-notice", "Short-notice fee")]

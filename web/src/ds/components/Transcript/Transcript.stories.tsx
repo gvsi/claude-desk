@@ -69,7 +69,7 @@ const MESSAGE_ROOTS = '.cd-visitor-message, .cd-claude-message, .cd-whisper, .cd
 export const DanaLive: Story = {
   parameters: {
     canvasNote:
-      "The board's header, margin receipts and composer are left out, and Claude's prose holds no times or prices: this is the log and its messages from the Rivera fixture.",
+      "The board's header, margin receipts and composer are left out, and Claude's prose holds no times or prices: this is the log and its messages from the Turner fixture.",
   },
   play: async ({ canvas, canvasElement }) => {
     // transcript_is_a_live_log: a polite live log, named, holding every message.

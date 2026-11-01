@@ -168,7 +168,7 @@ function actHost(ui: ReactElement, clock: 'fake' | 'real' = 'fake') {
 }
 
 /** About 100 characters: half a second at the reveal's pace. */
-const WORDS = 'Drain clearing is one visit. Here is the quote, and Maria can come by this week to clear it.';
+const WORDS = 'Drain clearing is one visit. Here is the quote, and Mike can come by this week to clear it.';
 
 /** Claude's quote reply as a row that arrived live and is revealed, with `lines` attached under it. */
 function revealed(lines: readonly string[], blocks = [proseBlock(WORDS), rivera.blocks.quote.en]) {

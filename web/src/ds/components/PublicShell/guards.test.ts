@@ -18,8 +18,8 @@ describe('PublicShell guards', () => {
   });
 
   it('about_links_stay_on_this_site', () => {
-    expect(aboutLinkHref('/d/rivera-plumbing-k3x9q2/agents')).toBe('/d/rivera-plumbing-k3x9q2/agents');
-    expect(aboutLinkHref('/d/rivera-plumbing-k3x9q2/agents#send')).toBe('/d/rivera-plumbing-k3x9q2/agents#send');
+    expect(aboutLinkHref('/d/turner-plumbing-k3x9q2/agents')).toBe('/d/turner-plumbing-k3x9q2/agents');
+    expect(aboutLinkHref('/d/turner-plumbing-k3x9q2/agents#send')).toBe('/d/turner-plumbing-k3x9q2/agents#send');
     // A scheme, another host, a backslash or whitespace is no link at all.
     for (const href of ['javascript:alert(1)', '//elsewhere.example/x', '/\\elsewhere.example', 'https://elsewhere.example', 'data:text/html,x', 'agents', '/d/x y', '', ' /d/x']) {
       expect(aboutLinkHref(href), href).toBeNull();
@@ -59,8 +59,8 @@ describe('PublicShell guards', () => {
     expectTypeOf<PublicShellProps>().not.toHaveProperty('statusLine');
     expectTypeOf<PublicShellProps['openStatus']>().toEqualTypeOf<PublicDesk['open_status'] | undefined>();
     const base: PublicShellProps = {
-      brand: { name: 'Rivera Plumbing', tagline: 'Main line', monogram: 'R', field: '#1F4E4A', ink: '#ffffff', inkSecondary: '#e6e6e6', accent: '#B87333' },
-      ownerName: 'Maria Rivera',
+      brand: { name: 'Turner Plumbing', tagline: 'Main line', monogram: 'T', field: '#1F4E4A', ink: '#ffffff', inkSecondary: '#e6e6e6', accent: '#B87333' },
+      ownerName: 'Mike Turner',
       language: 'en',
       onAskForOwner: () => {},
       composer: null,
@@ -69,7 +69,7 @@ describe('PublicShell guards', () => {
     const render = (props: PublicShellProps) => renderToStaticMarkup(createElement(PublicShell, props));
 
     const freeText = render({ ...base, statusLine: 'Open until 6:00 pm' } as PublicShellProps);
-    expect(freeText).toContain('Rivera Plumbing');
+    expect(freeText).toContain('Turner Plumbing');
     expect(freeText).not.toContain('Open until');
 
     // The kernel's words, exactly once and exactly as written.

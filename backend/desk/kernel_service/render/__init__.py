@@ -108,7 +108,7 @@ def status(key: str, lang: str, *, owner: str | None = None, **fields: str) -> s
 
 def executed_status(tool: str, lang: str, *, owner: str, business: BusinessToolDef | None = None) -> str:
     """What an executed `tool` did, in `lang`, naming `owner`: the receipt a visitor or agent sees
-    for an action that ran ("Quoted from Maria Rivera's price list"). A tool without a line raises
+    for an action that ran ("Quoted from Mike Turner's price list"). A tool without a line raises
     KeyError: there is no generic fallback, so execution checks for the line before anything runs."""
     from desk.contracts import is_business_tool
     if is_business_tool(tool):

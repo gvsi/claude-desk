@@ -29,17 +29,17 @@ import { CONNECTORS_SPEC, SPEC, expectFooter, expectOwnerFrame, expectRulesPage,
 
 const COUNTS = { conversations: { n: 2, label: '2 live conversations' }, safety: { n: 2, label: '2 blocked' } };
 
-/** The Rules page's suggestions on Rivera Plumbing's Desk, as the presets board words them. */
+/** The Rules page's suggestions on Turner Plumbing's Desk, as the presets board words them. */
 const RIVERA_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600', 'Why was this quote held?'];
 
-/** Rivera Plumbing's Rules page: its six built-in connectors and Stripe. */
+/** Turner Plumbing's Rules page: its six built-in connectors and Stripe. */
 const RIVERA_HUB: RulesHub = { summary: 'Version 7 of your rules, checked against the always-on rules', sections: rivera.connectors.sections };
 
 /** A review page's line under its title. */
 const REVIEW_LINE = 'Here’s exactly what changes on your Desk. Nothing changes until you confirm.';
 
 /** What the proofs found for the Ask me first preset, as the board words it. */
-/** The Ask me first review as the board lists it: Rivera's rules, with the board's illustrative shared rule after Payment link. */
+/** The Ask me first review as the board lists it: Turner's rules, with the board's illustrative shared rule after Payment link. */
 const ASK_FIRST_ROWS = rivera.askFirstReview.flatMap((row) => (row.key === 'rv-link' ? [row, rivera.sharedChargeReviewRow] : [row]));
 
 const ASK_FIRST_CHECKS = {
@@ -50,7 +50,7 @@ const ASK_FIRST_CHECKS = {
 /** The suggestions on Refund's page, in the owner's words. */
 const REFUND_CHIPS = ['Let Dana get refunds up to $50 without asking', 'Why was Dana’s refund held?'];
 
-/** Rivera's payment limit as a group's line above its tools: reading, or open on "1000". */
+/** Turner's payment limit as a group's line above its tools: reading, or open on "1000". */
 function limit(editing = false) {
   return (
     <MoneyLimit
@@ -165,7 +165,7 @@ export const PresetReview: Story = {
   parameters: {
     canvas: 'N-Conn-18-Preset-Review',
     canvasNote: [
-      'The rows add Dana Whitfield’s personal booking rule, which a preset replaces too and the board doesn’t draw; the shared rule for Alex Kim’s assistant is the board’s illustrative card, which isn’t in Rivera’s seed.',
+      'The rows add Dana Whitfield’s personal booking rule, which a preset replaces too and the board doesn’t draw; the shared rule for Alex Kim’s assistant is the board’s illustrative card, which isn’t in Turner’s seed.',
       SIDEBAR_ROW_NOTE,
     ].join(' '),
   },

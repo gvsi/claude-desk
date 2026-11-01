@@ -74,9 +74,9 @@ describe('A document that cannot be parsed', () => {
     const first = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
     await expect.element(first.screen.getByRole('dialog', { name: 'A Claude front desk for your business' })).toBeVisible();
     const publicPage = await renderRoute(`/d/${RIVERA.slug}`);
-    await expect.element(publicPage.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    await expect.element(publicPage.screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeVisible();
     await expect
-      .element(publicPage.screen.getByText("You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime."))
+      .element(publicPage.screen.getByText("You're chatting with Claude, an AI answering for Turner Plumbing. Ask for Mike Turner anytime."))
       .toBeVisible();
 
     // And from an About page that failed, the link opens it.

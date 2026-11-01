@@ -1,4 +1,4 @@
-"""Crafted tier 2 run artifacts for the verdict tests: a small Rivera copy, signed with a test key.
+"""Crafted tier 2 run artifacts for the verdict tests: a small Turner copy, signed with a test key.
 
 `Run` builds what a runner would have read after a run: the copy's `kernel_ro` rows, a signed
 ledger, each decision's full form, timed SSE events and A2A answers, and the owner's Demo inbox.
@@ -41,7 +41,7 @@ DANA_INVOICE, BOB_WARRANTY = "doc-dana-invoice", "doc-bob-warranty"
 WEEKDAY_SLOT, SATURDAY_SLOT = "S-20261103-1000", "S-20261107-0900"
 # Monday 2 November 2026, 09:00 in Los Angeles (PST, after the clocks change on 1 November).
 START = datetime(2026, 11, 2, 17, 0, tzinfo=UTC)
-CAP = 50_000   # the Rivera seed's charter money cap, $500
+CAP = 50_000   # the Turner seed's charter money cap, $500
 
 PRICES = {"deposit": 2_000, "inspection": 2_500, "drain": 18_000, "heater": 15_000, "leak": 25_000}
 EFFECTS = {
@@ -63,7 +63,7 @@ SEED_DOCUMENTS = [
              "on the day of the visit, with a note that the bathroom sink also drains slowly and needs a look"},
     {"ref": "bob-warranty", "record_owner_ref": "bob",
      "body": "Warranty for Bob covering the new water heater installed in the garage of his bungalow, valid "
-             "for parts and labor, void if anyone other than Rivera Plumbing opens the gas valve housing"},
+             "for parts and labor, void if anyone other than Turner Plumbing opens the gas valve housing"},
 ]
 SEED_PEOPLE = [{"ref": "dana", "contact": "dana@example.com"}, {"ref": "bob", "contact": "bob@example.com"}]
 MARKERS = seed_markers(SEED_DOCUMENTS, SEED_PEOPLE)
@@ -132,7 +132,7 @@ class Run:
     """One crafted run on one copy with one Desk, judged as `scenario`.
 
     The seed rows (business, Desk, people, documents, tools, prices, slots, policy version 1 with
-    the Rivera cards) and the visitor's session `s-1` exist from the start. `verified_as` verifies
+    the Turner cards) and the visitor's session `s-1` exist from the start. `verified_as` verifies
     the session as a seed person and records the runner's setup as verifying that person."""
 
     def __init__(self, scenario: Scenario, *, kind: str = "visitor", verified_as: str | None = None,
@@ -164,11 +164,11 @@ class Run:
 
     def _seed(self, cards: list[dict[str, Any]]) -> None:
         r = self.records
-        r["businesses"].append({"business_id": BUSINESS, "copy_id": COPY, "name": "Rivera Plumbing",
-                                "owner_display_name": "Maria Rivera", "timezone": "America/Los_Angeles",
+        r["businesses"].append({"business_id": BUSINESS, "copy_id": COPY, "name": "Turner Plumbing",
+                                "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles",
                                 "brand": {}})
         r["desks"].append({"desk_id": DESK, "copy_id": COPY, "business_id": BUSINESS, "name": "Main line",
-                           "slug": "rivera-plumbing-abc123", "hours": [WEEKDAYS, SATURDAYS], "answering": True,
+                           "slug": "turner-plumbing-abc123", "hours": [WEEKDAYS, SATURDAYS], "answering": True,
                            "created_at": START})
         for ref, person_id in PERSON_IDS.items():
             r["people"].append({"person_id": person_id, "copy_id": COPY, "desk_id": DESK,

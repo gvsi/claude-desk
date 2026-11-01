@@ -1,0 +1,22 @@
+[
+  {
+    "key": "contact",
+    "value": "(510) 555-0142"
+  },
+  {
+    "key": "windows",
+    "value": "[{\"days\":[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\"],\"end\":\"18:00:00\",\"start\":\"08:00:00\"},{\"days\":[\"sat\"],\"end\":\"13:00:00\",\"start\":\"09:00:00\"}]"
+  },
+  {
+    "key": "policy:arrival",
+    "value": "Maria texts before she arrives."
+  },
+  {
+    "key": "policy:first_visit",
+    "value": "The service call deposit is credited to the repair if you go ahead."
+  },
+  {
+    "key": "policy:service_area",
+    "value": "We work in Oakland, Berkeley, Alameda and Emeryville."
+  }
+]

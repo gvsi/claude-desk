@@ -70,7 +70,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
   - Spec: System › Tool profiles; Safety architecture #3 and #6.
 - **What's wrong:**
   - **The Chevy-$1 path works with no compromise:**
-    - The visitor talks Claude into calling `native.quote(amount=100)` ("Maria said $1").
+    - The visitor talks Claude into calling `native.quote(amount=100)` ("Mike said $1").
     - $1 is under any money cap, so `/decide` allows it.
     - The result becomes a Fact, so the reply "your quote is $1" counts as backed and is revealed.
   - **The same shape appears elsewhere:**
@@ -121,7 +121,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
 - **Where:** Plan: Shared contracts; Kernel HTTP API; Task 2.
 - **What's missing (each feature below has no field or call):**
   - **Sessions:**
-    - Session state and take-over/handoff: `mode: ai|owner|paused`, owner presence ("Answering"), the "Maria joined" event, callback booking.
+    - Session state and take-over/handoff: `mode: ai|owner|paused`, owner presence ("Answering"), the "Mike joined" event, callback booking.
     - A typed union of SSE events (writing, receipt, revealed{text, sig}, held, owner_joined, demo_inbox). OpenAPI does not type SSE payloads, so generate the TypeScript types from a Pydantic discriminated union.
   - **Rules and approvals:**
     - `RuleCard`: kind, tool or effect, money limit, hours, who, mode, `@id`.
@@ -278,7 +278,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
   - **Concurrent turns.** A double submit or a fast second message can interleave two turns and break `tool_use`/`tool_result` pairing.
 - **Fix:**
   - **Never park.** Return `tool_result {status:"held", approval_id}` immediately.
-  - **Owner answers.** When the owner answers, the app posts a fixed-template outcome card ("Maria approved — booking {{B-77}}") and queues a system note for Claude's next turn.
+  - **Owner answers.** When the owner answers, the app posts a fixed-template outcome card ("Mike approved — booking {{B-77}}") and queues a system note for Claude's next turn.
   - **Serialize turns.** Add a per-session run lock and a queue for inbound messages.
   - **Delivery feedback.** The `send_reply` `tool_result` reports what was actually delivered, so Claude knows when its text was rewritten.
   - **Plain text is checked too.** Any `end_turn` text is a draft with zero citations and goes through the check.
@@ -303,7 +303,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
     - a commitment verb from an en/es lexicon: waive, free, guarantee, refund, discount, approved, gratis, garantía, reembolso, descuento, and so on.
   - **Additive extractor.** The Haiku pass can only add violations, never clear them.
   - **Kernel language detection.** The kernel detects the language; anything other than en/es goes to handoff.
-  - **One retry.** Allow one regenerate-with-feedback attempt before falling back to "Let me check with Maria".
+  - **One retry.** Allow one regenerate-with-feedback attempt before falling back to "Let me check with Mike".
 
 **I8. Only the API process enforces check-then-reveal.**
 - **Where:** Plan: Global Constraints; `/check_reply`. Spec: Reply timing.
@@ -335,7 +335,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
 **I10. The owner's own words don't count as facts.**
 - **Where:** Spec: Owner experience (Taking over a conversation; Conversation detail). Plan: no coverage.
 - **What's wrong:**
-  - **Blocked owner offers.** If Maria types "I can do it for $150" or whispers "offer $20 off", Claude repeating it is blocked as unbacked.
+  - **Blocked owner offers.** If Mike types "I can do it for $150" or whispers "offer $20 off", Claude repeating it is blocked as unbacked.
   - **No lock.** Nothing stops the agent loop during a take-over.
 - **Fix:**
   - **Owner messages.** They bypass the checker but are logged and turned into `owner_statement` facts through an authenticated kernel call.
@@ -419,7 +419,7 @@ Inputs: `docs/specs/2026-10-28-claude-desk-design.md` (the "spec"), `docs/plans/
   - **Shared Stripe account.** All copies share one Stripe test account, so a refund in copy A breaks copy B's seeded charge.
   - **Wasted proofs.** Running proofs per copy repeats the same work.
 - **Fix:**
-  - **Slugs.** Use `rivera-plumbing-<short>`.
+  - **Slugs.** Use `turner-plumbing-<short>`.
   - **Isolation.** Put `copy_id` on every row, with row-level security or a mandatory scoped repository plus a test.
   - **Seeding.** Seed kernel data through a kernel call, `POST /copies/seed`.
   - **Stripe.** Create per-copy Stripe objects lazily, or keep seeded flows create-only.

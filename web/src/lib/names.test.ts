@@ -8,7 +8,7 @@ it('drops only a leading period after a name that already ends a sentence', () =
     ['Acme!', '. Ask for Linda anytime.', ' Ask for Linda anytime.'],
     ['Who?', '. Ask for Linda anytime.', ' Ask for Linda anytime.'],
     ['Chen & Co. \t\n', '. Ask for Linda anytime.', ' Ask for Linda anytime.'],
-    ['Rivera Plumbing', '. Ask for Linda anytime.', '. Ask for Linda anytime.'],
+    ['Turner Plumbing', '. Ask for Linda anytime.', '. Ask for Linda anytime.'],
     ['Chen & Co. CPA', '. Ask for Linda anytime.', '. Ask for Linda anytime.'],
     ['', '. Ask for Linda anytime.', '. Ask for Linda anytime.'],
     ['Chen & Co.', ' Ask for Linda anytime.', ' Ask for Linda anytime.'],

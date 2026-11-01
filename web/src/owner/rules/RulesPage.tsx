@@ -205,7 +205,7 @@ export function RulesPage() {
   const location = useLocation();
   const { ask, open: asking, busy: answering } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
-  // Rivera's fixed examples, less any whose change is already in effect: all of them until the rules are read.
+  // Turner's fixed examples, less any whose change is already in effect: all of them until the rules are read.
   const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? rulesChipsToOffer(rules.data?.active.cards) : [];
   const people = useQuery(peopleQuery(deskId));
   const suggestions = useQuery({ ...suggestionsQuery(deskId), refetchInterval: pollMs('rules') });
@@ -215,7 +215,7 @@ export function RulesPage() {
   // page reads it as it opens, so the question doesn't wait for the first poll.
   const needsYou = useNeedsYou(deskId, { readOnOpen: true });
   const hidesChips = useSyncExternalStore(subscribeChipsHidden, chipsHidden, () => false);
-  // Rivera's fixed suggestions let the first draw skip waiting for Needs you only once the rules are
+  // Turner's fixed suggestions let the first draw skip waiting for Needs you only once the rules are
   // read: all of them show meanwhile, but the rules may leave none, like another business's page.
   const keepsFixedChips = fixedChips.length > 0 && (rules.data !== undefined || rules.isError);
   const waitingForNeedsYou = !hidesChips && !keepsFixedChips && !needsYou.isFetchedAfterMount && !needsYou.isPaused;

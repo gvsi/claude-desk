@@ -1,7 +1,7 @@
 """FakeKernel: the kernel HTTP API v2 in this process, for the API's tests (never in an image).
 
 `fake_kernel_app(state)` is an ASGI app that answers the master plan's "Kernel HTTP API v2" routes the
-API uses, with the behavior Plan 02a relies on: a Rivera Plumbing copy, sessions with hashed tokens,
+API uses, with the behavior Plan 02a relies on: a Turner Plumbing copy, sessions with hashed tokens,
 "Session state responses" in order, decisions, executions, approvals, reply checks and the ledger.
 tests/kernel_contract/test_contract.py runs the same tests against it and the real kernel, so the
 API's tests can't lean on a behavior the kernel doesn't have. Later tasks add routes here, each with a
@@ -83,7 +83,7 @@ contract test, before the task that first uses them.
   a `charge` fact rendered `charge_confirmed`. Keys stay in memory; the mirror has the sessions' `agent_key_id` and
   `mandate_id` and the mandates' amounts.
 - The owner's Desks and setup (Plans 01b and 01c): `POST /desks` makes a Desk in the owner's copy through the same
-  seed path as the Rivera copy (native tools only, the `ask_first` preset's auto cards active), and
+  seed path as the Turner copy (native tools only, the `ask_first` preset's auto cards active), and
   `PUT /desks/{id}/business` renames its business; each refuses an owner name outside Plan 01a's pattern or an
   unknown time zone. `PUT /desks/{id}/people` (Plan 01b) upserts and removes people by `ref`, refusing a contact that
   looks masked (422). `DELETE /desks/{id}` (Plan 01b) closes the Desk's sessions; then its public page is 404, the
@@ -91,7 +91,7 @@ contract test, before the task that first uses them.
   its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy; its
   call-back writes its handoff already `done`, keeping its fact but leaving no Needs-you item. An owner
   session is given the setup tools alone, on any Desk of its copy, and executes its own setup decisions:
-  `native.read_memory` answers from the Desk's stored simulated memory (only the Rivera seed falls back to
+  `native.read_memory` answers from the Desk's stored simulated memory (only the Turner seed falls back to
   `MEMORY_ITEMS`; other unwritten Desks read nothing) and `native.fetch_website` reads any
   `.example` site as `WEBSITE_TEXT` (the fetch guard refuses every other address, so the call fails), each storing
   owner-only knowledge; `/context` serves the knowledge a session's labels read.
@@ -303,7 +303,7 @@ def new_id(prefix: str) -> str:
     return f"{prefix}-{secrets.token_hex(5)}"
 
 
-# The master plan's "Rivera seed", with Plan 01a's specifics.
+# The master plan's "Turner seed", with Plan 01a's specifics.
 RIVERA_TZ = ZoneInfo("America/Los_Angeles")
 RIVERA_HOURS = [HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), end=time(18)),
                 HoursWindow(days=["sat"], start=time(9), end=time(13))]
@@ -317,28 +317,28 @@ RIVERA_PRICES = [PriceItem(item_id="deposit", title="Service call deposit", unit
                  PriceItem(item_id="short-notice", title="Short-notice fee", unit_cents=5000)]
 RIVERA_KNOWLEDGE = [
     KnowledgeItem(item_id="kn-website", source="website",
-                  title="Your website, rivera-plumbing.example, read during setup",
-                  text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                  title="Your website, turner-plumbing.example, read during setup",
+                  text="Turner Plumbing is Mike Turner's home plumbing business: drain clearing, leak repair and "
                        "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
-                  text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                  text="The price list Mike gave in setup covers the service call deposit, drain clearing, a "
                        "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
-                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
+                       "The short-notice fee is added to an urgent visit that Mike fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]
 RIVERA_DOCUMENTS = [  # (ref, title, record owner, body): the kernel ends each body with a fresh canary
     ("dana-invoice", "Invoice, drain clearing", "dana",
-     "Rivera Plumbing\nInvoice, drain clearing\nBilled to Dana Whitfield\nDrain clearing: $180.00\n"),
+     "Turner Plumbing\nInvoice, drain clearing\nBilled to Dana Whitfield\nDrain clearing: $180.00\n"),
     ("bob-warranty", "Warranty, water heater flush", "bob",
-     "Rivera Plumbing\nWarranty, water heater flush\nIssued to Bob Okafor\nCovers the flush for a year.\n")]
+     "Turner Plumbing\nWarranty, water heater flush\nIssued to Bob Okafor\nCovers the flush for a year.\n")]
 RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:service_area", kind="text",
                         value="We work in Oakland, Berkeley, Alameda and Emeryville."),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
-                  Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
+                  Claim(key="policy:arrival", kind="text", value="Mike texts before he arrives.")]
 RIVERA_STARTERS = {
     "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
     "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
@@ -354,17 +354,17 @@ def is_starter_fact(fact_id: str) -> bool:
 NOTIFICATIONS = {"now": ["approval", "callback", "breaker", "lockout", "handoff"],
                  "briefing": ["lead", "booking"]}
 # The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
-MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Rivera notes.", "items": [
+MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Turner notes.", "items": [
     {"id": "business", "title": "Business", "topics": ["business", "name", "owner", "company"],
-     "text": "Maria Rivera owns Rivera Plumbing in Oakland, California, and answers its phone herself between jobs."},
+     "text": "Mike Turner owns Turner Plumbing in Oakland, California, and answers its phone himself between jobs."},
     {"id": "trade", "title": "Trade", "topics": ["trade", "services", "work", "plumbing"],
-     "text": "Rivera Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."},
+     "text": "Turner Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."},
     {"id": "service-area", "title": "Service area", "topics": ["area", "cities", "where"],
-     "text": "Rivera Plumbing works in Oakland, Berkeley, Alameda and Emeryville."},
+     "text": "Turner Plumbing works in Oakland, Berkeley, Alameda and Emeryville."},
     {"id": "hours", "title": "Hours", "topics": ["hours", "open", "opening", "schedule", "when"],
      "text": "Open Monday to Friday, 8 am to 6 pm, and Saturday, 9 am to 1 pm. Closed on Sundays."},
     {"id": "website", "title": "Website", "topics": ["website", "site", "web", "online"],
-     "text": "The business's website is https://rivera-plumbing.example."}]})
+     "text": "The business's website is https://turner-plumbing.example."}]})
 OWNER_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")   # Plan 01a's owner_display_name pattern
 # A fetched page (the kernel's fetch guard reads the real one): here any `.example` site reads as this, and any
 # other address is refused.
@@ -402,7 +402,7 @@ RIVERA_CARDS = [
 # by the seed's rules version, so `rv-urgent` allows it for anyone given the native callback.
 RIVERA_BUSINESS_TOOLS = [
     {"tool": "desk.emergency-callback", "title": "Emergency callback",
-     "description": "Asks Maria to call back urgently about an emergency.",
+     "description": "Asks Mike to call back urgently about an emergency.",
      "config": {"block": "urgent", "urgent_when": "A burst or leaking pipe, flooding, a sewage backup, or no water"}},
 ]
 
@@ -548,7 +548,7 @@ BOUNDED_CASES = 1_200
 COUNTEREXAMPLE = "A visitor could get something done without asking you that your cards don't allow."
 DEFAULT_REASON = "Anything your rules don't cover waits for you."
 # Verification is always on (Plan 01b): no owner card may change starting one. The tools of the always-on baseline,
-# and the presets' own card for each (auto, for anyone, on the tool), which every preset and the Rivera seed carry.
+# and the presets' own card for each (auto, for anyone, on the tool), which every preset and the Turner seed carry.
 ALWAYS_ON_TOOLS = ("native.start_verification",)
 ALWAYS_ON_CARDS = tuple(card for card in PRESETS["ask_first"] if card.applies_to in ALWAYS_ON_TOOLS)
 
@@ -1875,10 +1875,10 @@ class FakeKernelState:
             **envelope, "hash": entry.hash, "signature": entry.signature, "key_id": entry.key_id})
         return entry
 
-    # The Rivera seed -----------------------------------------------------------------------------
+    # The Turner seed -----------------------------------------------------------------------------
 
     def _seed_rivera(self, copy_id: str) -> Desk:
-        business = BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera", timezone=RIVERA_TZ.key,
+        business = BusinessSeed(name="Turner Plumbing", owner_display_name="Mike Turner", timezone=RIVERA_TZ.key,
                                 brand={"palette": "teal", **BRAND_PALETTE["teal"]})
         seed = DeskSeed(
             name="Main line", charter=list(RIVERA_CHARTER), hours=list(RIVERA_HOURS), price_items=list(RIVERA_PRICES),
@@ -2267,7 +2267,7 @@ class FakeKernelState:
                       key_id=KEY_ID, unproved_seeds=[])
 
     def create_copy(self, request: Request, body: CreateCopyRequest) -> CopyCreated:
-        """A Rivera Plumbing copy with its seeded hold and, when it asks and a night is recorded, the night replayed
+        """A Turner Plumbing copy with its seeded hold and, when it asks and a night is recorded, the night replayed
         into it (`_replay`)."""
         if self._no_seeded_night and "replay_night" in body.model_fields_set:
             raise Refusal(422, "invalid")
@@ -2682,7 +2682,7 @@ class FakeKernelState:
             recipient=recipient, starts_at=starts_at)
 
     def _rule(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[str, list[str], str | None]:
-        """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
+        """The Turner cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
         a refusal by the always-on baseline the `@id` of its forbid in `kernel/cedar/baseline.cedar`."""
         tool = action.tool
         if not tool.startswith('desk.') and self._never(desk, tool):

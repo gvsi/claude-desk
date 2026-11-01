@@ -10,7 +10,7 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import { latestOf } from './latest.ts';
 
 const { blocks } = rivera;
-const REPLY_CHECKED = "Reply checked against Maria Rivera's rules";
+const REPLY_CHECKED = "Reply checked against Mike Turner's rules";
 
 /** One item of the chat, before it has its place. */
 type Part = Omit<OwnerTranscriptItem, 'n' | 'created_at'>;
@@ -104,15 +104,15 @@ describe('latestOf', () => {
   it('a_later_hold_refusal_or_handoff_takes_over', () => {
     const booking = [words('visitor_text', 'Tuesday at 2 works.'), status('executed'), reply([blocks.prose.details.en, blocks.booking_confirmed.en])];
     const later = (...parts: Part[]) => latestOf(chat(...booking, words('visitor_text', 'Can you also take 15% off?'), ...parts));
-    expect(later(status('held', { plain: 'Waiting for Maria Rivera' }))).toBe('Waiting for Maria Rivera');
-    expect(later(status('refused', { plain: 'Not allowed by Maria Rivera’s rules' }))).toBe('Not allowed by Maria Rivera’s rules');
+    expect(later(status('held', { plain: 'Waiting for Mike Turner' }))).toBe('Waiting for Mike Turner');
+    expect(later(status('refused', { plain: 'Not allowed by Mike Turner’s rules' }))).toBe('Not allowed by Mike Turner’s rules');
     // A refusal at execution keeps the owner's own line for it.
     const ownerPlain = "Your rules changed before this ran, so it wasn't done.";
     expect(later(status('refused_at_execution', { type: 'resolved', ownerPlain }))).toBe(ownerPlain);
-    // Claude handed the chat to Maria with the handoff card, or the check handed its reply to her.
-    expect(later(reply([blocks.handoff.en], { visitor_plain: 'Handed to Maria Rivera' }))).toBe('Handed to Maria Rivera');
+    // Claude handed the chat to Mike with the handoff card, or the check handed its reply to him.
+    expect(later(reply([blocks.handoff.en], { visitor_plain: 'Handed to Mike Turner' }))).toBe('Handed to Mike Turner');
     expect(later(reply([blocks.prose.details.en], { handoff: true, visitor_plain: 'Handed to a person' }))).toBe('Handed to a person');
-    // A reply that hands the chat to Maria isn't a task done, even beside the booked card.
+    // A reply that hands the chat to Mike isn't a task done, even beside the booked card.
     const handedOver = reply([blocks.booking_confirmed.en, blocks.handoff.en]);
     expect(latestOf(chat(words('visitor_text', 'Tuesday at 2 works.'), status('executed'), handedOver))).toBe(REPLY_CHECKED);
     const blocked = reply([blocks.booking_confirmed.en], { handoff: true, visitor_plain: 'Handed to a person' });
@@ -125,11 +125,11 @@ describe('latestOf', () => {
     expect(latestOf(chat(...booking, words('visitor_text', 'Thanks!'), reply([blocks.prose.details.en])))).toBe(REPLY_CHECKED);
     expect(latestOf(chat(...booking, words('visitor_text', 'And a drain clearing?'), status('executed'), reply([blocks.quote.en])))).toBe(REPLY_CHECKED);
     expect(latestOf(chat(...booking, words('visitor_text', 'Any later times?'), status('executed', { plain: 'Checked the open times' })))).toBe('Checked the open times');
-    expect(latestOf(chat(...booking, reply([blocks.owner_said.en], { author: 'owner', visitor_plain: 'Maria Rivera wrote this' })))).toBe('Maria Rivera wrote this');
+    expect(latestOf(chat(...booking, reply([blocks.owner_said.en], { author: 'owner', visitor_plain: 'Mike Turner wrote this' })))).toBe('Mike Turner wrote this');
     // A refusal at execution with no owner's line keeps the kernel's.
     expect(latestOf(chat(...booking, status('refused_at_execution', { type: 'resolved', plain: 'Not done' })))).toBe('Not done');
     // Where the owner joined or left, and the visitor's words, carry no line of the kernel's: they are passed over.
-    const joined: Part = { kind: 'owner_joined', text: null, event: { type: 'owner_joined', name: 'Maria Rivera' } };
+    const joined: Part = { kind: 'owner_joined', text: null, event: { type: 'owner_joined', name: 'Mike Turner' } };
     const left: Part = { kind: 'owner_left', text: null, event: { type: 'owner_left' } };
     expect(latestOf(chat(...booking, joined, left, words('visitor_text', 'See you then.')))).toBe('Visit booked');
     // A chat with nothing of the kernel's yet has no line.

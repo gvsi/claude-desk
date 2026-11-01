@@ -841,7 +841,7 @@ it('today_link_actions_measure_inherited_font_metrics', async () => {
   document.body.append(host);
   const root = createRoot(host);
   onTestFinished(() => { root.unmount(); host.remove(); });
-  flushSync(() => root.render(<><div data-real-control><Button variant="secondary" href="/d/rivera-plumbing-abc123">Open your public page</Button></div><TodaySkeleton /></>));
+  flushSync(() => root.render(<><div data-real-control><Button variant="secondary" href="/d/turner-plumbing-abc123">Open your public page</Button></div><TodaySkeleton /></>));
   const real = host.querySelector('[data-real-control] .cd-button')!;
   const shape = host.querySelector('[data-skeleton-anchor="thing-action-0"]')!;
   expect(shape.textContent).toBe('');
@@ -850,7 +850,7 @@ it('today_link_actions_measure_inherited_font_metrics', async () => {
 
 it('reload_changes_only_the_link_pills_width_once', async () => {
   // The slug comes from the held read, so its width differs from the fresh-copy placeholder.
-  mockStore.world.desk(RIVERA.deskId)!.summary.slug = 'rivera-plumbing-a-new-random-slug';
+  mockStore.world.desk(RIVERA.deskId)!.summary.slug = 'turner-plumbing-a-new-random-slug';
   const desks = holdReads(ROUTES.desks.path);
   const { screen } = await renderRoute(TODAY, { pollScale: 100 });
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
@@ -882,7 +882,7 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
   frame = requestAnimationFrame(sampleFrame);
   try {
     desks.release();
-    await expect.element(screen.getByRole('heading', { name: /Good .*Maria/ })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: /Good .*Mike/ })).toBeVisible();
     await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
     const real = document.querySelector('.cd-greeting__link')!.getBoundingClientRect();
     // The pill ends where its shape ended, "Chat as a customer" after it at the band's right: a wider
@@ -894,7 +894,7 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
     document.body.append(sizing);
     const reference = createRoot(sizing);
     try {
-      flushSync(() => reference.render(<Greeting text="" link={{ label: publicLink('rivera-plumbing-abc123'), onCopy: () => {} }} />));
+      flushSync(() => reference.render(<Greeting text="" link={{ label: publicLink('turner-plumbing-abc123'), onCopy: () => {} }} />));
       const fresh = sizing.querySelector('.cd-greeting__link')!.getBoundingClientRect();
       expect(Math.abs(shape.width - fresh.width), 'the fresh-copy link uses browser font metrics').toBeLessThanOrEqual(2);
     } finally {
@@ -1203,7 +1203,7 @@ async function withRecordedHistory(now = new Date()): Promise<void> {
   const date = clock.formatToParts(now);
   const part = (type: Intl.DateTimeFormatPartTypes) => Number(date.find(part => part.type === type)!.value);
   const utcNoon = Date.UTC(part('year'), part('month') - 1, part('day'), 12);
-  // At UTC noon, Rivera's clock is already past either daylight-saving change. Its hour tells
+  // At UTC noon, Turner's clock is already past either daylight-saving change. Its hour tells
   // how far forward local noon is, using that day's offset rather than the offset at midnight.
   const hour = Number(clock.formatToParts(new Date(utcNoon)).find(part => part.type === 'hour')!.value);
   const noon = utcNoon + (12 - hour) * 3_600_000;
@@ -1218,7 +1218,7 @@ async function withRecordedHistory(now = new Date()): Promise<void> {
 
 it('recorded_history_stays_on_riveras_day_at_midnight_and_clock_changes', async () => {
   // Explicit inputs exercise day boundaries without changing the browser's real clock. Normal
-  // screen fixtures use the current date, even when the machine's own date differs from Rivera's.
+  // screen fixtures use the current date, even when the machine's own date differs from Turner's.
   for (const [at, noon] of [
     ['2026-11-01T07:00:00.500Z', '2026-11-01T20:00:00.000Z'],
     ['2026-11-01T07:00:01.500Z', '2026-11-01T20:00:00.000Z'],
@@ -1374,6 +1374,34 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
+});
+
+it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_matches_the_drawn_column_at_%sx%s', async (width, height) => {
+  const chat = holdReads(conversationRead(SEEDED_HOLD));
+  onTestFinished(chat.release);
+  const { screen } = await renderRoute(`${CONVERSATIONS}/${SEEDED_HOLD}`, { viewport: { width, height }, pollScale: 100 });
+  const shape = '.cd-conversation-pane .cd-conversation-skeleton';
+  await vi.waitFor(() => expect(document.querySelector(shape)).not.toBeNull());
+  const pane = document.querySelector('.cd-conversations__open')!.getBoundingClientRect();
+  const expectedWidth = Math.min(768, pane.width - (width >= 1024 ? 56 : 32));
+  const bounds = (selector: string) => {
+    const rect = document.querySelector(selector)!.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, width: rect.width };
+  };
+  const before = ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].map(part => {
+    const rect = bounds(`${shape} ${part}`);
+    expect(Math.abs(rect.width - expectedWidth), `${part} shape width`).toBeLessThanOrEqual(1);
+    expect(Math.abs((rect.left - pane.left) - (pane.right - rect.right)), `${part} shape centred`).toBeLessThanOrEqual(1);
+    return rect;
+  });
+  chat.release();
+  await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector(shape)).toBeNull());
+  ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
+    const rect = bounds(`.cd-conversation-pane ${part}`);
+    for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(rect[edge] - before[i]![edge]), `${part} ${edge}`).toBeLessThanOrEqual(1);
+  });
+  expectNoHorizontalScroll();
 });
 
 it('conversation_shapes_follow_the_answer_buttons_height', async () => {
@@ -2241,7 +2269,7 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
 });
 
 it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', async (viewport) => {
-  // Decision 15: a fresh Rivera copy has an Emergency callback. A Desk without jobs, such as
+  // Decision 15: a fresh Turner copy has an Emergency callback. A Desk without jobs, such as
   // Acme, loses that section once when its reads settle; its connectors then stay in place.
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   desk.summary.business_name = 'Acme Accounting';

@@ -2739,7 +2739,7 @@ _OWNERS = re.compile(r"\b(?:my own|my email|my e-mail|my phone|my number|my cell
 _SOMEONE_ELSE = re.compile(r"\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|"
                            r"daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|"
                            r"recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b")
-# A name just before a contact ("Ana at …", "Maria: …"), a possessive name ("Ana's email is …"), and the capitalized
+# A name just before a contact ("Ana at …", "Mike: …"), a possessive name ("Ana's email is …"), and the capitalized
 # words that are never a person's name.
 _NAMED = re.compile(r"([^\W\d_][^\W\d_'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$")
 _POSSESSIVE = re.compile(r"([^\W\d_][^\W\d_-]*)'s\b")

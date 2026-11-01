@@ -291,7 +291,7 @@ async def test_unpinned_operation_refused(k: KernelHarness, records, monkeypatch
         expected = sorted([(LIST_CHARGES, "enabled"), (REFUND, "enabled")])
         assert connected == expected, f"connecting again gave {connected}"
         # a tool an adapter has: a native or pinned one, or a business tool configured on this Desk
-        # (the Rivera seed's urgent callback)
+        # (the Turner seed's urgent callback)
         known = set(get_args(ToolName)) | {row["tool"] for row in await records.tools(desk.copy.copy_id)
                                            if row["desk_id"] == desk.desk_id and row["source"] == "business"}
         for whose, context in contexts.items():
@@ -676,7 +676,7 @@ async def test_payment_link_unknown_outcome_reconciled_once(k: KernelHarness, fa
         assert after == before, "a second restart changed the link, the session's charges or the copy's store"
 
 
-# Mandates: the demo agent's is $20 per charge, $100 in all, for an hour ("Rivera seed")
+# Mandates: the demo agent's is $20 per charge, $100 in all, for an hour ("Turner seed")
 
 DEPOSIT, DEPOSIT_CENTS = "deposit", 2_000   # the seed's $20 service call deposit, the agent demo's item
 MANDATE_CHARGES = 5        # $20 charges the $100 mandate pays for
@@ -1115,7 +1115,7 @@ async def test_signed_request_for_another_agents_session_refused(k: KernelHarnes
 
 # An owner's setup call reaches only its own copy (Plan 01c's setup tools)
 
-SETUP_URL = "https://rivera-plumbing.example/"   # never fetched: the call is refused before it is decided
+SETUP_URL = "https://turner-plumbing.example/"   # never fetched: the call is refused before it is decided
 
 
 @pytest.mark.requires("01c-setup")

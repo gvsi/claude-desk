@@ -29,8 +29,8 @@ const meta = {
   component: Composer,
   args: {
     variant: 'visitor',
-    label: 'Message Rivera Plumbing',
-    placeholder: 'Message Rivera Plumbing',
+    label: 'Message Turner Plumbing',
+    placeholder: 'Message Turner Plumbing',
     onSend: fn(),
   },
   // As on the boards: the owner's composer spans the content column, a single-row one the reading column.
@@ -125,7 +125,7 @@ export const Visitor: Story = {
     canvasNote: "The board's composer is the same single row; the footer beside it is the public shell's.",
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
-    const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const input = canvas.getByRole('textbox', { name: 'Message Turner Plumbing' });
     const send = canvas.getByRole('button', { name: 'Send' });
     const box = boxOf(input);
     expectComposerSurface(box);
@@ -169,7 +169,7 @@ export const InertSend: Story = {
   },
   play: async ({ args, canvas, userEvent }) => {
     // inert_send_keeps_the_text: Send keeps its look, empty and not, but neither it nor Enter sends.
-    const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const input = canvas.getByRole('textbox', { name: 'Message Turner Plumbing' });
     const send = canvas.getByRole('button', { name: 'Send' });
     // A polite live region waits under the composer, empty and taking no room until the first press.
     const status = canvas.getByRole('status');
@@ -244,7 +244,7 @@ export const Disabled: Story = {
     canvasNote: 'The board shows the composer ready; disabled, nothing can be typed or sent.',
   },
   play: async ({ args, canvas, userEvent }) => {
-    const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const input = canvas.getByRole('textbox', { name: 'Message Turner Plumbing' });
     await expect(input).toBeDisabled();
     await expect(canvas.getByRole('button', { name: 'Send' })).toBeDisabled();
     await userEvent.type(input, 'Hello');
@@ -373,8 +373,8 @@ export const FailedWhileSending: Story = {
 
 export const FailedInSpanish: Story = {
   args: {
-    label: 'Escribe a Rivera Plumbing',
-    placeholder: 'Escribe a Rivera Plumbing',
+    label: 'Escribe a Turner Plumbing',
+    placeholder: 'Escribe a Turner Plumbing',
     sendLabel: 'Enviar',
     failed: {
       text: '¿Cuánto cuesta destapar un desagüe?',
@@ -491,7 +491,7 @@ export const NearLimit: Story = {
     canvasNote: 'No board shows a long message; the counter shows from 90% of the limit, in the line under the composer.',
   },
   play: async ({ canvas, userEvent }) => {
-    const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const input = canvas.getByRole('textbox', { name: 'Message Turner Plumbing' });
     const counter = () => canvas.queryByText(new RegExp(`^\\d+ / ${NEAR_LIMIT_MAX}$`));
 
     const start = 'Can someone come out this week';

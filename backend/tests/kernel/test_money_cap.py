@@ -8,7 +8,7 @@ again at confirm, the compiler's amount bound, the baseline's `auto_money_cap` f
 the cap of the version being evaluated from the context) and the auto invariants, rendered at each
 version's cap and proved for every version. A cap changes only through a draft the owner confirms.
 
-Tests run on a Desk from `POST /desks` (version 1 at 0), or on a Rivera copy (version 1 at $500)
+Tests run on a Desk from `POST /desks` (version 1 at 0), or on a Turner copy (version 1 at $500)
 where a test needs people, with a fake `native.payment_link` enabled whose amount each test sets.
 A test that proves or confirms a draft needs the solver (`solver`).
 """
@@ -337,7 +337,7 @@ async def test_baseline_holds_auto_money_above_the_context_cap(desk_prove, app, 
                         json.dumps(compile_at([charge_card("links", 30_000)], profiles, cap=50_000).sets())) == []
     assert outcome(without, link_request(20_000, cap=10_000))["outcome"] == "allow"   # only that forbid held it
 
-    # a Rivera copy decides at its active version's cap, and every entry names the version and the cap
+    # a Turner copy decides at its active version's cap, and every entry names the version and the cap
     copy = await rivera(app, client)
     visitor = await open_visitor(client, copy)
     quote = await decided(client, visitor, "native.quote", quote_args(("drain", 1)))
@@ -451,7 +451,7 @@ async def test_a_version_is_proved_at_its_own_cap(desk_prove, app, client, regis
 
 async def rivera_with_links(app: FastAPI, client: httpx.AsyncClient, cents: int, *,
                             cap: int | None = None) -> tuple[Rivera, FakeAdapter, PolicyVersionContract]:
-    """A Rivera copy with the stand-in link enabled and an auto charge card up to `cents` confirmed
+    """A Turner copy with the stand-in link enabled and an auto charge card up to `cents` confirmed
     (at the money cap `cap`, else the seed's $500): version 2."""
     copy = await rivera(app, client)
     link = await enable(app, copy, payment_link(1))
@@ -724,7 +724,7 @@ async def answer(client: httpx.AsyncClient, copy: Rivera, decision_id: str, answ
 
 
 async def rivera_holding_links(app: FastAPI, client: httpx.AsyncClient) -> tuple[Rivera, FakeAdapter]:
-    """A Rivera copy with the stand-in link enabled and no card for it, so every link asks (version 2,
+    """A Turner copy with the stand-in link enabled and no card for it, so every link asks (version 2,
     at the seed's $500)."""
     copy = await rivera(app, client)
     link = await enable(app, copy, payment_link(1))
@@ -892,7 +892,7 @@ async def test_only_the_owner_changes_the_cap(app, client):
 async def test_desk_data_routes_cannot_set_the_cap(app, client):
     copy = await rivera(app, client)
     bodies = {
-        "business": {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": "America/Los_Angeles"},
+        "business": {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": "America/Los_Angeles"},
         "charter": {"charter": []},
         "hours": {"hours": []},
         "prices": {"price_items": []},

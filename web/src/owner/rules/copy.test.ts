@@ -1,5 +1,5 @@
 /**
- * Rivera's fixed suggestions on Rules, each offered only while its change isn't in effect under
+ * Turner's fixed suggestions on Rules, each offered only while its change isn't in effect under
  * the active rules: "Stop quoting on weekends" while an automatic quote rule for anyone covers a
  * Saturday or a Sunday, and "Quote water heater installs up to $600" until one is capped at $600.
  */
@@ -13,7 +13,7 @@ const WATER_HEATER = 'Quote water heater installs up to $600';
 
 const WEEKDAYS: RuleCard['hours'] = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' };
 
-/** An automatic quote rule for anyone, every day and with no cap, as Rivera's seed has it, with `fields` changed. */
+/** An automatic quote rule for anyone, every day and with no cap, as Turner's seed has it, with `fields` changed. */
 function quoteRule(fields: Partial<RuleCard> = {}): RuleCard {
   return {
     card_id: 'rv-quote',
@@ -32,7 +32,7 @@ function quoteRule(fields: Partial<RuleCard> = {}): RuleCard {
   };
 }
 
-describe("Rivera's fixed suggestions", () => {
+describe("Turner's fixed suggestions", () => {
   it('offers_both_in_order_while_the_rules_are_still_read', () => {
     expect(rulesChipsToOffer(undefined)).toEqual([WEEKENDS, WATER_HEATER]);
     expect(RULES_CHIPS).toEqual([WEEKENDS, WATER_HEATER]);

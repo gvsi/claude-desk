@@ -95,7 +95,7 @@ async function expectTurnOpensAtTheOwnersWords(log: Locator, words: string, at: 
   }
 }
 
-/** A rule Maria's answers suggest: Dana's refunds up to $50 without asking. */
+/** A rule Mike's answers suggest: Dana's refunds up to $50 without asking. */
 const DANA_REFUNDS: Suggestion = {
   tool: 'payments.create_refund',
   count: 3,
@@ -116,7 +116,7 @@ const DANA_REFUNDS: Suggestion = {
   },
 };
 
-/** Rivera's suggestions under Ask Claude, in order; a question about a hold may follow them. */
+/** Turner's suggestions under Ask Claude, in order; a question about a hold may follow them. */
 const FIXED_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
 
 /** The words of each suggestion in `group`, in order. */
@@ -164,7 +164,7 @@ function failNeedsYou(): { failed: () => number; recover: () => void } {
   };
 }
 
-/** Rivera's payment limit, atop Payments and Stripe. */
+/** Turner's payment limit, atop Payments and Stripe. */
 const LIMIT_500 = 'No payment over $500 goes through without asking you, whatever the rules below say.';
 
 const CANCELS_LINKS = "Open payment links I made on my own that the new rules don't allow will be cancelled.";
@@ -351,7 +351,7 @@ describe('rules page', () => {
     const reached = await expectTabOrderFromTop([...changes, all.element() as HTMLElement]);
     expect(reached.filter((el) => sections.contains(el))).toEqual(changes);
 
-    // All rules draws each tool's name and line without a link too: Rivera's urgent job first, then
+    // All rules draws each tool's name and line without a link too: Turner's urgent job first, then
     // the connectors' eleven tools.
     const house = await renderRoute(`${DESK}/rules/all`);
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
@@ -409,7 +409,7 @@ describe('rules page', () => {
     expect(router.state.location.pathname).toBe(`${DESK}/rules/drafts/${version}`);
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
-    // Quotes stay automatic: the preset's own quote rule is the same as Rivera's, so no row names
+    // Quotes stay automatic: the preset's own quote rule is the same as Turner's, so no row names
     // Quote, alone or among the tools a shared rule covers, and none moves it to "Ask me first".
     const rows = reviewRows(screen);
     expect(rows.length).toBeGreaterThan(0);
@@ -755,7 +755,7 @@ describe('rules page', () => {
   });
 
   it('house_rules_show_limits', async () => {
-    // Payment links up to $400, refunds never, and no rule of Maria's on quotes.
+    // Payment links up to $400, refunds never, and no rule of Mike's on quotes.
     desk().policy = {
       ...desk().policy,
       cards: desk()
@@ -947,7 +947,7 @@ describe('rules page', () => {
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 
-  it.each(['Rivera Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
+  it.each(['Turner Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
     renameBusiness(business);
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     const payments = screen.getByRole('region', { name: 'Payments' });
@@ -1076,7 +1076,7 @@ describe('rules page', () => {
     const row = main.querySelector('.cd-suggestion-chips') as HTMLElement;
     expect(top(box) - bottom(header)).toBe(20);
     expect(top(row) - bottom(box)).toBe(10);
-    // Then the Desk's own jobs (Rivera's urgent callback) 20 px under them, and the connectors'
+    // Then the Desk's own jobs (Turner's urgent callback) 20 px under them, and the connectors'
     // summary 20 px under those, at the page's own gap.
     const jobs = main.querySelector('.cd-business-jobs') as HTMLElement;
     expect(top(jobs) - bottom(row)).toBe(20);
@@ -1451,7 +1451,7 @@ describe("Ask Claude's question about a hold", () => {
 
   it('hold_question_only_while_a_request_is_held', async () => {
     // A copy with no hold: once Needs you has been read and drawn (a second read starts only after
-    // the first one's answer), only Rivera's fixed suggestions remain.
+    // the first one's answer), only Turner's fixed suggestions remain.
     const quiet = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
     const none = quiet.screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(none.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
@@ -1571,11 +1571,11 @@ describe("Ask Claude's question about a hold", () => {
   });
 });
 
-describe("Rivera's fixed suggestions", () => {
+describe("Turner's fixed suggestions", () => {
   type Screen = Awaited<ReturnType<typeof renderRoute>>['screen'];
 
   /**
-   * On Rules, presses Rivera's suggestion `words`, confirms the change Claude drafts from it in Ask
+   * On Rules, presses Turner's suggestion `words`, confirms the change Claude drafts from it in Ask
    * Claude beside the page, and waits for the receipt; returns the suggestions and the panel.
    */
   async function confirmSuggestion(screen: Screen, words: string) {
@@ -1695,7 +1695,7 @@ describe("Rivera's fixed suggestions", () => {
     await expect.element(group.getByRole('button', { name: FIXED_CHIPS[1], exact: true })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
-    // Rivera's rules have neither change, so both stay once they are drawn.
+    // Turner's rules have neither change, so both stay once they are drawn.
     releaseRules();
     await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
@@ -1742,7 +1742,7 @@ describe("Rivera's fixed suggestions", () => {
     expect(main.scrollTop).toBe(place);
   });
 
-  /** Rivera's active rules with both suggestions' changes in effect: quotes on their own only on weekdays, and water heater installs up to $600. */
+  /** Turner's active rules with both suggestions' changes in effect: quotes on their own only on weekdays, and water heater installs up to $600. */
   function bothChangesInEffect(): void {
     const main = desk();
     const weekdays: RuleCard['hours'] = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' };
@@ -1778,7 +1778,7 @@ describe("Rivera's fixed suggestions", () => {
 
     rules.release();
     await expect.poll(() => finished.has('rules')).toBe(true);
-    // The rules leave no suggestion of Rivera's own, so the page waits for Needs you, as another business's does.
+    // The rules leave no suggestion of Turner's own, so the page waits for Needs you, as another business's does.
     await expect.element(group).not.toBeInTheDocument();
     expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();

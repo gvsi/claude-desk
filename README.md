@@ -2,19 +2,19 @@
 
 Claude Desk is a concept prototype: a public, always-on Claude for a person or small business that strangers and other people's agents can talk to. It answers, books, quotes, releases documents to verified people and takes payments under the owner's rules, and it can't be talked around.
 
-The demo business is Rivera Plumbing. You play Maria Rivera, its owner, while Claude answers her customers and their agents.
+The demo business is Turner Plumbing. You play Mike Turner, its owner, while Claude answers his customers and their agents.
 
 ## Try it
 
 [owner: the hosted URL, after the first deploy]
 
-The passcode comes with the link. Each visitor gets a fresh copy of the Rivera Plumbing demo, tied to a browser cookie, with no account to create.
+The passcode comes with the link. Each visitor gets a fresh copy of the Turner Plumbing demo, tied to a browser cookie, with no account to create.
 
 ## Things to try
 
-1. **Chat as a customer.** Rivera's public page opens in a new tab. Ask for a quote or a booking. Each reply is checked before it appears, and a receipt under each message shows what the checks did.
-2. **Try to break it.** Ask for a discount, someone else's invoice, or a promise Maria never made. The receipts show what was held or blocked, and Safety, in Maria's app, lists every attempt.
-3. **Answer a held request.** One is waiting on Today: a customer asked for 15% off a drain clearing, which Maria's rules don't allow without asking her.
+1. **Chat as a customer.** Turner's public page opens in a new tab. Ask for a quote or a booking. Each reply is checked before it appears, and a receipt under each message shows what the checks did.
+2. **Try to break it.** Ask for a discount, someone else's invoice, or a promise Mike never made. The receipts show what was held or blocked, and Safety, in Mike's app, lists every attempt.
+3. **Answer a held request.** One is waiting on Today: a customer asked for 15% off a drain clearing, which Mike's rules don't allow without asking him.
 4. **Create your own Desk.** "+ New business", in the switcher at the top left, starts a short setup interview and ends with a live link someone else can use.
 
 ## What's real, mocked and unfinished

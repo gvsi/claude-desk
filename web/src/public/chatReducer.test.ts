@@ -126,7 +126,7 @@ describe('chatReducer', () => {
     expect(silent.error).toBeNull();
 
     // The owner joining mid-turn stops Claude: a line about the chat, and no message.
-    const joined: SseEvent = { type: 'owner_joined', name: 'Maria Rivera' };
+    const joined: SseEvent = { type: 'owner_joined', name: 'Mike Turner' };
     const taken = run(events([{ type: 'writing' }, joined]));
     expect(taken.writing).toBe(false);
     expect(taken.rows).toEqual([{ item: { kind: 'system', id: 's2', ev: joined }, receipts: [], live: true }]);
@@ -135,14 +135,14 @@ describe('chatReducer', () => {
   });
 
   it('owner_typing_shows_until_her_words', () => {
-    // Maria takes over and types: the chat keeps her name and the API's end time, and adds no row.
+    // Mike takes over and types: the chat keeps his name and the API's end time, and adds no row.
     const typing = run(events([ownerJoined, ownerTyping]));
-    expect(typing.ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-30T17:21:10Z' });
+    expect(typing.ownerTyping).toEqual({ name: 'Mike Turner', until: '2026-10-30T17:21:10Z' });
     expect(typing.rows.map((row) => row.item.kind)).toEqual(['system']);
 
-    // Her next typing event replaces the first; her own words then clear it.
+    // His next typing event replaces the first; his own words then clear it.
     const longer = run(events([{ ...ownerTyping, until: '2026-10-30T17:21:20Z' }], 3), typing);
-    expect(longer.ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-30T17:21:20Z' });
+    expect(longer.ownerTyping).toEqual({ name: 'Mike Turner', until: '2026-10-30T17:21:20Z' });
     const said = run(events([ownerSaid], 4), longer);
     expect(said.ownerTyping).toBeNull();
     expect(said.rows.at(-1)?.item).toEqual({ kind: 'message', seq: 4, ev: ownerSaid });
@@ -576,22 +576,22 @@ describe('chatReducer', () => {
   });
 
   it('owner_typing_until_the_owner_writes', () => {
-    const typing: EvOwnerTyping = { type: 'owner_typing', name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' };
-    const joined = run(events([{ type: 'owner_joined', name: 'Maria Rivera' }, typing]));
-    // Her name and how long, kept as the event said it, never her words, and no row; nothing says
+    const typing: EvOwnerTyping = { type: 'owner_typing', name: 'Mike Turner', until: '2026-10-29T15:04:30Z' };
+    const joined = run(events([{ type: 'owner_joined', name: 'Mike Turner' }, typing]));
+    // His name and how long, kept as the event said it, never his words, and no row; nothing says
     // Claude is writing.
-    expect(joined.ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' });
+    expect(joined.ownerTyping).toEqual({ name: 'Mike Turner', until: '2026-10-29T15:04:30Z' });
     expect(joined.writing).toBe(false);
     expect(joined.rows).toHaveLength(1);
     expect(joined.lastSeq).toBe(2);
 
-    // Her message takes its place, in one step.
+    // His message takes its place, in one step.
     const said: EvMessage = { ...quoteMessage, message_id: 'msg-owner', author: 'owner' };
     const answered = run(events([said], 3), joined);
     expect(answered.ownerTyping).toBeNull();
     expect(answered.rows.at(-1)?.item).toEqual({ kind: 'message', seq: 3, ev: said });
-    // Claude's doesn't: she may still be typing beside it.
-    expect(run(events([quoteMessage], 3), joined).ownerTyping).toEqual({ name: 'Maria Rivera', until: '2026-10-29T15:04:30Z' });
+    // Claude's doesn't: he may still be typing beside it.
+    expect(run(events([quoteMessage], 3), joined).ownerTyping).toEqual({ name: 'Mike Turner', until: '2026-10-29T15:04:30Z' });
     // Handing the chat back ends it, and so does an error, its time running out, the chat ending
     // (a 401) and a new chat.
     expect(run(events([{ type: 'owner_left' }], 3), joined).ownerTyping).toBeNull();
@@ -602,7 +602,7 @@ describe('chatReducer', () => {
     // A replayed event the chat has seen changes nothing.
     expect(run(events([typing], 2), answered).ownerTyping).toBeNull();
     // A stale one shows nothing, and the stream goes on after it.
-    const stale = run([{ type: 'stale', seq: 3 }], run(events([{ type: 'owner_joined', name: 'Maria Rivera' }])));
+    const stale = run([{ type: 'stale', seq: 3 }], run(events([{ type: 'owner_joined', name: 'Mike Turner' }])));
     expect(stale.ownerTyping).toBeNull();
     expect(stale.lastSeq).toBe(3);
 
@@ -618,14 +618,14 @@ describe('chatReducer', () => {
   });
 
   it('reload_during_a_take_over_shows_the_owner_joined', () => {
-    // Open throughout: Dana asks for Maria, Claude answers, Maria takes the chat over and writes.
+    // Open throughout: Dana asks for Mike, Claude answers, Mike takes the chat over and writes.
     const live = run([{ type: 'sent', id: 'local-1', text: ASK }, ...events(TAKEN_OVER)]);
-    // Reloaded after Maria pressed Take over: the stored conversation holds where she joined.
+    // Reloaded after Mike pressed Take over: the stored conversation holds where he joined.
     const joinedLast = run([{ type: 'history', transcript: transcript(4, STORED_TAKEN_OVER.slice(0, 3)) }]);
     expect(joinedLast.rows.map((row) => row.item.kind)).toEqual(['visitor', 'message', 'system']);
     expect(joinedLast.rows.at(-1)?.item).toMatchObject({ kind: 'system', ev: ownerJoined });
 
-    // Reloaded after her words too: the chat looks as it did to a page open throughout, in the
+    // Reloaded after his words too: the chat looks as it did to a page open throughout, in the
     // state the live join leaves it in (nothing writing, no typing, no error, no open hold).
     const reloaded = run([{ type: 'history', transcript: transcript(5, STORED_TAKEN_OVER) }]);
     expect(shown(reloaded)).toEqual(shown(live));
@@ -634,7 +634,7 @@ describe('chatReducer', () => {
   });
 
   it('reload_after_a_hand_back_shows_the_join_then_the_leave', () => {
-    // Open throughout: Maria joins, writes and hands the chat back, and Claude answers again.
+    // Open throughout: Mike joins, writes and hands the chat back, and Claude answers again.
     const later: EvMessage = { ...quoteMessage, message_id: 'msg-after-hand-back' };
     const live = run([
       { type: 'sent', id: 'local-1', text: ASK },
@@ -700,7 +700,7 @@ describe('chatReducer', () => {
   });
 
   it('a_second_take_over_shows_each_line', () => {
-    // Live: Maria joins, hands the chat back and joins again, three lines in order.
+    // Live: Mike joins, hands the chat back and joins again, three lines in order.
     const left: SseEvent = { type: 'owner_left' };
     const live = run(events([ownerJoined, left, ownerJoined]));
     expect(lines(live)).toEqual([
@@ -709,7 +709,7 @@ describe('chatReducer', () => {
       ['s3', 'owner_joined'],
     ]);
 
-    // Reloaded after the second join: the same three, and her next hand-back adds a fourth.
+    // Reloaded after the second join: the same three, and his next hand-back adds a fourth.
     const stored: TranscriptItem[] = [
       { ...item(1, 'owner_joined'), event: ownerJoined },
       { ...item(2, 'owner_left'), event: left },
@@ -726,8 +726,8 @@ describe('chatReducer', () => {
   });
 
   it('a_leave_with_no_join_before_it_still_shows', () => {
-    // A take-over whose join the API never kept: Maria types and writes, then hands the chat back.
-    // Her leave is a line of its own, and it ends her typing and anything shown writing.
+    // A take-over whose join the API never kept: Mike types and writes, then hands the chat back.
+    // His leave is a line of its own, and it ends his typing and anything shown writing.
     const left: SseEvent = { type: 'owner_left' };
     const live = run(events([{ type: 'writing' }, ownerTyping, ownerSaid, ownerTyping, left]));
     expect(lines(live)).toEqual([['s5', 'owner_left']]);
@@ -808,13 +808,13 @@ function lines(state: ChatState): [string, string][] {
   return state.rows.flatMap(({ item }) => (item.kind === 'system' ? [[item.id, item.ev.type] as [string, string]] : []));
 }
 
-/** Dana asks for Maria: what she types, and what Claude answers. */
-const ASK = "I'd like to talk to Maria Rivera.";
+/** Dana asks for Mike: what she types, and what Claude answers. */
+const ASK = "I'd like to talk to Mike Turner.";
 
-/** The take-over as the stream brings it, from seq 1: Claude's answer, then Maria joins and writes. */
+/** The take-over as the stream brings it, from seq 1: Claude's answer, then Mike joins and writes. */
 const TAKEN_OVER: SseEvent[] = [{ type: 'writing' }, quoteMessage, { type: 'turn_end' }, ownerJoined, ownerSaid];
 
-/** The same conversation as the API stores it: the visitor's words, the answer, the join, her words. */
+/** The same conversation as the API stores it: the visitor's words, the answer, the join, his words. */
 const STORED_TAKEN_OVER: TranscriptItem[] = [
   visitorText(1, ASK),
   { ...item(2, 'delivered'), event: quoteMessage },

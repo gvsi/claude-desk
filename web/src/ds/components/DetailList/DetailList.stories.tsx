@@ -4,11 +4,11 @@ import { expect, within } from 'storybook/test';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { DetailList, type DetailItem } from './DetailList.tsx';
 
-/** Settings › General's details for Rivera Plumbing, as N-Run2-Settings-General writes them. */
+/** Settings › General's details for Turner Plumbing, as N-Run2-Settings-General writes them. */
 const DETAILS: DetailItem[] = [
-  { label: 'Business', value: 'Rivera Plumbing' },
+  { label: 'Business', value: 'Turner Plumbing' },
   { label: 'This Desk', value: 'Main line' },
-  { label: 'Customers see you as', value: 'Maria Rivera' },
+  { label: 'Customers see you as', value: 'Mike Turner' },
   { label: 'Time zone', value: 'Pacific Time (Los Angeles)' },
   { label: 'Hours', value: 'Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm' },
 ];

@@ -169,9 +169,9 @@ async def test_fetch_rejects_private_addresses(k: KernelHarness, records, url: s
 # The guard itself (Plan 01c's `fetch_guard`, called directly)
 
 FETCH_GUARD = "desk.kernel_service.fetch_guard"
-SITE = "rivera-plumbing.example"
+SITE = "turner-plumbing.example"
 PUBLIC, PRIVATE = "93.184.215.14", "10.0.0.5"   # a public address and a private one; neither is ever connected to
-PAGE = "<html><head><title>Rivera Plumbing</title></head><body>Drains, leaks and water heaters.</body></html>"
+PAGE = "<html><head><title>Turner Plumbing</title></head><body>Drains, leaks and water heaters.</body></html>"
 
 
 def guard_and_transport() -> tuple[Any, Any]:

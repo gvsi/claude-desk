@@ -118,7 +118,7 @@ class StandInKernel:
 
         async def public(request: Request) -> JSONResponse:
             self.requests += 1
-            return JSONResponse({"business_name": "Rivera Plumbing", "brand": {LEAKED_CODE: 7}})   # a key it chose
+            return JSONResponse({"business_name": "Turner Plumbing", "brand": {LEAKED_CODE: 7}})   # a key it chose
 
         async def not_found(request: Request) -> JSONResponse:
             self.requests += 1
@@ -364,7 +364,7 @@ async def test_a_malformed_response_fails_without_printing_what_it_held(kernel: 
             await target.call("GET /public/{desk_slug}", path={"desk_slug": "rivera"}, auth=Auth.none())
         shown = str(failure.value)
         assert "desk_name: missing" in shown and "brand.*: string_type" in shown, shown
-        assert LEAKED_CODE not in shown and "Rivera" not in shown, shown
+        assert LEAKED_CODE not in shown and "Turner" not in shown, shown
         assert target.responses == []
     finally:
         await target.stop()

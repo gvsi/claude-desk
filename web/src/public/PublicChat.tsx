@@ -49,6 +49,8 @@ import { usePaymentLinks } from './usePaymentLinks.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
 import { messageReceiptVisible } from './messageReceipt.ts';
+import { OwnerPreviewBar } from './OwnerPreviewBar.tsx';
+import { useOwnerPreviewBack } from './ownerPreview.ts';
 import { useVisitorChat, type ChatStatus } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
@@ -710,10 +712,14 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const [language] = useState(browserLanguage);
   const copy = PUBLIC_COPY[language];
   const { openStatus, desk } = useOpenStatus(slug, chat.desk);
+  // The owner's way back from their own preview, read with their session; never in setup's preview,
+  // which sits inside the owner's app already.
+  const back = useOwnerPreviewBack(slug, embedded ? undefined : previewDeskId);
   // The first session/history read shapes the opening view too. Keep the shell's first header
-  // (including the served hours) together with that view rather than landing it in stages.
+  // (including the served hours, and the owner's preview bar) together with that view rather than
+  // landing it in stages.
   const opening =
-    (desk === null || (chat.session === null && chat.status === 'loading')) &&
+    (desk === null || (chat.session === null && chat.status === 'loading') || !back.settled) &&
     chat.status !== 'not_found' && chat.status !== 'unavailable';
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -798,19 +804,19 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
   // when nothing else has it, so a visitor who moved on while the chat opened stays where they are.
   // The idea speaks as this Desk's owner, by the name the Desk carries; there is a composer to
-  // type it into only once the Desk is read.
+  // type it into only once the page has opened (the Desk read, and on the owner's preview, the bar).
   const carried = useRef<Carried | null>(idea === undefined ? null : { text: { idea }, focus: 'if_free' });
   const ideaOwner = desk === null ? null : brandFrom(desk).ownerName;
   useEffect(() => {
     const words = carried.current;
     const box = composerRef.current?.querySelector('textarea');
-    if (!ready || words === null || !box) return;
+    if (opening || !ready || words === null || !box) return;
     carried.current = null;
     const text = typeof words.text === 'string' ? words.text : breakItIdea(words.text.idea, ideaOwner);
     if (text === null) return;
     const free = document.activeElement === null || document.activeElement === document.body;
     fillComposer(box, text, { focus: words.focus === 'always' || free });
-  }, [ready, ideaOwner]);
+  }, [opening, ready, ideaOwner]);
 
   const present = (children?: ReactNode) => (
     <>
@@ -1007,6 +1013,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}
+        banner={back.href === null ? undefined : <OwnerPreviewBar backHref={back.href} />}
         firstView={!conversationStarted(state, chat.status)}
         starters={{
           words: (desk.starters ?? []).slice(0, 3),

@@ -4,7 +4,7 @@ Setup gives a new Desk 60-minute slots from its hours for the 14 days after setu
 So a live Desk doesn't run out of open times, the kernel adds the days after its latest slot, up to
 14 days ahead, from its hours in its business's time zone (`desks.extend_calendars`), at its start
 and then daily. It only adds: a booked slot, one a request still names and the owner's changes
-inside the days it covers stay as they are. A Desk is made here as setup makes one: through `POST /desks` in a Rivera copy,
+inside the days it covers stay as they are. A Desk is made here as setup makes one: through `POST /desks` in a Turner copy,
 with its hours, then given its calendar and Answering through the owner's routes. The clock stands
 at Friday 2026-10-30, 12:04 in Chicago, two days before the clocks there go back an hour.
 """
@@ -220,7 +220,7 @@ async def test_a_second_refresh_adds_nothing(app, client):
 async def test_only_a_live_setup_desk_with_hours_is_refreshed(app, client):
     copy = await rivera(app, client)
     seed = SetupDesk(copy=copy, desk_id=copy.desk_id, slug=copy.slug)
-    # Rivera's seed, live with hours, its two-hour slots cut to end on Monday
+    # Turner's seed, live with hours, its two-hour slots cut to end on Monday
     oakland = ZoneInfo("America/Los_Angeles")
     seed_slots = [slot_body(row) for row in await rows_of(app, copy.copy_id, select(SlotRow).where(
         SlotRow.desk_id == copy.desk_id).order_by(SlotRow.slot_id)) if row.starts_at.astimezone(oakland).date()
@@ -245,7 +245,7 @@ async def test_only_a_live_setup_desk_with_hours_is_refreshed(app, client):
 
 
 async def test_a_rivera_copy_made_before_its_starter_questions_is_left_alone(app, client, frozen_clock):
-    """Copies made before the seed wrote its starter questions have none: they are still Rivera's."""
+    """Copies made before the seed wrote its starter questions have none: they are still Turner's."""
     copy = await rivera(app, client)
     seed = SetupDesk(copy=copy, desk_id=copy.desk_id, slug=copy.slug)
     with psycopg.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:

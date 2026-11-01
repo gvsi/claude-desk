@@ -16,7 +16,7 @@ const PUBLIC_LINK = `desk.example/d/${rivera.business.slug}`;
 const meta = {
   title: 'Layout/Greeting',
   component: Greeting,
-  args: { text: 'Good morning, Maria' },
+  args: { text: 'Good morning, Mike' },
   // Today's content column, as on the board.
   decorators: [
     (Story) => (
@@ -46,7 +46,7 @@ export const WithPresence: Story = {
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     // The greeting is Today's title, in Claude's serif voice.
-    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' });
+    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' });
     expectComputed(heading, { fontFamily: /Source Serif 4/, fontSize: '36px', lineHeight: '44px', fontWeight: '300', marginTop: '0px' });
 
     // The presence line says it in words; the glyphs beside it are decoration, hidden from readers.
@@ -108,7 +108,7 @@ export const WithActions: Story = {
     const header = canvasElement.querySelector<HTMLElement>('.cd-greeting');
     const pill = canvasElement.querySelector<HTMLElement>('.cd-greeting__link');
     if (!header || !pill) throw new Error('the greeting draws its header and link pill');
-    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' }).getBoundingClientRect();
+    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' }).getBoundingClientRect();
     const action = canvas.getByRole('link', { name: 'Chat as a customer' }).getBoundingClientRect();
     const link = pill.getBoundingClientRect();
 
@@ -133,7 +133,7 @@ export const WithActionsOnAPhone: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(window.innerWidth).toBe(390);
-    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' }).getBoundingClientRect();
+    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' }).getBoundingClientRect();
     const presence = canvas.getByText('One person is talking to your Desk right now.').closest('p')!.getBoundingClientRect();
     const link = canvasElement.querySelector<HTMLElement>('.cd-greeting__link')!.getBoundingClientRect();
     const action = canvas.getByRole('link', { name: 'Chat as a customer' }).getBoundingClientRect();

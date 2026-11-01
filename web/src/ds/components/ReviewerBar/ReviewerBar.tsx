@@ -5,7 +5,7 @@ import { Button } from '../Button/Button.tsx';
 import './ReviewerBar.css';
 
 /** The demo seed's `owner_display_name`, the owner a reviewer plays unless told otherwise. */
-export const SEED_OWNER_NAME = 'Maria Rivera';
+export const SEED_OWNER_NAME = 'Mike Turner';
 
 /** Shared words for the visible bar and its loading shapes' measurement. */
 export function reviewerBarWords(ownerName: string) {
@@ -13,7 +13,7 @@ export function reviewerBarWords(ownerName: string) {
 }
 
 export interface ReviewerBarProps {
-  /** `owner_display_name`, the owner a reviewer plays in the demo: "Maria Rivera". */
+  /** `owner_display_name`, the owner a reviewer plays in the demo: "Mike Turner". */
   ownerName: string;
   /** Asks for a fresh copy of the demo; the screen confirms first. */
   onStartOver: () => void;

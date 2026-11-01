@@ -24,7 +24,7 @@ worker.use = (...handlers) => use(epochFence(), ...handlers);
 
 /**
  * Starts the mock over for the next screen test: a new epoch, so that whatever the last test's page
- * sent and the mock hasn't received yet is dropped when it arrives, then a fresh Rivera copy, signed in.
+ * sent and the mock hasn't received yet is dropped when it arrives, then a fresh Turner copy, signed in.
  */
 export function startTest(): void {
   mockStore.nextEpoch();

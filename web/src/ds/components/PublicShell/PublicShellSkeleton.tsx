@@ -70,7 +70,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
                 {language === 'es' ? <Skeleton shape="line" text="meta" width="65%" className="cd-public-shell-skeleton__phone-line" /> : null}
               </div>
             </div>
-            <Skeleton shape="block" measure={{ label: `${ASK_OWNER_PREFIX[language]}Maria Rivera`, className: 'cd-button cd-button--secondary cd-button--inline cd-type-control' }} height="var(--size-control)" className="cd-public-shell-skeleton__ask" anchor="ask-owner" />
+            <Skeleton shape="block" measure={{ label: `${ASK_OWNER_PREFIX[language]}Mike Turner`, className: 'cd-button cd-button--secondary cd-button--inline cd-type-control' }} height="var(--size-control)" className="cd-public-shell-skeleton__ask" anchor="ask-owner" />
           </div>
           <div className="cd-public-shell__scroll">
             <div className="cd-public-shell__conversation" data-skeleton-anchor="conversation">

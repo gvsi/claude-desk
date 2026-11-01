@@ -69,11 +69,11 @@ export const GoogleCalendar: Story = {
     await expect(dialog.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], textarea')).toHaveLength(0);
     // A radio group named by the question, one choice per option, the screen's value checked and focused.
     const group = within(dialog).getByRole('radiogroup', { name: "Which calendar shows when you're busy?" });
-    const jobs = within(group).getByRole('radio', { name: /^Rivera Plumbing jobs/ });
+    const jobs = within(group).getByRole('radio', { name: /^Turner Plumbing jobs/ });
     const personal = within(group).getByRole('radio', { name: /^Personal/ });
     await expect(jobs).toBeChecked();
     await expect(jobs).toHaveFocus();
-    await expect(jobs).toHaveAccessibleName('Rivera Plumbing jobs maria@riveraplumbing.example');
+    await expect(jobs).toHaveAccessibleName('Turner Plumbing jobs mike@turnerplumbing.example');
     // The checked choice's box takes the accent border.
     expectComputed(jobs.closest('label') as Element, { borderTopColor: 'rgb(126, 174, 218)' });
     // Choosing another calls onChange; Continue sends the screen's value.

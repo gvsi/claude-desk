@@ -5,7 +5,7 @@
 ## When to use
 
 - `owner`: the hero composer on Today and Rules ("Ask Claude about your Desk, or change a rule"), and wherever the owner answers Claude in their own words. The controls sit in a row under the text, with the helper line between them.
-- `visitor`: the public page ("Message Rivera Plumbing"), one row with the send button at the end.
+- `visitor`: the public page ("Message Turner Plumbing"), one row with the send button at the end.
 - `whisper`: a conversation while Claude answers ("Whisper to Claude. Dana won't see it."), one row, its send button named "Send whisper". Put a `TakeOverBar` above it.
 - Not for a form field with a label above it: use `TextField`.
 

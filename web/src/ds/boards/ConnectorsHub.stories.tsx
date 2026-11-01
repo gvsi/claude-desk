@@ -66,7 +66,7 @@ export const AskClaude: Story = {
     canvas: 'N-Conn-12-Chat',
     canvasNote: [
       'The panel is AppShell’s panel beside the page, which narrows to make room; on a phone it is a modal sheet.',
-      'The page is Chen & Co. CPA’s Rules page with its three connectors, the Desk the conversation is about, where the redrawn board puts Rivera Plumbing’s page and sidebar beside Chen’s conversation. The board’s “Start from a preset” menu and payment limit lines are built with the follow-up, so the header has no action here.',
+      'The page is Chen & Co. CPA’s Rules page with its three connectors, the Desk the conversation is about, where the redrawn board puts Turner Plumbing’s page and sidebar beside Chen’s conversation. The board’s “Start from a preset” menu and payment limit lines are built with the follow-up, so the header has no action here.',
       'The offer card says what already covers Payments, the always-on money rule, where the board says no rule covers it yet.',
       'The “Add Payments” suggestion and the chat it starts are the board’s vision: the web app (plan 04) offers neither until Ask Claude can offer a connector (its Open question 5).',
       SIDEBAR_ROW_NOTE,

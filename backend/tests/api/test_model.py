@@ -46,7 +46,7 @@ from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 BACKEND = Path(__file__).resolve().parents[2]
 
-SYSTEM = [{"type": "text", "text": "You answer visitors for Rivera Plumbing."}]
+SYSTEM = [{"type": "text", "text": "You answer visitors for Turner Plumbing."}]
 TOOLS = [
     {"name": "native__quote", "description": "Quote services.", "input_schema": {
         "type": "object", "properties": {}, "required": [], "additionalProperties": False}},
@@ -98,7 +98,7 @@ def test_conversation_kwargs():
     assert build_kwargs(request) == {
         "model": "claude-opus-5-5",
         "max_tokens": 16000,
-        "system": [{"type": "text", "text": "You answer visitors for Rivera Plumbing.",
+        "system": [{"type": "text", "text": "You answer visitors for Turner Plumbing.",
                     "cache_control": {"type": "ephemeral"}}],
         "tools": TOOLS,
         "messages": MESSAGES,

@@ -12,7 +12,7 @@
 
 - `blocks`: the event's `blocks`, exactly as they arrived, in order.
 - `language`: the event's `language`. It picks the card chrome and sets `lang` on the message.
-- `ownerName`: `owner_display_name`, for the "Maria Rivera said" card label.
+- `ownerName`: `owner_display_name`, for the "Mike Turner said" card label.
 - `reveal` on a message that arrived live, on a page already open, never on one read from history: a load, a reload, a reopened chat, recorded history.
 
 ## Arriving live

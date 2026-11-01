@@ -10,7 +10,7 @@ import { worker } from '../mocks/browser.ts';
 import type { SseEvent } from './contracts.ts';
 import { openStream, type StreamState } from './stream.ts';
 
-const EVENTS_URL = '/api/public/desks/rivera-plumbing/events';
+const EVENTS_URL = '/api/public/desks/turner-plumbing/events';
 
 /** The event names the handlers below send, so `client.send` accepts them. */
 type Named = { message: unknown; writing: unknown; turn_end: unknown; error: unknown; surprise: unknown };

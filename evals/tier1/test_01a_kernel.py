@@ -193,7 +193,7 @@ async def test_seeded_copies_share_one_proof_and_stale_drafts_never_confirm(k: K
     find_slots = RuleCard(card_id="t18-auto-find-slots", applies_to="native.find_slots", mode="auto", who="anyone",
                           reason="Anyone can see open times.")
     ask_quote = RuleCard(card_id="t18-ask-quote", applies_to="native.quote", mode="ask", who="anyone",
-                         reason="Maria checks every quote.")
+                         reason="Mike checks every quote.")
     first = await draft_cards(k, a, [find_slots])
     second = await draft_cards(k, a, [find_slots, ask_quote])
     await k.call("POST /policy/confirm", body={"desk_id": a.desk_id, "version": first.version}, auth=a.owner,
@@ -291,7 +291,7 @@ async def test_the_public_desk_shows_no_private_field(k: KernelHarness, records)
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
     pages = {lang: await public_desk(k, desk.slug, lang) for lang in LANGUAGES}
-    await k.call("GET /public/{desk_slug}", path={"desk_slug": "rivera-plumbing-nosuch"}, query={"lang": "en"},
+    await k.call("GET /public/{desk_slug}", path={"desk_slug": "turner-plumbing-nosuch"}, query={"lang": "en"},
                  auth=Auth.none(), expect=NOT_FOUND)
     if k.is_real:
         texts, ids = await private_values(records, desk)
@@ -299,7 +299,7 @@ async def test_the_public_desk_shows_no_private_field(k: KernelHarness, records)
                     "the visitor's session id": visitor.state.session_id,
                     "the visitor's token": session_token(visitor)})
         for lang, page in pages.items():
-            assert (page.business_name, page.owner_display_name) == ("Rivera Plumbing", "Maria Rivera"), lang
+            assert (page.business_name, page.owner_display_name) == ("Turner Plumbing", "Mike Turner"), lang
             assert page.charter, f"the {lang} public page shows no charter"
             shown = shown_of(page, texts, ids)
             assert shown == [], f"the {lang} public page shows {shown}"

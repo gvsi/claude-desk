@@ -75,7 +75,7 @@ function arrivals(message: HTMLElement) {
 }
 
 /** About 100 characters: half a second at the reveal's pace. */
-const WORDS = 'Drain clearing is one visit. Here is the quote, and the times Maria has open this week for it.';
+const WORDS = 'Drain clearing is one visit. Here is the quote, and the times Mike has open this week for it.';
 const QUOTE = rivera.blocks.quote.en;
 const TIMES = rivera.blocks.booking_options.en;
 const OWNER = rivera.business.ownerName;
@@ -268,7 +268,7 @@ it('where_the_browser_cant_list_animations_a_revealed_message_settles_at_once', 
 it('a_revealed_reply_s_link_shows_its_words_without_markdown_marks_in_every_frame', async () => {
   await motion();
   vi.useFakeTimers();
-  const text = 'Maria keeps her hours up to date. You can see them on [our website](https://riveraplumbing.example/hours), with the holidays too.';
+  const text = 'Mike keeps her hours up to date. You can see them on [our website](https://turnerplumbing.example/hours), with the holidays too.';
   const message = mount(<ClaudeMessage blocks={[proseBlock(text)]} language="en" ownerName={OWNER} reveal />);
   // Every frame of the reveal: no raw link marks or address, only words.
   const frames = [words(message)[0] ?? ''];
@@ -278,15 +278,15 @@ it('a_revealed_reply_s_link_shows_its_words_without_markdown_marks_in_every_fram
   }
   for (const frame of frames) {
     expect(frame).not.toMatch(/\[|\]\(/);
-    expect(frame).not.toContain('https://riveraplumbing.example/hours');
+    expect(frame).not.toContain('https://turnerplumbing.example/hours');
   }
   expect(frames.length).toBeGreaterThan(5);
   // Whole, the link shows its words and opens in a new tab.
-  expect(frames.at(-1)).toBe('Maria keeps her hours up to date. You can see them on our website, with the holidays too.');
+  expect(frames.at(-1)).toBe('Mike keeps her hours up to date. You can see them on our website, with the holidays too.');
   expect(message.querySelectorAll('a')).toHaveLength(1);
   const link = message.querySelector('a');
   expect(link?.textContent).toBe('our website');
-  expect(link?.getAttribute('href')).toBe('https://riveraplumbing.example/hours');
+  expect(link?.getAttribute('href')).toBe('https://turnerplumbing.example/hours');
   expect(link?.getAttribute('target')).toBe('_blank');
   expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
 });

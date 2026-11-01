@@ -25,7 +25,7 @@ it('picks a header colour immediately and saves the whole business', async () =>
   await group.getByRole('radio', { name: 'Clay', exact: true }).click();
   await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect.poll(() => mockStore.requests.filter((r) => r.key === 'setBusiness').map((r) => r.body)).toEqual([{
-    name: 'Rivera Plumbing', owner_display_name: 'Maria Rivera', timezone: 'America/Los_Angeles',
+    name: 'Turner Plumbing', owner_display_name: 'Mike Turner', timezone: 'America/Los_Angeles',
     brand_palette: 'clay', brand: {},
   }]);
   await expect.poll(() => getComputedStyle(card.element().querySelector('.cd-header-colour__preview')!).backgroundColor).toBe('rgb(119, 54, 36)');
@@ -117,11 +117,11 @@ it('draws the public header in every picked palette, including No colour', async
   for (const palette of PALETTE_KEYS) {
     expect(await mockStore.dispatch('setBusiness', {
       params: { desk_id: RIVERA.deskId },
-      body: { name: 'Rivera Plumbing', owner_display_name: 'Maria Rivera', timezone: 'America/Los_Angeles', brand_palette: palette, brand: {} },
+      body: { name: 'Turner Plumbing', owner_display_name: 'Mike Turner', timezone: 'America/Los_Angeles', brand_palette: palette, brand: {} },
     })).toMatchObject({ status: 200 });
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(`/d/${RIVERA.slug}`, { viewport });
-      await expect.element(screen.getByRole('heading', { name: 'Rivera Plumbing', exact: true })).toBeVisible();
+      await expect.element(screen.getByRole('heading', { name: 'Turner Plumbing', exact: true })).toBeVisible();
       const header = document.querySelector('.cd-public-shell__brand')!;
       const probe = document.createElement('div');
       const colors = BRAND_PALETTE[palette];
