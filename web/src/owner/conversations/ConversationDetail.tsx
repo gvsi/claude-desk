@@ -29,6 +29,7 @@ import { fillComposer } from '../../lib/composer.ts';
 import { formatStarted } from '../../lib/format.ts';
 import { HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
+import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
@@ -142,6 +143,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const titleId = useId();
+  const nameRef = useRef<HTMLHeadingElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const [unsent, setUnsent] = useState<{ kind: 'say' | 'whisper'; text: string } | null>(null);
 
@@ -211,6 +213,9 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
 
   // The requests held in this chat: as Needs you lists them, those answered or being answered here, oldest first.
   const held = heldOldestFirst(needsYou.data ?? []).filter((item) => item.decision.session_id === sessionId);
+  const callbacks = read.replayed === true
+    ? []
+    : (needsYou.data ?? []).filter((item): item is CallbackItem => item.handoff !== null && item.handoff.session_id === sessionId);
   const mine = (item: HeldItem) => item.decision.session_id === sessionId;
   const kept = [...answers.kept.values()].filter(mine);
   const answered = [...answers.answered.values()].filter((entry) => mine(entry.item));
@@ -281,7 +286,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   return (
     <section className="cd-conversation" aria-labelledby={titleId}>
       <header className="cd-conversation__head">
-        <h2 id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
+        <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
           {who}
         </h2>
         <Pill>{levelOf(state)}</Pill>
@@ -304,6 +309,13 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
       {/* The transcript, its end in view as a chat's: it scrolls on its own between the head and the owner's controls, or in a short window with them, as one. */}
       <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
+        {callbacks.length > 0 ? (
+          <div className="cd-conversation__handoffs">
+            {callbacks.map((item) => (
+              <CallbackCard key={item.handoff.handoff_id} item={item} showJoin={false} onDone={() => nameRef.current?.focus({ preventScroll: true })} />
+            ))}
+          </div>
+        ) : null}
         <Transcript label={`Conversation with ${who}`}>
           <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
           <OwnerTranscript

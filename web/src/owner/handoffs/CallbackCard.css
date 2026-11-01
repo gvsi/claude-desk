@@ -1,0 +1,36 @@
+/* A callback request: who and why as they typed it, the promised time, and the two next steps. */
+.cd-callback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.cd-callback__top {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-callback__reason {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-callback__when {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* The visitor's words, as a held request's card quotes them. */
+.cd-callback__context {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-callback__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+

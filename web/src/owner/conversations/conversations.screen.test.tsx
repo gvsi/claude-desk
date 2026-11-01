@@ -194,6 +194,100 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it('callback_stays_after_takeover_and_fits_390px', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Dana Whitfield · (510) 555-0118 · Leaking water heater', callbackWindow: null, lead: DANA });
+    const { screen } = await renderRoute(LIST, { viewport: 'phone', pollScale: 100 });
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+    await row.click();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    await screen.getByRole('button', { name: 'Take over', exact: true }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toBeVisible();
+    await expect.element(card).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+    for (const el of screen.container.querySelectorAll('.cd-conversation__scroll, .cd-conversations__open')) {
+      expect(el.scrollWidth).toBeLessThanOrEqual(el.clientWidth);
+    }
+    await screen.getByRole('link', { name: 'All conversations', exact: true }).click();
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+
+    // Recorded history has nobody to answer, even if Needs you carries the same session id.
+    const read = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
+    mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, replayed: true } });
+    const recorded = await renderRoute(conversation(DANA_LIVE), { viewport: 'phone', pollScale: 100 });
+    await expect.element(recorded.screen.getByText('Recorded history, replayed into your copy. It happened before you arrived.', { exact: true })).toBeVisible();
+    expect(recorded.screen.getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('owner_message_closes_the_card_handoff_and_refreshes_needs_you', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    chat.state = { ...chat.state, mode: 'owner' };
+    mockStore.world.reply(chat, [rivera.blocks.handoff.en], 'en');
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    const reads = requests('needsYou').length;
+    await screen.getByRole('textbox', { name: 'Write to them' }).fill('I can help with that.');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.element(card).not.toBeInTheDocument();
+    expect(requests('needsYou').length).toBeGreaterThan(reads);
+    await expect.element(log(screen).getByText('I can help with that.', { exact: true })).toBeVisible();
+  });
+
+  it('takeover_closes_the_card_handoff_and_refreshes_needs_you', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    mockStore.world.reply(chat, [rivera.blocks.handoff.en], 'en');
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    await expect.element(card.getByText('The Desk handed this to you.', { exact: true })).toBeVisible();
+    expect(card.element().textContent).toContain('From the visitor:');
+    expect(card.element().textContent).not.toMatch(/call back/i);
+    const reads = requests('needsYou').length;
+    await screen.getByRole('button', { name: 'Take over', exact: true }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toBeVisible();
+    await expect.element(card).not.toBeInTheDocument();
+    expect(requests('needsYou').length).toBeGreaterThan(reads);
+    await expect.element(screen.getByRole('navigation', { name: 'Conversations' }).getByText("You're in this chat", { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('callback_marks_the_list_and_closes_in_the_chat_with_focus_on_its_name', async () => {
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('the visitor has a chat');
+    chat.displayName = DANA;
+    await expect.poll(() => [...mockStore.world.handoffs.values()].some((h) => h.handoff.session_id === chat.state.session_id)).toBe(true);
+    const { screen } = await renderRoute(LIST, { pollScale: 100 });
+    const list = screen.getByRole('navigation', { name: 'Conversations' });
+    const row = list.getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+    await row.click();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    await expect.element(card).toBeVisible();
+    expect(card.getByRole('button', { name: 'Join the chat' }).elements()).toHaveLength(0);
+    expect(card.getByRole('button').elements()).toHaveLength(1);
+    const header = log(screen).element().querySelector('.cd-transcript-header');
+    expect(header).not.toBeNull();
+    expect(card.element().compareDocumentPosition(header!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.element().parentElement?.parentElement).toHaveClass('cd-conversation__scroll');
+    await expectScreenBasics(screen.container, { owner: true });
+    await card.getByRole('button', { name: 'Mark done' }).click();
+    await expect.element(card).not.toBeInTheDocument();
+    await expect.element(row.getByText('Visitor', { exact: true })).toBeVisible();
+    const heading = screen.getByRole('heading', { level: 2, name: DANA });
+    await expect.poll(() => document.activeElement).toBe(heading.element());
+    expect(getComputedStyle(heading.element()).outlineStyle).toBe('none');
+  });
+
   it('conversation_matches_its_board', async () => {
     named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
