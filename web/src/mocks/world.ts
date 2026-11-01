@@ -81,7 +81,10 @@ export const TYPING_EVERY_MS = 2_000;
 
 export interface SessionRecord {
   state: SessionState;
-  /** A session error ends this chat; owner history remains readable. */
+  /**
+   * The visitor's chat has ended for good (a seeded scenario: its document waits for the owner
+   * after the chat closed). The visitor's routes no longer find it; the owner's history still does.
+   */
   ended: boolean;
   deskId: string;
   ownerPreview: boolean;
@@ -520,7 +523,6 @@ export class MockWorld {
    * left (an item of the event's own kind holding it), as the API does.
    */
   emit(session: SessionRecord, ev: SseEvent): number {
-    if (ev.type === 'error' && ev.code === 'session') session.ended = true;
     const seq = session.events.length + 1;
     session.events.push({ seq, ev });
     session.lastActivity = this.now();

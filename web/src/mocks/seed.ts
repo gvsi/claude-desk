@@ -331,8 +331,9 @@ export function seedWorld(world: MockWorld): void {
       writing,
       (ctx) => ctx.reply([rivera.blocks.handoff[ctx.language]]),
     ] }]);
-    // The same session error used by the public page's ended-chat flow; a new chat cannot resume it.
+    // The chat ends for good: the visitor's page hears the session error, and a new chat can't resume it.
     world.emit(chat, { type: 'error', code: 'session' });
+    chat.ended = true;
     return;
   }
 
