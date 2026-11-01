@@ -394,22 +394,31 @@ async def test_a_test_client_is_put_only_when_the_owner_says_yes(app, browser, f
     assert (again.status_code, again.json()) == (409, {"error": "conflict"})
 
 
-@pytest.mark.parametrize("typed, yes", [
-    ("yes", True), ("Yes please!", True), ("sure", True), ("OK", True), ("Sí", True),
-    ("no", False), ("No thanks.", False), ("maybe later", False), ("Yes, but with my other email", False),
-    ("Can you change my hours first?", False),
+@pytest.mark.parametrize("typed, read", [
+    ("yes", "yes"), ("Yes please!", "yes"), ("Sure, go ahead", "yes"), ("OK, add me", "yes"),
+    ("Yes, add me as a test client", "yes"), ("Sí", "yes"), ("vale", "yes"),
+    ("no", "no"), ("No, not now", "no"), ("don't add me", "no"), ("Maybe later", "no"), ("No gracias", "no"),
+    ("what does that mean?", "again"), ("Can you change my hours first?", "again"),
 ])
 async def test_a_typed_answer_to_the_test_client_offer_is_read_by_code(app, browser, fake, kernel_http, model,
-                                                                       typed, yes):
+                                                                       typed, read):
     owner, state = await offered(app, browser, kernel_http, model)
     fake.calls.clear()
     asked = len(model.requests)
     reply = await say(owner, state, typed)
     assert reply.status_code == 200, reply.text
     done = reply.json()
-    assert done["step"] == "tools" and len(model.requests) == asked
-    assert len(fake.called("PUT /desks/{id}/people")) == int(yes)
-    assert done["messages"][-2:] == ([owner_line(typed), ADDED] if yes else [OFFER, owner_line(typed)])
+    assert len(model.requests) == asked                   # read word by word by code, a "no" word winning
+    assert len(fake.called("PUT /desks/{id}/people")) == int(read == "yes")
+    if read == "again":
+        # Neither a yes nor a no: the same offer again, with its choices, and nothing written.
+        assert (done["step"], done["question"]) == ("questions", "test_client")
+        assert done["messages"][-3:] == [OFFER, owner_line(typed), OFFER]
+        assert (await say(owner, state, setup.TEST_CLIENT_YES)).json()["messages"][-1] == ADDED
+        assert len(fake.called("PUT /desks/{id}/people")) == 1
+    else:
+        assert done["step"] == "tools"
+        assert done["messages"][-2:] == ([owner_line(typed), ADDED] if read == "yes" else [OFFER, owner_line(typed)])
 
 
 @pytest.mark.parametrize("failure", ["422", "500", "connect"])

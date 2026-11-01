@@ -373,13 +373,11 @@ TEST_CLIENT_NO = "Not now"
 TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me."
 TEST_CLIENT: TestClientQuestion = "test_client"   # the offer's question, which code alone asks and reads
 TEST_CLIENT_REF = "test-client"                   # the owner's ref among the Desk's people, as a test client
-# The typed answers code reads as a yes to the test-client offer, in lower case without punctuation (`_says_yes`), in
-# English and Spanish. Anything else, a typed "no" or an unclear answer, writes nothing.
-TEST_CLIENT_TYPED_YES = frozenset({
-    "yes", "yes please", "yeah", "yep", "yup", "sure", "sure thing", "ok", "okay", "please", "please do", "do it",
-    "go ahead", "add me", "please add me", "yes add me", "yes please add me", "sounds good",
-    "sí", "si", "sí por favor", "si por favor", "claro", "claro que sí", "vale", "dale", "agrégame",
-})
+# The words and phrases code reads in a typed answer to the test-client offer (`_reads_yes`), in English and Spanish:
+# a "no" one wins over any "yes" one, and an answer with neither gets the same offer again.
+TEST_CLIENT_TYPED_YES = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead", "please do", "do it", "add me",
+                         "sounds good", "sí", "si", "vale", "claro", "dale", "añádeme", "agrégame")
+TEST_CLIENT_TYPED_NO = ("no", "not", "don't", "dont", "nope", "not now", "later", "skip", "no gracias")
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -2709,37 +2707,46 @@ def _owner_contact(interview: Interview) -> str | None:
     return phones[0] if len(phones) == 1 else None
 
 
-def _offer_test_client(interview: Interview) -> None:
-    """Once the plan is closed, ask once whether to put the owner on record as a test client, with code's two choices,
-    and only when they typed their own contact (`_owner_contact`). Setup then waits on the answer
-    (`_answer_test_client`) before its Tools step."""
-    if _owner_contact(interview) is None or any(entry.question == TEST_CLIENT for entry in interview.transcript):
-        return
+def _ask_test_client(interview: Interview) -> None:
+    """The test-client offer, with code's two choices, as the question setup waits on."""
     interview.transcript.append(Entry(role="claude", text=TEST_CLIENT_OFFER, question=TEST_CLIENT, choices=[
         Choice(text=TEST_CLIENT_YES, recommended=True), Choice(text=TEST_CLIENT_NO, recommended=False)]))
     interview.step = "questions"
 
 
-def _words(text: str) -> str:
-    return " ".join(re.findall(r"[^\W_]+", text.casefold()))
+def _offer_test_client(interview: Interview) -> None:
+    """Once the plan is closed, offer once to put the owner on record as a test client, only when they typed their own
+    contact (`_owner_contact`). Setup then waits on the answer (`_answer_test_client`) before its Tools step."""
+    if _owner_contact(interview) is None or any(entry.question == TEST_CLIENT for entry in interview.transcript):
+        return
+    _ask_test_client(interview)
 
 
-def _says_yes(text: str) -> bool:
-    """Whether the owner's answer to the test-client offer is a yes, read by code alone: its yes choice, or a plain
-    typed yes (`TEST_CLIENT_TYPED_YES`), whatever its case and punctuation."""
-    said = _words(text)
-    return said == _words(TEST_CLIENT_YES) or said in TEST_CLIENT_TYPED_YES
+def _reads_yes(text: str) -> bool | None:
+    """The owner's answer to the test-client offer, read word by word by code alone: False when it has a "no" word or
+    phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and "don't add me" are no), else True when it has a "yes" one
+    (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client" and "Sure, go ahead" are yes), else None."""
+    said = " {} ".format(" ".join(re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.casefold().replace("\u2019", "'"))))
+    if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_NO):
+        return False
+    if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_YES):
+        return True
+    return None
 
 
 async def _answer_test_client(owner: OwnerCtx, interview: Interview, text: str) -> None:
-    """The owner's answer to the test-client offer, read by code with no model call; setup then moves on to its Tools
-    step. Only a yes (`_says_yes`) puts the owner on record as a client (`PUT /desks/{id}/people`, ref
-    `TEST_CLIENT_REF`), in their display name and with the contact they typed (`_owner_contact`), and adds
-    `TEST_CLIENT_ADDED`. Any other answer writes nothing and adds no line. It is a person on record and nothing else:
-    no limit, rule, fact, document or public line. A failed write never stops setup: it is logged by type, never with
-    the contact, and adds no line."""
+    """The owner's answer to the test-client offer, read by code with no model call (`_reads_yes`). An answer that is
+    neither a yes nor a no gets the same offer again; a yes or a no moves setup on to its Tools step. Only a yes puts
+    the owner on record as a client (`PUT /desks/{id}/people`, ref `TEST_CLIENT_REF`), in their display name and with
+    the contact they typed (`_owner_contact`), and adds `TEST_CLIENT_ADDED`; a no writes nothing and adds no line. It
+    is a person on record and nothing else: no limit, rule, fact, document or public line. A failed write never stops
+    setup: it is logged by type, never with the contact, and adds no line."""
+    said = _reads_yes(text)
+    if said is None:
+        _ask_test_client(interview)
+        return
     contact = _owner_contact(interview)
-    if _says_yes(text) and contact is not None:
+    if said and contact is not None:
         try:
             desk_id = owner.desk(interview.desk_id)
             business = await _business(owner, desk_id)
