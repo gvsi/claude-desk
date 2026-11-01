@@ -16,8 +16,8 @@ export function BusinessJobs({ view, people }: { view: RulesView; people: People
     const def = business.get(row.tool);
     const state = toolState(row);
     if (def === undefined || (state !== 'on' && state !== 'changed')) return [];
-    const description = businessRulesDescription(def);
-    return description === null ? [] : [{ row, def, description }];
+    const description = businessRulesDescription(def) ?? row.description_confirmed;
+    return [{ row, def, description }];
   });
   if (jobs.length === 0) return null;
 

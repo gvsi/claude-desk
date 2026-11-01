@@ -107,7 +107,7 @@ it('renders business titles and questions as literal text with no links or injec
   }
 });
 
-it('lists changed jobs but omits off, new, delisted, unknown and malformed jobs on both pages', async () => {
+it('keeps titled jobs with confirmed fallback descriptions for unknown or malformed configuration on both pages', async () => {
   const desk = seedJobs();
   const intro = chenBusinessTools[0];
   if (!intro?.business) throw new Error('The fixture has an intro call definition');
@@ -118,8 +118,8 @@ it('lists changed jobs but omits off, new, delisted, unknown and malformed jobs 
     { ...intro, tool: 'desk.delisted', review_reason: 'delisted' },
     { ...intro, tool: 'desk.null', status: 'enabled', business: null },
     { ...intro, tool: 'desk.blank', status: 'enabled', business: { ...intro.business, title: ' ' } },
-    { ...intro, tool: 'desk.unknown', status: 'enabled', business: { ...intro.business, config: { block: 'unknown' } } } as unknown as ToolRow,
-    { ...intro, tool: 'desk.malformed', status: 'enabled', business: { ...intro.business, config: { block: 'intake', questions: ['Which year?', null] } } } as unknown as ToolRow,
+    { ...intro, tool: 'desk.unknown', status: 'enabled', business: { ...intro.business, title: 'Unknown configuration job', config: { block: 'unknown' } } } as unknown as ToolRow,
+    { ...intro, tool: 'desk.malformed', review_reason: 'changed', business: { ...intro.business, title: 'Malformed configuration job', config: { block: 'intake', questions: ['Which year?', null] } } } as unknown as ToolRow,
     { ...intro, tool: 'desk.effects', status: 'enabled', effects: [null] } as unknown as ToolRow,
     { ...intro, tool: 'desk.future-effect', status: 'enabled', effects: ['future'] } as unknown as ToolRow,
   ]);
@@ -128,8 +128,14 @@ it('lists changed jobs but omits off, new, delisted, unknown and malformed jobs 
     const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
     await expect.element(jobs).toBeVisible();
     expect([...jobs.element().querySelectorAll('.cd-tool-rules__tool-name')].map((el) => el.textContent)).toEqual([
-      'Book a free intro call', 'New client intake', 'Changed intro call',
+      'Book a free intro call', 'New client intake', 'Changed intro call', 'Unknown configuration job', 'Malformed configuration job',
     ]);
+    for (const name of ['Unknown configuration job', 'Malformed configuration job']) {
+      const job = jobs.getByRole('region', { name });
+      await expect.element(job.getByText(intro.description_confirmed, { exact: true })).toBeVisible();
+      await expect.element(job.getByText('Not covered by a rule you set, so I ask you.')).toBeVisible();
+      expect(job.getByRole('link').elements()).toHaveLength(0);
+    }
     expect(screen.container.querySelector('.cd-app-error')).toBeNull();
   }
 });
