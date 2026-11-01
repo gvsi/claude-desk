@@ -235,7 +235,7 @@ def test_job_names_are_the_required_checks():
         assert job["timeout-minutes"] == LONG_JOBS.get(job["name"], 25), job["name"]
 
 
-# The two suites that run past 20 minutes on a spot runner get 40; every other job keeps 25.
+# The two suites that run past 20 minutes get 40; every other job keeps 25.
 LONG_JOBS = {"backend tests": 40, "tier 1 evals": 40}
 
 
@@ -246,12 +246,12 @@ SWITCH = (
     "|| github.event.pull_request.head.repo.full_name == github.repository)"
 )
 # Where each job runs: GitHub-hosted ubuntu-24.04 unless the switch is on; then a single-use
-# self-hosted runner, spot for pull requests and on-demand otherwise, whose label names the run,
+# self-hosted on-demand runner for every event (docs/ci.md, "Runners"), whose label names the run,
 # the attempt and the job. <suffix> is the job's own part of the label.
 RUNS_ON = (
     "${{ " + SWITCH + " && fromJSON(format("
     """'["self-hosted","desk-ci-{0}-{1}-{2}-<suffix>"]', """
-    "github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) "
+    "'ondemand', github.run_id, github.run_attempt)) "
     "|| 'ubuntu-24.04' }}"
 )
 # The runner launcher's suffixes, one per job.
