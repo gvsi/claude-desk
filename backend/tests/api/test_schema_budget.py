@@ -38,8 +38,9 @@ from desk.api.prompts import (
 SCHEMA_OPTIONAL_MAX, SCHEMA_UNION_MAX = 8, 6
 REQUEST_OPTIONAL_MAX, REQUEST_UNION_MAX = 24, 16
 # The longest a setup turn's strict schema may be, as `len(json.dumps(strict_schema(model)))` with json's default
-# separators (how the live probe measured it): on the Claude API, a what_you_do turn of 8,337 characters compiled and
-# one of 10,895 was refused as too large a grammar.
+# separators (how the live probe measured it). This is a margin, not a measured limit: no refusal is known to come
+# from characters alone (the 10,895-character turn that was refused had 23 top-level properties), and a turn of
+# 8,802 characters and 20 properties compiled.
 SETUP_TURN_SCHEMA_CHARS_MAX = 9_000
 # The most top-level properties a setup turn's strict schema may have: the limit found by live probes, which the
 # character cap alone didn't catch. Turns of 21 properties were refused as too large a grammar even with every
