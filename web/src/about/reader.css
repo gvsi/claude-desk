@@ -1148,6 +1148,11 @@
   padding: var(--space-12) var(--space-16) 0;
 }
 
+/* 8 px either side of each name, not the laptop's 12, keeps the three pages on one row down to a 375 px phone. */
+.cd-about-switch--compact .cd-about-switch__link {
+  padding: 0 var(--space-8);
+}
+
 .cd-about-page--compact .cd-about-hero {
   padding-top: calc(var(--space-18) * 2);
 }
