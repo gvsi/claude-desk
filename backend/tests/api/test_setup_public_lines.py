@@ -150,6 +150,18 @@ async def test_confirm_publishes_only_changed_fact_parts(lines_setup, engine, mo
     assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == []
 
 
+async def test_confirm_republishes_empty_suggested_parts(lines_setup, engine, monkeypatch):
+    owner, state, path = lines_setup
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", json={})
+    assert reply.status_code == 200, reply.text
+    assert [part for part, _ in calls] == ["charter", "hours", "prices"]
+    assert dict(calls)["hours"] == {"hours": []}
+    assert dict(calls)["prices"] == {"price_items": []}
+    assert reply.json()["hours"] is reply.json()["prices"] is None
+    assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == ["hours", "price_items"]
+
+
 async def test_delete_suggested_prices_clears_answers_without_publishing_them(lines_setup, engine, monkeypatch):
     owner, state, path = lines_setup
     await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
@@ -161,8 +173,44 @@ async def test_delete_suggested_prices_clears_answers_without_publishing_them(li
     answers = (await stored(engine, state["interview_id"]))["answers"]
     assert answers["price_items"] == []
     assert "price_items" not in answers["suggested_fields"]
-    assert [part for part, _ in calls] == ["charter"]
+    assert [part for part, _ in calls] == ["charter", "prices"]
+    assert dict(calls)["prices"] == {"price_items": []}
     assert "contact" not in {claim["key"] for claim in calls[0][1]["charter"]}
+
+
+@pytest.mark.parametrize(("key", "field", "value"), [("hours", "hours", HOURS), ("prices", "price_items", PRICES)])
+async def test_delete_republishes_after_failed_confirm_repair(lines_setup, engine, fake, monkeypatch, key, field, value):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, **{field: value})
+    before = await stored(engine, state["interview_id"])
+    original = CredentialView.call
+    lost = False
+
+    async def lose_and_fail_repair(self, route, body=None, **kwargs):
+        nonlocal lost
+        if lost and route.startswith("PUT /desks/{id}/"):
+            raise KernelUnavailable(route)
+        result = await original(self, route, body, **kwargs)
+        if route == f"PUT /desks/{{id}}/{key}":
+            lost = True
+            raise KernelUnavailable(route)
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", lose_and_fail_repair)
+    failed = await owner.browser.post(f"{path}/confirm", json={})
+    assert failed.status_code == 503, failed.text
+    assert await stored(engine, state["interview_id"]) == before
+    desk = fake.desks[state["desk_id"]]
+    assert getattr(desk, key)
+    monkeypatch.setattr(CredentialView, "call", original)
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/{key}")
+    assert reply.status_code == 200, reply.text
+    assert reply.json()[key] is None
+    assert (await stored(engine, state["interview_id"]))["answers"][field] == []
+    assert [part for part, _ in calls] == ["charter", key]
+    assert calls[-1][1] == {field: []}
+    assert not getattr(desk, key)
 
 
 async def test_contact_edit_confirms_and_publishes_with_a_200_character_limit(lines_setup, engine, fake, monkeypatch):
@@ -189,10 +237,45 @@ async def test_contact_edit_confirms_and_publishes_with_a_200_character_limit(li
     assert charter(fake, state["desk_id"])["charter:contact"]["claims"][0]["value"] == text
 
 
-@pytest.mark.parametrize(("part", "key"), [("hours", "hours"), ("calendar", "hours"), ("prices", "prices")])
-async def test_part_refusal_names_item_and_repairs_all_changed_parts(lines_setup, engine, fake, monkeypatch, part, key):
+async def test_calendar_conflict_repairs_earlier_parts_without_saving(lines_setup, engine, fake, monkeypatch):
     owner, state, path = lines_setup
     await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    before = await stored(engine, state["interview_id"])
+    original = KernelHttp._send
+    conflicted = False
+    calls = []
+
+    async def conflict_once(self, route, request, **kwargs):
+        nonlocal conflicted
+        if route.startswith("PUT /desks/{id}/"):
+            calls.append((route.rsplit("/", 1)[1], json.loads(request.content)))
+        if route == "PUT /desks/{id}/calendar" and not conflicted:
+            conflicted = True
+            return httpx.Response(409, json={"code": "conflict", "detail": {"slot_spoken_for": []}})
+        return await original(self, route, request, **kwargs)
+
+    monkeypatch.setattr(KernelHttp, "_send", conflict_once)
+    reply = await owner.browser.post(f"{path}/confirm", json={})
+    assert reply.status_code == 409, reply.text
+    assert reply.json() == {"error": "kernel", "code": "conflict"}
+    assert await stored(engine, state["interview_id"]) == before
+    assert fake.desks[state["desk_id"]].hours == []
+    assert "charter:contact" not in charter(fake, state["desk_id"])
+    assert [part for part, _ in calls] == ["charter", "hours", "calendar"] * 2
+    assert dict(calls[3:])["hours"] == {"hours": []}
+    assert dict(calls[3:])["calendar"] == {"calendar_slots": []}
+
+
+@pytest.mark.parametrize(("part", "key"), [("hours", "hours"), ("calendar", "hours"), ("prices", "prices")])
+async def test_part_refusal_names_item_and_repairs_only_sent_parts(lines_setup, engine, fake, monkeypatch, part, key):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    # A calendar the attempt never reaches must survive an hours refusal.
+    slot = {"slot_id": "S-20261102-1230", "starts_at": "2026-11-02T12:30:00-08:00", "minutes": 30}
+    if part == "hours":
+        reply = await owner.browser.put(f'/api/owner/desks/{state["desk_id"]}/calendar',
+                                        json={"calendar_slots": [slot]})
+        assert reply.status_code == 200, reply.text
     before = await stored(engine, state["interview_id"])
     calls = []
     original = KernelHttp._send
@@ -212,14 +295,19 @@ async def test_part_refusal_names_item_and_repairs_all_changed_parts(lines_setup
     assert reply.status_code == 422, reply.text
     assert reply.json() == {"error": "line_refused", "key": key}
     assert await stored(engine, state["interview_id"]) == before
-    assert [part for part, _ in calls[-4:]] == ["charter", "hours", "calendar", "prices"]
-    restored = dict(calls[-4:])
+    sent = ["charter", "hours", "calendar", "prices"]
+    sent = sent[:sent.index(part) + 1]
+    assert [name for name, _ in calls] == sent * 2
+    restored = dict(calls[len(sent):])
     assert "contact" not in {claim["key"] for claim in restored["charter"]["charter"]}
     assert restored["hours"] == {"hours": []}
-    assert restored["calendar"] == {"calendar_slots": []}
-    assert restored["prices"] == {"price_items": []}
+    if "calendar" in sent:
+        assert restored["calendar"] == {"calendar_slots": []}
+    if "prices" in sent:
+        assert restored["prices"] == {"price_items": []}
     desk = fake.desks[state["desk_id"]]
-    assert desk.hours == [] and desk.slots == {} and desk.prices == {}
+    assert desk.hours == [] and desk.prices == {}
+    assert set(desk.slots) == ({slot["slot_id"]} if part == "hours" else set())
     assert "charter:contact" not in charter(fake, state["desk_id"])
 
 
@@ -254,7 +342,9 @@ async def test_delete_clears_other_suggested_items(lines_setup, engine, monkeypa
     assert key not in {line["key"] for line in reply.json()["lines"]}
     if key == "hours":
         assert reply.json()["hours"] is None
-    assert [part for part, _ in calls] == ["charter"]
+    assert [part for part, _ in calls] == (["charter", "hours"] if key == "hours" else ["charter"])
+    if key == "hours":
+        assert dict(calls)["hours"] == {"hours": []}
     assert "contact" not in {claim["key"] for claim in calls[0][1]["charter"]}
 
 
@@ -268,7 +358,7 @@ async def test_contact_refusal_names_contact_without_saving(lines_setup, engine,
     assert reply.json() == {"error": "line_refused", "key": "contact", "reason": ["lex.en.promise"]}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter refused (key=contact)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=contact)")
     assert "Private contact marker" not in caplog.text
 
 
@@ -330,15 +420,50 @@ async def test_lost_part_response_repairs_same_parts_under_guard(lines_setup, en
     reply = await owner.browser.post(f"{path}/confirm", json={})
     assert reply.status_code == 503, reply.text
     assert await stored(engine, state["interview_id"]) == before
-    assert [part for part, _ in calls[-4:]] == ["charter", "hours", "calendar", "prices"]
-    restored = dict(calls[-4:])
+    sent = ["charter", "hours", "calendar", "prices"]
+    sent = sent[:sent.index(part) + 1]
+    assert [name for name, _ in calls] == sent * 2
+    restored = dict(calls[len(sent):])
     assert restored["hours"] == {"hours": []}
-    assert restored["calendar"] == {"calendar_slots": []}
-    assert restored["prices"] == {"price_items": []}
+    if "calendar" in sent:
+        assert restored["calendar"] == {"calendar_slots": []}
+    if "prices" in sent:
+        assert restored["prices"] == {"price_items": []}
     assert "contact" not in {claim["key"] for claim in restored["charter"]["charter"]}
     desk = fake.desks[state["desk_id"]]
     assert desk.hours == [] and desk.slots == {} and desk.prices == {}
     assert (await owner.browser.get(path)).status_code == 200
+
+
+async def test_lost_prices_response_allows_time_for_every_repair_part(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    before = await stored(engine, state["interview_id"])
+    calls = []
+    original = CredentialView.call
+    lost = False
+
+    async def slow_repair(self, route, body=None, **kwargs):
+        nonlocal lost
+        if route.startswith("PUT /desks/{id}/"):
+            if lost:
+                await asyncio.sleep(0.4)
+            calls.append((route.rsplit("/", 1)[1], body.model_dump(mode="json")))
+        result = await original(self, route, body, **kwargs)
+        if route == "PUT /desks/{id}/prices" and not lost:
+            lost = True
+            raise KernelUnavailable(route)
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", slow_repair)
+    monkeypatch.setattr(setup, "PUBLIC_PARTS_REPAIR_TIMEOUT_S", 1)
+    reply = await owner.browser.post(f"{path}/confirm", json={})
+    assert reply.status_code == 503, reply.text
+    assert await stored(engine, state["interview_id"]) == before
+    assert fake.desks[state["desk_id"]].prices == {}
+    assert [part for part, _ in calls] == ["charter", "hours", "calendar", "prices"] * 2
+    assert dict(calls[4:])["prices"] == {"price_items": []}
+    assert state["interview_id"] not in setup._RUNNING
 
 
 def charter(fake, desk_id):
@@ -346,9 +471,9 @@ def charter(fake, desk_id):
             if fact.kind == "charter"}
 
 
-def assert_charter_logs(caplog, *messages):
+def assert_public_parts_logs(caplog, *messages):
     # Exact messages prove each outcome is logged once, using keys rather than any claim text.
-    assert [message for message in caplog.messages if message.startswith("setup public charter")] == list(messages)
+    assert [message for message in caplog.messages if message.startswith("setup public parts")] == list(messages)
 
 
 async def test_lost_put_response_restores_stored_charter(lines_setup, engine, fake, monkeypatch, caplog):
@@ -372,7 +497,7 @@ async def test_lost_put_response_restores_stored_charter(lines_setup, engine, fa
     assert len(calls) == 2
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter restored from stored answers (key=policy:pricing)")
+    assert_public_parts_logs(caplog, "setup public parts restored from stored answers (key=policy:pricing)")
     assert "Private candidate marker" not in caplog.text
 
 
@@ -393,13 +518,13 @@ async def test_uncertain_put_repair_times_out_and_releases_guard(lines_setup, en
         return await original(self, route, body, **kwargs)
 
     monkeypatch.setattr(CredentialView, "call", hang_repair)
-    monkeypatch.setattr(setup, "PUBLIC_CHARTER_REPAIR_TIMEOUT_S", 1)
+    monkeypatch.setattr(setup, "PUBLIC_PARTS_REPAIR_TIMEOUT_S", 1)
     reply = await asyncio.wait_for(request_lines(owner.browser, path, method), 5)
     assert reply.status_code == 503, reply.text
     assert len(calls) == 2
     assert await stored(engine, state["interview_id"]) == before
     key = "policy:pricing" if method == "put" else None
-    assert_charter_logs(caplog, f"setup public charter restore failed (TimeoutError, key={key})")
+    assert_public_parts_logs(caplog, f"setup public parts restore failed (TimeoutError, key={key})")
     assert "Quotes before repairs." not in caplog.text
     assert "We answer questions." not in caplog.text
     assert (await owner.browser.get(path)).status_code == 200
@@ -545,7 +670,7 @@ async def test_refused_how_we_help_is_dropped_for_pricing(lines_setup, engine, f
     assert calls[1]["policy:pricing"] == pricing
     assert "charter:policy:how_we_help" not in charter(fake, state["desk_id"])
     assert (await stored(engine, state["interview_id"]))["answers"]["pricing"] == pricing
-    assert_charter_logs(caplog, "setup public charter refused (key=policy:how_we_help)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=policy:how_we_help)")
     assert "We answer questions." not in caplog.text
 
 
@@ -571,7 +696,7 @@ async def test_mixed_help_refusal_keeps_editable_line_strict(lines_setup, engine
     assert len(calls) == 1
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter refused (key=policy:pricing)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=policy:pricing)")
     assert "We answer questions." not in caplog.text
     assert "Quotes before repairs." not in caplog.text
 
@@ -586,7 +711,7 @@ async def test_put_refusal_names_key_without_saving(lines_setup, engine, fake, m
     assert reply.json() == {"error": "line_refused", "key": "policy:pricing", "reason": ["digit", "currency"]}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter refused (key=policy:pricing)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=policy:pricing)")
     assert "private marker" not in caplog.text
 
 
@@ -612,8 +737,8 @@ async def test_help_retry_refusal_saves_nothing(lines_setup, engine, fake, monke
     assert len(calls) == 2
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter refused (key=policy:how_we_help)",
-                        "setup public charter refused (key=policy:pricing)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=policy:how_we_help)",
+                        "setup public parts refused (key=policy:pricing)")
     assert "We answer questions." not in caplog.text
     assert "Written quotes before work." not in caplog.text
 
@@ -639,7 +764,7 @@ async def test_refusal_prefers_the_edited_line(lines_setup, engine, fake, monkey
     assert reply.json() == {"error": "line_refused", "key": "policy:after_hours", "reason": ["lex.en.promise"]}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter refused (key=policy:after_hours)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=policy:after_hours)")
     assert "Private after hours marker" not in caplog.text
 
 
@@ -666,7 +791,7 @@ async def test_refusal_without_detail_is_plain_line_refused(lines_setup, engine,
     assert reply.json() == {"error": "line_refused"}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter refused (key=None)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=None)")
     assert "Quotes before repairs." not in caplog.text
 
 
@@ -704,7 +829,7 @@ async def test_failed_save_restores_charter_from_current_stored_answers(lines_se
     assert {fact["claims"][0]["key"]: fact["claims"][0]["value"]
             for fact_id, fact in charter(fake, state["desk_id"]).items() if fact_id != "charter:hours"} == restored
     assert caplog.messages.count("setup public lines save failed (ApiProblem)") == 1
-    assert_charter_logs(caplog, "setup public charter restored from stored answers (key=policy:pricing)")
+    assert_public_parts_logs(caplog, "setup public parts restored from stored answers (key=policy:pricing)")
     assert "Updated by another request." not in caplog.text
     assert "Quotes before repairs." not in caplog.text
 
@@ -769,7 +894,7 @@ async def test_confirm_refusal_names_the_refused_line(lines_setup, engine, fake,
     assert reply.json() == {"error": "line_refused", "key": "policy:intake", "reason": ["lex.en.promise"]}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter refused (key=policy:intake)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=policy:intake)")
     assert "Tell us what needs fixing." not in caplog.text
 
 
@@ -785,7 +910,7 @@ async def test_charter_cap_refusal_has_no_line_key(lines_setup, engine, fake, mo
     assert reply.json() == {"error": "line_refused"}
     assert await stored(engine, state["interview_id"]) == before
     assert charter(fake, state["desk_id"]) == published
-    assert_charter_logs(caplog, "setup public charter refused (key=None)")
+    assert_public_parts_logs(caplog, "setup public parts refused (key=None)")
     assert "Quotes before repairs." not in caplog.text
 
 
@@ -815,7 +940,7 @@ async def test_failed_restore_is_logged_once_and_answers_conflict(lines_setup, e
     assert await stored(engine, state["interview_id"]) == before
     assert caplog.messages.count("setup public lines save failed (RuntimeError)") == 1
     key = "policy:pricing" if method == "put" else None
-    assert_charter_logs(caplog, f"setup public charter restore failed (RuntimeError, key={key})")
+    assert_public_parts_logs(caplog, f"setup public parts restore failed (RuntimeError, key={key})")
     assert "private save failure marker" not in caplog.text
     assert "private restore failure marker" not in caplog.text
 

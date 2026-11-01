@@ -2650,7 +2650,7 @@ PUBLIC_LINE_KEYS = {
     "service_area": "policy:service_area",
     "how_we_help": "policy:how_we_help",
 }
-PUBLIC_CHARTER_REPAIR_TIMEOUT_S = DEFAULT_TIMEOUT_S
+PUBLIC_PARTS_REPAIR_TIMEOUT_S = DEFAULT_TIMEOUT_S
 
 
 class PublicLineProblem(Exception):
@@ -2713,21 +2713,26 @@ async def public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
 
 
 async def _put_public_parts(owner: OwnerCtx, interview: Interview, now: datetime, *,
-                           changed: frozenset[str], edited_key: str | None = None) -> None:
+                           selected: frozenset[str], sent: set[str] | None = None,
+                           edited_key: str | None = None) -> None:
     timezone = (await _business(owner, interview.desk_id))["timezone"]
     parts = seed_parts(_published_answers(interview.answers), timezone, business_type=interview.business_type,
                        today=now.astimezone(ZoneInfo(timezone)).date())
     charter = parts.charter
-    for attempt in range(2):
+    for attempt in range(2) if "charter" in selected else ():
         try:
+            if sent is not None:
+                sent.add("charter")
             await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter),
                                     path={"id": interview.desk_id})
             break
         except KernelFailed as failure:
             if failure.status != 422:
                 raise
+            if sent is not None:
+                sent.discard("charter")  # A definite refusal has applied nothing, including on the retry.
             refused = _line_refused(failure, edited_key)
-            logger.warning("setup public charter refused (key=%s)", refused.answer.key)
+            logger.warning("setup public parts refused (key=%s)", refused.answer.key)
             if attempt == 0 and set(_public_refusal_detail(failure)) == {"policy:how_we_help"}:
                 # This claim is code-owned; editable lines must always be corrected by the owner.
                 charter = [claim for claim in charter if claim.key != "policy:how_we_help"]
@@ -2735,20 +2740,21 @@ async def _put_public_parts(owner: OwnerCtx, interview: Interview, now: datetime
             raise refused from None
     path = {"id": interview.desk_id}
     writes = []
-    if "hours" in changed:
-        writes.extend([
-            ("hours", "hours", DeskHoursRequest(hours=parts.hours)),
-            ("calendar", "hours", DeskCalendarRequest(calendar_slots=parts.calendar)),
-        ])
-    if "price_items" in changed:
+    if "hours" in selected:
+        writes.append(("hours", "hours", DeskHoursRequest(hours=parts.hours)))
+    if "calendar" in selected:
+        writes.append(("calendar", "hours", DeskCalendarRequest(calendar_slots=parts.calendar)))
+    if "prices" in selected:
         writes.append(("prices", "prices", DeskPricesRequest(price_items=parts.prices)))
     for part, key, body in writes:
         try:
+            if sent is not None:
+                sent.add(part)
             await owner.kernel.call(f"PUT /desks/{{id}}/{part}", body, path=path)
         except KernelFailed as failure:
             if failure.status != 422:
                 raise
-            logger.warning("setup public part refused (key=%s)", key)
+            logger.warning("setup public parts refused (key=%s)", key)
             raise PublicLineProblem("line_refused", key=key) from None
 
 
@@ -2798,34 +2804,36 @@ async def delete_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id:
             field: [] if field in ("hours", "price_items") else "",
             "suggested_fields": [name for name in interview.answers.suggested_fields if name != field],
         })
-        return await _commit_public_lines(owner, engine, interview, seen, now, key=key)
+        return await _commit_public_lines(owner, engine, interview, seen, now, key=key,
+                                          republish=frozenset({key}) if key in ("hours", "prices") else frozenset())
 
 
 async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: Interview, seen: dict,
-                               now: datetime, *, key: str | None = None) -> SetupPublicLines:
+                               now: datetime, *, key: str | None = None,
+                               republish: frozenset[str] = frozenset()) -> SetupPublicLines:
     before = _published_answers(SetupAnswers.model_validate(seen["answers"]))
     after = _published_answers(interview.answers)
     changed = frozenset(field for field in ("hours", "price_items") if getattr(before, field) != getattr(after, field))
+    selected = frozenset({"charter"} | republish
+                         | ({"hours", "calendar"} if "hours" in changed else set())
+                         | ({"prices"} if "price_items" in changed else set()))
+    sent: set[str] = set()
 
     async def repair() -> None:
         try:
-            async with asyncio.timeout(PUBLIC_CHARTER_REPAIR_TIMEOUT_S):
+            async with asyncio.timeout(PUBLIC_PARTS_REPAIR_TIMEOUT_S * (1 + len(sent))):
                 stored = await _read(engine, owner, interview.interview_id)
-                await _put_public_parts(owner, stored, now, changed=changed, edited_key=key)
+                await _put_public_parts(owner, stored, now, selected=frozenset(sent), edited_key=key)
         except Exception as restore_failed:
-            logger.error("setup public charter restore failed (%s, key=%s)", type(restore_failed).__name__, key)
+            logger.error("setup public parts restore failed (%s, key=%s)", type(restore_failed).__name__, key)
         else:
-            logger.warning("setup public charter restored from stored answers (key=%s)", key)
+            logger.warning("setup public parts restored from stored answers (key=%s)", key)
 
     async def settle() -> SetupPublicLines:
         try:
-            await _put_public_parts(owner, interview, now, changed=changed, edited_key=key)
-        except KernelUnavailable:
-            await repair()
-            raise
-        except PublicLineProblem as refused:
-            if refused.answer.key in ("hours", "prices"):
-                # The charter and earlier parts may already have been accepted.
+            await _put_public_parts(owner, interview, now, selected=selected, sent=sent, edited_key=key)
+        except Exception:
+            if sent:
                 await repair()
             raise
         try:
@@ -2860,6 +2868,8 @@ async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_i
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         seen = _stored(interview)
+        republish = frozenset(part for field, part in (("hours", "hours"), ("price_items", "prices"))
+                              if field in interview.answers.suggested_fields)
         public = _public_lines(interview.answers)
         listed = {line.key for line in public.lines}
         confirmed = {field for field, key in PUBLIC_LINE_KEYS.items() if key in listed}
@@ -2870,7 +2880,7 @@ async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_i
         interview.answers = interview.answers.model_copy(update={
             "suggested_fields": [field for field in interview.answers.suggested_fields if field not in confirmed],
         })
-        return await _commit_public_lines(owner, engine, interview, seen, now)
+        return await _commit_public_lines(owner, engine, interview, seen, now, republish=republish)
 
 
 def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,
