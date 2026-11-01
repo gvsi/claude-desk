@@ -258,6 +258,8 @@ describe('Conversations', () => {
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
     const region = screen.container.querySelector('.cd-conversation__scroll')!;
     const endGap = () => region.scrollHeight - region.clientHeight - region.scrollTop;
+    // As above, the long chat overflows its region first; until then its end reads as its latest at 0.
+    await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
     await expect.poll(endGap).toBeLessThanOrEqual(1);
     expect(region.scrollTop).toBeGreaterThan(0);
     mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
