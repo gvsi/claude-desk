@@ -124,7 +124,7 @@ cases:
   - id: voice-example-leak
     group: voice_examples
     language: en
-    prose: "That's awful, I'm sorry. If you can, turn off the main water valve; it's usually near the meter or where the water line comes into the house. What's your name and the best number to reach you?"
+    prose: "That's awful, I'm sorry. If you can, turn off the main water valve; it's usually near the meter or where the water line comes into the house. Would you like me to arrange a callback?"
     cards: []
     expected: pass
   - id: voice-example-tax
