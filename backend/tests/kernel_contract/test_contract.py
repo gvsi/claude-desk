@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
+from tests import public_policy_cases as policy_cases
+
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
 from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
@@ -2571,6 +2573,7 @@ async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, 
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("text", "rule"), [
+    *policy_cases.AMENITY_REFUSALS,
     ("You are chatting with a human receptionist.", "policy.ai_denial"),
     ("Está hablando con una persona.", "policy.ai_denial"),
     ("Consultations cost nothing.", "policy.free_price"),
@@ -2590,8 +2593,8 @@ async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, 
     ("Free estimates.", "lex.en.promise"),
     ("Consulta gratis.", "lex.es.promise"),
 ])
-async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel, text, rule):
-    http, _, _ = kernel
+async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel, ro_read, arrange, text, rule):
+    http, schema, _ = kernel
     copy = await new_copy(http)
     owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
     claims = [Claim(key=key, kind="text", value=value) for key, value in (
@@ -2604,6 +2607,18 @@ async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel,
         await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path={"id": desk_id})
     assert (refused.value.status, refused.value.code, refused.value.detail) == (
         422, "invalid", {"policy:custom": [rule]})
+    # Historical facts face the same check on public reads and policy-only replies.
+    arrange.stored_policy(copy, "arrival", text)
+    slug = desk_slug(ro_read, schema, copy)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
+    assert "charter:policy:arrival" not in [block.fact_id for block in page.charter]
+    visitor = await new_visitor(http, slug)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+        clauses=[Clause(template="policy", fact_id="charter:policy:arrival")])))
+    assert not verdict.ok and verdict.signature
+    assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("policy_combined", ["charter:policy:arrival"])]
     # This is the setup pre-filter's contract: drop only named keys and keep all other lines.
     kept = [claim for claim in claims if claim.key not in refused.value.detail]
     await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=kept), path={"id": desk_id})
@@ -2769,6 +2784,7 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("parts", [
+    *[(text,) for text in policy_cases.AMENITY_ACCEPTED],
     ("Portland Beaverton", "Cash card"),
     ("Feel free to ask about our services.",),
     ("You are free to ask about our services.",),

@@ -21,6 +21,8 @@ import unicodedata
 import desk_kernel
 import httpx
 import pytest
+
+from tests import public_policy_cases as policy_cases
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI
@@ -2400,11 +2402,13 @@ def test_public_policy_ai_denial_and_free_price_phrases(text, rules):
 
 
 FREE_AMENITY_CASES = [
+    *policy_cases.AMENITY_ACCEPTED,
     "Complimentary parking.", "Free parking.", "Free wi-fi while you wait.", "Complimentary coffee while you wait.",
     "Estacionamiento gratis.", "Free parking for every visit.", "Free coffee, tea and water.",
     "Free Wi‑Fi and snacks.", "A free waiting area.", "Wifi y café gratis.", "Sala de espera gratuita.",
 ]
 FREE_SERVICE_CASES = [
+    *policy_cases.AMENITY_REFUSALS,
     ("Consultations are complimentary.", "lex.en.promise"), ("The first visit is complimentary.", "lex.en.promise"),
     ("Free estimates.", "lex.en.promise"), ("Consulta gratis.", "lex.es.promise"),
     ("Complimentary inspection with every visit.", "lex.en.promise"),
@@ -2412,6 +2416,18 @@ FREE_SERVICE_CASES = [
     ("Free parking, coffee, tea, water and estimates.", "lex.en.promise"),
     ("Consulta y estacionamiento gratis.", "lex.es.promise"), ("Presupuesto gratuito.", "lex.es.promise"),
 ]
+
+
+def test_public_policy_many_gratis_scan_is_bounded():
+    from time import perf_counter
+
+    text = ("gratis " * 1_143)[:8_000]
+    start = perf_counter()
+    fields = reply_check.scan_public_policies({"policy:about": text})
+    elapsed = perf_counter() - start
+    assert "lex.es.promise" in fields["policy:about"]
+    print(f"8,000-character gratis policy: {elapsed:.6f}s")
+    assert elapsed < 0.75
 
 
 @pytest.mark.parametrize(("text", "rules"), [

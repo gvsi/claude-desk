@@ -4,6 +4,8 @@ import time
 from datetime import timedelta
 
 import pytest
+
+from tests import public_policy_cases as policy_cases
 from sqlalchemy import select
 
 from desk.contracts import Claim
@@ -24,6 +26,7 @@ POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urg
 
 
 @pytest.mark.parametrize(("text", "rule"), [
+    *policy_cases.AMENITY_REFUSALS,
     ("You are chatting with a human receptionist.", "policy.ai_denial"),
     ("Está hablando con una persona.", "policy.ai_denial"),
     ("Consultations cost nothing.", "policy.free_price"),
@@ -332,6 +335,7 @@ async def test_charter_refuses_promises_without_writing_and_ledgers_rules(app, c
 
 
 @pytest.mark.parametrize("text", [
+    *policy_cases.AMENITY_ACCEPTED,
     "Human resources consulting",
     "We treat every customer like a person",
     "Complimentary parking",
