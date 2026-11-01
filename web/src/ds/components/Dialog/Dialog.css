@@ -45,10 +45,3 @@
   gap: var(--space-8);
   margin-top: var(--space-20);
 }
-
-@media (max-width: 639.98px) {
-  .cd-dialog__actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}

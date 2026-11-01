@@ -73,7 +73,7 @@ describe('Claude acts for you', () => {
     }
   });
 
-  it.each(['settings', 'sidebar'] as const)('stacks both dialogs at full width on a phone from %s', async (source) => {
+  it.each(['settings', 'sidebar'] as const)('keeps both dialogs on a phone inside the window, the safe choice first, from %s', async (source) => {
     const { screen } = await renderRoute(GENERAL, { viewport: 'phone' });
     if (source === 'sidebar') await screen.getByRole('button', { name: 'Menu', exact: true }).click();
     const area = source === 'sidebar' ? screen.getByRole('dialog', { name: 'Menu' }) : screen.getByRole('main');
@@ -89,17 +89,18 @@ describe('Claude acts for you', () => {
       const safe = dialog.getByRole('button', { name: safeLabel });
       const confirm = dialog.getByRole('button', { name: action, exact: true });
       await expect.element(safe).toHaveFocus();
+      // The design system's dialog as drawn: its actions row wraps by itself on a phone, the safe
+      // choice first, so a pair too wide for one line puts the safe choice on top.
       const actions = safe.element().parentElement!;
-      const first = safe.element().getBoundingClientRect();
-      const second = confirm.element().getBoundingClientRect();
       expect([...actions.children]).toEqual([safe.element(), confirm.element()]);
       expect(safe.element().classList.contains('cd-button--secondary')).toBe(true);
       expect(confirm.element().classList.contains('cd-button--primary')).toBe(true);
-      expect(Math.round(first.width)).toBe(Math.round(actions.getBoundingClientRect().width));
-      expect(Math.round(second.width)).toBe(Math.round(first.width));
-      expect(first.left).toBe(second.left);
-      expect(second.top).toBeGreaterThanOrEqual(first.bottom);
       const bounds = dialog.element().getBoundingClientRect();
+      for (const button of [safe.element(), confirm.element()]) {
+        const box = button.getBoundingClientRect();
+        expect(box.left).toBeGreaterThanOrEqual(bounds.left);
+        expect(box.right).toBeLessThanOrEqual(bounds.right);
+      }
       expect(bounds.left).toBeGreaterThanOrEqual(0);
       expect(bounds.right).toBeLessThanOrEqual(390);
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
