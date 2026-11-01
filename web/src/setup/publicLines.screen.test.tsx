@@ -79,6 +79,76 @@ it('natively dims Looks right and every Remove while a row is open', async () =>
   }
 });
 
+it('announces a successful stale Remove refresh with the shared changed line', async () => {
+  const { screen, state } = await openLines();
+  await mockStore.dispatch('setupPublicLine', { params: { id: state.interview_id }, body: { key: 'contact', text: 'office@example.com' } });
+  await screen.getByRole('button', { name: /^Remove/ }).first().click();
+  await expect.element(screen.getByText('office@example.com', { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('alert')).toHaveTextContent(CHANGED_REFRESHED.en);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
+});
+
+it('adopts changed remaining prices from a successful Remove and asks for review', async () => {
+  const { screen, state } = await openLines();
+  const data = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
+  data.revision = 'changed-response';
+  data.prices!.items.splice(1, 1);
+  data.prices!.items[1] = { item_id: 'updated-bookkeeping', title: 'Updated bookkeeping', unit_cents: 17500 };
+  mockStore.inject({ route: 'removePublicPrice', status: 200, body: data });
+  await screen.getByRole('button', { name: /^Remove/ }).nth(3).click();
+  await expect.element(screen.getByRole('button', { name: /^Remove/ }).nth(3)).not.toHaveAttribute('aria-busy');
+  expect(screen.getByRole('alert').element().textContent).toContain(CHANGED_REFRESHED.en);
+  await expect.element(screen.getByText('Updated bookkeeping, $175', { exact: true })).toBeVisible();
+  expect(screen.getByText('Business tax return, $600', { exact: true }).elements()).toHaveLength(0);
+  expect(screen.getByText('Monthly bookkeeping, $150', { exact: true }).elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
+});
+
+it('shows only the list error when a stale confirm refetch fails', async () => {
+  const { screen, state } = await openLines();
+  await mockStore.dispatch('setupPublicLine', { params: { id: state.interview_id }, body: { key: 'policy:about', text: 'Changed in another tab.' } });
+  mockStore.inject({ route: 'setupPublicLines', status: 503 });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  expect(screen.getByRole('alert').elements()).toHaveLength(1);
+  expect(screen.getByRole('alert').element().textContent).toContain(OWNER_ERROR_COPY.unavailable);
+  expect(screen.getByRole('button', { name: 'Looks right' }).elements()).toHaveLength(0);
+});
+
+it('keeps an emptied review screen until Looks right after removing its last item', async () => {
+  const state = await atSituations();
+  const params = { id: state.interview_id };
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  storePublicState(mockStore.world, params.id, { lines: (read.body as SetupPublicLines).lines.filter((line) => line.key === 'contact'), hours: null, prices: null });
+  const { screen } = await renderRoute(`/app/setup/${params.id}`, { viewport: 'phone' });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await screen.getByRole('button', { name: /^Remove/ }).click();
+  await expect.element(screen.getByRole('button', { name: /^Remove/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'What customers will read', exact: true }).elements()).toHaveLength(1);
+  expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck' || r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(0);
+});
+
+it('removes a suggested policy line through its encoded URL and redraws the list', async () => {
+  const state = await atSituations();
+  const params = { id: state.interview_id };
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  const data = read.body as SetupPublicLines;
+  const text = data.lines.find((line) => line.key === 'policy:after_hours')!.text;
+  storePublicLines(mockStore.world, params.id, data.lines.map((line) => line.key === 'policy:after_hours' ? { ...line, source: 'suggested' } : line));
+  const { screen } = await renderRoute(`/app/setup/${params.id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByText(text, { exact: true })).toBeVisible();
+  await screen.getByRole('button', { name: /^Remove/ }).nth(1).click();
+  await expect.element(screen.getByText(text, { exact: true })).not.toBeInTheDocument();
+  expect(mockStore.requests.filter((r) => r.key === 'removePublicLine').at(-1)?.path).toBe(`/api/owner/setup/${params.id}/public_lines/policy%3Aafter_hours`);
+  await expect.element(screen.getByText('Tax return review, $250', { exact: true })).toBeVisible();
+});
+
 it('confirms rendered group keys with the latest revision after removing Hours', async () => {
   const { screen, state } = await openLines('phone');
   await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).toBeVisible();
@@ -353,7 +423,7 @@ it('opens the row named by a refused confirm and lets the owner correct it', asy
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
 });
 
-it.each(['get', 'put', 'confirm'] as const)('rereads the interview on a 409 from public-lines %s and shows its current step', async (route) => {
+it.each(['get', 'put', 'confirm', 'remove'] as const)('rereads the interview on a 409 from public-lines %s and shows its current step', async (route) => {
   const state = await atSituations();
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await expect.element(screen.getByRole('heading', { name: 'Real situations', exact: true })).toBeVisible();
@@ -366,9 +436,12 @@ it.each(['get', 'put', 'confirm'] as const)('rereads the interview on a 409 from
       await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
       await screen.getByRole('textbox', { name: 'About us', exact: true }).fill('My draft is still here.');
       await screen.getByRole('button', { name: 'Save', exact: true }).click();
+    } else if (route === 'remove') {
+      await screen.getByRole('button', { name: /^Remove/ }).first().click();
     } else await screen.getByRole('button', { name: 'Looks right' }).click();
   }
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  if (route === 'remove') expect(mockStore.requests.filter((r) => r.key === 'removePublicLine')).toHaveLength(1);
   expect(mockStore.requests.filter((r) => r.key === 'setup').length).toBeGreaterThanOrEqual(2);
 });
 

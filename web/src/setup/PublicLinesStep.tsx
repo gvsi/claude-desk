@@ -69,6 +69,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const returnFocus = useRef<string | null>(null);
   const openedHeldOnLoad = useRef(false);
+  const firstReadHandled = useRef(false);
   useEffect(() => {
     if (editingKey === null && returnFocus.current !== null) {
       editButtons.current.get(returnFocus.current)?.focus();
@@ -111,8 +112,10 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     }
   }, [lines.data]);
   useEffect(() => {
+    if (!lines.data || lines.isError || firstReadHandled.current) return;
+    firstReadHandled.current = true;
     if (empty) onNext('safety_check');
-  }, [empty, onNext]);
+  }, [lines.data, lines.isError, empty, onNext]);
 
   const cancel = () => {
     returnFocus.current = editingKey;
@@ -161,17 +164,22 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
         : await request('removePublicPrice', {
           params: { id, item_id: price.item_id }, query: { title: price.title, unit_cents: price.unit_cents },
         }));
+      let changed = false;
       if (itemId !== undefined) {
         const remaining = lines.data?.prices?.items.filter((item) => item.item_id !== itemId);
-        if (!remaining || remaining.length !== (saved.prices?.items.length ?? 0)
+        changed = !remaining || remaining.length !== (saved.prices?.items.length ?? 0)
           || remaining.some((item, index) => item.title !== saved.prices?.items[index]?.title || item.unit_cents !== saved.prices?.items[index]?.unit_cents)
-          || (remaining.length === 0 ? saved.prices !== null : saved.prices?.source !== 'suggested')) throw new Error('unexpected remaining prices');
-      } else if (key === 'hours' ? saved.hours !== null : saved.lines.some((line) => line.key === key)) throw new Error('item not removed');
+          || (remaining.length === 0 ? saved.prices !== null : saved.prices?.source !== 'suggested');
+      } else changed = key === 'hours' ? saved.hours !== null : saved.lines.some((line) => line.key === key);
       queryClient.setQueryData(queryKey, saved);
+      if (changed) setError(CHANGED_REFRESHED.en);
     } catch (err) {
       if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'not_suggested'))) {
         const current = await reread();
-        if (current && (current.step === 'rules' || current.step === 'situations')) await lines.refetch();
+        if (current && (current.step === 'rules' || current.step === 'situations')) {
+          const refreshed = await lines.refetch();
+          if (refreshed.isSuccess) setError(CHANGED_REFRESHED.en);
+        }
         if (current === null) setError(ownerErrorCopy(err));
       } else setError(ownerErrorCopy(err));
     } finally {
@@ -201,8 +209,8 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
         const stillHere = current?.step === 'rules' || current?.step === 'situations';
         if (current === null || stillHere) {
           const refreshed = await lines.refetch();
-          if (stillHere && refreshed.isSuccess) {
-            setError(CHANGED_REFRESHED.en);
+          if (stillHere) {
+            if (refreshed.isSuccess) setError(CHANGED_REFRESHED.en);
             return;
           }
         }
@@ -302,7 +310,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     </div>
   );
 
-  if (empty) return null;
+  if (empty && !firstReadHandled.current) return null;
 
   return (
     <div className="cd-setup-step">
