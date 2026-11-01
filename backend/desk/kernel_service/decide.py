@@ -850,7 +850,7 @@ async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Revie
         raise RuntimeError("review_without_action")
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == call.action.desk_id, FactRow.kind == "charter",
-        ~FactRow.fact_id.startswith(desks.STARTER_FACT_PREFIX)).order_by(FactRow.fact_id)))
+        desks.not_starter()).order_by(FactRow.fact_id)))
     data = ReviewInput(action=ReviewAction.of(call.action, tz=call.business.timezone),
                        cards=[ReviewCard.of(card) for card in pending],
                        facts=[ReviewFact(key=claim.key, value=claim.value) for fact in facts

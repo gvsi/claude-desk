@@ -201,8 +201,8 @@ def starters(rows: Sequence[FactRow], canaries: Mapping[str, str], now: datetime
     by_id = {row.fact_id: row for row in rows}
     questions = []
     for n in (1, 2, 3):
-        key = f"starter:{n}:{lang}"
-        row = by_id.get(f"charter:{key}")
+        key = f"{desks.STARTER_KEY_PREFIX}{n}:{lang}"
+        row = by_id.get(f"{desks.STARTER_FACT_PREFIX}{n}:{lang}")
         if row is None or not labels.can_read(row.readers, PUBLIC):
             continue
         fact = labels.fact_of(row)
@@ -240,7 +240,7 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
     rows = list(await ctx.db.scalars(copy.scoped(select(FactRow).where(
         FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id.collate("C")))))
     facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)
-             and not row.fact_id.startswith(desks.STARTER_FACT_PREFIX)]
+             and not desks.is_starter_fact(row.fact_id)]
     canaries = await labels.copy_canaries(ctx)
     header, withheld = header_of(desk, business, canaries)
     info = DeskInfo(owner_display_name=header["owner_display_name"], timezone=business.timezone)

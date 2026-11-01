@@ -326,6 +326,14 @@ RIVERA_STARTERS = {
     "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
     "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
 }
+STARTER_KEY = "starter:"   # a seed-only question's claim key is `starter:<n>:<lang>`, its fact `charter:<key>`
+
+
+def is_starter_fact(fact_id: str) -> bool:
+    """A seed-only starter question's fact: out of Claude's context, kept by a charter replace, never an owner's."""
+    return fact_id.startswith(f"charter:{STARTER_KEY}")
+
+
 NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout", "handoff"],
                  "briefing": ["lead", "callback", "booking"]}
 # The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
@@ -1762,7 +1770,7 @@ class FakeKernelState:
         desk.rivera_seed = True
         for lang, questions in RIVERA_STARTERS.items():
             for n, question in enumerate(questions, start=1):
-                key = f"starter:{n}:{lang}"
+                key = f"{STARTER_KEY}{n}:{lang}"
                 self._put_fact(desk, Fact(fact_id=f"charter:{key}", kind="charter", status="available",
                                           source="kernel", claims=[Claim(key=key, kind="text", value=question)],
                                           label=Label(readers=["public"])))
@@ -2238,7 +2246,7 @@ class FakeKernelState:
         canaries = self._canaries(desk.copy_id)
         questions = []
         for n in (1, 2, 3):
-            key = f"starter:{n}:{language}"
+            key = f"{STARTER_KEY}{n}:{language}"
             fact = desk.facts.get(f"charter:{key}")
             if (fact is None or "public" not in fact.label.readers or fact.status != "available"
                     or not self._current(fact)):
@@ -2375,7 +2383,7 @@ class FakeKernelState:
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
             facts=[fact for fact in facts if self._readable(session, fact)
-                   and not fact.fact_id.startswith("charter:starter:")],
+                   and not is_starter_fact(fact.fact_id)],
             knowledge=[item for item in desk.knowledge.values()
                        if self._readers(session) & set(item.label.readers)])
 
@@ -3362,7 +3370,7 @@ class FakeKernelState:
         keys = [claim.key for claim in charter]
         if len(set(keys)) != len(keys):
             raise Refusal(422, "invalid")
-        starters = {key: ["starter_seed_only"] for key in keys if key.startswith("starter:")}
+        starters = {key: ["starter_seed_only"] for key in keys if is_starter_fact(f"charter:{key}")}
         if starters:
             raise Refusal(422, "invalid", starters)
         values = {claim.key: claim.value for claim in charter
@@ -3386,7 +3394,7 @@ class FakeKernelState:
         self._refuse_policy_promises(desk.copy_id, body.charter, "charter", desk)
         for fact_id in [fact_id for fact_id, fact in desk.facts.items()
                         if fact.kind == "charter" and fact_id != "charter:hours"
-                        and not fact_id.startswith("charter:starter:")]:
+                        and not is_starter_fact(fact_id)]:
             del desk.facts[fact_id]
             self._drop("facts", (desk.desk_id, fact_id))
         for claim in body.charter:

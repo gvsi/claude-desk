@@ -44,6 +44,7 @@ import desk_kernel
 from fastapi import Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql import ColumnElement
 
 from desk.contracts import (BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, SeedDocument,
                             ToolProfile)
@@ -72,7 +73,8 @@ WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 WINDOW_SEARCH = timedelta(days=14)        # how far ahead a callback window is looked for
 DAY_END = 24 * 60                         # an hours window ending at 00:00 ends at midnight
 HOURS_FACT = "charter:hours"
-STARTER_FACT_PREFIX = "charter:starter:"
+STARTER_KEY_PREFIX = "starter:"           # a seed-only public question's claim key, `starter:<n>:<lang>`
+STARTER_FACT_PREFIX = f"charter:{STARTER_KEY_PREFIX}"   # its fact's ID, `charter:starter:<n>:<lang>`
 TIMEZONES = frozenset(available_timezones())   # the IANA names the time zone database lists
 MAX_DOCUMENT_BYTES = 200 * 1024
 MAX_DOCUMENTS = 50                        # on one Desk, each a canary every scan looks for
@@ -81,6 +83,21 @@ MASKING = frozenset("•*")                 # what a masked contact holds and a 
 EMAIL = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
 PHONE = re.compile(r"\+?[0-9 ().-]+")
 PHONE_DIGITS = range(7, 16)               # E.164 numbers have at most 15 digits
+
+
+def is_starter_key(key: str) -> bool:
+    """A charter claim key only the demo seed writes: one of the public starter questions."""
+    return key.startswith(STARTER_KEY_PREFIX)
+
+
+def is_starter_fact(fact_id: str) -> bool:
+    """A seed-only starter question's fact: a chip on the public page, never a fact for Claude."""
+    return fact_id.startswith(STARTER_FACT_PREFIX)
+
+
+def not_starter() -> ColumnElement[bool]:
+    """The condition that leaves the seed-only starter facts out of a query of facts."""
+    return ~FactRow.fact_id.startswith(STARTER_FACT_PREFIX)
 
 
 class InvalidSeed(KernelFailure):
@@ -144,7 +161,7 @@ def check_charter(charter: Sequence[Claim]) -> None:
     if any(claim.key == "hours" for claim in charter):
         raise InvalidSeed("hours_claim")
     unique(claim.key for claim in charter)
-    starters = {claim.key: ["starter_seed_only"] for claim in charter if claim.key.startswith("starter:")}
+    starters = {claim.key: ["starter_seed_only"] for claim in charter if is_starter_key(claim.key)}
     if starters:
         raise KernelFailure(422, "invalid", "starter_seed_only", detail=starters)
 
@@ -504,7 +521,7 @@ async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) 
     now = ctx.clock.now()
     rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_row.desk_id, FactRow.kind == "charter", FactRow.fact_id != HOURS_FACT,
-        ~FactRow.fact_id.startswith(STARTER_FACT_PREFIX))))}
+        not_starter())))}
     wanted = {fact.fact_id: fact for fact in map(charter_fact, body.charter)}
     for fact_id, row in rows.items():
         if fact_id not in wanted:

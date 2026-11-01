@@ -100,7 +100,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     local = now.astimezone(tz)
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_id, FactRow.status != "expired",
-        ~FactRow.fact_id.startswith(desks.STARTER_FACT_PREFIX),
+        desks.not_starter(),
         or_(FactRow.expires_at.is_(None), FactRow.expires_at > now)).order_by(FactRow.created_at, FactRow.fact_id)))
     knowledge = await ctx.db.scalars(ctx.repo.scoped(
         select(KnowledgeRow).where(KnowledgeRow.desk_id == desk_id).order_by(KnowledgeRow.created_at,

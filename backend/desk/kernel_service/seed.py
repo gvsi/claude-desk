@@ -199,7 +199,7 @@ async def seed_starters(ctx: KernelCtx, desk_id: str) -> None:
     now = ctx.clock.now()
     for lang, questions in RIVERA_STARTERS.items():
         for n, question in enumerate(questions, start=1):
-            fact = desks.charter_fact(Claim(key=f"starter:{n}:{lang}", kind="text", value=question))
+            fact = desks.charter_fact(Claim(key=f"{desks.STARTER_KEY_PREFIX}{n}:{lang}", kind="text", value=question))
             ctx.db.add(labels.fact_row(ctx.copy_id, desk_id, fact, now))
     await ctx.db.flush()
 
