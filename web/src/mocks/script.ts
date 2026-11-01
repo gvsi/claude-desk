@@ -468,8 +468,9 @@ export interface TurnContext {
   /** The signed status event for a decision as it now stands. */
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
   /**
-   * A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the
-   * visitor gets the handoff, and `paused` when the check stopped it because the chat is paused.
+   * A checked reply's shown blocks and ledger entry; `blocked` when Claude's draft failed the
+   * check, and `paused` when the check stopped it because the chat is paused. Shown blocks may
+   * keep checked cards after a prose failure, with or without a drafted handoff.
    */
   reply(blocks: RenderedBlock[], opts?: { blocked?: boolean; paused?: boolean }): EvMessage;
   /**
@@ -507,7 +508,7 @@ export const writing: Step = () => ({ type: 'writing' });
 /** Ends every turn, a fenced one included: the visitor's "Claude is writing" clears even when nothing was shown. */
 export const turnEnd: Step = unfenced(() => ({ type: 'turn_end' }));
 
-export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'area' | 'callback' | 'talk' | 'outage' | 'other';
+export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'area' | 'callback' | 'talk' | 'outage' | 'cards-only' | 'cards-kept-handoff' | 'other';
 
 export interface ScriptRule {
   name: RuleName;
@@ -556,6 +557,20 @@ const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.hand
 export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([blocks.handoff[ctx.language]], { paused: true })];
 
 export const SCRIPT: readonly ScriptRule[] = [
+  {
+    // A final prose-only failure: the checked card stays, and none of the draft's prose is shown.
+    name: 'cards-only',
+    words: ['cards-only'],
+    tools: ['native.quote'],
+    steps: [writing, (ctx) => ctx.reply([blocks.quote[ctx.language]], { blocked: true })],
+  },
+  {
+    // The same failure with Claude's drafted handoff kept after the checked card.
+    name: 'cards-kept-handoff',
+    words: ['cards-kept-handoff'],
+    tools: ['native.quote'],
+    steps: [writing, (ctx) => ctx.reply([blocks.quote[ctx.language], blocks.handoff[ctx.language]], { blocked: true })],
+  },
   {
     name: 'discount',
     words: ['off', 'discount', 'descuento'],
