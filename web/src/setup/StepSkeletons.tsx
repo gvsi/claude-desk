@@ -334,7 +334,7 @@ export function DraftRulesSkeleton() {
         </li>
       </ul>
       <div className="cd-setup-step__actions">
-        <MainButton label="Check real situations" />
+        <MainButton label={SETUP_COPY.rules.checkSituations} />
       </div>
     </div>
   );
@@ -410,7 +410,7 @@ export function SituationsSkeleton() {
         </ul>
       </SkeletonCard>
       <div className="cd-setup-step__actions">
-        <MainButton label="Looks right" />
+        <MainButton label={SETUP_COPY.situations.looksRight} />
       </div>
     </div>
   );
@@ -480,8 +480,8 @@ export function SafetyCheckSkeleton() {
         </ul>
       </SkeletonCard>
       <div className="cd-setup-step__actions">
-        <MainButton label="Confirm rules" />
-        <MainButton label="Run again" variant="secondary" />
+        <MainButton label={SETUP_COPY.safety.confirm} />
+        <MainButton label={SETUP_COPY.safety.runAgain} variant="secondary" />
       </div>
     </div>
   );
