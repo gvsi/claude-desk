@@ -1,7 +1,7 @@
 /**
  * Setup's conversation fades softly where its messages scroll under the top edge of its scroll
  * area: marked while it is scrolled away from its top, and never at the top, where the first
- * message shows whole.
+ * message shows whole. Kept at its end, it leaves room under its last message, above the composer.
  */
 import { expect, it } from 'vitest';
 
@@ -49,4 +49,31 @@ it('the_conversation_fades_at_its_top_edge_only_once_scrolled_from_the_top', asy
   // And down again, it fades again.
   area.scrollTop = 40;
   await expect.poll(() => area.hasAttribute('data-scrolled')).toBe(true);
+});
+
+/** Pixels between the conversation's last line (its last row, or a notice under it) and the top of the dock with the composer. */
+function roomAboveTheDock(): number {
+  const column = document.querySelector('.cd-setup-chat__column');
+  const dock = document.querySelector('.cd-setup-dock');
+  if (column === null || dock === null) throw new Error('the questions step has its conversation and its dock');
+  const shown = [...column.children].filter((part) => part.getBoundingClientRect().height > 0);
+  return dock.getBoundingClientRect().top - Math.max(...shown.map((part) => part.getBoundingClientRect().bottom));
+}
+
+it('the_conversation_kept_at_its_end_leaves_room_above_the_composer', async () => {
+  // As the visitor chat does: 24 px between the last message and the composer's area, at the end,
+  // and still once the composer grows with a long answer.
+  const state = await interviewMidQuestions();
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 1440, height: 600 } });
+  const box = screen.getByRole('textbox', { name: 'Your answer' });
+  await expect.element(box).toBeVisible();
+  const area = document.querySelector<HTMLElement>('.cd-setup-chat__scroll');
+  if (area === null) throw new Error('the questions step has its scroll area');
+  await expect.poll(() => area.scrollTop).toBeGreaterThan(0);
+  await expect.poll(() => Math.abs(roomAboveTheDock() - 24)).toBeLessThanOrEqual(2);
+
+  const before = document.querySelector('.cd-setup-dock')!.getBoundingClientRect().height;
+  await box.fill('one\ntwo\nthree\nfour\nfive');
+  await expect.poll(() => document.querySelector('.cd-setup-dock')!.getBoundingClientRect().height).toBeGreaterThan(before + 40);
+  await expect.poll(() => Math.abs(roomAboveTheDock() - 24)).toBeLessThanOrEqual(2);
 });

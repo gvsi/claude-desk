@@ -169,6 +169,8 @@
 .cd-setup-chat__scroll[data-scrolled]:not(:focus-visible) {
   mask-image: linear-gradient(to bottom, transparent, var(--bg-app) var(--space-24));
 }
+/* Its 24 px at the foot is the room a chat leaves under its last message, above the composer, once
+   kept at its end, as the visitor chat leaves it. */
 .cd-setup-chat__column {
   box-sizing: border-box;
   max-width: calc(720px + 2 * var(--space-40));
