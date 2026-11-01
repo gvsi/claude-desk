@@ -110,7 +110,9 @@ def test_system_prompt_uses_the_business_policies():
         "Never make up a figure",
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
         "at a time, before you take their details or book. Before booking, ask for what's missing of their name and a "
-        "phone number or email, reusing anything already given, and finish any intake questions. Ask only about their "
+        "phone number or email, reusing anything already given, and finish any intake questions, then save them with "
+        "native__capture_lead in the same turn if it's one of your tools. If they'd rather not give contact details, "
+        "book without them. Ask only about their "
         "request and these booking details: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
         "otherwise native__request_callback. Beside its callback_confirmed card",
@@ -279,7 +281,9 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
         "don't push a booking before they've said what they need. When they're unsure what they need or want to "
         "understand their situation, help them with general trade advice first, committing Rivera Plumbing to "
         "nothing; offer open times only when they ask, or after that help when they want to go further. "
-        "Never lead with open times; offer only the real next steps listed above."
+        "Never lead with open times; offer only the real next steps listed above. When they ask what's next, offer "
+        "the step as a question naming a step you can take, such as \"Would you like me to find a time?\", rather "
+        "than stating what will happen."
     )
     period = next(line for line in lines if line.startswith("- If a request names a period"))
     assert period == (
@@ -291,6 +295,10 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
     intake = next(line for line in lines if line.startswith("- For a new request"))
     assert "Before booking, ask for what's missing of their name and a phone number or email" in intake
     assert "reusing anything already given, and finish any intake questions" in intake
+    assert "then save them with native__capture_lead in the same turn if it's one of your tools" in intake
+    assert "If they'd rather not give contact details, book without them." in intake
+    assert ("- Use bullets, not numbered lists: numbers in your own words are blocked, list numbers included."
+            in lines)
     assert "never for a password, a code, a card or account number or an ID number" in intake
     typed_booking = next(line for line in lines if line.startswith("- To book a kind of appointment"))
     assert typed_booking == (
