@@ -2921,8 +2921,8 @@ class FakeKernelState:
                 violations: list[Violation]) -> RenderedBlock | None:
         """The clause's card, or None after adding the violation it earns."""
         def refuse(kind: str, rule_id: str) -> None:
-            violations.append(Violation(kind=kind, span=clause.template, fact_ids=[clause.fact_id or ""][:1],
-                                        rule_id=rule_id))
+            violations.append(Violation(kind=kind, span=clause.template, rule_id=rule_id,
+                                        fact_ids=[clause.fact_id] if clause.fact_id is not None else []))
 
         template = clause.template
         if template in KERNEL_ONLY_TEMPLATES:

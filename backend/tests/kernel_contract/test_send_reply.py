@@ -129,6 +129,21 @@ async def test_a_final_prose_failure_delivers_the_kept_card_then_the_drafted_han
 
 
 @pytest.mark.kernel_plan("01b")
+async def test_a_clause_missing_its_fact_id_is_pointed_at_in_the_correction(kernel, ro_read, conn):
+    """A card template sent with no fact ID names no fact in the kernel's violation, so the correction points at the
+    clause by its place and template."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller = caller_of(http, ro_schema, copy, visitor)
+    outcome = await tools.send_reply(conn, caller, 0, {"prose": "Here are our opening hours.",
+                                                       "clauses": [{"template": "hours"}]}, 1, call_id="toolu_no_id")
+    assert outcome.result["outcome"] == "blocked"
+    assert outcome.result["violations"] == [
+        {"kind": "unknown_fact", "rule_id": "no_such_fact", "clause_index": 0, "template": "hours"}]
+
+
+@pytest.mark.kernel_plan("01b")
 async def test_a_rewritten_first_draft_opens_no_handoff_through_the_api(kernel, ro_read, conn):
     """A blocked first draft the API will rewrite is sent with `final` false: it shows nothing, and the kernel records
     it as not final and opens no handoff and no alert. The clean rewrite, sent as final, is what the visitor sees,
