@@ -9,6 +9,26 @@ import { ReviewerBarSkeleton } from './ReviewerBarSkeleton.tsx';
 
 beforeAll(loadWebFonts);
 
+it('reviewer_shape_matches_the_real_bar_on_its_first_commit_at_390px', async () => {
+  await page.viewport(390, 844);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  onTestFinished(() => { root.unmount(); host.remove(); });
+  flushSync(() => root.render(<><ReviewerBar ownerName="Maria Rivera" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
+  const [real, shape] = host.querySelectorAll('.cd-reviewer-bar');
+  expect(shape!.querySelectorAll('.cd-skeleton-line').length).toBe(2);
+  expect(shape!.getBoundingClientRect().height).toBe(real!.getBoundingClientRect().height);
+  const ownerName = 'Alexandria Rivera de la Cruz '.repeat(3).trim();
+  flushSync(() => root.render(<><ReviewerBar ownerName={ownerName} onStartOver={() => {}} /><ReviewerBarSkeleton ownerName={ownerName} /></>));
+  const range = document.createRange();
+  range.selectNodeContents(real!.querySelector('.cd-reviewer-bar__text')!);
+  const lineCount = new Set([...range.getClientRects()].map((rect) => rect.top)).size;
+  expect(lineCount).toBeGreaterThan(2);
+  expect(shape!.querySelectorAll('.cd-skeleton-line').length).toBe(lineCount);
+  expect(shape!.getBoundingClientRect().height).toBe(real!.getBoundingClientRect().height);
+});
+
 it('reviewer_shape_measures_the_control_with_different_font_metrics', async () => {
   const host = document.createElement('div');
   const metrics = document.createElement('style');
@@ -62,11 +82,24 @@ it('reviewer_shape_follows_natural_text_wrapping_between_breakpoints', async () 
   flushSync(() => root.render(<><ReviewerBar ownerName="Maria Rivera" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
   const [real, shape] = host.querySelectorAll('.cd-reviewer-bar');
   // Resize the same mounted bar too: wrapping follows available space, not a phone breakpoint.
-  for (const width of [620, 390, 440, 480, 540, 639, 640, 768, 1440]) {
+  for (const width of [620, 280, 320, 390, 440, 480, 540, 639, 640, 768, 1440]) {
     await page.viewport(width, width === 390 ? 844 : 900);
     await expect.poll(() => Math.abs(real!.getBoundingClientRect().height - shape!.getBoundingClientRect().height), {
       message: `reviewer bar height at ${width}px`,
     }).toBeLessThanOrEqual(2);
+    const text = real!.querySelector('.cd-reviewer-bar__text')!;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    // The real bar has inline spans, so several rects can share a wrapped line.
+    const lineCount = new Set([...range.getClientRects()].map((rect) => rect.top)).size;
+    const lines = [...shape!.querySelectorAll<HTMLElement>('.cd-skeleton-line')];
+    expect(lines.length, `line count at ${width}px`).toBe(lineCount);
+    if (width === 280) expect(lines.length).toBe(3);
+    const available = shape!.querySelector('.cd-reviewer-bar__text')!.getBoundingClientRect().width;
+    lines.forEach((line, i) => {
+      expect(line.style.width).toBe(i === 0 ? 'min(100%, 430px)' : '75%');
+      expect(Math.abs(line.getBoundingClientRect().width - (i === 0 ? Math.min(available, 430) : available * 0.75))).toBeLessThanOrEqual(0.02);
+    });
     const action = real!.querySelector('.cd-button')!.getBoundingClientRect();
     const control = shape!.querySelector(':scope > .cd-skeleton')!.getBoundingClientRect();
     expect(Math.abs(action.left - control.left), `control left at ${width}px`).toBeLessThanOrEqual(2);
