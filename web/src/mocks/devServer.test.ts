@@ -369,15 +369,15 @@ describe('the dev server mock', () => {
     expect((await tabA.json<CopyOut>('GET', apiPath('me', {}))).copy_id).toBe(copy.copy_id);
   });
 
-  it('a_document_cards_link_opens_once_in_a_tab', { timeout: 15_000 }, async () => {
-    const api = createMockApi();
-    const tab = browserOf(api).tab();
+  /**
+   * In a copy of its own, opened with the passcode in `tab`, Dana asks for her last invoice,
+   * confirms it's her with the Demo inbox's code, and gets its card: the card's link.
+   */
+  async function invoiceHref(tab: Tab): Promise<string> {
     const copy = await tab.json<CopyOut>('POST', apiPath('copies', {}), { passcode: 'demo' }, 201);
     const desk = copy.desks[0];
     if (!desk) throw new Error('the copy has a Desk');
     const slug = { slug: desk.slug };
-
-    // Dana asks for her last invoice, confirms it's her with the Demo inbox's code, and gets its card.
     await tab.json<VisitorSession>('POST', apiPath('openSession', slug));
     const stream = await tab.stream(apiPath('events', slug, { after: 0 }));
     let href: string | null | undefined;
@@ -391,6 +391,13 @@ describe('the dev server mock', () => {
       await stream.close();
     }
     if (!href) throw new Error('the invoice card links to its document');
+    return href;
+  }
+
+  it('a_document_cards_link_opens_once_in_a_tab', { timeout: 15_000 }, async () => {
+    const api = createMockApi();
+    const tab = browserOf(api).tab();
+    const href = await invoiceHref(tab);
 
     // A look first leaves it unopened; the tab then shows the document once, and the API's refusal after.
     const look = await tab.send('HEAD', href);
@@ -406,6 +413,22 @@ describe('the dev server mock', () => {
     expect([again.status, await again.text()]).toEqual([404, 'This link was already opened or has expired. Ask in the chat for a new one.']);
     const unknown = await tab.send('GET', `${href}x`, undefined, { headers: { accept: 'application/json' } });
     expect([unknown.status, await unknown.json()]).toEqual([404, { error: 'link_used_or_expired' }]);
+  });
+
+  it('each_copys_document_link_opens_once_on_its_own', { timeout: 15_000 }, async () => {
+    // Two browsers, each with its own copy, each get Dana's invoice card: two links, neither the
+    // fixtures' token, each opening once whatever the other did, then refused.
+    const api = createMockApi();
+    const first = browserOf(api).tab();
+    const second = browserOf(api).tab();
+    const hrefs = [await invoiceHref(first), await invoiceHref(second)];
+    expect(hrefs[0]).not.toBe(hrefs[1]);
+    for (const href of hrefs) expect(href).toMatch(/^\/api\/d\/[A-Za-z0-9]{6}$/);
+    expect(hrefs).not.toContain('/api/d/9fK2mQ');
+    const status = async (tab: Tab, href: string) => (await tab.send('GET', href)).status;
+    expect(await status(first, hrefs[0] ?? '')).toBe(200);
+    expect(await status(second, hrefs[1] ?? '')).toBe(200);
+    expect([await status(first, hrefs[0] ?? ''), await status(second, hrefs[1] ?? '')]).toEqual([404, 404]);
   });
 
   it('plugin_is_mock_mode_only', { timeout: 30_000 }, async () => {

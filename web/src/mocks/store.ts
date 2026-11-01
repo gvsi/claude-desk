@@ -24,7 +24,7 @@
  */
 import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, apiPath, type RouteKey, type RouteParams } from '../api/routes.ts';
-import { lookAtDocument, openDocument, type DocumentAnswer, type DocumentLink } from './documents.ts';
+import { DOCUMENT_TOKEN, lookAtDocument, openDocument, type DocumentAnswer, type DocumentLink } from './documents.ts';
 import { PAYMENT_TOKEN } from './script.ts';
 import type { MockSeed } from './seed.ts';
 import {
@@ -150,20 +150,25 @@ function freshToken(taken: Set<string>, length: number): string {
   return token;
 }
 
+/** The fixtures' `token` the first time, then a random token of its length; each once only. */
+function fixtureFirst(taken: Set<string>, token: string): string {
+  if (taken.has(token)) return freshToken(taken, token.length);
+  taken.add(token);
+  return token;
+}
+
 /**
  * The screen tests' naming: copies numbered from 1, so the first is the seed's (`RIVERA`), and
- * the first payment link is the fixtures' `k7Hq2vX9`; later links get random tokens of their own.
+ * the first payment and document links are the fixtures' `k7Hq2vX9` and `9fK2mQ`; later links
+ * get random tokens of their own.
  */
 function seedNaming(): CopyNaming {
   let copyNo = 0;
   const tokens = new Set<string>();
   return {
     copyNo: () => (copyNo += 1),
-    linkToken: () => {
-      if (tokens.has(PAYMENT_TOKEN)) return freshToken(tokens, PAYMENT_TOKEN.length);
-      tokens.add(PAYMENT_TOKEN);
-      return PAYMENT_TOKEN;
-    },
+    linkToken: () => fixtureFirst(tokens, PAYMENT_TOKEN),
+    documentToken: () => fixtureFirst(tokens, DOCUMENT_TOKEN),
   };
 }
 
@@ -172,7 +177,7 @@ const RANDOM_COPY_NO = { from: 36 ** 5, to: 36 ** 6 };
 
 /**
  * The dev server's naming: each copy numbered at random, so its ids and slugs are its own and a
- * link from before a restart names nothing, and every payment link with a random token.
+ * link from before a restart names nothing, and every payment and document link with a random token.
  */
 function randomNaming(): CopyNaming {
   const numbers = new Set<number>();
@@ -188,6 +193,7 @@ function randomNaming(): CopyNaming {
       return copyNo;
     },
     linkToken: () => freshToken(tokens, PAYMENT_TOKEN.length),
+    documentToken: () => freshToken(tokens, DOCUMENT_TOKEN.length),
   };
 }
 
@@ -250,13 +256,9 @@ class CookieCopies {
     return token === undefined ? undefined : this.copies.find((server) => server.world.links.has(token));
   }
 
-  /**
-   * The document link `token` names. Every copy's invoice card hands out the same token, so it is
-   * the one a copy handed out and nobody opened yet, if any.
-   */
+  /** The document link `token` names, in the one copy whose card handed it out. */
   documentLink(token: string): DocumentLink | undefined {
-    const links = this.copies.flatMap((server) => server.world.documentLinks.get(token) ?? []);
-    return links.find((link) => !link.opened) ?? links[0];
+    return this.copies.find((server) => server.world.documentLinks.has(token))?.world.documentLinks.get(token);
   }
 }
 

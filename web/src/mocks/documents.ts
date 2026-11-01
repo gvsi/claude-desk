@@ -1,10 +1,11 @@
 /**
  * A verified visitor's document link (`/api/d/{token}`), as the API serves the kernel's document
- * (`backend/desk/api/routes/proxy.py` over `kernel_service/adapters/release_document.py`): the link
- * a document card hands out opens once, as plain text shown in the tab under a file name made from
- * the card's title. Opened, or never handed out, it answers 404 in the API's short static copy (its
- * error, when JSON is asked for), and a HEAD answers 200 without opening it, whatever it names. The
- * API's expiry, prefetch refusal and rate limit aren't mocked.
+ * (`backend/desk/api/routes/proxy.py` over `kernel_service/adapters/release_document.py`): each
+ * document card hands out a link of its own (world.ts `reply`), which opens once, as plain text
+ * shown in the tab under a file name made from the card's title. Opened, or never handed out, it
+ * answers 404 in the API's short static copy (its error, when JSON is asked for), for good, and a
+ * HEAD answers 200 without opening it, whatever it names. The API's expiry, prefetch refusal and
+ * rate limit aren't mocked.
  */
 
 /** A document link a card handed out in a copy: the card's title, and whether it was opened. */
@@ -22,6 +23,9 @@ export interface DocumentAnswer {
 
 /** A document card's link, with its token. */
 export const DOCUMENT_HREF = /^\/api\/d\/([A-Za-z0-9_-]+)$/;
+
+/** The fixtures' document link token (`rivera.blocks.document_link`): the first one the screen tests' copy hands out. */
+export const DOCUMENT_TOKEN = '9fK2mQ';
 
 /** The headers the API sends with a document and with a refusal on its link: never cached, sniffed, sent on as a referrer or indexed. */
 const PRIVATE_HEADERS: Readonly<Record<string, string>> = {

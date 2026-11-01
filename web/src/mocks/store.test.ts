@@ -1334,14 +1334,14 @@ describe("a verified visitor's document link", () => {
     return answer;
   }
 
-  /** Dana confirms it's her and gets her last invoice: the token of the link its card hands out. */
+  /** Dana confirms it's her and gets her last invoice: the token of the link the newest card hands out. */
   async function invoiceToken(): Promise<string> {
     const { events } = await openChat();
     await send("I'm Dana Whitfield. Please send my last invoice.");
     await drain();
     expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
     await drain();
-    const card = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks : [])).find((block) => block.template === 'document_link');
+    const card = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks : [])).filter((block) => block.template === 'document_link').at(-1);
     expect(card?.title).toBe(rivera.blocks.document_link.en.title);
     const token = /^\/api\/d\/([A-Za-z0-9_-]+)$/.exec(card?.href ?? '')?.[1];
     if (token === undefined) throw new Error('the invoice card links to its document');
@@ -1385,6 +1385,18 @@ describe("a verified visitor's document link", () => {
     const token = await invoiceToken();
     expect(open('GET', `${token}x`).status).toBe(404);
     expect(open('GET', token).status).toBe(200);
+  });
+
+  it('each_card_hands_out_a_link_of_its_own', async () => {
+    // Dana asks again and gets a new card: its link is a new one, which opens once, and the link
+    // she already opened stays used.
+    const first = await invoiceToken();
+    expect(open('GET', first).status).toBe(200);
+    const second = await invoiceToken();
+    expect(second).not.toBe(first);
+    expect(open('GET', first).status).toBe(404);
+    expect(open('GET', second).status).toBe(200);
+    expect([open('GET', first).status, open('GET', second).status]).toEqual([404, 404]);
   });
 
   it('a_look_before_opening_never_uses_the_link', async () => {
