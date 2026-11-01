@@ -5,8 +5,10 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { MoneyCapIn } from './openapi.gen.ts';
-import { ROUTES, apiPath, type RouteBody, type RouteKey } from './routes.ts';
-import type { AnyToolName, QuestionKey } from './views.ts';
+import { ROUTES, apiPath, type RouteBody, type RouteKey, type RouteQuery } from './routes.ts';
+import type { AnyToolName, QuestionKey, SetupPublicLine, SetupPublicLineIn, SetupPublicLines, SetupPublicLinesConfirmIn } from './views.ts';
+import { ROUTE_MODELS } from './routes.typecheck.ts';
+import type { RequestOptions } from './http.ts';
 
 const PLAN_02: Record<RouteKey, string> = {
   // Copy and Desks
@@ -68,6 +70,11 @@ const PLAN_02: Record<RouteKey, string> = {
   setupSuggestions: 'POST /api/owner/setup/{id}/suggestions',
   setupTools: 'GET /api/owner/setup/{id}/tools',
   setupConnect: 'POST /api/owner/setup/{id}/tools/connect',
+  setupPublicLines: 'GET /api/owner/setup/{id}/public_lines',
+  setupPublicLine: 'PUT /api/owner/setup/{id}/public_lines',
+  setupPublicLinesConfirm: 'POST /api/owner/setup/{id}/public_lines/confirm',
+  removePublicLine: 'DELETE /api/owner/setup/{id}/public_lines/{key}',
+  removePublicPrice: 'DELETE /api/owner/setup/{id}/public_lines/prices/{item_id}',
   // Public
   publicDesk: 'GET /api/public/{slug}',
   openSession: 'POST /api/public/desks/{slug}/sessions',
@@ -134,4 +141,19 @@ describe('ROUTES', () => {
     expect(apiPath('conversation', { session_id: 's1' }, { after: undefined })).toBe('/api/owner/conversations/s1');
     expect(() => apiPath('publicDesk', {} as { slug: string })).toThrow();
   });
+});
+
+
+it('names the setup public-line responses as the API document does', () => {
+  for (const key of ['setupPublicLines', 'setupPublicLine', 'setupPublicLinesConfirm'] as const) {
+    expect(ROUTE_MODELS[key]).toBe('SetupPublicLines');
+  }
+  expectTypeOf<RouteBody<'setupPublicLine'>>().toEqualTypeOf<SetupPublicLineIn>();
+  expectTypeOf<RouteBody<'setupPublicLinesConfirm'>>().toEqualTypeOf<SetupPublicLinesConfirmIn>();
+  expectTypeOf<SetupPublicLines['lines'][number]>().toEqualTypeOf<SetupPublicLine>();
+});
+
+it('requires displayed price values in per-item removal requests', () => {
+  expectTypeOf<RouteQuery<'removePublicPrice'>>().toEqualTypeOf<{ title: string; unit_cents: number }>();
+  expectTypeOf<RequestOptions<'removePublicPrice'>>().toExtend<{ query: { title: string; unit_cents: number } }>();
 });

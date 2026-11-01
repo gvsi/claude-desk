@@ -17,6 +17,25 @@ apt-get update
 apt-get install -y build-essential pkg-config libssl-dev curl unzip git rsync openssh-server postgresql-16 postgresql-client-16 python3 acl iproute2 iptables socat fonts-liberation
 install -d -o ubuntu -g ubuntu /srv/testbox /srv/testbox/lanes /srv/testbox/cache
 install -d -o root -g root /opt/testbox
+# Every lane on a laptop shares one SSH connection, and sshd allows 10 sessions on a connection by default, so with
+# a dozen lanes at once new calls were refused ("no more sessions"). 256 stays inside the 1024 open files each
+# connection's sshd process may hold (about two per session). Reload only when the setting changes: a reload keeps
+# open connections, and each new connection gets the new limits. sshd keeps the first value it reads, so confirm
+# the one in effect; on any failure remove the file, so a retry sees a change and checks again.
+cat > /tmp/desk-testbox-sshd.conf <<'SSHD'
+MaxSessions 256
+MaxStartups 200:30:400
+SSHD
+if ! cmp -s /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf; then
+  install -m 644 /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf
+  # The check needs sshd's runtime directory, which only a started ssh.service creates (it starts on first connection).
+  install -d -o root -g root -m 0755 /run/sshd
+  if ! { sshd -t && sshd -T | grep -qx 'maxsessions 256' && systemctl try-reload-or-restart ssh.service; }; then
+    rm -f /etc/ssh/sshd_config.d/90-testbox.conf
+    echo "testbox bootstrap: sshd rejected or overrode the session limits" >&2
+    exit 1
+  fi
+fi
 # This server holds only disposable test data. Never apply these settings elsewhere.
 pg_changed=0
 cat > /tmp/desk-testbox-postgres.conf <<'PG'
