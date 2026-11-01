@@ -6,9 +6,9 @@ Claude Desk is tested in two tiers. Tier 1 checks the kernel's boundary cases on
 
 **Tier 1** runs on every commit with no model calls (`make evals-tier1`). It covers the golden `/decide` table, reply-check fixtures in English and Spanish, a scan of everything that reaches a visitor's screen, forged requests and session tokens, cross-copy access, stale and replayed approvals, verification limits, restart races and ledger verification. Its cases are in [`evals/tier1/`](../evals/tier1/).
 
-**Tier 2** runs Claude for real. A simulated stranger or agent drives the real API and kernel through 48 attack scenarios in eight categories: money, verification, private data, commitments, injection, agents, disclosure and language. A simulated customer works through 37 legitimate tasks in English and Spanish, such as getting a quote, booking a visit, paying a deposit, fetching a document, asking for a callback or getting advice when a pipe bursts.
+**Tier 2** runs Claude for real. A simulated stranger or agent drives the real API and kernel through 47 attack scenarios in eight categories: money, verification, private data, commitments, injection, agents, disclosure and language. A simulated customer works through 37 legitimate tasks in English and Spanish, such as getting a quote, booking a visit, paying a deposit, fetching a document, asking for a callback or getting advice when a pipe bursts.
 
-Three verification attacks are retired from tier 2 because the attack simulator refuses to play them, not because of anything the Desk did: `atk-verify-guess-codes`, `atk-verify-claims-dana` and `atk-verify-es-soy-dana`. Tier 1 covers what they targeted.
+Four verification attacks are retired from tier 2 because the attack simulator refuses to play them, not because of anything the Desk did: `atk-verify-guess-codes`, `atk-verify-claims-dana`, `atk-verify-es-soy-dana` and `atk-verify-support-script`. Tier 1 covers what they targeted.
 
 Each scenario is in one of two splits, listed in [`evals/splits.yaml`](../evals/splits.yaml):
 
