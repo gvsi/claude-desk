@@ -3,14 +3,14 @@ import { useCallback, useContext, useLayoutEffect, useState, type CSSProperties,
 import { useReducedMotion } from '../ChatMarkdown/useReducedMotion.ts';
 import { RowArrivalContext } from '../TranscriptRow/arrival.ts';
 
-/** The cards' fade and rise, after a revealed message's words (ClaudeMessage.css). */
-const FOLLOW = 'cd-claude-message-follow';
+/** The motion a revealed message comes in with: each word settling in (ChatMarkdown.css), then its cards (ClaudeMessage.css). */
+const COMING_IN: ReadonlySet<string> = new Set(['cd-md-settle', 'cd-md-settle-marker', 'cd-claude-message-follow']);
 
 /** From the third card on, cards share a beat, so a long list never keeps what follows waiting. */
 const CARD_BEATS = 3;
 
 export interface MessageReveal {
-  /** The message is revealed: it arrived live, with motion. Read once, when first drawn. */
+  /** The message's words are being revealed, or are still settling in: `ChatMarkdown`'s `reveal`. */
   revealing: boolean;
   /** How many prose blocks to draw: those whose words are whole, and the one being revealed. */
   drawn: number;
@@ -25,8 +25,9 @@ export interface MessageReveal {
  * under reduced motion), its prose blocks show word by word, one after another, while its cards wait
  * unseen in their places. Once the words are whole, the cards fade and rise in, one by one,
  * `motion-follow` apart, the first a beat after the words, or at once with no words before them,
- * and the `TranscriptRow` it arrived in brings what is attached in after them. Not revealed, it
- * shows whole at once.
+ * and the `TranscriptRow` it arrived in brings what is attached in after them. Once its words
+ * have settled and its cards have come in, it is drawn as a message from history is. Not revealed,
+ * it shows whole at once.
  */
 export function useMessageReveal(ref: RefObject<HTMLElement | null>, prose: number, cards: number, reveal: boolean): MessageReveal {
   const reduced = useReducedMotion();
@@ -34,8 +35,8 @@ export function useMessageReveal(ref: RefObject<HTMLElement | null>, prose: numb
   // How many prose blocks show all their words.
   const [whole, setWhole] = useState(revealing ? 0 : prose);
   const wordsIn = whole >= prose;
-  // Whether the cards have come in: at once when the message isn't revealed.
-  const [cardsIn, setCardsIn] = useState(!revealing);
+  // Whether everything in the message has come in: at once when it isn't revealed.
+  const [settled, setSettled] = useState(!revealing);
   const row = useContext(RowArrivalContext);
   // The first card's beat: one after the words, or at once with none.
   const from = prose > 0 ? 1 : 0;
@@ -51,19 +52,19 @@ export function useMessageReveal(ref: RefObject<HTMLElement | null>, prose: numb
     if (revealing && wordsIn) row?.follow(from + Math.min(cards, CARD_BEATS));
   }, [revealing, wordsIn, row, from, cards]);
 
-  // The cards have come in once their fade has played, or at once when nothing can play it, so
-  // motion going and coming back never plays it again.
+  // Everything has come in once the last word has settled and the cards' fade has played, or at
+  // once when nothing can play them, so motion going and coming back never plays them again.
   useLayoutEffect(() => {
     const el = ref.current;
-    if (cardsIn || !wordsIn || el === null) return undefined;
-    const following = () =>
-      el.getAnimations({ subtree: true }).some((a) => a instanceof CSSAnimation && a.animationName === FOLLOW && a.playState !== 'finished');
-    if (!following()) {
-      setCardsIn(true);
+    if (settled || !wordsIn || el === null) return undefined;
+    const comingIn = () =>
+      el.getAnimations({ subtree: true }).some((a) => a instanceof CSSAnimation && COMING_IN.has(a.animationName) && a.playState !== 'finished');
+    if (!comingIn()) {
+      setSettled(true);
       return undefined;
     }
     const settle = () => {
-      if (!following()) setCardsIn(true);
+      if (!comingIn()) setSettled(true);
     };
     el.addEventListener('animationend', settle);
     el.addEventListener('animationcancel', settle);
@@ -71,15 +72,15 @@ export function useMessageReveal(ref: RefObject<HTMLElement | null>, prose: numb
       el.removeEventListener('animationend', settle);
       el.removeEventListener('animationcancel', settle);
     };
-  }, [ref, cardsIn, wordsIn]);
+  }, [ref, settled, wordsIn]);
 
   const revealed = useCallback((nth: number) => setWhole((count) => Math.max(count, nth + 1)), []);
 
   let className = '';
   if (revealing && !wordsIn) className = ' cd-claude-message--revealing';
-  else if (revealing && !cardsIn) className = ' cd-claude-message--following';
+  else if (!settled) className = ' cd-claude-message--following';
   return {
-    revealing,
+    revealing: revealing && !settled,
     drawn: revealing ? Math.min(whole + 1, prose) : prose,
     revealed,
     root: {
