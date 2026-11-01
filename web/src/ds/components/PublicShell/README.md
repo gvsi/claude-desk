@@ -203,12 +203,12 @@ at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
 ## Before the first message
 
 Pass `firstView` only after session history has loaded and while the chat is empty. The shell shows
-“How can {business} help?” and “Try one of these, or ask in your own words.” (with the signed Spanish
-copy when `language="es"`). The business name keeps `data-copy="user"`; the surrounding words are
+“How can {business} help?” and, when there are starters, “Try one of these, or ask in your own
+words.” (with the signed Spanish copy when `language="es"`). The business name keeps `data-copy="user"`; the surrounding words are
 app copy. The disclosure and its punctuation stay in their usual head above the invitation.
 
 `starters={{ words, onPick, disabled }}` supplies localized business content to `SuggestionChips`;
-only the first three words entries appear. Omit it, or pass an empty array, for no chips. `onPick`
+only the first three words entries appear. Omit it, or pass an empty array, for the greeting alone: no meta line and no chips. `onPick`
 must use the same send path as the composer. PublicChat reads `(desk.starters ?? []).slice(0, 3)`
 and sends picks through its ordinary visitor send handler, including in Today and setup previews.
 

@@ -13,6 +13,7 @@ import { request } from '../api/http.ts';
 import { typingPingMs } from '../app/poll.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
+import { coarsePointer } from '../ds/test/touch.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, PUBLIC_SHELL_SCROLLER_EVENT, RATE_LIMITED_COPY, UNREACHABLE_COPY, type PublicShellScrollerDetail } from '../ds/index.ts';
 import { BREAK_IT_IDEAS, HANDOFF_MAX_AGE_MS, forgetTakenBreakItHandoffs, handOffBreakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../lib/storage.ts';
@@ -311,6 +312,44 @@ describe('public chat page', () => {
     await expect.element(screen.getByRole('heading', { name: 'How can Rivera Plumbing help?' })).not.toBeInTheDocument();
   });
 
+  it('fading_first_view_stays_in_place_under_a_short_scrolled_transformed_shell', async () => {
+    // An iPhone keyboard: the shell takes the visual viewport's height and offset, turns short and
+    // scrolls, and the fading invitation must stay where the visitor last saw it.
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await reduceMotion(false);
+    onTestFinished(() => reduceMotion(reduced));
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    const shell = document.querySelector<HTMLElement>('.cd-public-shell')!;
+    shell.style.transform = 'translateY(41px)';
+    shell.style.height = '480px';
+    await screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).fill('How much is drain clearing?');
+    await vi.waitFor(() => expect(shell.classList.contains('cd-public-shell--short')).toBe(true));
+    shell.scrollTop = 60;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    expect(shell.scrollTop).toBeGreaterThan(0);
+    // Where the invitation shows as the Send press lands, before the page answers it.
+    const drawn = new Map<Element, DOMRect>();
+    document.addEventListener('click', () => {
+      for (const element of shell.querySelectorAll('.cd-public-shell__welcome, .cd-public-shell__starters')) drawn.set(element, element.getBoundingClientRect());
+    }, { capture: true, once: true });
+    const fading: { before: DOMRect; after: DOMRect }[] = [];
+    const original = Element.prototype.animate;
+    const animate = vi.spyOn(Element.prototype, 'animate').mockImplementation(function (this: Element, ...args) {
+      const before = drawn.get(this);
+      if (before) fading.push({ before, after: this.getBoundingClientRect() });
+      return original.apply(this, args);
+    });
+    onTestFinished(() => animate.mockRestore());
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    expect(fading).toHaveLength(2);
+    for (const { before, after } of fading) {
+      expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(after.left - before.left)).toBeLessThanOrEqual(1);
+    }
+    await turnEnded(0);
+  });
+
   it('phone_first_send_fades_without_animating_the_composer_lift', async () => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     await reduceMotion(false);
@@ -380,12 +419,7 @@ describe('public chat page', () => {
   });
 
   it('touch_pick_sends_without_focusing_the_composer', async () => {
-    const matchMedia = window.matchMedia.bind(window);
-    const media = vi.spyOn(window, 'matchMedia').mockImplementation((query) => {
-      const result = matchMedia(query);
-      return query === '(pointer: coarse)' ? { matches: true } as MediaQueryList : result;
-    });
-    onTestFinished(() => media.mockRestore());
+    await coarsePointer();
     const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
     await ready(screen);
     const chip = screen.getByRole('button', { name: 'How much is drain clearing?', exact: true });
@@ -397,10 +431,7 @@ describe('public chat page', () => {
   });
 
   it('keyboard_pick_on_a_coarse_pointer_moves_focus_to_the_composer', async () => {
-    const matchMedia = window.matchMedia.bind(window);
-    const media = vi.spyOn(window, 'matchMedia').mockImplementation((query) =>
-      query === '(pointer: coarse)' ? { matches: true } as MediaQueryList : matchMedia(query));
-    onTestFinished(() => media.mockRestore());
+    await coarsePointer();
     const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
     await ready(screen);
     await userEvent.tab();

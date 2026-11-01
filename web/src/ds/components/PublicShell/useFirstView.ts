@@ -27,10 +27,11 @@ export function useFirstView(shellRef: RefObject<HTMLDivElement>, firstView: boo
         setInvitationShown(false);
         return;
       }
-      // A visual viewport fit translates the shell, making it the fixed elements' containing block.
+      // A visual viewport fit translates the shell, making it the fixed elements' containing block,
+      // and a short shell scrolls: they then sit against its scrolled content, as absolute ones do.
       const shellBounds = tokens.transform === 'none' ? null : shell.getBoundingClientRect();
-      const originTop = shellBounds ? shellBounds.top + shell.clientTop : 0;
-      const originLeft = shellBounds ? shellBounds.left + shell.clientLeft : 0;
+      const originTop = shellBounds ? shellBounds.top + shell.clientTop - shell.scrollTop : 0;
+      const originLeft = shellBounds ? shellBounds.left + shell.clientLeft - shell.scrollLeft : 0;
       const animations: Animation[] = [];
       for (const [element, rect] of [[welcome, old.welcome], [chips, old.chips]] as const) {
         if (!element || !rect) continue;
@@ -75,7 +76,12 @@ export function useFirstView(shellRef: RefObject<HTMLDivElement>, firstView: boo
     observer.observe(region);
     observer.observe(group);
     if (welcome) observer.observe(welcome);
-    return () => observer.disconnect();
+    // A short shell scrolls under the invitation: keep where it shows now, for the fade.
+    shell.addEventListener('scroll', place, { passive: true });
+    return () => {
+      observer.disconnect();
+      shell.removeEventListener('scroll', place);
+    };
   }, [firstView, aboutBeside, starterCount]);
   return firstView || invitationShown;
 }
