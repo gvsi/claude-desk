@@ -72,7 +72,7 @@ const DEMO_CODE_SHAPE = /^\d{6}$/;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const KNOWLEDGE_SOURCES: ReadonlySet<unknown> = new Set(['website', 'upload', 'setup', 'memory_import']);
+const KNOWLEDGE_SOURCES: ReadonlySet<unknown> = new Set(['website', 'upload', 'setup', 'memory_import', 'web_search']);
 
 /** A `KnowledgeItem` as the contracts have it: an id, a known source, a title, a text and readers. */
 function isKnowledgeItem(value: unknown): value is KnowledgeItem {
