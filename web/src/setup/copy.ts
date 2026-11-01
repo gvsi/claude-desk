@@ -182,7 +182,7 @@ export const SETUP_COPY = {
     failed: 'I couldn’t save that just now. Try again.', tryAgain: 'Try again',
     decline: 'Not now', later: 'Coming later',
     who: 'Who', usesLabel: 'Uses', nextLabel: 'Next for you', asks: 'Asks',
-    uses: { schedule: 'Your opening hours', payment: 'Stripe', price: 'Your prices', intake: 'Your questions', urgent: 'Alerts you right away' },
+    uses: { schedule: 'Your opening hours', payment: 'Stripe', price: 'Your prices', urgent: 'Alerts you right away' },
     next: {
       schedule: { auto: 'The booking shows in Today, with their answers', ask: 'You approve each request in Needs you' },
       intake: 'Their answers show on the booking', payment: 'Each payment shows in Today',

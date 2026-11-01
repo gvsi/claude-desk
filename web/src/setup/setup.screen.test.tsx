@@ -3325,7 +3325,7 @@ describe('consultant setup', () => {
   it.each([
     ['schedule', 'Your opening hours', 'You approve each request in Needs you'],
     ['payment', 'Stripe', 'Each payment shows in Today'],
-    ['intake', 'Your questions', 'Their answers show on the booking'],
+    ['intake', null, 'Their answers show on the booking'],
     ['price', 'Your prices', null], ['urgent', 'Alerts you right away', null],
     ['status', null, null], ['documents', null, null], ['answer', null, null],
   ] as const)('uses_only_the_signed_rows_for_%s_and_renders_who_as_untrusted_text', async (kind, uses, next) => {
@@ -3372,7 +3372,8 @@ describe('consultant setup', () => {
     expect(card.element().querySelector('.cd-setup-c3__line')).toBeNull();
     expect(card.getByRole('button').elements()).toHaveLength(0);
     const intake = screen.getByRole('article', { name: 'Ask new clients three questions', exact: true });
-    await expect.element(intake.getByText('Your questions', { exact: true })).toBeVisible();
+    expect(intake.getByText('Uses', { exact: true }).elements()).toHaveLength(0);
+    expect(intake.getByText('Your questions', { exact: true }).elements()).toHaveLength(0);
     expect(screen.getByText('Great, I’ll set it up this way. Next: the questions new clients answer before their call.', { exact: true }).elements()).toHaveLength(1);
     await expect.element(intake.getByText('Is it for you or your business? Which tax years or months? Any bookkeeping software?', { exact: true })).toBeVisible();
     await expect.element(intake.getByText('Their answers show on the booking', { exact: true })).toBeVisible();
