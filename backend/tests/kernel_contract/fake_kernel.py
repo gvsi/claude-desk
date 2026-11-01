@@ -928,12 +928,12 @@ PUBLIC_POLICY_PATTERNS = (
     ("policy.ai_denial", r"(?<!\w)(?:" + "|".join(POLICY_AI_DENIAL) + r")(?!\w)"),
     ("policy.free_price", r"(?<!\w)(?:" + "|".join(POLICY_FREE_PRICE) + r")(?!\w)"),
     ("lex.en.number", r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
-     r"(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty|half|halves)\b"),
+     r"(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty|half|halves|hundreds?)\b"),
     ("lex.es.number", r"\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mil|miles|"
-     r"veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|mitad)\b"),
+     r"veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|mitad|cien)\b"),
     ("lex.en.date", r"\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekends?|"
      r"same[\s-]{0,3}day|(?:in|within)[\s-]+(?:[^\W\d_]+[\s-]+){0,3}(?:minutes?|mins?|hours?|hrs?))\b"),
-    ("lex.es.date", r"\b(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?|fin(?:es)?\s+de\s+semana)\b"),
+    ("lex.es.date", r"\b(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?|fin(?:es)?\s+de\s+semana|ma[nñ]anas?)\b"),
     ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
      r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|garant(?:o|imos|em)|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
@@ -978,32 +978,50 @@ SERVICE_AREA_CARDINAL = (
     r"|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty"
     r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
     r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
-SERVICE_AREA_AFTER_CARDINAL = (
-    rf"(?:{SERVICE_AREA_BLANK}+(?:y{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_CARDINAL}\b){{0,2}}"
-    rf"(?:{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}|{SERVICE_AREA_BLANK}+(?:days?{SERVICE_AREA_BLANK}+a"
-    rf"{SERVICE_AREA_BLANK}+week|d[ií]as?{SERVICE_AREA_BLANK}+a{SERVICE_AREA_BLANK}+la{SERVICE_AREA_BLANK}+semana)\b)")
+SERVICE_AREA_AFTER_DIGITS = (
+    rf"(?:(?:{SERVICE_AREA_BLANK}*[-–—]{SERVICE_AREA_BLANK}*|{SERVICE_AREA_BLANK}+(?:to|a|hasta){SERVICE_AREA_BLANK}+)"
+    rf"[0-9]+(?:[.,][0-9]+)*)?{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}|{SERVICE_AREA_BLANK}+(?:days?{SERVICE_AREA_BLANK}+"
+    rf"a{SERVICE_AREA_BLANK}+week|d[ií]as?{SERVICE_AREA_BLANK}+a{SERVICE_AREA_BLANK}+la{SERVICE_AREA_BLANK}+semana)\b")
+SERVICE_AREA_YEAR_PREFIX = re.compile(r"\b(?:since|in|from|est\.|established|founded|desde|en)\s+$", re.IGNORECASE)
+SERVICE_AREA_HALF_OR_HUNDRED = rf"half|(?:one{SERVICE_AREA_BLANK}+)?hundred|cien"
+SERVICE_AREA_BEFORE_UNIT = rf"{SERVICE_AREA_BLANK}+(?:an?{SERVICE_AREA_BLANK}+)?{SERVICE_AREA_UNIT}"
 SERVICE_AREA_DAY_WORDS = (
     r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
     rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{SERVICE_AREA_BLANK}+de"
     rf"{SERVICE_AREA_BLANK}+semana|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches")
 
+# ZIP ranges keep both five-digit endpoints under the same postal marker.
+SERVICE_AREA_POSTAL_PREFIX = re.compile(
+    r"\b(?:(?i:zip(?:\s+codes?)?|c[oó]digo\s+postal)|(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|"
+    r"LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY))"
+    r"\s+(?:[0-9]{5}\s*[-–—]\s*)?$")
+SERVICE_AREA_ROAD_PREFIX = re.compile(r"\b(?:I-\s*|(?:Highway|Hwy)\s+)$", re.IGNORECASE)
+SERVICE_AREA_ALWAYS = re.compile(r"\b24/7\b")
+
 
 def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
     """Mirror the service-area allowance on the hit `text[start:end]`, read in that policy's own text: a
-    number before a distance unit or a year, a cardinal word before a unit or "days a week", "miles" as the
-    unit, and weekdays, weekends and parts of the day."""
+    number before a distance unit (or a range to one) or "days a week", a year, a marked ZIP code or road number, or literal "24/7"; any cardinal word, half or a hundred before a unit, "miles" as
+    the unit, and weekdays, weekends and parts of the day."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
     hit, after = text[start:end], text[end:]
     if rule == "digit":
-        return (re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
-                or re.match(rf"{SERVICE_AREA_BLANK}*{SERVICE_AREA_UNIT}", after, re.IGNORECASE) is not None)
+        return ((re.fullmatch(r"(?:19|20)[0-9]{2}", hit) is not None
+                 and SERVICE_AREA_YEAR_PREFIX.search(text[:start]) is not None)
+                or re.match(SERVICE_AREA_AFTER_DIGITS, after, re.IGNORECASE) is not None
+                or (re.fullmatch(r"[0-9]{5}", hit) is not None
+                    and SERVICE_AREA_POSTAL_PREFIX.search(text[:start]) is not None)
+                or (hit.isascii() and hit.isdigit() and SERVICE_AREA_ROAD_PREFIX.search(text[:start]) is not None)
+                or any(match.start() <= start and end <= match.end() for match in SERVICE_AREA_ALWAYS.finditer(text)))
     if rule in ("lex.en.number", "lex.es.number"):
-        return re.fullmatch(r"miles|millas", hit, re.IGNORECASE) is not None or (
-            re.fullmatch(SERVICE_AREA_CARDINAL, hit, re.IGNORECASE) is not None
-            and re.match(SERVICE_AREA_AFTER_CARDINAL, after, re.IGNORECASE) is not None)
+        return (re.fullmatch(rf"miles|millas|{SERVICE_AREA_CARDINAL}", hit, re.IGNORECASE) is not None
+                or (re.fullmatch(SERVICE_AREA_HALF_OR_HUNDRED, hit, re.IGNORECASE) is not None
+                    and re.match(SERVICE_AREA_BEFORE_UNIT, after, re.IGNORECASE) is not None))
     if rule in ("lex.en.date", "lex.es.date"):
-        return re.fullmatch(SERVICE_AREA_DAY_WORDS, hit, re.IGNORECASE) is not None
+        return (re.fullmatch(SERVICE_AREA_DAY_WORDS, hit, re.IGNORECASE) is not None
+                or (hit.casefold() in {"mañana", "manana"}
+                    and re.search(r"\b(?:por|en|de)\s+la\s+$", text[:start], re.IGNORECASE) is not None))
     return False
 
 

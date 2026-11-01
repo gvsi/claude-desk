@@ -78,16 +78,16 @@ WITHHELD_ALERT_EVERY = timedelta(hours=1)
 POLICY_LABELS = {"service_area": "Service area", "about": "About us", "pricing": "Pricing",
                  "intake": "Getting started", "after_hours": "After hours", "urgent": "Urgent help",
                  "how_we_help": "How we help"}
-# Why a line is withheld, from its rule IDs (never its text), in the order the alert gives them, each
-# after "it" and after "they".
+# Why each line is withheld, from its rule IDs (never its text), after "it".
 POLICY_CAUSES = {
-    "number": ("names a number", "name a number"),
-    "price": ("names a price or a discount", "name a price or a discount"),
-    "date": ("names a date or a time", "name a date or a time"),
-    "promise": ("makes a promise", "make a promise"),
-    "booking": ("confirms a booking or a call", "confirm a booking or a call"),
-    "language": ("isn't in English or Spanish", "aren't in English or Spanish"),
-    "format": ("has hidden formatting characters", "have hidden formatting characters"),
+    "number": "names a number",
+    "price": "names a price or a discount",
+    "date": "names a date or a time",
+    "promise": "makes a promise",
+    "booking": "confirms a booking or a call",
+    "language": "isn't in English or Spanish",
+    "format": "has hidden formatting characters",
+    "check": "doesn't pass the page's check",
 }
 
 
@@ -108,20 +108,24 @@ def _policy_cause(rule: str) -> str:
         return "booking"
     if rule in ("language", "mixed_script"):
         return "language"
-    return "format"
+    if rule == "format_control":
+        return "format"
+    return "check"
 
 
 def withheld_policy_alert(policies: Mapping[str, Iterable[str]]) -> str:
     """The owner's alert that the page left out `policies` (key after "policy:" → its rule IDs), naming
     each by its public label and saying why from the rules, never quoting the line."""
-    keys = sorted(policies)
-    labels = [POLICY_LABELS.get(key, key.replace("_", " ").capitalize()) for key in keys]
-    causes = {_policy_cause(rule) for key in keys for rule in policies[key]}
-    if "price" in causes:
-        causes.discard("number")                          # a price names its number already
-    plural = len(keys) > 1
-    because = _and([POLICY_CAUSES[cause][plural] for cause in POLICY_CAUSES if cause in causes])
-    return f"Your public page is hiding {_and(labels)}, because {'they' if plural else 'it'} {because}."
+    lines = []
+    for key in sorted(policies):
+        label = POLICY_LABELS.get(key, key.replace("_", " ").capitalize())
+        causes = {_policy_cause(rule) for rule in policies[key]} or {"check"}
+        if "price" in causes:
+            causes.discard("number")                      # a price names its own number already
+        because = _and([words for cause, words in POLICY_CAUSES.items() if cause in causes])
+        lines.append(f"{label}, because it {because}")
+    hidden = lines[0] if len(lines) == 1 else f"{', '.join(lines[:-1])}, and {lines[-1]}"
+    return f"Your public page is hiding {hidden}."
 
 
 def withheld_alert(fields: Sequence[str]) -> str:
