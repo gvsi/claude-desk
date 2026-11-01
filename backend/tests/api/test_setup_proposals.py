@@ -380,6 +380,31 @@ async def test_fact_turn_owns_only_supported_fields(proposals, model, engine, to
             assert record["answers"][name] == []
 
 
+@pytest.mark.parametrize("field,topic,owned", [
+    ("pricing", "what_you_do", True), ("pricing", "hours_and_area", False), ("pricing", "quote_limit", True),
+    ("intake", "what_you_do", True), ("intake", "hours_and_area", False),
+    ("urgent", "contact_and_after_hours", True), ("urgent", "hours_and_area", False),
+])
+async def test_policy_text_is_the_owners_only_on_its_own_question(proposals, model, engine, field, topic, owned):
+    from desk.api.prompts import SETUP_POLICY_CLAIMS
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await ask_topic(owner, engine, interview_id, topic)
+    text = "Each job is priced after a look at it."
+    reply = await answer(owner, model, interview_id, "Here's how it works.", turn(**{field: text}), question=topic)
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert getattr(answers, field) == text  # the owner's view keeps it either way
+    assert (field in said.get("owner_fields", [])) is owned
+    assert (field in answers.suggested_fields) is not owned
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert (SETUP_POLICY_CLAIMS[field] in {claim.key for claim in parts.charter}) is owned
+
+
 @pytest.mark.parametrize("source,supported", [("description", True), ("owner", True), ("claude", False),
                                                 ("website", False), ("memory", False)])
 async def test_fact_support_uses_only_owner_transcript(proposals, model, engine, source, supported):

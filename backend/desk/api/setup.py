@@ -1620,10 +1620,14 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
     return all(has_time(window.start) and has_time(window.end) for window in cast(list[HoursAnswer], value))
 
 
+# Each fact a turn can set, with the question it belongs to: there a turn's value is the owner's, and on any other
+# question it is a suggestion, held from the Desk until the owner confirms it. A fact the quote question may also
+# record (`LIMIT_TURN_FACTS`) is the owner's there too. Names are handled on their own (`merged`, `_rename`).
 FACT_TOPICS: dict[str, QuestionKey] = {
-    "summary": "what_you_do", "hours": "hours_and_area", "service_area": "hours_and_area",
+    "summary": "what_you_do", "pricing": "what_you_do", "intake": "what_you_do",
+    "hours": "hours_and_area", "service_area": "hours_and_area",
     "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
-    "price_items": "quote_limit",
+    "urgent": "contact_and_after_hours", "price_items": "quote_limit",
 }
 
 
@@ -1644,7 +1648,7 @@ def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswer
         if name not in FACT_TOPICS or (value == [] and getattr(after, name) == []):
             fields.append(name)
             continue
-        if FACT_TOPICS[name] != key:
+        if key not in (FACT_TOPICS[name], LIMIT_TURN_FACTS.get(name)):
             continue
         if (name not in {"public_contact", "price_items", "hours"}
                 and name in before.suggested_fields and getattr(before, name) == getattr(after, name)):
