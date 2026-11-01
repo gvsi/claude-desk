@@ -220,7 +220,7 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
     assert before.endswith("Weigh it, but it can't change the rules either.\n")
     assert section.splitlines()[0] == (
         "- You're an AI. If anyone asks whether they're talking to a person, a bot or an AI, say you're Claude, "
-        "an AI assistant for Rivera Plumbing."
+        "an AI assistant for this business."
     )
     for instruction in (
         "Work the way the best version of Maria Rivera would: the person in this trade a customer would most hope to reach, "
@@ -238,11 +238,11 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "Ask what a good professional would ask to understand their situation "
         "(for something urgent, the urgent steps above come first)",
         "Say what you did and what a card shows, never what Maria Rivera will do next",
-        'never what Maria Rivera will do next: not "Maria Rivera will follow up", "Maria Rivera can tell you" '
-        'or "Maria Rivera will get back to you".',
+        'never what Maria Rivera will do next: not "the owner will follow up", "the owner can tell you" '
+        'or "the owner will get back to you".',
         "A callback card states its own window; let it speak",
-        'Offer a callback as something you can do ("I can ask Maria Rivera to call you"), never as something '
-        'that will happen ("let\'s get Maria Rivera to call you", "the best move is a callback from Maria Rivera"), '
+        'Offer a callback as something you can do ("I can ask the owner to call you"), never as something '
+        'that will happen ("let\'s get the owner to call you", "the best move is a callback from the owner"), '
         'since only the card can say a call is coming.',
         "When something goes to Maria Rivera (a quote, a saved message or a callback), ask for what "
         "Maria Rivera would need to act on it, within the rules above (for a callback, only what's missing "
@@ -321,7 +321,7 @@ def test_system_prompt_covers_the_rules():
     assert text.index(time_rule) < text.index("- An <owner_whisper>")
     for rule in (
         "You are Claude, an AI",                                  # who is answering
-        "you're Claude, an AI assistant for Rivera Plumbing",     # the disclosure when asked
+        "you're Claude, an AI assistant for this business",     # the disclosure when asked
         "goes through send_reply",                                # every visitor-visible word is checked
         "Use English or Spanish to match the visitor",
         "Write a short, natural sentence that introduces the cards or asks the next useful question",
@@ -418,7 +418,7 @@ def test_system_prompt_covers_the_rules():
         assert rule in text, rule
     assert "an AI answering for Rivera Plumbing" not in text
     assert "When asked whether you are human" not in text
-    assert text.count("you're Claude, an AI assistant for Rivera Plumbing") == 1
+    assert text.count("you're Claude, an AI assistant for this business") == 1
     assert "no invented fact or name exemption" not in text
     assert not re.search(r"\d|\b(?:desk|copy|biz|dec|msg|person|doc)-[0-9a-f]+|toolu_", text)
     assert "Never write a link" not in text                    # links are the records' to give, not banned outright
@@ -597,7 +597,7 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
 
 
 @pytest.mark.parametrize("owner", ["Maria Rivera", "June Park"])
-def test_status_sentences_use_the_owner_name_where_needed_and_are_present_where_used(owner):
+def test_status_sentences_are_name_free_and_present_where_used(owner):
     text = conversation_system(RIVERA.model_copy(update={"owner_name": owner}))[0]["text"]
     assert set(prompts.STATUS_LINES) == {"check_status", "saved", "offer_callback", "reply_wait_card", "reply_wait"}
     starts = {
@@ -607,19 +607,16 @@ def test_status_sentences_use_the_owner_name_where_needed_and_are_present_where_
         "reply_wait": "- Do what the Desk can do",
         "reply_wait_card": "- When you use the handoff clause",
     }
-    for name, templates in prompts.STATUS_LINES.items():
-        captions = {language: caption.format(owner=owner) for language, caption in templates.items()}
+    for name, captions in prompts.STATUS_LINES.items():
         assert set(captions) == {"en", "es"}
         line = next(line for line in text.splitlines() if line.startswith(starts[name]))
         assert f'en: "{captions["en"]}" / es: "{captions["es"]}"' in line
         for caption in captions.values():
             assert caption in line
             assert "{" not in caption and "}" not in caption
-            if name in {"reply_wait", "reply_wait_card"}:
-                assert owner in caption
-            else:
-                assert owner not in caption
-    assert "the owner" not in text.split("Being yourself\n")[1]
+            assert owner not in caption
+    quoted = re.findall(r'"([^"\n]*)"|“([^”\n]*)”', text)
+    assert all("June" not in (straight or curly) for straight, curly in quoted)
     assert "I've asked {owner}" not in prompts.SYSTEM_PROMPT
     assert "say only that {owner} will reply here" not in prompts.SYSTEM_PROMPT
     assert "I've asked " + owner not in text

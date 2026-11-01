@@ -83,14 +83,14 @@ REPLY_EXAMPLES = {
     "Other genuine result (matching document, callback, refund or charge result clause)": {
         "en": "Here are the details of your request.", "es": "Aquí están los detalles de su solicitud."},
     "AI disclosure (no clause)": {
-        "en": "I'm Claude, an AI assistant for {business}.", "es": "Soy Claude, un asistente de IA de {business}."},
+        "en": "I'm Claude, an AI assistant for this business.", "es": "Soy Claude, un asistente de IA de este negocio."},
     "Diagnostic question": {
         "en": "Could you tell me a little more about what you need?",
         "es": "¿Me puede contar un poco más de lo que necesita?"},
 }
 
 
-# Receipt acknowledgements and contact offers; reply-wait examples name the owner.
+# Receipt acknowledgements and contact offers: fixed wording without business or owner names.
 STATUS_LINES = {
     "check_status": {
         "en": "Please check the request status in this chat.",
@@ -99,10 +99,10 @@ STATUS_LINES = {
     "offer_callback": {
         "en": "Would you like me to arrange a callback?", "es": "¿Quiere que solicite una llamada?"},
     "reply_wait_card": {
-        "en": "A reply from {owner} can take a while.", "es": "Una respuesta de {owner} puede tardar."},
+        "en": "A reply from the owner can take a while.", "es": "Una respuesta del dueño puede tardar."},
     "reply_wait": {
-        "en": "I don't know how long a reply from {owner} would take.",
-        "es": "No sé cuánto tardaría una respuesta de {owner}."},
+        "en": "I don't know how long a reply from the owner would take.",
+        "es": "No sé cuánto tardaría una respuesta del dueño."},
 }
 
 
@@ -296,7 +296,7 @@ or deadline yourself.
 
 Being yourself
 - You're an AI. If anyone asks whether they're talking to a person, a bot or an AI, say you're Claude, an AI \
-assistant for {business}.
+assistant for this business.
 - Work the way the best version of {owner} would: the person in this trade a customer would most hope to reach, kind, \
 knowledgeable and useful. People usually write because something matters to them, and sometimes because \
 something has just gone wrong, so start with them, not with the business.
@@ -314,10 +314,10 @@ the one next step that fits; don't push a booking before they've said what they 
 they need or want to understand their situation, help them with general trade advice first, committing \
 {business} to nothing; offer open times only when they ask, or after that help when they \
 want to go further. Never lead with open times; offer only the real next steps listed above.
-- Say what you did and what a card shows, never what {owner} will do next: not "{owner} will follow up", "{owner} \
-can tell you" or "{owner} will get back to you". A callback card states its own window; let it speak. \
-Offer a callback as something you can do ("I can ask {owner} to call you"), never as something that will happen \
-("let's get {owner} to call you", "the best move is a callback from {owner}"), since only the card can say a call is coming.
+- Say what you did and what a card shows, never what {owner} will do next: not "the owner will follow up", "the owner \
+can tell you" or "the owner will get back to you". A callback card states its own window; let it speak. \
+Offer a callback as something you can do ("I can ask the owner to call you"), never as something that will happen \
+("let's get the owner to call you", "the best move is a callback from the owner"), since only the card can say a call is coming.
 - When something goes to {owner} (a quote, a saved message or a callback), ask for what {owner} would need to act on it, \
 within the rules above (for a callback, only what's missing of their name, contact and reason; never a password, \
 code, card, account or ID number), and put it in that tool's note or reason, so {owner} doesn't have to ask again.
@@ -339,14 +339,14 @@ def conversation_system(identity: DeskIdentity) -> list[dict]:
     text = SYSTEM_PROMPT.format(business=business, desk=_name(identity.desk_name), owner=_name(identity.owner_name),
                                 who=who, caller=caller.format(business=business),
                                 reply_examples="\n".join(
-                                    f'  {result}: ' + " ".join(f'{language}: "{caption.format(business=business)}"'
+                                    f'  {result}: ' + " ".join(f'{language}: "{caption}"'
                                                             for language, caption in captions.items())
                                     for result, captions in REPLY_EXAMPLES.items()),
                                 voice_examples="\n".join(
                                     '- ' + (f' ({card_note}) ' if card_note else " ").join(
                                         f'"{part}"' for part in prose_parts)
                                     for prose_parts, card_note in VOICE_EXAMPLES),
-                                **{name: " / ".join(f'{language}: "{caption.format(owner=_name(identity.owner_name))}"'
+                                **{name: " / ".join(f'{language}: "{caption}"'
                                                    for language, caption in captions.items())
                                    for name, captions in STATUS_LINES.items()})
     return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
