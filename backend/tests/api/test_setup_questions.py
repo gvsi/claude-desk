@@ -3191,7 +3191,8 @@ async def test_a_limit_follow_up_uses_its_reply_with_codes_choices(key, text, ca
 
 @pytest.mark.parametrize("key", ["contact_and_after_hours", "quote_limit"])
 @pytest.mark.parametrize("text", ["Got it, your site is rivera.example/?ref=desk.",
-                                  "Got it, your site is **rivera.example/?ref=desk**."])
+                                  "Got it, your site is **rivera.example/?ref=desk**.",
+                                  "Got it, your site is rivera.example/?_gl=desk."])
 async def test_a_question_mark_that_ends_no_sentence_still_asks_the_topics_question(key, text, caplog):
     question = "What should the Desk do with messages that come in after hours?"
     reply = desk_setup.Entry(role="claude", text=text)
@@ -4063,19 +4064,26 @@ async def test_a_planned_id_is_asked_whatever_kind_names_it(app, browser, kernel
     assert response.json()["pending_card"] == proposal_id
 
 
-async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, kernel_http, model, engine):
+# The card shows why as plain text, so the question's Markdown bold doesn't carry into it.
+@pytest.mark.parametrize("question,why", [
+    ("Use Stripe?", "Use Stripe?"),
+    ("Should I set up **Stripe** for deposits?", "Should I set up Stripe for deposits?"),
+    ("Should I set up __Stripe__ for deposits?", "Should I set up Stripe for deposits?"),
+])
+async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, kernel_http, model, engine,
+                                                                  question, why):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     model.add(unparsed(understanding(next_topic="what_you_do", connectors=[])))
     await consent(owner, interview_id, False, model, cards=True)
     response = await answer(owner, model, interview_id, "We take deposits.",
-                            turn(next={"kind": "connector", "connector": "stripe"}, question="Use Stripe?"))
+                            turn(next={"kind": "connector", "connector": "stripe"}, question=question))
     assert response.status_code == 200, response.text
     row = await stored(engine, interview_id)
     card = next(entry["card"] for entry in reversed(row["transcript"]) if entry.get("card"))
     assert card is not None and card["connector"] == {
-        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True, "connected": False}
+        "app": "stripe", "label": "Stripe", "why": why, "connectable": True, "connected": False}
     assert response.json()["pending_card"] == card["proposal_id"]
     assert any(card["proposal_id"] == item["proposal_id"] for entry in row["transcript"]
                for item in entry.get("planned", []))

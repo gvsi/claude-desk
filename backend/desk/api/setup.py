@@ -2076,9 +2076,9 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         app = source.next.connector
         existing = [*interview.planned, *(entry.card for entry in interview.transcript if entry.card)]
         if app in get_args(ConnectorKey) and not any(card.connector and card.connector.app == app for card in existing):
+            why = source.question.replace("**", "").replace("__", "").strip()[:200]   # the card shows plain text
             card = ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None,
-                                connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app],
-                                                            why=source.question.strip()[:200],
+                                connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app], why=why,
                                                             connectable=True))
             reply.planned.append(card)
             available.append(card)

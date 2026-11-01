@@ -563,10 +563,10 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
 
 def test_setup_writing_allows_markdown_but_no_exclamation_marks():
     """The setup chat renders Markdown, so setup's writing rule no longer bans headings, bold or emoji; it keeps the
-    ban on exclamation marks, and keeps card fields, choices and the lines customers read plain text. The visitor's
-    and agent's prompt has its own wording and doesn't take setup's rule."""
+    ban on exclamation marks, and keeps card fields, choices and the lines customers read plain text with no emoji.
+    The visitor's and agent's prompt has its own wording and doesn't take setup's rule."""
     plain = ("Markdown shows only in your replies, questions and the closing plan; card fields, choices and the lines "
-             "customers read stay plain text.")
+             "customers read stay plain text, with no emoji.")
     with_writing = {name for name, value in vars(prompts).items()
                     if name != "_WRITING" and isinstance(value, str) and prompts._WRITING in value}
     assert with_writing == {"SETUP_UNDERSTAND_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_NEXT_SYSTEM",
