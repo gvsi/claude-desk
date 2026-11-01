@@ -965,7 +965,8 @@ def proposal_entries() -> list[dict]:
         {"role": "claude", "text": "", "card": {
             "proposal_id": "p-fedcba543210", "kind": "connector", "state": "proposed", "job": None,
             "superseded_by": None,
-            "connector": {"app": "stripe", "label": "Stripe", "why": "Take payments", "connectable": True}}},
+            "connector": {"app": "stripe", "label": "Stripe", "why": "Take payments", "connectable": True,
+                          "connected": False}}},
         {"role": "claude", "text": "Who do you help?", "question": "what_you_do",
          "choices": [{"text": "Individuals", "recommended": True}, {"text": "Businesses", "recommended": False}]},
     ]
@@ -4066,7 +4067,7 @@ async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, 
     row = await stored(engine, interview_id)
     card = next(entry["card"] for entry in reversed(row["transcript"]) if entry.get("card"))
     assert card is not None and card["connector"] == {
-        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True}
+        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True, "connected": False}
     assert response.json()["pending_card"] == card["proposal_id"]
     assert any(card["proposal_id"] == item["proposal_id"] for entry in row["transcript"]
                for item in entry.get("planned", []))

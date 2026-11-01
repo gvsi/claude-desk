@@ -1267,6 +1267,7 @@ class ConnectorProposal(BaseModel):
     label: str
     why: str = Field(max_length=200, description="Why this helps, at most 200 characters.")
     connectable: bool
+    connected: bool = False  # Written by connection code, never a model draft.
 
 
 class ProposalCard(BaseModel):

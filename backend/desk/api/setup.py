@@ -452,6 +452,7 @@ def proposal_entries(jobs: Iterable[JobProposal | dict], connectors: Iterable[Co
     for drafted_connector in connectors:
         connector = drafted_connector.model_copy(deep=True)
         connector.connectable = True
+        connector.connected = False
         connector.label = CONNECTOR_LABELS[connector.app]
         cards.append(ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed",
                                   job=None, connector=connector))
@@ -541,11 +542,12 @@ class Interview:
 
     @property
     def connected(self) -> list[ConnectedApp]:
-        """Derive connections from current acceptances, without separate stored state or I/O."""
+        """Derive connections from current accepted cards whose connection succeeded."""
         cards = {card.proposal_id: card for card in self.planned}
         cards.update((entry.card.proposal_id, entry.card) for entry in self.transcript if entry.card)
         apps = dict.fromkeys(card.connector.app for card in cards.values()
                              if card.state == "accepted" and card.connector is not None
+                             and card.connector.connected
                              and card.superseded_by is None and card.proposal_id not in self.dropped)
         return [ConnectedApp(app=app, simulated=app != "stripe") for app in apps]
 
@@ -1200,6 +1202,8 @@ def apply_decision(interview: Interview, proposal_id: str, decision: SetupPropos
     card, decision = _check_decision(interview, proposal_id, decision, configs=interview.business_tools_enabled)
     config = card.job.config if card.job is not None else None
     card.state = "accepted" if decision.accept else "declined"
+    if card.connector is not None:
+        card.connector.connected = decision.accept and card.connector.app != "stripe"
     if decision.amount_cents is not None:
         config.amount_cents = decision.amount_cents
     if card.job is not None:
@@ -1234,7 +1238,7 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if connect:
-            await _connect_accepted_connector(ctx, interview)
+            await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
             await after_finish(ctx, interview)
 
@@ -2018,7 +2022,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if connect:
-            await _connect_accepted_connector(ctx, interview)
+            await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
             await after_finish(ctx, interview)
 
@@ -2050,6 +2054,8 @@ def settle_plan(interview: Interview) -> None:
         for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
             if card.state == "accepted" and _unpriced_payment(card.job):
                 card.state = "declined"
+            if card.state == "accepted" and card.connector is not None and card.connector.app != "stripe":
+                card.connector.connected = True
 
 
 async def close_setup(owner, engine, model, interview: Interview) -> None:
@@ -2150,12 +2156,41 @@ def _claim_connector_connect(interview: Interview, proposal_id: str | None = Non
     return False
 
 
-async def _connect_accepted_connector(owner: OwnerCtx, interview: Interview) -> None:
+def _mark_stripe_connected(interview: Interview, proposal_ids: set[str]) -> None:
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if (card.proposal_id in proposal_ids and card.state == "accepted"
+                    and card.connector is not None and card.connector.app == "stripe"):
+                card.connector.connected = True
+
+
+async def _connect_accepted_connector(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
     """Connect after the decision commit; failures leave the Tools step's Connect available."""
     try:
         await connect_payments(owner, owner.desk(interview.desk_id))
     except Exception as failed:
         logger.warning("a setup payments connection failed (%s)", type(failed).__name__)
+        return
+    for attempt in range(2):
+        try:
+            current = await _read(engine, owner, interview.interview_id)
+            seen = _stored(current)
+            current.business_tools_enabled = interview.business_tools_enabled
+            cards = {card.proposal_id: card for card in current.planned}
+            cards.update((entry.card.proposal_id, entry.card) for entry in current.transcript if entry.card)
+            accepted = {card.proposal_id for card in cards.values()
+                        if card.state == "accepted" and card.connector is not None
+                        and card.connector.app == "stripe" and card.superseded_by is None
+                        and card.proposal_id not in current.dropped}
+            _mark_stripe_connected(current, accepted)
+            await _commit(engine, owner, current, seen)
+        except Exception as failed:
+            if isinstance(failed, ApiProblem) and failed.status == 409 and failed.error == "conflict" and attempt == 0:
+                continue
+            logger.warning("a setup payments connection result couldn't be saved (%s)", type(failed).__name__)
+            return
+        _mark_stripe_connected(interview, accepted)
+        return
 
 
 async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
@@ -2190,7 +2225,7 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if connect:
-            await _connect_accepted_connector(ctx, interview)
+            await _connect_accepted_connector(ctx, engine, interview)
         await after_finish(ctx, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,

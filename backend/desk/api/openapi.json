@@ -8293,6 +8293,11 @@
           "connectable": {
             "type": "boolean",
             "title": "Connectable"
+          },
+          "connected": {
+            "type": "boolean",
+            "title": "Connected",
+            "default": false
           }
         },
         "additionalProperties": false,

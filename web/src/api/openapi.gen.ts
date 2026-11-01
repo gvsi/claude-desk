@@ -307,6 +307,7 @@ export interface ConnectorProposal {
    */
   why: string;
   connectable: boolean;
+  connected?: boolean;
 }
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when

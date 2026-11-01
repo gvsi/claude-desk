@@ -26,6 +26,20 @@ def stripe():
     return ConnectorProposal(app="stripe", label="Wrong label", why="Take payments", connectable=False)
 
 
+def test_connector_connection_state_is_code_written_and_not_a_model_output():
+    from pydantic import ValidationError
+    from desk.api.model import strict_schema
+    from desk.api.prompts import ConnectorDraft
+
+    assert ConnectorProposal.model_validate(stripe().model_dump(exclude={"connected"})).connected is False
+    supplied = stripe().model_copy(update={"connected": True})
+    assert setup.proposal_entries([], [supplied])[0].card.connector.connected is False
+    with pytest.raises(ValidationError):
+        ConnectorDraft(app="stripe", why="Help", connected=True)
+    for output in (setup.SetupUnderstanding, setup.SetupNextStep, setup.SetupCardAnswer, *setup.SETUP_TURNS.values()):
+        assert '"connected"' not in json.dumps(strict_schema(output))
+
+
 @pytest.mark.parametrize("app_key", list(setup.CONNECTOR_LABELS))
 def test_connected_apps_come_only_from_current_accepted_cards(app_key):
     entries = setup.proposal_entries([], [ConnectorProposal(
@@ -38,6 +52,8 @@ def test_connected_apps_come_only_from_current_accepted_cards(app_key):
     entries[0].card.superseded_by = entries[1].card.proposal_id
     assert state.connected == []
     entries[1].card.state = "accepted"
+    assert state.connected == []
+    entries[1].card.connector.connected = True  # Only a completed connection supplies this code-owned bit.
     expected = [{"app": app_key, "simulated": app_key != "stripe"}]
     assert [app.model_dump() for app in state.connected] == expected
     # A shown decision overrides the hidden plan's original state; duplicates connect once.
@@ -66,7 +82,7 @@ def test_only_stripe_reserves_a_real_attempt_regardless_of_connectable(app_key, 
     assert setup._claim_connector_connect(state, entries[0].card.proposal_id) is (app_key == "stripe")
     assert setup._claim_connector_connect(state) is False
     assert entries[0].connector_connect_attempted is (app_key == "stripe")
-    assert [app.model_dump() for app in state.connected] == [{"app": app_key, "simulated": app_key != "stripe"}]
+    assert state.connected == []  # Reserving an attempt is not a completed connection.
 
 
 def test_proposals_come_as_cards_on_the_understanding():
@@ -354,7 +370,7 @@ async def test_connected_apps_add_no_jobs_facts_tools_or_rule_claims(monkeypatch
         assert await setup.draft_cards(None, None, interview.business_type, interview.answers,
                                       [{"tool": "native.book", "effects": ["book"]}], post,
                                       jobs=setup.owner_job_answers(interview)) is version
-    assert len(with_app.connected) == 1
+    assert len(with_app.connected) == (0 if app_key == "stripe" else 1)
     assert baseline.answers == with_app.answers
     assert baseline.answers.how_we_help == "Book an intro: Book a free slot"
     assert messages[0] == messages[1]
@@ -406,6 +422,7 @@ async def test_accepting_stripe_connects_after_the_decision_commit(proposals, en
         card = next(entry["card"] for entry in reversed(saved["transcript"])
                     if (entry.get("card") or {}).get("proposal_id") == ids[2])
         assert card["state"] == "accepted"
+        assert card["connector"]["connected"] is False
         calls.append(desk_id)
         return []
 
@@ -414,6 +431,13 @@ async def test_accepting_stripe_connects_after_the_decision_commit(proposals, en
                                      json={"accept": True})
     assert reply.status_code == 200, reply.text
     assert calls == [state["desk_id"]]
+    accepted = next(card for card in shown(reply) if card["proposal_id"] == ids[2])
+    assert accepted["connector"]["connected"] is True
+    reloaded = await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")
+    assert reloaded.json() == reply.json()
+    async with engine.connect() as conn:
+        saved = await setup._load(conn, owner.copy_id, interview_id)
+    assert [app.model_dump() for app in saved.connected] == [{"app": "stripe", "simulated": False}]
 
 
 async def test_typing_accept_connects_stripe_after_the_commit(proposals, model, engine, monkeypatch):
@@ -427,6 +451,7 @@ async def test_typing_accept_connects_stripe_after_the_commit(proposals, model, 
         card = next(entry["card"] for entry in reversed(saved["transcript"])
                     if (entry.get("card") or {}).get("proposal_id") == ids[2])
         assert card["state"] == "accepted"
+        assert card["connector"]["connected"] is False
         assert interview_id in setup._RUNNING
         calls.append(desk_id)
         return []
@@ -438,6 +463,9 @@ async def test_typing_accept_connects_stripe_after_the_commit(proposals, model, 
     assert reply.status_code == 200, reply.text
     assert calls == [state["desk_id"]]
     assert any(message["text"] == "The consultant reply." for message in reply.json()["messages"])
+    assert next(card for card in shown(reply) if card["proposal_id"] == ids[2])["connector"]["connected"] is True
+    reloaded = await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")
+    assert reloaded.json() == reply.json()
 
 
 async def test_a_failed_connector_accept_still_saves_and_answers(proposals, engine, monkeypatch, caplog):
@@ -462,6 +490,57 @@ async def test_a_failed_connector_accept_still_saves_and_answers(proposals, engi
                entry["card"]["proposal_id"] == ids[2] for entry in saved["transcript"])
     assert any(message["text"] == "Got it." for message in reply.json()["messages"])
     assert "a setup payments connection failed (KernelFailed)" in caplog.text
+    assert next(card for card in shown(reply) if card["proposal_id"] == ids[2])["connector"]["connected"] is False
+    reloaded = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}?cards=1")
+    assert reloaded.json() == reply.json()
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, state["interview_id"])
+    assert interview.connected == []
+
+
+@pytest.mark.parametrize("conflicts", [1, 2])
+async def test_stripe_connection_result_retries_one_conflict_and_preserves_concurrent_changes(
+        proposals, engine, monkeypatch, caplog, conflicts):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[2])
+    commit = setup._commit
+    attempts, connects = [], []
+
+    async def connect(ctx, desk_id):
+        connects.append(desk_id)
+
+    async def conflicting_commit(engine, ctx, interview, seen):
+        if any(entry.card and entry.card.connector and entry.card.connector.connected
+               for entry in interview.transcript):
+            attempts.append(seen)
+            if len(attempts) <= conflicts:
+                saved = await stored(engine, interview_id)
+                saved["transcript"].append(setup.Entry(role="claude", text=f"Concurrent update {len(attempts)}")
+                                            .model_dump(mode="json"))
+                async with engine.begin() as conn:
+                    await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                                           " WHERE interview_id = :id"),
+                                       {"transcript": json.dumps(saved["transcript"]), "id": interview_id})
+        await commit(engine, ctx, interview, seen)
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    monkeypatch.setattr(setup, "_commit", conflicting_commit)
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{ids[2]}?cards=1",
+                                     json={"accept": True})
+    card = next(card for card in shown(reply) if card["proposal_id"] == ids[2])
+    assert card["state"] == "accepted"
+    assert card["connector"]["connected"] is (conflicts == 1)
+    assert connects == [state["desk_id"]]
+    assert len(attempts) == 2
+    assert any(entry["text"] == "Concurrent update 1" for entry in attempts[1]["transcript"])
+    async with engine.connect() as conn:
+        saved = await setup._load(conn, owner.copy_id, interview_id)
+    assert [app.app for app in saved.connected] == (["stripe"] if conflicts == 1 else [])
+    assert [entry.text for entry in saved.transcript if entry.text.startswith("Concurrent update")] == [
+        f"Concurrent update {n}" for n in range(1, conflicts + 1)]
+    assert saved.planned[0].job.config is not None  # The fresh read retains the runtime tools flag when saved.
+    assert ("a setup payments connection result couldn't be saved (ApiProblem)" in caplog.text) is (conflicts == 2)
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -484,7 +563,9 @@ async def test_use_your_suggestions_connects_leftover_apps_after_commit(proposal
             saved = await setup._load(conn, owner.copy_id, interview_id)
         assert saved.step == "tools"
         assert {app.app: app.simulated for app in saved.connected} == {
-            app: app != "stripe" for app in setup.CONNECTOR_LABELS}
+            app: True for app in setup.CONNECTOR_LABELS if app != "stripe"}
+        assert all(card.connector.connected is (card.connector.app != "stripe")
+                   for card in saved.planned if card.connector is not None and card.state == "accepted")
         assert sum(entry.connector_connect_attempted for entry in saved.transcript) == 1
         connects.append(desk_id)
         if fail:
@@ -504,7 +585,10 @@ async def test_use_your_suggestions_connects_leftover_apps_after_commit(proposal
     async with engine.connect() as conn:
         reloaded = await setup._load(conn, owner.copy_id, interview_id)
     assert {app.app: app.simulated for app in reloaded.connected} == {
-        app: app != "stripe" for app in setup.CONNECTOR_LABELS}
+        app: app != "stripe" for app in setup.CONNECTOR_LABELS if app != "stripe" or not fail}
+    assert all(card["connector"]["connected"] is (card["connector"]["app"] != "stripe" or not fail)
+               for card in shown(reply) if card["connector"] is not None and card["state"] == "accepted")
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json() == reply.json()
     assert (await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})).status_code == 409
     assert connects == [state["desk_id"]]
 
@@ -547,6 +631,7 @@ async def test_ordinary_completion_connects_leftover_stripe_after_commit(
     assert reply.status_code == 200, reply.text
     assert reply.json()["step"] == "tools"
     assert connects == [state["desk_id"]]
+    assert next(card for card in shown(reply) if card["proposal_id"] == ids[2])["connector"]["connected"] is True
 
 
 @pytest.mark.parametrize("typed", [False, True])
@@ -574,7 +659,9 @@ async def test_accepting_an_app_simulates_connection_after_claudes_turn(
     before_calls = len(fake.calls)
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}?cards=1", json=body)
     assert reply.status_code == 200, reply.text
-    assert next(card for card in shown(reply) if card["proposal_id"] == entry.card.proposal_id)["state"] == "accepted"
+    accepted = next(card for card in shown(reply) if card["proposal_id"] == entry.card.proposal_id)
+    assert accepted["state"] == "accepted"
+    assert accepted["connector"]["connected"] is True
     assert connects == []
     # Authentication is the route's only kernel request; simulation adds no calls or tools.
     assert [call.route for call in fake.calls[before_calls:]] == ["GET /whoami"]
@@ -587,6 +674,8 @@ async def test_accepting_an_app_simulates_connection_after_claudes_turn(
     async with engine.connect() as conn:
         interview = await setup._load(conn, owner.copy_id, interview_id)
     assert [app.model_dump() for app in interview.connected] == [{"app": app_key, "simulated": True}]
+    assert next(entry.card.connector.connected for entry in reversed(interview.transcript)
+                if entry.card is not None and entry.card.proposal_id == accepted["proposal_id"]) is True
     assert not any(entry.connector_connect_attempted for entry in interview.transcript)
 
 
@@ -709,6 +798,8 @@ async def test_a_connector_without_an_accept_does_not_connect(proposals, model, 
     assert reply.status_code == 200, reply.text
     card = next(card for card in shown(reply) if card["proposal_id"] == ids[2])
     assert card["state"] == ("proposed" if decision == "none" else "declined")
+    assert card["connector"]["connected"] is False
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json() == reply.json()
     assert connects == []
     async with engine.connect() as conn:
         assert (await setup._load(conn, owner.copy_id, interview_id)).connected == []
@@ -1166,6 +1257,26 @@ def test_settle_plan_is_idempotent_and_emits_each_leftover_card_once():
     before = setup._stored(state)
     setup.settle_plan(state)
     assert setup._stored(state) == before
+
+
+@pytest.mark.parametrize("app_key", list(setup.CONNECTOR_LABELS))
+@pytest.mark.parametrize("status", ["pending", "unshown", "declined"])
+def test_settling_apps_marks_only_accepted_simulated_connections(app_key, status):
+    entries = setup.proposal_entries([], [ConnectorProposal(app=app_key, label="App", why="Help", connectable=True)])
+    state = plan_state(entries)
+    if status == "unshown":
+        state.transcript.pop()
+    elif status == "declined":
+        setup.apply_decision(state, entries[0].card.proposal_id, setup.SetupProposalIn(accept=False))
+    setup.settle_plan(state)
+    card = state.planned[0]
+    expected = status != "declined" and app_key != "stripe"
+    assert card.state == ("declined" if status == "declined" else "accepted")
+    assert card.connector.connected is expected
+    assert [app.app for app in state.connected] == ([app_key] if expected else [])
+    saved = setup._stored(state)
+    setup.settle_plan(state)
+    assert setup._stored(state) == saved
 
 
 def test_finish_reads_shown_and_unshown_items():
