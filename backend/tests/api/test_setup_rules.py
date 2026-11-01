@@ -771,6 +771,43 @@ async def test_rules_are_drafted_as_cards_and_compiled_by_the_kernel(app, browse
     assert [card["card_id"] for card in row["draft_cards"]] == ["card-1", "card-2", "card-3", "card-4", "card-5"]
 
 
+async def test_first_and_repeated_rules_hold_suggestions_until_selected_confirm(
+    app, browser, fake, kernel_http, model, engine,
+):
+    owner, state = await ready(app, browser, kernel_http, model)
+    # The stored result of choosing suggestions; this branch has no finish/suggestions route yet.
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET answers = answers || CAST(:patch AS jsonb)"
+                               " WHERE interview_id = :id"), {
+            "id": state["interview_id"], "patch": json.dumps({
+                "suggested_fields": ["public_contact", "hours", "price_items", "service_area"],
+            }),
+        })
+    before = await stored(engine, state["interview_id"])
+    model.add(drafted(*GOOD_CARDS))
+    for _ in range(2):
+        reply = await settled(owner, policy(state, "rules"))
+        assert reply.status_code == 200, reply.text
+        desk = fake.desks[state["desk_id"]]
+        assert desk.hours == [] and desk.prices == {} and desk.slots == {}
+        assert "charter:contact" not in desk.facts
+        assert "charter:policy:service_area" not in desk.facts
+        assert (await stored(engine, state["interview_id"]))["answers"] == before["answers"]
+    for route, field in (("hours", "hours"), ("prices", "price_items"), ("calendar", "calendar_slots")):
+        assert [call.body for call in fake.called(f"PUT /desks/{{id}}/{route}")] == [{field: []}]
+    (charter_call,) = fake.called("PUT /desks/{id}/charter")
+    assert not {"contact", "policy:service_area"} & {claim["key"] for claim in charter_call.body["charter"]}
+    path = f'/api/owner/setup/{state["interview_id"]}/public_lines'
+    shown = (await owner.browser.get(path)).json()
+    confirmed = await owner.browser.post(f"{path}/confirm", json={"keys": ["contact"], "revision": shown["revision"]})
+    assert confirmed.status_code == 200, confirmed.text
+    assert desk.facts["charter:contact"].claims[0].value == PATCHES["contact_and_after_hours"]["public_contact"]
+    assert desk.hours == [] and desk.prices == {} and desk.slots == {}
+    assert "charter:policy:service_area" not in desk.facts
+    assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == [
+        "hours", "price_items", "service_area"]
+
+
 def sent_tools(model: ScriptedModel) -> list[dict]:
     """The `<tools>` the card drafting call offered."""
     (call, *_) = [request for request in model.requests if request.route == "card_draft"]
