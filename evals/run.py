@@ -10,7 +10,7 @@
     python -m evals.run results --pass <id>
     python -m evals.run record-rate --pass <id> --signed-off-by "<name>" --reason "<text>" [--lower-bar]
     python -m evals.run key
-    python -m evals.run results-check --base <ref>
+    python -m evals.run results-check --base <ref> [--history-since <rev>]
     python -m evals.run merge-ready [--head <ref>]
     python -m evals.run calibrate --pass <id> [--write] [--owner-approved "<name>"]
     python -m evals.run latency --max-usd X [--turns 20] [--base-url URL] [--dry-run] [--pass <id>]
@@ -343,8 +343,9 @@ def results_check(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(prog="python -m evals.run results-check", allow_abbrev=False)
     parser.add_argument("--base", required=True)
+    parser.add_argument("--history-since")
     options = parser.parse_args(argv)
-    passed, reason = check(options.base)
+    passed, reason = check(options.base, history_since=options.history_since)
     print(f"results-check: {reason}")
     return 0 if passed else 1
 
