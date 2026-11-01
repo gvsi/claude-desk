@@ -283,15 +283,22 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
         "nothing; offer open times only when they ask, or after that help when they want to go further. "
         "Never lead with open times; offer only the real next steps listed above. When they ask what's next, offer "
         "the step as a question naming a step you can take, such as \"Would you like me to find a time?\", rather "
-        "than stating what will happen."
+        "than stating what will happen. If you say what the step involves, such as what a consult covers, show the "
+        "policy card that says it; without one, just offer the step."
     )
     period = next(line for line in lines if line.startswith("- If a request names a period"))
     assert period == (
         "- If a request names a period that's ambiguous against the local date in the note, ask which period "
-        "they mean before answering, in words with no digits, such as \"this year's return or last year's?\" "
+        "they mean before answering, in words with no digits; relative dates such as \"this year\" or \"last year\" "
+        "are blocked too, so describe the period instead: \"Is it the return that's already due, or the upcoming one?\" "
         "Never state a year, date or deadline yourself."
     )
     assert not re.search(r"\d", period)
+    # the example question itself passes the reply check's prose scan, as Claude would send it
+    from desk.kernel_service.reply_check import scan_prose
+    example = re.search(r'"(Is it [^"]+)"', period).group(1)
+    assert scan_prose(example) == []
+    assert f"- Call {RIVERA.owner_name} by name when you mean them, never \"the owner\"." in lines
     intake = next(line for line in lines if line.startswith("- For a new request"))
     assert "Before booking, ask for what's missing of their name and a phone number or email" in intake
     assert "reusing anything already given, and finish any intake questions" in intake
