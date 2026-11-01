@@ -5,6 +5,9 @@ import json
 import pathlib
 import subprocess
 import sys
+if sys.version_info < (3, 10):
+    print("testbox: Python 3.10 or newer is required; run with python3.10+ or install a current Python 3.", file=sys.stderr)
+    sys.exit(1)
 import time
 import hashlib
 import uuid

@@ -31,7 +31,7 @@ API keys, deploy credentials or owner environment files; its generated `.env` us
 
 ## Client requirements
 
-Use Python 3, Git, rsync, SSH, AWS CLI v2 and the Session Manager plugin. The plugin may be
+Use Python 3.10 or newer, Git, rsync, SSH, AWS CLI v2 and the Session Manager plugin. The plugin may be
 installed in the user's local bin directory; the client adds that directory to PATH. Use
 the default AWS profile with EC2 discovery, SSM SendCommand/GetCommandInvocation and
 StartSession permissions. The stock macOS openrsync (protocol 29) works; Homebrew rsync is

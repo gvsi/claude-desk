@@ -195,3 +195,13 @@ def test_interrupted_transfer_paths_survive_request_overwrite_and_are_pruned(tmp
     subprocess.run([sys.executable, '-c', cleanup_script(str(tmp_path))], check=True)
     assert not (repo / 'partial_branch_test.py').exists()
     assert json.loads((tmp_path / 'pending-manifest.json').read_text()) == []
+
+
+def test_client_rejects_old_python_before_importing_annotations():
+    import sys
+    runner = Path(__file__).parents[1] / 'testbox/run'
+    script = f"import sys, runpy; sys.version_info = (3, 9, 6); runpy.run_path({str(runner)!r}, run_name='__main__')"
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True)
+    assert result.returncode == 1
+    assert 'Python 3.10 or newer is required' in result.stderr
+    assert 'Traceback' not in result.stderr
