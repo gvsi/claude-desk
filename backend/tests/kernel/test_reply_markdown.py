@@ -264,6 +264,9 @@ async def test_a_cell_past_the_header_is_read_as_the_chats_show_it(app, client):
     ("Thanks for asking.\n\n[unused]: https://elsewhere.example/pay", "https://elsewhere.example/pay"),
     ('<a href="https://elsewhere.example/pay">Our reviews</a> are kind.', 'https://elsewhere.example/pay">Our'),
     ("Write to <!-- someone@elsewhere.example --> us.", "someone@elsewhere.example"),
+    # only a trailing pipe is trimmed: inside the URL it is userinfo, and the host is the one after it
+    ("Our photos: https://riveraplumbing.example|@elsewhere.example for you.",
+     "https://riveraplumbing.example|@elsewher"),                   # a span is cut at 40 characters
 ])
 async def test_a_url_or_email_written_anywhere_in_the_prose_is_held_to_the_contact(app, client, prose, span):
     """Defence in depth: the raw prose is read for URLs and email addresses too, so one the visible
@@ -296,6 +299,8 @@ async def test_a_url_or_email_written_anywhere_in_the_prose_is_held_to_the_conta
     "Pay for it at riveraplumbing.example/pay when you're ready.",
     "Call <!-- note --> us about it.",
     "Turn off the main valve.<br>Keep the area dry until Maria gets there.",
+    "Our site is `https://riveraplumbing.example`.",                   # a code span's backticks aren't the URL's
+    "| Where | Link |\n|---|---|\n| Website |https://riveraplumbing.example|",   # nor an unpadded cell's pipe
 ])
 async def test_honest_formatting_and_the_business_own_links_pass(app, client, prose):
     copy, visitor = await visitor_of(app, client)

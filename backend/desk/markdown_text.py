@@ -46,7 +46,9 @@ MARKER_PREFIX = re.compile(r"[ \t>*+-]*")           # indentation, quote and bul
 # email address (its extended autolinks). Matched anywhere, so a stricter reading than GFM's own.
 URL_LITERAL = re.compile(r"(?:https?://|www\.)[^\s<]+", re.IGNORECASE)
 EMAIL_LITERAL = re.compile(r"[A-Za-z0-9.+_-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+")
-TRAILING = "?!.,:;*_~'\"()[]{}>"                       # punctuation after a literal URL, which a sentence puts there
+TRAILING = "?!.,:;*_~'\"()[]{}>|`"                     # punctuation after a literal URL, which a sentence puts
+# there, and a table cell's pipe or a code span's backtick around it; only trailing ones, so a pipe inside a
+# URL stays in its host or path and "https://host|@elsewhere.example" still reads as elsewhere.example
 INLINE_TEXT = frozenset({"text", "code_inline"})
 LINE_BREAKS = frozenset({"softbreak", "hardbreak"})
 
