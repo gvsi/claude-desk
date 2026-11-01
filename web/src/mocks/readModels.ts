@@ -79,6 +79,24 @@ function decisionsOf(world: MockWorld, deskId: string): DecisionRecord[] {
   return [...world.decisions.values()].filter((d) => d.deskId === deskId);
 }
 
+/** The most of a visitor's newest message a conversation summary carries, "…" included. */
+const LATEST_VISITOR_TEXT_MAX = 200;
+
+/**
+ * What the visitor typed last in `session`, as the API's summary carries it: whitespace collapsed
+ * to single spaces, and cut to 199 characters and "…" past 200, with no space left before the
+ * "…". Null for an agent's or the owner's chat, the owner's preview, before the visitor writes,
+ * and when what they wrote last is all whitespace.
+ */
+function latestVisitorText(session: SessionRecord): string | null {
+  if (session.state.kind !== 'visitor' || session.ownerPreview) return null;
+  const newest = session.items.findLast((item) => item.kind === 'visitor_text');
+  if (newest?.text == null) return null;
+  const chars = Array.from(newest.text.split(/\s+/).filter(Boolean).join(' '));
+  if (chars.length === 0) return null;
+  return chars.length > LATEST_VISITOR_TEXT_MAX ? `${chars.slice(0, LATEST_VISITOR_TEXT_MAX - 1).join('').trimEnd()}…` : chars.join('');
+}
+
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {
   const counts: Partial<Record<DecisionState, number>> = {};
   for (const { decision } of world.decisions.values()) {
@@ -93,6 +111,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     last_activity: isoTime(session.lastActivity),
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
+    latest_visitor_text: latestVisitorText(session),
   };
 }
 
@@ -436,6 +455,7 @@ function briefingOf(a: Activity): Briefing {
     conversations: conversationsIn(a, since, end).size,
     bookings: within(a.bookings, since, end).length,
     leads: within(a.leads, since, end).length,
+    answers: items.filter((i) => i.kind === 'answer').length,
     turned_down: items.filter((i) => i.kind === 'turned_down').length,
     total: items.length,
     newest: { turned_down: first('turned_down'), booking: first('booking'), lead_or_answer: leadOrAnswer },
