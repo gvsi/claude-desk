@@ -495,3 +495,67 @@ async def test_a_repriced_tool_makes_a_new_link(app, client):
     assert (await executed(client, visitor, repriced)).model_view['amount_cents'] == AMOUNT + 100
     assert [link.amount_cents for link in await links_of(app, copy)] == [AMOUNT, AMOUNT + 100]
     assert len(await quotes_of(app, copy)) == len(checkouts(copy)) == 2
+
+
+# Regression guards: activation, startup rebuild and an agent's refusal at execution -------------------------------
+
+@pytest.mark.solver
+async def test_lowering_the_auto_rule_cancels_an_open_purpose_payment_link(app, client, desk_prove):
+    from desk.contracts import PolicyVersion
+    from .test_money_cap import post_draft
+
+    copy = await payment_desk(app, client)
+    visitor = await open_visitor(client, copy)
+    assert (await executed(client, visitor, await decided(client, visitor, TOOL, {}))).state == 'succeeded'
+    response = await post_draft(client, copy, [auto(2000)], 2, auto_money_cap_cents=50_000)
+    assert response.status_code == 200, response.text
+    version = PolicyVersion.model_validate(response.json())
+    assert version.status == 'proved', version.proof
+    response = await client.post('/policy/confirm', headers=copy.owner,
+                                 json={'desk_id': copy.desk_id, 'version': version.version})
+    assert response.status_code == 200, response.text
+    [link] = await links_of(app, copy)
+    assert (link.state, link.cancel_reason, link.cancelled_by_version) == ('cancelled', 'rules_changed', version.version)
+    assert (visitor.session_id, {'link_id': link.link_id, 'state': 'cancelled', 'reason': 'rules_changed',
+                                 'version': version.version}) in await payment_entries(app, copy)
+
+
+@pytest.mark.parametrize('maximum,refused', [(None, True), (AMOUNT, False)])
+async def test_a_rebuild_refuses_a_purpose_payment_auto_card_with_no_maximum(app, client, maximum, refused):
+    from desk.db.models import PolicyVersion as PolicyVersionRow
+    from desk.kernel_service import activation, compiler
+
+    copy = await payment_desk(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        stored = PolicyVersionRow(copy_id=copy.copy_id, desk_id=copy.desk_id, version=99, parent_version=2,
+                                  cards=[auto(maximum)], auto_money_cap_cents=50_000, status='active')
+        rebuilt = await activation._rebuilt(ctx, stored, prove=False)
+    assert (rebuilt == compiler.ABOVE_MONEY_CAP) is refused, rebuilt
+
+
+async def test_an_agents_payment_refused_after_a_configuration_change_releases_its_reservation(
+        app, client, frozen_clock, monkeypatch):
+    from desk.kernel_service import execute
+    from .test_agent_auth import mint, open_agent, turn
+    from .test_execute import post_execute
+    from .test_mandates import reservation_of
+
+    copy = await payment_desk(app, client, amount=2000)
+    agent = await mint(client, copy.owner, copy.desk_id)
+    opened = await open_agent(client, copy.slug, agent, frozen_clock)
+    caller = turn(agent, copy.slug, opened.state.session_id, frozen_clock)
+    decision = await decided(client, caller, TOOL, {})
+    assert decision.outcome == 'allow', decision.reason_plain
+
+    async def change():
+        assert await reservation_of(app, copy.copy_id, decision.action.action_id) == (2000, 'reserved')
+        response = await put(client, copy, [payment(amount=2100)])
+        assert response.status_code == 200, response.text
+
+    monkeypatch.setattr(execute, '_after_intent', change)
+    response = await post_execute(client, caller, decision)
+    assert response.status_code == 409, response.text
+    assert (await read(client, caller.headers, decision)).state == 'refused_at_execution'
+    assert await reservation_of(app, copy.copy_id, decision.action.action_id) == (2000, 'released')
+    assert not await quotes_of(app, copy) and not await links_of(app, copy) and not checkouts(copy)
