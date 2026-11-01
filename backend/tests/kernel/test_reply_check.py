@@ -2736,6 +2736,59 @@ def test_public_text_allows_only_explicit_owner_words_with_case_width_and_accent
     assert reply_check.scan_public_text(word)  # default callers remain strict
 
 
+FREE_CONSULT = ("Free consult",)              # an enabled typed-booking tool's appointment type
+CONSULTA_GRATUITA = ("Consulta gratuita",)
+
+
+@pytest.mark.parametrize(("prose", "names", "booking_card", "rule_id"), [
+    ("Done, I've booked your Free consult. Here are the details.", FREE_CONSULT, True, "lex.en.promise"),
+    ("I can book you a Free consult with Maria\u2026", FREE_CONSULT, False, "lex.en.promise"),
+    ("Listo, reservé tu consulta gratuita\u2026", CONSULTA_GRATUITA, True, "lex.es.promise"),
+    ("Your \uff26\uff32\uff25\uff25 CONSULT is ready.", FREE_CONSULT, False, "lex.en.promise"),    # width and case
+    ("Tu consulta gratuíta está lista.", CONSULTA_GRATUITA, False, "lex.es.promise"),           # an accent
+    ("We offer a Free consultation.", FREE_CONSULT, False, "lex.en.promise"),                   # the name, then more
+])
+def test_a_free_word_passes_inside_an_enabled_business_tools_name(prose, names, booking_card, rule_id):
+    """The owner's decision of 2026-10-31: a free word in the name the owner gave an enabled business
+    tool (its title or appointment type) passes in Claude's prose inside a repeat of that name, read
+    across case, width and accents. Without the name the same prose is blocked on that word alone."""
+    assert [v.rule_id for v in reply_check.scan_prose(prose, booking_card=booking_card)] == [rule_id]
+    assert reply_check.scan_prose(prose, booking_card=booking_card, approved_free_names=names) == []
+
+
+@pytest.mark.parametrize(("prose", "names", "found"), [
+    # A free word outside the name: the name backs "your Free consult", not the second "free".
+    ("Your Free consult is free of charge too.", FREE_CONSULT, [("lex.en.promise", "free")]),
+    ("Tu consulta gratuita es gratis.", CONSULTA_GRATUITA, [("lex.es.promise", "gratis")]),
+    ("Consultations are free.", (), [("lex.en.promise", "free")]),
+    ("Consultations are free.", FREE_CONSULT, [("lex.en.promise", "free")]),            # the name isn't there
+    ("Book a \u0192ree consult.", FREE_CONSULT, [("lex.en.promise", "\u0192ree")]),         # a lookalike f
+    ("Book a fr\u0435e consult.", FREE_CONSULT, [("lex.en.promise", "fr\u0435e"), ("mixed_script", "fr\u0435e")]),
+    # Only free words are exempt: another promise word in the name still blocks.
+    ("I can book a Guaranteed free consult for you.", ("Guaranteed free consult",),
+     [("lex.en.promise", "Guaranteed")]),
+    ("I can book a free discount visit for you.", ("free discount visit",), [("lex.en.promise", "discount")]),
+    # A name made only of free words backs no free word: it can't tell the name from the word.
+    ("Consultations are free.", ("Free",), [("lex.en.promise", "free")]),
+    ("Las consultas son gratis.", ("Gratis",), [("lex.es.promise", "gratis")]),
+    # A free word whose promise reads past the name ("free to all clients") isn't the name's.
+    ("We offer a Consult free to all clients.", ("Consult free",), [("lex.en.promise", "free")]),
+    # The name's other words are scanned as ever.
+    ("I can book a Free half-day visit for you.", ("Free half-day visit",), [("lex.en.number", "half")]),
+])
+def test_a_free_word_outside_an_enabled_business_tools_name_is_still_blocked(prose, names, found):
+    assert [(v.rule_id, v.span) for v in reply_check.scan_prose(prose, approved_free_names=names)] == found
+
+
+def test_a_long_draft_repeating_a_business_tools_name_is_scanned_in_one_pass():
+    """Each free word is looked up once among the names' repeats, not once per repeat."""
+    prose = "Your Free consult is free. " * 800
+    started = time.perf_counter()
+    found = reply_check.scan_prose(prose, approved_free_names=FREE_CONSULT * 20)
+    assert time.perf_counter() - started < 2
+    assert [v.span for v in found] == ["free"] * 800
+
+
 
 @pytest.mark.parametrize("phrase", ["We offer free consultations. ", "You are free to all clients. "])
 def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phrase):
