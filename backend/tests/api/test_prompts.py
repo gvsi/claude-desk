@@ -319,9 +319,9 @@ def test_setup_job_cards_use_short_names_and_one_plain_line():
 def test_setup_job_titles_avoid_rejecting_the_business_tools_batch():
     for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_TURN_SYSTEM,
                    SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
-        assert "with no amounts, numbers or promise words" in system
-        assert ('("free" is fine, as in "Book a free intro call", but never "Free 20-minute intro call", '
-                'and never "free" in a payment job\'s title)') in system
+        assert "with no amounts, numbers, durations or promise words" in system
+        assert 'never "free" or "complimentary" in a payment job\'s title' in system
+        assert "the length going only in minutes" in system
         assert "the kernel refuses the whole set of business tools" in system
 
 
