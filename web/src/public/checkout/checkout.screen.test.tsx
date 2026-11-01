@@ -9,6 +9,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { SseEvent } from '../../api/contracts.ts';
 import type { PaymentLinkOut } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { payChatKey, recordPayChat } from '../../lib/payChats.ts';
 import { LINK_CANCELLED, type Language } from '../../mocks/script.ts';
 import { BUSINESS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -16,6 +17,9 @@ import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 
 const CHAT = `/d/${RIVERA.slug}`;
+
+/** This browser's record of each payment link's chat, as `storage.ts` keeps it. */
+const PAY_CHATS = 'claude-desk.pay-chats';
 
 /** Every event this browser's chat with Rivera has carried, in order. */
 function chatEvents(): { seq: number; ev: SseEvent }[] {
@@ -273,6 +277,104 @@ describe('mock checkout', () => {
     await expect.element(open.screen.getByText('Paid. Go back to the chat to see it there.')).toBeVisible();
     await expect.element(open.screen.getByText('That didn’t go through. Reload this page to see where the payment stands.')).not.toBeInTheDocument();
     expect(open.screen.container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('paid_line_links_back_to_the_chat', async () => {
+    // The chat showed the link's card, so this browser knows the chat it came from: once paid, the
+    // line's own words "Go back to the chat" lead there.
+    const token = await linkFromTheChat();
+    const { screen } = await renderRoute(`/pay/${token}`);
+    await screen.getByRole('button', { name: 'Pay $20.00' }).click();
+    const back = screen.getByRole('link', { name: 'Go back to the chat', exact: true });
+    await expect.element(back).toBeVisible();
+    expect(back.element().getAttribute('href')).toBe(CHAT);
+    // Today's words, unchanged, with the link inside the line.
+    const line = screen.container.querySelector('.cd-checkout__state');
+    expect(line?.textContent).toBe('Paid. Go back to the chat to see it there.');
+    expect(back.element().closest('.cd-checkout__state')).toBe(line);
+    expect(screen.container.querySelectorAll('a')).toHaveLength(1);
+
+    // It opens the chat in this tab: no new tab, and a plain click is left to the browser to
+    // follow (the test stops it there, so this page stays loaded).
+    expect(back.element().getAttribute('target')).toBeNull();
+    let followed: boolean | null = null;
+    const stop = (event: MouseEvent) => {
+      followed = !event.defaultPrevented;
+      event.preventDefault();
+    };
+    window.addEventListener('click', stop);
+    try {
+      await back.click();
+    } finally {
+      window.removeEventListener('click', stop);
+    }
+    expect(followed).toBe(true);
+    await expectScreenBasics(screen.container, { owner: false });
+
+    // At phone width the line fits with its link, with nothing scrolling sideways.
+    const phone = await renderRoute(`/pay/${token}`, { viewport: 'phone' });
+    await expect.element(phone.screen.getByRole('link', { name: 'Go back to the chat', exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+  });
+
+  it('paid_line_links_back_in_spanish', async () => {
+    // A link in Spanish, from a chat this browser showed: "Vuelve al chat" is the link, whatever
+    // the browser's language.
+    const token = issueLink('es');
+    recordPayChat(token, CHAT);
+    const { screen } = await renderRoute(`/pay/${token}`, { language: 'en-US' });
+    await screen.getByRole('button', { name: 'Pagar $20.00' }).click();
+    const back = screen.getByRole('link', { name: 'Vuelve al chat', exact: true });
+    await expect.element(back).toBeVisible();
+    expect(back.element().getAttribute('href')).toBe(CHAT);
+    expect(back.element().getAttribute('target')).toBeNull();
+    expect(screen.container.querySelector('.cd-checkout__state')?.textContent).toBe('Pagado. Vuelve al chat para verlo allí.');
+    expect(back.element().closest('[lang]')?.getAttribute('lang')).toBe('es');
+    await expectScreenBasics(screen.container, { owner: false });
+
+    // Without a known chat, the Spanish line as it was, with no link.
+    const unknown = await renderRoute(`/pay/${issueLink('es')}`, { language: 'en-US' });
+    await unknown.screen.getByRole('button', { name: 'Pagar $20.00' }).click();
+    await expect.element(unknown.screen.getByText('Pagado. Vuelve al chat para verlo allí.', { exact: true })).toBeVisible();
+    expect(unknown.screen.container.querySelectorAll('a')).toHaveLength(0);
+  });
+
+  it('paid_line_without_a_known_chat_has_no_link', async () => {
+    const PAID = 'Paid. Go back to the chat to see it there.';
+    /** Pays `token` on its checkout and returns the paid line, after checking it has no link. */
+    async function paidWithoutALink(token: string, why: string): Promise<void> {
+      const { screen } = await renderRoute(`/pay/${token}`);
+      await screen.getByRole('button', { name: 'Pay $20.00' }).click();
+      await expect.element(screen.getByText(PAID, { exact: true })).toBeVisible();
+      expect(screen.container.querySelector('.cd-checkout__state')?.textContent, why).toBe(PAID);
+      expect(screen.container.querySelectorAll('a'), why).toHaveLength(0);
+    }
+
+    // No chat showed this link in this browser: today's line, with no link.
+    await paidWithoutALink(issueLink(), 'nothing recorded');
+
+    // Another link's chat is known, not this one's.
+    recordPayChat(issueLink(), CHAT);
+    await paidWithoutALink(issueLink(), "another token's entry");
+
+    // A record for this link that holds anything but a public chat's own path.
+    for (const path of ['https://evil.example/d/rivera', '//evil.example', `${CHAT}?preview=${RIVERA.deskId}`, `${CHAT}/agents`, '/D/Rivera', 'javascript:alert(1)']) {
+      const token = issueLink();
+      localStorage.setItem(PAY_CHATS, JSON.stringify([[payChatKey(token), path]]));
+      await paidWithoutALink(token, path);
+    }
+
+    // Storage that can't be read: the line as it was.
+    const token = issueLink();
+    recordPayChat(token, CHAT);
+    const blocked = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('Blocked.', 'SecurityError');
+    });
+    try {
+      await paidWithoutALink(token, 'storage blocked');
+    } finally {
+      blocked.mockRestore();
+    }
   });
 
   it('unknown_link_is_kind', async () => {

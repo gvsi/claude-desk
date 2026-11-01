@@ -53,6 +53,7 @@ from desk.api.prompts import (
     TriageCategory,
     conversation_system,
 )
+from desk.api.model import strict_schema
 from desk.api.store import DELIVERY_AUTHORS, ROW_KINDS
 from desk.contracts import ClauseTemplate
 
@@ -110,18 +111,26 @@ def test_system_prompt_uses_the_business_policies():
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
         "at a time, before you take their details or book. Ask only about their request: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
-        "call native__request_callback, and beside its callback_confirmed card",
-        "- When they describe something charter:policy:urgent treats as urgent, that comes first: skip the intake "
-        "questions, ask for their name and a phone number or email, call native__request_callback, and beside its "
-        "callback_confirmed card say plainly that the request is in and the card shows when to expect the call. "
-        "If they'd rather book, find open times instead. Never say how soon.",
+        "otherwise native__request_callback. Beside its callback_confirmed card",
+        "- When they describe something charter:policy:urgent treats as urgent, or an emergency happening now "
+        "(water spraying or flooding, a gas smell, no heat in freezing weather), that comes first: skip the intake "
+        "questions and give the one practical safety step a good professional would give. If anyone could be in "
+        "danger (gas, water near electrics, an injury), suggest they call their local emergency number, in words, "
+        'never the number itself. Ask before you bring Maria Rivera in: ask en: "Would you like me to arrange a '
+        'callback?" / es: "¿Quiere que solicite una llamada?", even when one of your tools is for urgent requests. '
+        "Only on their yes, ask for what's missing of their name, a phone number or email and the reason, reusing "
+        "what they've already given, and make that one call: the business tool for urgent requests (its "
+        'description starts "Saves an urgent callback request") if one of your tools is one, otherwise '
+        "native__request_callback. Beside its callback_confirmed card, say plainly that the request is in and the "
+        "card shows when to expect the call. Never present a callback window as help on the way, and never say "
+        "how soon. If they'd rather book, find open times instead.",
         "- When charter:policy:after_hours is there and they ask about reaching Rivera Plumbing outside its "
         "hours, show it with the policy clause.",
         "- When charter:policy:how_we_help is there, offer only the work it lists and what your tools do. For "
         "something you can't do here, such as checking on a case or sending in documents, say plainly that you "
         "can't do that here, and offer to take a message for Maria Rivera or arrange a callback.",
-        "When one of your tools is Rivera Plumbing's own rather than a native one, refer to it by its title "
-        "when you offer it.",
+        "- When one of your tools is Rivera Plumbing's own rather than a native one, refer to it by its title "
+        "when you offer it, the tool for urgent requests excepted.\n",
     ):
         assert instruction in section
 
@@ -169,6 +178,40 @@ def test_system_prompt_prioritizes_urgent_requests_over_intake():
     assert text.index(urgent) < text.index(intake)
 
 
+def test_urgent_requests_get_a_safety_step_then_ask_before_involving_the_owner():
+    """An emergency gets a safety step first, then an offer, and the owner is brought in only on the visitor's yes
+    (#519). A live Desk once heard about a burst pipe with a name and a number, and called native__request_callback
+    without asking: the visitor got a callback window on the next business day and the owner no urgent alert."""
+    text = conversation_system(RIVERA)[0]["text"]
+    urgent = next(line for line in text.splitlines() if line.startswith("- When they describe something"))
+    # what counts: what the business's own policy treats as urgent, or an emergency happening now
+    assert "something charter:policy:urgent treats as urgent, or an emergency happening now" in urgent
+    # it comes first, with a safety step, and danger gets the local emergency number in words: a number's digits
+    # or its number words would be blocked by the reply check
+    assert "that comes first: skip the intake questions and give the one practical safety step" in urgent
+    assert ("If anyone could be in danger (gas, water near electrics, an injury), suggest they call their local "
+            "emergency number, in words, never the number itself.") in urgent
+    # it asks first, always with the approved callback offer: neither a priority nor the urgent tool's title is
+    # Claude's to say, since the soft-promise check reads a priority no card backs as a promise, and the kernel's
+    # receipt names the tool once it has run
+    ask = urgent.index('Ask before you bring Maria Rivera in: ask en: "Would you like me to arrange a callback?" / '
+                       'es: "¿Quiere que solicite una llamada?", even when one of your tools is for urgent requests.')
+    assert "title" not in urgent and "as urgent" not in urgent.split("that comes first")[1]
+    # only on their yes does it ask for what's missing and make the call, choosing the urgent tool then
+    yes = urgent.index("Only on their yes, ask for what's missing")
+    assert ask < yes < urgent.index('"Saves an urgent callback request"') < urgent.index("native__request_callback")
+    assert ('make that one call: the business tool for urgent requests (its description starts "Saves an urgent '
+            'callback request") if one of your tools is one, otherwise native__request_callback.') in urgent
+    # honest about timing, and nothing the soft-promise check reads as a promise
+    assert "say plainly that the request is in and the card shows when to expect the call" in urgent
+    assert "Never present a callback window as help on the way, and never say how soon." in urgent
+    assert "If they'd rather book, find open times instead." in urgent
+    for promise in ("right away", "will call", "promise", "shortly"):
+        assert promise not in urgent, promise
+    # the old line took details and called before asking
+    assert "ask for their name and a phone number or email, call native__request_callback" not in text
+
+
 def test_system_prompt_ends_with_the_owners_visitor_voice():
     text = conversation_system(RIVERA)[0]["text"]
     before, section = text.split("\nBeing yourself\n")
@@ -182,8 +225,8 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "kind, knowledgeable and useful.",
         "start with them, not with the business",
         "Keep each reply to two to four short sentences",
-        "give one practical tip any good professional in this trade would give",
-        "general and committing Rivera Plumbing to nothing",
+        "give one practical tip any good professional in this trade would give (how to stop a leak for now, what "
+        "to have ready), general and committing Rivera Plumbing to nothing",
         "for a health, legal or money question outside Rivera Plumbing's own work, point them to the right professional "
         "(a pharmacist or doctor, a lawyer) instead of advising",
         "Facts about Rivera Plumbing itself, such as what it does, where it works or what something costs, "
@@ -211,9 +254,10 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "These shape how you sound; the rules above still decide what you say.",
     ):
         assert instruction in section, instruction
+    assert "until help arrives" not in text   # the urgent rule never presents a callback as help on the way
     assert section.split("How it can sound (illustrative; vary it, and keep to the reply rules above):\n")[1] == (
         '- "That\'s awful, I\'m sorry. If you can, turn off the main water valve; it\'s usually near the meter '
-        'or where the water line comes into the house. What\'s your name and the best number to reach you?"\n'
+        'or where the water line comes into the house. Would you like me to arrange a callback?"\n'
         '- "Here\'s what this business does." (beside the about policy card) "Is it a personal return or a '
         'business one, and is anything new, like freelance income?"\n'
         '- "It depends on your hair; here\'s how this business prices." (beside the pricing policy card) '
@@ -232,7 +276,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.15"                  # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.18"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -367,6 +411,34 @@ def test_the_opening_prompt_asks_only_for_its_own_fields():
     named_fields = set(re.findall(r"\b([a-z_]+):", system))
     assert named_fields.isdisjoint({"skip", "drop", "add_jobs", "plan"})
     assert "<answers_so_far>" not in system
+
+
+def test_setup_tells_the_consultant_the_public_contact_format_once_per_place():
+    """The kernel takes a public contact only as ways to reach the business, so each place setup's consultant writes
+    one says that format, in one sentence: the fact turn's guidance once, and the field's description in the
+    suggested facts and the patch code merges. A turn schema's field points to the guidance in a short line instead,
+    since every character of a turn's schema goes into the grammar the API compiles, which has a size cap."""
+    sentence = prompts.PUBLIC_CONTACT_FORMAT
+    for part in ('"ext. 12"', "an https URL or a bare domain", 'separated by commas or "or"', "at most one label",
+                 "with or without a colon", "only from this list", "no other words, such as offers or promises"):
+        assert part in sentence
+    # The labels the kernel accepts before a part, and no others: the sentence offers no open-ended example.
+    labels = ["Call us at", "Call", "Call or text", "Text us at", "Text", "Email us at", "Email", "Phone", "Tel",
+              "Mobile", "Office", "Website", "Web", "Llámanos al", "Escríbenos a", "Teléfono", "Correo"]
+    assert re.findall(r'"([^"]+)"', sentence) == ["ext. 12", "or", *labels]
+    assert SETUP_TURN_SYSTEM.count(sentence) == 1
+    for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert sentence not in system
+    turns = [turn for turn in SETUP_TURNS.values() if "public_contact" in turn.model_fields]
+    assert turns
+    assert prompts.TURN_CONTACT == ("The contact customers see, in the format your instructions give: phone numbers, "
+                                    "emails or websites, each with at most one listed label, and no other words.")
+    for model in turns:
+        assert model.model_fields["public_contact"].description == prompts.TURN_CONTACT, model.__name__
+        assert json.dumps(sentence)[1:-1] not in json.dumps(strict_schema(model)), model.__name__
+    for model in (prompts.SuggestedFacts, prompts.SetupPatch):
+        assert model.model_fields["public_contact"].description.count(sentence) == 1, model.__name__
+    assert json.dumps(strict_schema(prompts.SetupUnderstanding)).count(json.dumps(sentence)[1:-1]) == 1
 
 
 def test_setup_planning_prompts_ask_prerequisites_before_proposing_jobs():

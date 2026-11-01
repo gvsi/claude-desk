@@ -111,7 +111,8 @@ RIVERA_KNOWLEDGE: list[KnowledgeItem] = [
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
                   text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
-                       "water heater flush and leak repair. Each price is given in a quote from this list.",
+                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
+                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 
@@ -146,6 +147,10 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
             PriceItem(item_id="drain", title="Drain clearing", unit_cents=18000),
             PriceItem(item_id="heater", title="Water heater flush", unit_cents=15000),
             PriceItem(item_id="leak", title="Leak repair", unit_cents=25000),
+            # a plumbing emergency: "pipe repairs start from $100, and there's a short-notice fee of $50",
+            # each amount on a quote card; a price item has no "from" price, so the title says it starts there
+            PriceItem(item_id="pipe", title="Pipe repair (starting price)", unit_cents=10000),
+            PriceItem(item_id="short-notice", title="Short-notice fee", unit_cents=5000),
         ],
         calendar_slots=calendar_slots(now),
         people=[
@@ -161,8 +166,8 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
                               "Water heater flush. Parts and labor are covered for 12 months from the service date."),
         ],
         # a handoff the card opens alerts at once, as a held request does (the owner's decision of 2026-10-30)
-        notifications=NotificationDefaults(now=["approval", "emergency", "breaker", "lockout", "handoff"],
-                                           briefing=["lead", "callback", "booking"]),
+        notifications=NotificationDefaults(now=["approval", "callback", "breaker", "lockout", "handoff"],
+                                           briefing=["lead", "booking"]),
         connections=["mock_payments"],
     )
     return business, desk

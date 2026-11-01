@@ -467,7 +467,10 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     chat.status !== 'not_found' && chat.status !== 'unavailable';
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const paymentBlock = usePaymentLinks(chat.state.rows, chat.paymentLinks, composerRef);
+  // The chat's own path, without the owner's `?preview=`: the visitor cookie the preview's chat
+  // runs on is the one `/d/<slug>` resumes. Setup's preview sits inside an owner screen, so its
+  // links note no chat to go back to.
+  const paymentBlock = usePaymentLinks(chat.state.rows, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);

@@ -208,6 +208,7 @@ export {
   type TranscriptRowProps,
 } from './components/TranscriptRow/TranscriptRow.tsx';
 export { MarginReceipt, type MarginReceiptProps } from './components/MarginReceipt/MarginReceipt.tsx';
+export { RulesReceipt, type RulesReceiptProps } from './components/MarginReceipt/RulesReceipt.tsx';
 export {
   OWNER_REASON_STATES,
   OWNER_STATE_WORDS,
@@ -262,7 +263,7 @@ export {
   type ConnectorDirectoryProps,
   type DirectoryRowView,
 } from './components/ConnectorDirectory/ConnectorDirectory.tsx';
-export { AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
+export { ALWAYS_ON, AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
 export {
   ChangeReview,
   type ChangeReviewProps,
@@ -271,7 +272,7 @@ export {
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
 export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
-export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+export { AskClaudePanel, useAskClaudeIsSheet, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
 export { clickedControl } from './components/AskClaudePanel/clickedControl.ts';
 
 // The preset menu and the payment limit

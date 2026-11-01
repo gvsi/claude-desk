@@ -14,7 +14,7 @@ import { page } from 'vitest/browser';
 
 import { motion } from '../../test/reducedMotion.ts';
 import { partsOf, regionIn, watchRegion } from '../../test/skeletonRegion.ts';
-import { SWEEP_SHAPES, expectBandLinesUp, expectNoStepAtTheEdge, mountSweep, nextFrame, resizeWindow } from '../../test/skeletonSweep.tsx';
+import { SWEEP_SHAPES, expectBandLinesUp, expectBandsFollowLateResizeLayout, expectNoStepAtTheEdge, mountSweep, nextFrame, resizeWindow } from '../../test/skeletonSweep.tsx';
 import { Skeleton } from './Skeleton.tsx';
 import meta, { Continues, Lands, Sweep } from './Skeleton.stories.tsx';
 import { SKELETON_DELAY_MS, SkeletonScreen } from './SkeletonScreen.tsx';
@@ -192,4 +192,9 @@ it('band_edge_draws_no_step_in_chromium', async () => {
   await motion();
   const shapes = await mountSweep();
   await expectNoStepAtTheEdge(shapes.wide);
+});
+
+it('bands_follow_a_late_resize_layout_with_an_unchanged_region', async () => {
+  await motion();
+  await expectBandsFollowLateResizeLayout();
 });

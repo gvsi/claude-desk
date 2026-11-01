@@ -146,9 +146,10 @@ def test_a2a_request_body_is_documented():
 
 # Path parameters are named after their resource, `id` for a setup interview (master plan, "Shared seams").
 PATH_PARAMETERS = {"desk_id", "session_id", "decision_id", "handoff_id", "slug", "token", "version", "run_id", "tool",
-                   "id"}
+                   "id", "proposal_id"}
 SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
                "/api/owner/setup/{id}/tools", "/api/owner/setup/{id}/tools/connect",
+               "/api/owner/setup/{id}/proposals/{proposal_id}", "/api/owner/setup/{id}/suggestions",
                *(f"/api/owner/policy/setup/{{id}}/{step}"
                  for step in ("rules", "situations", "safety_check", "confirm", "go_live"))}
 
@@ -162,7 +163,7 @@ def test_path_parameters_are_named_after_their_resource():
     for path in setup:
         for operation in document["paths"][path].values():
             assert [(parameter["name"], parameter["in"]) for parameter in operation.get("parameters", [])
-                    if parameter["in"] == "path"] == [("id", "path")], path
+                    if parameter["in"] == "path"] == [(name, "path") for name in re.findall(r"{(\w+)}", path)], path
 
 
 def test_the_keyed_starts_document_their_answers():

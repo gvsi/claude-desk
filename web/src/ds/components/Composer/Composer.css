@@ -117,7 +117,7 @@
 
 /* A send that failed (N-R2-Setup-04-Answer-Failed): the screen's line 20 px over the box, and in the
    box the words as sent, then "Try again", both on the box's bottom line. The box is the composer's
-   surface without its hairline, as the board draws it; nothing in it takes the text box's ring. */
+   surface without its hairline, as the board draws it; kept words and controls use their own rings. */
 .cd-composer--failed {
   gap: var(--space-20);
 }
@@ -130,9 +130,17 @@
   box-shadow: var(--shadow-composer);
 }
 
+.cd-composer__box--failed > .cd-button {
+  flex: none;
+  white-space: nowrap;
+}
+
 .cd-composer__kept {
   flex: 1 1 auto;
   min-width: 0;
+  max-height: 6lh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;

@@ -11,7 +11,7 @@ import { useLocation, useNavigate, useParams } from 'react-router';
 import { request } from '../../api/http.ts';
 import type { ConversationSummary } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
-import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, TextLink } from '../../ds/index.ts';
+import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, SkeletonScreen, TextLink } from '../../ds/index.ts';
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
@@ -21,6 +21,7 @@ import { entriesPath } from '../today/SinceLastNight.tsx';
 import { useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
+import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
 import { conversationPath, conversationStatus, whoLabel, type ConversationArrival } from './status.ts';
 
 import './Conversations.css';
@@ -78,21 +79,19 @@ export function ConversationsPage() {
   // The chats with an open handoff, from Needs you's last good read: a later read that fails leaves
   // them open, and with none yet, the rows keep their usual status.
   const handoffs = new Set((needsYou.data ?? []).flatMap((item) => (item.handoff === null ? [] : [item.handoff.session_id])));
-  const failure = useReadFailure(list);
+  const failure = useReadFailure(list, { pausedRoute: 'conversations' });
+  const needsFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
   const now = new Date();
   const items = list.data ?? [];
   const groups = groupsOf(items, business.timezone, now);
   const open = sessionId === undefined ? undefined : items.find((s) => s.session_id === sessionId);
   const replayed = items.some((s) => s.replayed === true);
+  // Needs you supplies callback statuses, so both first reads settle before rows replace shapes.
+  // Retained failures keep the list open while a reconnect or retry reads either part again.
+  const listRead = (list.data !== undefined || failure !== null) && (needsYou.data !== undefined || needsFailure !== null);
 
   let listBody;
-  if (list.data === undefined && failure === null) {
-    listBody = (
-      <p className="cd-conversations__quiet cd-type-meta" role="status">
-        Reading your conversations
-      </p>
-    );
-  } else if (list.data !== undefined && items.length === 0) {
+  if (list.data !== undefined && items.length === 0) {
     listBody = (
       <EmptyState
         title="No conversations yet"
@@ -135,24 +134,33 @@ export function ConversationsPage() {
         <h1 id={titleId} className="cd-conversations__title cd-type-page-title">
           {TITLE}
         </h1>
-        {replayed ? (
-          <p className="cd-conversations__caption">
-            <RecordedHistoryLink href={entriesPath(deskId)} />
-          </p>
-        ) : null}
-        {failure !== null ? (
-          <Notice
-            tone="error"
-            action={
-              <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-                Try again
-              </Button>
-            }
-          >
-            {failure.line}
-          </Notice>
-        ) : null}
-        {listBody}
+        <SkeletonScreen
+          loading={!listRead}
+          status="Reading your conversations"
+          skeleton={<ConversationsSkeleton withHeader={false} open={sessionId !== undefined} />}
+          className="cd-conversations__region"
+        >
+          <div className="cd-conversations__under">
+            {replayed ? (
+              <p className="cd-conversations__caption">
+                <RecordedHistoryLink href={entriesPath(deskId)} />
+              </p>
+            ) : null}
+            {failure === null ? null : (
+              <Notice
+                tone="error"
+                action={
+                  <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
+                    Try again
+                  </Button>
+                }
+              >
+                {failure.line}
+              </Notice>
+            )}
+            {listBody}
+          </div>
+        </SkeletonScreen>
       </nav>
       <div className="cd-conversations__open">
         {sessionId === undefined ? (
@@ -160,10 +168,13 @@ export function ConversationsPage() {
           items.length > 0 ? <p className="cd-conversations__quiet cd-conversations__pick cd-type-meta">Choose a conversation to read it.</p> : null
         ) : (
           <>
+            {/* Under 1024 px the list, and its title, step aside for the conversation: the page keeps
+                its one top heading here, out of sight, while the conversation opens and once it has. */}
+            <h1 className="cd-sr-only cd-conversations__open-title">{TITLE}</h1>
             <p className="cd-conversations__back cd-type-meta">
               <TextLink href={conversationsPath(deskId)}>All conversations</TextLink>
             </p>
-            <ConversationDetail key={sessionId} sessionId={sessionId} summary={open} notice={arrivalNotice(location.state)} />
+            <ConversationDetail key={sessionId} sessionId={sessionId} summary={open} listRead={listRead} notice={arrivalNotice(location.state)} />
           </>
         )}
       </div>
