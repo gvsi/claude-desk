@@ -1724,6 +1724,10 @@ describe('Today', () => {
     await expect.element(wants.first().getByText("You'll call back. No time was promised.", { exact: true }), { timeout: 2_000 }).toBeVisible();
     expect(wants.elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
+    // Both of its answers are secondary buttons, "Mark done" as well as "Join the chat".
+    for (const name of ['Join the chat', 'Mark done']) {
+      expect(wants.first().getByRole('button', { name }).element().classList.contains('cd-button--secondary'), name).toBe(true);
+    }
 
     // Joining reads the chat, takes it over at the generation read, and opens it.
     const session = mockStore.visitorSession(RIVERA.slug);
