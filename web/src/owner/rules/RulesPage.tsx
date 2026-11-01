@@ -136,7 +136,7 @@ export function RulesPage() {
   }, [rules.isFetched, waitingForOpening]);
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
   const question = current && !skipHoldQuestion ? holdQuestion(needsYou.data ?? []) : null;
-  const failure = useReadFailure(rules);
+  const failure = useReadFailure(rules, { pausedRoute: 'rules' });
   const peopleFailure = useReadFailure(people, { pausedRoute: 'people' });
   const suggestionsFailure = useReadFailure(suggestions, { pausedRoute: 'suggestions' });
   const [presetPending, setPresetPending] = useState(false);

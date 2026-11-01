@@ -72,7 +72,7 @@ export function PeoplePage() {
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const people = usePeople(deskId);
-  const failure = useReadFailure(people);
+  const failure = useReadFailure(people, { pausedRoute: 'people' });
   const contactsId = useId();
   const leadsId = useId();
 

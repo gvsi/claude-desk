@@ -79,7 +79,7 @@ export function ConversationsPage() {
   // The chats with an open handoff, from Needs you's last good read: a later read that fails leaves
   // them open, and with none yet, the rows keep their usual status.
   const handoffs = new Set((needsYou.data ?? []).flatMap((item) => (item.handoff === null ? [] : [item.handoff.session_id])));
-  const failure = useReadFailure(list);
+  const failure = useReadFailure(list, { pausedRoute: 'conversations' });
   const now = new Date();
   const items = list.data ?? [];
   const groups = groupsOf(items, business.timezone, now);

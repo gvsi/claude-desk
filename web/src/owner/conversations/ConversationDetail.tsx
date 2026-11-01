@@ -162,10 +162,10 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   });
   // A read taken since the chat opened has come in, not only one kept from an earlier visit.
   const readSinceOpened = chat.isFetchedAfterMount && chat.isSuccess;
-  const failure = useReadFailure(chat);
+  const failure = useReadFailure(chat, { pausedRoute: 'conversation' });
   const needsYou = useNeedsYou(deskId);
   // The requests held here come from Needs you: a failed read says so, rather than a hold with nothing to answer.
-  const heldFailure = useReadFailure(needsYou);
+  const heldFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
   const answers = useAnswer(deskId);
   // A request answered here keeps focus as the button pressed goes.
   const answeredFocus = useAnsweredFocus(answers.answered);

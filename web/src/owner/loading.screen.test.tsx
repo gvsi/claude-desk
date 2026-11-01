@@ -1514,6 +1514,107 @@ async function beforeSafety(viewport: 'desktop' | 'phone' = 'phone', retryScale 
   return rendered;
 }
 
+/** A single uncached page read pauses in an open app, then reconnects while its answer is held. */
+async function expectPausedPageRead({ path, queryKey, readPath, region, landed, prime, primeLanded, error = `${region} [role="alert"]` }: {
+  path: string; queryKey: readonly string[]; readPath: string; region: string; landed: string;
+  prime?: string; primeLanded?: string; error?: string;
+}) {
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { screen, router } = await renderRoute(SAFETY, { pollScale: 100 });
+  await expect.element(screen.getByRole('list', { name: 'Stopped, newest first' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  if (prime !== undefined) {
+    await router.navigate(prime);
+    await vi.waitFor(() => expect(landedElement(primeLanded!)).not.toBeNull());
+    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+    await router.navigate(SAFETY);
+    await expect.element(screen.getByRole('list', { name: 'Stopped, newest first' })).toBeVisible();
+  }
+  const client = mounted.mock.contexts.at(-1) as QueryClient;
+  client.removeQueries({ queryKey });
+  let offline = true;
+  const send = window.fetch;
+  const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+    if (offline && url.pathname.startsWith('/api/')) return Promise.reject(new TypeError('Network unavailable'));
+    return send(input, init);
+  });
+  onTestFinished(() => sending.mockRestore());
+  onlineManager.setOnline(false);
+  onTestFinished(() => onlineManager.setOnline(true));
+  const read = holdReads(readPath);
+  await router.navigate(path);
+  await vi.waitFor(() => {
+    expect(client.getQueryState(queryKey)?.fetchStatus).toBe('paused');
+    expect(client.getQueryState(queryKey)?.data).toBeUndefined();
+  });
+  await vi.waitFor(() => expect(document.querySelector(error)?.textContent ?? '').toContain(OWNER_ERROR_COPY.network), { timeout: 2_000 });
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const retry = document.querySelector(error)!.querySelector('button')!;
+  expect(retry.textContent).toBe('Try again');
+  expect(retry.getClientRects().length).toBeGreaterThan(0);
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  const { userEvent } = await import('vitest/browser');
+  await userEvent.click(retry);
+  await nextFrames();
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  expect(read.held()).toBe(0);
+
+  const layers = watchLayers();
+  offline = false;
+  onlineManager.setOnline(true);
+  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+  await nextFrames();
+  expect(document.querySelector(error)?.textContent ?? '').toContain(OWNER_ERROR_COPY.network);
+  expect(document.querySelector(`${region}[aria-busy="true"]`)).toBeNull();
+  read.release();
+  await vi.waitFor(() => expect(landedElement(landed)).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector(error)).toBeNull());
+  await nextFrames();
+  expect(layers(), 'reconnecting never brings the skeleton back').toBe(0);
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  await expectScreenBasics(document.body, { owner: true });
+}
+
+it('customers_paused_first_read_lands_its_error_and_stays_open_on_reconnect', async () => {
+  await expectPausedPageRead({
+    path: PEOPLE, queryKey: ['people', RIVERA.deskId], readPath: PEOPLE_READ,
+    region: '.cd-people__region', landed: '.cd-people__rows',
+  });
+});
+
+it('conversations_paused_first_read_lands_its_error_and_stays_open_on_reconnect', async () => {
+  await expectPausedPageRead({
+    path: CONVERSATIONS, queryKey: ['conversations', RIVERA.deskId], readPath: CONVERSATIONS_READ,
+    region: '.cd-conversations__region', landed: '.cd-conversations__items',
+  });
+});
+
+it('conversation_paused_first_read_lands_its_error_and_stays_open_on_reconnect', async () => {
+  await expectPausedPageRead({
+    path: `${CONVERSATIONS}/${SEEDED_HOLD}`, queryKey: ['conversation', SEEDED_HOLD], readPath: conversationRead(SEEDED_HOLD),
+    region: '.cd-conversation-pane', landed: '.cd-conversation__head',
+    prime: CONVERSATIONS, primeLanded: '.cd-conversations__items',
+  });
+});
+
+it('conversation_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', async () => {
+  await expectPausedPageRead({
+    path: `${CONVERSATIONS}/${SEEDED_HOLD}`, queryKey: needsYouKey(RIVERA.deskId), readPath: NEEDS_YOU_READ,
+    region: '.cd-conversation-pane', landed: '.cd-conversation__head',
+    prime: `${CONVERSATIONS}/${SEEDED_HOLD}`, primeLanded: '.cd-conversation__head',
+  });
+});
+
+it('rules_paused_primary_read_lands_its_error_and_stays_open_on_reconnect', async () => {
+  await expectPausedPageRead({
+    path: RULES, queryKey: ['rules', RIVERA.deskId], readPath: RULES_READ,
+    region: '.cd-rules__region', landed: '.cd-connector-list',
+    prime: RULES, primeLanded: '.cd-connector-list', error: '.cd-rules > [role="alert"]',
+  });
+});
+
 it('safety_paused_first_reads_show_network_errors_and_stay_open_on_reconnect', async () => {
   const mounted = vi.spyOn(QueryClient.prototype, 'mount');
   onTestFinished(() => mounted.mockRestore());
