@@ -40,6 +40,7 @@ import { ARROW_CHARACTERS } from '../ds/test/copy.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { retryAfterMs } from '../app/poll.ts';
 import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
+import { changeSomethingPath, useChangeSomething } from './shared.ts';
 import { ProposalCard } from './ProposalCard.tsx';
 import { assertNoJargon, expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 
@@ -1877,6 +1878,30 @@ describe('setup', () => {
     expect(requests('confirmRules', mark)).toHaveLength(1);
     expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
     await expect.element(connectorRow(screen, 'Payments').getByText('On', { exact: true })).toBeVisible();
+  });
+
+  it('change_something_opens_the_chat_again_and_its_continue_goes_back_to_the_step', async () => {
+    // "Change something"'s handler, as Real situations will place it: the interview's chat again,
+    // over the rules the API has it at. The chat's "Continue" goes back to the step; the API's step
+    // stays where it was, and nothing is sent to the chat.
+    const { state } = await interviewAtRules();
+    function ChangeSomething() {
+      const change = useChangeSomething(state.interview_id);
+      return <button type="button" onClick={change}>Change something</button>;
+    }
+    const { screen, router } = await renderRoute('/probe', { routes: [{ path: '/probe', element: <ChangeSomething /> }, ...routes] });
+    const mark = mockStore.requests.length;
+    await screen.getByRole('button', { name: 'Change something' }).click();
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(changeSomethingPath(state.interview_id));
+    await expect.element(screen.getByRole('log', { name: 'Setup questions' })).toBeVisible();
+    expect(screen.getByRole('list', { name: 'Set up your Desk' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
+    const read = await mockStore.dispatch('setup', { params: { id: state.interview_id } });
+    expect('network' in read ? null : (read.body as SetupState).step).toBe('rules');
+
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    expect(requests('setupAnswer', mark)).toHaveLength(0);
   });
 
   it('tools_start_at_the_outcome_rules_shows', async () => {

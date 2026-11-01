@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 
 import { SETUP_COPY } from './copy.ts';
-import { aroundBusiness } from './shared.ts';
+import { aroundBusiness, changeSomethingPath, opensSetupChat, setupPath } from './shared.ts';
 
 it('avoids a second sentence stop after a business name while preserving the name and other copy', () => {
   const cases: readonly [string, readonly string[], string][] = [
@@ -24,4 +24,15 @@ it('avoids a second sentence stop after a business name while preserving the nam
     expect(line.querySelector('script')).toBeNull();
     expect(line.querySelector('[data-copy="user"]')?.textContent ?? null).toBe(business === '' ? null : business);
   }
+});
+
+it('leads "Change something" to the setup chat on the same interview, and back to its step', () => {
+  expect(setupPath('i1')).toBe('/app/setup/i1');
+  expect(changeSomethingPath('i1')).toBe('/app/setup/i1?chat');
+  // An id is a path segment, never a way out of setup's path.
+  expect(changeSomethingPath('a/../b?x')).toBe('/app/setup/a%2F..%2Fb%3Fx?chat');
+  expect(opensSetupChat(new URLSearchParams('chat'))).toBe(true);
+  expect(opensSetupChat(new URLSearchParams('chat=1'))).toBe(true);
+  expect(opensSetupChat(new URLSearchParams(''))).toBe(false);
+  expect(opensSetupChat(new URLSearchParams('chatty'))).toBe(false);
 });

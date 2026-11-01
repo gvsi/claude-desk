@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { useNavigate, useParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
+import { useNavigate, useParams, useSearchParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
 import { ApiError, observeRequests, ownerErrorCopy, request } from '../api/http.ts';
 import { NotFound } from '../app/NotFound.tsx';
@@ -15,7 +15,7 @@ import { QuestionsStep } from './QuestionsStep.tsx';
 import { RulesStep } from './RulesStep.tsx';
 import { SafetyStep } from './SafetyStep.tsx';
 import { StartStep } from './StartStep.tsx';
-import { SETUP_REACHES, laterStep, useOpensAtTop } from './shared.ts';
+import { SETUP_REACHES, laterStep, opensSetupChat, setupPath, useOpensAtTop } from './shared.ts';
 import { SetupOpening } from './StepSkeletons.tsx';
 import { ToolsStep } from './ToolsStep.tsx';
 
@@ -132,6 +132,8 @@ function SetupStart() {
 /** `/app/setup/:setupId`: the interview, at the step it is at. */
 function SetupInterview({ setupId }: { setupId: string }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [search] = useSearchParams();
   const setup = useQuery({ ...setupQuery(setupId), staleTime: Infinity, refetchOnWindowFocus: false });
   const deskId = setup.data?.desk_id ?? null;
   // The business's name: the API names it from the owner's words, on the new Desk.
@@ -262,9 +264,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const opened = openedAt ?? state?.step;
   // While Questions closes, the tools the API has moved on to wait for its "Continue".
   const closingQuestions = state !== undefined && closing.current && !continued && state.step === 'tools';
+  // "Change something" (`changeSomethingPath`): the chat again, over a step past it; its "Continue"
+  // goes back to the step the API has the interview at. The API's step stays where it is.
+  const changing = state !== undefined && state.step !== 'questions' && opensSetupChat(search);
   // Each step opens at its top, by the bar's step: Your rules' views open at their tops on their own
   // (RulesStep), and the preview going live stays the same screen.
-  useOpensAtTop(state === undefined ? null : STEP_INDEX[closingQuestions ? 'questions' : state.step]);
+  useOpensAtTop(state === undefined ? null : STEP_INDEX[closingQuestions || changing ? 'questions' : state.step]);
   // An interview outside this copy: the app's not-found screen.
   if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
@@ -295,10 +300,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
   // or elsewhere, doesn't claim it. The check's drawing is the page's own history, kept apart.
   const answering = desk?.answering === true;
   let body: ReactNode;
-  const shownStep = closingQuestions ? 'questions' : state.step;
+  const shownStep = closingQuestions || changing ? 'questions' : state.step;
+  const backToStep = () => void navigate(setupPath(setupId));
   switch (shownStep) {
     case 'questions':
-      body = <QuestionsStep state={state} onState={onState} reread={reread} onContinue={() => setContinued(true)} />;
+      body = <QuestionsStep state={state} onState={onState} reread={reread} onContinue={changing ? backToStep : () => setContinued(true)} />;
       break;
     case 'tools':
       body = <ToolsStep state={state} business={name} onContinue={() => moveTo('rules')} />;
@@ -329,7 +335,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       step={STEP_INDEX[shownStep]}
       live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
       exitTo={todayPath(state.desk_id)}
-      wide={state.step === 'preview'}
+      wide={state.step === 'preview' && !changing}
       chat={shownStep === 'questions'}
       beforeLeave={beforeLeave}
     >
