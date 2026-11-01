@@ -2812,6 +2812,73 @@
         }
       }
     },
+    "/api/owner/setup/{id}/events": {
+      "get": {
+        "summary": "Setup Events",
+        "description": "One owner turn's whole reply so far, then done after its saved state or error after rollback.\n\nNo running turn sends done with run null immediately. Choices, cards and plans are read only\nfrom the existing state route. Authentication and interview scoping finish before SSE starts.",
+        "operationId": "owner_setup_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/owner/setup/{id}/consent": {
       "post": {
         "summary": "Setup Consent",
@@ -6897,7 +6964,7 @@
     "/api/owner/policy/{desk_id}/chat": {
       "post": {
         "summary": "Rule Chat",
-        "description": "Ask Claude about the Desk's rules in plain words. A question gets an answer and drafts nothing; a change comes\nback as a draft the kernel compiled and proved, with how it differs from the active rules, which nothing changes\nuntil `confirm`. Counts on the copy's `owner_ai` limit (40 an hour) and, in production, the daily model budget\n(503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer.",
+        "description": "Ask Claude about the Desk's rules in plain words. A question gets an answer and drafts nothing; a change comes\nback as a draft the kernel compiled and proved, with how it differs from the active rules, which nothing changes\nuntil `confirm`. Counts on the copy's `owner_ai` limit (40 an hour) and, in production, the daily model budget\n(503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer.\n\nAccept: text/event-stream subscribes to whole-answer deltas, reset on retry, then final\nRuleChatOut after any kernel proof, or an error with status and error code. Admission\nfailures remain JSON. Without that header the existing JSON/202 behavior is unchanged.",
         "operationId": "owner_rule_chat",
         "parameters": [
           {

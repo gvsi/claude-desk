@@ -22,10 +22,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sse_starlette import EventSourceResponse
 
 from desk.api import proving, setup, versions
 from desk.api.deps import OwnerCtx, Runtime, owner_ctx, public_origin, require_model_budget, runtime
 from desk.api.idempotency import body_sha256
+from desk.api.owner_streaming import event, response as stream_response
 from desk.api.schemas import (
     ApiError,
     ChangesAlwaysOn,
@@ -112,6 +114,29 @@ async def setup_interview(interview_id: InterviewId, request: Request,
     state = runtime(request).started()
     return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards,
                             business_tools_enabled=state.settings.business_tools_enabled)
+
+
+@router.get("/{id}/events", response_class=EventSourceResponse,
+            responses={200: {"content": {"text/event-stream": {}}}, **error_responses(401, 404, 422, 503)})
+async def setup_events(interview_id: InterviewId, request: Request,
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> EventSourceResponse:
+    """One owner turn's whole reply so far, then done after its saved state or error after rollback.
+
+    No running turn sends done with run null immediately. Choices, cards and plans are read only
+    from the existing state route. Authentication and interview scoping finish before SSE starts.
+    """
+    state = runtime(request).started()
+    await setup.interview_desk(ctx, state.database(), interview_id)
+    display = state.turn_runs.display(interview_id)
+
+    async def events():
+        if display is None:
+            yield event("done", {"run": None})
+        else:
+            async for item in display.events():
+                yield item
+
+    return stream_response(events())
 
 
 @router.post("/{id}/consent", response_model=SetupState,
@@ -310,7 +335,7 @@ ALWAYS_ON_RESPONSES: dict[int | str, dict[str, Any]] = {422: {"model": ChangesAl
 
 async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, started: float,
                          admit: Callable[[], Awaitable[None]], body: BaseModel | None = None,
-                         changes_rules: bool = False) -> Any:
+                         changes_rules: bool = False, owner_stream: bool = False, stream: bool = False) -> Any:
     """Run `work` through the process's proving tasks, keyed by the Desk, the path and the body: its answer, or 202
     `ProvingPending` naming the same request (path and JSON body) once `PROVING_WAIT_S` has passed since `started`.
     `admit` (the route's limits) runs for new work only; a re-post that joins it isn't counted again. The work runs
@@ -329,9 +354,13 @@ async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Wo
             if changes_rules:
                 state.proving.forget(desk_id)
 
+    key = (desk_id, request.url.path, body_sha256(payload))
+    if stream:
+        events = await state.proving.stream(key, run, admit=admit)
+        return stream_response(events)
     try:
-        answer = await state.proving.run((desk_id, request.url.path, body_sha256(payload)), run, admit=admit,
-                                         deadline=started + proving.PROVING_WAIT_S)
+        answer = await state.proving.run(key, run, admit=admit,
+                                         deadline=started + proving.PROVING_WAIT_S, display=owner_stream)
     except versions.ChangesAlwaysOn as refused:
         return JSONResponse(ChangesAlwaysOn(card_ids=refused.card_ids).model_dump(mode="json"), status_code=422)
     if answer is proving.PENDING:

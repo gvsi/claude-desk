@@ -1,0 +1,521 @@
+"""Owner display streams never become setup state or rule cards."""
+
+import json
+
+from desk.api.owner_streaming import StringField
+
+
+def test_string_field_at_every_byte_boundary():
+    value = 'Hello "owner"\n雪 😀 \\ /\t\b\f\r'
+    for ascii_only in (False, True):
+        raw = json.dumps({"other": {"reply": "hidden"}, "reply": value, "cards": ["hidden"]},
+                         ensure_ascii=ascii_only).encode()
+        for edge in range(len(raw) + 1):
+            field = StringField("reply")
+            values = [text for part in (raw[:edge], raw[edge:]) if (text := field.feed(part)) is not None]
+            assert values[-1] == value
+            assert all(value.startswith(text) for text in values)
+        field = StringField("reply")
+        values = [text for byte in raw if (text := field.feed(bytes([byte]))) is not None]
+        assert values[-1] == value
+        assert all(value.startswith(text) for text in values)
+    field = StringField("reply")
+    assert field.feed('{"nested":{"reply":"hidden"},"choices":["hidden"]}') is None
+
+
+async def test_sdk_structured_stream_delivers_text_before_validation():
+    import httpx2
+    import pytest
+    from pydantic import BaseModel
+    from desk.api.model import AnthropicModel, ModelRequest, ModelUnavailable
+    from tests.api.fakes import FakeMessagesApi
+
+    class Answer(BaseModel):
+        reply: str
+
+    def scripted(raw):
+        events = [
+            ("message_start", {"type": "message_start", "message": {
+                "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
+                "content": [], "stop_reason": None, "stop_sequence": None,
+                "usage": {"input_tokens": 5, "output_tokens": 1}}}),
+            ("content_block_start", {"type": "content_block_start", "index": 0,
+                                     "content_block": {"type": "text", "text": ""}}),
+        ]
+        for piece in raw:
+            events.append(("content_block_delta", {"type": "content_block_delta", "index": 0,
+                                                   "delta": {"type": "text_delta", "text": piece}}))
+        events += [
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+                               "usage": {"output_tokens": 12}}),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content="".join(
+            f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events).encode())
+
+    server = FakeMessagesApi(scripted(['{"reply":"Got', ' it"}']), scripted(['{"reply":42}']))
+    model = AnthropicModel("test-key", base_url="https://model.test", http_client=server.client())
+    chunks = []
+    request = ModelRequest(route="setup", system=[{"type": "text", "text": "test"}], messages=[],
+                           output_schema=Answer, on_text=chunks.append)
+    try:
+        result = await model.call(request)
+        assert chunks == ['{"reply":"Got', ' it"}']
+        assert result.parsed == Answer(reply="Got it")
+        assert result.usage.output_tokens == 12
+        with pytest.raises(ModelUnavailable):
+            await model.call(request)
+        assert len(server.requests) == 2
+        assert all(json.loads(sent.content)["stream"] is True for sent in server.requests)
+    finally:
+        await model.aclose()
+
+
+# Exercise real owner auth, setup commits and rules proofs with no network/model calls.
+import asyncio
+import contextlib
+
+import pytest
+
+from desk.api import setup
+from tests.api.fakes import response, text, unavailable
+from tests.api.test_setup_questions import (
+    app, model, answer_turn, begin, consent, new_owner, until,
+)
+
+
+class LiveEvents:
+    """Observe ASGI body sends, since httpx's in-memory transport buffers a whole SSE response."""
+
+    def __init__(self, app, browser, owner):
+        self.sent = asyncio.Queue()
+
+        async def capture(scope, receive, send):
+            async def observe(message):
+                if message["type"] == "http.response.body":
+                    self.sent.put_nowait(message.get("body", b""))
+                await send(message)
+            await app(scope, receive, observe)
+
+        self.client = browser(capture)
+        self.client.cookies.update(owner.browser.cookies)
+        self.task = None
+        self.buffer = ""
+
+    def open(self, path, *, body=None):
+        if body is None:
+            self.task = asyncio.create_task(self.client.get(path))
+        else:
+            self.task = asyncio.create_task(self.client.post(path, json=body, headers={"Accept": "text/event-stream"}))
+        return self
+
+    async def next(self):
+        while "\n\n" not in self.buffer:
+            chunk = await asyncio.wait_for(self.sent.get(), 5)
+            self.buffer += chunk.decode().replace("\r\n", "\n")
+        frame, self.buffer = self.buffer.split("\n\n", 1)
+        lines = frame.splitlines()
+        if frame.startswith(":"):
+            return ("comment", frame)
+        return (next(line[7:] for line in lines if line.startswith("event: ")),
+                json.loads(next(line[6:] for line in lines if line.startswith("data: "))))
+
+    async def close(self):
+        if self.task:
+            self.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.task
+
+
+def streaming(raw, pieces, releases, entered=None, fail=False):
+    """Send selected raw JSON pieces, pausing after each so HTTP sends are observable."""
+    async def call(request):
+        assert request.on_text is not None
+        if entered is not None:
+            entered.set()
+        for piece, release in zip(pieces, releases, strict=True):
+            request.on_text(piece)
+            await release.wait()
+        if fail:
+            raise unavailable()
+        return response(text(raw))
+    return call
+
+
+async def question_ready(app, browser, kernel_http, model):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    state = await consent(owner, state["interview_id"], False, model, cards=True)
+    return owner, state, f"/api/owner/setup/{state['interview_id']}"
+
+
+async def test_setup_contract_example_is_live_and_saves_only_validated_state(
+        app, browser, kernel_http, model, monkeypatch, caplog):
+    owner, initial, path = await question_ready(app, browser, kernel_http, model)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    reply = "Got it: leaks and blocked drains. Do you take emergency calls"
+    result = answer_turn(setup.SETUP_TURNS["what_you_do"], reply, step_done=False)
+    raw = result.model_dump_json()
+    prefix, rest = raw.split('"reply":', 1)
+    remaining = rest[len(json.dumps(reply)):]
+    pieces = [prefix + '"reply":"Got', " it: leaks and blocked", " drains. Do you take emergency calls" + '"' + remaining]
+    gates = [asyncio.Event() for _ in pieces]
+    entered = asyncio.Event()
+    model.add(streaming(raw, pieces, gates, entered))
+    baseline_calls = len(model.requests)
+    busy = await owner.browser.post(path + "/answer?cards=1", json={"question": "what_you_do", "text": "We fix leaks and blocked drains"})
+    assert busy.status_code == 202 and busy.json()["busy"] is True
+    await asyncio.wait_for(entered.wait(), 5)
+    live = LiveEvents(app, browser, owner).open(path + "/events")
+    try:
+        first = await live.next()
+        assert first[0] == "delta"
+        run = first[1]["run"]
+        assert isinstance(run, str) and run
+        assert first == ("delta", {"run": run, "text": "Got"})
+        gates[0].set()
+        assert await live.next() == ("delta", {"run": run, "text": "Got it: leaks and blocked"})
+        gates[1].set()
+        assert await live.next() == ("delta", {"run": run, "text": reply})
+        # Neither incomplete display text nor choices/card/plan JSON have reached saved state.
+        stored = (await owner.browser.get(path + "?cards=1")).json()
+        assert stored["busy"] is True and reply not in [message["text"] for message in stored["messages"]]
+        gates[2].set()
+        assert await live.next() == ("done", {"run": run})
+        sse = await live.task
+        assert sse.status_code == 200 and sse.headers["content-type"].startswith("text/event-stream")
+        landed = (await owner.browser.get(path + "?cards=1")).json()
+        assert landed["busy"] is False
+        assert reply in [message["text"] for message in landed["messages"]]
+        assert landed["question"] == initial["question"]
+        assert len(model.requests) == baseline_calls + 1
+        assert reply not in caplog.text
+        # A second interview takes today's ordinary JSON path with the identical full output.
+        monkeypatch.setattr(setup, "TURN_WAIT_S", 25)
+        other, _, fallback_path = await question_ready(app, browser, kernel_http, model)
+        model.add(response(text(raw)))
+        fallback = await other.browser.post(fallback_path + "/answer?cards=1", json={
+            "question": "what_you_do", "text": "We fix leaks and blocked drains"})
+        assert fallback.status_code == 200
+        omit = {"interview_id", "desk_id", "slug"}
+        assert {key: value for key, value in landed.items() if key not in omit} == {
+            key: value for key, value in fallback.json().items() if key not in omit}
+    finally:
+        for gate in gates:
+            gate.set()
+        await live.close()
+        await app.state.runtime.turn_runs.wait(initial["interview_id"])
+
+
+async def test_rules_contract_example_and_json_fallback(app, browser, fake, kernel_http, model):
+    from tests.api.test_owner_desks import new_owner as rules_owner
+    from desk.api.prompts import RuleChat
+
+    owner = await rules_owner(app, browser, fake, kernel_http)
+    path = f"/api/owner/policy/{owner.desk_id}/chat"
+    answer = "Yes. Right now every payment asks you first. Want me to draft a rule for deposits on jobs over $500?"
+    raw = RuleChat(answer=answer, change=None).model_dump_json()
+    gates = [asyncio.Event() for _ in range(2)]
+    pieces = ['{"answer":"Yes', '. Right now every payment asks you first']
+    model.add(streaming(raw, pieces, gates))
+    live = LiveEvents(app, browser, owner).open(path, body={"text": "Can I take deposits for big jobs?"})
+    try:
+        assert await live.next() == ("delta", {"text": "Yes"})
+        gates[0].set()
+        assert await live.next() == ("delta", {"text": "Yes. Right now every payment asks you first"})
+        gates[1].set()
+        expected = {"answer": answer, "draft": None}
+        assert await live.next() == ("final", expected)
+        result = await live.task
+        assert result.status_code == 200 and result.headers["content-type"].startswith("text/event-stream")
+        # Reposting JSON takes the existing proving answer, exactly as before: no extra model call.
+        fallback = await owner.browser.post(path, json={"text": "Can I take deposits for big jobs?"})
+        assert fallback.status_code == 200
+        assert fallback.headers["content-type"].startswith("application/json")
+        assert fallback.json() == expected
+        assert len(model.requests) == 1 and fake.called("POST /policy/draft") == []
+    finally:
+        for gate in gates:
+            gate.set()
+        await live.close()
+
+
+@pytest.mark.parametrize("outcome", ["retry", "model_error"])
+async def test_setup_retry_and_error_contract(app, browser, kernel_http, model, monkeypatch, outcome):
+    owner, initial, path = await question_ready(app, browser, kernel_http, model)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    first, second = asyncio.Event(), asyncio.Event()
+    raw = '{"reply":"Here\'s what I\'d","invalid":true}'
+    model.add(streaming(raw, [raw], [first], fail=outcome == "model_error"))
+    good = answer_turn(setup.SETUP_TURNS["what_you_do"], "Here's the plan", step_done=False).model_dump_json()
+    if outcome == "retry":
+        model.add(streaming(good, [good], [second]))
+    busy = await owner.browser.post(path + "/answer?cards=1", json={"question": "what_you_do", "text": "Leaky taps"})
+    assert busy.status_code == 202
+    live = LiveEvents(app, browser, owner).open(path + "/events")
+    try:
+        name, data = await live.next()
+        run = data["run"]
+        assert (name, data) == ("delta", {"run": run, "text": "Here's what I'd"})
+        first.set()
+        if outcome == "retry":
+            assert await live.next() == ("reset", {"run": run})
+            assert await live.next() == ("delta", {"run": run, "text": "Here's the plan"})
+            second.set()
+            assert await live.next() == ("done", {"run": run})
+            landed = (await owner.browser.get(path + "?cards=1")).json()
+            assert "Here's the plan" in [entry["text"] for entry in landed["messages"]]
+            assert "Here's what I'd" not in [entry["text"] for entry in landed["messages"]]
+        else:
+            assert await live.next() == ("error", {"run": run, "error": "model_unavailable"})
+            assert (await owner.browser.get(path + "?cards=1")).json() == initial
+        await live.task
+    finally:
+        first.set()
+        second.set()
+        await live.close()
+        with contextlib.suppress(Exception):
+            await app.state.runtime.turn_runs.wait(initial["interview_id"])
+
+
+async def test_setup_late_subscriber_and_scoping_are_json_before_stream(app, browser, kernel_http, model):
+    owner, state, path = await question_ready(app, browser, kernel_http, model)
+    late = await owner.browser.get(path + "/events")
+    assert late.status_code == 200 and late.text.replace("\r\n", "\n") == 'event: done\ndata: {"run":null}\n\n'
+    other = await new_owner(app, browser, kernel_http)
+    for client, url, status in [(other.browser, path + "/events", 404),
+                                (owner.browser, "/api/owner/setup/unknown/events", 404),
+                                (browser(app), path + "/events", 401)]:
+        reply = await client.get(url)
+        assert reply.status_code == status
+        assert reply.headers["content-type"].startswith("application/json")
+        assert "error" in reply.json()
+    assert len(model.requests) == 2
+
+
+async def test_rules_draft_is_only_final_after_kernel_proof(app, browser, fake, kernel_http, model):
+    from tests.api.test_owner_desks import new_owner as rules_owner
+    from tests.api.test_rules import chat_card, chatted, owner_cards
+
+    owner = await rules_owner(app, browser, fake, kernel_http)
+    path = f"/api/owner/policy/{owner.desk_id}/chat"
+    result = chatted("Every quote waits for you.", *(chat_card(card, mode="ask", reason="Quotes ask you first.")
+                       if card.card_id == "rv-quote" else chat_card(card) for card in owner_cards(fake, owner.desk_id)))
+    raw = result.content[0]["text"]
+    gate = asyncio.Event()
+    release_proof = fake.gate("POST /policy/draft")
+    model.add(streaming(raw, [raw], [gate]))
+    live = LiveEvents(app, browser, owner).open(path, body={"text": "Ask before every quote"})
+    try:
+        assert await live.next() == ("delta", {"text": "Every quote waits for you."})
+        assert fake.called("POST /policy/draft") == []
+        gate.set()
+        await until(lambda: bool(fake.called("POST /policy/draft")))
+        assert not live.task.done() and live.sent.empty()
+        release_proof.set()
+        name, final = await live.next()
+        assert name == "final" and final["answer"] == "Every quote waits for you."
+        assert final["draft"]["proof"]["ok"] is True
+        assert final["draft"]["cards"]
+        await live.task
+        fallback = await owner.browser.post(path, json={"text": "Ask before every quote"})
+        assert fallback.status_code == 200 and fallback.json() == final
+        assert len(model.requests) == 1 and len(fake.called("POST /policy/draft")) == 1
+    finally:
+        gate.set()
+        release_proof.set()
+        await live.close()
+
+
+@pytest.mark.parametrize("outcome", ["retry", "model_error", "proof_error"])
+async def test_rules_reset_and_error_shapes(app, browser, fake, kernel_http, model, monkeypatch, outcome, caplog):
+    from desk.api import rules
+    from desk.api.deps import ApiProblem
+    from desk.api.prompts import RuleChat
+    from tests.api.test_owner_desks import new_owner as rules_owner
+    from tests.api.test_rules import chat_card, chatted, owner_cards
+
+    owner = await rules_owner(app, browser, fake, kernel_http)
+    path = f"/api/owner/policy/{owner.desk_id}/chat"
+    first, second = asyncio.Event(), asyncio.Event()
+    first_raw = '{"answer":"Wrong attempt","invalid":true}'
+    if outcome == "proof_error":
+        result = chatted("A proposed change.", *(chat_card(card) for card in owner_cards(fake, owner.desk_id)))
+        first_raw = result.content[0]["text"]
+
+        async def cannot_prove(*args, **kwargs):
+            raise ApiProblem(409, "rules_cannot_be_checked")
+        monkeypatch.setattr(rules, "draft", cannot_prove)
+    model.add(streaming(first_raw, [first_raw], [first], fail=outcome == "model_error"))
+    good = RuleChat(answer="A checked answer.", change=None).model_dump_json()
+    if outcome == "retry":
+        model.add(streaming(good, [good], [second]))
+    live = LiveEvents(app, browser, owner).open(path, body={"text": "Explain the rules"})
+    try:
+        assert await live.next() == ("delta", {"text": "A proposed change." if outcome == "proof_error" else "Wrong attempt"})
+        first.set()
+        if outcome == "retry":
+            assert await live.next() == ("reset", {})
+            assert await live.next() == ("delta", {"text": "A checked answer."})
+            second.set()
+            assert await live.next() == ("final", {"answer": "A checked answer.", "draft": None})
+        else:
+            status, code = (409, "rules_cannot_be_checked") if outcome == "proof_error" else (503, "model_unavailable")
+            assert await live.next() == ("error", {"status": status, "error": code})
+        await live.task
+        assert "Wrong attempt" not in caplog.text and "A proposed change." not in caplog.text
+    finally:
+        first.set()
+        second.set()
+        await live.close()
+
+
+@pytest.mark.parametrize("reason", ["rate_limit", "demo_budget", "validation", "missing_desk", "foreign_desk", "auth"])
+async def test_rules_admission_errors_stay_json(app, browser, fake, kernel_http, model, monkeypatch, reason):
+    from desk.api.deps import ApiProblem
+    from desk.api.ratelimit import RateLimited
+    from desk.api.routes import rules as routes
+    from tests.api.test_owner_desks import new_owner as rules_owner
+
+    owner = await rules_owner(app, browser, fake, kernel_http)
+    client = owner.browser
+    path = f"/api/owner/policy/{owner.desk_id}/chat"
+    body = {"text": "Can I take deposits?"}
+    expected = {"rate_limit": (429, "rate_limited"), "demo_budget": (503, "demo_budget"),
+                "validation": (422, "invalid"), "missing_desk": (404, "not_found"),
+                "foreign_desk": (404, "not_found"), "auth": (401, "no_owner_session")}
+    if reason == "rate_limit":
+        async def limited(bucket, *args, **kwargs):
+            assert bucket == "owner_ai"
+            raise RateLimited(60)
+        monkeypatch.setattr(app.state.runtime.limiter, "enforce", limited)
+    elif reason == "demo_budget":
+        async def budget(request):
+            raise ApiProblem(503, "demo_budget")
+        monkeypatch.setattr(routes, "require_model_budget", budget)
+    elif reason == "validation":
+        body = {"text": ""}
+    elif reason == "missing_desk":
+        path = "/api/owner/policy/missing/chat"
+    elif reason == "foreign_desk":
+        other = await rules_owner(app, browser, fake, kernel_http)
+        client = other.browser
+    else:
+        client = browser(app)
+    answer = await client.post(path, json=body, headers={"Accept": "text/event-stream"})
+    assert answer.status_code == expected[reason][0]
+    assert answer.headers["content-type"].startswith("application/json")
+    assert answer.json()["error"] == expected[reason][1]
+    assert model.requests == []
+
+
+async def test_setup_keepalives_are_ping_comments_every_15_seconds(app, browser, kernel_http, model, monkeypatch):
+    from desk.api import owner_streaming
+
+    owner, initial, path = await question_ready(app, browser, kernel_http, model)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    real_response = owner_streaming.EventSourceResponse
+    intervals = []
+
+    def fast_response(*args, **kwargs):
+        intervals.append(kwargs["ping"])
+        kwargs["ping"] = 0.01  # Exercise real SSE keepalives without a 15-second test delay.
+        return real_response(*args, **kwargs)
+
+    monkeypatch.setattr(owner_streaming, "EventSourceResponse", fast_response)
+    release = asyncio.Event()
+    result = answer_turn(setup.SETUP_TURNS["what_you_do"], "Got it", step_done=False)
+
+    async def waiting(request):
+        await release.wait()
+        return response(text(result.model_dump_json()))
+
+    model.add(waiting)
+    busy = await owner.browser.post(path + "/answer", json={"question": "what_you_do", "text": "Repairs"})
+    assert busy.status_code == 202
+    live = LiveEvents(app, browser, owner).open(path + "/events")
+    try:
+        assert await live.next() == ("comment", ": ping")
+        assert await live.next() == ("comment", ": ping")
+        assert intervals == [15]
+        release.set()
+        while (item := await live.next())[0] == "comment":
+            pass
+        assert item[0] == "done"
+        await live.task
+    finally:
+        release.set()
+        await live.close()
+        await app.state.runtime.turn_runs.wait(initial["interview_id"])
+
+
+async def test_rules_stream_joins_json_work_and_disconnect_leaves_it_running(
+        app, browser, fake, kernel_http, model, monkeypatch):
+    from desk.api import proving
+    from desk.api.prompts import RuleChat
+    from tests.api.test_owner_desks import new_owner as rules_owner
+
+    owner = await rules_owner(app, browser, fake, kernel_http)
+    path = f"/api/owner/policy/{owner.desk_id}/chat"
+    body = {"text": "Explain my rules"}
+    monkeypatch.setattr(proving, "PROVING_WAIT_S", 0)
+    gate = asyncio.Event()
+    raw = RuleChat(answer="A shared answer.", change=None).model_dump_json()
+    model.add(streaming(raw, [raw], [gate]))
+    pending = await owner.browser.post(path, json=body)
+    assert pending.status_code == 202 and pending.json() == {"retry": {"path": path, "body": body}}
+    live = LiveEvents(app, browser, owner).open(path, body=body)
+    try:
+        assert await live.next() == ("delta", {"text": "A shared answer."})
+        await live.close()
+        assert len(model.requests) == 1
+        gate.set()
+        monkeypatch.setattr(proving, "PROVING_WAIT_S", 25)
+        final = await owner.browser.post(path, json=body)
+        assert final.status_code == 200 and final.json() == {"answer": "A shared answer.", "draft": None}
+        assert len(model.requests) == 1
+    finally:
+        gate.set()
+        await live.close()
+
+
+async def test_slow_subscriber_gets_reset_before_done_after_failed_attempt():
+    from desk.api.owner_streaming import Display
+
+    display = Display("r_7f3b")
+    first = display.begin("reply")
+    first('{"reply":"Here\'s what I\'d"}')
+    events = display.events()
+    assert await anext(events) == {"event": "delta", "data": '{"run":"r_7f3b","text":"Here\'s what I\'d"}'}
+    # The network pauses after the first send while the model retries and finishes.
+    second = display.begin("reply")
+    second('{"reply":"Here\'s the plan"}')
+    display.finish("done", {"run": "r_7f3b"})
+    assert await anext(events) == {"event": "reset", "data": '{"run":"r_7f3b"}'}
+    assert await anext(events) == {"event": "delta", "data": '{"run":"r_7f3b","text":"Here\'s the plan"}'}
+    assert await anext(events) == {"event": "done", "data": '{"run":"r_7f3b"}'}
+    with pytest.raises(StopAsyncIteration):
+        await anext(events)
+
+
+async def test_malformed_json_keys_do_not_bypass_the_existing_validation_retry():
+    from desk.api.model import ModelRequest
+    from desk.api.owner_streaming import Display, displaying
+    from desk.api.prompts import RuleChat
+    from tests.api.fakes import ScriptedModel
+
+    def malformed(request: ModelRequest):
+        raw = '{"bad\\q":"ignored","answer":"Unusable","change":null}'
+        request.on_text(raw)
+        return response(text(raw))
+
+    valid = RuleChat(answer="Validated answer", change=None)
+    fake = ScriptedModel([malformed, response(text(valid.model_dump_json()))])
+
+    async def record(response):
+        pass
+
+    with displaying(Display()):
+        answer = await setup.ask_model(fake, record, "test", [], RuleChat, max_tokens=8192, route="rules_chat")
+    assert answer == valid and len(fake.requests) == 2

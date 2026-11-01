@@ -115,6 +115,8 @@ class ModelRequest:
     max_tokens: int = 16000
     output_schema: Any = None
     timeout_s: float | None = None
+    # Raw structured text for an ephemeral owner display; never sent as a model setting.
+    on_text: Callable[[str], None] | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.route not in ROUTES:
@@ -264,7 +266,8 @@ def _utc_now() -> datetime:
 
 class _SdkModel:
     """`ModelClient` on one of the SDK's clients: every provider sends `build_kwargs(request)`, streams the
-    conversation and `create`s the structured routes. A provider maps the model name it sends (`_sent_model`) and
+    conversation and, when an owner display callback is present, structured text; other structured routes use
+    `create`. A provider maps the model name it sends (`_sent_model`) and
     the one it records (`_served_model`); `clock` is a test hook."""
 
     _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrockMantle
@@ -291,6 +294,11 @@ class _SdkModel:
         try:
             if request.output_schema is None:
                 async with self._client.beta.messages.stream(**kwargs) as stream:
+                    message = await stream.get_final_message()
+            elif request.on_text is not None:
+                async with self._client.messages.stream(**kwargs) as stream:
+                    async for text in stream.text_stream:
+                        request.on_text(text)
                     message = await stream.get_final_message()
             else:
                 message = await self._client.messages.create(**kwargs)

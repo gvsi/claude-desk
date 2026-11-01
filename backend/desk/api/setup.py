@@ -128,9 +128,10 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import Executable
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.turn_runs import TurnRuns
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.idempotency import Admissions, body_sha256
+from desk.api.owner_streaming import current as current_display, failure as display_failure
+from desk.api.turn_runs import TurnRuns
 from desk.api.kernel_client import DEFAULT_TIMEOUT_S, KernelFailed, KernelUnavailable
 from desk.api.link_notices import tell_cancelled_links
 from desk.api.metrics import record_model_call
@@ -751,9 +752,12 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
         bound = timeout_s() if callable(timeout_s) else SETUP_TIMEOUT_S if timeout_s is None else timeout_s
         if bound <= 0 or (attempt == 2 and bound < retry_min_s):
             return None
+        display = current_display.get()
+        field = "reply" if "reply" in output.model_fields else "answer" if "answer" in output.model_fields else None
+        on_text = display.begin(field) if display is not None and field is not None else None
         request = ModelRequest(route=route, system=[{"type": "text", "text": system}], messages=list(messages),
                                model=CONVERSATION_MODEL, effort=effort, max_tokens=max_tokens, output_schema=output,
-                               timeout_s=bound)
+                               timeout_s=bound, on_text=on_text)
         started = monotonic()
         try:
             async with asyncio.timeout(bound):
@@ -1409,7 +1413,9 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
 
     async def run() -> SetupState:
         nonlocal pending
-        run_id = secrets.token_hex(8)
+        display = current_display.get()
+        assert display is not None and display.run is not None
+        run_id = display.run
         busy = None
         committed = False
         try:
@@ -1438,6 +1444,7 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                         interview.transcript = [entry for entry in interview.transcript if entry.pending != run_id]
                     await _commit(engine, ctx, interview, busy)
                     committed = True
+                    display.finish("done", {"run": run_id})
                 if after is not None:
                     try:
                         async with asyncio.timeout(TURN_AFTER_TIMEOUT_S):
@@ -1458,6 +1465,7 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                         await _rollback_turn(owner, engine, interview_id, run_id)
                 except Exception as rollback_failed:
                     logger.warning("setup turn couldn't be reopened (%s)", type(rollback_failed).__name__)
+            display.finish("error", {"run": run_id, "error": display_failure(failed)["error"]})
             if isinstance(failed, TimeoutError):
                 raise ApiProblem(503, "model_unavailable") from None
             raise
