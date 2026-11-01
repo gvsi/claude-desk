@@ -29,7 +29,7 @@ export class SseParser {
     let text = chunk;
     if (!this.started && text !== '') {
       this.started = true;
-      if (text.startsWith('﻿')) text = text.slice(1);
+      if (text.startsWith('\uFEFF')) text = text.slice(1);
     }
     if (this.afterCr && text.startsWith('\n')) text = text.slice(1);
     this.afterCr = false;

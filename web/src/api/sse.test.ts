@@ -58,7 +58,7 @@ describe('SseParser', () => {
   });
 
   it('strips_a_leading_byte_order_mark', () => {
-    expect(readAll('﻿event: reset\ndata: {}\n\n')).toEqual([{ event: 'reset', data: '{}' }]);
+    expect(readAll('\uFEFFevent: reset\ndata: {}\n\n')).toEqual([{ event: 'reset', data: '{}' }]);
   });
 
   it('resets_the_event_name_after_each_dispatch', () => {
