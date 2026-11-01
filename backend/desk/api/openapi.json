@@ -5052,7 +5052,7 @@
     "/api/public/desks/{slug}/send_agent/{run_id}": {
       "get": {
         "summary": "Agent Run",
-        "description": "The built-in agent's run as it stands, for the session that sent it (any other is 404): what the Desk\nanswered, as the kernel checked it, and never the agent's own words. Kept for an hour. Never cached: a Desk turn\ncan carry a payment link.",
+        "description": "The built-in agent's run as it stands, for the session that sent it (any other is 404): each message the agent\nsent, exactly as sent, as the agent's own untrusted words, and what the Desk answered, as the kernel checked it.\nKept for an hour. Never cached: a Desk turn can carry a payment link.",
         "operationId": "public_agent_run",
         "parameters": [
           {
@@ -7994,6 +7994,17 @@
             "type": "integer",
             "title": "N"
           },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
           "blocks": {
             "items": {
               "$ref": "#/components/schemas/RenderedBlock"
@@ -8031,11 +8042,12 @@
         "required": [
           "author",
           "n",
+          "text",
           "blocks",
           "receipts"
         ],
         "title": "AgentTurn",
-        "description": "One side of an exchange in a built-in agent's run: the agent's request (`n`-th), which carries nothing, since\nthe agent's own words are never shown (the panel titles it), or the Desk's answer to it, with the blocks and\nsigned statuses the kernel checked and the Desk showed the agent."
+        "description": "One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,\nwith the blocks and signed statuses the kernel checked and the Desk showed the agent.\n\nAn agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most\n2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is\n(owner decision, 2026-11-01). The agent's model writes it from a fixed `DemoTask` and the Desk's kernel-checked\nreplies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the\nDesk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked\nblocks and statuses."
       },
       "AlreadyResolved": {
         "properties": {
@@ -8299,6 +8311,10 @@
             "type": "integer",
             "title": "Turned Down"
           },
+          "answers": {
+            "type": "integer",
+            "title": "Answers"
+          },
           "total": {
             "type": "integer",
             "title": "Total"
@@ -8314,11 +8330,12 @@
           "bookings",
           "leads",
           "turned_down",
+          "answers",
           "total",
           "newest"
         ],
         "title": "Briefing",
-        "description": "\"Since last night\": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of\nthe full list (`BriefingList`)."
+        "description": "\"Since last night\": from 18:00 yesterday in the business's time zone (`since`) to now. `answers` counts the\nlist's `answer` items, the conversations Claude answered alone; `total` is the length of the full list\n(`BriefingList`)."
       },
       "BriefingItem": {
         "properties": {
@@ -8565,6 +8582,54 @@
           "timezone"
         ],
         "title": "BusinessSeed"
+      },
+      "BusinessToolDef": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Description"
+          },
+          "config": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntakeConfig"
+              },
+              {
+                "$ref": "#/components/schemas/TypedBookingConfig"
+              },
+              {
+                "$ref": "#/components/schemas/PurposePaymentConfig"
+              },
+              {
+                "$ref": "#/components/schemas/UrgentConfig"
+              }
+            ],
+            "title": "Config",
+            "discriminator": {
+              "propertyName": "block",
+              "mapping": {
+                "intake": "#/components/schemas/IntakeConfig",
+                "purpose_payment": "#/components/schemas/PurposePaymentConfig",
+                "typed_booking": "#/components/schemas/TypedBookingConfig",
+                "urgent": "#/components/schemas/UrgentConfig"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "description",
+          "config"
+        ],
+        "title": "BusinessToolDef"
       },
       "CalendarSlot": {
         "properties": {
@@ -8942,6 +9007,17 @@
           "owner_preview": {
             "type": "boolean",
             "title": "Owner Preview"
+          },
+          "latest_visitor_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Visitor Text"
           }
         },
         "type": "object",
@@ -8953,10 +9029,11 @@
           "mode",
           "last_activity",
           "outcome_counts",
-          "owner_preview"
+          "owner_preview",
+          "latest_visitor_text"
         ],
         "title": "ConversationSummary",
-        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview."
+        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet."
       },
       "CopyOut": {
         "properties": {
@@ -10189,6 +10266,32 @@
         ],
         "title": "InboxNotice"
       },
+      "IntakeConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "intake",
+            "title": "Block"
+          },
+          "questions": {
+            "items": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Questions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "questions"
+        ],
+        "title": "IntakeConfig"
+      },
       "IntakeProposalConfig": {
         "properties": {
           "block": {
@@ -10589,7 +10692,8 @@
               "agent_auth",
               "head_checkpoint",
               "desk_data",
-              "web_search"
+              "web_search",
+              "business_tools"
             ],
             "title": "Kind"
           },
@@ -10870,6 +10974,17 @@
               }
             ],
             "title": "From The Visitor"
+          },
+          "claude_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claude Summary"
           }
         },
         "type": "object",
@@ -10879,10 +10994,11 @@
           "held_at",
           "handoff",
           "session",
-          "from_the_visitor"
+          "from_the_visitor",
+          "claude_summary"
         ],
         "title": "NeedsYouItem",
-        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last\nthing they wrote (untrusted)."
+        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200\ncharacters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff only, the conversation's newest\nAI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,\nlabelled as Claude's and never quoted as the visitor's), else None. A held request asks the owner for a decision, so\nit never carries AI-written text: a visitor could steer a summary to sway an approval."
       },
       "NeedsYouSession": {
         "properties": {
@@ -10958,22 +11074,30 @@
             "title": "Generation"
           },
           "tool": {
-            "type": "string",
-            "enum": [
-              "native.quote",
-              "native.find_slots",
-              "native.book",
-              "native.release_document",
-              "native.payment_link",
-              "native.charge_mandate",
-              "native.capture_lead",
-              "native.request_callback",
-              "native.start_verification",
-              "native.fetch_website",
-              "native.read_memory",
-              "native.web_search",
-              "payments.list_charges",
-              "payments.create_refund"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native.quote",
+                  "native.find_slots",
+                  "native.book",
+                  "native.release_document",
+                  "native.payment_link",
+                  "native.charge_mandate",
+                  "native.capture_lead",
+                  "native.request_callback",
+                  "native.start_verification",
+                  "native.fetch_website",
+                  "native.read_memory",
+                  "native.web_search",
+                  "payments.list_charges",
+                  "payments.create_refund"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
+              }
             ],
             "title": "Tool"
           },
@@ -12173,6 +12297,34 @@
           "agent_card"
         ],
         "title": "PublicDesk"
+      },
+      "PurposePaymentConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "purpose_payment",
+            "title": "Block"
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Purpose"
+          },
+          "amount_cents": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Amount Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "purpose",
+          "amount_cents"
+        ],
+        "title": "PurposePaymentConfig"
       },
       "PurposePaymentProposalConfig": {
         "properties": {
@@ -13994,22 +14146,30 @@
       "ToolPin": {
         "properties": {
           "tool": {
-            "type": "string",
-            "enum": [
-              "native.quote",
-              "native.find_slots",
-              "native.book",
-              "native.release_document",
-              "native.payment_link",
-              "native.charge_mandate",
-              "native.capture_lead",
-              "native.request_callback",
-              "native.start_verification",
-              "native.fetch_website",
-              "native.read_memory",
-              "native.web_search",
-              "payments.list_charges",
-              "payments.create_refund"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native.quote",
+                  "native.find_slots",
+                  "native.book",
+                  "native.release_document",
+                  "native.payment_link",
+                  "native.charge_mandate",
+                  "native.capture_lead",
+                  "native.request_callback",
+                  "native.start_verification",
+                  "native.fetch_website",
+                  "native.read_memory",
+                  "native.web_search",
+                  "payments.list_charges",
+                  "payments.create_refund"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
+              }
             ],
             "title": "Tool"
           },
@@ -14030,22 +14190,30 @@
       "ToolProfile": {
         "properties": {
           "tool": {
-            "type": "string",
-            "enum": [
-              "native.quote",
-              "native.find_slots",
-              "native.book",
-              "native.release_document",
-              "native.payment_link",
-              "native.charge_mandate",
-              "native.capture_lead",
-              "native.request_callback",
-              "native.start_verification",
-              "native.fetch_website",
-              "native.read_memory",
-              "native.web_search",
-              "payments.list_charges",
-              "payments.create_refund"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native.quote",
+                  "native.find_slots",
+                  "native.book",
+                  "native.release_document",
+                  "native.payment_link",
+                  "native.charge_mandate",
+                  "native.capture_lead",
+                  "native.request_callback",
+                  "native.start_verification",
+                  "native.fetch_website",
+                  "native.read_memory",
+                  "native.web_search",
+                  "payments.list_charges",
+                  "payments.create_refund"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
+              }
             ],
             "title": "Tool"
           },
@@ -14053,7 +14221,8 @@
             "type": "string",
             "enum": [
               "native",
-              "mcp"
+              "mcp",
+              "business"
             ],
             "title": "Source"
           },
@@ -14158,6 +14327,16 @@
               }
             ],
             "title": "Review Reason"
+          },
+          "business": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BusinessToolDef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -14184,7 +14363,8 @@
             "type": "string",
             "enum": [
               "native",
-              "mcp"
+              "mcp",
+              "business"
             ],
             "title": "Source"
           },
@@ -14251,6 +14431,16 @@
             },
             "type": "array",
             "title": "Cards"
+          },
+          "business": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BusinessToolDef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -14276,7 +14466,7 @@
               "$ref": "#/components/schemas/ToolPin"
             },
             "type": "array",
-            "maxItems": 14,
+            "maxItems": 22,
             "minItems": 1,
             "title": "Tools"
           },
@@ -14416,6 +14606,34 @@
         "title": "Triage",
         "description": "A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk\ndid, and a category for the Safety page's filters. AI-written, for the owner alone."
       },
+      "TypedBookingConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "typed_booking",
+            "title": "Block"
+          },
+          "appointment_type": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Appointment Type"
+          },
+          "minutes": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 15.0,
+            "title": "Minutes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "appointment_type",
+          "minutes"
+        ],
+        "title": "TypedBookingConfig"
+      },
       "TypedBookingProposalConfig": {
         "properties": {
           "block": {
@@ -14446,6 +14664,27 @@
           "minutes"
         ],
         "title": "TypedBookingProposalConfig"
+      },
+      "UrgentConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "urgent",
+            "title": "Block"
+          },
+          "urgent_when": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Urgent When"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "urgent_when"
+        ],
+        "title": "UrgentConfig"
       },
       "UrgentProposalConfig": {
         "properties": {

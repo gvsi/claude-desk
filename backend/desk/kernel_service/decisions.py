@@ -45,7 +45,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator
 
-from desk.contracts import Effect, NormalizedAction, Review, RuleCard, ToolName
+from desk.contracts import AnyToolName, Effect, NormalizedAction, Review, RuleCard
 from desk.env import is_development
 
 if TYPE_CHECKING:
@@ -163,7 +163,7 @@ class ReviewAction(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tool: ToolName
+    tool: AnyToolName
     effects: list[Effect]
     resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
     list_cents: int | None

@@ -9,6 +9,11 @@ export interface StandalonePageProps {
   labelledBy: string;
   /** The language of the page's words, when it isn't the document's. */
   lang?: string;
+  /**
+   * The ground the page is drawn on: the app's dark one (the default), or a light one, such as the About set's
+   * paper, where the bell keeps the drawing's dark ink.
+   */
+  ground?: 'dark' | 'light';
   children: ReactNode;
 }
 
@@ -16,11 +21,11 @@ export interface StandalonePageProps {
  * A page outside the owner app and the public page, such as an unknown path or a page that broke:
  * the product's name at the top, one state in the middle of the window, and the concept footer.
  */
-export function StandalonePage({ labelledBy, lang, children }: StandalonePageProps) {
+export function StandalonePage({ labelledBy, lang, ground = 'dark', children }: StandalonePageProps) {
   return (
     <div className="cd-standalone-page" lang={lang}>
       <header className="cd-standalone-page__brand">
-        <Mark />
+        <Mark ground={ground} />
         <Wordmark />
       </header>
       <main className="cd-standalone-page__main" aria-labelledby={labelledBy}>

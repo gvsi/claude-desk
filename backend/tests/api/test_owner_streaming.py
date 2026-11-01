@@ -152,6 +152,7 @@ async def question_ready(app, browser, kernel_http, model):
 
 OPENING = "Thanks. From your site, you fix leaks and water heaters."
 HOST = "rivera-plumbing.example"
+QUERIES = ["plumber service calls", "water heater repair pricing"]       # the second search fails
 
 
 def opening():
@@ -164,8 +165,9 @@ def opening():
     return raw, [prefix + '"reply": "Thanks. From your site, you fix leaks', ' and water heaters."' + remaining]
 
 
-async def consenting(app, browser, fake, kernel_http, model, website):
-    """A new interview whose site reads as `website` ("pages" or "failed"); its owner and state path."""
+async def consenting(app, browser, fake, kernel_http, model, website, queries=()):
+    """A new interview whose site reads as `website` ("pages" or "failed") and that searches the web for `queries`;
+    its owner and state path."""
     from tests.api.test_setup_questions import WEBSITE
 
     if website == "pages":
@@ -173,8 +175,22 @@ async def consenting(app, browser, fake, kernel_http, model, website):
     else:
         fake.script("native.fetch_website", exec_state="failed")
     owner = await new_owner(app, browser, kernel_http)
-    state = await begin(owner, model, website=WEBSITE)
+    state = await begin(owner, model, website=WEBSITE, search_queries=list(queries))
     return owner, f"/api/owner/setup/{state['interview_id']}", state["interview_id"]
+
+
+def failing_search(fake, monkeypatch, query):
+    """The web search for `query` fails; every other read runs as usual."""
+    execute = setup.execute_setup_tool
+
+    async def executing(owner, tool, decision, **kwargs):
+        (call,) = [call.body["call"] for call in fake.called("POST /decide")
+                   if call.body["call"]["call_id"] == decision.call_id]
+        if tool == "native.web_search" and call["args"]["query"] == query:
+            return None
+        return await execute(owner, tool, decision, **kwargs)
+
+    monkeypatch.setattr(setup, "execute_setup_tool", executing)
 
 
 def saved_messages(state):
@@ -183,10 +199,11 @@ def saved_messages(state):
 
 @pytest.mark.parametrize("website", ["pages", "failed"])
 async def test_setup_yes_streams_each_read_then_the_opening_and_saves_only_the_turn(
-        app, browser, fake, kernel_http, model, website, caplog):
+        app, browser, fake, kernel_http, model, monkeypatch, website, caplog):
     from tests.api.test_setup_questions import landed, understanding
 
-    owner, path, interview_id = await consenting(app, browser, fake, kernel_http, model, website)
+    failing_search(fake, monkeypatch, QUERIES[1])
+    owner, path, interview_id = await consenting(app, browser, fake, kernel_http, model, website, QUERIES)
     raw, pieces = opening()
     gates = [asyncio.Event() for _ in pieces]
     entered = asyncio.Event()
@@ -196,19 +213,24 @@ async def test_setup_yes_streams_each_read_then_the_opening_and_saves_only_the_t
     try:
         busy = await asyncio.wait_for(owner.browser.post(path + "/consent?cards=1", json={"allow": True}), 2)
         assert busy.status_code == 202 and busy.json()["busy"] is True
-        await until(lambda: len(fake.called("POST /execute")) == 2)   # both reads are running at once
+        await until(lambda: len(fake.called("POST /execute")) == 3)   # memory, website and a search run at once
         live = LiveEvents(app, browser, owner).open(path + "/events")
         name, data = await live.next()
         run = data["run"]
         assert isinstance(run, str) and run
+        # One reading per read, in saved order, then one label per read in that order, then the opening.
         assert (name, data) == ("reading", {"run": run, "read": "memory", "host": None})
         assert await live.next() == ("reading", {"run": run, "read": "website", "host": HOST})
+        assert await live.next() == ("reading", {"run": run, "read": "web_search", "host": None})
+        assert await live.next() == ("reading", {"run": run, "read": "web_search", "host": None})
         await asyncio.sleep(0.05)
-        assert live.sent.empty() and not live.buffer                   # nothing finishes while the reads wait
+        assert live.sent.empty() and not live.buffer         # the failed search waits for the reads before it
         reads.set()
         site = f"Read {HOST}, 3 pages" if website == "pages" else f"Couldn't read {HOST}"
-        assert await live.next() == ("label", {"run": run, "read": "memory", "text": "Searched your Claude memory"})
-        assert await live.next() == ("label", {"run": run, "read": "website", "text": site})
+        labels = ["Searched your Claude memory", site, f"Searched the web: {QUERIES[0]}",
+                  "Couldn't search the web just now"]
+        for read, label in zip(["memory", "website", "web_search", "web_search"], labels, strict=True):
+            assert await live.next() == ("label", {"run": run, "read": read, "text": label})
         await asyncio.wait_for(entered.wait(), 5)
         assert await live.next() == ("delta", {"run": run, "text": "Thanks. From your site, you fix leaks"})
         assert (await owner.browser.get(path)).json()["busy"] is True   # nothing is saved before the turn lands
@@ -219,11 +241,11 @@ async def test_setup_yes_streams_each_read_then_the_opening_and_saves_only_the_t
         await live.task
         saved = await landed(owner, interview_id, cards=True)
         assert saved_messages(saved) == [
-            ("claude", setup.CONSENT_QUESTION), ("owner", "Yes, use it"), ("tool_label", "Searched your Claude memory"),
-            ("tool_label", site), ("claude", OPENING), ("claude", understanding()["question"])]
+            ("claude", setup.CONSENT_QUESTION), ("owner", "Yes, use it"),
+            *(("tool_label", label) for label in labels), ("claude", OPENING), ("claude", understanding()["question"])]
         assert OPENING not in caplog.text
         # The same consent with nobody subscribed saves the same state.
-        other, other_path, other_id = await consenting(app, browser, fake, kernel_http, model, website)
+        other, other_path, other_id = await consenting(app, browser, fake, kernel_http, model, website, QUERIES)
         model.add(response(text(raw)))
         assert (await other.browser.post(other_path + "/consent?cards=1", json={"allow": True})).status_code == 202
         omit = {"interview_id", "desk_id", "slug"}

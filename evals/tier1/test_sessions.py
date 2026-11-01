@@ -536,7 +536,9 @@ async def test_closed_session_after_desk_delete(k: KernelHarness, records):
         assert await decision_ids(records, desk) == before, "a closed session's call stored a decision"
 
 
-ANSWERING_OFF_TOOLS = {"native.capture_lead", "native.request_callback"}
+# With Answering off a visitor keeps lead capture and callback requests: the native ones, and the
+# Rivera seed's urgent callback, `desk.emergency-callback`, which is given on `native.request_callback`.
+ANSWERING_OFF_TOOLS = {"native.capture_lead", "native.request_callback", "desk.emergency-callback"}
 
 
 @pytest.mark.requires("01b")

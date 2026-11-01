@@ -144,12 +144,19 @@ def desk_schema(profiles: Iterable[ToolProfile]) -> dict[str, Any]:
                 raise ValueError(f"{profile.tool}: the base schema doesn't declare it")
             continue
         principals = MCP_PRINCIPAL_TYPES.get(profile.tool)
+        resource = MCP_RESOURCE_TYPE
+        if profile.source == "business":
+            from desk.kernel_service.adapters.blocks import profile as block_profile
+            if profile.business is None or block_profile(profile.tool, profile.business).effects != profile.effects:
+                raise ValueError(f"{profile.tool}: invalid business profile")
+            principals = ("Visitor", "Agent")
+            resource = "Slot" if profile.business.config.block == "typed_booking" else "Desk"
         groups = [f"effect:{effect}" for effect in profile.effects]
         if principals is None or not groups or any(group not in actions for group in groups):
             raise ValueError(f"{profile.tool}: no action can be declared for it")
         actions[profile.tool] = {
             "memberOf": [{"id": group} for group in groups],
-            "appliesTo": {"principalTypes": list(principals), "resourceTypes": [MCP_RESOURCE_TYPE],
+            "appliesTo": {"principalTypes": list(principals), "resourceTypes": [resource],
                           "context": {"type": "Ctx"}},
         }
     return schema
@@ -309,16 +316,18 @@ ABOVE_MONEY_CAP = "above_money_cap"
 # each tool (`ALWAYS_ON_CARDS`) to a set that leaves it out.
 
 
-def above_money_cap(cards: Iterable[RuleCard], auto_money_cap_cents: int) -> list[RuleCard]:
+def above_money_cap(cards: Iterable[RuleCard], auto_money_cap_cents: int, *,
+                    money_tools: Collection[str]) -> list[RuleCard]:
     """The auto money cards (`desk.money_cap.auto_money`, the predicate `lower_to_cap` reads too)
-    that would allow more than the money cap (`capped`) without asking."""
+    that would allow more than the money cap (`capped`) without asking. `money_tools` must include
+    the Desk's money profiles of every status, since a card can precede enabling its tool."""
     cap = capped(auto_money_cap_cents)
-    return [card for card in cards if auto_money(card)
+    return [card for card in cards if auto_money(card, money_tools)
             and (card.max_amount_cents is None or card.max_amount_cents > cap)]
 
 
 def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_keys: Collection[str],
-                   auto_money_cap_cents: int) -> list[str]:
+                   auto_money_cap_cents: int, money_tools: Collection[str]) -> list[str]:
     """Plain reasons a set of owner cards can't be compiled at a version's money cap; empty means
     it can. Defaults are left out (`with_defaults` drops and derives them again). A reason names a
     card by its `card_id` only when that is safe to show, and never repeats the offending value;
@@ -360,7 +369,7 @@ def validate_cards(cards: Iterable[RuleCard], *, people: Collection[str], agent_
                 _hours(c)
             except ValueError as e:
                 errors.append(f"{label}: {e}")
-        if above_money_cap([c], cap):
+        if above_money_cap([c], cap, money_tools=money_tools):
             errors.append(f"{label}: {ABOVE_MONEY_CAP}: it would take or pay out more than the money limit without "
                           "asking")
     return errors

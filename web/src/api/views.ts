@@ -10,6 +10,7 @@ import type {
   ActorKind,
   ApprovalAnswer,
   Assurance,
+  BusinessToolDef,
   Decision,
   DecisionState,
   EvHeld,
@@ -77,6 +78,13 @@ export interface ConversationSummary {
   owner_preview: boolean;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+  /**
+   * The newest message the visitor typed in this chat, its whitespace collapsed to single spaces
+   * and cut to 199 characters and "…" past 200; null for an agent's or the owner's chat, the
+   * owner's preview, and before the visitor writes. Untrusted. The API always sends it; a reply
+   * without it draws the row as before.
+   */
+  latest_visitor_text?: string | null;
 }
 
 export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
@@ -108,6 +116,11 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
+  /**
+   * The conversations Claude answered on its own: the `answer` items in the window. The API always
+   * sends it; without it, Today's one line waits rather than say less.
+   */
+  answers?: number;
   /** The requests the kernel refused. Claude's drafts the reply check stopped stay on Safety, out of the briefing. */
   turned_down: number;
   /** The full list's length (`BriefingList.items`). */
@@ -281,8 +294,14 @@ export interface OwnerTranscript {
   replayed?: boolean;
 }
 
-/** Owner-only annotation beside the signed event, absent on older API responses. */
-export interface OwnerTranscriptItem extends TranscriptItem {
+/** An item of the owner's transcript: a visitor's kinds, and where the reply check stopped a draft of Claude's. */
+export interface OwnerTranscriptItem extends Omit<TranscriptItem, 'kind'> {
+  /**
+   * A `stopped_draft` item stands where the check stopped Claude's draft, before the rewrite or the
+   * handoff that followed in the same turn; it has no `text` or `event` (openapi.json).
+   */
+  kind: TranscriptKind | 'stopped_draft';
+  /** Owner-only annotation beside the signed event, absent on older API responses. */
   owner_plain?: import('./openapi.gen.ts').OwnerTranscriptItem['owner_plain'];
 }
 
@@ -340,38 +359,8 @@ export interface PeopleOut {
  */
 export type ToolReviewReason = 'new' | 'changed' | 'delisted';
 
-/**
- * Business tool definitions, typed here until the kernel's business tools change (branch
- * `plan/09-blocks-core`) regenerates their types, then imported from `contracts.ts`.
- * The owner's title, description and configuration are untrusted text.
- */
-export interface BusinessToolDef {
-  title: string;
-  description: string;
-  config: IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig;
-}
-
-export interface IntakeConfig {
-  block: 'intake';
-  questions: string[];
-}
-
-export interface TypedBookingConfig {
-  block: 'typed_booking';
-  appointment_type: string;
-  minutes: number;
-}
-
-export interface PurposePaymentConfig {
-  block: 'purpose_payment';
-  purpose: string;
-  amount_cents: number;
-}
-
-export interface UrgentConfig {
-  block: 'urgent';
-  urgent_when: string;
-}
+/** Owner configuration is untrusted text, with its shape from the kernel's generated contract. */
+export type { BusinessToolDef, IntakeConfig, TypedBookingConfig, PurposePaymentConfig, UrgentConfig } from './contracts.ts';
 
 /** A catalog tool or a Desk's own tool, whose title comes from its business definition. */
 export type AnyToolName = ToolName | `desk.${string}`;
@@ -706,13 +695,22 @@ export interface AgentRunStarted {
   run_id: string;
 }
 
-/** One turn of a demo agent run. The agent's own words are never returned: its turns are empty. */
+/**
+ * One turn of a demo agent run: the agent's request, with the words it sent (`text`), or the Desk's
+ * checked answer to it, with its blocks and receipts.
+ */
 export interface AgentTurn {
   author: 'agent' | 'desk';
   n: number;
   blocks: RenderedBlock[];
   /** A Desk turn's status events, as its `A2AResponse` carries them. */
   receipts: (EvReceipt | EvHeld | EvResolved)[];
+  /**
+   * An agent turn's request, as the agent sent it to the Desk; null for a Desk turn. Untrusted: on
+   * the hosted site these are a model's own words, at most 2,000 characters. The API always sends
+   * it; without it, the request draws as before.
+   */
+  text?: string | null;
 }
 
 export interface DemoAgentRun {

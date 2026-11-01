@@ -10,7 +10,7 @@ import asyncio
 import base64
 import binascii
 import json
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any, get_args
 
@@ -61,17 +61,16 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
-from desk.contracts import MONEY_TOOLS, Effect, PolicyVersion, RuleCard
+from desk.contracts import AUTO_MONEY_NEEDS_LIMIT, MONEY_TOOLS, Effect, HoursWindow, PolicyVersion, RuleCard, money_tools_of
 from desk.kernel_api import PolicyConfirmRequest
-from desk.money_cap import Language, lower_to_cap
-from desk.presets import PRESETS, PresetName
+from desk.money_cap import Language, auto_money, lower_to_cap
+from desk.presets import PRESETS, PresetName, preset_cards
 
 # The language the owner reads the rules in, for the rule copy code writes (a lowered card's reason). The owner app
 # renders rules copy in English today (its rules chat shows Claude's answers with language "en"), and `kernel_ro`
 # keeps no owner language, so this is English for every owner; an owner language source, once there is one, replaces
 # this line. It is never read from a model.
 OWNER_LANGUAGE: Language = "en"
-MONEY_TARGETS = MONEY_TOOLS | {"effect:charge", "effect:pay_out"}
 DRAFT_STATUSES = ("draft", "proved", "rejected")     # a version the owner can still read as a draft
 EFFECT_TARGETS = frozenset(f"effect:{effect}" for effect in get_args(Effect))
 CHAT_ROUTE = "rules_chat"
@@ -118,39 +117,64 @@ def card_diff(before: list[RuleCard], after: list[RuleCard]) -> CardDiff:
                              if card.card_id in old and old[card.card_id] != card])
 
 
-def preset_of(cards: Iterable[RuleCard]) -> PresetName | None:
-    """The preset the owner cards are, exactly (default asks aside, in any order), else None."""
+def preset_of(cards: Iterable[RuleCard], hours: list[HoursWindow]) -> PresetName | None:
+    """The preset the owner cards are, exactly (default asks aside, in any order), as a Desk with these opening hours
+    drafts it (`preset_cards`), else None."""
     owned = sorted((card for card in cards if not card.is_default), key=lambda card: card.card_id)
-    for name, preset in PRESETS.items():
-        if owned == sorted(preset, key=lambda card: card.card_id):
+    for name in PRESETS:
+        if owned == sorted(preset_cards(name, hours), key=lambda card: card.card_id):
             return name
     return None
+
+
+async def desk_hours(owner: OwnerCtx, desk_id: str) -> list[HoursWindow]:
+    """The Desk's opening hours, as its `kernel_ro.desks` row keeps them. None without a row, and none when the row's
+    hours aren't a list of windows that each read as one, so the Rules page still loads and a preset's draft takes
+    the shipped cards (`preset_cards`); a failed read still raises."""
+    desk = await owner.ro.one("desks", desk_id=desk_id)
+    stored = None if desk is None else desk.get("hours")
+    if not isinstance(stored, list):
+        return []
+    try:
+        return [HoursWindow.model_validate(window) for window in stored]
+    except ValidationError:
+        return []
 
 
 async def rules_view(owner: OwnerCtx, desk_id: str) -> RulesView:
     """The Rules page: the active version, each tool with the cards that cover it, and its preset, if any."""
     active = version_from_row(await active_row(owner, desk_id))
     return RulesView(active=active, tools=await tool_rows(owner, desk_id, active.cards),
-                     preset=preset_of(active.cards))
+                     preset=preset_of(active.cards, await desk_hours(owner, desk_id)))
 
 
-def moves_money_alone(card: RuleCard) -> bool:
+def _money_tools(rows: Iterable[Mapping[str, Any]]) -> frozenset[str]:
+    """Money tools from the copy-scoped read view, which exposes effects rather than full profiles.
+
+    Include every status: a card may name a tool before its owner enables it.
+    """
+    return money_tools_of((row["tool"], row["effects"]) for row in rows)
+
+
+def moves_money_alone(card: RuleCard, money_tools: Collection[str] = frozenset()) -> bool:
     """Whether the card lets money be taken or paid out without asking: an auto card on a money tool or effect."""
-    return card.mode == "auto" and card.applies_to in MONEY_TARGETS
+    return auto_money(card, money_tools)
 
 
-def above_cap(card: RuleCard, active: dict[str, RuleCard], cap_cents: int) -> bool:
+def above_cap(card: RuleCard, active: dict[str, RuleCard], cap_cents: int, *,
+              money_tools: Collection[str] = frozenset()) -> bool:
     """Whether `card`, new or changed from the `active` card with its ID, moves more money on its own than the cap.
-    An unchanged card stays as the kernel proved it; one with no amount is the contract's to refuse."""
-    return (moves_money_alone(card) and active.get(card.card_id) != card
-            and card.max_amount_cents is not None and card.max_amount_cents > cap_cents)
+    An unchanged card stays as the kernel proved it; one with no amount is above any cap, as the kernel counts it."""
+    return (moves_money_alone(card, money_tools) and active.get(card.card_id) != card
+            and (card.max_amount_cents is None or card.max_amount_cents > cap_cents))
 
 
-def check_cap(cards: Iterable[RuleCard], active: Iterable[RuleCard], cap_cents: int) -> None:
+def check_cap(cards: Iterable[RuleCard], active: Iterable[RuleCard], cap_cents: int, *,
+              money_tools: Collection[str] = frozenset()) -> None:
     """`AboveMoneyCap` when a card new or changed from the `active` ones moves more money on its own than the cap. The
     kernel's own check at draft and confirm stays the enforcement: this one only tells the owner the limit first."""
     kept = {card.card_id: card for card in active}
-    if any(above_cap(card, kept, cap_cents) for card in cards):
+    if any(above_cap(card, kept, cap_cents, money_tools=money_tools) for card in cards):
         raise AboveMoneyCap(cap_cents)
 
 
@@ -167,7 +191,8 @@ async def draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], *, expecte
         raise ApiProblem(422, "invalid")
     row = await active_row(owner, desk_id)
     active = version_from_row(row)
-    check_cap(cards, active.cards, version_cap(row) if auto_money_cap_cents is None else auto_money_cap_cents)
+    check_cap(cards, active.cards, version_cap(row) if auto_money_cap_cents is None else auto_money_cap_cents,
+              money_tools=_money_tools(await owner.ro.rows("tools", desk_id=desk_id)))
     parent = active.version if expected_parent is None else expected_parent
     version = checkable(await post_draft(owner, desk_id, cards, parent, auto_money_cap_cents=auto_money_cap_cents))
     return rules_draft(version, version_cap(version), card_diff(active.cards, version.cards))
@@ -182,7 +207,8 @@ async def draft_money_cap(owner: OwnerCtx, desk_id: str, cap: int) -> RulesDraft
     cards to its cap whatever the API sent."""
     active = version_from_row(await active_row(owner, desk_id))
     owned = [card for card in active.cards if not card.is_default]
-    return await draft(owner, desk_id, lower_to_cap(owned, active.cards, cap, OWNER_LANGUAGE),
+    money_tools = _money_tools(await owner.ro.rows("tools", desk_id=desk_id))
+    return await draft(owner, desk_id, lower_to_cap(owned, active.cards, cap, OWNER_LANGUAGE, money_tools=money_tools),
                        expected_parent=active.version, auto_money_cap_cents=cap, carried_only=True)
 
 
@@ -212,10 +238,12 @@ async def draft_added(owner: OwnerCtx, desk_id: str, add: list[RuleCard]) -> Rul
 
 
 async def draft_preset(owner: OwnerCtx, desk_id: str, name: PresetName) -> RulesDraft:
-    """The preset's cards in place of every owner card, cards for one person and "never" cards included, so the
-    draft's diff lists each card it removes. The cards go as they are, so a new Desk's draft hits the proofs shipped
-    for them; presets carry no auto money card."""
-    return await draft(owner, desk_id, list(PRESETS[name]))
+    """The preset's cards for the Desk's opening hours (`preset_cards`: "Recommended rules" books weekdays in them) in
+    place of every owner card, cards for one person and "never" cards included, so the draft's diff lists each card it
+    removes. A Desk with no hours, or with Monday to Friday 09:00 to 17:00, drafts the preset's cards as they are,
+    which hit the proofs shipped for them; one whose hours have no weekday gets no booking card. Presets carry no auto
+    money card."""
+    return await draft(owner, desk_id, preset_cards(name, await desk_hours(owner, desk_id)))
 
 
 async def confirm(owner: OwnerCtx, engine: AsyncEngine, desk_id: str, version: int) -> PolicyVersion:
@@ -273,11 +301,27 @@ def rule_card(card: ChatCard) -> RuleCard:
     return RuleCard.model_validate(_fields(card))
 
 
-def _chat_problems(chat: RuleChat, owned: list[RuleCard], targets: frozenset[str], cap_cents: int) -> str | None:
+# The contract's limit line as pydantic reports a validator's ValueError, so a business money card's line matches a
+# native one's word for word.
+_NO_LIMIT_ERROR = f"Value error, {AUTO_MONEY_NEEDS_LIMIT}"
+
+
+def _contract_errors(card: ChatCard) -> list[str]:
+    """Why the contract refuses the card Claude wrote, one line per error; empty when it doesn't."""
+    try:
+        rule_card(card)
+    except ValidationError as invalid:
+        return [error["msg"] for error in invalid.errors(include_url=False, include_input=False)]
+    return []
+
+
+def _chat_problems(chat: RuleChat, owned: list[RuleCard], targets: frozenset[str], cap_cents: int, *,
+                   money_tools: Collection[str] = frozenset()) -> str | None:
     """What makes Claude's change unusable, one line per card: an ID used twice or of the compiler's own, a target
     that is neither a tool of the Desk nor an effect, a card for one person or agent that isn't one of the active
     ones kept under its ID for the same person or agent on the same target, or a card the contract refuses. A money card above the cap
-    isn't one: it is the owner's to raise the limit (`AboveMoneyCap`)."""
+    isn't one: it is the owner's to raise the limit (`AboveMoneyCap`). An auto money card with no limit is one, on a
+    business money tool too, which the contract alone can't recognise: Claude gets the contract's own line for it."""
     if chat.change is None:
         return None
     active = {card.card_id: card for card in owned}
@@ -299,12 +343,14 @@ def _chat_problems(chat: RuleChat, owned: list[RuleCard], targets: frozenset[str
                 was is None or (was.applies_to, was.who, was.person_id, was.agent_key_id) != (
                     card.applies_to, card.who, card.person_id, card.agent_key_id)):
             problem(CHAT_ERRORS["scoped"])
-        elif not above_cap(unchecked(card), active, cap_cents):
-            try:
-                rule_card(card)
-            except ValidationError as invalid:
-                for error in invalid.errors(include_url=False, include_input=False):
-                    problem(error["msg"])
+        else:
+            no_limit = auto_money(unchecked(card), money_tools) and card.max_amount_cents is None
+            if no_limit or not above_cap(unchecked(card), active, cap_cents, money_tools=money_tools):
+                errors = _contract_errors(card)
+                if no_limit and _NO_LIMIT_ERROR not in errors:
+                    errors.insert(0, _NO_LIMIT_ERROR)
+                for error in errors:
+                    problem(error)
     return "\n".join(problems) or None
 
 
@@ -356,6 +402,7 @@ async def chat(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, desk_id
     cap = version_cap(row)
     owned = [card for card in active.cards if not card.is_default]
     tools = await owner.ro.rows("tools", desk_id=desk_id, order_by=("tool",))
+    money_tools = _money_tools(tools)
     listed = [{"tool": tool["tool"], "effects": list(tool["effects"]), "status": tool["status"]} for tool in tools]
     message = "\n\n".join([rules_chat_head(cap), wrap(RULES_TAG, json.dumps([chat_view(card) for card in owned])),
                             wrap(TOOLS_TAG, json.dumps(listed)),
@@ -365,12 +412,13 @@ async def chat(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, desk_id
     answered = await ask_model(model, recorder(engine, owner, CHAT_ROUTE), RULES_CHAT_SYSTEM,
                                [{"role": "user", "content": [{"type": "text", "text": message}]}], RuleChat,
                                max_tokens=CHAT_MAX_TOKENS, route=CHAT_ROUTE, effort="medium",
-                               check=lambda chat: _chat_problems(chat, owned, targets, cap), timeout_s=CHAT_TIMEOUT_S)
+                               check=lambda chat: _chat_problems(chat, owned, targets, cap, money_tools=money_tools),
+                               timeout_s=CHAT_TIMEOUT_S)
     if answered is None:
         raise ApiProblem(503, "model_unavailable")
     if answered.change is None:
         return RuleChatOut(answer=answered.answer, draft=None)
-    check_cap([unchecked(card) for card in answered.change.cards], active.cards, cap)
+    check_cap([unchecked(card) for card in answered.change.cards], active.cards, cap, money_tools=money_tools)
     cards = [rule_card(card) for card in answered.change.cards]
     return RuleChatOut(answer=answered.answer,
                        draft=await draft(owner, desk_id, cards, expected_parent=active.version))
@@ -380,11 +428,11 @@ async def chat(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, desk_id
 
 
 async def _suggested_card(owner: OwnerCtx, tool: str, effects: list[str], approved: list[dict],
-                          cap_cents: int) -> RuleCard | None:
+                          cap_cents: int, *, label: str | None = None) -> RuleCard | None:
     """The auto card that would have let Claude handle the `approved` requests of `tool`: for anyone, or for the
     verified record owner when the tool reaches private data; on a money tool, up to the largest amount approved
     (each read from the kernel) and never above the money cap, and none while the cap is 0."""
-    label = TOOL_LABELS[tool]
+    label = label if label is not None else TOOL_LABELS.get(tool, tool)
     card = {"card_id": f"suggested-{tool.replace('.', '-').replace('_', '-')}", "applies_to": tool, "mode": "auto",
             "who": "record_owner" if "private_data" in effects else "anyone",
             "reason": SUGGESTED_REASON.format(label=label.capitalize())}
@@ -408,10 +456,13 @@ async def suggestions(owner: OwnerCtx, desk_id: str, now: datetime) -> list[Sugg
     before `now` (by when each request was made) that no auto card of the active rules covers, by tool."""
     row = await active_row(owner, desk_id)
     active, cap = version_from_row(row), version_cap(row)
-    tools = {tool["tool"]: list(tool["effects"]) for tool in await owner.ro.rows("tools", desk_id=desk_id)}
+    listed = await owner.ro.rows("tools", desk_id=desk_id)
+    tools = {tool["tool"]: list(tool["effects"]) for tool in listed}
+    labels = {row["tool"]: (row["business"]["title"] if row.get("business") is not None
+                           else TOOL_LABELS.get(row["tool"], row["tool"])) for row in listed}
     since = now - SUGGEST_WINDOW
     recent = {decision["decision_id"]: decision for decision in await owner.ro.rows("decisions", desk_id=desk_id)
-              if utc(decision["created_at"]) >= since and decision["tool"] in tools and decision["tool"] in TOOL_LABELS}
+              if utc(decision["created_at"]) >= since and decision["tool"] in tools}
     approved: dict[str, list[dict]] = {}
     if recent:
         for approval in await owner.ro.rows("approvals", decision_id=list(recent), answer="allow_once"):
@@ -422,10 +473,10 @@ async def suggestions(owner: OwnerCtx, desk_id: str, now: datetime) -> list[Sugg
         if len(rows) < SUGGEST_AFTER or any(each.mode == "auto"
                                             for each in covering_cards(active.cards, tool, tools[tool])):
             continue
-        card = await _suggested_card(owner, tool, tools[tool], rows, cap)
+        card = await _suggested_card(owner, tool, tools[tool], rows, cap, label=labels[tool])
         if card is not None:
             found.append(Suggestion(tool=tool, count=len(rows), card=card,
-                                    text=SUGGESTION_TEXT.format(count=len(rows), label=TOOL_LABELS[tool])))
+                                    text=SUGGESTION_TEXT.format(count=len(rows), label=labels[tool])))
     return found
 
 

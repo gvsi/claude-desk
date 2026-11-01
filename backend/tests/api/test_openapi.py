@@ -48,6 +48,18 @@ def test_public_desk_starters_are_optional_with_an_empty_default():
         "default": [], "items": {"type": "string"}, "title": "Starters", "type": "array"}
 
 
+def test_business_definition_and_setup_proposals_have_distinct_config_schemas():
+    schemas = export_openapi()["components"]["schemas"]
+    mapping = schemas["BusinessToolDef"]["properties"]["config"]["discriminator"]["mapping"]
+    assert mapping == {block: f"#/components/schemas/{name}" for block, name in (
+        ("intake", "IntakeConfig"), ("typed_booking", "TypedBookingConfig"),
+        ("purpose_payment", "PurposePaymentConfig"), ("urgent", "UrgentConfig"))}
+    # A proposal may still need the owner's amount; a configured business tool never does.
+    amount = schemas["PurposePaymentProposalConfig"]["properties"]["amount_cents"]
+    assert {"type": "null"} in amount["anyOf"]
+    assert schemas["PurposePaymentConfig"]["properties"]["amount_cents"]["type"] == "integer"
+
+
 def test_briefing_contract_counts_only_turned_down_requests():
     schemas = json.loads(OPENAPI_PATH.read_text())["components"]["schemas"]
     item = schemas["BriefingItem"]

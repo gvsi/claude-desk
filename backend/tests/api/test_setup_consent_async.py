@@ -27,6 +27,39 @@ async def settled(app, interview_id):
         await app.state.runtime.turn_runs.wait(interview_id)
 
 
+async def test_the_turn_deadline_is_available_during_the_turn_but_never_stored(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    from tests.api.test_setup_questions import consent
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    after, commit = setup._after_consent, setup._commit
+    deadlines = []
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 1)
+    before = asyncio.get_running_loop().time()
+
+    async def saving(engine, ctx, interview, seen):
+        assert before + 1 <= interview.turn_deadline <= asyncio.get_running_loop().time() + 1
+        deadlines.append(interview.turn_deadline)
+        assert "turn_deadline" not in setup._stored(interview)
+        await commit(engine, ctx, interview, seen)
+
+    async def understanding(ctx, engine, model, interview, entries):
+        assert interview.turn_deadline == deadlines[0]
+        loaded = await setup._read(engine, ctx, interview_id)
+        assert loaded.turn_deadline is None
+        await after(ctx, engine, model, interview, entries)
+
+    monkeypatch.setattr(setup, "_commit", saving)
+    monkeypatch.setattr(setup, "_after_consent", understanding)
+    state = await consent(owner, interview_id, False, model)
+    assert not state["busy"] and len(deadlines) == 2 and deadlines[0] == deadlines[1]
+    async with engine.connect() as conn:
+        loaded = await setup._load(conn, owner.copy_id, interview_id)
+    assert loaded.turn_deadline is None and "turn_deadline" not in setup._stored(loaded)
+
+
 async def test_a_slow_answer_answers_202_busy_and_lands_later(
         app, browser, fake, kernel_http, model, monkeypatch, db):
     from tests.api.fakes import gated
@@ -653,12 +686,11 @@ async def test_a_run_deadline_or_shutdown_reopens_consent(
         await release.wait()
 
     monkeypatch.setattr(setup, "_after_consent", waiting)
-    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", None if end == "deadline" else 100)
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 100)
     if end == "deadline":
         # Keep the real timeout, but arm it only after database staging reaches the stalled step.
-        timeout = asyncio.timeout
-        deadline = timeout(None)
-        monkeypatch.setattr(setup.asyncio, "timeout", lambda delay: deadline if delay is None else timeout(delay))
+        deadline = asyncio.timeout(None)
+        monkeypatch.setattr(setup.asyncio, "timeout_at", lambda when: deadline)
     request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": True}))
     try:
         await asyncio.wait_for(entered.wait(), 5)
@@ -786,9 +818,10 @@ async def test_a_cancelled_request_leaves_the_run_on_its_own_connection(
     request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": True}))
     await asyncio.wait_for(entered.wait(), 5)
     try:
+        # Consent answers 202 once its busy state is stored, so the request may already have answered by now.
         request.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await request
+        (outcome,) = await asyncio.gather(request, return_exceptions=True)
+        assert isinstance(outcome, asyncio.CancelledError) or outcome.status_code == 202
         busy = (await owner.browser.get(path)).json()
         assert busy["busy"] is True and busy["messages"][-1]["role"] == "owner"
         assert all(message["role"] != "tool_label" for message in busy["messages"])
