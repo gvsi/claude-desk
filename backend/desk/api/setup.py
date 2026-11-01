@@ -1699,15 +1699,26 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                for window in cast(list[HoursAnswer], value))
 
 
-# Each fact a turn can set, with the question it belongs to: there a turn's value is the owner's, and on any other
-# question it is a suggestion, held from the Desk until the owner confirms it. A fact the quote question may also
-# record (`LIMIT_TURN_FACTS`) is the owner's there too. Names are handled on their own (`merged`, `_rename`).
+# Each fact a turn can set that `FIELD_TURNS` doesn't scope, with the one question that asks for it. A fact is on
+# topic on every question that asks for it (`_on_topic`): there a turn's value is the owner's, and on any other question
+# it is a suggestion, held from the Desk until the owner confirms it. Names are handled on their own (`merged`,
+# `_rename`).
 FACT_TOPICS: dict[str, QuestionKey] = {
-    "summary": "what_you_do", "pricing": "what_you_do", "intake": "what_you_do",
-    "hours": "hours_and_area", "service_area": "hours_and_area",
-    "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
-    "urgent": "contact_and_after_hours", "price_items": "quote_limit",
+    "summary": "what_you_do", "service_area": "hours_and_area",
+    "public_contact": "contact_and_after_hours", "price_items": "quote_limit",
 }
+
+
+def _on_topic(name: str, key: QuestionKey) -> bool:
+    """Whether fact `name` is on topic on the turn answering `key`: on every question that asks for it, the ones
+    `FIELD_TURNS` lists for it (read at each call) or else its one question in `FACT_TOPICS`, and on the quote question
+    for a fact that question records (`LIMIT_TURN_FACTS`)."""
+    return key in FIELD_TURNS.get(name, (FACT_TOPICS.get(name),)) or LIMIT_TURN_FACTS.get(name) == key
+
+
+def _is_fact(name: str) -> bool:
+    """Whether code tracks who gave `name`: a fact some question asks for. Names, limits and a website named aren't."""
+    return name in SetupPatch.model_fields and any(_on_topic(name, key) for key in QUESTION_KEYS)
 
 
 def _fact_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
@@ -1729,13 +1740,13 @@ def _only_removes_hours(before: SetupAnswers, named: list[HoursAnswer]) -> bool:
 
 
 def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: SetupAnswers | None = None) -> set[str]:
-    """The facts this turn gave off their own question that the owner's own words this turn (`said`) back: a list they
-    said to clear (`CLEARABLE`), a removal from stored owner hours, or a structured value `owner_supports` finds in
-    `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained suggested
+    """The facts this turn gave off the questions that ask for them (`_on_topic`) that the owner's own words this turn
+    (`said`) back: a list they said to clear (`CLEARABLE`), a removal from stored owner hours, or a structured value
+    `owner_supports` finds in `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained suggested
     item does. Such a turn reads the website and memory, so prices and times need explicit syntax."""
     backed = set()
     for name in _fact_patch_fields(patch, key):
-        if name not in FACT_TOPICS or key in (FACT_TOPICS[name], LIMIT_TURN_FACTS.get(name)):
+        if not _is_fact(name) or _on_topic(name, key):
             continue
         value = getattr(patch, name)
         if name == "price_items" and value and before is not None:
@@ -1762,10 +1773,10 @@ def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswer
     fields = []
     for name in _fact_patch_fields(patch, key):
         value = getattr(patch, name)
-        if name not in FACT_TOPICS or name in backed or (value == [] and getattr(after, name) == []):
+        if not _is_fact(name) or name in backed or (value == [] and getattr(after, name) == []):
             fields.append(name)
             continue
-        if key not in (FACT_TOPICS[name], LIMIT_TURN_FACTS.get(name)):
+        if not _on_topic(name, key):
             continue
         if (name not in {"public_contact", "price_items", "hours"}
                 and name in before.suggested_fields and getattr(before, name) == getattr(after, name)):
@@ -1816,7 +1827,7 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
             value = reduce_name(value) or None
         elif name == "business_name":
             value = " ".join(value.split()) or None
-        if (name in FACT_TOPICS and FACT_TOPICS[name] != key and name not in backed
+        if (_is_fact(name) and not _on_topic(name, key) and name not in backed
                 and (name in owner_fields or (getattr(answers, name) and name not in answers.suggested_fields))):
             if value != getattr(answers, name):
                 logger.warning("setup dropped off-topic field %s", name)
@@ -2201,7 +2212,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
         said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
         for name in _fact_patch_fields(patch, key):
-            if name not in FACT_TOPICS:
+            if not _is_fact(name):
                 continue
             if name in said.owner_fields:
                 updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
@@ -2319,12 +2330,16 @@ def finish(interview: Interview) -> None:
     remaining = set(QUESTION_KEYS) - interview.covered
     suggested = interview.suggested
     if suggested is not None:
-        patch = SetupPatch.model_validate({name: value for name, value in suggested
-                                          if FACT_TOPICS.get(name) in remaining and name not in interview.owner_fields
-                                          and value and not getattr(interview.answers, name)})
-        # A fact merge drops every limit, even if a stored suggestion somehow carries one.
-        suggested_fields = interview.answers.suggested_fields + sorted(patch.model_fields_set)
-        interview.answers = merged(interview.answers, patch, "what_you_do")
+        # A suggestion fills a fact still empty and never the owner's when a question that asks for it went unanswered,
+        # merged as the first such question's turn takes it (some facts are fields only of certain turns,
+        # `FIELD_TURNS`). Only a fact has a topic, so a limit a stored suggestion somehow carried never fills.
+        fills = {name: value for name, value in suggested
+                 if any(_on_topic(name, key) for key in remaining) and name not in interview.owner_fields
+                 and value and not getattr(interview.answers, name)}
+        suggested_fields = interview.answers.suggested_fields + sorted(fills)
+        for name, value in fills.items():
+            key = next(key for key in QUESTION_KEYS if key in remaining and _on_topic(name, key))
+            interview.answers = merged(interview.answers, SetupPatch.model_validate({name: value}), key)
         interview.answers.suggested_fields = list(dict.fromkeys(suggested_fields))
     interview.cover(remaining)
     included = []
