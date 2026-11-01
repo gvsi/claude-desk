@@ -16,10 +16,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 TAGS = [{"Key": "Project", "Value": "claude-desk"}, {"Key": "Purpose", "Value": "agent-test-box"}]
 NAME = "claude-desk-test-box"
 SESSION_POLICY_NAME = NAME + "-session"
-# Another project in this account adds this deny-only inline policy to every IAM role. The check accepts it
-# beside the session policy when every statement denies, and provisioning never removes it; rollback removes
-# it only from a role this run created and is deleting, since delete-role fails while any inline policy remains.
-ACCOUNT_DENY_POLICIES = ("chiefy-runtime-secret-write-deny",)
+# The account may add deny-only inline policies to every IAM role. The check accepts any other inline policy whose
+# statements all deny, since it can't grant anything, and provisioning never removes one; rollback removes them
+# only from a role this run created and is deleting, since delete-role fails while any inline policy remains.
 SESSION_POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManagerAndRunCommandOnly", "Effect": "Allow", "Action": [
     "ssm:UpdateInstanceInformation", "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel",
     "ssmmessages:OpenControlChannel", "ssmmessages:OpenDataChannel", "ec2messages:AcknowledgeMessage",
@@ -118,18 +117,17 @@ def main():
                 assume_role_policy_document={"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]})["Role"]
             created.append("role")
             aws("iam", "put-role-policy", role_name=role, policy_name=SESSION_POLICY_NAME, policy_document=SESSION_POLICY)
-            created.append("policy")
         policies = aws("iam", "list-attached-role-policies", role_name=role)["AttachedPolicies"]
         inline = aws("iam", "list-role-policies", role_name=role)["PolicyNames"]
-        extra = [name for name in inline if name != SESSION_POLICY_NAME]
-        if policies or inline.count(SESSION_POLICY_NAME) != 1 or any(name not in ACCOUNT_DENY_POLICIES for name in extra):
-            raise RuntimeError("Test box role must have only the inline session policy (beside the account's deny-only "
-                               "policies) and no managed policies")
-        for name in extra:
+        if policies or inline.count(SESSION_POLICY_NAME) != 1:
+            raise RuntimeError("Test box role must have the inline session policy and no managed policies")
+        for name in inline:
+            if name == SESSION_POLICY_NAME:
+                continue
             statements = aws("iam", "get-role-policy", role_name=role, policy_name=name)["PolicyDocument"].get("Statement", [])
             statements = statements if isinstance(statements, list) else [statements]
             if not statements or any(statement.get("Effect") != "Deny" for statement in statements):
-                raise RuntimeError(f"The account's {name} policy on the test box role must only deny")
+                raise RuntimeError(f"Test box role's other inline policy {name} must only deny; only the session policy may allow")
         document = aws("iam", "get-role-policy", role_name=role, policy_name=SESSION_POLICY_NAME)["PolicyDocument"]
         # IAM may reorder actions, but no extra action, statement, condition or resource is accepted.
         def canonical(value):
@@ -185,7 +183,8 @@ def main():
             if i.get("IamInstanceProfile", {}).get("Arn") != profile_info["Arn"]:
                 raise RuntimeError("Existing test box has an unexpected attached instance profile ARN")
             if args.check:
-                print("Test box check: expected profile ARN, role ARN and exact inline session policy; no managed policies; instance/network configuration valid")
+                print("Test box check: expected profile ARN, role ARN and exact inline session policy; other inline policies only deny; "
+                      "no managed policies; instance/network configuration valid")
                 return
             aws("ec2", "modify-instance-attribute", instance_id=instance, disable_api_termination={"Value": True})
             if i["State"]["Name"] == "stopped":
@@ -236,9 +235,7 @@ def main():
             "group": [("ec2", "delete-security-group", {"group_id": group})],
             "profile-role": [("iam", "remove-role-from-instance-profile", {"instance_profile_name": profile, "role_name": role})],
             "profile": [("iam", "delete-instance-profile", {"instance_profile_name": profile})],
-            "policy": [("iam", "delete-role-policy", {"role_name": role, "policy_name": SESSION_POLICY_NAME})],
-            "role": [*(("iam", "delete-role-policy", {"role_name": role, "policy_name": name}) for name in ACCOUNT_DENY_POLICIES),
-                     ("iam", "delete-role", {"role_name": role})],
+            "role": [("iam", "delete-inline-policies", {}), ("iam", "delete-role", {"role_name": role})],
         }
         # Association creation can fail. Track it separately and attempt every cleanup even
         # if an earlier cleanup fails; an absent association must not prevent deletion.
@@ -247,6 +244,10 @@ def main():
                 try:
                     if operation == "wait":
                         subprocess.run(["aws", "--region", args.region, "ec2", "wait", "instance-terminated", "--instance-ids", instance], check=True)
+                    elif operation == "delete-inline-policies":
+                        # Our session policy and any the account added: delete-role fails while one remains.
+                        for name in (optional("iam", "list-role-policies", role_name=role) or {}).get("PolicyNames", []):
+                            optional("iam", "delete-role-policy", role_name=role, policy_name=name)
                     else:
                         optional(service, operation, **params)
                     print(f"Rolled back {resource}: {operation}", file=sys.stderr)

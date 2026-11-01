@@ -27,8 +27,8 @@ machine removes.
 
 It has termination protection, requires IMDSv2, and has no inbound security group rules.
 Access uses [SSH over SSM](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started-enable-ssh-connections.html).
-Its instance role has no attached managed policies. Its one permission policy is the inline
-`claude-desk-test-box-session` (beside the account's deny-only `chiefy-runtime-secret-write-deny`, described
+Its instance role has no attached managed policies. Its one policy that allows anything is the inline
+`claude-desk-test-box-session` (the account's deny-only inline policies may sit beside it, described
 below), allowing only `ssm:UpdateInstanceInformation`,
 `ssmmessages:CreateControlChannel`, `CreateDataChannel`, `OpenControlChannel`,
 `OpenDataChannel`, and `ec2messages:AcknowledgeMessage`, `DeleteMessage`, `FailMessage`,
@@ -110,7 +110,11 @@ same development role passwords as `make db-roles`. A schema change recreates th
 throwaway database. The dedicated Postgres 16 server disables fsync, synchronous_commit
 and full_page_writes: its data is disposable. It never connects to a laptop database.
 
-Another project in this AWS account adds a deny-only inline policy, `chiefy-runtime-secret-write-deny`, to every IAM role. Provisioning accepts it beside the session policy when every statement in it denies, and never removes it. Before deleting the role by hand, delete that inline policy first, or `delete-role` fails; provisioning's own rollback does this for a role it created.
+The account's deny-only inline policies may also be on the role. Provisioning accepts any other inline
+policy, whatever its name, when all its statements deny, since such a policy can't grant anything, and
+never removes one. Another inline policy that allows anything, or has no statements, is refused. Before
+deleting the role by hand, delete its inline policies first, or `delete-role` fails; provisioning's own
+rollback does this for a role it created.
 
 ## Re-create or move
 
@@ -125,8 +129,9 @@ The script discovers resources by Project=claude-desk and Purpose=agent-test-box
 no account or instance ID belongs in source. It creates only a role/profile, a security
 group in the default VPC and the instance with its root volume and primary interface.
 Re-running checks the instance's attached profile ARN, the profile's sole role name and ARN,
-and the role's exact inline session policy document with no managed policies before starting
-or bootstrapping a reused box. Any mismatch is refused. Use
+and the role's exact inline session policy document, that any other inline policy only denies
+and that there are no managed policies, before starting or bootstrapping a reused box. Any
+mismatch is refused. Use
 `tools/testbox/provision.sh --region us-east-1 --check` for the same read-only validation.
 Re-running reuses tagged resources and starts a stopped box. A failed provisioning attempt
 rolls back resources it created and reports any cleanup failure. Existing resources are

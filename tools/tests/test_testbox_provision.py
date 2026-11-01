@@ -14,8 +14,9 @@ SPEC.loader.exec_module(provision)
 ROLE_ARN = "arn:aws:iam::123456789012:role/claude-desk-test-box"
 PROFILE_ARN = "arn:aws:iam::123456789012:instance-profile/claude-desk-test-box"
 POLICY_NAME = "claude-desk-test-box-session"
-# The deny-only inline policy another project in the account adds to every IAM role.
-ACCOUNT_DENY = "chiefy-runtime-secret-write-deny"
+# Fixture names for the account's deny-only inline policies; provisioning accepts them by content, never by name.
+ACCOUNT_DENY = "account-guardrail-deny"
+OTHER_DENY = "another-account-deny"
 DENY_DOCUMENT = {"Version": "2012-10-17", "Statement": [{"Effect": "Deny", "Action": ["secretsmanager:PutSecretValue"], "Resource": "*"}]}
 POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManagerAndRunCommandOnly", "Effect": "Allow", "Action": [
     "ssm:UpdateInstanceInformation", "ssmmessages:CreateControlChannel", "ssmmessages:CreateDataChannel",
@@ -25,12 +26,15 @@ POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManagerAndRunCo
 
 
 class AWS:
-    def __init__(self, fresh=False, fail=None):
+    def __init__(self, fresh=False, fail=None, account_policies=()):
         self.fresh, self.fail, self.calls = fresh, fail, []
         self.role = {"Arn": ROLE_ARN, "RoleName": provision.NAME, "Tags": provision.TAGS}
         self.profile = {"Arn": PROFILE_ARN, "Tags": provision.TAGS, "Roles": [self.role]}
-        self.attached, self.inline, self.document = [], [POLICY_NAME], copy.deepcopy(POLICY)
-        self.documents = {}            # other inline policies by name
+        self.attached, self.document = [], copy.deepcopy(POLICY)
+        # Deny-only inline policies the account adds to every role, including one this run creates.
+        self.account_policies = list(account_policies)
+        self.documents = {name: copy.deepcopy(DENY_DOCUMENT) for name in account_policies}   # other inline policies
+        self.inline = self.account_policies[:] if fresh else [POLICY_NAME, *self.account_policies]
         self.deleted_policies = []     # policy names delete-role-policy was called with
         self.instance = {"InstanceId": "i-0123456789abcdef0", "InstanceType": "c8g.24xlarge",
                          "IamInstanceProfile": {"Arn": PROFILE_ARN}, "MetadataOptions": {"HttpTokens": "required"},
@@ -46,8 +50,10 @@ class AWS:
             return SimpleNamespace(returncode=1, stderr="Injected failure", stdout="")
         data = {}
         if op == "put-role-policy":
-            self.inline = [POLICY_NAME]
+            self.inline = [name for name in self.inline if name != POLICY_NAME] + [POLICY_NAME]
             self.document = copy.deepcopy(POLICY)
+        elif op == "delete-role-policy" and policy_name in self.inline:
+            self.inline.remove(policy_name)
         if op == "get-role":
             data = {"Role": self.role}
         elif op == "get-instance-profile":
@@ -225,28 +231,30 @@ def test_rebootstrap_restarts_postgres_only_when_configuration_changes(tmp_path)
     assert log.read_text().splitlines() == ['restart postgresql', 'start postgresql', 'restart postgresql']
 
 
-def test_the_accounts_deny_only_policy_on_the_role_is_accepted_and_left_alone(monkeypatch):
-    """Another project in the account adds a deny-only inline policy to every IAM role; the check accepts it
-    beside the session policy and never removes it."""
-    fixture = AWS()
-    fixture.inline = [POLICY_NAME, ACCOUNT_DENY]
-    fixture.documents[ACCOUNT_DENY] = copy.deepcopy(DENY_DOCUMENT)
-    invoke(monkeypatch, fixture, "--check")
+@pytest.mark.parametrize("args", [("--check",), ()])
+def test_the_accounts_deny_only_policies_on_the_role_are_accepted_and_left_alone(monkeypatch, args):
+    """Any other inline policy whose statements all deny can't grant anything, so the check accepts it beside the
+    session policy, whatever its name, and neither the check nor provisioning ever removes it."""
+    fixture = AWS(account_policies=[ACCOUNT_DENY, OTHER_DENY])
+    invoke(monkeypatch, fixture, *args)
     assert fixture.deleted_policies == []
     assert "put-role-policy" not in fixture.calls
+    assert fixture.inline == [POLICY_NAME, ACCOUNT_DENY, OTHER_DENY]
 
 
 @pytest.mark.parametrize("statement", [
     {"Effect": "Allow", "Action": ["ssm:GetParameter"], "Resource": "*"},
     {"Effect": "Deny", "Action": ["s3:PutObject"], "Resource": "*"},
+    "no statements",
 ])
 def test_the_accounts_policy_is_refused_unless_every_statement_denies(monkeypatch, statement):
-    fixture = AWS()
-    fixture.inline = [POLICY_NAME, ACCOUNT_DENY]
-    document = copy.deepcopy(DENY_DOCUMENT)
-    document["Statement"].append(statement)
-    fixture.documents[ACCOUNT_DENY] = document
-    if statement["Effect"] == "Deny":
+    fixture = AWS(account_policies=[ACCOUNT_DENY])
+    document = fixture.documents[ACCOUNT_DENY]
+    if statement == "no statements":
+        document["Statement"] = []
+    else:
+        document["Statement"].append(statement)
+    if statement != "no statements" and statement["Effect"] == "Deny":
         invoke(monkeypatch, fixture, "--check")      # more denials are still deny-only
     else:
         with pytest.raises(RuntimeError, match="only deny"):
@@ -254,13 +262,14 @@ def test_the_accounts_policy_is_refused_unless_every_statement_denies(monkeypatc
     assert fixture.deleted_policies == []
 
 
-def test_rolling_back_a_created_role_removes_the_accounts_policy_before_deleting_it(monkeypatch):
-    """The account's deny policy can land on a role between its creation and a rollback; delete-role fails
-    while any inline policy remains, so rollback removes it first."""
-    fixture = AWS(fresh=True, fail="describe-vpcs")
+def test_rolling_back_a_created_role_removes_every_inline_policy_it_still_has_before_deleting_it(monkeypatch):
+    """The account can add its deny-only policies to a role between its creation and a rollback, and delete-role
+    fails while any inline policy remains, so rollback lists the role's inline policies and removes them first."""
+    fixture = AWS(fresh=True, fail="describe-vpcs", account_policies=[ACCOUNT_DENY, OTHER_DENY])
     with pytest.raises(RuntimeError, match="Injected failure"):
         invoke(monkeypatch, fixture)
-    assert ACCOUNT_DENY in fixture.deleted_policies
+    assert sorted(fixture.deleted_policies) == sorted([POLICY_NAME, ACCOUNT_DENY, OTHER_DENY])
+    assert fixture.inline == []
     assert fixture.calls.index("delete-role") > max(i for i, op in enumerate(fixture.calls) if op == "delete-role-policy")
 
 
