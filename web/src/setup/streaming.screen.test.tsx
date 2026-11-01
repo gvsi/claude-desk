@@ -4,10 +4,12 @@
  * show only once the turn is saved, when the saved message takes the growing one's place. A stream
  * the API refuses leaves the step reading the interview while it is busy, as before.
  */
+import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 
 import { newIdempotencyKey } from '../api/http.ts';
 import type { SetupState } from '../api/views.ts';
+import { worker } from '../mocks/browser.ts';
 import { growingWords } from '../mocks/ownerStreams.ts';
 import { CPA_COPY, MEMORY_LABEL } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -101,6 +103,45 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     held.release();
     await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
     expect(growing()).toBeNull();
+  });
+
+  it('keeps_the_saved_turn_when_an_older_read_of_the_busy_interview_answers_after_it', async () => {
+    const state = await cpaInterview(true);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    mockStore.streamSetupTurns();
+    const turn = gate();
+    mockStore.planStream('setup', { pauseAfter: 3, until: turn.until });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    await expect.poll(() => growing()?.textContent).toBe(growingWords(CPA_COPY.consult)[1]);
+    // The step's next read of the busy interview, 2 s on, is held, and answers with the interview
+    // as it was when it was read: busy, the turn still running.
+    const poll = gate();
+    let polled = false;
+    worker.use(
+      http.get(
+        `/api/owner/setup/${state.interview_id}`,
+        async () => {
+          const then = await mockStore.dispatch('setup', { params: { id: state.interview_id }, query: { cards: '1' } });
+          polled = true;
+          await poll.until;
+          return HttpResponse.json('network' in then ? null : (then.body as SetupState));
+        },
+        { once: true },
+      ),
+    );
+    await expect.poll(() => polled, { timeout: 5_000 }).toBe(true);
+    // The turn lands: done, and its read of the saved interview answers first.
+    turn.release();
+    const card = screen.getByRole('article', { name: 'Google Calendar', exact: true });
+    await expect.element(card).toBeVisible();
+    const events = mockStore.requests.filter((r) => r.key === 'setupEvents').length;
+    // Then the older read answers, busy: it changes nothing, and no stream opens again.
+    poll.release();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await expect.element(card).toBeVisible();
+    expect(screen.container.querySelector('.cd-writing-indicator')).toBeNull();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeEnabled();
+    expect(mockStore.requests.filter((r) => r.key === 'setupEvents')).toHaveLength(events);
   });
 
   it('keeps_the_writing_dots_through_a_turn_that_streams_no_words', async () => {

@@ -178,14 +178,30 @@ function SetupInterview({ setupId }: { setupId: string }) {
   );
   /** The page moves on: the screen shows the next step; the API confirms it with that step's own request. */
   const moveTo = useCallback((step: SetupStep) => update((now) => (now === undefined ? now : { ...now, step })), [update]);
-  /** The API answered with the interview as it stands. */
-  const onState = useCallback(
+  /**
+   * Reads of the interview and the answers of the requests that change it can land out of order: a
+   * read of a busy interview every 2 s can answer after the read once its turn is saved. Each read is
+   * numbered as it goes out and lands only if nothing newer has landed since, so an older read never
+   * replaces a newer interview; a request's own answer is newer than every read sent before it.
+   */
+  const reads = useRef<{ sent: number; landed: number; latest: SetupState | null }>({ sent: 0, landed: 0, latest: null });
+  /** Shows `next`, the interview as the API last said it stands. */
+  const publish = useCallback(
     (next: SetupState) => {
+      reads.current.latest = next;
       if (confirmed.current === 'questions' && next.step === 'tools') closing.current = true;
       confirm(next.step);
       update(() => next);
     },
     [confirm, update],
+  );
+  /** The API answered a request with the interview as it stands. */
+  const onState = useCallback(
+    (next: SetupState) => {
+      reads.current.landed = reads.current.sent;
+      publish(next);
+    },
+    [publish],
   );
   /**
    * Leaving setup carries the interview as it stands into the copy's Desks once more (then they are
@@ -214,17 +230,24 @@ function SetupInterview({ setupId }: { setupId: string }) {
     },
     [carry, queryClient, setupId, asConfirmed],
   );
-  /** The interview read again, after a write whose answer was lost; null when it can't be read. */
-  const reread = useCallback(
-    () => request('setup', { params: { id: setupId } })
+  /**
+   * The interview read again, after a write whose answer was lost or while it is busy; null when it
+   * can't be read. A read something newer has overtaken changes nothing and answers with that newer
+   * interview.
+   */
+  const reread = useCallback(() => {
+    reads.current.sent += 1;
+    const sent = reads.current.sent;
+    return request('setup', { params: { id: setupId } })
       .then((next) => {
+        if (sent <= reads.current.landed) return reads.current.latest ?? next;
+        reads.current.landed = sent;
         // Hold the closing before publishing the read to the cache, so Tools never mounts first.
-        onState(next);
+        publish(next);
         return next;
       })
-      .catch(() => null),
-    [setupId, onState],
-  );
+      .catch(() => null);
+  }, [setupId, publish]);
 
   const state = setup.data;
   // The step setup opened at on this page: a step come to after it was reached live, and its
