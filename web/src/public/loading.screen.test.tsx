@@ -29,8 +29,17 @@ const CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'chat-title', page: '.cd-public-shell__chat-title > h2' },
   { name: 'disclosure', page: '.cd-public-shell__disclosure' },
   { name: 'ask-owner', page: '.cd-public-shell__chat-head > button', size: true },
-  // History is unknown while loading. The docked skeleton can land on either an existing chat
-  // or the invitation with its inline composer and phone footer. The disclosure stays in place.
+];
+
+// History is unknown while loading, so the skeleton draws the first view. A first visit to a Desk
+// with starters lands on it in place; a resumed chat keeps only its head.
+const FIRST_VIEW_ANCHORS: readonly SkeletonAnchor[] = [
+  ...CHAT_ANCHORS,
+  { name: 'greeting', page: '.cd-public-shell__greeting' },
+  { name: 'invitation', page: '.cd-public-shell__invitation', dimensions: ['height'] },
+  { name: 'composer', page: '.cd-composer__box', size: true },
+  { name: 'starters', page: '.cd-public-shell__starters', size: true },
+  { name: 'concept-footer', page: '.cd-concept-footer', size: true },
 ];
 
 const DESKTOP_CHAT_ANCHORS: readonly SkeletonAnchor[] = [
@@ -42,7 +51,7 @@ it('public_chat_opens_in_place_desktop', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    anchors: [...DESKTOP_CHAT_ANCHORS, { name: 'about-title', page: '.cd-public-shell__about > h2' }],
+    anchors: [...FIRST_VIEW_ANCHORS, { name: 'about-title', page: '.cd-public-shell__about > h2' }],
     open: async () => {
       await renderRoute(CHAT, { pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
@@ -53,7 +62,9 @@ it('public_chat_opens_in_place_desktop', async () => {
   await expectScreenBasics(document.body, { owner: false });
 });
 
-it.each(['desktop', 'phone'] as const)('resumed_public_chat_opens_in_place_%s', async (viewport) => {
+// Every load draws the first view, so a resumed chat's composer and footer move when it lands; its
+// head stays in place.
+it.each(['desktop', 'phone'] as const)('resumed_public_chat_keeps_its_head_in_place_%s', async (viewport) => {
   const first = await renderRoute(CHAT, { viewport, pollScale: 100 });
   await expect.element(first.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
   const chat = mockStore.visitorSession(RIVERA.slug)!;
@@ -62,11 +73,7 @@ it.each(['desktop', 'phone'] as const)('resumed_public_chat_opens_in_place_%s', 
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    anchors: [
-      ...CHAT_ANCHORS,
-      { name: 'composer', page: '.cd-composer__box', size: true },
-      { name: 'concept-footer', page: '.cd-concept-footer', size: true },
-    ],
+    anchors: CHAT_ANCHORS,
     open: async () => {
       await renderRoute(CHAT, { viewport, pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
@@ -81,7 +88,7 @@ it('public_chat_opens_in_place_phone', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    anchors: CHAT_ANCHORS,
+    anchors: [...FIRST_VIEW_ANCHORS, { name: 'about-title', page: '.cd-public-shell__about > h2' }],
     open: async () => {
       await renderRoute(CHAT, { viewport: 'phone', pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
@@ -110,7 +117,7 @@ it('public_chat_opens_in_spanish_desktop', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Abriendo el chat',
-    anchors: DESKTOP_CHAT_ANCHORS,
+    anchors: FIRST_VIEW_ANCHORS,
     open: async () => {
       await renderRoute(CHAT, { viewport: 'desktop', language: 'es-MX', pollScale: 100 });
       await vi.waitFor(() => expect(document.querySelector('[role="status"][lang="es"]')?.textContent).toBe('Abriendo el chat'));

@@ -207,11 +207,12 @@ describe('public chat page', () => {
     const mountedWelcome: Element[] = [];
     const recordMounts = (records: MutationRecord[]) => {
       for (const record of records) {
-        // Removed nodes also reveal a welcome mounted and removed within one commit.
+        // Removed nodes also reveal a greeting mounted and removed within one commit. The loading
+        // skeleton draws the first view's place in shapes, with no greeting heading.
         for (const node of [...record.addedNodes, ...record.removedNodes]) {
           if (!(node instanceof Element)) continue;
-          if (node.matches('.cd-public-shell__welcome')) mountedWelcome.push(node);
-          mountedWelcome.push(...node.querySelectorAll('.cd-public-shell__welcome'));
+          if (node.matches('.cd-public-shell__greeting')) mountedWelcome.push(node);
+          mountedWelcome.push(...node.querySelectorAll('.cd-public-shell__greeting'));
         }
       }
     };

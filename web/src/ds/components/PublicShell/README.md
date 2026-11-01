@@ -190,14 +190,20 @@ at 390 px, closed and no-hours headers change height once (19 px taller and 16 p
 The agents page passes `hours={false}` because its real header has no hours.
 
 The shell shape shares the shell's layout and visual-viewport measurement hooks, including short
-windows and embedded panels. It draws the real fresh copy's five charter cards and two agents
-links: beside the chat from 900 px, and opening the conversation's scroll region below that,
-as the current page does. Greeting and starter chips are left out until those ship. In setup's
-fresh preview (`footer={false}`), there is no charter or footer, so neither is drawn. Text that
-depends on other Desk data can change size once when it arrives.
+windows and embedded panels. History is unknown until the page lands, so every load draws the first
+view, placed by the same `useFirstView` hook as the real one: a greeting line (two on a phone), its
+meta line, the inline composer and three starter chips as wide as the fresh copy's. It draws the
+real fresh copy's five charter cards and two agents links: beside the chat from 900 px, and under
+the footer below that, as the first view does. In setup's fresh preview (`footer={false}`), there
+is no charter or footer, so neither is drawn.
 
-The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell
-at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
+A first visit to a Desk with starters lands in place. A resumed chat keeps its head in place, and its
+composer moves down to the bottom as it lands. A Desk without starters lands on the greeting alone,
+so its composer moves up by the meta line and chips. Text that depends on other Desk data, such as
+a long greeting or longer starters, can change size once when it arrives.
+
+The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell's
+first view at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
 (`#artboard-d122e70134a0`), and follow the real page wherever it differs from that board.
 
 ## Before the first message
