@@ -92,8 +92,10 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       cancel();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) await reread();
-      if (err instanceof ApiError && err.status === 422 && err.code === 'line_refused' && err.lineKey === editingKey) setRefused(true);
-      else setError(ownerErrorCopy(err));
+      if (err instanceof ApiError && err.status === 422 && err.code === 'line_refused') {
+        if (err.lineKey === editingKey) setRefused(true);
+        else setError(copy.refused);
+      } else setError(ownerErrorCopy(err));
     } finally {
       setBusy(null);
     }
@@ -113,7 +115,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
         setText(line.text);
         setEditingKey(line.key);
         setRefused(true);
-      } else setError(ownerErrorCopy(err));
+      } else setError(err instanceof ApiError && err.status === 422 && err.code === 'line_refused' ? copy.refused : ownerErrorCopy(err));
     } finally {
       setBusy(null);
     }

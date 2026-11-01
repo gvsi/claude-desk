@@ -230,8 +230,38 @@ it('uses existing error Notices and preserves the draft through service and netw
   await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
   mockStore.inject({ route: 'setupPublicLinesConfirm', status: 422, body: { error: 'line_refused', key: 'policy:unknown', reason: 'Untrusted error text' } });
   await screen.getByRole('button', { name: 'Looks right' }).click();
-  await expect.element(screen.getByRole('alert')).toHaveTextContent(OWNER_ERROR_COPY.unprocessable);
+  await expect.element(screen.getByRole('alert')).toHaveTextContent(REFUSED_COPY);
   expect(screen.container.textContent).not.toContain('Untrusted error text');
   expect(screen.getByRole('textbox').elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
+
+it.each([
+  'policy:pricing', 'policy:how_we_help', 'policy:unknown', null,
+])('keeps a draft and shows the signed Notice when Save refuses %s', async (key) => {
+  const { screen } = await openLines();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  const field = screen.getByRole('textbox', { name: 'About us', exact: true });
+  await field.fill('Words I am still checking.');
+  mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', ...(key === null ? {} : { key }), reason: ['INTERNAL refusal'] } });
+  await screen.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect.element(screen.getByRole('alert')).toHaveTextContent(REFUSED_COPY);
+  await expect.element(field).toHaveValue('Words I am still checking.');
+  expect(screen.container.textContent).not.toContain('INTERNAL refusal');
+  expect(screen.container.textContent).not.toContain(OWNER_ERROR_COPY.unprocessable);
+  expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
+
+it.each(['policy:how_we_help', 'policy:unknown', null])('shows the signed Notice when confirm refuses %s', async (key) => {
+  const { screen } = await openLines();
+  mockStore.inject({ route: 'setupPublicLinesConfirm', status: 422, body: { error: 'line_refused', ...(key === null ? {} : { key }), reason: ['INTERNAL refusal'] } });
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  const notice = screen.getByRole('alert');
+  await expect.element(notice).toBeVisible();
+  expect(notice.element().textContent).toBe(REFUSED_COPY);
+  expect(screen.getByRole('textbox').elements()).toHaveLength(0);
+  expect(screen.container.textContent).not.toContain('INTERNAL refusal');
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
 });
