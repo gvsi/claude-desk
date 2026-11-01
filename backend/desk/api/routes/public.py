@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import func, select
 from sse_starlette import EventSourceResponse
 
-from desk.api.agents import DemoAgents, KeyReused, KeysFull
+from desk.api.agents import DemoAgents, KeyReused, KeysFull, demo_task_set
 from desk.api.cookies import VISITOR_COOKIE, set_visitor_cookie
 from desk.api.deliver import Status, deliver
 from desk.api.deps import (
@@ -437,9 +437,14 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     A request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the
     agent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent
     (no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a
-    new click sends a new key."""
+    new click sends a new key.
+
+    The agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Rivera's
+    for the copy's own Desk), read before anything is claimed."""
     state = runtime(request).started()
     key = body.idempotency_key
+    task_set = await demo_task_set(ctx.conn, ctx.ro, ctx.ids.desk_id)
+    await ctx.conn.commit()
     async with state.agents.admissions.admitting(ctx.ids.copy_id, key):
         run_id, _ = _keyed(state.agents, ctx, body, slug, claim=False)
         if run_id is not None:
@@ -462,7 +467,8 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     except BaseException:                       # the agent may exist: the key keeps the failed run for good
         state.agents.fail(claimed, "the agent's mint went unanswered")
         raise
-    return AgentRunStarted(run_id=state.agents.launch(issued, body.task, slug, ctx.ids, run=claimed))
+    return AgentRunStarted(run_id=state.agents.launch(issued, body.task, slug, ctx.ids, run=claimed,
+                                                      task_set=task_set))
 
 
 @router.get("/desks/{slug}/send_agent/{run_id}", response_model=DemoAgentRun,
