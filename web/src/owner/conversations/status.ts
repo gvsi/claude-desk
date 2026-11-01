@@ -76,7 +76,7 @@ export function conversationListStatus(s: ConversationSummary, held: number, ope
   const status = conversationStatus(s, held, openHandoff);
   const words = { visit_booked: LATEST_VISIT_BOOKED, deposit_paid: LATEST_DEPOSIT_PAID, turned_down: TURNED_DOWN };
   const outcome = s.latest_outcome == null ? undefined : words[s.latest_outcome];
-  return s.kind === 'agent' && status?.text === 'Agent' && outcome !== undefined
-    ? { ...status, text: `${status.text} · ${outcome}` }
+  return s.kind === 'agent' && (status === null || status.text === 'Agent') && outcome !== undefined
+    ? { tone: 'info', text: `Agent · ${outcome}` }
     : status;
 }

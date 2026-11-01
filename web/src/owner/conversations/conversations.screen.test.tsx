@@ -548,6 +548,18 @@ describe('Conversations', () => {
     });
   });
 
+  it('unnamed_agent_row_shows_its_confirmed_outcome', async () => {
+    const booked = await bookTheEarliestVisit();
+    const agent = session(booked);
+    agent.displayName = null;
+    agent.state = { ...agent.state, verified: false };
+    const { screen } = await renderRoute(LIST);
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Agent/ });
+    await expect.element(row.getByText('Agent · Visit booked', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--info')).not.toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('agent_rows_show_confirmed_outcomes_and_attention_first', async () => {
     const booked = await bookTheEarliestVisit();
     const paid = await bookTheEarliestVisit('quote_and_deposit');
