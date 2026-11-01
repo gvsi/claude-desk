@@ -170,7 +170,7 @@ def hours(fact: Fact | None, desk: DeskInfo) -> Card:
 
 
 def booking_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
-    """`{date}` / `Arriving {start} to {end}` / `With {owner}`; no booking ID."""
+    """`{date}` / `{start} to {end}` / `With {owner}`; no booking ID."""
     start, end = booking_window(fact, desk)
     found = claims(fact)
     if "appointment_type" in found:
@@ -178,7 +178,7 @@ def booking_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
         return Card(title=date(start), lines=(f"{quoted(found['appointment_type'])} at {clock(start)}",
                                               f"About {found['appointment_minutes']} minutes",
                                               f"With {desk.owner_display_name}"))
-    return Card(title=date(start), lines=(f"Arriving {clock(start)} to {clock(end)}",
+    return Card(title=date(start), lines=(f"{clock(start)} to {clock(end)}",
                                           f"With {desk.owner_display_name}"))
 
 

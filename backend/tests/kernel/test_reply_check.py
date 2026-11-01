@@ -1045,7 +1045,7 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
     assert {template: (card.title, card.lines) for template, card in cards.items()} == {
         "quote": ("$153.00", ["Drain clearing", "Includes 15% off $180.00", "Good until Monday, November 2, 9:04 am"]),
         "booking_options": ("Times that are open", [label for _, label in open_times]),
-        "booking_confirmed": ("Monday, November 2", ["Arriving 10:00 am to 12:00 pm", "With Maria Rivera"]),
+        "booking_confirmed": ("Monday, November 2", ["10:00 am to 12:00 pm", "With Maria Rivera"]),
         "hours": ("Monday to Friday, 8:00 am to 6:00 pm", ["Saturday, 9:00 am to 1:00 pm"]),
         "policy": ("We work in Oakland, Berkeley, Alameda and Emeryville.", []),
         "contact": ("(510) 555-0142", []),
@@ -1066,7 +1066,7 @@ async def test_card_text_is_headline_then_details(app, client, reviewer):
     spanish = await checked(client, visitor, "Aquí tiene los detalles.",
                             [clause("booking_confirmed", booking.fact_id)])
     assert (spanish.blocks[1].title, spanish.blocks[1].lines) == (
-        "lunes 2 de noviembre", ["Llegada de 10:00 a 12:00", "Con Maria Rivera"])
+        "lunes 2 de noviembre", ["De 10:00 a 12:00", "Con Maria Rivera"])
 
 
 # The soft-promise check flagging nothing, so a block below is the code's own.

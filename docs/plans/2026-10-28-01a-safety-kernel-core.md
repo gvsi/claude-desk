@@ -137,7 +137,7 @@ Card data (the master's "Clauses" row): `title` is the headline, `lines` the det
 |---|---|---|---|
 | `quote` | `quote`, status `available`, not expired | `{total}` / `{items}` / `Includes {pct} off {list}` (only with a discount) / `Good until {expires}` | `{total}` / `{items}` / `Incluye {pct} de descuento sobre {list}` / `Válido hasta {expires}` |
 | `booking_options` | `slots`, status `available`, not expired | `Times that are open` / one line and option per slot still free | `Horarios disponibles` / una línea y opción por horario libre |
-| `booking_confirmed` | `booking` with prefix `booking:`, status `committed` | `{date}` / `Arriving {start} to {end}` / `With {owner}` (date "Tuesday, November 3"; the window formatted like `hours`, from `starts_at` to `starts_at + minutes`; `{owner}` is `owner_display_name`; no booking id on the visitor's card) | `{date}` / `Llegada de {start} a {end}` / `Con {owner}` ("martes 3 de noviembre"; "de 14:00 a 16:00") |
+| `booking_confirmed` | `booking` with prefix `booking:`, status `committed` | `{date}` / `{start} to {end}` / `With {owner}` (date "Tuesday, November 3"; the window formatted like `hours`, from `starts_at` to `starts_at + minutes`; `{owner}` is `owner_display_name`; no booking id on the visitor's card) | `{date}` / `De {start} a {end}` / `Con {owner}` ("martes 3 de noviembre"; "de 14:00 a 16:00") |
 | `hours` | `charter:hours` (claim `windows`, written from `DeskSeed.hours`) | one line per window: `Monday to Friday, 8:00 am to 6:00 pm` | `De lunes a viernes, de 8:00 a 18:00` |
 | `policy` | a `charter:policy:*` fact | the policy text | the policy text |
 | `contact` | `charter:contact` | the contact | the contact |
