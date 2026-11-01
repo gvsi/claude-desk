@@ -17,6 +17,16 @@ from tests.api.test_setup_questions import (
 PAYMENT_HOW = "Sends a retainer payment link"
 
 
+@pytest.mark.parametrize("contact,owner_text,supported", [
+    ("Call 415-555-0118 for a free estimate, same-day service guaranteed", "Call 415-555-0118", False),
+    ("Call 415-555-0118, ask for Maria", "Call 415-555-0118, ask for Maria", True),
+    ("Call 415-555-0118, ask for Maria", "Call 415-555-0118", False),
+    ("415-555-0118 or hello@bobs.com", "415-555-0118 or hello@bobs.com", True),
+])
+def test_contact_leftover_words_must_be_the_owners(contact, owner_text, supported):
+    assert setup.owner_supports("public_contact", contact, owner_text) is supported
+
+
 @pytest.mark.parametrize("field,value,owner_text,supported", [
     ("public_contact", "(415) 555-0118", "Call 4155550118", True),
     ("public_contact", "HELLO@example.test", "Email hello@EXAMPLE.test", True),
@@ -320,6 +330,33 @@ async def test_website_domain_beside_the_owners_phone_never_reaches_the_kernel(p
     public = await owner.browser.get(f"/api/public/{state['slug']}")
     assert public.status_code == 200, public.text
     assert domain not in public.text
+
+
+@pytest.mark.parametrize("topic", ["contact_and_after_hours", "hours_and_area"])
+async def test_contact_offer_words_stay_held_through_rules(proposals, model, engine, fake, topic):
+    from tests.api.test_setup_questions import answer, turn
+    from tests.api.test_setup_rules import settled, unparseable
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await ask_topic(owner, engine, interview_id, topic)
+    contact = "Call 415-555-0118 for a free estimate, same-day service guaranteed"
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118.",
+                         turn(public_contact=contact), question=topic)
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    assert "public_contact" in record["answers"]["suggested_fields"]
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert "public_contact" not in said.get("owner_fields", [])
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    model.add(unparseable(), unparseable())
+    reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert reply.status_code == 200, reply.text
+    assert fake.called("PUT /desks/{id}/charter")
+    writes = [call.body for call in fake.calls if not call.route.startswith("GET ")]
+    assert "same-day service guaranteed" not in json.dumps(writes)
+    assert "public_contact" in (await stored(engine, interview_id))["answers"]["suggested_fields"]
 
 
 async def ask_topic(owner, engine, interview_id, topic):

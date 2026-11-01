@@ -1607,12 +1607,21 @@ def _contact_parts(text: str) -> tuple[set[str], list[str]]:
     return addresses, [digits for digits in phones if len(digits) >= 7]
 
 
+def _contact_words(text: str) -> set[str]:
+    """Words beyond recognized contact parts and their ordinary labels."""
+    rest = _CONTACT_DOMAIN.sub(" ", _CONTACT_ADDRESS.sub(" ", text.casefold()))
+    rest = _CONTACT_PHONE.sub(lambda match: " " if len(re.sub(r"\D", "", match.group())) >= 7 else match.group(), rest)
+    rest = re.sub(r"\b(?:ask\s+for|call|text|email|phone|website|web|site|or|and|at|us)\b", " ", rest)
+    return set(re.findall(r"\w+", rest))
+
+
 def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                    value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str, *,
                    stated: bool = False) -> bool:
     """Whether the owner's typed text contains every structured value, independent of model or read text. A contact
     needs every part in it (`_contact_parts`): each address whole, and each phone's last 10 digits (all of them when
-    it has fewer) in one number the owner typed; a contact with no part needs its whole text. With `stated`, prices need a dollar sign; hours need a meridiem, a clock time or a range,
+    it has fewer) in one number the owner typed, plus any words beyond labels and separators. A contact with no part
+    needs its whole text. With `stated`, prices need a dollar sign; hours need a meridiem, a clock time or a range,
     never unrelated bare counts."""
     if not value:
         return True
@@ -1623,7 +1632,8 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
         if addresses or phones:
             owner_addresses, owner_phones = _contact_parts(owner_text)
             return addresses <= owner_addresses and all(
-                any(digits[-10:] in typed for typed in owner_phones) for digits in phones)
+                any(digits[-10:] in typed for typed in owner_phones) for digits in phones
+            ) and _contact_words(contact) <= set(re.findall(r"\w+", folded))
         return contact in folded
     if field == "price_items":
         sign = r"\$\s?" if stated else r"\$?"
