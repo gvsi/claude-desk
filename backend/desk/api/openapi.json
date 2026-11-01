@@ -3475,7 +3475,7 @@
     "/api/owner/setup/{id}/public_lines": {
       "get": {
         "summary": "Setup Public Lines",
-        "description": "Read the nonblank public charter lines in board order, with their provenance and editability.\nAllowed at `rules` or `situations`; 409 `conflict` at any other step or while a turn is pending.",
+        "description": "Read nonblank public lines in board order, hours and prices, with their provenance.\nAllowed at `rules` or `situations`; 409 `conflict` at any other step or while a turn is pending.",
         "operationId": "owner_setup_public_lines",
         "parameters": [
           {
@@ -3653,7 +3653,7 @@
     "/api/owner/setup/{id}/public_lines/confirm": {
       "post": {
         "summary": "Setup Confirm Public Lines",
-        "description": "Confirm all listed public lines without changing the setup step; publish before saving their provenance.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A refused charter is 422 `line_refused`, naming\nthe refused key and reason codes when available; a charter cap names no key. A failed save restores the stored\ncharter once, then answers 409. Blank lines and suggestions outside the listed lines remain unconfirmed.",
+        "description": "Confirm all listed public lines, hours and prices without changing the setup step; publish before saving.\nAllowed at `rules` or `situations`; 409 `conflict` otherwise. A refused charter is 422 `line_refused`, naming\nthe refused key and reason codes when available; a charter cap names no key. A failed save restores the stored\nparts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed.",
         "operationId": "owner_setup_confirm_public_lines",
         "parameters": [
           {
@@ -3731,6 +3731,104 @@
                     }
                   ],
                   "title": "Response 422 Owner Setup Confirm Public Lines"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/setup/{id}/public_lines/{key}": {
+      "delete": {
+        "summary": "Setup Delete Public Line",
+        "description": "Remove a suggested public item, publishing before saving. Owner items are 422 `not_suggested`;\n`policy:how_we_help` is 422 `not_editable`, and unknown keys are 422 `invalid`.\nAllowed at `rules` or `situations`, under the same turn guard, publication and repair as edits.",
+        "operationId": "owner_setup_delete_public_line",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPublicLines"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SetupPublicLineError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    }
+                  ],
+                  "title": "Response 422 Owner Setup Delete Public Line"
                 }
               }
             },
@@ -12856,6 +12954,31 @@
         "title": "SetupProposalIn",
         "description": "The owner's decision on a setup proposal, with optional changes when accepting it."
       },
+      "SetupPublicHours": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "suggested"
+            ],
+            "title": "Source"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/HoursWindow"
+            },
+            "type": "array",
+            "title": "Windows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "windows"
+        ],
+        "title": "SetupPublicHours"
+      },
       "SetupPublicLine": {
         "properties": {
           "key": {
@@ -12895,7 +13018,8 @@
             "type": "string",
             "enum": [
               "line_refused",
-              "not_editable"
+              "not_editable",
+              "not_suggested"
             ],
             "title": "Error"
           },
@@ -12960,11 +13084,33 @@
             },
             "type": "array",
             "title": "Lines"
+          },
+          "hours": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupPublicHours"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prices": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupPublicPrices"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
-          "lines"
+          "lines",
+          "hours",
+          "prices"
         ],
         "title": "SetupPublicLines"
       },
@@ -12973,6 +13119,49 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SetupPublicLinesConfirmIn"
+      },
+      "SetupPublicPriceItem": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "unit_cents": {
+            "type": "integer",
+            "title": "Unit Cents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "unit_cents"
+        ],
+        "title": "SetupPublicPriceItem"
+      },
+      "SetupPublicPrices": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "suggested"
+            ],
+            "title": "Source"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SetupPublicPriceItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "items"
+        ],
+        "title": "SetupPublicPrices"
       },
       "SetupStartIn": {
         "properties": {

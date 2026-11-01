@@ -232,9 +232,11 @@ from desk.api.schemas import (
     SafetyRow,
     SetupMessage,
     SetupProposalIn,
+    SetupPublicHours,
     SetupPublicLine,
     SetupPublicLineError,
     SetupPublicLines,
+    SetupPublicPrices,
     SetupStartIn,
     SetupState,
     SetupStep,
@@ -2638,12 +2640,21 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
     return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
-PUBLIC_LINE_FIELDS = ("summary", "pricing", "intake", "after_hours", "urgent", "service_area", "how_we_help")
+PUBLIC_LINE_KEYS = {
+    "summary": "policy:about",
+    "public_contact": "contact",
+    "pricing": "policy:pricing",
+    "intake": "policy:intake",
+    "after_hours": "policy:after_hours",
+    "urgent": "policy:urgent",
+    "service_area": "policy:service_area",
+    "how_we_help": "policy:how_we_help",
+}
 PUBLIC_CHARTER_REPAIR_TIMEOUT_S = DEFAULT_TIMEOUT_S
 
 
 class PublicLineProblem(Exception):
-    def __init__(self, error: Literal["line_refused", "not_editable"], *, key: str | None = None,
+    def __init__(self, error: Literal["line_refused", "not_editable", "not_suggested"], *, key: str | None = None,
                  reason: list[str] | None = None):
         super().__init__(error)
         self.answer = SetupPublicLineError(error=error, key=key, reason=reason)
@@ -2664,7 +2675,7 @@ def _line_refused(failure: KernelFailed, edited_key: str | None = None) -> Publi
     # Only known claim keys and machine reason codes leave this boundary; never claim text.
     detail = _public_refusal_detail(failure)
     if "charter" not in detail:
-        keys = [SETUP_POLICY_CLAIMS[field] for field in PUBLIC_LINE_FIELDS]
+        keys = list(PUBLIC_LINE_KEYS.values())
         if edited_key in keys:
             keys = [edited_key, *[key for key in keys if key != edited_key]]
         for key in keys:
@@ -2676,11 +2687,15 @@ def _line_refused(failure: KernelFailed, edited_key: str | None = None) -> Publi
 
 def _public_lines(answers: SetupAnswers) -> SetupPublicLines:
     return SetupPublicLines(lines=[
-        SetupPublicLine(key=SETUP_POLICY_CLAIMS[field], text=value.strip(),
+        SetupPublicLine(key=key, text=value.strip(),
                         source="suggested" if field in answers.suggested_fields else "owner",
                         editable=field != "how_we_help")
-        for field in PUBLIC_LINE_FIELDS if (value := getattr(answers, field)) and value.strip()
-    ])
+        for field, key in PUBLIC_LINE_KEYS.items() if (value := getattr(answers, field)) and value.strip()
+    ], hours=SetupPublicHours(source="suggested" if "hours" in answers.suggested_fields else "owner",
+                             windows=answers.hours) if answers.hours else None,
+       prices=SetupPublicPrices(source="suggested" if "price_items" in answers.suggested_fields else "owner",
+                                items=[item.model_dump() for item in answers.price_items])
+       if answers.price_items else None)
 
 
 async def _public_lines_interview(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Interview:
@@ -2697,17 +2712,17 @@ async def public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
         return _public_lines(interview.answers)
 
 
-async def _put_public_charter(owner: OwnerCtx, interview: Interview, now: datetime, *,
-                              edited_key: str | None = None) -> None:
+async def _put_public_parts(owner: OwnerCtx, interview: Interview, now: datetime, *,
+                           changed: frozenset[str], edited_key: str | None = None) -> None:
     timezone = (await _business(owner, interview.desk_id))["timezone"]
-    parts = seed_parts(interview.answers, timezone, business_type=interview.business_type,
+    parts = seed_parts(_published_answers(interview.answers), timezone, business_type=interview.business_type,
                        today=now.astimezone(ZoneInfo(timezone)).date())
     charter = parts.charter
     for attempt in range(2):
         try:
             await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter),
                                     path={"id": interview.desk_id})
-            return
+            break
         except KernelFailed as failure:
             if failure.status != 422:
                 raise
@@ -2718,6 +2733,29 @@ async def _put_public_charter(owner: OwnerCtx, interview: Interview, now: dateti
                 charter = [claim for claim in charter if claim.key != "policy:how_we_help"]
                 continue
             raise refused from None
+    path = {"id": interview.desk_id}
+    writes = []
+    if "hours" in changed:
+        writes.extend([
+            ("hours", "hours", DeskHoursRequest(hours=parts.hours)),
+            ("calendar", "hours", DeskCalendarRequest(calendar_slots=parts.calendar)),
+        ])
+    if "price_items" in changed:
+        writes.append(("prices", "prices", DeskPricesRequest(price_items=parts.prices)))
+    for part, key, body in writes:
+        try:
+            await owner.kernel.call(f"PUT /desks/{{id}}/{part}", body, path=path)
+        except KernelFailed as failure:
+            if failure.status != 422:
+                raise
+            logger.warning("setup public part refused (key=%s)", key)
+            raise PublicLineProblem("line_refused", key=key) from None
+
+
+def _published_answers(answers: SetupAnswers) -> SetupAnswers:
+    return answers.model_copy(update={
+        field: [] if field in ("hours", "price_items") else "" for field in answers.suggested_fields
+    })
 
 
 async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str, text: str,
@@ -2726,7 +2764,7 @@ async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         seen = _stored(interview)
-        fields = {claim: field for field, claim in SETUP_POLICY_CLAIMS.items()}
+        fields = {key: field for field, key in PUBLIC_LINE_KEYS.items()}
         if key not in fields:
             raise ApiProblem(422, "invalid")
         field = fields[key]
@@ -2742,13 +2780,38 @@ async def put_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
         return await _commit_public_lines(owner, engine, interview, seen, now, key=key)
 
 
+async def delete_public_line(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, key: str,
+                            now: datetime) -> SetupPublicLines:
+    await _read(engine, owner, interview_id)
+    with _turn(interview_id):
+        interview = await _public_lines_interview(owner, engine, interview_id)
+        seen = _stored(interview)
+        fields = {key: field for field, key in PUBLIC_LINE_KEYS.items()} | {"hours": "hours", "prices": "price_items"}
+        if key not in fields:
+            raise ApiProblem(422, "invalid")
+        field = fields[key]
+        if field == "how_we_help":
+            raise PublicLineProblem("not_editable", key=key)
+        if field not in interview.answers.suggested_fields:
+            raise PublicLineProblem("not_suggested", key=key)
+        interview.answers = interview.answers.model_copy(update={
+            field: [] if field in ("hours", "price_items") else "",
+            "suggested_fields": [name for name in interview.answers.suggested_fields if name != field],
+        })
+        return await _commit_public_lines(owner, engine, interview, seen, now, key=key)
+
+
 async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: Interview, seen: dict,
                                now: datetime, *, key: str | None = None) -> SetupPublicLines:
+    before = _published_answers(SetupAnswers.model_validate(seen["answers"]))
+    after = _published_answers(interview.answers)
+    changed = frozenset(field for field in ("hours", "price_items") if getattr(before, field) != getattr(after, field))
+
     async def repair() -> None:
         try:
             async with asyncio.timeout(PUBLIC_CHARTER_REPAIR_TIMEOUT_S):
                 stored = await _read(engine, owner, interview.interview_id)
-                await _put_public_charter(owner, stored, now, edited_key=key)
+                await _put_public_parts(owner, stored, now, changed=changed, edited_key=key)
         except Exception as restore_failed:
             logger.error("setup public charter restore failed (%s, key=%s)", type(restore_failed).__name__, key)
         else:
@@ -2756,9 +2819,14 @@ async def _commit_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview: 
 
     async def settle() -> SetupPublicLines:
         try:
-            await _put_public_charter(owner, interview, now, edited_key=key)
+            await _put_public_parts(owner, interview, now, changed=changed, edited_key=key)
         except KernelUnavailable:
             await repair()
+            raise
+        except PublicLineProblem as refused:
+            if refused.answer.key in ("hours", "prices"):
+                # The charter and earlier parts may already have been accepted.
+                await repair()
             raise
         try:
             await _commit(engine, owner, interview, seen)
@@ -2792,8 +2860,13 @@ async def confirm_public_lines(owner: OwnerCtx, engine: AsyncEngine, interview_i
     with _turn(interview_id):
         interview = await _public_lines_interview(owner, engine, interview_id)
         seen = _stored(interview)
-        listed = {line.key for line in _public_lines(interview.answers).lines}
-        confirmed = {field for field, key in SETUP_POLICY_CLAIMS.items() if key in listed}
+        public = _public_lines(interview.answers)
+        listed = {line.key for line in public.lines}
+        confirmed = {field for field, key in PUBLIC_LINE_KEYS.items() if key in listed}
+        if public.hours is not None:
+            confirmed.add("hours")
+        if public.prices is not None:
+            confirmed.add("price_items")
         interview.answers = interview.answers.model_copy(update={
             "suggested_fields": [field for field in interview.answers.suggested_fields if field not in confirmed],
         })

@@ -688,8 +688,25 @@ class SetupPublicLine(BaseModel):
     editable: bool
 
 
+class SetupPublicHours(BaseModel):
+    source: Literal["owner", "suggested"]
+    windows: list[HoursWindow]
+
+
+class SetupPublicPriceItem(BaseModel):
+    title: str
+    unit_cents: int
+
+
+class SetupPublicPrices(BaseModel):
+    source: Literal["owner", "suggested"]
+    items: list[SetupPublicPriceItem]
+
+
 class SetupPublicLines(BaseModel):
     lines: list[SetupPublicLine]
+    hours: SetupPublicHours | None
+    prices: SetupPublicPrices | None
 
 
 class SetupPublicLineIn(BaseModel):
@@ -700,7 +717,7 @@ class SetupPublicLineIn(BaseModel):
 
 
 class SetupPublicLineError(BaseModel):
-    error: Literal["line_refused", "not_editable"]
+    error: Literal["line_refused", "not_editable", "not_suggested"]
     key: str | None = None
     reason: list[str] | None = None
 

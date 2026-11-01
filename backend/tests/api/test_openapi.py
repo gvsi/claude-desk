@@ -19,7 +19,8 @@ OWN_ERROR_BODIES = {("system_health", "503"): ("HealthOut",),
                     **{(operation, "422"): ("ChangesAlwaysOn", "ApiError")
                        for operation in ("owner_draft_money_cap", "owner_setup_rules", "owner_setup_confirm")},
                     **{(operation, "422"): ("SetupPublicLineError", "ApiError")
-                       for operation in ("owner_setup_put_public_line", "owner_setup_confirm_public_lines")},
+                       for operation in ("owner_setup_put_public_line", "owner_setup_confirm_public_lines",
+                                         "owner_setup_delete_public_line")},
                     ("proxy_complete_payment", "409"): ("PaymentConflict",),
                     ("proxy_cancel_payment", "409"): ("PaymentConflict",),
                     # every A2A answer says it comes from an AI, its errors included
@@ -148,11 +149,12 @@ def test_a2a_request_body_is_documented():
 
 # Path parameters are named after their resource, `id` for a setup interview (master plan, "Shared seams").
 PATH_PARAMETERS = {"desk_id", "session_id", "decision_id", "handoff_id", "slug", "token", "version", "run_id", "tool",
-                   "id", "proposal_id"}
+                   "id", "proposal_id", "key"}
 SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
                "/api/owner/setup/{id}/tools", "/api/owner/setup/{id}/tools/connect",
                "/api/owner/setup/{id}/proposals/{proposal_id}", "/api/owner/setup/{id}/suggestions",
                "/api/owner/setup/{id}/public_lines", "/api/owner/setup/{id}/public_lines/confirm",
+               "/api/owner/setup/{id}/public_lines/{key}",
                *(f"/api/owner/policy/setup/{{id}}/{step}"
                  for step in ("rules", "situations", "safety_check", "confirm", "go_live"))}
 

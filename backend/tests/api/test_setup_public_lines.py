@@ -30,7 +30,8 @@ async def lines_setup(app, browser, kernel_http, model, engine):
         await conn.execute(sql("UPDATE app.setup_interviews SET step = 'rules', answers = CAST(:answers AS jsonb)"
                                " WHERE interview_id = :id"),
                            {"answers": json.dumps(answers), "id": state["interview_id"]})
-    parts = setup.seed_parts(SetupAnswers(**answers), "America/Los_Angeles", business_type="trade",
+    # Start from the publication hold that the incoming setup seeding change also enforces.
+    parts = setup.seed_parts(SetupAnswers(**{**answers, "public_contact": ""}), "America/Los_Angeles", business_type="trade",
                              today=date(2026, 10, 31))
     await kernel_http.owner(owner.token).call("PUT /desks/{id}/charter", DeskCharterRequest(charter=parts.charter),
                                              path={"id": state["desk_id"]})
@@ -48,12 +49,296 @@ async def test_get_lists_nonblank_lines_in_board_order(lines_setup, engine):
     assert reply.status_code == 200, reply.text
     assert reply.json() == {"lines": [
         {"key": "policy:about", "text": "Local plumbing help.", "source": "owner", "editable": True},
+        {"key": "contact", "text": "hello@example.test", "source": "suggested", "editable": True},
         {"key": "policy:pricing", "text": "Written quotes before work.", "source": "suggested", "editable": True},
         {"key": "policy:intake", "text": "Tell us what needs fixing.", "source": "suggested", "editable": True},
         {"key": "policy:service_area", "text": "Oakland and Berkeley.", "source": "owner", "editable": True},
         {"key": "policy:how_we_help", "text": "We answer questions.", "source": "owner", "editable": False},
-    ]}
+    ], "hours": None, "prices": None}
     assert await stored(engine, state["interview_id"]) == before
+
+
+async def patch_answers(engine, state, **patch):
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET answers = answers || CAST(:patch AS jsonb)"
+                               " WHERE interview_id = :id"),
+                           {"patch": json.dumps(patch), "id": state["interview_id"]})
+
+
+HOURS = [{"days": ["mon", "tue"], "start": "09:00:00", "end": "17:00:00"}]
+PRICES = [{"title": "Visit", "unit_cents": 12500}]
+
+
+@pytest.mark.parametrize("suggested", [True, False])
+async def test_get_lists_hours_and_prices_with_source(lines_setup, engine, suggested):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES,
+                        suggested_fields=["hours", "price_items"] if suggested else [])
+    reply = await owner.browser.get(path)
+    assert reply.status_code == 200, reply.text
+    source = "suggested" if suggested else "owner"
+    assert reply.json()["hours"] == {"source": source, "windows": HOURS}
+    assert reply.json()["prices"] == {"source": source, "items": PRICES}
+    assert reply.json()["lines"][1] == {
+        "key": "contact", "text": "hello@example.test", "source": "owner", "editable": True}
+
+
+def received_parts(monkeypatch):
+    calls = []
+    original = KernelHttp._send
+
+    async def record(self, route, request, **kwargs):
+        reply = await original(self, route, request, **kwargs)
+        if route.startswith("PUT /desks/{id}/"):
+            calls.append((route.rsplit("/", 1)[1], json.loads(request.content)))
+        return reply
+
+    monkeypatch.setattr(KernelHttp, "_send", record)
+    return calls
+
+
+async def test_other_line_edit_holds_all_unconfirmed_suggestions(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    suggested = ["public_contact", "hours", "price_items", "service_area", "after_hours", "pricing"]
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES, suggested_fields=suggested)
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.put(path, json={"key": "policy:intake", "text": "Describe the problem."})
+    assert reply.status_code == 200, reply.text
+    assert [part for part, _ in calls] == ["charter"]
+    claims = {claim["key"]: claim["value"] for claim in calls[0][1]["charter"]}
+    assert claims == {"policy:about": "Local plumbing help.", "policy:intake": "Describe the problem.",
+                      "policy:urgent": "Call the emergency services.", "policy:how_we_help": "We answer questions."}
+    assert "charter:contact" not in charter(fake, state["desk_id"])
+    assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == suggested
+
+
+async def test_confirm_publishes_suggested_contact_hours_calendar_and_prices(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", json={})
+    assert reply.status_code == 200, reply.text
+    assert [part for part, _ in calls] == ["charter", "hours", "calendar", "prices"]
+    parts = dict(calls)
+    assert {claim["key"]: claim["value"] for claim in parts["charter"]["charter"]}["contact"] == "hello@example.test"
+    assert parts["hours"] == {"hours": HOURS}
+    expected = setup.seed_parts(SetupAnswers(summary="Local plumbing help.", hours=HOURS, price_items=PRICES), "America/Los_Angeles",
+                                business_type="trade", today=date(2026, 10, 31))
+    assert parts["calendar"] == {"calendar_slots": [slot.model_dump(mode="json") for slot in expected.calendar]}
+    assert parts["prices"] == {"price_items": [{"item_id": "visit", **PRICES[0]}]}
+    assert fake.desks[state["desk_id"]].hours == expected.hours
+    assert list(fake.desks[state["desk_id"]].prices.values()) == expected.prices
+    assert reply.json()["hours"]["source"] == reply.json()["prices"]["source"] == "owner"
+    assert all(line["source"] == "owner" for line in reply.json()["lines"])
+    assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == []
+    calls.clear()
+    again = await owner.browser.post(f"{path}/confirm", json={})
+    assert again.status_code == 200, again.text
+    assert [part for part, _ in calls] == ["charter"]
+
+
+@pytest.mark.parametrize(("suggested", "parts"), [
+    (["hours"], ["charter", "hours", "calendar"]), (["price_items"], ["charter", "prices"]),
+])
+async def test_confirm_publishes_only_changed_fact_parts(lines_setup, engine, monkeypatch, suggested, parts):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES, suggested_fields=suggested)
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.post(f"{path}/confirm", json={})
+    assert reply.status_code == 200, reply.text
+    assert [part for part, _ in calls] == parts
+    assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == []
+
+
+async def test_delete_suggested_prices_clears_answers_without_publishing_them(lines_setup, engine, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/prices")
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["prices"] is None
+    assert reply.json()["hours"] == {"source": "suggested", "windows": HOURS}
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert answers["price_items"] == []
+    assert "price_items" not in answers["suggested_fields"]
+    assert [part for part, _ in calls] == ["charter"]
+    assert "contact" not in {claim["key"] for claim in calls[0][1]["charter"]}
+
+
+async def test_contact_edit_confirms_and_publishes_with_a_200_character_limit(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    too_long = await owner.browser.put(path, json={"key": "contact", "text": "a" * 201})
+    assert too_long.status_code == 422, too_long.text
+    assert too_long.json() == {"error": "invalid"}
+    assert calls == []
+    assert await stored(engine, state["interview_id"]) == before
+    blank = await owner.browser.put(path, json={"key": "contact", "text": " \n\t "})
+    assert blank.status_code == 422, blank.text
+    assert calls == []
+    text = "a" * 200
+    reply = await owner.browser.put(path, json={"key": "contact", "text": f"  {text}  "})
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["lines"][1] == {"key": "contact", "text": text, "source": "owner", "editable": True}
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert answers["public_contact"] == text
+    assert "public_contact" not in answers["suggested_fields"]
+    assert [part for part, _ in calls] == ["charter"]
+    assert {claim["key"]: claim["value"] for claim in calls[0][1]["charter"]}["contact"] == text
+    assert charter(fake, state["desk_id"])["charter:contact"]["claims"][0]["value"] == text
+
+
+@pytest.mark.parametrize(("part", "key"), [("hours", "hours"), ("calendar", "hours"), ("prices", "prices")])
+async def test_part_refusal_names_item_and_repairs_all_changed_parts(lines_setup, engine, fake, monkeypatch, part, key):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    before = await stored(engine, state["interview_id"])
+    calls = []
+    original = KernelHttp._send
+    refused = False
+
+    async def refuse_once(self, route, request, **kwargs):
+        nonlocal refused
+        if route.startswith("PUT /desks/{id}/"):
+            calls.append((route.rsplit("/", 1)[1], json.loads(request.content)))
+            if route == f"PUT /desks/{{id}}/{part}" and not refused:
+                refused = True
+                return httpx.Response(422, json={"code": "invalid"})
+        return await original(self, route, request, **kwargs)
+
+    monkeypatch.setattr(KernelHttp, "_send", refuse_once)
+    reply = await owner.browser.post(f"{path}/confirm", json={})
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "line_refused", "key": key}
+    assert await stored(engine, state["interview_id"]) == before
+    assert [part for part, _ in calls[-4:]] == ["charter", "hours", "calendar", "prices"]
+    restored = dict(calls[-4:])
+    assert "contact" not in {claim["key"] for claim in restored["charter"]["charter"]}
+    assert restored["hours"] == {"hours": []}
+    assert restored["calendar"] == {"calendar_slots": []}
+    assert restored["prices"] == {"price_items": []}
+    desk = fake.desks[state["desk_id"]]
+    assert desk.hours == [] and desk.slots == {} and desk.prices == {}
+    assert "charter:contact" not in charter(fake, state["desk_id"])
+
+
+@pytest.mark.parametrize(("key", "error"), [
+    ("contact", "not_suggested"), ("hours", "not_suggested"), ("prices", "not_suggested"),
+    ("policy:about", "not_suggested"), ("policy:how_we_help", "not_editable"), ("unknown", "invalid"),
+])
+async def test_delete_rejects_owner_readonly_and_unknown_items(lines_setup, engine, monkeypatch, key, error):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, suggested_fields=["how_we_help"])
+    before = await stored(engine, state["interview_id"])
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/{key}")
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == ({"error": error} if error == "invalid" else {"error": error, "key": key})
+    assert await stored(engine, state["interview_id"]) == before
+    assert calls == []
+
+
+@pytest.mark.parametrize(("key", "field", "empty"), [
+    ("contact", "public_contact", ""), ("hours", "hours", []), ("policy:pricing", "pricing", ""),
+])
+async def test_delete_clears_other_suggested_items(lines_setup, engine, monkeypatch, key, field, empty):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS)
+    calls = received_parts(monkeypatch)
+    reply = await owner.browser.delete(f"{path}/{key}")
+    assert reply.status_code == 200, reply.text
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert answers[field] == empty
+    assert field not in answers["suggested_fields"]
+    assert key not in {line["key"] for line in reply.json()["lines"]}
+    if key == "hours":
+        assert reply.json()["hours"] is None
+    assert [part for part, _ in calls] == ["charter"]
+    assert "contact" not in {claim["key"] for claim in calls[0][1]["charter"]}
+
+
+async def test_contact_refusal_names_contact_without_saving(lines_setup, engine, fake, monkeypatch, caplog):
+    owner, state, path = lines_setup
+    before = await stored(engine, state["interview_id"])
+    published = charter(fake, state["desk_id"])
+    refuse_charter(monkeypatch, {"contact": ["lex.en.promise"]})
+    reply = await owner.browser.put(path, json={"key": "contact", "text": "Private contact marker."})
+    assert reply.status_code == 422, reply.text
+    assert reply.json() == {"error": "line_refused", "key": "contact", "reason": ["lex.en.promise"]}
+    assert await stored(engine, state["interview_id"]) == before
+    assert charter(fake, state["desk_id"]) == published
+    assert_charter_logs(caplog, "setup public charter refused (key=contact)")
+    assert "Private contact marker" not in caplog.text
+
+
+async def test_confirm_save_conflict_repairs_same_parts_from_current_answers(lines_setup, engine, fake, monkeypatch):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    calls = []
+    original = KernelHttp._send
+    current_hours = [{"days": ["fri"], "start": "10:00:00", "end": "11:00:00"}]
+    current_prices = [{"title": "Consultation", "unit_cents": 2000}]
+
+    async def competing_save(self, route, request, **kwargs):
+        reply = await original(self, route, request, **kwargs)
+        if route.startswith("PUT /desks/{id}/"):
+            calls.append((route.rsplit("/", 1)[1], json.loads(request.content)))
+            if len(calls) == 4:
+                await patch_answers(engine, state, hours=current_hours, price_items=current_prices,
+                                    public_contact="owner@example.test", suggested_fields=[])
+        return reply
+
+    monkeypatch.setattr(KernelHttp, "_send", competing_save)
+    reply = await owner.browser.post(f"{path}/confirm", json={})
+    assert reply.status_code == 409, reply.text
+    assert [part for part, _ in calls] == ["charter", "hours", "calendar", "prices"] * 2
+    restored = dict(calls[-4:])
+    assert restored["hours"] == {"hours": current_hours}
+    assert restored["prices"] == {"price_items": [{"item_id": "consultation", **current_prices[0]}]}
+    assert {claim["key"]: claim["value"] for claim in restored["charter"]["charter"]}["contact"] == "owner@example.test"
+    expected_calendar = setup.calendar_slots(SetupAnswers(summary="", hours=current_hours).hours,
+                                              "America/Los_Angeles", date(2026, 10, 31))
+    assert restored["calendar"] == {"calendar_slots": [slot.model_dump(mode="json") for slot in expected_calendar]}
+    assert fake.desks[state["desk_id"]].hours == SetupAnswers(summary="", hours=current_hours).hours
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert answers["public_contact"] == "owner@example.test"
+    assert answers["price_items"] == current_prices
+
+
+@pytest.mark.parametrize("part", ["hours", "calendar", "prices"])
+async def test_lost_part_response_repairs_same_parts_under_guard(lines_setup, engine, fake, monkeypatch, part):
+    owner, state, path = lines_setup
+    await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
+    before = await stored(engine, state["interview_id"])
+    calls = []
+    original = CredentialView.call
+    lost = False
+
+    async def lose_response(self, route, body=None, **kwargs):
+        nonlocal lost
+        result = await original(self, route, body, **kwargs)
+        if route.startswith("PUT /desks/{id}/"):
+            calls.append((route.rsplit("/", 1)[1], body.model_dump(mode="json")))
+            assert state["interview_id"] in setup._RUNNING
+            if route == f"PUT /desks/{{id}}/{part}" and not lost:
+                lost = True
+                raise KernelUnavailable(route)
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", lose_response)
+    reply = await owner.browser.post(f"{path}/confirm", json={})
+    assert reply.status_code == 503, reply.text
+    assert await stored(engine, state["interview_id"]) == before
+    assert [part for part, _ in calls[-4:]] == ["charter", "hours", "calendar", "prices"]
+    restored = dict(calls[-4:])
+    assert restored["hours"] == {"hours": []}
+    assert restored["calendar"] == {"calendar_slots": []}
+    assert restored["prices"] == {"price_items": []}
+    assert "contact" not in {claim["key"] for claim in restored["charter"]["charter"]}
+    desk = fake.desks[state["desk_id"]]
+    assert desk.hours == [] and desk.slots == {} and desk.prices == {}
+    assert (await owner.browser.get(path)).status_code == 200
 
 
 def charter(fake, desk_id):
@@ -151,20 +436,23 @@ async def test_cancel_during_save_settles_before_releasing_guard(lines_setup, en
     assert (await owner.browser.get(path)).status_code == 200
 
 
-async def test_cancel_during_put_settles_before_releasing_guard(lines_setup, engine, fake, monkeypatch):
+@pytest.mark.parametrize("part", ["charter", "hours", "calendar", "prices"])
+async def test_cancel_during_put_settles_before_releasing_guard(lines_setup, engine, fake, monkeypatch, part):
     owner, state, path = lines_setup
+    if part != "charter":
+        await patch_answers(engine, state, hours=HOURS, price_items=PRICES)
     entered, release = asyncio.Event(), asyncio.Event()
     original = CredentialView.call
 
     async def pause_put(self, route, body=None, **kwargs):
         result = await original(self, route, body, **kwargs)
-        if route == "PUT /desks/{id}/charter":
+        if route == f"PUT /desks/{{id}}/{part}":
             entered.set()
             await release.wait()
         return result
 
     monkeypatch.setattr(CredentialView, "call", pause_put)
-    request = asyncio.create_task(request_lines(owner.browser, path, "put"))
+    request = asyncio.create_task(request_lines(owner.browser, path, "put" if part == "charter" else "confirm"))
     try:
         await asyncio.wait_for(entered.wait(), 2)
         request.cancel()
@@ -175,8 +463,14 @@ async def test_cancel_during_put_settles_before_releasing_guard(lines_setup, eng
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await request
-    assert (await stored(engine, state["interview_id"]))["answers"]["pricing"] == "Quotes before repairs."
-    assert charter(fake, state["desk_id"])["charter:policy:pricing"]["claims"][0]["value"] == "Quotes before repairs."
+    pricing = "Quotes before repairs." if part == "charter" else "Written quotes before work."
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert answers["pricing"] == pricing
+    assert charter(fake, state["desk_id"])["charter:policy:pricing"]["claims"][0]["value"] == pricing
+    if part != "charter":
+        assert answers["suggested_fields"] == []
+        assert fake.desks[state["desk_id"]].hours == SetupAnswers(summary="", hours=HOURS).hours
+        assert [item.title for item in fake.desks[state["desk_id"]].prices.values()] == ["Visit"]
     assert (await owner.browser.get(path)).status_code == 200
 
 
@@ -199,8 +493,7 @@ async def test_put_saves_owner_text_and_publishes_whole_charter(lines_setup, eng
     assert saved["step"] == "rules"
     assert saved["answers"]["pricing"] == "Quotes before repairs."
     assert saved["answers"]["suggested_fields"] == ["intake", "hours", "price_items", "public_contact"]
-    # Publishing a suggested contact is the known gap tracked by #394; board 14's next step covers it.
-    expected = {"contact": "hello@example.test", "policy:about": "Local plumbing help.",
+    expected = {"policy:about": "Local plumbing help.",
                 "policy:pricing": "Quotes before repairs.", "policy:after_hours": "Leave a message.",
                 "policy:urgent": "Call the emergency services.", "policy:service_area": "Oakland and Berkeley.",
                 "policy:how_we_help": "We answer questions."}
@@ -210,10 +503,10 @@ async def test_put_saves_owner_text_and_publishes_whole_charter(lines_setup, eng
             for fact_id, fact in charter(fake, state["desk_id"]).items() if fact_id != "charter:hours"} == expected
     assert charter(fake, state["desk_id"])["charter:hours"] == hours_before
     assert [line["key"] for line in reply.json()["lines"]] == [
-        "policy:about", "policy:pricing", "policy:intake", "policy:after_hours", "policy:urgent",
+        "policy:about", "contact", "policy:pricing", "policy:intake", "policy:after_hours", "policy:urgent",
         "policy:service_area", "policy:how_we_help",
     ]
-    assert reply.json()["lines"][1] == {"key": "policy:pricing", "text": "Quotes before repairs.",
+    assert reply.json()["lines"][2] == {"key": "policy:pricing", "text": "Quotes before repairs.",
                                         "source": "owner", "editable": True}
 
 
@@ -429,7 +722,7 @@ async def test_confirm_owns_only_listed_lines_and_publishes(lines_setup, engine,
     assert all(line["source"] == "owner" for line in reply.json()["lines"])
     assert "policy:intake" not in {line["key"] for line in reply.json()["lines"]}
     assert (await stored(engine, state["interview_id"]))["answers"]["suggested_fields"] == [
-        "intake", "hours", "price_items", "public_contact"]
+        "intake", "hours", "price_items"]
     assert (await stored(engine, state["interview_id"]))["step"] == "rules"
     assert {fact_id.removeprefix("charter:") for fact_id in charter(fake, state["desk_id"])} == {
         "hours", "contact", "policy:about", "policy:pricing", "policy:after_hours", "policy:urgent",
@@ -441,11 +734,13 @@ async def request_lines(client, path, method):
         return await client.get(path)
     if method == "put":
         return await client.put(path, json={"key": "policy:pricing", "text": "Quotes before repairs."})
+    if method == "delete":
+        return await client.delete(f"{path}/policy:pricing")
     return await client.post(f"{path}/confirm", json={})
 
 
 @pytest.mark.parametrize("step", ["questions", "tools", "rules", "situations", "safety_check", "preview", "live"])
-@pytest.mark.parametrize("method", ["get", "put", "confirm"])
+@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete"])
 async def test_public_lines_only_at_rules_or_situations(lines_setup, engine, fake, step, method):
     owner, state, path = lines_setup
     async with engine.begin() as conn:
@@ -526,7 +821,7 @@ async def test_failed_restore_is_logged_once_and_answers_conflict(lines_setup, e
 
 
 @pytest.mark.parametrize(("key", "text"), [
-    ("policy:unknown", "Text"), ("contact", "Text"), ("policy:about", " \n\t "),
+    ("policy:unknown", "Text"), ("contact", "a" * 201), ("policy:about", " \n\t "),
     ("policy:about", "a" * 1501), ("policy:pricing", "a" * 501), ("policy:intake", "a" * 501),
     ("policy:after_hours", "a" * 501), ("policy:urgent", "a" * 501), ("policy:service_area", "a" * 501),
 ], ids=["unknown", "contact", "blank", "about-long", "pricing-long", "intake-long", "after-hours-long",
@@ -549,7 +844,7 @@ async def test_invalid_edits_publish_and_save_nothing(lines_setup, engine, fake,
     assert charter(fake, state["desk_id"]) == published
 
 
-@pytest.mark.parametrize("method", ["get", "put", "confirm"])
+@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete"])
 async def test_another_owners_interview_is_not_found(lines_setup, app, browser, kernel_http, engine, fake, method):
     _, state, path = lines_setup
     other = await new_owner(app, browser, kernel_http)
@@ -562,7 +857,7 @@ async def test_another_owners_interview_is_not_found(lines_setup, app, browser, 
     assert charter(fake, state["desk_id"]) == published
 
 
-@pytest.mark.parametrize("method", ["get", "put", "confirm"])
+@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete"])
 async def test_another_owners_busy_interview_is_not_found(lines_setup, app, browser, kernel_http, engine, fake, method):
     _, state, path = lines_setup
     other = await new_owner(app, browser, kernel_http)
@@ -576,7 +871,7 @@ async def test_another_owners_busy_interview_is_not_found(lines_setup, app, brow
     assert charter(fake, state["desk_id"]) == published
 
 
-@pytest.mark.parametrize("method", ["get", "put", "confirm"])
+@pytest.mark.parametrize("method", ["get", "put", "confirm", "delete"])
 async def test_public_lines_share_the_interview_guard(lines_setup, engine, fake, method):
     owner, state, path = lines_setup
     before = await stored(engine, state["interview_id"])

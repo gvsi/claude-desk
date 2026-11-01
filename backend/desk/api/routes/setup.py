@@ -218,7 +218,7 @@ async def setup_connect_tools(interview_id: InterviewId, request: Request,
             responses=error_responses(401, 404, 409, 422, 503))
 async def setup_public_lines(interview_id: InterviewId, request: Request,
                              ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupPublicLines:
-    """Read the nonblank public charter lines in board order, with their provenance and editability.
+    """Read nonblank public lines in board order, hours and prices, with their provenance.
     Allowed at `rules` or `situations`; 409 `conflict` at any other step or while a turn is pending."""
     return await setup.public_lines(ctx, runtime(request).started().database(), interview_id)
 
@@ -249,12 +249,24 @@ async def _public_lines_answer(work: Awaitable[SetupPublicLines]) -> SetupPublic
                         422: {"model": SetupPublicLineError | ApiError}})
 async def setup_confirm_public_lines(interview_id: InterviewId, body: SetupPublicLinesConfirmIn, request: Request,
                                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
-    """Confirm all listed public lines without changing the setup step; publish before saving their provenance.
+    """Confirm all listed public lines, hours and prices without changing the setup step; publish before saving.
     Allowed at `rules` or `situations`; 409 `conflict` otherwise. A refused charter is 422 `line_refused`, naming
     the refused key and reason codes when available; a charter cap names no key. A failed save restores the stored
-    charter once, then answers 409. Blank lines and suggestions outside the listed lines remain unconfirmed."""
+    parts once, then answers 409. Blank lines and empty hours or prices remain unconfirmed."""
     state = runtime(request).started()
     return await _public_lines_answer(setup.confirm_public_lines(ctx, state.database(), interview_id, state.clock()))
+
+
+@router.delete("/{id}/public_lines/{key}", response_model=SetupPublicLines,
+               responses={**error_responses(401, 404, 409, 422, 503),
+                          422: {"model": SetupPublicLineError | ApiError}})
+async def setup_delete_public_line(interview_id: InterviewId, key: str, request: Request,
+                                   ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Remove a suggested public item, publishing before saving. Owner items are 422 `not_suggested`;
+    `policy:how_we_help` is 422 `not_editable`, and unknown keys are 422 `invalid`.
+    Allowed at `rules` or `situations`, under the same turn guard, publication and repair as edits."""
+    state = runtime(request).started()
+    return await _public_lines_answer(setup.delete_public_line(ctx, state.database(), interview_id, key, state.clock()))
 
 
 # The proving routes ----------------------------------------------------------------------------------------------
