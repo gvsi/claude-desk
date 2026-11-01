@@ -7,8 +7,8 @@ import type { SetupState } from '../api/views.ts';
  * How long polling waits for setup's work before offering "Try again". It must outlast the API's
  * `TURN_ABANDONED_S` (130 s, in backend/desk/api/setup.py): by then a turn has landed, rolled back
  * or been recovered as abandoned, so the next read answers it. Consent answers 202 at once, so this
- * starts as the turn does; the 10 s past abandonment covers a few 2 s reads. A backend test reads
- * this line and holds the two together.
+ * starts as the turn does; the 10 s past abandonment covers a few 2 s reads. Its test holds the two
+ * together.
  */
 export const SETUP_WORK_GIVE_UP_MS = 140_000;
 

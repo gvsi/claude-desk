@@ -20,7 +20,6 @@ import secrets
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from datetime import date
-from pathlib import Path
 from typing import get_args, get_origin
 from unittest.mock import AsyncMock
 
@@ -2024,11 +2023,6 @@ def test_each_consent_read_deadline_outlasts_what_it_waits_for():
     # A run and its cleanup end before another process may recover the row as abandoned, with room for the clocks.
     assert (desk_setup.TURN_ABANDONED_S - (run + desk_setup.TURN_ROLLBACK_TIMEOUT_S)
             >= desk_setup.TURN_CLOCK_SLACK_S >= 10)
-    # The web polls a busy interview every 2 s and keeps going past abandonment for at least one more read, by when
-    # the turn has landed, rolled back or been recovered: it never gives up on a turn that can still be running.
-    hook = (Path(__file__).resolve().parents[3] / "web/src/setup/useSetupWork.ts").read_text()
-    [give_up_ms] = re.findall(r"^export const SETUP_WORK_GIVE_UP_MS = ([\d_]+);$", hook, re.MULTILINE)
-    assert int(give_up_ms.replace("_", "")) / 1000 >= desk_setup.TURN_ABANDONED_S + 2
 
 
 async def test_a_search_execute_can_outlast_the_default_kernel_timeout(

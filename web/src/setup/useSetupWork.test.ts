@@ -62,7 +62,9 @@ it('polls_busy_questions_every_two_seconds_and_stops_when_the_question_lands', a
 });
 
 it('gives_up_only_after_a_turn_can_no_longer_be_running_including_failed_reads_and_retry_reads_before_a_fresh_wait', async () => {
-  // Past the API's `TURN_ABANDONED_S` (130 s), when a busy interview is landed, rolled back or recovered.
+  // At least one 2 s poll past the API's `TURN_ABANDONED_S` (130 s, backend/desk/api/setup.py), by when a busy
+  // interview has landed, rolled back or been recovered: polling never gives up on a turn that can still be running.
+  expect(SETUP_WORK_GIVE_UP_MS).toBeGreaterThanOrEqual((130 + 2) * 1000);
   expect(SETUP_WORK_GIVE_UP_MS).toBe(140_000);
   const polls = SETUP_WORK_GIVE_UP_MS / 2000 - 1;   // the deadline wins over the tick at the limit itself
   show(busy);
