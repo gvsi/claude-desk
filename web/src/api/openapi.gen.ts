@@ -350,6 +350,7 @@ export interface ConversationSummary {
   owner_preview: boolean;
   latest_visitor_text: string | null;
   latest_outcome: ("visit_booked" | "deposit_paid" | "turned_down") | null;
+  replayed?: boolean;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -547,6 +548,7 @@ export interface Lead {
   display_name: string | null;
   note: string | null;
   created_at: string;
+  replayed?: boolean;
 }
 /**
  * 202: the visitor's message is stored; Claude's answer arrives on the event stream.
@@ -615,6 +617,7 @@ export interface OwnerTranscript {
   state: SessionState;
   items: OwnerTranscriptItem[];
   typing_until: string | null;
+  replayed?: boolean;
 }
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each

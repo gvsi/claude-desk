@@ -10,13 +10,14 @@
 ## What the consumer provides
 
 - `name`: `business_name`; `url`: the Desk's public link as people type it ("desk.example/rivera"); `ownerName`: `owner_display_name`. All three are shown as written, each marked as user text (`data-copy="user"`) inside the card's own words. The owner's name sits inside a sentence, so it is isolated too (`<bdi data-copy="user">`): a direction mark in it can't reorder the words after it.
-- `qr`: the QR code for the link, which the web app draws (`QrCode`, plan 04). It fills a 152 px square, centered. The card never makes, fetches or checks a code. A QR code needs its own light quiet zone to scan, which the web app's code draws, so that ground stays inside the code. It is one of the product's three light surfaces, with the intro illustration's cards and the white tile of the About pages' app icon.
+- `qr`: the QR code for the link, which the web app draws (`QrCode`, plan 04) in `SHARE_CARD_QR_COLORS`: `qr-ink` modules on the tile's own `qr-tile` sand, which is the code's light quiet zone, one module wide. It fills the 128 px inside the card's tile. The card never makes, fetches or checks a code. The sand tile is one of the product's three light surfaces, with the intro illustration's cards and the white tile of the About pages' app icon.
 - `language`: the language the card is printed in.
 - `onPrint` to show "Print card" under the card. The screen prints; nothing here does.
 
 ## What it shows
 
-- A card 300 px wide (at most its column), in the card look (`fill-card`, a `line-card` border at `radius-card`), padded 20 px, everything centered and 12 px apart: the name in `section` type, the QR code's square, the link in `control` type, and who answers in `meta`, `text-secondary`.
+- A card 300 px wide (at most its column), in the card look (`fill-card`, a `line-card` border at `radius-card`), padded 20 px, everything centered and 12 px apart: the name in `section` type, the QR code's sand tile, the link in `control` type, and who answers in `meta`, `text-secondary`.
+- The QR code's tile, as N-Live-REV-QR-B draws it: 152 px square, padded 12 px, at `radius-card`, in `qr-tile` with an inset 1 px `qr-hairline` edge. It prints the same, its colors exact.
 - Who answers is the AI disclosure, which every printed card carries and which can't be left off: "Answered by Claude, an AI. Ask for {owner} any time." / "Responde Claude, una IA. Puedes pedir hablar con {owner} cuando quieras."
 - "Print card", a secondary `main` button, 12 px under the card at its left, when `onPrint` is given. Its words are the owner's, in English.
 - On a phone (below 768 px of window width) the card takes the whole column and Print card sits centered under it, as N-Run2-Share-Phone draws them.

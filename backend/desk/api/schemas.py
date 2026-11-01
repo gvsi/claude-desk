@@ -429,6 +429,7 @@ class ConversationSummary(BaseModel):
     owner_preview: bool
     latest_visitor_text: str | None
     latest_outcome: Literal["visit_booked", "deposit_paid", "turned_down"] | None
+    replayed: bool = False                  # recorded history written into the copy (`owner_reads.history_sessions`)
 
 
 class OwnerTranscript(BaseModel):
@@ -440,6 +441,7 @@ class OwnerTranscript(BaseModel):
     state: SessionState
     items: list[OwnerTranscriptItem]
     typing_until: AwareDatetime | None
+    replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
 
 
 # The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------
@@ -952,6 +954,7 @@ class Lead(BaseModel):
     display_name: str | None
     note: str | None
     created_at: AwareDatetime
+    replayed: bool = False                  # recorded history: left in a session written into the copy, not a live one
 
 
 class PeopleOut(BaseModel):

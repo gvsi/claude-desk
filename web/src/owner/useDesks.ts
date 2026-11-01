@@ -294,10 +294,8 @@ export function lastOrFirst(desks: readonly { desk_id: string }[]): string | nul
   return desks[0]?.desk_id ?? null;
 }
 
-/** The first word of the owner's name, as the API writes `Today.greeting_name`. */
-export function firstName(displayName: string): string {
-  return displayName.trim().split(/\s+/)[0] ?? displayName;
-}
+/** The first word of the owner's name (`lib/names.ts`), here too for the owner's screens. */
+export { firstName } from '../lib/names.ts';
 
 /** Held requests in `items`, oldest first by when they were held, whatever order the answer lists them in. */
 export function heldOldestFirst(items: readonly NeedsYouItem[]): Extract<NeedsYouItem, { decision: object }>[] {
