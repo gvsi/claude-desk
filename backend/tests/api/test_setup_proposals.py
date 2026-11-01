@@ -1597,6 +1597,32 @@ async def test_disabling_business_tools_clears_hidden_plan_configs_before_a_late
     assert all(card['job']['config'] is None for card in shown(reply) if card['job'])
 
 
+async def test_disabling_tools_declines_an_already_accepted_payment(proposals, app, model, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    await show_card(engine, interview_id, ids[1])
+    response = await owner.browser.post(path + f"/proposals/{ids[1]}?cards=1",
+                                        json={"accept": True, "amount_cents": 100})
+    payment = next(card for card in shown(response) if card["proposal_id"] == ids[1])
+    assert payment["state"] == "accepted" and payment["job"]["config"]["amount_cents"] == 100
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
+    model.add(next_step("what_you_do", next=next_ask("hours_and_area")))
+    response = await owner.browser.post(path + f"/proposals/{ids[2]}?cards=1", json={"accept": False})
+    payment = next(card for card in shown(response) if card["proposal_id"] == ids[1])
+    assert payment["state"] == "declined" and payment["job"]["config"] is None
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+    copies = [card for entry in interview.transcript for card in [*entry.planned, *([entry.card] if entry.card else [])]
+              if card.proposal_id == ids[1]]
+    assert len(copies) == 2
+    assert all(card.state == "declined" and card.job.config is None for card in copies)
+    assert not any(job.job == "payment" for job in setup.accepted_jobs(interview))
+    assert not any(job["job"] == "payment" for job in setup.owner_job_answers(interview))
+    setup.finish(interview)
+    assert "Pay a retainer" not in (interview.answers.how_we_help or "")
+
+
 @pytest.mark.parametrize("typed", [False, True])
 @pytest.mark.parametrize("amount", [None, 25_000])
 async def test_payment_accept_is_refused_while_business_tools_are_disabled(proposals, app, model, engine, typed, amount):

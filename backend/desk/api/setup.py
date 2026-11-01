@@ -677,10 +677,14 @@ def _turn(interview_id: str) -> Iterator[None]:
 
 
 def _clear_configs(interview: Interview) -> None:
+    accepted_payments = {card.proposal_id for card in interview.planned
+                         if card.state == "accepted" and card.job is not None and card.job.job == "payment"}
     for entry in interview.transcript:
         for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
             if card.job is not None:
                 card.job.config = None
+                if card.job.job == "payment" and (card.state == "accepted" or card.proposal_id in accepted_payments):
+                    card.state = "declined"
 
 
 def setup_state(interview: Interview, slug: str, *, cards: bool = False,
