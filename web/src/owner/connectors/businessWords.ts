@@ -17,8 +17,11 @@ const text = (value: unknown): value is string => typeof value === 'string' && v
 
 /** Validate API text and configuration before drawing any part of a job. Unknown blocks stay out. */
 export function isBusinessDef(value: unknown): value is BusinessToolDef {
-  if (!record(value) || !text(value.title) || !text(value.description) || !record(value.config)) return false;
-  const config = value.config;
+  return record(value) && text(value.title) && text(value.description) && isBusinessConfig(value.config);
+}
+
+function isBusinessConfig(config: unknown): config is BusinessToolDef['config'] {
+  if (!record(config)) return false;
   if (config.block === 'intake') return Array.isArray(config.questions) && config.questions.length > 0 && config.questions.every(text);
   if (config.block === 'purpose_payment') return text(config.purpose) && Number.isSafeInteger(config.amount_cents) && (config.amount_cents as number) > 0;
   if (config.block === 'urgent') return text(config.urgent_when);
@@ -27,7 +30,10 @@ export function isBusinessDef(value: unknown): value is BusinessToolDef {
 
 export function businessLine(def: BusinessToolDef): string | null {
   if (!isBusinessDef(def)) return null;
-  const config = def.config;
+  return configLine(def.config);
+}
+
+function configLine(config: BusinessToolDef['config']): string | null {
   if (config.block === 'typed_booking') return `${config.appointment_type}, ${config.minutes} minutes, in your opening hours`;
   if (config.block === 'intake') return `${config.questions.length} ${config.questions.length === 1 ? 'question' : 'questions'} before a booking`;
   if (config.block === 'purpose_payment') return `${config.purpose}, ${formatCents(config.amount_cents)}`;
@@ -36,9 +42,9 @@ export function businessLine(def: BusinessToolDef): string | null {
 }
 
 /** Rules spells out an intake's questions; other jobs keep the shared configuration line. */
-export function businessRulesDescription(def: BusinessToolDef): string | null {
-  if (!isBusinessDef(def)) return null;
-  return def.config.block === 'intake' ? `${BUSINESS_WORDS.asks}: ${def.config.questions.join(' ')}` : businessLine(def);
+export function businessRulesDescription(def: BusinessToolDef | null | undefined): string | null {
+  if (!record(def) || !isBusinessConfig(def.config)) return null;
+  return def.config.block === 'intake' ? `${BUSINESS_WORDS.asks}: ${def.config.questions.join(' ')}` : configLine(def.config);
 }
 
 export function businessRows(def: BusinessToolDef, mode: RuleMode): BusinessSetupRow[] {

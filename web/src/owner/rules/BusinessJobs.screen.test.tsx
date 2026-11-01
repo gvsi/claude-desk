@@ -107,7 +107,7 @@ it('renders business titles and questions as literal text with no links or injec
   }
 });
 
-it('keeps titled jobs with confirmed fallback descriptions for unknown or malformed configuration on both pages', async () => {
+it('keeps active jobs and their rules with safe fallback names and descriptions on both pages', async () => {
   const desk = seedJobs();
   const intro = chenBusinessTools[0];
   if (!intro?.business) throw new Error('The fixture has an intro call definition');
@@ -118,18 +118,37 @@ it('keeps titled jobs with confirmed fallback descriptions for unknown or malfor
     { ...intro, tool: 'desk.delisted', review_reason: 'delisted' },
     { ...intro, tool: 'desk.null', status: 'enabled', business: null },
     { ...intro, tool: 'desk.blank', status: 'enabled', business: { ...intro.business, title: ' ' } },
+    { ...intro, tool: 'desk.missing', review_reason: 'changed', business: { ...intro.business, title: undefined } } as unknown as ToolRow,
+    { ...intro, tool: 'desk.Invalid', status: 'enabled', business: null },
     { ...intro, tool: 'desk.unknown', status: 'enabled', business: { ...intro.business, title: 'Unknown configuration job', config: { block: 'unknown' } } } as unknown as ToolRow,
     { ...intro, tool: 'desk.malformed', review_reason: 'changed', business: { ...intro.business, title: 'Malformed configuration job', config: { block: 'intake', questions: ['Which year?', null] } } } as unknown as ToolRow,
     { ...intro, tool: 'desk.effects', status: 'enabled', effects: [null] } as unknown as ToolRow,
     { ...intro, tool: 'desk.future-effect', status: 'enabled', effects: ['future'] } as unknown as ToolRow,
   ]);
+  mockStore.world.addActiveRules(desk, ['desk.null', 'desk.blank', 'desk.missing'].map((tool, index) => ({
+    ...INTAKE_RULE, card_id: `untitled-${index}`, applies_to: tool,
+    mode: index === 0 ? 'auto' : index === 1 ? 'never' : 'ask',
+  })));
   for (const path of ['rules', 'rules/all']) {
     const { screen } = await renderRoute(`${DESK}/${path}`);
     const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
     await expect.element(jobs).toBeVisible();
     expect([...jobs.element().querySelectorAll('.cd-tool-rules__tool-name')].map((el) => el.textContent)).toEqual([
-      'Book a free intro call', 'New client intake', 'Changed intro call', 'Unknown configuration job', 'Malformed configuration job',
+      'Book a free intro call', 'New client intake', 'Changed intro call',
+      'A connected tool', 'A connected tool', 'A connected tool',
+      'Unknown configuration job', 'Malformed configuration job',
     ]);
+    const untitled = jobs.getByRole('region', { name: 'A connected tool', exact: true }).elements();
+    expect(untitled.map((card) => card.querySelector('.cd-tool-rules__tool-description')?.textContent)).toEqual([
+      intro.description_confirmed, 'Free intro call, 20 minutes, in your opening hours', 'Free intro call, 20 minutes, in your opening hours',
+    ]);
+    for (const [index, card] of untitled.entries()) {
+      expect(card.querySelector('.cd-rule-row__reason')?.textContent).toBe(INTAKE_RULE.reason);
+      expect(card.querySelectorAll('.cd-rule-row')).toHaveLength(1);
+      expect(card.textContent).toContain(['Automatic', 'Never', 'Ask me first'][index]);
+      expect(card.querySelectorAll('a')).toHaveLength(0);
+    }
+    expect(jobs.element().textContent).not.toMatch(/desk\./);
     for (const name of ['Unknown configuration job', 'Malformed configuration job']) {
       const job = jobs.getByRole('region', { name });
       await expect.element(job.getByText(intro.description_confirmed, { exact: true })).toBeVisible();

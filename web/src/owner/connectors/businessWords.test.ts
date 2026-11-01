@@ -18,6 +18,16 @@ it('describes Rules intake by its questions and other jobs by their configuratio
   expect(businessRulesDescription({ ...intake, config: { block: 'unknown' } } as never)).toBeNull();
 });
 
+it('describes valid Rules configuration independently of missing or blank business titles', () => {
+  for (const title of [undefined, ' ']) {
+    expect(businessRulesDescription({ ...booking, title } as BusinessToolDef)).toBe('Free intro call, 20 minutes, in your opening hours');
+    expect(businessRulesDescription({
+      title, config: { block: 'intake', questions: ['Which year?'] },
+    } as BusinessToolDef)).toBe('Asks: Which year?');
+  }
+  expect(businessRulesDescription(null)).toBeNull();
+});
+
 it('describes a booking and follows its starting outcome without a Who row', () => {
   expect(businessLine(booking)).toBe('Free intro call, 20 minutes, in your opening hours');
   expect(businessGlyph(booking.config)).toBe('calendar');
