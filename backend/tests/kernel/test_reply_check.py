@@ -30,6 +30,7 @@ from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
 from desk.kernel_service import labels, lang, ledger, render, reply_check
+from desk.next_steps import NEXT_STEPS
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 from scripts import lookalikes
 
@@ -39,6 +40,10 @@ from .test_adapters import Rivera, book, quote_args, visitor_of
 from .test_approvals import answered
 from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, set_mode, set_session
 from .test_execute import executed
+
+VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
+    "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
+    "native.quote", "native.request_callback", "native.start_verification")]
 
 ROUTE = "POST /check_reply"
 
@@ -995,7 +1000,7 @@ async def test_a_booking_claim_beside_its_booking_card_passes_by_the_owners_deci
     assert (verdict.ok, verdict.violations, verdict.language) == (True, [], language)
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (prose, "booking_confirmed", booking.fact_id)
-    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[card.text])]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[card.text], next_steps=VISITOR_NEXT_STEPS)]
 
 
 @pytest.mark.parametrize(("prose", "language", "span"), [
@@ -1328,7 +1333,7 @@ async def test_a_policy_restated_beside_its_card_is_shown_by_the_owners_decision
     verdict = await checked(client, visitor, SERVICE_AREA, [clause("policy", "charter:policy:service_area")])
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", SERVICE_AREA), ("card", SERVICE_AREA)]
-    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[SERVICE_AREA])]
+    assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[SERVICE_AREA], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
@@ -1391,7 +1396,7 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (reply_check.shown(prose), "quote", quote.fact_id)
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=reply_check.shown(prose),
-                                                     cards=[card.text])]
+                                                     cards=[card.text], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
     assert link not in json.dumps(entry.event.summary)

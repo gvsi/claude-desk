@@ -94,7 +94,8 @@ from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
-from desk.kernel_service.sessions import verified
+from desk.kernel_service.sessions import principal_for, verified
+from desk.next_steps import next_steps
 from desk.rewrites import REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
@@ -588,7 +589,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                                                                                              cards_only=True):
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
-        found, usage = await soft_promises(ctx, language, prose, backing)
+        found, usage = await soft_promises(ctx, session_row, language, prose, backing)
         violations += found
     if violations:
         blocks = [handoff(language, desk)]
@@ -600,15 +601,19 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                           handoff_backed=handoff_backed, final=final)
 
 
-async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
+async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card). A `soft_promise` violation per flag set
     (`soft.promise`, `soft.denies_ai`), or `soft.unavailable` when there is no verdict, each
     spanning the prose's start; and the call's usage, for the ledger. (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
+        Desk.desk_id == session_row.desk_id)))).one()
+    tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
+    steps = next_steps(tools)
     verdict, usage = await ctx.decisions.soft_promise(
-        SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards]))
+        SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards], next_steps=steps))
     if verdict is None:
         rule_ids = ["soft.unavailable"]
     else:

@@ -36,6 +36,7 @@ OTHER_FILES = {
     "backend/desk/money_cap.py": "# money cap\n",
     "backend/desk/presets.py": "# presets\n",
     "backend/desk/rewrites.py": "# the violations a rewrite can fix\n",
+    "backend/desk/next_steps.py": "# fixed session next steps\n",
     "backend/desk/contracts.py": "# contracts\n",
     "backend/desk/kernel_api.py": "# the kernel API\n",
     "backend/desk/mockpay/server.py": "# the mock payments server\n",

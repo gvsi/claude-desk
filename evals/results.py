@@ -127,6 +127,7 @@ GATED_PATHS = (
     "backend/desk/kernel_api.py",           # the requests the kernel decides on and the answers it gives
     "backend/desk/contracts.py",            # the cards, decisions and labels the kernel checks and renders
     "backend/desk/rewrites.py",             # the violations a rewrite can fix: when a handoff opens
+    "backend/desk/next_steps.py",           # the fixed session capabilities exempted by the soft check
     "backend/desk/mockpay",                 # the payment server behind the kernel's money tools
     # The prompts.
     "backend/desk/api/prompts.py",          # every fixed string the Desk's model sees
