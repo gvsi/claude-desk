@@ -25,7 +25,8 @@ it('shows one period after Chen & Co. when reaching Real situations on desktop a
       body: { question: question.key, text: question.key === 'money_limit' ? '$500 is fine.' : 'Yes, that works.' },
     });
   }
-  await mockStore.dispatch('setupRules', { params });
+  const drafted = await mockStore.dispatch('setupRules', { params });
+  if ('network' in drafted || drafted.status !== 200) throw new Error('the mock drafts setup rules');
 
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('button', { name: 'Check real situations' }).click();
