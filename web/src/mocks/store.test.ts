@@ -2126,6 +2126,28 @@ describe('epochs', () => {
   });
 });
 
+describe('Safety triage', () => {
+  it('describes_the_seeded_stopped_reply_as_wording', async () => {
+    const entries = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
+    const reply = entries.find((entry) => entry.kind === 'reply_blocked');
+    expect(reply?.triage).toEqual({
+      category: 'wording',
+      summary: 'The visitor asked for a discount. Claude’s draft stated the discount in its own words, so the Desk stopped the reply.',
+    });
+  });
+
+  it('describes_the_demo_agents_over_limit_request_as_limits', async () => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'push_the_limit', idempotency_key: 'safety-limit' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 4);
+    const entries = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
+    expect(entries.find((entry) => entry.kind === 'refused')?.triage).toEqual({
+      category: 'limits',
+      summary: 'The agent asked to charge more than its signed limit. The Desk refused the charge.',
+    });
+  });
+});
+
 describe("Today's windows", () => {
   /** Thursday, October 29, 10:30 am in Los Angeles. */
   const NOW = new Date('2026-10-29T17:30:00Z');

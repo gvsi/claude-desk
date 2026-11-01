@@ -36,7 +36,7 @@ import type {
   ToolName,
   ToolProfile,
 } from './contracts.ts';
-import type { Attempt as ApiAttempt, DeskSetup, DeskSummary } from './openapi.gen.ts';
+import type { Attempt as ApiAttempt, DeskSetup, DeskSummary, Triage } from './openapi.gen.ts';
 
 // Copy and Desks
 
@@ -288,21 +288,11 @@ export interface OwnerTranscriptItem extends TranscriptItem {
 
 // Safety
 
-/** What a stopped attempt was about, as the API owner plan's triage task sorts it (plan 02b, Task 10). */
-export type TriageCategory =
-  | 'impersonation'
-  | 'discount_push'
-  | 'private_data'
-  | 'code_redirect'
-  | 'injection'
-  | 'over_limit'
-  | 'other';
+/** A checkpoint event's subject, as the API's descriptive triage names it. */
+export type TriageCategory = Triage['category'];
 
-/** An attempt's AI-written summary and category: owner-facing only, and labelled as written by Claude. */
-export interface Triage {
-  summary: string;
-  category: TriageCategory;
-}
+/** The API's AI-written summary and category, for the owner alone. */
+export type { Triage };
 
 /**
  * Why the kernel refused a request: a closed code from the API's own document, which the web holds
