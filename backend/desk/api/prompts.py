@@ -820,7 +820,7 @@ works: no price list for a business that prices after a consult; payment only fo
 for, such as a deposit, a fee or a retainer. At most two apps: stripe only with a payment job, and at most one \
 other, one they already use.
 - suggested: facts from the homework (service_area, hours, public_contact, after_hours, price_items); text empty \
-and lists empty when unknown. Hours are local 24-hour HH:MM, a window past midnight split in two; prices are whole \
+and lists empty when unknown. after_hours is customer copy: {POLICY_FIELD_RULE} Hours are local 24-hour HH:MM, a window past midnight split in two; prices are whole \
 US cents and only the business's own published prices.
 
 Two illustrative openings (vary the wording; don't copy them):
@@ -1422,7 +1422,8 @@ class SuggestedFacts(BaseModel):
     service_area: str = Field(max_length=500)
     hours: list[HoursAnswer] = Field(max_length=14)
     public_contact: str = Field(max_length=200, description=f"The contact customers see: {PUBLIC_CONTACT_FORMAT}")
-    after_hours: str = Field(max_length=500)
+    after_hours: str = Field(max_length=500, description=f"What customers are told outside the hours. "
+                                                         f"{POLICY_FIELD_RULE}")
     price_items: list[PriceAnswer] = Field(max_length=50)
 
 

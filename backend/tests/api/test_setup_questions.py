@@ -2042,6 +2042,15 @@ def test_suggested_fields_are_stored_only_by_code():
         SetupAnswers(summary="Tax advice.", suggested_fields=["pricing"] * (len(names) + 1))
 
 
+def test_homework_after_hours_suggestion_is_customer_copy():
+    # The homework's suggested after-hours line is published when the owner skips the contact question, and the
+    # kernel refuses a time or number in it ("answered 24/7"), as it does in the About line.
+    from desk.api.prompts import SETUP_UNDERSTAND_SYSTEM, SuggestedFacts
+
+    assert POLICY_FIELD_RULE in SuggestedFacts.model_fields["after_hours"].description
+    assert f"after_hours is customer copy: {POLICY_FIELD_RULE}" in SETUP_UNDERSTAND_SYSTEM
+
+
 def test_setup_summary_is_customer_copy_from_the_opening_parse():
     summary_line = next(line for line in SETUP_START_SYSTEM.splitlines() if line.startswith("- summary:"))
     descriptions = {"opening prompt": summary_line,
