@@ -1,6 +1,6 @@
 # Tier 2 spend limits, in US dollars. The monthly limit is shared with the hosted demo, so a pass
 # is refused when its estimate would take this month's eval spend past the limit less the reserve.
-# The reserve is five days at the demo's $80 daily budget, a cap on its spend, not what it is
+# The reserve is about two and a half days at the demo's $150 daily budget (raised from $80 on 2026-10-31), counting the kernel's checks outside it; a cap on its spend, not what it is
 # expected to spend.
 monthly_limit_usd = 1000
 demo_reserve_usd = 400
