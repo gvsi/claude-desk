@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 import shlex
 import shutil
+import signal
+import uuid
 import subprocess
 import sys
 import tempfile
@@ -118,6 +120,54 @@ print(json.dumps({'git': signature, 'sources': sources}), flush=True)
 """.replace('BASE', repr(base))
 
 
+def transaction_script(base: str, command: list[str], cancel: list[str]) -> str:
+    """Hold the lane until execution AND cancellation finish, including on client EOF."""
+    return """import fcntl, os, select, signal, subprocess, sys, time
+from pathlib import Path
+base = Path(BASE)
+process = None
+def interrupted(signum, _frame):
+    raise SystemExit(128 + signum)
+for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(signum, interrupted)
+with (base / 'lock').open('w') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        exec(STATE)
+        # Read unbuffered: the same stream remains a lifetime lease after the start byte.
+        start = b''
+        while len(start) < 4:
+            part = os.read(0, 4 - len(start))
+            if not part:
+                raise SystemExit(130)
+            start += part
+        if start != b'run\\n':
+            raise SystemExit(130)
+        process = subprocess.Popen(COMMAND, stdin=subprocess.DEVNULL, start_new_session=True)
+        while process.poll() is None:
+            if select.select([0], [], [], 0.1)[0]:
+                if not os.read(0, 1024):
+                    raise SystemExit(130)
+        raise SystemExit(process.returncode)
+    finally:
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(signum, signal.SIG_IGN)
+        if process is not None:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+            # The cgroup also covers children that detached from the process group.
+            subprocess.run(CANCEL, check=True, stdout=subprocess.DEVNULL)
+""".replace('BASE', repr(base)).replace('STATE', repr(lane_state_script(base))).replace('COMMAND', repr(command)).replace('CANCEL', repr(cancel))
+
+
 def control_path(cache: Path, region: str, instance: str) -> Path:
     return cache / (hashlib.sha256(("v2:" + region + instance).encode()).hexdigest()[:20] + ".sock")
 
@@ -150,6 +200,10 @@ def create_bundle(root: Path, bundle: Path, previous: str) -> bool:
 
 
 def main():
+    def terminated(signum, _frame):
+        raise SystemExit(128 + signum)
+    signal.signal(signal.SIGTERM, terminated)
+    signal.signal(signal.SIGHUP, terminated)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region", default=os.environ.get("TESTBOX_REGION", "us-east-1"))
     parser.add_argument("--ci", action="store_const", const="1", help="explicitly set CI on the remote run")
@@ -241,9 +295,13 @@ def run(args, root, lane, cache):
     timing.mark("connection")
     base = f"/srv/testbox/lanes/{lane}"
     # Remote flock covers synchronization as well as execution, including different client hosts.
-    transaction = "python3 -c " + shlex.quote(lane_state_script(base)) + f"; read -r start || exit 130; exec sudo /opt/testbox/lane-exec.py {lane} python3 {base}/repo/tools/testbox/worker.py {base}"
-    prepare = f"test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; flock {base}/lock sh -c "
-    holder = subprocess.Popen(ssh + [prepare + shlex.quote(transaction)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+    call_id = uuid.uuid4().hex
+    unit = f"desk-testbox-run-{lane}-{call_id}"
+    # stop is idempotent even if cancellation happens before the service was created.
+    cancel = ["sudo", "sh", "-c", f"systemctl stop {unit}.service 2>/dev/null || ! systemctl is-active --quiet {unit}.service"]
+    transaction = transaction_script(base, ["sudo", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/repo/tools/testbox/worker.py", base], cancel)
+    prepare = f"test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c "
+    holder = subprocess.Popen(ssh + [prepare + shlex.quote(transaction)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, start_new_session=True)
     try:
         line = holder.stdout.readline()
         if not line:
@@ -288,7 +346,6 @@ def run(args, root, lane, cache):
             # Install the runner from this synced tree, so uncommitted client changes are testable.
             holder.stdin.write("run\n")
             holder.stdin.flush()
-            holder.stdin.close()
             for line in holder.stdout:
                 print(line, end="", flush=True)
             code = holder.wait()
@@ -296,11 +353,19 @@ def run(args, root, lane, cache):
             print(f"testbox: lane={lane} exit={code} elapsed={time.monotonic() - start:.2f}s", flush=True)
             return code
     finally:
-        if not holder.stdin.closed:
-            holder.stdin.close()
-        if holder.poll() is None:
-            holder.terminate()
-        holder.wait(timeout=15)
+        # Closing the lease tells the remote watchdog to stop this exact call. Wait for its
+        # acknowledgement before releasing the local lane lock or exiting on INT/TERM.
+        handlers = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+        try:
+            if not holder.stdin.closed:
+                holder.stdin.close()
+            # Drain without writing: a closed caller stdout must not skip acknowledgement.
+            for _ in holder.stdout:
+                pass
+            holder.wait()
+        finally:
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
 
 
 if __name__ == "__main__":

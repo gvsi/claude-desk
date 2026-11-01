@@ -17,17 +17,29 @@ ACTIVE = None
 
 
 def stop(signum, _frame):
-    if ACTIVE is not None and ACTIVE.poll() is None:
-        os.killpg(ACTIVE.pid, signum)
-        ACTIVE.wait()
+    # Popen.wait holds a non-reentrant lock. Unwind it before cleanup waits again.
     raise SystemExit(128 + signum)
 
 
 def run(cmd, **kwargs):
     global ACTIVE
     ACTIVE = subprocess.Popen(cmd, start_new_session=True, **kwargs)
-    code = ACTIVE.wait()
-    ACTIVE = None
+    try:
+        code = ACTIVE.wait()
+    finally:
+        handlers = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)}
+        try:
+            if ACTIVE.poll() is None:
+                os.killpg(ACTIVE.pid, signal.SIGTERM)
+                try:
+                    ACTIVE.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(ACTIVE.pid, signal.SIGKILL)
+                    ACTIVE.wait()
+            ACTIVE = None
+        finally:
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
     if code:
         raise subprocess.CalledProcessError(code, cmd)
 
