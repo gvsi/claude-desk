@@ -70,6 +70,23 @@ def test_feedback_names_a_card_whose_claims_changed_at_signing_and_a_callback_cl
         tools.REPLY_DIAGNOSTICS["not_current"], tools.REPLY_DIAGNOSTICS["lex.en.callback"]]
 
 
+def test_an_outage_beside_a_jev_flag_asks_for_the_flag_to_be_fixed():
+    # The model check gave no verdict while Jev flagged a promise: both reach Claude, and the outage's line defers
+    # to the flag rather than asking for the same prose again.
+    from types import SimpleNamespace
+
+    verdict = SimpleNamespace(violations=[
+        Violation(kind="check_unavailable", rule_id="soft.unavailable", span="Maria will call you today."),
+        Violation(kind="soft_promise", rule_id="soft.jev", span="Maria will call you today.")])
+    feedback = tools._feedback(verdict, [])
+    assert feedback == [{"kind": "check_unavailable", "rule_id": "soft.unavailable"},
+                        {"kind": "soft_promise", "rule_id": "soft.jev"}]
+    diagnostics = tools._blocked(feedback).result["diagnostics"]
+    assert diagnostics == [tools.REPLY_DIAGNOSTICS["soft.unavailable"], tools.REPLY_DIAGNOSTICS["soft.promise"]]
+    assert diagnostics[0].startswith("This check returned no verdict. Fix any other violations listed")
+    assert "nothing was flagged" not in json.dumps(diagnostics)
+
+
 def test_feedback_never_echoes_checker_payloads_or_untrusted_validation_keys():
     from types import SimpleNamespace
 

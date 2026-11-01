@@ -503,15 +503,17 @@ def test_reply_correction_uses_fixed_codes_and_the_same_plain_text_instruction()
 
     assert REWRITE_INSTRUCTION in NOTES["prose_blocked"]
     assert "or use the handoff clause" not in REWRITE_INSTRUCTION
-    assert "For soft.unavailable, the checkpoint wasn't available" in REWRITE_INSTRUCTION
+    assert ("For soft.unavailable, this check returned no verdict: fix any other violations listed; if there are "
+            "none, send the reply again as it is.") in REWRITE_INSTRUCTION
+    assert "nothing was flagged" not in REWRITE_INSTRUCTION
     assert "harness" not in REWRITE_INSTRUCTION
     assert "write at least one full sentence in English or Spanish beside the cards" in REWRITE_INSTRUCTION
     assert "don't repeat the flagged words" in REWRITE_INSTRUCTION
     assert "Do not repeat a business action" in REWRITE_INSTRUCTION
     assert "soft.unavailable" in REPLY_RULE_IDS
     assert REPLY_DIAGNOSTICS["soft.unavailable"] == (
-        "The checkpoint wasn't available, so nothing was flagged. Send the reply again as it is, with its cards and no "
-        "promise they don't back.")
+        "This check returned no verdict. Fix any other violations listed; if there are none, send the reply again as "
+        "it is.")
     assert "lex.en.untrusted" not in REPLY_RULE_IDS
     assert "soft.handoff_closed" in REPLY_RULE_IDS
     assert REPLY_DIAGNOSTICS["language_uncertain"].startswith("Write at least one full sentence")
