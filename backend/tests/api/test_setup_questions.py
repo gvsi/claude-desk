@@ -2329,7 +2329,7 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
     (renamed,) = fake.called("PUT /desks/{id}/business")                 # the named owner, sent once
     assert renamed.path == f"/desks/{state['desk_id']}/business"
     assert renamed.body == {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": TIMEZONE,
-                            "brand": {}}
+                            "brand": {}, "brand_palette": None}   # the stored brand passed through, no new pick
     assert fake.desks[state["desk_id"]].owner_display_name == "Maria Rivera"
     row = await stored(engine, interview_id)
     assert row["step"] == "tools" and row["answers"]["owner_display_name"] == "Maria Rivera"

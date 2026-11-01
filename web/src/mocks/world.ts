@@ -128,6 +128,8 @@ export interface SessionRecord {
 export type ToolRecord = Omit<ToolProfile, 'tool' | 'source'> & Pick<ToolRow, 'tool' | 'source' | 'business'> & { review_reason: ToolReviewReason | null };
 
 export interface DeskRecord {
+  /** Stored business brand; absent or empty reads as the default teal palette. */
+  brand?: Record<string, string>;
   /** The Desk as the copy lists it, but its setup, which is its interview's (`withSetupDesks`). */
   summary: Omit<DeskSummary, 'setup'>;
   /** The active rules version, with its money cap. */
@@ -368,6 +370,7 @@ export class MockWorld {
     const { openStatus, ...summary } = fields;
     const policy = activePolicy(fields.desk_id);
     const desk: DeskRecord = {
+      brand: { ...BUSINESS.brand },
       summary: { ...summary, business_name: BUSINESS.name, answering: true },
       policy,
       ledger: [],

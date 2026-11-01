@@ -368,7 +368,7 @@ async def test_switcher_lists_only_this_copys_businesses(app, browser, fake, ker
     desk = fake.desks[owner.desk_id]
     assert listed.json() == [{
         "business_id": desk.business_id, "name": "Rivera Plumbing", "owner_display_name": "Maria Rivera",
-        "timezone": "America/Los_Angeles",
+        "timezone": "America/Los_Angeles", "brand": {"palette": "teal", "primary": "#1F4E4A", "accent": "#B87333"},
         "desks": [{"desk_id": owner.desk_id, "slug": owner.slug, "name": "Main line",
                    "business_name": "Rivera Plumbing",
                    "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True,

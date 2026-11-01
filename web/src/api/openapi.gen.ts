@@ -249,6 +249,9 @@ export interface BusinessOut {
   name: string;
   owner_display_name: string;
   timezone: string;
+  brand: {
+    [k: string]: string;
+  };
   desks: DeskSummary[];
 }
 /**

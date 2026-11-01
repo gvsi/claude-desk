@@ -4,11 +4,12 @@ The models below are the master plan's "Shared contracts v2" block, verbatim and
 order (each class is defined before it is used). Field comments are part of the contract.
 """
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from datetime import datetime, time
 from typing import Annotated, Literal, Self, get_args
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StringConstraints, model_validator
+from pydantic import (AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StringConstraints,
+                      model_validator)
 
 # Identity and sessions: built by the kernel from its own tables; never accepted over HTTP.
 ActorKind = Literal["visitor", "agent", "owner"]
@@ -112,11 +113,58 @@ class NotificationDefaults(BaseModel):    # alerts are delivered to the owner's 
     now: list[str]                        # event kinds that alert at once ("approval", "callback", "breaker")
     briefing: list[str]
 
+# A Desk's brand colours, picked from a fixed palette: the owner picks a key and the kernel stores it with this
+# table's colours, never colours of the request's, so every pick keeps the public page's header readable
+# (the web palette tests hold each primary to 4.5:1 under both header text tokens).
+BrandPalette = Literal["none", "teal", "clay", "navy", "forest", "plum", "rust", "slate"]   # in display order
+DEFAULT_BRAND_PALETTE: BrandPalette = "teal"            # what a business that stored no brand reads as
+BRAND_PALETTE: dict[BrandPalette, dict[str, str]] = {   # the one table: the header's field and the rule under it
+    "none": {},                                         # no colours: the web draws its neutral header
+    "teal": {"primary": "#1F4E4A", "accent": "#B87333"},
+    "clay": {"primary": "#773624", "accent": "#D97757"},
+    "navy": {"primary": "#1F3A5C", "accent": "#C9A24B"},
+    "forest": {"primary": "#28452B", "accent": "#B5A05E"},
+    "plum": {"primary": "#4A2D4D", "accent": "#C98FA3"},
+    "rust": {"primary": "#6B2F22", "accent": "#D9A578"},
+    "slate": {"primary": "#33383F", "accent": "#8FA4B8"},
+}
+BRAND_PALETTE_UNLISTED = "a brand's palette is one of BRAND_PALETTE's keys"
+
+def _listed_palette(brand: dict[str, str]) -> dict[str, str]:
+    if "palette" in brand and brand["palette"] not in BRAND_PALETTE:
+        raise ValueError(BRAND_PALETTE_UNLISTED)
+    return brand
+
+# A business's brand: the public page's colors, and a `palette` key when they are a pick from BRAND_PALETTE
+Brand = Annotated[dict[str, str], AfterValidator(_listed_palette)]
+
+def stored_brand(brand: Mapping[str, str], palette: BrandPalette | None = None) -> dict[str, str]:
+    """The brand a business write stores: a pick, `palette` or else the `palette` key `brand` carries (a brand passed
+    back as it was read), as its key and BRAND_PALETTE's colours, whatever colours `brand` holds; without a pick,
+    `brand` as sent. A key outside the table raises ValueError."""
+    key = palette if palette is not None else brand.get("palette")
+    if key is None:
+        return dict(brand)
+    if key not in BRAND_PALETTE:
+        raise ValueError(BRAND_PALETTE_UNLISTED)
+    return {"palette": key, **BRAND_PALETTE[key]}
+
+def effective_brand(stored: Mapping[str, str]) -> dict[str, str]:
+    """The brand a read serves (the public page, the owner's business read) for a stored one: a pick's key and
+    BRAND_PALETTE's colours as they are now ("none": the key alone); free-form colours from before the palette, as
+    stored; and the default pick, teal, for a business that stored no colours, or a key the table no longer has."""
+    key = stored.get("palette")
+    if key is None and ("primary" in stored or "accent" in stored):
+        return dict(stored)
+    if key not in BRAND_PALETTE:
+        key = DEFAULT_BRAND_PALETTE
+    return {"palette": key, **BRAND_PALETTE[key]}
+
 class BusinessSeed(BaseModel):
     name: str
     owner_display_name: str               # "Maria Rivera"; the handoff clause, visitor status lines and owner_joined render it
     timezone: str                         # IANA; Cedar's local_dow and local_minute use it
-    brand: dict[str, str] = {}            # public-page colors
+    brand: Brand = {}                     # public-page colors; the kernel stores a `palette` pick as `stored_brand` makes it
     existing_business_id: str | None = None   # add a Desk to a business in this copy
 
 class HoursWindow(BaseModel):

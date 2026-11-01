@@ -7,6 +7,7 @@
  * here is a credential.
  */
 import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type KnowledgeItem, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
+import { paletteBrand, paletteKey } from '../public/palette.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
@@ -502,6 +503,21 @@ const SERVED: ServedRoutes = {
     const on = isRecord(req.body) ? req.body.on : undefined;
     if (typeof on !== 'boolean') return INVALID;
     desk.summary.answering = on;
+    return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
+  },
+  setBusiness(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const body = req.body;
+    if (req.malformed || !isRecord(body) || typeof body.name !== 'string' || typeof body.owner_display_name !== 'string' || typeof body.timezone !== 'string') return INVALID;
+    if (!isRecord(body.brand) || Object.keys(body.brand).length > 0 || typeof body.brand_palette !== 'string') return INVALID;
+    const palette = paletteKey({ palette: body.brand_palette });
+    if (palette === null) return INVALID;
+    const business = withSetupBusinesses(sv.world, [businessOut(sv.world)]).find((b) => b.desks.some((d) => d.desk_id === desk.summary.desk_id));
+    for (const summary of business?.desks ?? []) {
+      const sibling = sv.world.desk(summary.desk_id);
+      if (sibling) sibling.brand = paletteBrand(palette);
+    }
     return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
   },
   deleteDesk(sv, req) {

@@ -17,6 +17,7 @@ const PLAN_02: Record<RouteKey, string> = {
   me: 'GET /api/owner/me',
   desks: 'GET /api/owner/desks',
   setAnswering: 'PUT /api/owner/desks/{desk_id}/answering',
+  setBusiness: 'PUT /api/owner/desks/{desk_id}/business',
   deleteDesk: 'DELETE /api/owner/desks/{desk_id}',
   openPreview: 'POST /api/owner/desks/{desk_id}/preview_session',
   // Today

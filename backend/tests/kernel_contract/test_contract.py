@@ -23,6 +23,7 @@ from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
 from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
 from desk.contracts import (
+    BRAND_PALETTE,
     AgentAuth,
     ApprovalResult,
     BusinessSeed,
@@ -2672,6 +2673,42 @@ async def test_owner_renames_the_business(kernel, ro_read):
     assert await refused(owner.call("PUT /desks/{id}/business", bad, path={"id": created.desk_id})) == (422, "invalid")
     elsewhere = http.owner(other.owner_token).call("PUT /desks/{id}/business", renamed, path={"id": created.desk_id})
     assert await refused(elsewhere) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_brand_palette_pick_stores_the_tables_colours(kernel, ro_read):
+    """`PUT /desks/{id}/business` with `brand_palette` stores the key and `BRAND_PALETTE`'s colours as the brand, and
+    a brand passed back with a pick takes the table's colours, never its own; the API's view holds the brand as
+    stored, the public page serves it as `effective_brand` reads it, and the ledger names the key. "none" is the pick
+    of no colours; no pick and an empty brand store nothing, which reads as teal."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    path = {"id": created.desk_id}
+    names = {"name": "Okafor Electric", "owner_display_name": "Bob Okafor", "timezone": "America/New_York"}
+
+    async def brand_read() -> tuple[dict, dict]:
+        (row,) = ro_read(ro_schema, copy.copy_id, "SELECT b.brand FROM {ro}.businesses b"
+                                                  " JOIN {ro}.desks d USING (business_id) WHERE d.desk_id = %s",
+                         (created.desk_id,))
+        public = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": created.slug})
+        return row["brand"], public.brand
+
+    await owner.call("PUT /desks/{id}/business", DeskBusinessRequest(**names, brand_palette="rust"), path=path)
+    rust = {"palette": "rust", **BRAND_PALETTE["rust"]}
+    assert await brand_read() == (rust, rust)
+    business = [entry.event.summary for entry in (await ledger_page(owner, created.desk_id)).entries
+                if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "business"]
+    assert business[-1]["palette"] == "rust"
+    passed_back = DeskBusinessRequest(**names, brand={"palette": "slate", "primary": "#000000"})
+    await owner.call("PUT /desks/{id}/business", passed_back, path=path)
+    slate = {"palette": "slate", **BRAND_PALETTE["slate"]}
+    assert await brand_read() == (slate, slate)
+    await owner.call("PUT /desks/{id}/business", DeskBusinessRequest(**names, brand_palette="none"), path=path)
+    assert await brand_read() == ({"palette": "none"}, {"palette": "none"})
+    await owner.call("PUT /desks/{id}/business", DeskBusinessRequest(**names), path=path)
+    assert await brand_read() == ({}, {"palette": "teal", **BRAND_PALETTE["teal"]})
 
 
 @pytest.mark.kernel_plan("01b")

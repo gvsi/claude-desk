@@ -8603,6 +8603,13 @@
             "type": "string",
             "title": "Timezone"
           },
+          "brand": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Brand"
+          },
           "desks": {
             "items": {
               "$ref": "#/components/schemas/DeskSummary"
@@ -8617,6 +8624,7 @@
           "name",
           "owner_display_name",
           "timezone",
+          "brand",
           "desks"
         ],
         "title": "BusinessOut",
@@ -9524,6 +9532,27 @@
             "type": "object",
             "title": "Brand",
             "default": {}
+          },
+          "brand_palette": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "teal",
+                  "clay",
+                  "navy",
+                  "forest",
+                  "plum",
+                  "rust",
+                  "slate"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Palette"
           }
         },
         "additionalProperties": false,

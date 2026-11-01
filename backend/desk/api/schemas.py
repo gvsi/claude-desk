@@ -333,6 +333,7 @@ class BusinessOut(BaseModel):
     name: str
     owner_display_name: str
     timezone: str                         # IANA name: Today's windows are in it
+    brand: dict[str, str]                 # as the public page serves it (`effective_brand`): teal when none is stored
     desks: list[DeskSummary]
 
 

@@ -150,6 +150,7 @@ from desk.public_person import future_person_direction
 from desk.public_contact import valid_public_contact
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
+    BRAND_PALETTE,
     ITEM_ID_PATTERN,
     MCP_TOOLS,
     MONEY_TOOLS,
@@ -201,7 +202,9 @@ from desk.contracts import (
     Violation,
     money_tool,
     money_tools_of,
+    effective_brand,
     moves_money,
+    stored_brand,
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
@@ -1876,7 +1879,7 @@ class FakeKernelState:
 
     def _seed_rivera(self, copy_id: str) -> Desk:
         business = BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera", timezone=RIVERA_TZ.key,
-                                brand={"primary": "#1F4E4A", "accent": "#B87333"})
+                                brand={"palette": "teal", **BRAND_PALETTE["teal"]})
         seed = DeskSeed(
             name="Main line", charter=list(RIVERA_CHARTER), hours=list(RIVERA_HOURS), price_items=list(RIVERA_PRICES),
             calendar_slots=rivera_slots(self.now),
@@ -1938,7 +1941,7 @@ class FakeKernelState:
         suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
         desk = Desk(desk_id=new_id("desk"), copy_id=copy_id, business_id=business.existing_business_id or new_id("biz"),
                     business_name=business.name, owner_display_name=business.owner_display_name,
-                    brand=dict(business.brand), timezone=business.timezone, name=seed.name,
+                    brand=stored_brand(business.brand), timezone=business.timezone, name=seed.name,
                     slug=f"{slugify(business.name)}-{suffix}", hours=list(seed.hours), created_at=self.now,
                     auto_money_cap_cents=seed.auto_money_cap_cents)
         self.desks[desk.desk_id] = desk
@@ -2381,7 +2384,7 @@ class FakeKernelState:
         card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
-                          owner_display_name=desk.owner_display_name, brand=dict(desk.brand), charter=charter,
+                          owner_display_name=desk.owner_display_name, brand=effective_brand(desk.brand), charter=charter,
                           agent_card=card, open_status=self._open_status(desk, language),
                           starters=self._starters(desk, language))
 
@@ -3724,15 +3727,18 @@ class FakeKernelState:
             raise Refusal(422, "invalid") from None
 
     def put_business(self, request: Request, body: DeskBusinessRequest) -> DeskUpdated:
-        """The Desk's business: its name, owner name, time zone and brand, for every Desk of that business."""
+        """The Desk's business: its name, owner name, time zone and brand, for every Desk of that business; a palette
+        pick is stored as its key and the table's colours, and the ledger names the key."""
         desk = self._owners_desk(request, request.path_params["id"])
         self._check_business(body.owner_display_name, body.timezone)
+        brand = stored_brand(body.brand, body.brand_palette)
         for each in self.desks.values():
             if each.business_id == desk.business_id:
                 each.business_name, each.owner_display_name = body.name, body.owner_display_name
-                each.timezone, each.brand = body.timezone, dict(body.brand)
+                each.timezone, each.brand = body.timezone, dict(brand)
         self._put_business(desk)
-        self.append(desk, "desk_data", {"part": "business", "refs": []})
+        palette = {"palette": brand["palette"]} if "palette" in brand else {}
+        self.append(desk, "desk_data", {"part": "business", "refs": [], **palette})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
     def answering(self, request: Request, body: DeskAnsweringRequest) -> DeskUpdated:
