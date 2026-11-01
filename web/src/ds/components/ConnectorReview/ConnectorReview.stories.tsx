@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import { chenBusinessTools } from '../../../mocks/businessTools.ts';
+import { businessGlyph, businessRows } from '../../../owner/connectors/businessWords.ts';
+import { reviewTool } from '../../../setup/ToolsStep.tsx';
+
 import { chen, rivera } from '../../fixtures';
 import { expectBalancedLines } from '../../test/expectBalancedLines.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
@@ -221,5 +225,52 @@ export const LongNameOnAPhone: Story = {
     await expect(window.innerWidth).toBe(390);
     await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_TITLE);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+const introCall = chenBusinessTools[0]!;
+const introDef = introCall.business!;
+
+export const BusinessJob: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  args: {
+    connector: undefined,
+    job: { title: introDef.title, glyph: businessGlyph(introDef.config)!, rows: businessRows(introDef, 'ask') },
+    tools: [reviewTool(introCall, [])], onChangeOutcome: undefined,
+  },
+  render: (args) => <div style={{ maxWidth: 720 }}><ConnectorReview {...args} /></div>,
+  parameters: { canvas: 'none', canvasNote: 'Signed D4 board p09-d4review-1512, with the corrected rows and starting outcome; not yet in the reference registry.' },
+  play: async ({ args, canvas, userEvent }) => {
+    await expect(canvas.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
+    await expect(canvas.queryByText(/built-in connector/)).toBeNull();
+    const setup = canvas.getByRole('region', { name: 'How it’s set up' });
+    await expect(within(setup).queryByText('Who')).toBeNull();
+    await expect(within(setup).getByText('Your opening hours', { exact: true })).toBeVisible();
+    await expect(within(setup).getByText('You approve each request in Needs you')).toBeVisible();
+    const turnOn = canvas.getByRole('button', { name: 'Turn it on' });
+    turnOn.focus();
+    await expect(turnOn).toHaveFocus();
+    await userEvent.tab();
+    await expect(canvas.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onCancel).toHaveBeenCalledTimes(1);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const BusinessJobPhone: Story = {
+  ...BusinessJob,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'Signed D4 board p09-d4review-390, not yet in the reference registry.' },
+  play: async (context) => {
+    await BusinessJob.play?.(context);
+    for (const row of context.canvasElement.querySelectorAll('.cd-connector-review__setup-row')) {
+      const label = row.querySelector('dt')!;
+      const value = row.querySelector('dd')!;
+      await expect(value.getBoundingClientRect().left).toBe(label.getBoundingClientRect().left);
+      await expect(value.getBoundingClientRect().top).toBeGreaterThan(label.getBoundingClientRect().bottom);
+    }
+    const text = context.canvasElement.querySelector('.cd-connector-review__text')!;
+    await expect(context.canvas.getByText('Ask me first', { exact: true }).getBoundingClientRect().top).toBeGreaterThanOrEqual(text.getBoundingClientRect().bottom);
   },
 };

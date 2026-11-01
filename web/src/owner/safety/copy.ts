@@ -5,6 +5,7 @@
  * week stopped or turned down anything at all.
  */
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
+import { handoffEntryOf, takeoverEntryOf, type HandoffEntry } from '../../api/handoffEntry.ts';
 import type { Attempt, RefusalCause, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
@@ -30,6 +31,7 @@ export const LEDGER_KIND_COPY = {
   agent_auth: 'Agent signature',
   head_checkpoint: 'Record checkpoint',
   desk_data: 'Desk details changed',
+  web_search: 'Web search',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**
@@ -110,6 +112,35 @@ export function kindCopy(kind: string): string {
   return Object.hasOwn(LEDGER_KIND_COPY, kind) ? LEDGER_KIND_COPY[kind as LedgerEvent['kind']] : 'Other entry';
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The `desk_data` entries about a conversation handed to the owner (`part: "handoffs"`), by
+ * `handoffEntryOf`, in the owner's signed words: the handoff card handing one over, the owner
+ * marking one done, and the kernel closing one when a call-back request replaced it, the owner
+ * took the chat over, or the owner wrote in it.
+ */
+export const HANDOFF_ENTRY_COPY = {
+  opened: 'Chat handed to you',
+  done: 'Chat marked done',
+  replaced: 'Chat moved to a call-back',
+  took_over: 'Handoff closed when you took over',
+  wrote: 'Handoff closed when you wrote in the chat',
+} as const satisfies Record<HandoffEntry, string>;
+
+/**
+ * An entry's name as a row of the record names it: its kind's, but a `desk_data` entry about a
+ * handoff says which one it is, and a mode change back to Claude says so. Every other entry, a
+ * handoffs entry this build doesn't know or a mode change with no readable direction among them,
+ * keeps its kind's name.
+ */
+export function entryCopy(event: Pick<LedgerEvent, 'kind' | 'summary'>): string {
+  const handoff = handoffEntryOf(event);
+  if (handoff !== null) return HANDOFF_ENTRY_COPY[handoff];
+  if (takeoverEntryOf(event) === 'handback') return 'Hand back to Claude';
+  return kindCopy(event.kind);
+}
+
 /** The checkpoint that stopped an attempt: a blocked reply at the reply checkpoint, anything else at the action checkpoint. */
 export function stoppedBy(a: Pick<Attempt, 'kind'>): Checkpoint {
   return a.kind === 'reply_blocked' ? 'reply' : 'action';
@@ -119,8 +150,6 @@ export function stoppedBy(a: Pick<Attempt, 'kind'>): Checkpoint {
 export function entryFor(a: Pick<Attempt, 'ledger_seq'>, page: Pick<LedgerPage, 'entries'> | undefined): LedgerEntry | null {
   return page?.entries.find((entry) => entry.seq === a.ledger_seq) ?? null;
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * The replay marker inside the signed entry (`event.summary.replayed`, which only the kernel's

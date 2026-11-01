@@ -1566,7 +1566,7 @@
     "/api/owner/conversations/{session_id}": {
       "get": {
         "summary": "Conversation",
-        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).",
+        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders.",
         "operationId": "owner_conversation",
         "parameters": [
           {
@@ -2076,7 +2076,7 @@
     "/api/owner/approvals/{decision_id}/answer": {
       "post": {
         "summary": "Answer Approval",
-        "description": "The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs\nthere and then, as the visitor's session (also during a take-over); the visitor sees the outcome, and Claude\nfollows up, once the resume job ran and the visitor's own credential is present (the open stream or the next\nrequest). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never\nwaits on a proof.\n\nWhen the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the\ndecision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)\nresume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the\ndecision. A decision still `held` keeps the kernel's own error, its code included (\"Errors\"): a 409 is\n`{error: \"kernel\", code}`, and an answer that never reached the kernel is 503, `seed_unproved` and `internal`\nkept. A decision that can't be read is 503 `kernel_unavailable`. In each case answering again is safe. An answer\nthe request doesn't offer is the kernel's 422 `invalid`.",
+        "description": "The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs\nthere and then, as the visitor's session (also during a take-over); the visitor sees the signed approved status\nbefore the outcome when the answer includes it, and Claude follows up once the resume job ran and the visitor's\nown credential is present (the open stream or the next\nrequest). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never\nwaits on a proof.\n\nWhen the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the\ndecision is read as it stands: once it left `held` and `approved`, an outcome the visitor wasn't shown yet gets\nthe (idempotent) resume job, so a lost response still resumes the chat. While `approved`, publish its signed\nreceipt without waking Claude and leave a `decision_pending` row under the session's run lock. The visitor's\nnext request can then read its final outcome even if the first answer never queues a job. Either case answers\n409 `already_resolved` with the decision. A decision still `held` keeps the kernel's own error, its code included\n(\"Errors\"): a 409 is\n`{error: \"kernel\", code}`, and an answer that never reached the kernel is 503, `seed_unproved` and `internal`\nkept. A decision that can't be read is 503 `kernel_unavailable`. In each case answering again is safe. An answer\nthe request doesn't offer is the kernel's 422 `invalid`.",
         "operationId": "owner_answer_approval",
         "parameters": [
           {
@@ -2625,15 +2625,27 @@
         "summary": "Start Setup",
         "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.\n\nEach start carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy answers the interview the first made, as it stands now, and makes nothing: no model call, no Desk, no\ncount on the limits. A repeat with another body is 409 `conflict`, and one sent while the first is still starting\nanswers 409 `in_progress` at once, to be sent again after `retry_after`. A first that stopped before the kernel\nwas asked for the Desk (its process did, say) frees the key once it is older than the longest a start can take. A\nstart is admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent\nmeanwhile waits for that admission and is never counted; another process admits on its own, so during a deploy's\noverlap a repeat routed to the other task can be counted twice.\n\n409 `key_spent` (no `retry_after`) means this key is spent: its start asked the kernel for the Desk and then\nfailed, or stopped with no answer kept and is now older than the longest a start can take. The Desk may exist,\nso the key never starts again and waiting changes nothing; a new click needs a new key. The first request still\nanswers its own failure.\n\nA start that fails before the kernel is asked for the Desk (refused by the limits, or Claude couldn't answer)\nfrees its key, so the same request can be sent again. Once the Desk was asked for, the key keeps the outcome\nwhatever the kernel answered, a refusal too, and a repeat of a start that failed answers 409 `key_spent`.",
         "operationId": "owner_start_setup",
+        "parameters": [
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SetupStartIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -2647,64 +2659,64 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Unauthorized"
           },
           "404": {
-            "description": "Not Found",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Not Found"
           },
           "409": {
-            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Conflict"
           },
           "422": {
-            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Unprocessable Content"
           },
           "429": {
-            "description": "Too Many Requests",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Too Many Requests"
           },
           "503": {
-            "description": "Service Unavailable",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
               }
-            }
+            },
+            "description": "Service Unavailable"
           }
         }
       }
@@ -2712,7 +2724,7 @@
     "/api/owner/setup/{id}": {
       "get": {
         "summary": "Setup Interview",
-        "description": "The setup interview as it stands, reopening consent when its run was abandoned.",
+        "description": "The setup interview as it stands, removing abandoned turn entries and reopening consent if needed.",
         "operationId": "owner_setup_interview",
         "parameters": [
           {
@@ -2723,6 +2735,16 @@
               "type": "string",
               "maxLength": 64,
               "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
             }
           }
         ],
@@ -2793,7 +2815,7 @@
     "/api/owner/setup/{id}/consent": {
       "post": {
         "summary": "Setup Consent",
-        "description": "Start a background run that stores consent, then reads Claude memory and the named website through the\nkernel on yes, or skips both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit; answers 200 when finished within the following wait, otherwise 202 with consent still pending.\nCancelling the request leaves the run working. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
+        "description": "Use the shared turn runner to store consent, then read Claude memory and the named website through the\nkernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit; answer 200 when finished within 25 seconds, otherwise 202 `SetupState` with `busy: true`.\nCancelling the request leaves the run working. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
         "operationId": "owner_setup_consent",
         "parameters": [
           {
@@ -2804,6 +2826,16 @@
               "type": "string",
               "maxLength": 64,
               "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
             }
           }
         ],
@@ -2904,7 +2936,7 @@
     "/api/owner/setup/{id}/answer": {
       "post": {
         "summary": "Setup Answer",
-        "description": "The owner's answer to the question waiting, which the answer names (409 `conflict` when none is waiting or\nanother is, so an answer sent twice answers once): Claude replies, the answers are updated and, once the question\nis covered, the next one is asked. 503 `model_unavailable` when Claude couldn't answer, with nothing stored, so the\nsame answer can be sent again.",
+        "description": "Use the shared turn runner for the owner's answer to the question waiting, which the answer names\n(409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Claude replies,\nupdates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to\n25 seconds: 200 with the landed state or 202 `SetupState` with `busy: true`. Any turn while busy answers 202\nwithout running or counting on the limits. Cancelling the request leaves the turn working. Failure or\nabandonment removes the staged answer and leaves the same question waiting, so the owner can retry.\n503 `model_unavailable` when Claude couldn't answer or the run deadline expires.",
         "operationId": "owner_setup_answer",
         "parameters": [
           {
@@ -2915,6 +2947,16 @@
               "type": "string",
               "maxLength": 64,
               "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
             }
           }
         ],
@@ -2938,6 +2980,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "401": {
             "content": {
@@ -5840,6 +5892,79 @@
       }
     },
     "/api/owner/desks/{desk_id}/knowledge": {
+      "get": {
+        "summary": "Knowledge",
+        "description": "The owner's knowledge on this Desk, oldest first by `created_at`, null timestamps first, ties by `item_id`.\nContent the kernel's read-only view masks stays null; listing never writes or asks the kernel for masked text.",
+        "operationId": "owner_knowledge",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KnowledgeRow"
+                  },
+                  "title": "Response Owner Knowledge"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
       "post": {
         "summary": "Add Knowledge",
         "description": "Tell Claude something about the business, kept by the kernel under its `item_id` (posting it again replaces\nit): owner-only, or public once the owner marks it so (`Label(readers=[\"public\"])`). It is information for Claude,\nnever a rule; the kernel refuses other readers or a text over 100 KiB (422), and keeps an item that quotes a\nprivate document owner-only.",
@@ -6608,6 +6733,117 @@
                     }
                   ],
                   "title": "Response 422 Owner Draft Money Cap"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/policy/{desk_id}/tools/confirm": {
+      "post": {
+        "summary": "Confirm Tools",
+        "description": "Send the owner's reviewed pins to the kernel. Enabling drafts a rules version; only explicit policy\nconfirmation activates it. Disabling takes effect immediately. A slow proof answers 202 with this request.",
+        "operationId": "owner_confirm_tools",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolsConfirmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolConfirmed"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvingPending"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             },
@@ -7660,6 +7896,28 @@
         "title": "CheckedDraft",
         "description": "A reply of Claude's exactly as it was sent to the kernel's reply check: its prose and its clauses."
       },
+      "Choice": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Text"
+          },
+          "recommended": {
+            "type": "boolean",
+            "title": "Recommended"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "recommended"
+        ],
+        "title": "Choice"
+      },
       "Claim": {
         "properties": {
           "key": {
@@ -7754,6 +8012,46 @@
         ],
         "title": "ConfirmRulesIn",
         "description": "`POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms."
+      },
+      "ConnectorProposal": {
+        "properties": {
+          "app": {
+            "type": "string",
+            "enum": [
+              "google_calendar",
+              "gmail",
+              "google_drive",
+              "quickbooks",
+              "stripe",
+              "square",
+              "calendly"
+            ],
+            "title": "App"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "why": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Why",
+            "description": "Why this helps, at most 200 characters."
+          },
+          "connectable": {
+            "type": "boolean",
+            "title": "Connectable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app",
+          "label",
+          "why",
+          "connectable"
+        ],
+        "title": "ConnectorProposal"
       },
       "ConversationSummary": {
         "properties": {
@@ -8010,6 +8308,17 @@
           "reason_plain": {
             "type": "string",
             "title": "Reason Plain"
+          },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain"
           },
           "visitor_plain": {
             "type": "string",
@@ -9060,6 +9369,135 @@
         ],
         "title": "InboxNotice"
       },
+      "IntakeConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "intake",
+            "title": "Block"
+          },
+          "questions": {
+            "items": {
+              "type": "string",
+              "maxLength": 120,
+              "minLength": 1,
+              "description": "1 to 120 characters."
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Questions",
+            "description": "1 to 5 intake questions, each 1 to 120 characters."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "questions"
+        ],
+        "title": "IntakeConfig"
+      },
+      "JobProposal": {
+        "properties": {
+          "job": {
+            "type": "string",
+            "enum": [
+              "answer",
+              "intake",
+              "schedule",
+              "price",
+              "documents",
+              "status",
+              "payment",
+              "urgent"
+            ],
+            "title": "Job"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Title",
+            "description": "Title, at most 60 characters."
+          },
+          "who": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Who",
+            "description": "Who this is for, at most 60 characters; empty if unclear.",
+            "default": ""
+          },
+          "why": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Why",
+            "description": "Why this helps, at most 200 characters."
+          },
+          "how": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "How",
+            "description": "How the Desk helps, at most 300 characters."
+          },
+          "autonomy": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "ask"
+            ],
+            "title": "Autonomy"
+          },
+          "can_do_today": {
+            "type": "boolean",
+            "title": "Can Do Today"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/IntakeConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TypedBookingConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PurposePaymentConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/UrgentConfig"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "block",
+                  "mapping": {
+                    "intake": "#/components/schemas/IntakeConfig",
+                    "purpose_payment": "#/components/schemas/PurposePaymentConfig",
+                    "typed_booking": "#/components/schemas/TypedBookingConfig",
+                    "urgent": "#/components/schemas/UrgentConfig"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job",
+          "title",
+          "why",
+          "how",
+          "autonomy",
+          "can_do_today",
+          "config"
+        ],
+        "title": "JobProposal"
+      },
       "KnowledgeIn": {
         "properties": {
           "item": {
@@ -9086,7 +9524,8 @@
               "website",
               "upload",
               "setup",
-              "memory_import"
+              "memory_import",
+              "web_search"
             ],
             "title": "Source"
           },
@@ -9111,6 +9550,77 @@
           "label"
         ],
         "title": "KnowledgeItem"
+      },
+      "KnowledgeRow": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "readers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Readers"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "website",
+              "upload",
+              "setup",
+              "memory_import",
+              "web_search"
+            ],
+            "title": "Source"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "title",
+          "text",
+          "readers",
+          "source",
+          "created_at"
+        ],
+        "title": "KnowledgeRow",
+        "description": "An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view\nmasks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows\nwithout a timestamp. Every field is always sent."
       },
       "Label": {
         "properties": {
@@ -9258,7 +9768,8 @@
               "rate_limit",
               "agent_auth",
               "head_checkpoint",
-              "desk_data"
+              "desk_data",
+              "web_search"
             ],
             "title": "Kind"
           },
@@ -9640,6 +10151,7 @@
               "native.start_verification",
               "native.fetch_website",
               "native.read_memory",
+              "native.web_search",
               "payments.list_charges",
               "payments.create_refund"
             ],
@@ -10032,6 +10544,18 @@
                 "type": "null"
               }
             ]
+          },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain",
+            "description": "Owner-only execution refusal reason for this exact status, fetched with the owner's credential; never part of the stored or signed visitor event."
           }
         },
         "type": "object",
@@ -10044,10 +10568,11 @@
           "cursor",
           "owner_translation",
           "triage",
-          "stopped_draft"
+          "stopped_draft",
+          "owner_plain"
         ],
         "title": "OwnerTranscriptItem",
-        "description": "The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each\ndraft of Claude's the reply check stopped.\n\n`cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto\nit, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest\none read). Items come in transcript order (`n`), each once per read.\n\nA `stopped_draft` item (Plan 02b) stands where the check stopped the draft, before the rewrite or the handoff that\nfollowed: its `stopped_draft` holds the draft and why it was stopped, and it has no `text` or `event`. Every other\nitem's `stopped_draft` is null."
+        "description": "The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each\ndraft of Claude's the reply check stopped.\n`owner_plain` is always present: the owner-only reason for this exact execution refusal, or null.\n\n`cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto\nit, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest\none read). Items come in transcript order (`n`), each once per read.\n\nA `stopped_draft` item (Plan 02b) stands where the check stopped the draft, before the rewrite or the handoff that\nfollowed: its `stopped_draft` holds the draft and why it was stopped, and it has no `text` or `event`. Every other\nitem's `stopped_draft` is null."
       },
       "PaymentConflict": {
         "properties": {
@@ -10655,6 +11180,75 @@
         ],
         "title": "ProofReport"
       },
+      "ProposalCard": {
+        "properties": {
+          "proposal_id": {
+            "type": "string",
+            "pattern": "^p-[0-9a-f]{12}$",
+            "title": "Proposal Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "job",
+              "connector"
+            ],
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "accepted",
+              "declined",
+              "changed"
+            ],
+            "title": "State"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^p-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connector": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectorProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "proposal_id",
+          "kind",
+          "state",
+          "job",
+          "connector"
+        ],
+        "title": "ProposalCard"
+      },
       "ProvingPending": {
         "properties": {
           "retry": {
@@ -10751,6 +11345,43 @@
           "agent_card"
         ],
         "title": "PublicDesk"
+      },
+      "PurposePaymentConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "purpose_payment",
+            "title": "Block"
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Purpose",
+            "description": "Payment purpose, 1 to 60 characters."
+          },
+          "amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "purpose",
+          "amount_cents"
+        ],
+        "title": "PurposePaymentConfig"
       },
       "RecordedHistory": {
         "properties": {
@@ -11532,17 +12163,35 @@
       "SetupAnswerIn": {
         "properties": {
           "question": {
-            "type": "string",
-            "enum": [
-              "what_you_do",
-              "hours_and_area",
-              "quote_limit",
-              "discounts",
-              "documents_and_payments",
-              "money_limit",
-              "contact_and_after_hours"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "what_you_do",
+                  "hours_and_area",
+                  "quote_limit",
+                  "discounts",
+                  "documents_and_payments",
+                  "money_limit",
+                  "contact_and_after_hours"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Question"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card"
           },
           "text": {
             "type": "string",
@@ -11554,11 +12203,10 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "question",
           "text"
         ],
         "title": "SetupAnswerIn",
-        "description": "`POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers\n(`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it."
+        "description": "`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.\nNaming the ask prevents a repeated answer from answering the next one."
       },
       "SetupConsentIn": {
         "properties": {
@@ -11589,6 +12237,24 @@
           "text": {
             "type": "string",
             "title": "Text"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/Choice"
+            },
+            "type": "array",
+            "title": "Choices",
+            "default": []
+          },
+          "card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposalCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -11597,7 +12263,7 @@
           "text"
         ],
         "title": "SetupMessage",
-        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`)."
+        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text."
       },
       "SetupStartIn": {
         "properties": {
@@ -11701,6 +12367,17 @@
             ],
             "title": "Question"
           },
+          "pending_card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Card"
+          },
           "busy": {
             "type": "boolean",
             "title": "Busy",
@@ -11725,7 +12402,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether a consent run is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
       },
       "SetupTools": {
         "properties": {
@@ -11769,6 +12446,7 @@
               "native.start_verification",
               "native.fetch_website",
               "native.read_memory",
+              "native.web_search",
               "payments.list_charges",
               "payments.create_refund"
             ],
@@ -12021,6 +12699,33 @@
         ],
         "title": "ToolCall"
       },
+      "ToolConfirmed": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ToolProfile"
+            },
+            "type": "array",
+            "title": "Profiles"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "profiles",
+          "draft"
+        ],
+        "title": "ToolConfirmed"
+      },
       "ToolDecisionRow": {
         "properties": {
           "decision_id": {
@@ -12072,6 +12777,18 @@
             "type": "string",
             "title": "Reason Plain"
           },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain",
+            "description": "Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -12094,6 +12811,7 @@
           "outcome",
           "state",
           "reason_plain",
+          "owner_plain",
           "created_at",
           "ledger_seq",
           "replayed"
@@ -12130,6 +12848,42 @@
         "title": "ToolDecisions",
         "description": "`GET /api/owner/desks/{desk_id}/tools/{tool}/decisions`: a page of the tool's decisions on the Desk, newest\nfirst; `next_before` is the cursor for the next page, None on the last."
       },
+      "ToolPin": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "native.quote",
+              "native.find_slots",
+              "native.book",
+              "native.release_document",
+              "native.payment_link",
+              "native.charge_mandate",
+              "native.capture_lead",
+              "native.request_callback",
+              "native.start_verification",
+              "native.fetch_website",
+              "native.read_memory",
+              "native.web_search",
+              "payments.list_charges",
+              "payments.create_refund"
+            ],
+            "title": "Tool"
+          },
+          "definition_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Definition Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tool",
+          "definition_sha256"
+        ],
+        "title": "ToolPin"
+      },
       "ToolProfile": {
         "properties": {
           "tool": {
@@ -12146,6 +12900,7 @@
               "native.start_verification",
               "native.fetch_website",
               "native.read_memory",
+              "native.web_search",
               "payments.list_charges",
               "payments.create_refund"
             ],
@@ -12371,6 +13126,31 @@
         "title": "ToolRow",
         "description": "A tool of the Desk as the kernel lists it (`kernel_ro.tools`): its effects, whether it can be undone, its\nstatus (`needs_review` until the owner confirms a connected tool), the description Claude sees and, for a\nconnected tool, the hash of the definition it is pinned to and a changed definition waiting for review; and the\nactive rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9)."
       },
+      "ToolsConfirmIn": {
+        "properties": {
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ToolPin"
+            },
+            "type": "array",
+            "maxItems": 14,
+            "minItems": 1,
+            "title": "Tools"
+          },
+          "enable": {
+            "type": "boolean",
+            "title": "Enable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tools",
+          "enable"
+        ],
+        "title": "ToolsConfirmIn",
+        "description": "The shared batch review body; the checked Desk ID comes from the route."
+      },
       "TranscriptItem": {
         "properties": {
           "n": {
@@ -12492,6 +13272,60 @@
         ],
         "title": "Triage",
         "description": "A stopped attempt, summarized for the owner (route `triage`): what the person seemed to be after, and a\ncategory for the Safety page's filters. AI-written, for the owner alone."
+      },
+      "TypedBookingConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "typed_booking",
+            "title": "Block"
+          },
+          "appointment_type": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Appointment Type",
+            "description": "Appointment name, 1 to 60 characters."
+          },
+          "minutes": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 15.0,
+            "title": "Minutes",
+            "description": "Appointment length, 15 to 60 minutes."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "appointment_type",
+          "minutes"
+        ],
+        "title": "TypedBookingConfig"
+      },
+      "UrgentConfig": {
+        "properties": {
+          "block": {
+            "type": "string",
+            "const": "urgent",
+            "title": "Block"
+          },
+          "urgent_when": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Urgent When",
+            "description": "When a request is urgent, 1 to 300 characters."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "block",
+          "urgent_when"
+        ],
+        "title": "UrgentConfig"
       },
       "VerifyCheckIn": {
         "properties": {

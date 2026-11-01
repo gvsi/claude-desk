@@ -49,12 +49,12 @@ async def cancellation_during_signing(app, client, reviewer, monkeypatch, *, pro
     paused, resume, committed = asyncio.Event(), asyncio.Event(), asyncio.Event()
     recheck = reply_check.recheck_cards
 
-    async def pause(ctx, session_row, blocks):
+    async def pause(ctx, session_row, blocks, *, rendered_claims):
         event.listen(ctx.db.sync_session, "after_commit", lambda session: committed.set(), once=True)
         if cancel_first:
             paused.set()
             await resume.wait()
-        result = await recheck(ctx, session_row, blocks)
+        result = await recheck(ctx, session_row, blocks, rendered_claims=rendered_claims)
         if not cancel_first:
             assert [b.template for b in result[0] if b.kind == "card"] == ["payment_link"]
             paused.set()
@@ -271,6 +271,59 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
     else:
         assert_handed_off(verdict)
     verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("part", ["charter", "hours"])
+@pytest.mark.parametrize("flagged", [False, True], ids=["passing", "blocked"])
+@pytest.mark.parametrize("changed", [True, False], ids=["replaced", "unchanged"])
+async def test_signing_rechecks_claims_after_an_owner_replacement(app, client, reviewer, part, flagged, changed):
+    from .test_desk_writes import desks_of, facts_of, updated
+    from .test_reply_check import public_key, verify_verdict
+
+    copy, visitor = await visitor_of(app, client)
+    fact_id = "charter:policy:service_area" if part == "charter" else "charter:hours"
+    template = "policy" if part == "charter" else "hours"
+    original = (await facts_of(app, copy, "charter"))[fact_id]
+    quote = await own_quote(client, visitor)
+    clauses = [clause(template, fact_id), clause("quote", quote.fact_id)]
+    baseline = await checked(client, visitor, "", clauses)
+    asked, answer = asyncio.Event(), asyncio.Event()
+    soft_promise = reviewer.soft_promise
+    reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
+
+    async def slow_model(data, *, timeout_s=None):
+        asked.set()
+        await answer.wait()
+        return await soft_promise(data, timeout_s=timeout_s)
+
+    reviewer.soft_promise = slow_model
+    checking = asyncio.create_task(checked(client, visitor, "Here are the details.", clauses))
+    try:
+        await asyncio.wait_for(asked.wait(), 5)
+        if part == "charter":
+            body = {"charter": [{"key": "policy:service_area", "kind": "text",
+                                  "value": "We work in Oakland only." if changed else original.claims[0].value}]}
+        else:
+            hours = [{"days": ["mon"], "start": "08:00:00", "end": "12:00:00"}] if changed else [
+                window.model_dump(mode="json") for window in (await desks_of(app, copy))[copy.desk_id].hours]
+            body = {"hours": hours}
+        # The authenticated owner route commits on another connection while the soft check waits.
+        await asyncio.wait_for(updated(client, copy, part, body), 5)
+        current = (await facts_of(app, copy, "charter"))[fact_id]
+        assert (current.claims != original.claims) == changed
+    finally:
+        answer.set()
+        verdict = await asyncio.wait_for(checking, 5)
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    if changed and not flagged:
+        assert_handed_off(verdict)
+        assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
+            ("stale_fact", "claims_changed", [fact_id])]
+    else:
+        assert verdict.ok == (not flagged)
+        expected_cards = baseline.blocks[1:] if changed else baseline.blocks
+        assert [block for block in verdict.blocks if block.kind == "card"] == expected_cards
+        assert any(block.kind == "prose" for block in verdict.blocks) == (not flagged)
 
 
 async def test_soft_promise_request_shape():

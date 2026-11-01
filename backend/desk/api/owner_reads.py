@@ -6,8 +6,8 @@ owner's `WhoAmI` answer named, filtered by the path Desk, and the API's own rows
 route has already checked that the Desk is one of the copy's (`OwnerCtx.desk`). The Desk list's unfinished setups are
 the one read across the copy's Desks: the API's own interview rows, filtered by that copy and its Desks. Only the
 Desk's visitor and agent sessions count, the owner's previews among them; the owner's own session (its setup calls)
-never does. Nothing here writes or commits, and nothing is kept between reads: each one is computed from the rows as
-they stand.
+never does. Nothing here writes or commits. Reads are computed from the current rows, except final execution
+refusal reasons: a bounded process-local cache avoids reading the same immutable kernel reason on each poll.
 
 Names, notes, reasons and texts a visitor typed are passed on as they are, for the owner's screens to show as
 untrusted text; nothing here reaches a visitor or a model.
@@ -20,7 +20,8 @@ never count as needing the owner, so "needs you" is never flagged.
 """
 
 import asyncio
-from collections import Counter
+import logging
+from collections import Counter, OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -30,6 +31,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from desk.api.deps import OwnerCtx
+from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.ro import decision_replayed, replayed
 from desk.api.schemas import (
     Attempt,
@@ -52,7 +54,8 @@ from desk.api.schemas import (
 from desk.api.setup import INTERVIEWS
 from desk.api.sse import RUN_EVENTS
 from desk.api.store import MESSAGES, WITH_EVENTS, triaged
-from desk.contracts import Decision
+from desk.contracts import Decision, DecisionState
+
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
 OWNER_NOTES = ("triage", "annotation")              # what the API writes later for the owner: never activity
@@ -60,6 +63,9 @@ LIVE_FOR = timedelta(minutes=5)                    # Today's "Live now": activit
 BRIEFING_FROM = time(18)                           # "Since last night": from 18:00 yesterday
 WEEK_DAYS = 7                                      # "Last 7 days": today and the six dates before it
 KIND_ORDER = {"turned_down": 0, "booking": 1, "lead": 2, "answer": 3}
+REFUSAL_CACHE_SIZE = 1024
+# Exact final decision version -> (session, reason); the session is still checked on every cache hit.
+_REFUSAL_REASONS: OrderedDict[tuple[str, int], tuple[str, str | None]] = OrderedDict()
 # The owner's line for a reply of Claude's the checkpoint stopped, and why: by rule ID where one says more than its
 # violation kind (a booking claim, which is a `promise_word`), else by the kind.
 REPLY_STOPPED = "A reply was stopped before it was shown"
@@ -135,6 +141,40 @@ async def last_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str]) ->
                MESSAGES.c.session_id.in_(wanted), MESSAGES.c.kind.in_(VISITOR_TEXT))
         .order_by(MESSAGES.c.n))
     return {session_id: text for session_id, text in rows}          # the last row of each session stays
+
+
+async def refusal_reason(ctx: OwnerCtx, decision_id: str, session_id: str, state: DecisionState,
+                         ledger_seq: int) -> str | None:
+    """Read the owner-only reason for a copy-scoped status, never from a visitor-readable stored row.
+
+    Match the exact state and ledger entry being displayed, so a later read cannot annotate an older status.
+    An unavailable or refused kernel read leaves the reason null and logs only the error type.
+    Matching final reasons are cached for this process's life, up to 1,024 entries, evicting the least recently used;
+    failures and mismatches are retried on later reads. The caller has already scoped the session or decision row
+    to the owner's Desks.
+    """
+    if state != "refused_at_execution":
+        return None
+    key = (decision_id, ledger_seq)
+    if key in _REFUSAL_REASONS:
+        cached_session, reason = _REFUSAL_REASONS[key]
+        if cached_session != session_id:
+            return None
+        _REFUSAL_REASONS.move_to_end(key)
+        return reason
+    try:
+        decision = await ctx.kernel.call("GET /decisions/{id}", path={"id": decision_id})
+    except (KernelFailed, KernelUnavailable) as error:
+        logging.getLogger(__name__).warning("Owner refusal reason unavailable: %s", type(error).__name__)
+        return None
+    if (decision.decision_id, decision.session_id, decision.state, decision.ledger_seq) != (
+            decision_id, session_id, state, ledger_seq):
+        return None
+    _REFUSAL_REASONS[key] = (session_id, decision.owner_plain)
+    _REFUSAL_REASONS.move_to_end(key)
+    if len(_REFUSAL_REASONS) > REFUSAL_CACHE_SIZE:
+        _REFUSAL_REASONS.popitem(last=False)
+    return decision.owner_plain
 
 
 async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> dict[str, str | None]:

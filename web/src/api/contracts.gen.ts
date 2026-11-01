@@ -156,6 +156,7 @@ export interface ApprovalResult {
   decision: Decision;
   execution: ExecResult | null;
   card_diff: RuleCard[] | null;
+  approved?: Decision | null;
 }
 export interface Decision {
   decision_id: string;
@@ -180,6 +181,7 @@ export interface Decision {
   card_ids: string[];
   review?: Review | null;
   reason_plain: string;
+  owner_plain?: string | null;
   visitor_plain: string;
   answers?: ("allow_once" | "deny_once" | "allow_person" | "deny_always")[];
   expires_at: string;
@@ -205,6 +207,7 @@ export interface NormalizedAction {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
   effects: ("read" | "private_data" | "change" | "charge" | "pay_out" | "send_message")[];
@@ -340,6 +343,13 @@ export interface Clause {
     | "payment_confirmed"
     | "link_cancelled";
   fact_id?: string | null;
+}
+export interface ContextClock {
+  as_of_utc: string;
+  local_now: string;
+  local_date: string;
+  weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+  timezone: string;
 }
 export interface CopyCreated {
   copy_id: string;
@@ -496,6 +506,233 @@ export interface DeskCreated {
 export interface DeskHoursRequest {
   hours: HoursWindow[];
 }
+export interface DeskMemoryRequest {
+  about: string;
+  /**
+   * @maxItems 20
+   */
+  items:
+    | []
+    | [MemoryItem]
+    | [MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ];
+}
+/**
+ * An untrusted simulated owner note, shared by the write contract and memory reader.
+ */
+export interface MemoryItem {
+  id: string;
+  title: string;
+  /**
+   * @maxItems 10
+   */
+  topics:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string];
+  text: string;
+}
 export interface DeskNotificationsRequest {
   notifications: NotificationDefaults;
 }
@@ -594,7 +831,7 @@ export interface KernelError {
 }
 export interface KnowledgeItem {
   item_id: string;
-  source: "website" | "upload" | "setup" | "memory_import";
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
   title: string;
   text: string;
   label: Label;
@@ -627,7 +864,8 @@ export interface LedgerEvent {
     | "rate_limit"
     | "agent_auth"
     | "head_checkpoint"
-    | "desk_data";
+    | "desk_data"
+    | "web_search";
   origin: "kernel" | "api";
   session_id?: string | null;
   ref_id?: string | null;
@@ -770,6 +1008,7 @@ export interface ReviewThresholds {
   max_manipulation_bp: number;
 }
 export interface SessionContext {
+  clock: ContextClock;
   tools: ToolProfile[];
   tools_declared: ToolProfile[];
   facts: Fact[];
@@ -788,6 +1027,7 @@ export interface ToolProfile {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
   source: "native" | "mcp";
@@ -824,6 +1064,7 @@ export interface ToolPin {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
   definition_sha256: string;
@@ -832,7 +1073,7 @@ export interface ToolsConfirmRequest {
   desk_id: string;
   /**
    * @minItems 1
-   * @maxItems 13
+   * @maxItems 14
    */
   tools:
     | [ToolPin]
@@ -848,6 +1089,22 @@ export interface ToolsConfirmRequest {
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
         ToolPin,
         ToolPin,
         ToolPin,
@@ -882,6 +1139,7 @@ export interface ToolsSimulateChangeRequest {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }

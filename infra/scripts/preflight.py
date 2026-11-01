@@ -6,9 +6,9 @@ In order, stopping at the first failure, which it names:
 
 1. The working tree is clean (ignored files aside) and the clone isn't shallow.
 2. HEAD is on `main` as origin has it now (fetched first); `--allow-branch` skips this check only.
-3. `make evals-results-check BASE=<the repository's first commit>`. The first commit touches no
-   gated path, so the check always requires HEAD's own tier 2 results file to exist and pass. A
-   missing make target fails too: no deploy without the tier 2 check.
+3. `make evals-results-check` passes against the first commit: while every tier 2 scenario is
+   pending, no results file is needed; once any can run, HEAD's own results file must exist and
+   pass. A missing make target fails too: no deploy without the tier 2 check.
 4. Both owner secrets (`desk/anthropic-api-key`, `desk/passcode-hash`) are the owner's: the
    `owner-set` tag infra/scripts/set_secret.py adds names the version it wrote, and that version is
    the secret's current one (AWSCURRENT). A secret never set, or set and then overwritten (by
@@ -94,9 +94,9 @@ def check_results(repo: Path) -> None:
         if "No rule to make target" in output:
             reason = "the evals-results-check target is missing, so HEAD's tier 2 result can't be checked"
         else:
-            reason = "HEAD has no passing tier 2 results file"
+            reason = "HEAD's tier 2 results check failed"
         raise PreflightError(f"{reason} (make evals-results-check BASE={base}):\n{output}")
-    print(f"ok: HEAD's tier 2 results file passes (make evals-results-check BASE={base})")
+    print(f"ok: tier 2 results check: {output}")
 
 
 def check_owner_secrets(client) -> None:

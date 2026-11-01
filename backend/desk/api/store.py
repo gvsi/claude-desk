@@ -791,5 +791,6 @@ async def transcript(conn: AsyncConnection, ids: Ids, audience: str, after: int 
                                 text=None if row.kind in UNTEXTED_KINDS else row.text,
                                 event=row.payload if row.kind in EVENT_KINDS else None,
                                 owner_translation=row.owner_translation, triage=_read_triage(row.triage),
+                                owner_plain=None,
                                 stopped_draft=_read_stopped_draft(row.text) if row.kind == "stopped_draft" else None)
             for row in rows]

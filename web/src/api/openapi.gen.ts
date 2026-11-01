@@ -2,7 +2,7 @@
 // Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.
 // Only the API-owned schemas are here; contract types come from src/api/contracts.ts.
 
-import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, Violation } from './contracts.ts';
+import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
 
 /**
  * An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI.
@@ -289,11 +289,24 @@ export interface CheckedDraft {
   prose: string;
   clauses: Clause[];
 }
+export interface Choice {
+  text: string;
+  recommended: boolean;
+}
 /**
  * `POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms.
  */
 export interface ConfirmRulesIn {
   version: number;
+}
+export interface ConnectorProposal {
+  app: "google_calendar" | "gmail" | "google_drive" | "quickbooks" | "stripe" | "square" | "calendly";
+  label: string;
+  /**
+   * Why this helps, at most 200 characters.
+   */
+  why: string;
+  connectable: boolean;
 }
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
@@ -413,6 +426,71 @@ export interface HealthOut {
   ok: boolean;
   kernel: Health | null;
 }
+export interface IntakeConfig {
+  block: "intake";
+  /**
+   * 1 to 5 intake questions, each 1 to 120 characters.
+   *
+   * @minItems 1
+   * @maxItems 5
+   *
+   * Items: 1 to 120 characters.
+   */
+  questions:
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string];
+}
+export interface JobProposal {
+  job: "answer" | "intake" | "schedule" | "price" | "documents" | "status" | "payment" | "urgent";
+  /**
+   * Title, at most 60 characters.
+   */
+  title: string;
+  /**
+   * Who this is for, at most 60 characters; empty if unclear.
+   */
+  who?: string;
+  /**
+   * Why this helps, at most 200 characters.
+   */
+  why: string;
+  /**
+   * How the Desk helps, at most 300 characters.
+   */
+  how: string;
+  autonomy: "auto" | "ask";
+  can_do_today: boolean;
+  config: (IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig) | null;
+}
+export interface TypedBookingConfig {
+  block: "typed_booking";
+  /**
+   * Appointment name, 1 to 60 characters.
+   */
+  appointment_type: string;
+  /**
+   * Appointment length, 15 to 60 minutes.
+   */
+  minutes: number;
+}
+export interface PurposePaymentConfig {
+  block: "purpose_payment";
+  /**
+   * Payment purpose, 1 to 60 characters.
+   */
+  purpose: string;
+  amount_cents: number | null;
+}
+export interface UrgentConfig {
+  block: "urgent";
+  /**
+   * When a request is urgent, 1 to 300 characters.
+   */
+  urgent_when: string;
+}
 /**
  * `POST /api/owner/desks/{desk_id}/knowledge`: something the owner tells Claude about the business (untrusted
  * text, never policy), owner-only (`Label(readers=["owner"])`) or public (`Label(readers=["public"])`); posting an
@@ -420,6 +498,19 @@ export interface HealthOut {
  */
 export interface KnowledgeIn {
   item: KnowledgeItem;
+}
+/**
+ * An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view
+ * masks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows
+ * without a timestamp. Every field is always sent.
+ */
+export interface KnowledgeRow {
+  item_id: string;
+  title: string | null;
+  text: string | null;
+  readers: string[];
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
+  created_at: string | null;
 }
 /**
  * Details a visitor left: the name and note as they typed them (untrusted text, either may be missing).
@@ -495,6 +586,7 @@ export interface OwnerTranscript {
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
  * draft of Claude's the reply check stopped.
+ * `owner_plain` is always present: the owner-only reason for this exact execution refusal, or null.
  *
  * `cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto
  * it, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest
@@ -522,6 +614,10 @@ export interface OwnerTranscriptItem {
   owner_translation: string | null;
   triage: Triage | null;
   stopped_draft: StoppedDraft | null;
+  /**
+   * Owner-only execution refusal reason for this exact status, fetched with the owner's credential; never part of the stored or signed visitor event.
+   */
+  owner_plain: string | null;
 }
 /**
  * A reply of Claude's the kernel's reply check stopped (Plan 02b): the draft as the check had it, and each
@@ -566,6 +662,14 @@ export interface PersonOnRecord {
  */
 export interface PresetIn {
   preset: "ask_first" | "auto";
+}
+export interface ProposalCard {
+  proposal_id: string;
+  kind: "job" | "connector";
+  state: "proposed" | "accepted" | "declined" | "changed";
+  superseded_by?: string | null;
+  job: JobProposal | null;
+  connector: ConnectorProposal | null;
 }
 /**
  * 202: the rules are still being drafted or checked. Send `retry` again in a few seconds: it picks up the same
@@ -703,18 +807,22 @@ export interface SendAgentIn {
   idempotency_key: string;
 }
 /**
- * `POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
- * (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it.
+ * `POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
+ * Naming the ask prevents a repeated answer from answering the next one.
  */
 export interface SetupAnswerIn {
-  question:
-    | "what_you_do"
-    | "hours_and_area"
-    | "quote_limit"
-    | "discounts"
-    | "documents_and_payments"
-    | "money_limit"
-    | "contact_and_after_hours";
+  question?:
+    | (
+        | "what_you_do"
+        | "hours_and_area"
+        | "quote_limit"
+        | "discounts"
+        | "documents_and_payments"
+        | "money_limit"
+        | "contact_and_after_hours"
+      )
+    | null;
+  card?: string | null;
   text: string;
 }
 /**
@@ -725,11 +833,14 @@ export interface SetupConsentIn {
 }
 /**
  * One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
- * owner's memory or website (`tool_label`).
+ * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
+ * only to a card message, with role `claude` and empty text.
  */
 export interface SetupMessage {
   role: "claude" | "owner" | "tool_label";
   text: string;
+  choices?: Choice[];
+  card?: ProposalCard | null;
 }
 /**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
@@ -747,7 +858,7 @@ export interface SetupStartIn {
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent, while busy and after the last one), whether a consent run is pending (`busy`), and the
+ * before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
  * conversation so far. Its messages start at Claude's consent
  * question: the owner's opening description isn't shown back to them.
  */
@@ -768,6 +879,7 @@ export interface SetupState {
         | "contact_and_after_hours"
       )
     | null;
+  pending_card?: string | null;
   busy?: boolean;
   messages: SetupMessage[];
 }
@@ -795,6 +907,7 @@ export interface SimulateChangeIn {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }
@@ -894,6 +1007,10 @@ export interface ToolDecisionRow {
     | "unknown"
     | "refused_at_execution";
   reason_plain: string;
+  /**
+   * Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise.
+   */
+  owner_plain: string | null;
   created_at: string;
   ledger_seq: number;
   replayed: boolean;
@@ -905,6 +1022,60 @@ export interface ToolDecisionRow {
 export interface ToolDecisions {
   items: ToolDecisionRow[];
   next_before: string | null;
+}
+/**
+ * The shared batch review body; the checked Desk ID comes from the route.
+ */
+export interface ToolsConfirmIn {
+  /**
+   * @minItems 1
+   * @maxItems 14
+   */
+  tools:
+    | [ToolPin]
+    | [ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ];
+  enable: boolean;
 }
 /**
  * One transcript entry as the visitor sees it: their own words, or an event the API delivered or emitted.
@@ -1001,7 +1172,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
-  "POST /api/owner/setup/{id}/answer": { 200: "SetupState" },
+  "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
@@ -1034,6 +1205,7 @@ export const API_OPERATIONS = {
   "GET /api/owner/desks/{desk_id}/tools/{tool}/decisions": { 200: "ToolDecisions" },
   "POST /api/owner/desks/{desk_id}/tools/connect": { 200: "ToolRow[]" },
   "POST /api/owner/desks/{desk_id}/tools/simulate_change": { 200: "ToolProfile" },
+  "GET /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeRow[]" },
   "POST /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeItem" },
   "POST /api/owner/desks/{desk_id}/documents": { 201: "DocumentCreated" },
   "POST /api/owner/policy/{desk_id}/chat": { 200: "RuleChatOut", 202: "ProvingPending" },
@@ -1041,5 +1213,6 @@ export const API_OPERATIONS = {
   "POST /api/owner/policy/{desk_id}/preset": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/suggestions/{tool}": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/money_cap": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/tools/confirm": { 200: "ToolConfirmed", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
 } as const;

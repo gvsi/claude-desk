@@ -133,7 +133,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
   - `ink` and `inkSecondary` are `var(--text-primary)` and `var(--text-secondary)`.
   - The mapping keeps both inks at 4.5:1 over the field, falling back to `bg-panel` when they can't.
 - `ownerName` (`owner_display_name`), `language`, `onAskForOwner`.
-- `ownerInChat`, whether the owner is in the chat. Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens or reloads, kept current by the stream's `owner_joined` and `owner_left` (the events the page also draws as the joined and "Claude is helping again." lines). The line tells the visitor a person is in the chat, so it is never set from anything else. The web app is to set it this way; it doesn't yet. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
+- `ownerInChat`, whether the owner is in the chat. Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens or reloads, kept current by the stream's `owner_joined` and `owner_left` (the events the page also draws as the joined and "Claude is helping again." lines). The line tells the visitor a person is in the chat, so it is never set from anything else. `PublicChat` passes `chat.ownerInChat` from `PublicChatProvider`, which derives it through `ownerInChatNow`. The flag is false while the stream is disconnected or catching up, or the session mode is not confirmed. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, pinned at the bottom, and `children`, the conversation, in the scroll region. Whatever the page adds after the conversation (notices, the element it keeps above the composer) goes in `children` too.
@@ -149,7 +149,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
-| `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. The web app is to set it so; it doesn't yet. `false` by default. |
+| `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. `PublicChat` passes `chat.ownerInChat`, derived by `PublicChatProvider` through `ownerInChatNow`; it is false while the stream is disconnected or catching up, or the mode is not confirmed. `false` by default. |
 | `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
@@ -159,3 +159,28 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 
 `PublicBrand`, `PublicOpenStatus`, `PUBLIC_SHELL_SCROLLER_EVENT` and `PublicShellScrollerDetail` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.
+
+## While the page opens
+
+`PublicShellSkeleton({ language, footer })` and `PublicBrandHeaderSkeleton({ hours })` are exported
+alongside the shell. Put them in a `SkeletonScreen`, which owns the 200 ms wait, one synced sweep,
+hidden status and 120 ms fade. They draw no content or controls; the real `ConceptFooter poweredBy`
+is the shell skeleton's only text when `footer` is true. The consumer keeps a hidden heading and
+main landmark outside the layer on a standalone loading page.
+
+The brand shape uses `bg-panel` until the business's colours arrive, its real monogram size and
+name/tagline line boxes, and one open-hours line when `hours` is true. It follows the header's own
+container rules: the status wraps below the name under 640 px. A fresh copy's open header matches;
+at 390 px, closed and no-hours headers change height once (19 px taller and 16 px shorter).
+The agents page passes `hours={false}` because its real header has no hours.
+
+The shell shape shares the shell's layout and visual-viewport measurement hooks, including short
+windows and embedded panels. It draws the real fresh copy's five charter cards and two agents
+links: beside the chat from 900 px, and opening the conversation's scroll region below that,
+as the current page does. Greeting and starter chips are left out until those ship. In setup's
+fresh preview (`footer={false}`), there is no charter or footer, so neither is drawn. Text that
+depends on other Desk data can change size once when it arrives.
+
+The `Skeleton`, `SkeletonPhone` and `SkeletonShort` stories compare the shapes with the real shell
+at 1280 px, 390 px and 390×480. They reference P12-02, `UXC-P1202-After`
+(`#artboard-d122e70134a0`), and follow the real page wherever it differs from that board.

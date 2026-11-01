@@ -117,6 +117,9 @@ class Desk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Private setup notes; never included in kernel_ro.desks.
+    simulated_memory: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+
 
 class Person(Base):
     __tablename__ = "people"
@@ -356,6 +359,8 @@ class Decision(Base):
     card_ids: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=EMPTY_LIST)
     review: Mapped[c.Review | None] = mapped_column(ContractJSON(c.Review))
     reason_plain: Mapped[str] = mapped_column(Text)
+    # why it was refused at execution, for the owner alone (`decide.set_state`); None in every other state
+    owner_plain: Mapped[str | None] = mapped_column(Text)
     visitor_plain: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ledger_seq: Mapped[int] = mapped_column(BigInteger)
@@ -553,7 +558,9 @@ class Handoff(Base):
     card opened, or a callback a visitor asked for (`native.request_callback`, 01b_2_handoffs),
     which first closes the session's open ones. A row's kind never changes. The kernel keeps one
     open handoff per session, of either kind, under the session row, not by a constraint, so rows
-    from before may hold several (01b_2b_handoff_kind)."""
+    from before may hold several (01b_2b_handoff_kind). A call-back in the owner's own preview
+    inserts its row already `done`, with no closing entry or alert, so it leaves no Needs-you item;
+    its fact still backs the preview's card and its row stays for reconciliation."""
 
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}

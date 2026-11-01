@@ -109,7 +109,7 @@ RESOURCE_KINDS = {
     "native.quote": "desk", "native.find_slots": "desk", "native.book": "slot", "native.release_document": "document",
     "native.payment_link": "quote", "native.charge_mandate": "quote", "native.capture_lead": "desk",
     "native.request_callback": "desk", "native.start_verification": "desk", "payments.list_charges": "charge",
-    "payments.create_refund": "charge", "native.fetch_website": "desk", "native.read_memory": "desk",
+    "payments.create_refund": "charge", "native.fetch_website": "desk", "native.read_memory": "desk", "native.web_search": "desk",
 }
 
 REVIEWER_MODEL = "claude-sonnet-5-5"

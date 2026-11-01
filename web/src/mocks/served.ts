@@ -6,7 +6,7 @@
  * cookies: kept in the store for the screen tests' one page, real ones on the dev server. Nothing
  * here is a credential.
  */
-import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
+import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type KnowledgeItem, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
@@ -35,14 +35,28 @@ import {
   needsYou,
   ownerTranscript,
   paymentLinkOut,
+  knowledgeList,
   peopleOut,
   publicDesk,
+  REPORT_DAYS,
   reports,
   rulesView,
   today,
   visitorTranscript,
 } from './readModels.ts';
-import { EVENT_GAP_MS, afterAnswer, afterVerify, allows, cardDiffFor, ruleChatReply, scriptedTurn, turnEnd, type Language, type Step } from './script.ts';
+import {
+  EVENT_GAP_MS,
+  PAUSED_TURN,
+  afterAnswer,
+  afterVerify,
+  cardDiffFor,
+  ruleChatReply,
+  scriptedTurn,
+  turnEnd,
+  visitorSafe,
+  type Language,
+  type Step,
+} from './script.ts';
 import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
 import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
@@ -57,6 +71,21 @@ const DEMO_CODE_SHAPE = /^\d{6}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const KNOWLEDGE_SOURCES: ReadonlySet<unknown> = new Set(['website', 'upload', 'setup', 'memory_import', 'web_search']);
+
+/** A `KnowledgeItem` as the contracts have it: an id, a known source, a title, a text and readers. */
+function isKnowledgeItem(value: unknown): value is KnowledgeItem {
+  if (!isRecord(value) || !isRecord(value.label)) return false;
+  const { readers } = value.label;
+  return (
+    typeof value.item_id === 'string' &&
+    KNOWLEDGE_SOURCES.has(value.source) &&
+    typeof value.title === 'string' &&
+    typeof value.text === 'string' &&
+    (readers === undefined || (Array.isArray(readers) && readers.every((reader) => typeof reader === 'string')))
+  );
+}
 
 /**
  * The cookies a request carries, as the API reads who is asking from them, and the ones its answer
@@ -258,16 +287,16 @@ export class Server {
     this.world = this.freshWorld();
   }
 
-  private freshWorld(): MockWorld {
-    const world = new MockWorld(this.seed, this.naming.copyNo(), () => this.naming.linkToken());
+  private freshWorld(seed: MockSeed = this.seed): MockWorld {
+    const world = new MockWorld(seed, this.naming.copyNo(), () => this.naming.linkToken());
     seedWorld(world);
     return world;
   }
 
   /** A new copy of the same seed, with new ids and slugs; the old copy's chats and turns are left behind. */
-  startOver(): void {
+  startOver(seed: MockSeed = this.world.seed): void {
     this.stopTurns();
-    this.world = this.freshWorld();
+    this.world = this.freshWorld(seed);
   }
 
   stopTurns(): void {
@@ -302,7 +331,7 @@ export class Server {
     if (!desk || slug === undefined) return NOT_FOUND;
     const sessionId = cookies.visitor(slug);
     const session = sessionId === undefined ? undefined : this.world.sessions.get(sessionId);
-    if (!session || session.deskId !== desk.summary.desk_id) return NO_SESSION;
+    if (!session || session.ended || session.deskId !== desk.summary.desk_id) return NO_SESSION;
     return { desk, session };
   }
 
@@ -401,6 +430,8 @@ const SERVED: ServedRoutes = {
     const passcode = isRecord(req.body) ? req.body.passcode : undefined;
     if (req.malformed || typeof passcode !== 'string' || passcode === '') return INVALID;
     if (passcode === 'wrong') return failWith(401, 'wrong_passcode');
+    // Mock-only capture path: enter this passcode to answer a document hold after its chat ended.
+    if (passcode === 'not-shared') sv.startOver('rivera_ended_document');
     req.cookies.setOwner();
     return ok(copyOut(sv.world), 201);
   },
@@ -457,7 +488,12 @@ const SERVED: ServedRoutes = {
   },
   reports(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
-    return isFailure(desk) ? desk : ok(reports(sv.world, desk));
+    if (isFailure(desk)) return desk;
+    // `days`: whole local dates, 1 to 365, as the API takes them; anything else is refused.
+    const asked = req.query.get('days');
+    const days = asked === null ? REPORT_DAYS.default : /^\d+$/.test(asked) ? Number(asked) : NaN;
+    if (!Number.isInteger(days) || days < 1 || days > REPORT_DAYS.max) return INVALID;
+    return ok(reports(sv.world, desk, days));
   },
   answer(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
@@ -475,11 +511,11 @@ const SERVED: ServedRoutes = {
     }
     const session = sv.world.sessions.get(record.decision.session_id);
     const decision = sv.world.answer(record, given);
-    if (session) sv.runTurn(session, afterAnswer(given, decision), session.language, '');
+    if (session) sv.runTurn(session, afterAnswer(given, visitorSafe(decision), record.approved ? visitorSafe(record.approved) : null), session.language, '');
     const out: ApprovalAnswerOut = {
       decision,
-      execution_state: allows(given) ? 'succeeded' : null,
-      card_diff: cardDiffFor(given, decision, session?.person ?? null),
+      execution_state: decision.state === 'executed' ? 'succeeded' : null,
+      card_diff: decision.state === 'refused_at_execution' ? null : cardDiffFor(given, decision, session?.person ?? null),
     };
     return ok(out);
   },
@@ -504,7 +540,7 @@ const SERVED: ServedRoutes = {
     if (!session) return NOT_FOUND;
     if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const after = Number(req.query.get('after') ?? '0');
-    return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0, sv.world.now()));
+    return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0, sv.world.now(), sv.world));
   },
   takeover(sv, req) {
     const session = ownerSession(sv, req);
@@ -641,6 +677,38 @@ const SERVED: ServedRoutes = {
     const record = /^\d{1,9}$/.test(version) ? desk.drafts.get(Number(version)) : undefined;
     return record ? ok(record.draft) : NOT_FOUND;
   },
+  addKnowledge(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const item = isRecord(req.body) ? req.body.item : undefined;
+    if (req.malformed || !isKnowledgeItem(item)) return INVALID;
+    if (item.item_id.length === 0 || item.item_id.length > 64 || /[^A-Za-z0-9_-]/.test(item.item_id)) return failWith(422, 'kernel', { code: 'invalid' });
+    if ([item.title, item.text].some((text) => /\p{Surrogate}/u.test(text))) return failWith(422, 'kernel', { code: 'invalid' });
+    if (item.title.includes('\0') || item.text.includes('\0')) return failWith(422, 'kernel', { code: 'invalid' });
+    if (new TextEncoder().encode(item.text).length > 100 * 1024) return failWith(422, 'kernel', { code: 'invalid' });
+    if ([...item.title].length > 200) return failWith(422, 'kernel', { code: 'invalid' });
+    if (item.label.record_owner != null) return failWith(422, 'kernel', { code: 'invalid' });
+    const readersAsked = item.label.readers ?? ['owner'];
+    if (readersAsked.length !== 1 || !['owner', 'public'].includes(readersAsked[0]!)) return failWith(422, 'kernel', { code: 'invalid' });
+    // Match the kernel's knowledge label, storable text, sizes, ref and per-Desk cap.
+    // Posted again under its id, it replaces the item. The label is the one the kernel keeps, with
+    // every field, as the API's models send them (readers default to the owner's).
+    const forced = sv.world.keepsKnowledgeOwnerOnly(item);
+    const readers = forced ? ['owner'] : [...(item.label.readers ?? ['owner'])];
+    const stored: KnowledgeItem = { ...item, label: { readers, record_owner: item.label.record_owner ?? null } };
+    const key = `${desk.summary.desk_id}:${item.item_id}`;
+    const previous = sv.world.knowledge.get(key);
+    if (previous === undefined && [...sv.world.knowledge.values()].filter((row) => row.deskId === desk.summary.desk_id).length >= 200) {
+      return failWith(422, 'kernel', { code: 'invalid' });
+    }
+    const createdAt = previous === undefined ? sv.world.now() : previous.createdAt;
+    sv.world.knowledge.set(key, { deskId: desk.summary.desk_id, item: stored, createdAt, forced });
+    return ok(stored);
+  },
+  knowledge(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(knowledgeList(sv.world, desk.summary.desk_id));
+  },
   people(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(peopleOut(sv.world, desk));
@@ -697,6 +765,8 @@ const SERVED: ServedRoutes = {
     sv.world.visitorText(session, text);
     // The turn's tools are read when it starts, which may be after a turn in progress ends.
     if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session)), session.language, text);
+    // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
+    else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
   },
   visitorTyping(sv, req) {

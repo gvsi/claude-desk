@@ -233,7 +233,7 @@ async def test_three_blocks_pause_the_session(app, client, registry, reviewer, b
     named = {entry.entry_id: entry.decision_id for entry in await rows_of(app, rows.copy_id, select(DemoInboxEntry))}
     assert [[named[notice.entry_id] for notice in d.inbox] for d in (first, second, third)] == [
         [first.decision_id], [second.decision_id], [None, third.decision_id]]
-    assert "The reviewer flagged it as an attempt to get around your rules." in third.reason_plain
+    assert "The reviewer flagged something in the request as a possible way around your rules." in third.reason_plain
     breaker = [(e.event.session_id, e.event.summary) for e in await ledger_rows(app, rows) if e.event.kind == "breaker"]
     assert breaker == [(visitor.session_id, {"strike": 1}), (visitor.session_id, {"strike": 2}),
                        (visitor.session_id, {"strike": 3}), (visitor.session_id, {"paused": True})]
@@ -1167,6 +1167,76 @@ async def test_the_owners_rule_is_quoted_whole(app, client, registry):
     assert decision.reason_plain == f"A stranger asked to get a quote for $180. Your rule allows it: “{LONG_RULE}”"
 
 
+@pytest.mark.parametrize(("baseline_id", "said"), [
+    ("same_copy", "It reached into another copy of the Desk, which is never allowed."),
+    ("private_data_record_owner",
+     "Private records go only to the verified person they belong to, so it was refused."),
+    ("recipient_owner_or_verified_contact",
+     "Messages go only to you or to a verified contact on record, so it was refused."),
+    ("no_agent_pay_out", "An agent can never be paid money out, so it was refused."),
+    ("agent_charge_within_mandate", "It was more than this agent's signed limit allows, so it was refused."),
+    ("money_has_amount", "A payment needs an amount above zero and within the platform's limit, so it was refused."),
+])
+def test_a_baseline_refusal_names_the_deciding_rule(baseline_id, said):
+    call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
+                           action=None, version_row=SimpleNamespace(cards=[]), quotes={})
+    if baseline_id == "agent_charge_within_mandate":
+        call.principal = SimpleNamespace(kind="agent")
+        call.mandate_remaining_cents = 1_000
+        call.action = SimpleNamespace(amount_cents=2_000, discount_bp=0)
+    evaluation = decide.Evaluation("refuse", [f"B.{baseline_id}"], [], None, None,
+                                 strike=False, needed_review=False)
+    assert decide._reason_plain(call, "refuse", None, evaluation) == (
+        f"{decide._asked(call.subject, call.req.call.tool, call.action)} {said}")
+
+
+def test_a_refusal_without_a_deciding_policy_does_not_blame_the_baseline():
+    call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
+                           action=None, version_row=SimpleNamespace(cards=[]), quotes={})
+    evaluation = decide.Evaluation("refuse", [], [], None, None, strike=False, needed_review=False)
+    assert decide._reason_plain(call, "refuse", None, evaluation) == (
+        "A stranger asked to book a visit. None of your rules covers this yet, so it was refused.")
+
+
+@pytest.mark.parametrize("remaining", [None, 2_000])
+def test_a_mandate_refusal_without_an_exceeded_limit_keeps_the_generic_line(remaining):
+    call = SimpleNamespace(subject="An agent", req=SimpleNamespace(call=SimpleNamespace(tool="native.charge_mandate")),
+                           action=SimpleNamespace(amount_cents=2_000, discount_bp=0), mandate_remaining_cents=remaining,
+                           principal=SimpleNamespace(kind="agent"), version_row=SimpleNamespace(cards=[]), quotes={})
+    evaluation = decide.Evaluation("refuse", ["B.agent_charge_within_mandate"], [], None, None,
+                                 strike=False, needed_review=False)
+    assert decide._reason_plain(call, "refuse", None, evaluation).endswith(decide.BASELINE_PLAIN)
+    assert decide._status_key(call, "refused", None, evaluation) == "refused"
+
+
+@pytest.mark.parametrize("policy_ids", [["F.never.no-quotes"], ["F.never.no-quotes", "B.same_copy"]])
+def test_an_owner_never_card_keeps_its_reason(policy_ids):
+    never = rule("no-quotes", "never", "No quotes in chat.")
+    call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.quote")),
+                           action=None, version_row=SimpleNamespace(cards=[never]), quotes={})
+    evaluation = decide.Evaluation("refuse", policy_ids, [never.card_id], None, None,
+                                 strike=False, needed_review=False)
+    assert decide._reason_plain(call, "refuse", None, evaluation) == (
+        "A stranger asked to get a quote. Your rule says never: “No quotes in chat.”")
+
+
+def test_every_baseline_rule_that_can_refuse_shares_its_owner_explanation_with_probes():
+    baseline_ids = set(re.findall(r'@id\("([^"]+)"\)', compiler.BASELINE))
+    assert baseline_ids
+    # The approvable evaluation has owner_approved=true: the auto cap holds, never refuses.
+    assert decide.BASELINE_RULE_PLAIN.keys() == baseline_ids - {"auto_money_cap"}
+    assert decide.BASELINE_RULE_PLAIN is activation.BASELINE_REASONS
+
+
+def test_two_deciding_baseline_rules_keep_the_generic_explanation():
+    call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
+                           action=None, version_row=SimpleNamespace(cards=[]), quotes={})
+    evaluation = decide.Evaluation("refuse", ["B.agent_charge_within_mandate", "B.money_has_amount"], [], None, None,
+                                 strike=False, needed_review=False)
+    assert decide._reason_plain(call, "refuse", None, evaluation) == (
+        "A stranger asked to book a visit. The always-on safety rules don't allow it.")
+
+
 async def test_a_refusal_no_rule_decided_keeps_its_words(app, client, registry):
     """The always-on baseline is no rule of the owner's, so its refusal has no lead-in: here money
     with no amount above zero, which the baseline refuses whatever the cards say."""
@@ -1174,16 +1244,18 @@ async def test_a_refusal_no_rule_decided_keeps_its_words(app, client, registry):
     decision = await decided(client, await open_visitor(client, rows), "native.payment_link")
     assert (decision.outcome, decision.card_ids, decision.policy_ids) == ("refuse", [], ["B.money_has_amount"])
     assert decision.reason_plain == ("A stranger asked to get a payment link for $0. "
-                                     "The always-on safety rules don't allow it.")
+                                     "A payment needs an amount above zero and within the platform's limit, "
+                                     "so it was refused.")
 
 
 def test_status_lines_are_digit_free():
     states = {"allowed", "held", "refused", "approved", "denied", "expired", "cancelled", "executed", "failed",
               "unknown", "refused_at_execution"}
     receipts = {"reply_checked", "reply_handed_off", "owner_said", "owner_say_blocked"}   # a reply's, an owner say's
-    # why an approved release of private data went nowhere, for the owner alone: the visitor mustn't read why
+    # why an action was refused at execution, for the owner alone (`owner_plain`): the visitor mustn't read why
     # their session ended, so these aren't status lines and `render.status` can't render them
-    reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed"}
+    reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed",
+               "refused_rules_changed", "refused_desk_deleted", "refused_fallback"}
     # refused_at_execution's line when a connected tool can't be reached, and refused's when an agent's charge is
     # over what its signed mandate has left
     variants = {"tool_unavailable", "refused_over_mandate"}
@@ -1208,6 +1280,7 @@ def test_status_lines_are_digit_free():
 
 
 @pytest.mark.parametrize("key", ["refused_contact_changed", "refused_person_removed", "refused_session_closed",
+                                 "refused_rules_changed", "refused_desk_deleted", "refused_fallback",
                                  "owner_say_blocked", "owner_said", "verify_started"])
 async def test_a_decision_takes_only_a_visitor_status_line(app, client, registry, key):
     """A decision's status line is `visitor_plain`, which the visitor reads, so `set_state` takes only a

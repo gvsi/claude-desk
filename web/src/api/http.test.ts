@@ -100,6 +100,15 @@ afterEach(() => {
 });
 
 describe('request', () => {
+  it('consent_202_requires_and_returns_the_interview_without_a_proving_retry', async () => {
+    const state = { interview_id: 's1', step: 'questions', consent: true, question: null, busy: true, messages: [] };
+    reply({ status: 202, body: state });
+    await expect(request('setupConsent', { params: { id: 's1' }, body: { allow: true } })).resolves.toEqual(state);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    replies = [{ status: 202 }];
+    await expect(request('setupConsent', { params: { id: 's1' }, body: { allow: true } })).rejects.toMatchObject({ kind: 'unavailable' });
+  });
+
   it('maps_status_to_error_kind', async () => {
     const cases: [number, ApiErrorKind][] = [
       [401, 'unauthorized'],

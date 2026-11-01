@@ -11,12 +11,14 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from 'react';
 
 import { Icon } from '../../icons/index.tsx';
 import { IconButton } from '../IconButton/IconButton.tsx';
 import { Mark } from '../Mark/Mark.tsx';
+import { Skeleton } from '../Skeleton/Skeleton.tsx';
 
 import './AppShell.css';
 
@@ -36,6 +38,8 @@ export interface AppShellProps {
    * every page.
    */
   fill?: boolean;
+  /** Draw the compact bar as shapes and leave landmarks to the loading page. */
+  skeleton?: boolean;
   /**
    * A panel beside the page, such as `AskClaudePanel`: at the right of the main area, the main
    * area's height, the page narrowing to make room. A panel that becomes a modal sheet (on a phone
@@ -96,7 +100,7 @@ function reducesMotion(): boolean {
  * Menu opens the sidebar as a modal sheet, and Escape, "Close menu" or going to a page closes it
  * and returns focus to Menu.
  */
-export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, panel, children }: AppShellProps) {
+export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, skeleton = false, panel, children }: AppShellProps) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
   const reduced = useSyncExternalStore(subscribeReducedMotion, reducesMotion, () => true);
@@ -122,23 +126,57 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
     if (inert || active === null || active === document.body) target.focus();
   }, [inert]);
 
+  const Column = skeleton ? 'div' : 'aside';
+  // Keep the address intact: owner pages may use its fragment for their own state.
+  const mainId = useId();
+  const main = useRef<HTMLElement>(null);
+  const skipToContent = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    main.current?.focus();
+  };
+
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
   // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
   return (
     <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}`}>
+      {skeleton ? null : (
+        <a className="cd-app-shell__skip cd-type-control" href={`#${mainId}`} onClick={skipToContent} {...inertWhen(inert)}>
+          Skip to content
+        </a>
+      )}
       {banner ? (
         <div className="cd-app-shell__banner" {...inertWhen(inert)}>
           {banner}
         </div>
       ) : null}
-      {compact ? <CompactNav sidebar={sidebar} business={business} inert={inert} /> : null}
+      {compact ? (
+        skeleton ? (
+          <div className="cd-app-shell__topbar" data-skeleton-anchor="top-bar">
+            <Skeleton shape="block" width={20} height={20} anchor="top-mark" />
+            <div className="cd-app-shell__business">
+              <Skeleton shape="line" text="control" width="65%" />
+            </div>
+            <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor="menu" />
+          </div>
+        ) : (
+          <CompactNav sidebar={sidebar} business={business} inert={inert} />
+        )
+      ) : null}
       <div className="cd-app-shell__body">
         {compact ? null : (
-          <aside className="cd-app-shell__column" aria-label="Claude Desk" {...inertWhen(inert)}>
+          <Column className="cd-app-shell__column" aria-label={skeleton ? undefined : 'Claude Desk'} {...inertWhen(inert)}>
             {sidebar}
-          </aside>
+          </Column>
         )}
-        <Main fill={fill} inert={inert} contentRef={content}>
+        <Main
+          id={skeleton ? undefined : mainId}
+          mainRef={skeleton ? undefined : main}
+          tabIndex={skeleton ? undefined : -1}
+          fill={fill}
+          inert={inert}
+          skeleton={skeleton}
+          contentRef={content}
+        >
           {children}
         </Main>
         {/* A panel beside the page slides in and out; a sheet, or any panel under reduced motion, comes and goes at once. */}
@@ -148,12 +186,29 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
   );
 }
 
-function Main({ fill, inert, contentRef, children }: { fill: boolean; inert: boolean; contentRef: RefObject<HTMLDivElement>; children: ReactNode }) {
-  return (
-    <main className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`} {...inertWhen(inert)}>
-      <div ref={contentRef} className="cd-app-shell__content">
-        {children}
-      </div>
+interface MainProps {
+  id?: string;
+  mainRef?: Ref<HTMLElement>;
+  tabIndex?: -1;
+  fill: boolean;
+  inert: boolean;
+  skeleton: boolean;
+  contentRef: RefObject<HTMLDivElement>;
+  children: ReactNode;
+}
+
+function Main({ id, mainRef, tabIndex, fill, inert, skeleton, contentRef, children }: MainProps) {
+  const area = { className: `cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`, ...inertWhen(inert) };
+  const content = (
+    <div ref={contentRef} className="cd-app-shell__content">
+      {children}
+    </div>
+  );
+  return skeleton ? (
+    <div {...area}>{content}</div>
+  ) : (
+    <main ref={mainRef} id={id} tabIndex={tabIndex} {...area}>
+      {content}
     </main>
   );
 }

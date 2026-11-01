@@ -64,8 +64,9 @@ export interface PublicShellProps {
    *
    * Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens
    * or reloads, kept current by the stream's `owner_joined` and `owner_left`. The line tells the
-   * visitor a person is in the chat, so it is never set from anything else. The web app is to set
-   * it this way; it doesn't yet.
+   * visitor a person is in the chat, so it is never set from anything else. `PublicChat` passes
+   * `chat.ownerInChat` from `PublicChatProvider`, which derives it through `ownerInChatNow`. The flag
+   * is false while the stream is disconnected or catching up, or the session mode is not confirmed.
    */
   ownerInChat?: boolean;
   /**
@@ -99,6 +100,9 @@ function Name({ children }: { children: string }) {
   return <span data-copy="user">{children}</span>;
 }
 
+/** Shared with the wordless shape's browser measurement. */
+export const ASK_OWNER_PREFIX = { en: 'Ask for ', es: 'Pedir hablar con ' } as const;
+
 /** The shell's own copy. The AI disclosure is part of it, in both languages, and can't be turned off. */
 const COPY = {
   en: {
@@ -114,7 +118,7 @@ const COPY = {
         {owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.
       </>
     ),
-    askFor: (owner: ReactNode) => <>Ask for {owner}</>,
+    askFor: (owner: ReactNode) => <>{ASK_OWNER_PREFIX.en}{owner}</>,
     about: (name: ReactNode) => <>About {name}</>,
     forAgents: 'For AI agents',
   },
@@ -130,7 +134,7 @@ const COPY = {
         {owner} está en este chat. Claude, una IA, está en pausa hasta que {owner} le devuelva el chat.
       </>
     ),
-    askFor: (owner: ReactNode) => <>Pedir hablar con {owner}</>,
+    askFor: (owner: ReactNode) => <>{ASK_OWNER_PREFIX.es}{owner}</>,
     about: (name: ReactNode) => <>Sobre {name}</>,
     forAgents: 'Para agentes de IA',
   },
@@ -339,7 +343,7 @@ function watchAbout(shell: HTMLElement, observer: ResizeObserver | null, watched
  * the message the visitor was reading stays where it was under the chat's head, and the shell sends
  * `PUBLIC_SHELL_SCROLLER_EVENT` with the element that now scrolls the conversation.
  */
-function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
+export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
   const [aboutBeside, setAboutBeside] = useState(false);
   const short = useRef(false);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -442,7 +446,7 @@ function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
  * on an iPhone), so it turns short and its chat's head stays at the top of what shows. Not while the
  * visitor has zoomed in, and not inside an owner screen.
  */
-function useVisualViewportFit(shell: RefObject<HTMLElement | null>, embedded: boolean): void {
+export function useVisualViewportFit(shell: RefObject<HTMLElement | null>, embedded: boolean): void {
   useLayoutEffect(() => {
     const el = shell.current;
     const viewport = typeof window === 'undefined' ? undefined : window.visualViewport;

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { Decision, DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -17,10 +17,12 @@ import type {
   ConversationSummary,
   CopyOut,
   DemoAgentRun,
+  KnowledgeRow,
   NeedsYouItem,
   OwnerTranscript,
   PeopleOut,
   PolicyVersionOut,
+  Reports,
   RuleChatOut,
   RulesDraft,
   RulesView,
@@ -30,17 +32,19 @@ import type {
   VisitorSession,
   VisitorTranscript,
 } from '../api/views.ts';
-import { rivera } from '../ds/fixtures/index.ts';
+import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
 import {
+  CALLBACK_WINDOW,
   DECISIONS,
   DEMO_CODE,
   EVENT_GAP_MS,
   HELD_PROSE,
   LINK_CANCELLED,
   VISITOR_PLAIN,
+  afterAnswer,
   askedDiscountBp,
   linkCancelledBlock,
   matchRule,
@@ -50,6 +54,8 @@ import {
 import { RIVERA } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
+import { validateContract } from './validate.ts';
+import type { ReplayTurn } from './world.ts';
 
 const slug = RIVERA.slug;
 const deskId = RIVERA.deskId;
@@ -321,9 +327,9 @@ describe('the scripted Desk', () => {
     for (const entry of others) expect(entry.decision_id, entry.entry_id).toBeNull();
   });
 
-  it('answer_resolves_and_follows_up', async () => {
+  it.each(['en', 'es'] as const)('allowed_answer_emits_approved_before_outcome_and_follows_up_%s', async (language) => {
     const { events } = await openChat();
-    await send('Can I get 15% off?');
+    await send(language === 'es' ? '¿Me hacen un descuento del 15%?' : 'Can I get 15% off?');
     await drain();
     const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
@@ -331,7 +337,7 @@ describe('the scripted Desk', () => {
     const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } });
     expect(answered.status).toBe(200);
     expect(answered.body).toMatchObject({
-      decision: { decision_id: decisionId, state: 'executed', visitor_plain: "Quoted from Maria Rivera's price list" },
+      decision: { decision_id: decisionId, state: 'executed', visitor_plain: executedLine('native.quote', language, 'Maria Rivera') },
       execution_state: 'succeeded',
       card_diff: null,
     });
@@ -339,16 +345,22 @@ describe('the scripted Desk', () => {
     expect(typesOf(events)).toEqual(['writing', 'held', 'message', 'turn_end']);
 
     await drain();
-    expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
-    const [, resolved] = events[4] ?? [];
+    expect(typesOf(events).slice(4)).toEqual(['receipt', 'resolved', 'writing', 'message', 'turn_end']);
+    const [, approved] = events[4] ?? [];
+    expect(approved).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved', visitor_plain: VISITOR_PLAIN[language].approved });
+    const [, resolved] = events[5] ?? [];
     // An executed action's line says what ran and whose records it used, never a bare "Done".
     expect(resolved).toMatchObject({
       type: 'resolved',
       decision_id: decisionId,
       state: 'executed',
-      visitor_plain: "Quoted from Maria Rivera's price list",
+      visitor_plain: executedLine('native.quote', language, 'Maria Rivera'),
     });
-    const [, followUp] = events[6] ?? [];
+    if (approved?.type !== 'receipt' || resolved?.type !== 'resolved') throw new Error('approval precedes resolution');
+    expect(approved.ledger_seq).toBeLessThan(resolved.ledger_seq);
+    const approvalEntry = mockStore.world.desks[0]?.ledger.find((entry) => entry.seq === approved.ledger_seq);
+    expect(approvalEntry?.event).toMatchObject({ kind: 'approval', ref_id: decisionId, summary: { state: 'approved' } });
+    const [, followUp] = events[7] ?? [];
     expect(followUp?.type === 'message' && followUp.blocks.map((b) => [b.kind, b.template])).toEqual([
       ['prose', null],
       ['card', 'quote'],
@@ -359,6 +371,43 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
     expect(needsYou).toHaveLength(1);
+  });
+
+  it.each(['missing', 'different decision', 'not approved', 'same ledger', 'later ledger'] as const)(
+    'answer_drops_snapshot_when_%s', async (reason) => {
+      const { session } = await openChat();
+      const chat = mockStore.world.sessions.get(session.session_id);
+      if (!chat) throw new Error('the visitor opened a chat');
+      const held = mockStore.world.decide(chat, DECISIONS.heldQuote, 'en');
+      const record = mockStore.world.decisions.get(held.decision_id);
+      if (!record) throw new Error('the discount was held');
+      const decision = mockStore.world.answer(record, 'allow_once');
+      const approved = record.approved;
+      if (!approved) throw new Error('the owner approved the discount');
+      const snapshots: Record<typeof reason, Decision | null> = {
+        missing: null,
+        'different decision': { ...approved, decision_id: 'another-decision' },
+        'not approved': { ...approved, state: 'held' },
+        'same ledger': { ...approved, ledger_seq: decision.ledger_seq },
+        'later ledger': { ...approved, ledger_seq: decision.ledger_seq + 1 },
+      };
+      const ctx = mockStore.world.context(chat, 'en', '');
+      const emitted = afterAnswer('allow_once', decision, snapshots[reason]).map((step) => step(ctx));
+      expect(emitted.map((ev) => ev.type)).toEqual(['resolved', 'writing', 'message']);
+      expect(emitted[0]).toEqual(ctx.status('resolved', decision));
+    },
+  );
+
+  it('denied_answer_emits_only_the_denial_before_follow_up', async () => {
+    const { events } = await openChat();
+    await send('Can I get 10% off?');
+    await drain();
+    const held = events.find(([, ev]) => ev.type === 'held')?.[1];
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    expect((await call('answer', { params: { decision_id: held.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
+    expect(events[4]?.[1]).toMatchObject({ type: 'resolved', state: 'denied', visitor_plain: VISITOR_PLAIN.en.denied });
   });
 
   it('answer_records_the_kernels_approval', async () => {
@@ -738,13 +787,15 @@ describe('the scripted Desk', () => {
     expect(mockStore.world.inbox.filter((record) => record.sessionId === session.session_id)).toEqual([]);
     expect([...mockStore.world.links.values()].filter((link) => link.sessionId === session.session_id)).toEqual([]);
 
-    // A callback still goes through, with its receipt and card.
-    const handoffs = mockStore.world.handoffs.size;
+    // A callback still goes through, with its receipt and card, and closes the handoff the card
+    // opened as it opens its own.
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
     const callback = await turn('Can you call me back?');
     expect(callback.map((ev) => ev.type)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
     expect(shown(callback).map(([, template]) => template)).toEqual(['callback_confirmed']);
     expect(toolsDecided(session.session_id)).toEqual(['native.request_callback']);
-    expect(mockStore.world.handoffs.size).toBe(handoffs + 1);
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'done'], ['callback', 'open']]);
 
     // An agent sent from the chat gets the handoff too, and decides nothing.
     const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
@@ -872,6 +923,172 @@ describe('the scripted Desk', () => {
     // Its amount reads as render/cards.py `money` writes it: grouped dollars, then two cents digits.
     expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 123_456 }, 'en').title).toBe('$1,234.56');
     expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 5 }, 'es').title).toBe('$0.05');
+  });
+
+  it('handoff_card_opens_none_while_a_request_waits_for_the_owner', async () => {
+    // As the kernel's reply check does (plan 01b, the owner's decision of 2026-10-31): while the chat
+    // has a held request waiting for the owner, whose alert and item she already has, the card opens
+    // no handoff, so she sees one item and gets one alert. Once the hold is answered, it opens one.
+    const { session } = await openChat();
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    await send('Can I get 15% off if I pay cash?');
+    await drain();
+    const held = [...mockStore.world.decisions.values()].find((d) => d.decision.session_id === session.session_id && d.decision.state === 'held');
+    expect(held).toBeDefined();
+    const inbox = mockStore.world.inbox.length;
+
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toEqual([]);
+    expect(mockStore.world.inbox.slice(inbox).map(({ entry }) => entry.body)).not.toContain('A visitor is waiting in a conversation the Desk handed to you.');
+
+    expect((await call('answer', { params: { decision_id: held?.decision.decision_id ?? '' }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    // Answering it may itself show the card (the mock's reply after a deny does), which now opens one.
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+  });
+
+  it('handoff_card_opens_an_owner_handoff_as_the_kernel_does', async () => {
+    // As the kernel's reply check does (plan 01b): a reply of Claude's that shows the handoff card
+    // opens an owner handoff of kind `card` for the chat, unless one of either kind is open there.
+    // It has the kernel's own reason and no call-back window, alerts the owner, and is recorded on
+    // the chat just before the reply. The seeded history's stopped reply opened none: the kernel's
+    // seed holds its request without checking a reply.
+    expect(mockStore.world.handoffs.size).toBe(0);
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    const inbox = mockStore.world.inbox.length;
+
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toEqual([
+      { handoff_id: expect.any(String), session_id: session.session_id, reason: 'The Desk handed this to you.', callback_window: null, status: 'open', kind: 'card' },
+    ]);
+    const card = mine()[0]?.handoff_id;
+    const [opened, reply] = desk.ledger.slice(-2).map((entry) => entry.event);
+    expect(opened).toEqual({ kind: 'desk_data', origin: 'kernel', session_id: session.session_id, ref_id: null, summary: { part: 'handoffs', refs: [card], kind: 'card' } });
+    expect(reply).toMatchObject({ kind: 'reply', session_id: session.session_id });
+    expect(mockStore.world.inbox.slice(inbox).map(({ entry, sessionId }) => [entry.to, entry.kind, entry.body, entry.decision_id, sessionId])).toEqual([
+      ['owner', 'alert', 'A visitor is waiting in a conversation the Desk handed to you.', null, null],
+    ]);
+
+    // One at a time: the card shown again opens no second handoff while this one is open.
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toHaveLength(1);
+
+    // Once the owner marks it done, a call back opens one of its own kind, which the card waits on too.
+    expect((await call('handoffDone', { params: { handoff_id: card ?? '' } })).status).toBe(200);
+    await send('Can you call me back?');
+    await drain();
+    expect(mine().map((h) => [h.kind, h.status, h.callback_window])).toEqual([
+      ['card', 'done', null],
+      ['callback', 'open', CALLBACK_WINDOW],
+    ]);
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toHaveLength(2);
+  });
+
+  it('callback_closes_the_open_handoff_and_opens_its_own', async () => {
+    // As the kernel's `native.request_callback` does (plan 01b): a chat holds one open handoff, so a
+    // call back first closes the open one, the card's here, exactly as the owner's mark of done does
+    // (`done`, a `desk_data` entry naming it), then opens its own of kind `callback`. A row's kind
+    // never changes, so the owner keeps one item, the call-back's, and a stale Done on the card's is 409.
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    await send('Can I talk to Maria?');
+    await drain();
+    const card = mine()[0]?.handoff_id ?? '';
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+
+    const ledgered = desk.ledger.length;
+    await send('Can you call me back?');
+    await drain();
+    expect(mine().map((h) => [h.handoff_id === card, h.kind, h.status, h.callback_window])).toEqual([
+      [true, 'card', 'done', null],
+      [false, 'callback', 'open', CALLBACK_WINDOW],
+    ]);
+    // Its closing entry names the call-back that replaced it, which the owner's own mark of done doesn't.
+    const callback = mine()[1]?.handoff_id;
+    const closed = desk.ledger.slice(ledgered).map((entry) => entry.event).filter((event) => event.kind === 'desk_data');
+    expect(closed).toEqual([
+      { kind: 'desk_data', origin: 'kernel', session_id: null, ref_id: null, summary: { part: 'handoffs', refs: [card], replaced_by: callback } },
+    ]);
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(items.filter((item) => item.handoff?.session_id === session.session_id).map((item) => item.handoff?.kind)).toEqual(['callback']);
+    expect((await call('handoffDone', { params: { handoff_id: card } })).status).toBe(409);
+  });
+
+  it('open_handoff_quotes_its_visitors_latest_words', async () => {
+    // As the API reads Needs you (`last_texts`): an open handoff quotes what its visitor wrote last,
+    // on every read, not what they had written when it opened.
+    const { session } = await openChat();
+    const quoted = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+        .filter((item) => item.handoff?.session_id === session.session_id)
+        .map((item) => [item.handoff?.kind, item.from_the_visitor]);
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
+    await send('It is about the leak under my sink.');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink.']]);
+  });
+
+  it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
+    // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
+    // kernel's handoff, which its check stops as paused (`session_paused`, no attempt anyone made)
+    // and which opens the owner's handoff the first time, as any reply showing the card does.
+    const { session, events } = await openChat();
+    const record = mockStore.world.sessions.get(session.session_id);
+    const desk = mockStore.world.desk(deskId);
+    if (!record || !desk) throw new Error('the chat and its Desk are in the copy');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    const attempts = async () => ((await call('safety', { params: { desk_id: deskId } })).body as unknown[]).length;
+    const stopped = await attempts();
+    mockStore.world.pause(record);
+
+    for (const text of ['Hello? Is anyone there?', 'Hello?']) {
+      const before = events.length;
+      await send(text);
+      await drain();
+      const shown = events.slice(before).map(([, ev]) => ev);
+      expect(shown.map((ev) => ev.type), text).toEqual(['message', 'turn_end']);
+      const [message] = shown;
+      expect(message?.type === 'message' && [message.author, message.handoff, message.blocks.map((b) => b.template)]).toEqual(['claude', true, ['handoff']]);
+      expect(desk.ledger.at(-1)?.event).toMatchObject({ kind: 'reply', summary: { ok: false, violations: ['session_paused'] } });
+    }
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+    expect(await attempts()).toBe(stopped);
+  });
+
+  it('handoff_done_is_recorded_as_the_kernel_does', async () => {
+    // The owner marking a handoff done, of either kind, is one `desk_data` entry naming it, on no
+    // chat and with no `kind` (plan 01b, `POST /handoffs/{id}/done`).
+    await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    for (const text of ['Can I talk to Maria?', 'Can you call me back?']) {
+      await send(text);
+      await drain();
+      const handoff = [...mockStore.world.handoffs.values()].at(-1)?.handoff;
+      if (handoff?.status !== 'open') throw new Error(`"${text}" opened a handoff`);
+      expect((await call('handoffDone', { params: { handoff_id: handoff.handoff_id } })).status).toBe(200);
+      expect(desk.ledger.at(-1)?.event, handoff.kind).toEqual({
+        kind: 'desk_data',
+        origin: 'kernel',
+        session_id: null,
+        ref_id: null,
+        summary: { part: 'handoffs', refs: [handoff.handoff_id] },
+      });
+    }
   });
 
   it('events_replay_after_seq', async () => {
@@ -1037,7 +1254,7 @@ describe('taking over', () => {
     expect(typesOf(events)).toEqual(['owner_joined', 'turn_end']);
   });
 
-  it('takeover_still_tells_the_visitor_an_answered_hold_ran', async () => {
+  it('takeover_still_tells_the_visitor_approval_then_the_outcome', async () => {
     const { session, events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
@@ -1049,8 +1266,9 @@ describe('taking over', () => {
     expect((await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } })).status).toBe(200);
     expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
     await drain();
-    expect(typesOf(events).slice(4)).toEqual(['owner_joined', 'resolved', 'turn_end']);
-    expect(events[5]?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
+    expect(typesOf(events).slice(4)).toEqual(['owner_joined', 'receipt', 'resolved', 'turn_end']);
+    expect(events[5]?.[1]).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved' });
+    expect(events[6]?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
     expect(kindsFor(session.session_id).filter((kind) => kind === 'reply')).toHaveLength(1);
   });
 });
@@ -1290,6 +1508,176 @@ describe('rules and tools', () => {
     expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} Not covered by a rule yet, so it asks you.`);
     record.decision.card_ids = ['rv-refund'];
     expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} It was held by your rule: Refunds to a customer wait for your answer.`);
+  });
+
+  it('knowledge_seed_returns_every_generated_row_field', async () => {
+    const answer = await call('knowledge', { params: { desk_id: deskId } });
+    expect(answer.status).toBe(200);
+    const rows = answer.body as KnowledgeRow[];
+    expect(rows.map((row) => row.item_id)).toEqual(['kn-website', 'kn-price-list']);
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(['created_at', 'item_id', 'readers', 'source', 'text', 'title']);
+      expect(row.readers).toEqual(['public']);
+      expect(row.title).toEqual(expect.any(String));
+      expect(row.text).toEqual(expect.any(String));
+      expect(row.created_at).toEqual(expect.any(String));
+    }
+    expect(rows.map((row) => row.source)).toEqual(['website', 'setup']);
+    expect(Date.parse(rows[0]!.created_at!)).toBeLessThan(Date.parse(rows[1]!.created_at!));
+  });
+
+  it('knowledge_lists_legacy_items_first_then_timestamp_and_item_id', async () => {
+    mockStore.world.knowledge.clear();
+    const item: KnowledgeItem = { item_id: 'kn-legacy', source: 'setup', title: 'An older note', text: 'An older note', label: { readers: ['owner'] } };
+    const at = Date.parse('2026-10-30T19:30:00Z');
+    // Insert out of order, including a pre-epoch date, so null cannot sort as zero. Ties use the
+    // item's id rather than the host locale's collation.
+    for (const [itemId, createdAt] of [['kn-a', at], ['kn-legacy', null], ['kn-Z', at], ['kn-oldest', -1], ['kn-A-legacy', null]] as const) {
+      mockStore.world.knowledge.set(`${deskId}:${itemId}`, { deskId, item: { ...item, item_id: itemId }, createdAt, forced: false });
+    }
+    const list = () => call('knowledge', { params: { desk_id: deskId } });
+    const rows = (await list()).body as KnowledgeRow[];
+    expect(rows.map((row) => row.item_id)).toEqual(['kn-A-legacy', 'kn-legacy', 'kn-oldest', 'kn-Z', 'kn-a']);
+    expect(rows.map((row) => row.created_at)).toEqual([null, null, '1969-12-31T23:59:59.999000Z', '2026-10-30T19:30:00.000000Z', '2026-10-30T19:30:00.000000Z']);
+
+    // Updating readers preserves the original timestamp, including an unknown one.
+    await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers: ['public'] } } } });
+    expect(((await list()).body as typeof rows).find((row) => row.item_id === item.item_id)?.created_at).toBeNull();
+  });
+
+  it('knowledge_refuses_invalid_readers', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const readers of [[], ['public', 'owner'], ['owner', 'owner'], ['person:p-1'], ['session:s-1'], ['stranger']]) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers } } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+    for (const readers of [['owner'], ['public']]) {
+      expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers } } } })).status).toBe(200);
+    }
+  });
+
+  it('knowledge_refuses_a_record_owner', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'], record_owner: 'person-1' } };
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+  });
+
+  it('knowledge_refuses_invalid_item_ids', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const item_id of ['', 'bad.id', 'bad/id', 'é', 'a'.repeat(65), 'note\n']) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id: 'A_0-'.repeat(16) } } })).status).toBe(200);
+  });
+
+  it('knowledge_caps_titles_at_200_characters', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: '🔧'.repeat(201), text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, title: '🔧'.repeat(200) } } })).status).toBe(200);
+  });
+
+  it('knowledge_caps_text_at_100_kib_utf8', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: '🔧'.repeat(25 * 1024 + 1), label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    const refused = await call('addKnowledge', { params: { desk_id: deskId }, body: { item } });
+    expect({ status: refused.status, body: refused.status === 422 ? refused.body : undefined }).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, text: '🔧'.repeat(25 * 1024) } } })).status).toBe(200);
+  });
+
+  it('knowledge_refuses_nul_in_title_or_text', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const field of ['title', 'text']) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, [field]: 'Parking\0' } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+  });
+
+  it('knowledge_refuses_unpaired_surrogates', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const field of ['title', 'text']) {
+      for (const text of ['\ud800', '\udc00']) {
+        expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, [field]: text } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+        expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+      }
+    }
+  });
+
+  it('knowledge_validates_title_and_text_utf8_separately', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: '\ud800', text: '\udc00', label: { readers: ['owner'] } };
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+  });
+
+  it('knowledge_caps_each_desk_at_200_items_but_allows_replacements', async () => {
+    mockStore.world.knowledge.clear();
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    for (let i = 0; i < 200; i++) {
+      mockStore.world.knowledge.set(`${deskId}:note-${i}`, { deskId, item: { ...item, item_id: `note-${i}` }, createdAt: i, forced: false });
+    }
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id: 'note-0', label: { readers: ['public'] } } } })).status).toBe(200);
+    expect(mockStore.world.knowledge.size).toBe(200);
+    // A different Desk's items do not count against this Desk.
+    const first = mockStore.world.knowledge.get(`${deskId}:note-0`)!;
+    mockStore.world.knowledge.delete(`${deskId}:note-0`);
+    mockStore.world.knowledge.set('desk-other:note-0', { ...first, deskId: 'desk-other' });
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).status).toBe(200);
+  });
+
+  it('knowledge_answers_what_the_kernel_keeps', async () => {
+    mockStore.world.knowledge.clear();
+    const note: KnowledgeItem = {
+      item_id: 'note-0f2c',
+      source: 'setup',
+      title: 'We don’t service tankless water heaters older than 15 years.',
+      text: 'We don’t service tankless water heaters older than 15 years. Suggest a replacement quote instead.',
+      label: { readers: ['owner'] },
+    };
+    const add = (item: unknown) => call('addKnowledge', { params: { desk_id: deskId }, body: { item } });
+
+    // Stored as posted, and answered with the stored item, which is a contract KnowledgeItem: its
+    // label with every field, as the API sends it.
+    const labelled = (readers: string[]) => ({ ...note, label: { readers, record_owner: null } });
+    const kept = await add(note);
+    expect(kept).toEqual({ status: 200, body: labelled(['owner']) });
+    expect(validateContract('KnowledgeItem', kept.body)).toEqual([]);
+    // Posted again under its id with the public label: it replaces the item, and says so.
+    expect((await add({ ...note, label: { readers: ['public'] } })).body).toEqual(labelled(['public']));
+    expect([...mockStore.world.knowledge.values()].map((stored) => stored.item.label.readers)).toEqual([['public']]);
+
+    // The kernel keeps an item to the owner whatever it's posted with, when a test says it does.
+    mockStore.world.keepsKnowledgeOwnerOnly = (item) => item.item_id === note.item_id;
+    const forced = await add({ ...note, label: { readers: ['public'] } });
+    expect(forced.body).toEqual(labelled(['owner']));
+    expect(validateContract('KnowledgeItem', forced.body)).toEqual([]);
+
+    // Listed, with when it was first added: one the kernel keeps to the owner has its words withheld.
+    const listed = await call('knowledge', { params: { desk_id: deskId } });
+    const { label: _label, ...words } = note;
+    expect(listed).toEqual({ status: 200, body: [{ ...words, readers: ['owner'], title: null, text: null, created_at: expect.any(String) }] });
+    mockStore.world.keepsKnowledgeOwnerOnly = () => false;
+    await add({ ...note, label: { readers: ['public'] } });
+    expect((await call('knowledge', { params: { desk_id: deskId } })).body).toEqual([{ ...words, readers: ['public'], created_at: (listed.body as KnowledgeRow[])[0]?.created_at }]);
+
+    // Not an item: refused, nothing stored.
+    for (const bad of [undefined, { ...note, title: 3 }, { ...note, label: { readers: 'public' } }, { ...note, source: 'gossip' }, { ...note, item_id: '' }]) {
+      expect((await add(bad)).status).toBe(422);
+    }
+    expect(mockStore.world.knowledge.size).toBe(1);
+
+    // Another copy's owner reaches none of it.
+    mockStore.reset('rivera', { signedIn: false });
+    expect((await add(note)).status).toBe(401);
   });
 
   it('people_mark_replayed_leads', async () => {
@@ -1758,9 +2146,9 @@ describe("Today's windows", () => {
       conversations: 0,
       bookings: 0,
       leads: 0,
-      blocked: 0,
+      turned_down: 0,
       total: 0,
-      newest: { blocked: null, booking: null, lead_or_answer: null },
+      newest: { turned_down: null, booking: null, lead_or_answer: null },
     });
     expect(quiet.this_week).toEqual({
       timezone: 'America/Los_Angeles',
@@ -1785,26 +2173,27 @@ describe("Today's windows", () => {
     // Rivera's seed: Alex Kim's assistant, whose deposit Claude quoted and charged within its signed
     // limit; the held visitor, whose drafted reply was stopped; and Dana's chat, where Maria
     // whispered and Claude booked her at the quoted list price. The stopped draft is no request the
-    // kernel refused, so the last 7 days count none stopped; the briefing still lists it as blocked.
+    // kernel refused, so the last 7 days count none stopped, and nothing in the briefing turned down:
+    // the draft stays on Safety, out of the briefing.
     mockStore.reset('rivera');
     const seeded = await read();
     expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 0 });
     expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 0 });
-    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, blocked: 1, total: 3 });
-    const blockedReply = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.summary.ok === false);
-    expect(seeded.briefing.newest.blocked).toMatchObject({
-      kind: 'blocked',
-      session_id: 'ses-visitor-web',
-      ref_id: String(blockedReply?.seq),
-      line: null,
-    });
+    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, turned_down: 0, total: 2 });
+    expect(seeded.briefing.newest.turned_down).toBeNull();
     expect(seeded.briefing.newest.booking).toMatchObject({
       kind: 'booking',
       session_id: 'ses-dana-web',
       line: DECISIONS.book.reasonPlain,
+      cause: null,
     });
-    expect(seeded.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', session_id: 'ses-alex-agent', display_name: "Alex Kim's assistant" });
-    // The blocked reply's attempt on Safety has the same ref.
+    expect(seeded.briefing.newest.lead_or_answer).toMatchObject({
+      kind: 'answer',
+      session_id: 'ses-alex-agent',
+      display_name: "Alex Kim's assistant",
+      cause: null,
+    });
+    const blockedReply = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.summary.ok === false);
     const attempts = (await call('safety', { params: { desk_id: deskId } })).body as { kind: string; ref_id: string }[];
     expect(attempts.find((a) => a.kind === 'reply_blocked')?.ref_id).toBe(String(blockedReply?.seq));
 
@@ -1823,7 +2212,7 @@ describe("Today's windows", () => {
     await drain();
     const both = await read();
     expect(both.this_week).toMatchObject({ conversations: 5, stepped_in: 2, handled: 3 });
-    expect(both.briefing).toMatchObject({ conversations: 5, total: 5 });
+    expect(both.briefing).toMatchObject({ conversations: 5, total: 4 });
     expect(both.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', display_name: null });
 
     // And a visitor who asks for a callback is a lead, not an answer.
@@ -1832,7 +2221,7 @@ describe("Today's windows", () => {
     await send('Can you call me back?');
     await drain();
     const withLead = await read();
-    expect(withLead.briefing).toMatchObject({ leads: 1, total: 4 });
+    expect(withLead.briefing).toMatchObject({ leads: 1, total: 3 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
       display_name: 'Dana Whitfield',
@@ -1852,21 +2241,21 @@ describe("Today's windows", () => {
       display_name: null,
       ref_id: preview?.state.session_id,
       line: null,
+      cause: null,
     });
     expect(answered.this_week).toMatchObject({ conversations: 5, stepped_in: 1, handled: 4 });
 
     // The full list, newest first, and the short form's rows are its own.
     const full = await list();
-    expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'blocked', 'answer']);
+    expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'answer']);
     expect(full.items).toHaveLength(answered.briefing.total);
-    expect(full.items).toContainEqual(answered.briefing.newest.blocked);
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
   });
 
   it('week_counts_refused_requests_only', async () => {
     // Rivera's seed keeps one of Claude's drafts the reply check stopped, which nobody tried; then the
     // built-in agent tries to charge over its signed limit, which the kernel refuses. The last 7 days
-    // count the refusal alone, as the API does; the briefing and Safety keep both.
+    // and the briefing count the refusal alone, as the API does, and Safety keeps both.
     mockStore.reset('rivera');
     await openChat();
     const sent = await call('sendAgent', { params: { slug }, body: { task: 'push_the_limit', idempotency_key: 'key-1' } });
@@ -1878,8 +2267,12 @@ describe("Today's windows", () => {
     const today = await read();
     expect(today.this_week.stopped).toBe(1);
     expect(today.this_week.days.map((d) => d.stopped)).toEqual([0, 0, 0, 0, 0, 0, 1]);
-    expect(today.briefing.blocked).toBe(2);
-    expect((await list()).items.filter((item) => item.kind === 'blocked')).toHaveLength(2);
+    expect(today.briefing.turned_down).toBe(1);
+    const turnedDown = (await list()).items.filter((item) => item.kind === 'turned_down');
+    expect(turnedDown).toEqual([today.briefing.newest.turned_down]);
+    const refusal = [...mockStore.world.decisions.values()].find((d) => d.decision.state === 'refused')?.decision;
+    // The kernel's own line, and the refusal's cause: over the agent's signed limit.
+    expect(turnedDown[0]).toMatchObject({ ref_id: refusal?.decision_id, line: refusal?.reason_plain, cause: 'agent_limit' });
     const attempts = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
     expect(attempts.map((a) => a.kind).sort()).toEqual(['refused', 'reply_blocked']);
 
@@ -1889,6 +2282,105 @@ describe("Today's windows", () => {
     expect(refused?.policy_ids).toEqual(['B.agent_charge_within_mandate']);
     expect(attempts.find((a) => a.kind === 'refused')).toMatchObject({ ref_id: refused?.decision_id, cause: 'agent_limit' });
     expect(attempts.find((a) => a.kind === 'reply_blocked')?.cause).toBeNull();
+  });
+
+  /** A chat in the quiet copy, opened an hour ago with `turns` replayed as given, and its session. */
+  const chatWith = (turns: ReplayTurn[]) => {
+    mockStore.reset('rivera_quiet');
+    const desk = mockStore.world.desks[0];
+    if (!desk) throw new Error('the copy has its Desk');
+    const at = NOW.getTime() - HOUR;
+    const session = mockStore.world.at(at, () => mockStore.world.addSession(desk));
+    mockStore.world.replay(session, at, turns);
+    return session.state.session_id;
+  };
+  /** Safety's attempts, by kind. */
+  const attemptKinds = async () => ((await call('safety', { params: { desk_id: deskId } })).body as { kind: string }[]).map((a) => a.kind);
+
+  it('a_refusal_without_a_cause_and_any_other_outcome_have_none', async () => {
+    // A refusal whose policies have no known cause reads as one the API can't place. A booking
+    // has no cause even when its policy would identify a refusal's cause.
+    chatWith([
+      {
+        text: 'Book me Tuesday at 2.',
+        steps: [
+          (ctx) => ctx.status('receipt', ctx.decide({ ...DECISIONS.book, outcome: 'refuse', executed: false, policyIds: ['B.unknown'], reasonPlain: 'That time is taken.' })),
+          (ctx) => ctx.status('receipt', ctx.decide({ ...DECISIONS.book, policyIds: ['F.never.test'] })),
+        ],
+      },
+    ]);
+    const attempts = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.cause).toBeNull();
+    const items = (await list()).items;
+    expect(items.map((item) => [item.kind, item.cause])).toEqual([
+      ['booking', null],
+      ['turned_down', null],
+    ]);
+    expect(items.find((item) => item.kind === 'turned_down')?.line).toBe('That time is taken.');
+  });
+
+  it('a_reply_delivered_after_a_stopped_draft_is_an_answer', async () => {
+    // Claude's first draft put a price in its own words, so the check stopped it, and the rewrite
+    // went out. The draft stays on Safety; in the briefing the chat is one Claude answered.
+    const sessionId = chatWith([
+      {
+        text: 'How much is drain clearing?',
+        steps: [
+          (ctx) => {
+            ctx.reply([proseBlock('It costs $1 today.')], { blocked: true });
+            return ctx.reply([proseBlock('Drain clearing is on the price list.')]);
+          },
+        ],
+      },
+    ]);
+    const today = await read();
+    expect(today.briefing).toMatchObject({ conversations: 1, turned_down: 0, total: 1 });
+    expect(today.briefing.newest.turned_down).toBeNull();
+    expect(today.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', session_id: sessionId, ref_id: sessionId, line: null, cause: null });
+    expect((await list()).items).toEqual([today.briefing.newest.lead_or_answer]);
+    expect(await attemptKinds()).toEqual(['reply_blocked']);
+  });
+
+  it('a_handoff_after_stopped_drafts_makes_no_row', async () => {
+    // Both of Claude's drafts were stopped and the visitor got the handoff clause: nobody was turned
+    // down and Claude didn't answer, so the briefing has nothing for the chat. Safety keeps both drafts.
+    chatWith([
+      {
+        text: 'How much is drain clearing?',
+        steps: [
+          (ctx) => {
+            ctx.reply([proseBlock('It costs $1 today.')], { blocked: true });
+            return ctx.reply([rivera.blocks.handoff[ctx.language]], { blocked: true });
+          },
+        ],
+      },
+    ]);
+    const today = await read();
+    expect(today.briefing).toMatchObject({ conversations: 1, bookings: 0, leads: 0, turned_down: 0, total: 0 });
+    expect(today.briefing.newest).toEqual({ turned_down: null, booking: null, lead_or_answer: null });
+    expect((await list()).items).toEqual([]);
+    expect(await attemptKinds()).toEqual(['reply_blocked', 'reply_blocked']);
+  });
+
+  it('a_chat_that_ends_in_a_handoff_is_no_answer', async () => {
+    // Claude answered first; a later draft was stopped and the visitor got the handoff clause. The
+    // chat isn't one Claude answered alone, as the API counts it, so its earlier reply makes no row.
+    chatWith([
+      { text: 'Hello there', steps: [(ctx) => ctx.reply([proseBlock('Hi, how can I help?')])] },
+      {
+        text: 'How much is drain clearing?',
+        steps: [
+          (ctx) => {
+            ctx.reply([proseBlock('It costs $1 today.')], { blocked: true });
+            return ctx.reply([rivera.blocks.handoff[ctx.language]], { blocked: true });
+          },
+        ],
+      },
+    ]);
+    const today = await read();
+    expect(today.briefing).toMatchObject({ conversations: 1, turned_down: 0, total: 0 });
+    expect((await list()).items).toEqual([]);
   });
 
   it('windows_follow_the_business_clock', async () => {
@@ -1915,6 +2407,47 @@ describe("Today's windows", () => {
     // The quote at 7:00 pm answered a question: Claude replied with no booking, lead, hold or stop.
     expect(today.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', line: null });
     expect(today.briefing.total).toBe(1);
+  });
+
+  it('reports_count_what_the_owner_stepped_into_in_their_days', async () => {
+    // As the API counts the reports: over the last `days` local dates, today included (30 unless
+    // asked), the conversations the owner stepped into needed her and Claude handled the rest, as
+    // Today's last 7 days count them. A request held for her, or a chat the handoff card handed to
+    // her, isn't one she stepped into until she answers, takes over, whispers or resumes it.
+    mockStore.reset('rivera');
+    const reports = async (days?: string) => {
+      const answer = await call('reports', { params: { desk_id: deskId }, query: days === undefined ? {} : { days } });
+      expect(answer.status, days).toBe(200);
+      return answer.body as Reports;
+    };
+    const split = (r: Reports) => [r.handled_by_claude, r.needed_you];
+
+    // The seeded copy as its last 7 days count it: Maria whispered in Dana's chat, and the held
+    // request she hasn't answered is still Claude's.
+    const week = (await read()).this_week;
+    expect([week.handled, week.stepped_in]).toEqual([2, 1]);
+    expect(split(await reports('7'))).toEqual([2, 1]);
+
+    // Three days ago Maria whispered in a chat: it needed her in the last 7 days, but not today.
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its Desk');
+    const at = NOW.getTime() - 3 * 24 * HOUR;
+    const earlier = mockStore.world.at(at, () => mockStore.world.addSession(desk));
+    mockStore.world.replay(earlier, at, [{ text: 'Is my water heater still covered?', whisper: 'Check the warranty first.', steps: [] }]);
+    expect(split(await reports('1'))).toEqual([2, 1]);
+    expect(split(await reports('7'))).toEqual([2, 2]);
+    expect(split(await reports())).toEqual([2, 2]);
+
+    // Today a visitor asks for her and the handoff card hands her the chat: Claude's, until she takes it over.
+    const { session } = await openChat();
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(split(await reports('1'))).toEqual([3, 1]);
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
+    expect(split(await reports('1'))).toEqual([2, 2]);
+
+    // A span the API refuses.
+    for (const days of ['0', '366', 'week']) expect((await call('reports', { params: { desk_id: deskId }, query: { days } })).status, days).toBe(422);
   });
 });
 

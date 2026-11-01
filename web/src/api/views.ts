@@ -79,7 +79,7 @@ export interface ConversationSummary {
   replayed?: boolean;
 }
 
-export type BriefingKind = 'blocked' | 'booking' | 'lead' | 'answer';
+export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
 
 /** One thing that happened since last night, as the API core's briefing lists it. */
 export interface BriefingItem {
@@ -90,13 +90,15 @@ export interface BriefingItem {
   session_id: string | null;
   /** As `ConversationSummary.display_name`. Untrusted. */
   display_name: string | null;
-  /** The `Attempt.ref_id` for `blocked`; the decision for a booking; the `lead_id`; the session for an answer. */
+  /** The refused decision for `turned_down` (its `Attempt.ref_id`); the decision for a booking; the `lead_id`; the session for an answer. */
   ref_id: string;
   /**
    * A refusal's or a booking's `reason_plain` (the kernel's owner text); a lead's note (untrusted, and
-   * it may hold the contact as typed); null for a blocked reply and for an answer.
+   * it may hold the contact as typed); null for an answer.
    */
   line: string | null;
+  /** Why a `turned_down` request was refused, as a closed code; null for the other kinds and for a refusal the API can't place. */
+  cause: RefusalCause | null;
 }
 
 /** "Since last night": from 18:00 yesterday in the business's time zone, to now. */
@@ -106,11 +108,12 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
-  blocked: number;
+  /** The requests the kernel refused. Claude's drafts the reply check stopped stay on Safety, out of the briefing. */
+  turned_down: number;
   /** The full list's length (`BriefingList.items`). */
   total: number;
   newest: {
-    blocked: BriefingItem | null;
+    turned_down: BriefingItem | null;
     booking: BriefingItem | null;
     /** The newer of the newest lead and the newest answer. */
     lead_or_answer: BriefingItem | null;
@@ -179,14 +182,23 @@ export interface Reports {
   needed_you: number;
 }
 
+/**
+ * A conversation handed to the owner: a visitor's call-back request (`callback`), or one the
+ * handoff card handed over in a chat (`card`), which promises no call back.
+ */
 export interface Handoff {
   handoff_id: string;
   session_id: string;
-  /** `<name> · <contact> · <reason>` as the visitor typed them. Untrusted. */
+  /**
+   * A call-back request's `<name> · <contact> · <reason>` as the visitor typed them; a card's, the
+   * Desk's own words ("The Desk handed this to you."). Untrusted.
+   */
   reason: string;
-  /** `<start>/<end>`, or null when the visitor named no open hour. */
+  /** `<start>/<end>`, or null when the visitor named no open hour. Always null for a card. */
   callback_window: string | null;
   status: string;
+  /** Optional until the API sends it (plan 02b); a handoff without one is a call-back request. */
+  kind?: 'callback' | 'card';
 }
 
 export interface NeedsYouSession {
@@ -204,7 +216,7 @@ interface NeedsYouBase {
 }
 
 /**
- * One held request or one open callback that waits for the owner. The API sends every field, the
+ * One held request or one open handoff that waits for the owner. The API sends every field, the
  * other alternative's as null (openapi.json), so code tells them apart with `!= null`.
  */
 export type NeedsYouItem =
@@ -259,7 +271,7 @@ export interface VisitorTranscript {
 
 export interface OwnerTranscript {
   state: SessionState;
-  items: TranscriptItem[];
+  items: OwnerTranscriptItem[];
   /**
    * Until when the visitor is typing, while that is in the future, else null (plan 02b Task 1,
    * owner view only). Optional until the API sends it.
@@ -267,6 +279,11 @@ export interface OwnerTranscript {
   typing_until?: string | null;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+}
+
+/** Owner-only annotation beside the signed event, absent on older API responses. */
+export interface OwnerTranscriptItem extends TranscriptItem {
+  owner_plain?: import('./openapi.gen.ts').OwnerTranscriptItem['owner_plain'];
 }
 
 // Safety
@@ -333,10 +350,46 @@ export interface PeopleOut {
  */
 export type ToolReviewReason = 'new' | 'changed' | 'delisted';
 
+/**
+ * Business tool definitions, typed here until the kernel's business tools change (branch
+ * `plan/09-blocks-core`) regenerates their types, then imported from `contracts.ts`.
+ * The owner's title, description and configuration are untrusted text.
+ */
+export interface BusinessToolDef {
+  title: string;
+  description: string;
+  config: IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig;
+}
+
+export interface IntakeConfig {
+  block: 'intake';
+  questions: string[];
+}
+
+export interface TypedBookingConfig {
+  block: 'typed_booking';
+  appointment_type: string;
+  minutes: number;
+}
+
+export interface PurposePaymentConfig {
+  block: 'purpose_payment';
+  purpose: string;
+  amount_cents: number;
+}
+
+export interface UrgentConfig {
+  block: 'urgent';
+  urgent_when: string;
+}
+
+/** A catalog tool or a Desk's own tool, whose title comes from its business definition. */
+export type AnyToolName = ToolName | `desk.${string}`;
+
 /** A tool as the owner reviews it: the kernel's tool row (`ToolProfile`'s columns). */
 export interface ToolRow {
-  tool: ToolName;
-  source: ToolProfile['source'];
+  tool: AnyToolName;
+  source: ToolProfile['source'] | 'business';
   effects: ToolProfile['effects'];
   reversible: boolean;
   status: ToolProfile['status'];
@@ -351,6 +404,8 @@ export interface ToolRow {
    * here, and optional, until the regenerated contract types have it: a row without it gives no reason.
    */
   review_reason?: ToolReviewReason | null;
+  /** Typed here and optional until the regenerated contract types carry business definitions. */
+  business?: BusinessToolDef | null;
   /**
    * The active version's cards that cover the tool, in card order, `shared` for a rule on an effect
    * group (plan 02b Task 9; pending, typed here and optional until the API sends it). Screens read
@@ -460,6 +515,11 @@ export interface SetupState {
   messages: SetupMessage[];
   /** Whether the owner let Claude read their memory and website; null until asked. */
   consent: boolean | null;
+  /**
+   * Derived from the stored transcript: Claude is working on the owner's last message with no
+   * reply yet. Absent means false on older APIs.
+   */
+  busy?: boolean;
   /** The question waiting for an answer; null before consent and after the last one. */
   question: QuestionKey | null;
 }
@@ -614,6 +674,8 @@ export interface KnowledgeBody {
   item: KnowledgeItem;
 }
 
+export type { KnowledgeRow } from './openapi.gen.ts';
+
 export interface TextBody {
   text: string;
 }
@@ -636,7 +698,7 @@ export interface ConfirmRulesBody {
 
 /** One tool of a `confirmTool` batch, with the hash of the definition the owner confirms. */
 export interface ToolConfirmEntry {
-  tool: ToolName;
+  tool: AnyToolName;
   /**
    * The row's `definition_sha256`, the hash it was listed at; only the changed-tool review sends its
    * `pending_sha256`, the hash of the definition the owner just read.

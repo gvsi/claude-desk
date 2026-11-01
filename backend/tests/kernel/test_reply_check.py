@@ -894,6 +894,28 @@ async def test_an_unmarked_reply_gets_one_rewrite_and_never_shows(app, client, p
     assert lang.detect(prose) == "unmarked"
 
 
+@pytest.mark.parametrize(("prose", "detected", "kind", "rule_id"), [
+    ("Absolutely. Payment link below.", "unmarked", "uncertain_language", "language_uncertain"),
+    ("Je peux vous aider avec ça.", "other", "unsupported_language", "language"),
+    ("H\u0435llo, how can I help?", "en", "unsupported_language", "mixed_script"),
+], ids=["uncertain", "other-language", "mixed-script"])
+@pytest.mark.parametrize("final", [False, True])
+async def test_refused_prose_preserves_the_visitors_turn_language(app, client, prose, detected, kind, rule_id, final):
+    from .test_turn_language import SPANISH, turn
+
+    copy, visitor = await visitor_of(app, client)
+    assert await turn(client, visitor, SPANISH) == "es"
+    assert lang.detect(prose) == detected
+    verdict = await checked(client, visitor, prose, final=final)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [(kind, rule_id)]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    if final or kind == "unsupported_language":
+        assert_handed_off(verdict, "es")
+    else:
+        assert not verdict.ok and verdict.blocks == [] and verdict.language == "es"
+    assert (await session_of(app, copy, visitor)).last_language == "es"
+
+
 async def own_slots(client: httpx.AsyncClient, visitor: Visitor, call_id: str = "call-slots") -> Fact:
     """The open times `native.find_slots` lists for the visitor (the six earliest): their fact."""
     decision = await decided(client, visitor, "native.find_slots", {}, call_id=call_id)
@@ -1787,7 +1809,7 @@ async def test_unread_price_still_needs_the_soft_check(app, client, reviewer, pr
     assert len(reviewer.soft_inputs) == 1
 
 
-async def test_unmarked_payment_caption_gets_a_checked_rewrite(app, client, reviewer):
+async def test_payment_caption_rewrites_and_prose_failure_keeps_its_card(app, client, reviewer):
     from .test_handoff_card import handoffs_of
 
     copy, visitor = await visitor_of(app, client)
@@ -1801,20 +1823,52 @@ async def test_unmarked_payment_caption_gets_a_checked_rewrite(app, client, revi
     first = await checked(client, visitor, "Absolutely. Payment link below.", cited, final=False)
     assert [(v.kind, v.rule_id) for v in first.violations] == [("uncertain_language", "language_uncertain")]
     assert first.blocks == []
+    assert first.visitor_plain == "Passed to Maria Rivera to answer"
     assert await handoffs_of(app, copy) == []
     corrected = await checked(client, visitor, "Here is the link to pay.", cited)
     assert corrected.ok
     assert [b.template for b in corrected.blocks] == [None, "payment_link"]
     assert corrected.blocks[-1].fact_id == fact.fact_id
     assert await handoffs_of(app, copy) == []
+    kept = await checked(client, visitor, "Absolutely. Payment link below.", cited)
+    assert not kept.ok
+    assert [(v.kind, v.rule_id) for v in kept.violations] == [("uncertain_language", "language_uncertain")]
+    assert [b.template for b in kept.blocks] == ["payment_link"]
+    assert kept.blocks[0].fact_id == fact.fact_id
+    assert kept.visitor_plain == "Reply checked against Maria Rivera's rules"
+    assert await handoffs_of(app, copy) == []
+
+
+async def set_document_canary(app: FastAPI, copy: Rivera, canary: str) -> None:
+    async with kernel_ctx(app) as ctx:
+        repo = ctx.bind(copy.copy_id)
+        document = (await ctx.db.scalars(repo.scoped(select(Document)))).first()
+        document.body = document.body.replace(document.canary, canary)
+        document.canary = canary
 
 
 async def test_uncertain_language_span_never_echoes_a_document_canary(app, client):
     copy, visitor = await visitor_of(app, client)
-    canary = (await rows_of(app, copy.copy_id, select(Document)))[0].canary
+    canary = "cdk-01be234567890123"              # "be" is an English marker, not reply prose
+    await set_document_canary(app, copy, canary)
     verdict = await checked(client, visitor, f"{canary} Entendido, revisamos ambos grifos.", final=False)
     assert {v.kind for v in verdict.violations} == {"uncertain_language", "canary"}
+    assert all(canary not in violation.span for violation in verdict.violations)
     assert canary not in verdict.model_dump_json()
     assert_handed_off(verdict)
     assert all(canary not in entry.envelope_jcs for entry in await reply_entries(app, copy))
     assert (await session_of(app, copy, visitor)).last_language is None
+
+
+async def test_english_language_ignores_spanish_markers_in_a_document_canary(app, client):
+    copy, visitor = await visitor_of(app, client)
+    await set_session(app, copy, visitor.session_id, last_language="es")
+    canary = "cdk-el1la2los3las4un5una"          # synthetic Spanish markers outnumber the prose's English ones
+    await set_document_canary(app, copy, canary)
+    verdict = await checked(client, visitor, f"Here is the link to pay. {canary}")
+    assert {v.kind for v in verdict.violations} == {"canary"}
+    assert all(canary not in violation.span for violation in verdict.violations)
+    assert canary not in verdict.model_dump_json()
+    assert_handed_off(verdict, "en")
+    assert all(canary not in entry.envelope_jcs for entry in await reply_entries(app, copy))
+    assert (await session_of(app, copy, visitor)).last_language == "en"

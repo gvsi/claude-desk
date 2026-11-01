@@ -12,18 +12,19 @@ const NOT_FOUND = "This page doesn't exist";
 /**
  * The page drawn now, by name: the preview behind the intro dialog; the owner's loading page or its
  * error; the not-found page, or another page outside the app's frame (an error); Today while its
- * column holds the loading line, then named for what it lacks until it holds Rivera's held request
+ * own skeleton is mounted, then named for what it lacks until it holds Rivera's held request
  * and its briefing; any other page; or nothing.
  */
 export function pageNow(): string {
   const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
+  if (document.querySelector('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer') !== null) return 'loading';
   const state = document.querySelector('.cd-owner-state');
-  if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
+  if (state !== null) return 'error';
   const standalone = document.querySelector('.cd-standalone-page');
   if (standalone !== null) return standalone.textContent?.includes(NOT_FOUND) ? 'not found' : 'an error page';
   if (document.querySelector('.cd-today-preview') !== null) return 'preview';
+  if (document.querySelector('.cd-today-opening .cd-skeleton-screen__layer') !== null) return 'today opening';
   if (document.querySelector('.cd-today') !== null) {
-    if (document.querySelector('.cd-today__main > .cd-loading-line') !== null) return 'today opening';
     if (document.querySelector(held) === null) return 'today without its held request';
     if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
     return 'today';

@@ -102,7 +102,7 @@ async def test_the_reply_checks_fallback_follows_the_turn(app, client):
     # no prose, only a card and the handoff: nothing to detect, so the cards speak the turn's language
     verdict = await checked(client, visitor, "", [clause("quote", quote.fact_id), clause("handoff")])
     assert (verdict.ok, verdict.violations, verdict.language, verdict.visitor_plain) == (
-        True, [], "es", "Respuesta revisada con las reglas de Maria Rivera")
+        True, [], "es", "Pasado a Maria Rivera para responder")
     quote_card, handoff = verdict.blocks
     assert (quote_card.title, quote_card.lines) == (
         "$180.00", ["Drain clearing", "Válido hasta lunes 2 de noviembre, 9:04"])
@@ -288,7 +288,8 @@ DENIALS = frozenset({"I am a real person.", "Soy una persona de verdad."})
 
 
 class ScriptedSoftPromise:
-    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict, CallUsage]:
+    async def soft_promise(self, data: SoftPromiseInput, *,
+                           timeout_s: float | None = None) -> tuple[SoftPromiseVerdict, CallUsage]:
         verdict = SoftPromiseVerdict(promises_beyond_cards=data.prose in PROMISES,
                                      denies_being_ai=data.prose in DENIALS)
         return verdict, CallUsage(status="ok", **FakeDecisions.SOFT_USAGE)

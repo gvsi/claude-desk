@@ -86,6 +86,7 @@ from desk.kernel_service import (activation, adapters, auth, decide, labels, led
                                  repo)
 from desk.kernel_service.adapters.base import (Adapter, AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown,
                                                ExecCtx, Normalized, NormalizeCtx)
+from desk.kernel_service.adapters.web_search import SearchFailure, record_usage
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import Reviewed
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction
@@ -143,6 +144,7 @@ class _Target:
     adapter: Adapter | None
     principal: Principal
     checked: Checked | None = None       # the version and cap step 6 ran against, once it has
+    prepare_check: str = "prepare"
     notices: list[InboxNotice] = field(default_factory=list)   # owner alerts the re-check wrote (a drift)
 
     def xctx(self, ctx: KernelCtx, *, reconciling: bool = False) -> ExecCtx:
@@ -266,10 +268,12 @@ async def recheck(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) 
 
 async def recheck_under(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Checked | str:
     """`recheck`, answering with the version and money cap it passed under, or, when it fails, with
-    the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy` or `binding`, and
+    the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy`, `conditions` or `binding`, and
     `UNAVAILABLE` or `PIN` for a connected tool), the `check` its refusal is ledgered with, as an
     allow's is. A pass that named no version fails as `policy`, so the refusal never ledgers a null
-    check."""
+    check. `conditions` means the decision's own policy version refused after inputs it reads
+    changed (such as a mandate's expiry or remaining allowance); `policy` means a different active
+    version refused, or no usable active version exists."""
     outcome = await recheck_outcome(ctx, decision_row, path=path)
     return outcome.checked if outcome.checked is not None else outcome.failed
 
@@ -351,12 +355,12 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
             return stored_review                           # the review the allow was decided with, never a new call
 
         if (await decide.evaluate(ctx, version_row, request, review_source=review_source)).outcome != "allow":
-            return "policy"
+            return "conditions" if version_row.version == decision.policy_version else "policy"
     else:
         key = activation.version_key(version_row.desk_id, version_row.version) + ":approvable"
         verdict = json.loads(ctx.policies.engine.decide(key, json.dumps(request), "final"))
         if verdict["errors"] or verdict["outcome"] != "hold":
-            return "policy"
+            return "conditions" if version_row.version == decision.policy_version else "policy"
         approval = (await ctx.db.scalars(ctx.repo.scoped(
             select(Approval).where(Approval.decision_id == decision.decision_id)))).one_or_none()
         if approval is None or not approval.nonce or approval.binding_sha256 != binding_sha256(
@@ -422,7 +426,12 @@ async def _prepare_intent(ctx: KernelCtx, target: _Target) -> bool:
         try:
             async with ctx.db.begin_nested():           # a refusal takes back what prepare wrote
                 await prepare(target.xctx(ctx), target.action)
-        except AdapterRefusal:
+        except AdapterRefusal as refused:
+            # A fixed search-budget code can be recorded as the terminal check; all other
+            # prepare refusals keep the existing generic check and never expose adapter text.
+            if refused.code == "search_limit":
+                target.prepare_check = "search_limit"
+                await _note(ctx, target.decision, _summary(target, "prepare_refused", reason="search_limit"))
             return False
     checked = target.checked
     ctx.db.add(Execution(action_id=target.action.action_id, copy_id=target.action.copy_id,
@@ -515,7 +524,7 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
     if (failed := await _recheck(ctx, target, "allow")) is not None:
         raise await _refused_at_execution(ctx, target, failed)
     if not await _prepare_intent(ctx, target):
-        raise await _refused_at_execution(ctx, target, "prepare")
+        raise await _refused_at_execution(ctx, target, target.prepare_check)
     await ctx.db.commit()                                # T1: the intent row, before any side effect
     return await _run(ctx, row.decision_id, target.action.action_id, row.session_id, path="allow",
                       checked=target.checked)
@@ -705,6 +714,8 @@ async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failu
         repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
         await ctx.db.rollback()
         return await _settle_unknown(ctx, decision_id, action_id, checked)
+    if isinstance(failure, SearchFailure):
+        await record_usage(ctx, target.action, failure.usage)
     code = failure.args[0] if failure.args and isinstance(failure.args[0], str) else "adapter_failure"
     result = _no_result(action_id, "failed")
     await _finish(ctx, target, execution, result, "failed", _summary(target, "failed", reason=ledger.safe_ref(code)))
@@ -944,7 +955,10 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     orphaned = execution.state == "intent"
     ended = None
     if private and not await auth.session_stands(ctx, _named(target), None):
-        ended = await session_ended(ctx, decision) or "session_closed"          # "session_closed": its Desk's gone
+        # `session_ended` names nothing once the Desk is gone, whose deletion closed the session: "desk", as
+        # every other refusal names a deleted Desk
+        ended = await session_ended(ctx, decision) or ("desk" if target.desk_row.deleted_at is not None
+                                                       else "session_closed")
     outcome = await _ask_adapter(ctx, target, action_id, ended=ended)
     if orphaned:
         await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
