@@ -126,14 +126,22 @@ def test_system_prompt_uses_the_business_policies():
         assert instruction in section
 
 
+def test_visitor_asks_in_person_or_remote_before_the_town():
+    text = conversation_system(RIVERA)[0]["text"]
+    assert "first ask whether they'd like to meet in person or remotely" in text
+    assert "the request means a visit or an in-person appointment" in text
+
+
 def test_system_prompt_checks_service_area_before_offering_to_book():
     lines = conversation_system(RIVERA)[0]["text"].splitlines()
     next_step = next(i for i, line in enumerate(lines) if line.startswith("- When you suggest a next step,"))
     assert lines[next_step + 1] == (
-        "- If <desk_context> states where the business works and the request means going to a place, find out "
-        "which town that is before you offer to book. If it isn't one they serve, tell them Rivera Plumbing "
-        "doesn't list that place, then offer to take a message for Maria Rivera or arrange a callback. "
-        "Either way, show charter:policy:service_area with the policy clause."
+        "- If <desk_context> states where the business works and the request means a visit or an in-person "
+        "appointment, find out which town that is before you offer to book. When the area it states also "
+        "includes remote work, first ask whether they'd like to meet in person or remotely, and ask for the "
+        "town only if they want in person. If the town isn't one they serve, tell them Rivera Plumbing doesn't "
+        "list that place, then offer to take a message for Maria Rivera or arrange a callback. Either way, "
+        "show charter:policy:service_area with the policy clause."
     )
 
 
