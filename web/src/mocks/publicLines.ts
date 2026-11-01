@@ -21,7 +21,8 @@ const CPA_LINES = [
 function afterHoursOf(answer: string | undefined): string | undefined {
   const clauses = answer?.split(/(?<=[.!?])\s+|[;\n]+/)
     .map((clause) => clause.trim())
-    .filter((clause) => /^(?:after[ -]hours|outside business hours)[,:]?\s+(?:you (?:can|may)\b|we (?:(?:always|never)\s+)?(?:reply|respond|take|are|charge|help|accept)\b|the (?:desk|office|team) (?:takes|replies|responds|is)\b)/i.test(clause));
+    .filter((clause) => /^(?:after[ -]hours|outside business hours)[,:]?\s+(?:you (?:can|may) (?:leave (?:a|us a) message|(?:contact|email|call|reach) us)\b|we (?:(?:always|never)\s+)?(?:reply|respond|take|are|charge|help|accept)\b|the (?:desk|office|team) (?:takes|replies|responds|is)\b)/i.test(clause))
+    .filter((clause) => !/\b(?:for me|on my behalf)\b/i.test(clause));
   return clauses?.length ? clauses.join(' ') : undefined;
 }
 

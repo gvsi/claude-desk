@@ -85,6 +85,10 @@ it('seeds other businesses only from their About and customer-facing after-hours
   for (const [contact, afterHours] of [
     ['Email me at lee@example.com; After hours, take a message.', null],
     ['Email me at lee@example.com; After hours, you can leave a message.', 'After hours, you can leave a message.'],
+    ['After hours, you can take a message for me.', null],
+    ['After hours, you can handle any requests.', null],
+    ['After hours, you can leave a message for me.', null],
+    ['After hours, you can email us.', 'After hours, you can email us.'],
     ['Call me. Outside business hours, take a message.', null],
     ['Call me. Outside business hours, we reply the next business day.', 'Outside business hours, we reply the next business day.'],
     ['After hours, we should take a message.', null],
