@@ -2092,6 +2092,8 @@ describe('public chat page', () => {
     const messages = shownMessages().length;
     mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock(MARKDOWN_REPLY)]));
     await vi.waitFor(() => expect(shownMessages()).toHaveLength(messages + 1));
+    // It arrived live, so its words are revealed: read it once it shows whole.
+    await vi.waitFor(() => expect(document.querySelector(COMING_IN)).toBeNull(), { timeout: 5_000 });
 
     // Claude's words as Markdown: the bold as bold, the list as a list, and no marks left over.
     const reply = shownMessages()[messages] as HTMLElement;
