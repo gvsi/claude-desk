@@ -230,7 +230,9 @@ async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn,
 async def setup_tools(interview_id: InterviewId, request: Request,
                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupTools:
     """The new Desk's tools, and the mock payments server while it isn't connected."""
-    return await setup.setup_tools(ctx, runtime(request).started().database(), interview_id)
+    state = runtime(request).started()
+    return await setup.setup_tools(ctx, state.database(), interview_id,
+                                   business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.post("/{id}/tools/connect", response_model=list[ToolRow],

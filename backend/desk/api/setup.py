@@ -273,6 +273,7 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
+from desk import contracts
 from desk.calendar import WEEK, calendar_slots, minute_of_day
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -293,9 +294,11 @@ from desk.contracts import (
     ProbeResult,
     RuleCard,
     ToolCall,
+    money_tool,
 )
 from desk.db.models import SetupInterview
 from desk.kernel_api import (
+    BusinessToolsRequest,
     CreateDeskRequest,
     DecideRequest,
     DeskAnsweringRequest,
@@ -2939,7 +2942,42 @@ async def _put_test_client(owner: OwnerCtx, engine: AsyncEngine, interview: Inte
 
 
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
-    """A5 (19) supplies the kernel business-tool write after the blocks are deployed."""
+    """Publish accepted configurations as one batch for the owner's tool review. When the kernel refuses the batch
+    and names some of its tools, publish it once more without them; any other refusal is raised."""
+    tools = []
+    used = set()
+    configured = [job for job in accepted_jobs if job.config is not None]
+    if len(configured) > 8:
+        logger.warning("%s accepted setup jobs with configurations were left out of the business tools batch",
+                       len(configured) - 8)
+    for job in configured[:8]:
+        slug = item_slug(job.title)
+        slug = re.sub(r"^[^a-z]+", "", slug) or job.config.block.replace("_", "-")
+        slug = slug[:40].rstrip("-")
+        name, number = slug, 2
+        while name in used:
+            suffix = f"-{number}"
+            name = slug[:40 - len(suffix)].rstrip("-") + suffix
+            number += 1
+        used.add(name)
+        tools.append({"tool": f"desk.{name}", "title": job.title[:60],
+                      "description": " ".join(job.how.split())[:300],
+                      "config": job.config.model_dump(mode="json")})
+    if not tools:
+        return
+    try:
+        await owner.kernel.call("PUT /desks/{id}/business_tools",
+                                BusinessToolsRequest.model_validate({"tools": tools}), path={"id": desk_id})
+    except KernelFailed as failed:
+        # A refusal's detail is keyed "<tool>.<field>", and a tool's name has dots of its own.
+        refused = {tool["tool"] for tool in tools if failed.status == 422
+                   and any(key.startswith(tool["tool"] + ".") for key in failed.detail or {})}
+        if not refused or len(refused) == len(tools):
+            raise
+        logger.warning("%s setup business tools were refused; retrying without them", len(refused))
+        kept = [tool for tool in tools if tool["tool"] not in refused]
+        await owner.kernel.call("PUT /desks/{id}/business_tools",
+                                BusinessToolsRequest.model_validate({"tools": kept}), path={"id": desk_id})
 
 
 def _claim_connector_connect(interview: Interview, proposal_id: str | None = None) -> bool:
@@ -3001,9 +3039,16 @@ async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
     """Apply enabled business tools after the setup commit, without a database lock."""
     if not interview.business_tools_enabled:
         return
-    desk_id = owner.desk(interview.desk_id)
     try:
+        desk_id = owner.desk(interview.desk_id)
         await _put_business_tools(owner, desk_id, accepted_jobs(interview))
+    except KernelFailed as failed:
+        if failed.status == 404:
+            logger.warning("setup business tools aren't available (404); keeping words only")
+        elif failed.status == 422:
+            logger.warning("the setup business tools batch was refused (%s); keeping words only", failed.code)
+        else:
+            logger.warning("a setup business tools write failed (%s %s)", failed.status, failed.code)
     except Exception as failed:
         logger.warning("a setup business tools write failed (%s)", type(failed).__name__)
 
@@ -3054,7 +3099,7 @@ ITEM_ID_MAX = 40
 UTILITY_CARDS: tuple[RuleCard, ...] = tuple(PRESETS["ask_first"])
 UTILITY_TOOLS = frozenset(card.applies_to for card in UTILITY_CARDS)
 EFFECT_TARGETS = tuple(f"effect:{effect}" for effect in get_args(Effect))
-MONEY_TARGETS = MONEY_TOOLS | {"effect:charge", "effect:pay_out"}
+MONEY_TARGETS = MONEY_TOOLS | {f"effect:{effect}" for effect in contracts.MONEY_EFFECTS}
 # Where each tool a situation can call acts (as its profile says), for the probe's stand-in resource.
 RESOURCE_KINDS: dict[str, str] = {
     "native.quote": "desk", "native.find_slots": "desk", "native.book": "slot", "native.release_document": "document",
@@ -3549,10 +3594,16 @@ def _covering(tool: str, tools: list[dict], effects: frozenset[str] | None = Non
     return frozenset({tool, *(f"effect:{effect}" for effect in offered if effects is None or effect in effects)})
 
 
+def _money_targets(tools: list[dict]) -> frozenset[str]:
+    """Money tools offered by this Desk, and effect targets that cover them."""
+    return MONEY_TARGETS | frozenset(target for tool in tools if money_tool(tool["tool"], tool["effects"])
+                                     for target in _covering(tool["tool"], tools))
+
+
 def _past_a_limit(card: RuleCard, tools: list[dict], answers: SetupAnswers) -> str | None:
     """The answered limit an auto card goes past, by the tool it names or an effect the tool has, or None: a quote's
     amount (which it must set) and discount past the answered quote and discount limits, a document going out unless
-    verified owners get their own, or a payment link's amount past the lower of the answered link limit and the money
+    verified owners get their own, or a money tool's amount past the lower of the answered link limit and the money
     cap. An unanswered limit is 0."""
     if card.applies_to in _covering("native.quote", tools):
         if card.max_amount_cents is None or card.max_amount_cents > (answers.quote_auto_max_cents or 0):
@@ -3563,7 +3614,8 @@ def _past_a_limit(card: RuleCard, tools: list[dict], answers: SetupAnswers) -> s
             and answers.documents != "verified_owner"):
         return "documents"
     link_limit = min(answers.payment_link_auto_max_cents or 0, answers.auto_money_cap_cents)
-    if card.applies_to in _covering("native.payment_link", tools) and (card.max_amount_cents or 0) > link_limit:
+    if card.applies_to in _money_targets(tools) and (
+            card.max_amount_cents is None or card.max_amount_cents > link_limit):
         return "link_limit"
     return None
 
@@ -3610,7 +3662,7 @@ def _card_problems(drafted: DraftedRules, tools: list[dict], answers: SetupAnswe
             continue
         if _pays_out(card.applies_to, tools):
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS["pay_out"]))
-        elif card.applies_to in MONEY_TARGETS and (card.max_amount_cents or 0) > cap:
+        elif card.applies_to in _money_targets(tools) and (card.max_amount_cents or 0) > cap:
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS["above_cap"]))
         elif (past := _past_a_limit(card, tools, answers)) is not None:
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS[past]))
@@ -4059,10 +4111,21 @@ async def go_live(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, publi
 # Tools -------------------------------------------------------------------------------------------------------------
 
 
-async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupTools:
+async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
+                      business_tools_enabled: bool = False) -> SetupTools:
     """The new Desk's tools as the kernel lists them, each with the active rules' cards that cover it, and the mock
     payments server while it isn't connected."""
-    desk_id = await interview_desk(owner, engine, interview_id)
+    async with engine.connect() as conn:
+        interview = await _load(conn, owner.copy_id, interview_id)
+    desk_id = owner.desk(interview.desk_id)
+    if (business_tools_enabled and interview.step != "questions"
+            and any(job.config is not None for job in accepted_jobs(interview))
+            and not await owner.ro.rows("tools", desk_id=desk_id, source="business")):
+        interview.business_tools_enabled = business_tools_enabled
+        # End the read's transaction before waiting on the kernel; the reads below set the copy again on their own.
+        if owner.ro.conn.in_transaction():
+            await owner.ro.conn.rollback()
+        await after_finish(owner, interview)
     rows = await tool_rows(owner, desk_id, version_from_row(await active_row(owner, desk_id)).cards)
     connected = any(row.tool in MCP_TOOLS for row in rows)
     return SetupTools(tools=rows, connectable=[] if connected else ["mock_payments"])
