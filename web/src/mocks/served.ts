@@ -58,7 +58,8 @@ import {
   type Step,
 } from './script.ts';
 import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
-import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
+import { SETUP_ROUTES, setupPublicDesk, stopSetupRuns, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
+import { TEST_PACE, type OwnerStreamPlan, type StreamSettings } from './ownerStreams.ts';
 import { PUBLIC_LINES_ROUTES } from './publicLines.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
@@ -268,6 +269,9 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
+/** The owner-chat streams a test can plan: Ask Claude's answer, or a setup turn. */
+export type OwnerStreamKind = 'ruleChat' | 'setup';
+
 /**
  * How a store numbers its copies and names their payment links: the screen tests' one copy from
  * 1, so its ids are the seed's, and the dev server's at random, so each copy's are its own.
@@ -284,13 +288,29 @@ export class Server {
   world: MockWorld;
   /** The built-in agent's runs in this copy. */
   readonly agents = new AgentRuns();
+  /** How this copy's owner-chat streams are written; a test may change whether setup's turns stream. */
+  readonly streams: StreamSettings;
+  /** Streams a test planned, each taken by the next stream of its kind. */
+  private readonly plans: Record<OwnerStreamKind, OwnerStreamPlan[]> = { ruleChat: [], setup: [] };
   private readonly turns = new Map<string, { queue: Scheduled[]; timer: ReturnType<typeof setTimeout> | null }>();
 
   constructor(
     readonly seed: MockSeed,
     private readonly naming: CopyNaming,
+    streams: StreamSettings = TEST_PACE,
   ) {
+    this.streams = { ...streams };
     this.world = this.freshWorld();
+  }
+
+  /** Plans the next stream of `kind`: Ask Claude's answer, or a setup turn. */
+  planStream(kind: OwnerStreamKind, plan: OwnerStreamPlan): void {
+    this.plans[kind].push(plan);
+  }
+
+  /** The plan for this stream of `kind`, if a test made one. */
+  takePlan(kind: OwnerStreamKind): OwnerStreamPlan | null {
+    return this.plans[kind].shift() ?? null;
   }
 
   private freshWorld(seed: MockSeed = this.seed): MockWorld {
@@ -309,6 +329,7 @@ export class Server {
     for (const turn of this.turns.values()) if (turn.timer !== null) clearTimeout(turn.timer);
     this.turns.clear();
     this.agents.stop();
+    stopSetupRuns(this.world);
   }
 
   /**
