@@ -1056,7 +1056,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
                              booking_card=any(card.template == "booking_confirmed" for card in cards),
-                             callback_card=any(card.template == "callback_confirmed" for card in cards))
+                             callback_card=any(card.template == "callback_confirmed" for card in cards),
+                             approved_free_names=await context.business_free_names(ctx, desk_id))
     violations += refused
     violations += policy_card_violations(prose, cards)
     detected_language = detected if detected in ("en", "es") else None

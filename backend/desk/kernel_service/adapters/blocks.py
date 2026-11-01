@@ -30,6 +30,17 @@ CARD_FIELDS: dict[Block, tuple[str, ...]] = {
 }
 
 
+def free_name_fields(block: Block) -> tuple[str, ...]:
+    """The card fields of `block` that may hold a free word (`reply_check.FREE_WORDS`), in render
+    order: its title or appointment type, never on a payment's card (the owner's decisions of
+    2026-10-31). The business tools write allows the words there (`business_tools.free_allow_words`),
+    and the reply check lets Claude's prose repeat these fields of the Desk's enabled tools that
+    resolve (`context.business_free_names`), so the two allowances stay one."""
+    if block == "purpose_payment":
+        return ()
+    return tuple(field for field in CARD_FIELDS[block] if field in ("title", "appointment_type"))
+
+
 class IntakeArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=80)
