@@ -15,6 +15,16 @@ QA also stay on the laptop. CI continues using its own runners.
 
 The always-on, on-demand test machine is a c8g.24xlarge (96 arm64 vCPUs, 192 GB RAM) in
 us-east-1, with Ubuntu 24.04 and an encrypted 1 TiB gp3 root disk (16,000 IOPS, 1,000 MiB/s).
+Budget about **$3,000/month** while running 24/7 (730 hours): roughly $2,795 for
+[on-demand Linux compute](https://aws.amazon.com/ec2/pricing/on-demand/) at $3.8285/hour in
+us-east-1, plus about $182 for the configured gp3 disk and a small public IPv4 charge
+(before tax and data transfer; estimate dated 2026-10-31). Stop it when sustained parallel
+testing ends or before an extended idle period; stopping ends compute charges but retains
+the billed disk. The owner approves stopping or retiring it.
+CI runners remain the merge gate, but their minutes per round trip slow interactive fixes;
+local Docker keeps the compilation, containers and database load on the laptop that this
+machine removes.
+
 It has termination protection, requires IMDSv2, and has no inbound security group rules.
 Access uses [SSH over SSM](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-getting-started-enable-ssh-connections.html).
 Its instance role has no attached managed policies and exactly one inline policy,
@@ -69,7 +79,8 @@ call's service and its whole process group are stopped, including detached desce
 in its control group. A killed process itself cannot wait for cleanup before exiting.
 
 The client compares source content hashes under the lane lock and sends only changed files,
-repairing sources edited or removed by a previous remote command. It syncs tracked and
+repairing sources edited or removed by a previous remote command and removing new
+nonignored source files it created. Ignored build directories remain warm. It syncs tracked and
 nonignored untracked source files, including
 uncommitted edits and deletions. It excludes environment files (except `.env.example`),
 private local directories, credential/key files and local build outputs. Do not put
@@ -81,6 +92,12 @@ remain in the working tree.
 A pending-transfer manifest is saved before copying sources; paths left by an interrupted
 sync are reconciled on the next call. Successful sync atomically promotes the manifest.
 Changing branches removes stale synced files and invalidates affected build/schema caches.
+The client transfers its own worker and helper modules separately from the selected tree;
+another checkout's client works with `--lane` even on a branch without `tools/testbox`.
+The launcher accepts the current and previous protocol versions; older clients must update
+their branch's tools or re-provision. Runner diagnostics go to stderr; set `TESTBOX_TIMING=1`
+for phase timings. Exit 75 means the test machine is bootstrapping: retry shortly.
+Do merges, rebases, fetches and commits locally: the remote copy is disposable and nothing comes back.
 Remote test reports remain in the lane; source files are never copied back automatically.
 
 Changed kernel sources or build inputs trigger `make kernel` before the requested command.
@@ -107,9 +124,11 @@ or bootstrapping a reused box. Any mismatch is refused. Use
 `tools/testbox/provision.sh --region us-east-1 --check` for the same read-only validation.
 Re-running reuses tagged resources and starts a stopped box. A failed provisioning attempt
 rolls back resources it created and reports any cleanup failure. Existing resources are
-preserved. Bootstrap starts through cloud-init; provisioning waits for readiness and safely retries
+preserved. Bootstrap runs once through SSM after cloud-init; provisioning waits for readiness and safely retries
 an interrupted or changed bootstrap through SSM, with its log at
 `/var/log/desk-testbox-bootstrap.log` and readiness marker `/opt/testbox/ready`.
+Re-bootstrap removes readiness first and takes an exclusive machine lock, draining running
+lanes that hold shared locks. Postgres restarts only when its configuration changed.
 Allow about ten minutes for a fresh bootstrap; provisioning waits up to thirty minutes.
 
 The replacement is independent: no data migration is needed. After testing it, retire the
@@ -117,9 +136,9 @@ old protected instance and its regional security group with the owner's approval
 role/profile are global and reused across regions. Recreating in the same region requires
 retiring the old instance first. Never disable termination protection as routine setup.
 
-The bootstrap pins Rust 1.99.1, uv 0.13.0, Python 3.13, cvc5 1.4.2 and Node 24.21.0.
+The bootstrap pins Rust 1.99.1, uv 0.13.0 (SHA-256 verified), Python 3.13, cvc5 1.4.2 and Node 24.21.0.
 cvc5 is verified against [the repository checksums](../tools/cvc5.sha256). Playwright's
-Chromium/WebKit and system dependencies are installed for the version in the web lockfile.
+Chromium/WebKit and system dependencies are installed for a pin checked against the web lockfile by the tools tests.
 The font inventory matches the minimal arm64 CI image: Playwright’s font packages, without
 DejaVu from the server AMI. DejaVu changes the fallback text metrics in layout tests.
 Bootstrap removes its core and mono packages after installing the browser fonts, so normal
