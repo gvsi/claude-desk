@@ -2,11 +2,11 @@
  * Rules in the owner's words: what a card enforces (`RuleWord`s for `ChangeReview`, `RuleRow` and
  * `ConnectorReview`), what a card applies to, and the payment limit in its signed words.
  */
-import type { RuleCard, ToolName } from '../../api/contracts.ts';
+import type { RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut } from '../../api/views.ts';
 import type { RuleWord } from '../../ds/index.ts';
 import { formatCents, formatHours } from '../../lib/format.ts';
-import { toolWords } from '../connectors/catalog.ts';
+import { NO_BUSINESS_TOOLS, toolDisplayName, type BusinessTools } from '../connectors/catalog.ts';
 
 /**
  * Visiting agents by name, keyed by `agent_key_id`, where the caller has one: "Alex Kim's
@@ -99,12 +99,12 @@ const EFFECT_WORDS: Readonly<Record<string, string>> = {
  * group's ("Every tool that charges money"). A target this build doesn't know is named plainly,
  * never by its raw name.
  */
-export function targetWords(appliesTo: string): string {
+export function targetWords(appliesTo: string, business: BusinessTools = NO_BUSINESS_TOOLS): string {
   if (appliesTo.startsWith('effect:')) {
     const effect = appliesTo.slice('effect:'.length);
     return Object.hasOwn(EFFECT_WORDS, effect) ? (EFFECT_WORDS[effect] ?? 'A group of tools') : 'A group of tools';
   }
-  return toolWords(appliesTo as ToolName)?.name ?? 'A connected tool';
+  return toolDisplayName(appliesTo, business) ?? 'A connected tool';
 }
 
 /**

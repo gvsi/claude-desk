@@ -1,10 +1,11 @@
 """`native.read_memory`: setup searches the owner's Claude memory, simulated in this prototype.
 
 An owner setup tool: only an owner session is given it (`decide.OWNER_TOOLS`), and it is decided
-and executed like any other tool. There is no real memory to read: the items come from
-`fixtures/memory.json` (the business, its trade, service area, hours and website), and the result
+and executed like any other tool. There is no real memory to read: setup writes simulated notes
+for this Desk through the kernel's owner route. Only the Rivera seed falls back to
+`fixtures/memory.json`; other Desks without notes read nothing. The result
 says so (`simulated: true`). An item matches when a word of the query is one of its title's words
-or topics, compared case-folded; the items keep the fixture's order.
+or topics, compared case-folded; the items keep their stored order.
 
 Each item read is stored as a `KnowledgeItem(source="memory_import")` the owner alone may read
 until they mark it public (`labels.store_knowledge`), under an ID fixed by the item, so reading it
@@ -19,8 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 
 from desk.contracts import KnowledgeItem, Label, NormalizedAction, ResourceRef, ToolProfile
+from desk.db.models import PolicyVersion
+from desk.kernel_api import DeskMemoryRequest as Memory
+from desk.kernel_api import MemoryItem
 from desk.kernel_service import labels
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import AdapterResult, ExecCtx, Normalized, NormalizeCtx
@@ -45,25 +50,9 @@ PROFILE = ToolProfile(
     input_schema=ReadMemoryArgs.model_json_schema(), status="enabled")
 
 
-class MemoryItem(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-
-    id: str = Field(pattern=r"^[a-z][a-z-]{0,59}$")
-    title: str = Field(min_length=1, max_length=200)
-    topics: list[str]
-    text: str = Field(min_length=1, max_length=2000)
-
-
-class Memory(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-
-    about: str
-    items: list[MemoryItem]
-
-
 @cache
 def memory() -> Memory:
-    """The simulated memory, read once from `MEMORY_FILE`."""
+    """The Rivera seed's simulated memory, read once from `MEMORY_FILE`."""
     return Memory.model_validate(json.loads(MEMORY_FILE.read_text(encoding="utf-8")))
 
 
@@ -71,10 +60,10 @@ def words(text: str) -> set[str]:
     return {word.casefold() for word in WORD.findall(text)}
 
 
-def matching(query: str) -> list[MemoryItem]:
+def matching(query: str, source: Memory) -> list[MemoryItem]:
     """The memory's items that a word of `query` names, by title or topic, in the memory's order."""
     asked = words(query)
-    return [item for item in memory().items
+    return [item for item in source.items
             if asked & (words(item.title) | {topic.casefold() for topic in item.topics})]
 
 
@@ -93,9 +82,18 @@ class ReadMemoryAdapter:
         return Normalized(resource=ResourceRef(kind="desk", id=nctx.desk_row.desk_id, owner_person_id=None))
 
     async def execute(self, xctx: ExecCtx, action: NormalizedAction, args: ReadMemoryArgs) -> AdapterResult:
+        source = None
+        if xctx.desk_row.simulated_memory is not None:
+            source = Memory.model_validate(xctx.desk_row.simulated_memory)
+        else:
+            # The original shipped version identifies the seed even after the owner changes its rules.
+            seed = (await xctx.ctx.db.scalars(xctx.ctx.repo.scoped(select(PolicyVersion.preset).where(
+                PolicyVersion.desk_id == action.desk_id, PolicyVersion.version == 1)))).one_or_none() == "rivera"
+            if seed:
+                source = memory()
         stored = [await labels.store_knowledge(xctx.ctx, action.desk_id, KnowledgeItem(
             item_id=f"mem-{item.id}", source="memory_import", title=item.title, text=item.text,
-            label=Label(readers=["owner"]))) for item in matching(args.query)]
+            label=Label(readers=["owner"]))) for item in (matching(args.query, source) if source is not None else [])]
         return AdapterResult(model_view=model_view(stored))
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:

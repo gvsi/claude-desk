@@ -3,11 +3,11 @@
  * `reviewChanges` pairs the cards, the one algorithm every review's rows follow, and this gives
  * each side its words. It decides no outcome the draft doesn't enforce.
  */
-import type { Effect, RuleCard, ToolName } from '../../api/contracts.ts';
-import type { PeopleOut, ToolRow } from '../../api/views.ts';
+import type { Effect, RuleCard } from '../../api/contracts.ts';
+import type { AnyToolName, PeopleOut, ToolRow } from '../../api/views.ts';
 import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeSide, type ConnectorView, type RulesTool } from '../../ds/index.ts';
 import { formatCents, listWords } from '../../lib/format.ts';
-import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOf } from '../connectors/catalog.ts';
+import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOf, isCatalogTool, type BusinessTools } from '../connectors/catalog.ts';
 import type { RuleDraft } from './drafts.ts';
 import { toolOutcome } from './outcome.ts';
 import { ruleWords, targetWords } from './ruleWords.ts';
@@ -20,11 +20,11 @@ export const DEFAULT_SIDE = {
 } as const satisfies ChangeSide;
 
 /** The tools a rules review knows the effects of, by name. */
-type ToolEffects = readonly Pick<ToolRow, 'tool' | 'effects'>[];
+type ToolEffects = readonly Pick<ToolRow, 'tool' | 'effects' | 'source' | 'business'>[];
 
 /** The connector a tool card's tool belongs to; none for a tool the catalog doesn't know. */
 function connectorFor(card: RuleCard): ConnectorView | undefined {
-  return connectorOf(card.applies_to as ToolName)?.view ?? undefined;
+  return isCatalogTool(card.applies_to) ? connectorOf(card.applies_to)?.view : undefined;
 }
 
 /**
@@ -81,7 +81,7 @@ const LAST_PLACE = TOOL_ORDER.length + 1;
  * A review passes one side of its draft and the Desk's whole catalog in review order; Rules, the
  * active rules and the Desk's tools on its connectors, in the connectors' order.
  */
-export function coveredTools(card: RuleCard, cards: readonly RuleCard[], catalog: readonly RulesTool[]): ToolName[] {
+export function coveredTools(card: RuleCard, cards: readonly RuleCard[], catalog: readonly RulesTool[]): AnyToolName[] {
   const shared = cards.filter(isEffectCard);
   return catalog.filter((tool) => rulesForTool(tool, shared).some((rule) => rule.card_id === card.card_id)).map((tool) => tool.tool);
 }
@@ -94,12 +94,12 @@ export function coveredTools(card: RuleCard, cards: readonly RuleCard[], catalog
  * else no connector, last. Covering none of this Desk's tools, it keeps its group's words
  * ("Every tool that charges money"), last.
  */
-function rowLabel(card: RuleCard, side: readonly RuleCard[], catalog: readonly RulesTool[]): RowLabel {
+function rowLabel(card: RuleCard, side: readonly RuleCard[], catalog: readonly RulesTool[], business: BusinessTools): RowLabel {
   if (!isEffectCard(card)) {
     const connector = connectorFor(card);
-    return { title: targetWords(card.applies_to), ...(connector === undefined ? {} : { connector }), place: toolPlace(card.applies_to) };
+    return { title: targetWords(card.applies_to, business), ...(connector === undefined ? {} : { connector }), place: toolPlace(card.applies_to) };
   }
-  return coveredLabel(coveredTools(card, side, catalog)) ?? { title: targetWords(card.applies_to), place: LAST_PLACE };
+  return coveredLabel(coveredTools(card, side, catalog), business) ?? { title: targetWords(card.applies_to, business), place: LAST_PLACE };
 }
 
 /**
@@ -107,24 +107,24 @@ function rowLabel(card: RuleCard, side: readonly RuleCard[], catalog: readonly R
  * joined; with their connector when they share one, right after the rows of the first of them;
  * else no connector, last. None when it covers no tool.
  */
-function coveredLabel(covered: readonly ToolName[]): RowLabel | undefined {
+function coveredLabel(covered: readonly AnyToolName[], business: BusinessTools): RowLabel | undefined {
   const [first] = covered;
   if (first === undefined) return undefined;
-  const title = coveredWords(covered);
-  const connectors = new Set(covered.map((tool) => connectorOf(tool)?.key ?? null));
+  const title = coveredWords(covered, business);
+  const connectors = new Set(covered.map((tool) => (isCatalogTool(tool) ? connectorOf(tool)?.key : null) ?? null));
   const [only] = connectors;
   const connector = connectors.size === 1 && only != null ? connectorByKey(only)?.view : undefined;
   return connector === undefined ? { title, place: LAST_PLACE } : { title, connector, place: toolPlace(first) + 0.5 };
 }
 
 /** The names of the tools a shared rule covers, joined ("Share a document, See charges and Refund"). */
-function coveredWords(covered: readonly ToolName[]): string {
-  return listWords(covered.map((tool) => targetWords(tool)));
+function coveredWords(covered: readonly AnyToolName[], business: BusinessTools): string {
+  return listWords(covered.map((tool) => targetWords(tool, business)));
 }
 
 /** What a side covers, in words: its tools' names, or its group's words when it covers none of this Desk's. */
-function sideCoverage(card: RuleCard, covered: readonly ToolName[]): string {
-  return covered.length > 0 ? coveredWords(covered) : targetWords(card.applies_to);
+function sideCoverage(card: RuleCard, covered: readonly AnyToolName[], business: BusinessTools): string {
+  return covered.length > 0 ? coveredWords(covered, business) : targetWords(card.applies_to, business);
 }
 
 /** A row that moves in the tools it covers: its label, and what each side covers in words. */
@@ -142,14 +142,14 @@ interface CoverageMove {
  * every tool either side covers, in review order, and each side names its own. None when either
  * side isn't a shared rule, or both cover the same tools.
  */
-function coverageMove(before: RuleCard, after: RuleCard, draft: RuleDraft, catalog: readonly RulesTool[]): CoverageMove | undefined {
+function coverageMove(before: RuleCard, after: RuleCard, draft: RuleDraft, catalog: readonly RulesTool[], business: BusinessTools): CoverageMove | undefined {
   if (!isEffectCard(before) || !isEffectCard(after)) return undefined;
   const was = coveredTools(before, draft.before, catalog);
   const now = coveredTools(after, draft.after, catalog);
   if (was.length === now.length && was.every((tool, index) => now[index] === tool)) return undefined;
-  const label = coveredLabel(catalog.map((tool) => tool.tool).filter((tool) => was.includes(tool) || now.includes(tool)));
+  const label = coveredLabel(catalog.map((tool) => tool.tool).filter((tool) => was.includes(tool) || now.includes(tool)), business);
   if (label === undefined) return undefined;
-  return { label, before: sideCoverage(before, was), after: sideCoverage(after, now) };
+  return { label, before: sideCoverage(before, was, business), after: sideCoverage(after, now, business) };
 }
 
 /** `items` by `place`, a stable sort, so items at one place keep their order. */
@@ -168,18 +168,19 @@ function byPlace<T>(items: readonly T[], place: (item: T) => number): T[] {
  * govern it; the draft's own `turnedOn` rows count too.
  */
 export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefined, tools: ToolEffects = []): ChangeRowView[] {
-  const effects = new Map<ToolName, readonly Effect[]>();
+  const business = businessTools([...tools, ...draft.turnedOn]);
+  const effects = new Map<AnyToolName, readonly Effect[]>();
   for (const row of [...tools, ...draft.turnedOn]) effects.set(row.tool, row.effects);
-  const effectsOf = (tool: ToolName): readonly Effect[] => effects.get(tool) ?? [];
+  const effectsOf = (tool: AnyToolName): readonly Effect[] => effects.get(tool) ?? [];
   const catalog = byPlace(
     [...effects].map(([tool, toolEffects]): RulesTool => ({ tool, effects: toolEffects })),
     (tool) => toolPlace(tool.tool),
   );
   // Each side's labels, read once: a shared rule's coverage depends on the other shared rules beside it.
-  const labelsOf = (side: readonly RuleCard[]) => new Map(side.map((card) => [card, rowLabel(card, side, catalog)]));
+  const labelsOf = (side: readonly RuleCard[]) => new Map(side.map((card) => [card, rowLabel(card, side, catalog, business)]));
   const beforeLabels = labelsOf(draft.before);
   const afterLabels = labelsOf(draft.after);
-  const labelOf = (card: RuleCard, labels: ReadonlyMap<RuleCard, RowLabel>) => labels.get(card) ?? rowLabel(card, [card], catalog);
+  const labelOf = (card: RuleCard, labels: ReadonlyMap<RuleCard, RowLabel>) => labels.get(card) ?? rowLabel(card, [card], catalog, business);
 
   // The draft's cards go to `reviewChanges` as the draft has them, so neither which card governs a
   // dropped one (`rulesForTool`'s order) nor the pairing depends on the review's order; only the
@@ -190,10 +191,10 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     if (card === null) throw new Error('a review change with no card');
     // A row reads by its card's side, the after side for an added rule; a shared rule that covers
     // other tools after reads by every tool either side covers.
-    const move = before !== null && after !== null ? coverageMove(before, after, draft, catalog) : undefined;
+    const move = before !== null && after !== null ? coverageMove(before, after, draft, catalog, business) : undefined;
     const { title, connector, place } = move?.label ?? labelOf(card, before === null ? afterLabels : beforeLabels);
     const retargeted = before !== null && after !== null && after.applies_to !== before.applies_to;
-    const target = (side: RuleCard, covered: string | undefined) => covered ?? (retargeted ? targetWords(side.applies_to) : undefined);
+    const target = (side: RuleCard, covered: string | undefined) => covered ?? (retargeted ? targetWords(side.applies_to, business) : undefined);
     // A rule on a group of tools on every side it has (dropped, changed, added, or replaced by
     // another group's rule) is a shared rule, and its row says so: "Payments · Shared rule". A rule
     // that moves between one tool and a group leaves it unset, since its sides' `appliesTo` show
@@ -218,8 +219,8 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
   ].map(({ row }) => row);
 
   for (const row of [...draft.turnedOn].sort((a, b) => toolPlace(a.tool) - toolPlace(b.tool))) {
-    const title = targetWords(row.tool);
-    const connector = connectorOf(row.tool)?.view;
+    const title = targetWords(row.tool, business);
+    const connector = isCatalogTool(row.tool) ? connectorOf(row.tool)?.view : undefined;
     const { rule } = toolOutcome({ tool: row.tool, effects: row.effects }, draft.after);
     rows.push({
       key: `turned-on:${row.tool}`,

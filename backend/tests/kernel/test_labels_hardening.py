@@ -14,6 +14,7 @@ Desks with scripted adapters (`FakeAdapter`) where a test says what a tool retur
 for the document release tool, which comes later in this plan.
 """
 
+import random
 import unicodedata
 
 import httpx
@@ -25,7 +26,7 @@ from desk.contracts import Claim, Fact, KnowledgeItem, Label, ReplyVerdict
 from desk.db.models import Document, Execution
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
-from desk.kernel_service import desks, labels, ledger, seed
+from desk.kernel_service import desks, labels, ledger, reply_check, seed
 from desk.kernel_service.adapters.base import AdapterResult
 
 from .fakes import FakeAdapter
@@ -39,7 +40,7 @@ from .test_copies import api_rows
 from .test_decide import decided, desk_with, open_visitor, set_session
 from .test_execute import Crash, executed, post_execute, read
 from .test_owner_messages import sent
-from .test_reply_check import assert_handed_off, checked, clause, reply_entries
+from .test_reply_check import assert_handed_off, checked, clause, reply_entries, session_of
 
 REFUNDS = "charter:policy:refunds"
 POLICY_DRAFT = {"en": "Here is our policy on that.", "es": "Esta es nuestra política al respecto."}
@@ -50,6 +51,17 @@ DANA_SAYS = {"en": "Here is your invoice reference: {}. Anything else I can help
 async def documents(app: FastAPI, copy: Rivera) -> dict[str, Document]:
     """The copy's documents by ref: Dana's invoice and Bob's warranty, each with its canary."""
     return {row.ref: row for row in await rows_of(app, copy.copy_id, select(Document))}
+
+
+async def set_document_canary(app: FastAPI, copy: Rivera, canary: str) -> Document:
+    """Give Dana's invoice a deterministic canary, including its copy in the body."""
+    async with kernel_ctx(app) as ctx:
+        repo = ctx.bind(copy.copy_id)
+        document = (await ctx.db.scalars(repo.scoped(select(Document).where(
+            Document.ref == "dana-invoice")))).one()
+        document.body = document.body.replace(document.canary, canary)
+        document.canary = canary
+    return document
 
 
 async def store_charter(app: FastAPI, copy: Rivera, claims: list[Claim]) -> None:
@@ -315,7 +327,8 @@ def test_the_one_reading_keeps_whatever_either_form_kept():
 
 async def test_canary_split_with_spaces_case_or_width_is_caught(app, client):
     copy, visitor = await visitor_of(app, client)
-    dana = (await documents(app, copy))["dana-invoice"]
+    # Its capital lookalikes previously made language detection report another language.
+    dana = await set_document_canary(app, copy, "cdk-a7a7ebeb7ebe1ae7")
     canaries = {dana.document_id: dana.canary}
     assert labels.canary_key("Ｃdk-0123 4567\u00a0ab.Cd") == "cdk01234567abcd"
     for disguised in disguises(dana.canary):
@@ -329,7 +342,10 @@ async def test_canary_split_with_spaces_case_or_width_is_caught(app, client):
         assert (document_id, text[:start]) == (dana.document_id, "Reference: "), disguised
         assert labels.find_canaries(text[start:end], canaries) == [dana.document_id], disguised
         assert labels.canary_key(text[end:]) == "", disguised
-        verdict = await checked(client, visitor, f"Your invoice reference is {disguised}.")
+        prose = f"Your invoice reference is {disguised}."
+        assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, canaries)] == [
+            ("canary", "labels.canary")], disguised
+        verdict = await checked(client, visitor, prose)
         # only the canary: none of its digits is read as an amount, so no span quotes a piece of it
         assert violations(verdict) == blocked_by(dana), disguised
         assert_handed_off(verdict)
@@ -337,6 +353,61 @@ async def test_canary_split_with_spaces_case_or_width_is_caught(app, client):
     await assert_no_canary_on_record(app, copy, dana.canary, *disguises(dana.canary))
     # text that only shares the prefix, or most of the canary, is not one
     assert labels.find_canaries(f"cdk-{dana.canary[4:-1]}", canaries) == []
+
+
+@pytest.mark.parametrize(("canary", "prose", "language", "previous"), [
+    ("cdk-01be234567890123", "Hola.", "es", "en"),
+    ("cdk-el1la2los3las4un5una", "Here is the link to pay.", "en", "es"),
+])
+async def test_canary_language_markers_do_not_choose_the_reply_language(
+        app, client, canary, prose, language, previous):
+    copy, visitor = await visitor_of(app, client)
+    await set_session(app, copy, visitor.session_id, last_language=previous)
+    # The Spanish marker case is synthetic; the English marker is a possible random hex canary.
+    dana = await set_document_canary(app, copy, canary)
+    verdict = await checked(client, visitor, f"{prose} {canary}")
+    assert violations(verdict) == blocked_by(dana)
+    assert_handed_off(verdict, language)
+    assert (await session_of(app, copy, visitor)).last_language == language
+    assert canary not in verdict.model_dump_json()
+    await assert_no_canary_on_record(app, copy, canary)
+
+
+async def test_seeded_random_canaries_never_add_prose_violations(app, client):
+    copy, visitor = await visitor_of(app, client)
+    rng = random.Random(380)
+    for _ in range(64):
+        dana = await set_document_canary(app, copy, f"cdk-{rng.getrandbits(64):016x}")
+        canaries = {dana.document_id: dana.canary}
+        for disguised in disguises(dana.canary):
+            prose = f"Here is {disguised}."
+            assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose, canaries)] == [
+                ("canary", "labels.canary")], disguised
+        disguised = dana.canary.upper().translate(CAPITAL_LOOKALIKES)
+        verdict = await checked(client, visitor, f"Here is {disguised}.")
+        assert violations(verdict) == blocked_by(dana), disguised
+        assert_handed_off(verdict)
+        assert disguised not in verdict.model_dump_json()
+
+
+@pytest.mark.parametrize(("canary", "inside_rules"), [
+    ("cdk-a7a7ebeb7ebe1ae7", {"digit", "mixed_script"}),
+    ("cdk-2026103012345678", {"digit"}),
+    ("cdk-tuesday-2026-11-02", {"digit", "lex.en.date"}),
+])
+async def test_canary_scan_exempts_only_the_matched_span(app, client, canary, inside_rules):
+    copy, visitor = await visitor_of(app, client)
+    dana = await set_document_canary(app, copy, canary)
+    disguised = canary.upper().translate(CAPITAL_LOOKALIKES)
+    # These characters would trigger the ordinary scan if they were outside a canary.
+    assert inside_rules <= {v.rule_id for v in reply_check.scan_prose(disguised)}
+    prose = f"Here is {disguised}. H\u0435llo."
+    expected = blocked_by(dana) + [("unsupported_language", "H\u0435llo", [], "mixed_script")]
+    verdict = await checked(client, visitor, prose)
+    assert violations(verdict) == expected
+    assert_handed_off(verdict)
+    assert disguised not in verdict.model_dump_json()
+    await assert_no_canary_on_record(app, copy, canary, disguised)
 
 
 async def test_canary_in_owner_say_is_blocked(app, client):

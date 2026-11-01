@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { Decision, DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -44,6 +44,7 @@ import {
   HELD_PROSE,
   LINK_CANCELLED,
   VISITOR_PLAIN,
+  afterAnswer,
   askedDiscountBp,
   linkCancelledBlock,
   matchRule,
@@ -326,9 +327,9 @@ describe('the scripted Desk', () => {
     for (const entry of others) expect(entry.decision_id, entry.entry_id).toBeNull();
   });
 
-  it('answer_resolves_and_follows_up', async () => {
+  it.each(['en', 'es'] as const)('allowed_answer_emits_approved_before_outcome_and_follows_up_%s', async (language) => {
     const { events } = await openChat();
-    await send('Can I get 15% off?');
+    await send(language === 'es' ? '¿Me hacen un descuento del 15%?' : 'Can I get 15% off?');
     await drain();
     const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
@@ -336,7 +337,7 @@ describe('the scripted Desk', () => {
     const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } });
     expect(answered.status).toBe(200);
     expect(answered.body).toMatchObject({
-      decision: { decision_id: decisionId, state: 'executed', visitor_plain: "Quoted from Maria Rivera's price list" },
+      decision: { decision_id: decisionId, state: 'executed', visitor_plain: executedLine('native.quote', language, 'Maria Rivera') },
       execution_state: 'succeeded',
       card_diff: null,
     });
@@ -344,16 +345,22 @@ describe('the scripted Desk', () => {
     expect(typesOf(events)).toEqual(['writing', 'held', 'message', 'turn_end']);
 
     await drain();
-    expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
-    const [, resolved] = events[4] ?? [];
+    expect(typesOf(events).slice(4)).toEqual(['receipt', 'resolved', 'writing', 'message', 'turn_end']);
+    const [, approved] = events[4] ?? [];
+    expect(approved).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved', visitor_plain: VISITOR_PLAIN[language].approved });
+    const [, resolved] = events[5] ?? [];
     // An executed action's line says what ran and whose records it used, never a bare "Done".
     expect(resolved).toMatchObject({
       type: 'resolved',
       decision_id: decisionId,
       state: 'executed',
-      visitor_plain: "Quoted from Maria Rivera's price list",
+      visitor_plain: executedLine('native.quote', language, 'Maria Rivera'),
     });
-    const [, followUp] = events[6] ?? [];
+    if (approved?.type !== 'receipt' || resolved?.type !== 'resolved') throw new Error('approval precedes resolution');
+    expect(approved.ledger_seq).toBeLessThan(resolved.ledger_seq);
+    const approvalEntry = mockStore.world.desks[0]?.ledger.find((entry) => entry.seq === approved.ledger_seq);
+    expect(approvalEntry?.event).toMatchObject({ kind: 'approval', ref_id: decisionId, summary: { state: 'approved' } });
+    const [, followUp] = events[7] ?? [];
     expect(followUp?.type === 'message' && followUp.blocks.map((b) => [b.kind, b.template])).toEqual([
       ['prose', null],
       ['card', 'quote'],
@@ -364,6 +371,43 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
     expect(needsYou).toHaveLength(1);
+  });
+
+  it.each(['missing', 'different decision', 'not approved', 'same ledger', 'later ledger'] as const)(
+    'answer_drops_snapshot_when_%s', async (reason) => {
+      const { session } = await openChat();
+      const chat = mockStore.world.sessions.get(session.session_id);
+      if (!chat) throw new Error('the visitor opened a chat');
+      const held = mockStore.world.decide(chat, DECISIONS.heldQuote, 'en');
+      const record = mockStore.world.decisions.get(held.decision_id);
+      if (!record) throw new Error('the discount was held');
+      const decision = mockStore.world.answer(record, 'allow_once');
+      const approved = record.approved;
+      if (!approved) throw new Error('the owner approved the discount');
+      const snapshots: Record<typeof reason, Decision | null> = {
+        missing: null,
+        'different decision': { ...approved, decision_id: 'another-decision' },
+        'not approved': { ...approved, state: 'held' },
+        'same ledger': { ...approved, ledger_seq: decision.ledger_seq },
+        'later ledger': { ...approved, ledger_seq: decision.ledger_seq + 1 },
+      };
+      const ctx = mockStore.world.context(chat, 'en', '');
+      const emitted = afterAnswer('allow_once', decision, snapshots[reason]).map((step) => step(ctx));
+      expect(emitted.map((ev) => ev.type)).toEqual(['resolved', 'writing', 'message']);
+      expect(emitted[0]).toEqual(ctx.status('resolved', decision));
+    },
+  );
+
+  it('denied_answer_emits_only_the_denial_before_follow_up', async () => {
+    const { events } = await openChat();
+    await send('Can I get 10% off?');
+    await drain();
+    const held = events.find(([, ev]) => ev.type === 'held')?.[1];
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    expect((await call('answer', { params: { decision_id: held.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
+    expect(events[4]?.[1]).toMatchObject({ type: 'resolved', state: 'denied', visitor_plain: VISITOR_PLAIN.en.denied });
   });
 
   it('answer_records_the_kernels_approval', async () => {
@@ -1210,7 +1254,7 @@ describe('taking over', () => {
     expect(typesOf(events)).toEqual(['owner_joined', 'turn_end']);
   });
 
-  it('takeover_still_tells_the_visitor_an_answered_hold_ran', async () => {
+  it('takeover_still_tells_the_visitor_approval_then_the_outcome', async () => {
     const { session, events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
@@ -1222,8 +1266,9 @@ describe('taking over', () => {
     expect((await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } })).status).toBe(200);
     expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
     await drain();
-    expect(typesOf(events).slice(4)).toEqual(['owner_joined', 'resolved', 'turn_end']);
-    expect(events[5]?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
+    expect(typesOf(events).slice(4)).toEqual(['owner_joined', 'receipt', 'resolved', 'turn_end']);
+    expect(events[5]?.[1]).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved' });
+    expect(events[6]?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
     expect(kindsFor(session.session_id).filter((kind) => kind === 'reply')).toHaveLength(1);
   });
 });

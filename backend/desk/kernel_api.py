@@ -80,6 +80,28 @@ class DeskBusinessRequest(KernelRequest):     # PUT /desks/{id}/business
 class DeskCharterRequest(KernelRequest):      # PUT /desks/{id}/charter
     charter: list[Claim]
 
+class MemoryItem(BaseModel):
+    """An untrusted simulated owner note, shared by the write contract and memory reader."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    id: str = Field(pattern=r"^[a-z][a-z-]{0,59}$")
+    title: str = Field(min_length=1, max_length=200)
+    topics: list[Annotated[str, StringConstraints(min_length=1, max_length=60)]] = Field(max_length=10)
+    text: str = Field(min_length=1, max_length=2000)
+
+class DeskMemoryRequest(KernelRequest):       # PUT /desks/{id}/memory
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    about: str = Field(min_length=1, max_length=500)
+    items: list[MemoryItem] = Field(max_length=20)
+
+    @model_validator(mode="after")
+    def _unique_ids(self) -> Self:
+        if len({item.id for item in self.items}) != len(self.items):
+            raise ValueError("memory item ids must be unique")
+        return self
+
 class DeskHoursRequest(KernelRequest):        # PUT /desks/{id}/hours (the kernel rewrites fact "charter:hours")
     hours: list[HoursWindow]
 
@@ -242,7 +264,7 @@ class LedgerAppendRequest(KernelRequest):     # POST /ledger/append: origin "api
         return self
 
 KERNEL_REQUESTS: tuple[type[BaseModel], ...] = (
-    CreateCopyRequest, CreateDeskRequest, DeskBusinessRequest, DeskCharterRequest, DeskHoursRequest,
+    CreateCopyRequest, CreateDeskRequest, DeskBusinessRequest, DeskCharterRequest, DeskMemoryRequest, DeskHoursRequest,
     DeskPricesRequest, DeskCalendarRequest, DeskPeopleRequest, DeskNotificationsRequest,
     DeskAnsweringRequest, DocumentUploadRequest, CreateSessionRequest, ModeRequest, TurnRequest, VerifyStartRequest,
     VerifyCheckRequest, DecideRequest, ExecuteRequest, CancelRequest, AnswerRequest, CheckReplyRequest,
@@ -382,6 +404,7 @@ KERNEL_ROUTES: dict[str, tuple[type[BaseModel] | None, type | None]] = {
     "POST /desks": (CreateDeskRequest, DeskCreated),
     "PUT /desks/{id}/business": (DeskBusinessRequest, DeskUpdated),
     "PUT /desks/{id}/charter": (DeskCharterRequest, DeskUpdated),
+    "PUT /desks/{id}/memory": (DeskMemoryRequest, DeskUpdated),
     "PUT /desks/{id}/hours": (DeskHoursRequest, DeskUpdated),
     "PUT /desks/{id}/prices": (DeskPricesRequest, DeskUpdated),
     "PUT /desks/{id}/calendar": (DeskCalendarRequest, DeskUpdated),
