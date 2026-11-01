@@ -400,6 +400,9 @@ async def test_a_test_client_is_put_only_when_the_owner_says_yes(app, browser, f
     ("Yes, add me as a test client", "yes"), ("Sí", "yes"), ("vale", "yes"),
     ("no", "no"), ("No, not now", "no"), ("don't add me", "no"), ("Maybe later", "no"), ("No gracias", "no"),
     ("what does that mean?", "again"), ("Can you change my hours first?", "again"),
+    # A question, or a yes only on a condition, is no yes, whatever words it holds.
+    ("What does add me as a test client mean?", "again"), ("What happens if I say yes?", "again"),
+    ("If it's free, yes", "again"),
 ])
 async def test_a_typed_answer_to_the_test_client_offer_is_read_by_code(app, browser, fake, kernel_http, model,
                                                                        typed, read):

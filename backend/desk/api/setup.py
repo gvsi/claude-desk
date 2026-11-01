@@ -378,6 +378,12 @@ TEST_CLIENT_REF = "test-client"                   # the owner's ref among the De
 TEST_CLIENT_TYPED_YES = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead", "please do", "do it", "add me",
                          "sounds good", "sí", "si", "vale", "claro", "dale", "añádeme", "agrégame")
 TEST_CLIENT_TYPED_NO = ("no", "not", "don't", "dont", "nope", "not now", "later", "skip", "no gracias")
+# A typed answer that asks something, or gives a yes only on a condition, which is never a yes or a no: a question mark,
+# a question's opening word, or "if" ("si" in Spanish, unless it stands alone as a yes, "Si" or "Si, …").
+TEST_CLIENT_UNCLEAR = re.compile(r"[?¿]|^\W*(?:what|how|why|does|can|is|will|qué|cómo|por qué)\b"
+                                 r"|^\W*do\s+(?:you|i|we|they|he|she|this|that)\b|\bif\b", re.IGNORECASE)
+TEST_CLIENT_SI = re.compile(r"\bsi\b", re.IGNORECASE)
+TEST_CLIENT_SI_ALONE = re.compile(r"^\W*si\s*(?:$|[,.!])", re.IGNORECASE)
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -2728,9 +2734,13 @@ def _offer_test_client(interview: Interview) -> None:
 
 
 def _reads_yes(text: str) -> bool | None:
-    """The owner's answer to the test-client offer, read word by word by code alone: False when it has a "no" word or
-    phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and "don't add me" are no), else True when it has a "yes" one
-    (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client" and "Sure, go ahead" are yes), else None."""
+    """The owner's answer to the test-client offer, read word by word by code alone: None when it asks something or
+    says yes only on a condition (`TEST_CLIENT_UNCLEAR`, so "What does add me as a test client mean?" and "What happens
+    if I say yes?" are neither); else False when it has a "no" word or phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and
+    "don't add me" are no); else True when it has a "yes" one (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client"
+    and "Sure, go ahead" are yes); else None."""
+    if TEST_CLIENT_UNCLEAR.search(text) or (TEST_CLIENT_SI.search(text) and not TEST_CLIENT_SI_ALONE.match(text)):
+        return None
     said = " {} ".format(" ".join(re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.casefold().replace("\u2019", "'"))))
     if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_NO):
         return False
