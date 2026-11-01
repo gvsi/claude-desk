@@ -298,11 +298,17 @@ describe('agents page', () => {
     await expect.element(waiting.getByRole('button', { name: TASKS[0] })).toBeVisible();
     expect(waiting.element().querySelector('[data-loading="task-chips"]')).toBeNull();
 
-    // A read that fails never holds the page up: the tasks come in plain words for any business, and
-    // the agent still goes out on the one picked.
+    // A read that fails, or a session that won't open for it, never holds the page up: the tasks come
+    // in plain words for any business, and the agent still goes out on the one picked.
     const plain = ['Book the earliest appointment', 'Pay up front, within its limit', 'Try to pay more than its limit'];
-    for (const failure of [{ status: 503 as const }, { status: 'network' as const }]) {
-      mockStore.inject({ route: 'agentTasks', ...failure });
+    const failures = [
+      { route: 'agentTasks', status: 503 },
+      { route: 'agentTasks', status: 'network' },
+      { route: 'openSession', status: 429 },
+      { route: 'openSession', status: 'network' },
+    ] as const;
+    for (const failure of failures) {
+      mockStore.inject({ ...failure });
       const { screen } = await renderRoute(PAGE);
       const panel = screen.getByRole('region', { name: 'Send an agent' });
       await expect.element(panel.getByRole('button', { name: plain[0] })).toBeVisible();
@@ -973,7 +979,12 @@ describe('agents page', () => {
     await expectScreenBasics(screen.container, { owner: false });
 
     // Mounted as the app mounts it, in StrictMode, the key still shows once it comes, and so does a run.
+    // StrictMode runs the panel's effect twice, yet the Desk's tasks are read once, in one session.
+    const strictMark = mockStore.requests.length;
     const strict = await renderStrict(PAGE);
+    await expect.element(strict.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    expect(requests('openSession', strictMark)).toHaveLength(1);
+    expect(requests('agentTasks', strictMark)).toHaveLength(1);
     const strictCard = strict.getByRole('region', { name: 'Try it with a demo key' });
     await strictCard.getByRole('button', { name: 'Get a demo key' }).click();
     await expect.element(strictCard.getByRole('group', { name: 'Private key' })).toBeVisible();
@@ -1345,8 +1356,8 @@ describe('agents page', () => {
   });
 
   it('both_actions_share_one_session', async () => {
-    // A fresh page, where both actions start before the visitor's session has opened: one session
-    // opens, and the key and the run both belong to it, so the run is read to its end.
+    // A fresh page, whose session opens slowly: the page's read of the Desk's tasks opens it, and the
+    // key and the run, sent once the tasks show, both belong to it, so the run is read to its end.
     worker.use(
       http.post(`/api/public/desks/${RIVERA.slug}/sessions`, async () => {
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1364,6 +1375,8 @@ describe('agents page', () => {
     // When both find the session gone at once, one new session opens for both.
     mockStore.reset('rivera', {});
     const again = await renderRoute(PAGE);
+    await expect.element(again.screen.getByRole('button', { name: 'Try to pay more than its limit' })).toBeVisible();
+    mockStore.dropVisitorCookie(RIVERA.slug);
     const opened = requests('openSession').length;
     await again.screen.getByRole('button', { name: 'Get a demo key' }).click();
     await again.screen.getByRole('button', { name: 'Try to pay more than its limit' }).click();
@@ -1372,8 +1385,30 @@ describe('agents page', () => {
     expect(requests('openSession')).toHaveLength(opened + 1);
   });
 
+  it('a_send_shares_the_open_after_a_failed_task_read', async () => {
+    // The page's read of the Desk's tasks finds no session it can open (a 429), so the plain tasks
+    // show. A demo key and a task, pressed together, then share the one session the first opens.
+    mockStore.inject({ route: 'openSession', status: 429 });
+    worker.use(
+      http.post(`/api/public/desks/${RIVERA.slug}/sessions`, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return undefined;
+      }),
+    );
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest appointment' })).toBeVisible();
+    expect(requests('agentTasks')).toHaveLength(0);
+    const mark = mockStore.requests.length;
+    await screen.getByRole('button', { name: 'Get a demo key' }).click();
+    await panel.getByRole('button', { name: 'Book the earliest appointment' }).click();
+    await expect.element(screen.getByRole('group', { name: 'Private key' })).toBeVisible();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(requests('openSession', mark)).toHaveLength(1);
+  });
+
   it('both_actions_share_one_reopened_session', async () => {
-    // The session opens with a key request the demo refuses as busy.
+    // The page opens its session to read the Desk's tasks, and a key request in it is refused as busy.
     mockStore.inject({ route: 'agentKey', status: 429 });
     const { screen } = await renderRoute(PAGE);
     const card = screen.getByRole('region', { name: 'Try it with a demo key' });
