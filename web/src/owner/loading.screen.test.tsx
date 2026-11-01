@@ -228,19 +228,20 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'owner-footer', page: '.cd-owner-layout__footer', size: true },
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
+  { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
   { name: 'things-title', page: '.cd-things__title' },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
   { name: 'thing-tile-0', page: '.cd-things__item:first-child .cd-things__icon' },
   { name: 'thing-tile-3', page: '.cd-things__item:last-child .cd-things__icon' },
   { name: 'things-hide', page: '.cd-things__hide > .cd-button', size: true },
   ...[0, 1, 2, 3].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
+  // A phone row's chevron (not drawn from 640 px, as the cards' buttons aren't on a phone).
+  ...[0, 1, 2, 3].map((i) => ({ name: `thing-go-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__go`, size: true })),
   { name: 'needs-title', page: '.cd-today__section[tabindex] .cd-section-header__heading' },
   { name: 'held-card', page: '.cd-needs-you .cd-card', dimensions: ['width'] },
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
   { name: 'since-title', page: '.cd-today__main > .cd-today__section:last-child .cd-section-header__heading' },
   { name: 'since-card', page: '.cd-today__main > .cd-today__section:last-child > .cd-card', size: true },
-  { name: 'public-card', page: '.cd-today-aside > .cd-card:first-child', size: true },
-  { name: 'public-page-action', page: '.cd-today-aside__action > .cd-button', size: true },
   { name: 'inbox', page: '.cd-owner-inbox > .cd-button', size: true },
   { name: 'week-title', page: '.cd-week__heading' },
   { name: 'week-bar-0', page: '.cd-week__bar' },
@@ -345,18 +346,19 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
       if (height !== undefined) expect(rect.height).toBe(height);
     });
   };
-  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-today__main', ['100%'], 44);
-  lines('.cd-greeting .cd-skeleton-line--body', '.cd-today__main', ['80%'], 22);
-  expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link)')).toBeNull();
+  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-greeting__text', ['100%'], 44);
+  lines('.cd-greeting .cd-skeleton-line--body', '.cd-greeting__text', ['80%'], 22);
+  expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link, .cd-today-skeleton__action)')).toBeNull();
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
-  [2, 3, 3, 2].forEach((count, i) => {
+  // Each card's line wraps in its quarter of the band on a laptop; each row's beside its tile and chevron on a phone.
+  (viewport === 'phone' ? [2, 3, 3, 3] : [2, 4, 4, 3]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
   });
   lines('.cd-things__vision .cd-skeleton-line', '.cd-things__vision', ['75%']);
-  for (const child of [3, 4, 5]) lines(`.cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
+  for (const child of [1, 2, 3]) lines(`.cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
   lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
   lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
@@ -369,8 +371,6 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   }
   lines('.cd-live .cd-skeleton-line--control', '.cd-conversation-item__top', ['55%']);
   lines('.cd-live .cd-skeleton-line--caption', '.cd-conversation-item__top', ['20%']);
-  lines('.cd-today-aside__public .cd-skeleton-line--section', '.cd-today-aside__public', [130]);
-  lines('.cd-today-aside__public .cd-skeleton-line--meta', '.cd-today-aside__public', ['65%', '100%', '75%']);
   lines('.cd-week__head .cd-skeleton-line', '.cd-week__head', [110]);
   lines('.cd-week__part:nth-child(2) .cd-skeleton-line--figure', '.cd-week__part:nth-child(2)', ['45%']);
   lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['70%']);
@@ -416,11 +416,14 @@ it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
  * frame's footer each land once, by exactly that change. Everything else lands where its shape was.
  */
 const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card'];
-const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'public-card', 'public-page-action', 'inbox', 'week-title', 'week-bar-0'];
+const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'inbox', 'week-title', 'week-bar-0'];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
-  const under = new Set(phone ? UNDER_THINGS_ON_A_PHONE : UNDER_THINGS);
-  return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && name !== 'thing-tile-3' && name !== 'thing-action-3').map((anchor) =>
+  const ticked = ['thing-tile-3', 'thing-action-3', 'thing-go-3'];
+  // From 640 px the cards of a row share its height, so the ticked card moves nothing.
+  if (!phone) return TODAY_CONTENT_ANCHORS.filter(({ name }) => !ticked.includes(name));
+  const under = new Set(UNDER_THINGS_ON_A_PHONE);
+  return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && !ticked.includes(name)).map((anchor) =>
     anchor.name === 'things-card' ? { name: anchor.name, page: anchor.page, dimensions: ['width'] as const } : anchor,
   );
 }
@@ -522,7 +525,6 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
-  const ticked = watchTheTickedRow(false);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
     anchors: switchedAnchors(false),
@@ -531,12 +533,11 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
       await screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' }).click();
       await screen.getByRole('button', { name: 'Main line', exact: true }).click();
     },
-    release: () => {
-      ticked.record();
-      reads.forEach((read) => read.release());
-    },
+    release: () => reads.forEach((read) => read.release()),
   });
-  await ticked.expectOneMove();
+  // The last card lands ticked in the shape's place: its row of cards keeps its height.
+  const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
+  expect(last?.textContent).toContain('Done. Your new Desk is live.');
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -691,17 +692,15 @@ it('todays_hold_still_under_reduced_motion', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
-  const ticked = watchTheTickedRow(false);
   await expectSkeletonStill({
     status: 'Opening your Desk',
     anchors: switchedAnchors(false),
     open: async () => { await router.navigate(TODAY); },
-    release: () => {
-      ticked.record();
-      needsYou.release();
-    },
+    release: () => needsYou.release(),
   });
-  await ticked.expectOneMove();
+  // From 640 px the ticked card keeps its row's height, so everything lands in its shape's place.
+  const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
+  expect(last?.textContent).toContain('Done. Your new Desk is live.');
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -796,6 +795,8 @@ it.each([390, 620])('reload_opens_on_the_frames_shape at %i', async (width) => {
 });
 
 it('today_link_actions_measure_inherited_font_metrics', async () => {
+  // A laptop's width, where the cards draw their buttons (a phone row draws a chevron instead).
+  await page.viewport(1440, 900);
   const host = document.createElement('div');
   host.style.letterSpacing = '0.2em';
   document.body.append(host);
@@ -845,7 +846,9 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
     await expect.element(screen.getByRole('heading', { name: /Good .*Maria/ })).toBeVisible();
     await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
     const real = document.querySelector('.cd-greeting__link')!.getBoundingClientRect();
-    for (const edge of ['top', 'left', 'height'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
+    // The pill ends where its shape ended, "Chat as a customer" after it at the band's right: a wider
+    // link grows to the left.
+    for (const edge of ['top', 'right', 'height'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
     const sizing = document.createElement('div');
     Object.assign(sizing.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' });
     sizing.inert = true;

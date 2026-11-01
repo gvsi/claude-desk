@@ -1,6 +1,7 @@
-/* Greeting: the serif greeting with the presence line under it, and the public link in an
-   outlined pill at the right, level with the greeting's first line. On a narrow line the pill
-   drops under the text. The presence glyphs sit in a short row and breathe slowly over
+/* Greeting: the serif greeting with the presence line under it, and at the right of its line the
+   public link in an outlined pill, then the screen's own actions, their tops level with the
+   greeting's. On a narrow line they drop under the text; on a phone they always go under the
+   presence line, the pill and the actions wrapping as they need. The presence glyphs sit in a short row and breathe slowly over
    motion-breathe, between 60% and full strength, each half a breath out of step with the one
    before; under reduced motion they are still. */
 
@@ -8,8 +9,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  column-gap: var(--space-16);
-  row-gap: var(--space-12);
+  justify-content: space-between;
+  column-gap: var(--space-24);
+  row-gap: var(--space-16);
   min-width: 0;
 }
 
@@ -79,6 +81,36 @@
   }
 }
 
+/* The link pill and the screen's actions, in a row that wraps. Their 4 px top sets the pill and a
+   button level with the greeting's first line. */
+.cd-greeting__actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+  min-width: 0;
+  max-width: 100%;
+  padding-top: var(--space-4);
+}
+
+/* On a phone the greeting, its presence line and then the pill and the actions stack, 16 px apart. */
+@media (max-width: 639.98px) {
+  .cd-greeting {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: var(--space-16);
+  }
+
+  .cd-greeting__text {
+    max-width: 100%;
+  }
+
+  .cd-greeting__actions {
+    padding-top: 0;
+  }
+}
+
 /* The public link: an outlined pill, its copy button inside the right end. */
 .cd-greeting__link {
   display: flex;
@@ -89,7 +121,6 @@
   min-width: 0;
   max-width: 100%;
   height: var(--size-control);
-  margin-top: var(--space-6);
   padding: 0 var(--space-2) 0 var(--space-12);
   border: 1px solid var(--line-card);
   border-radius: var(--radius-full);

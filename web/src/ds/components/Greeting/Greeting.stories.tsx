@@ -7,6 +7,7 @@ import { pairContrast } from '../../contrast.ts';
 import { faintestOpacity, paintedGroundOf } from '../../test/breath.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { lineWords } from '../../test/lineWords.ts';
+import { Button } from '../Button/Button.tsx';
 import { Greeting, type GreetingProps } from './Greeting.tsx';
 
 /** The public link as the owner's screen would show it: a display string, never fetched. */
@@ -84,6 +85,64 @@ export const WithPresence: Story = {
 
     // The link sits at the right of the greeting's line.
     await expect(copy.getBoundingClientRect().left).toBeGreaterThan(heading.getBoundingClientRect().right);
+  },
+};
+
+/** The greeting with the screen's own action after the link pill, as Today has "Chat as a customer". */
+export const WithActions: Story = {
+  args: {
+    presence: { line: 'One person is talking to your Desk right now.', people: [{ kind: 'person' }] },
+    link: { label: PUBLIC_LINK, onCopy: fn() },
+    actions: (
+      <Button variant="secondary" href={`https://${PUBLIC_LINK}`} external>
+        Chat as a customer
+      </Button>
+    ),
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'TOD-04 (signed 2026-11-01) draws the top of Today with the link pill and "Chat as a customer" at the right of the greeting\'s line, their tops level with the greeting\'s; no reference board draws it, and the nearest is N-Today-Run1.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const header = canvasElement.querySelector<HTMLElement>('.cd-greeting');
+    const pill = canvasElement.querySelector<HTMLElement>('.cd-greeting__link');
+    if (!header || !pill) throw new Error('the greeting draws its header and link pill');
+    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' }).getBoundingClientRect();
+    const action = canvas.getByRole('link', { name: 'Chat as a customer' }).getBoundingClientRect();
+    const link = pill.getBoundingClientRect();
+
+    // The pill, then the action, at the right of the greeting's line, 12 px apart.
+    await expect(link.left).toBeGreaterThan(heading.right);
+    await expect(action.left - link.right).toBeCloseTo(12, 0);
+    await expect(Math.abs(action.right - header.getBoundingClientRect().right)).toBeLessThanOrEqual(0.5);
+    // Their tops sit 4 px under the greeting's, level with its first line.
+    await expect(link.top - heading.top).toBeCloseTo(4, 0);
+    await expect(action.top - heading.top).toBeCloseTo(4, 0);
+    expectComputed(pill, { marginTop: '0px' });
+  },
+};
+
+export const WithActionsOnAPhone: Story = {
+  name: 'With actions on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: WithActions.args,
+  parameters: {
+    canvas: 'none',
+    canvasNote: "TOD-04's phone board (signed 2026-11-01): the greeting, its presence line, then the link pill and the action, 16 px apart.",
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(window.innerWidth).toBe(390);
+    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' }).getBoundingClientRect();
+    const presence = canvas.getByText('One person is talking to your Desk right now.').closest('p')!.getBoundingClientRect();
+    const link = canvasElement.querySelector<HTMLElement>('.cd-greeting__link')!.getBoundingClientRect();
+    const action = canvas.getByRole('link', { name: 'Chat as a customer' }).getBoundingClientRect();
+    // In that order down the page, from the same left edge, the pill 16 px under the presence line.
+    await expect(presence.top).toBeGreaterThanOrEqual(heading.bottom);
+    await expect(link.top - presence.bottom).toBeCloseTo(16, 0);
+    await expect(action.top).toBeGreaterThan(link.top);
+    for (const box of [presence, link, action]) await expect(box.left).toBeCloseTo(heading.left, 0);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };
 

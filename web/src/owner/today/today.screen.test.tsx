@@ -41,6 +41,7 @@ import {
   nextFrames,
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
+import { customerLink } from '../customerLink.ts';
 import { CAUSE_COPY } from '../safety/copy.ts';
 import { needsYouKey, ownerInboxQuery } from '../useDesks.ts';
 import { COPIED_FOR_MS, TodayPage } from './TodayPage.tsx';
@@ -1949,6 +1950,203 @@ describe('Today', () => {
     const heading = screen.container.querySelector('h1')?.getBoundingClientRect();
     expect(heading?.top).toBeGreaterThanOrEqual(0);
     expect(heading?.bottom).toBeLessThanOrEqual(window.innerHeight);
+  });
+});
+
+/** The box of an element on the page. */
+const box = (el: Element) => el.getBoundingClientRect();
+
+/** The controls in `root` that a pointer or Tab can reach now (drawn, not hidden). */
+function drawnControls(root: Element): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('a[href], button')].filter((el) => el.getClientRects().length > 0);
+}
+
+/** The chevron a phone row draws at its right. */
+const CHEVRON_PATH = 'm9 6 6 6-6 6';
+
+describe("Today's top band", () => {
+  it.each([
+    { width: 1440, height: 900 },
+    { width: 1512, height: 982 },
+  ])('band_spans_both_columns_at_$width', async (viewport) => {
+    const { screen } = await renderRoute(TODAY, { viewport });
+    const things = region(screen, 'Things to try');
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(things.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const band = document.querySelector('.cd-today__band');
+    const main = document.querySelector('.cd-today__main');
+    const aside = document.querySelector('.cd-today-aside');
+    if (!band || !main || !aside) throw new Error('Today draws its band and its two columns');
+
+    // The band sits above both columns and spans them, 32 px over their tops.
+    expect(box(band).bottom + 32).toBeCloseTo(box(main).top, 0);
+    expect(box(band).bottom + 32).toBeCloseTo(box(aside).top, 0);
+    expect(box(band).left).toBeCloseTo(box(main).left, 0);
+    expect(box(band).right).toBeCloseTo(box(aside).right, 0);
+
+    // The header: the greeting at the left; the link pill and "Chat as a customer" at the right of its
+    // line, their tops 4 px under the title's.
+    const header = band.querySelector('.cd-greeting');
+    const pill = band.querySelector('.cd-greeting__link');
+    if (!header || !pill) throw new Error('the band starts with the greeting and its link pill');
+    const title = box(screen.getByRole('heading', { level: 1 }).element());
+    const chat = screen.getByRole('link', { name: 'Chat as a customer', exact: true }).element();
+    expect(header.contains(chat)).toBe(true);
+    expect(chat.getAttribute('href')).toBe(customerLink(RIVERA.slug, RIVERA.deskId));
+    expect(chat.getAttribute('target')).toBe('_blank');
+    expect(box(pill).left).toBeGreaterThan(title.right);
+    expect(box(chat).left - box(pill).right).toBeCloseTo(12, 0);
+    expect(box(chat).right).toBeCloseTo(box(band).right, 0);
+    expect(box(pill).top - title.top).toBeCloseTo(4, 0);
+    expect(box(chat).top - title.top).toBeCloseTo(4, 0);
+    // The greeting has 16 px over it on a laptop, inside the page's own padding.
+    expectComputed(band.querySelector('.cd-today__greeting')!, { paddingTop: '16px' });
+
+    // Things to try, under the header in the band: four equal cards in one row, 16 px apart, across
+    // the band, each card's next step on one line.
+    expect(band.contains(things.element())).toBe(true);
+    expect(box(things.element()).top - box(header).bottom).toBeCloseTo(32, 0);
+    const cards = things.getByRole('listitem').elements();
+    expect(cards).toHaveLength(4);
+    const rects = cards.map(box);
+    for (const rect of rects) {
+      expect(rect.top).toBeCloseTo(rects[0]!.top, 0);
+      expect(rect.width).toBeCloseTo(rects[0]!.width, 0);
+      expect(rect.height).toBeCloseTo(rects[0]!.height, 0);
+    }
+    for (let i = 1; i < 4; i += 1) expect(rects[i]!.left - rects[i - 1]!.right).toBeCloseTo(16, 0);
+    expect(rects[0]!.left).toBeCloseTo(box(band).left, 0);
+    expect(rects[3]!.right).toBeCloseTo(box(band).right, 0);
+    for (const card of cards) {
+      expectComputed(card, { borderTopWidth: '1px', borderTopLeftRadius: '12px', paddingTop: '16px', paddingLeft: '16px' });
+    }
+    const steps = cards.map((card) => drawnControls(card));
+    expect(steps.map((found) => found.map((el) => el.textContent))).toEqual([
+      ['Open your public page'],
+      ['Show me ideas'],
+      ['Open the request'],
+      ['Start a Desk'],
+    ]);
+    const stepTops = steps.map(([step]) => box(step!).top);
+    for (const top of stepTops) expect(top).toBeCloseTo(stepTops[0]!, 0);
+    // The card wrapper has no chrome of its own on a laptop.
+    expectComputed(things.element().querySelector(':scope > .cd-card')!, { borderTopWidth: '0px', paddingTop: '0px', backgroundColor: 'rgba(0, 0, 0, 0)' });
+    // "Hide this list" on the title's line, the caption under both; the Vision link 12 px under the cards.
+    const thingsTitle = box(things.getByRole('heading', { level: 2, name: 'Things to try' }).element());
+    const hide = box(things.getByRole('button', { name: 'Hide this list' }).element());
+    expect(hide.top + hide.height / 2).toBeCloseTo(thingsTitle.top + thingsTitle.height / 2, 0);
+    expect(hide.right).toBeCloseTo(box(band).right, 0);
+    const vision = box(things.getByRole('link', { name: 'Vision: where a Desk could go next' }).element().closest('p')!);
+    expect(vision.top - rects[0]!.bottom).toBeCloseTo(12, 0);
+
+    // The right column no longer has the public page card or its line.
+    expect(screen.getByRole('heading', { name: 'Your public page' }).query()).toBeNull();
+    expect(document.body.textContent).not.toContain('Chats on it are real conversations');
+    // Needs you, Live now and Since last night stay in the left column; the right column keeps the week.
+    for (const name of ['Needs you', 'Live now', 'Since last night']) expect(main.contains(region(screen, name).element())).toBe(true);
+    expect(aside.querySelector('.cd-week')).not.toBeNull();
+    expectNoHorizontalScroll();
+  });
+
+  it('phone_stacks_the_header_and_makes_each_thing_one_row', async () => {
+    const { screen, router } = await renderRoute(TODAY, { viewport: 'phone' });
+    const things = region(screen, 'Things to try');
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(screen.getByText('One person is talking to your Desk right now.')).toBeVisible();
+
+    // Title, presence line, link pill, then "Chat as a customer", down the page from one left edge.
+    const title = box(screen.getByRole('heading', { level: 1 }).element());
+    const presence = box(document.querySelector('.cd-greeting__presence')!);
+    const pill = box(document.querySelector('.cd-greeting__link')!);
+    // The header's own "Chat as a customer" (the row of Things to try has the same name, by design).
+    const header = page.elementLocator(document.querySelector('.cd-greeting')!);
+    const chat = box(header.getByRole('link', { name: 'Chat as a customer', exact: true }).element());
+    expect(presence.top).toBeGreaterThanOrEqual(title.bottom);
+    expect(pill.top - presence.bottom).toBeCloseTo(16, 0);
+    expect(chat.top).toBeGreaterThanOrEqual(pill.bottom);
+    for (const each of [presence, pill, chat]) expect(each.left).toBeCloseTo(title.left, 0);
+    // No extra room over the greeting on a phone.
+    expectComputed(document.querySelector('.cd-today__greeting')!, { paddingTop: '0px' });
+
+    // Each row is one control named by its title, with a chevron at its right and no button inside.
+    const rows = things.getByRole('listitem').elements();
+    expect(rows).toHaveLength(4);
+    const names = ['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk'];
+    for (const [i, row] of rows.entries()) {
+      const controls = drawnControls(row);
+      expect(controls, names[i]).toHaveLength(1);
+      expect(controls[0]!.querySelector(`path[d="${CHEVRON_PATH}"]`), names[i]).not.toBeNull();
+      expect(box(controls[0]!).right).toBeCloseTo(box(row).right, 0);
+    }
+    const chatRow = things.getByRole('link', { name: 'Chat as a customer', exact: true });
+    await expect.element(chatRow).toHaveAttribute('href', customerLink(RIVERA.slug, RIVERA.deskId));
+    await expect.element(chatRow).toHaveAttribute('target', '_blank');
+    // A press anywhere on the row is the row's: its words, not just its chevron.
+    const answerRow = things.getByRole('button', { name: 'Answer a held request', exact: true });
+    const answerTitle = box(things.getByRole('heading', { level: 3, name: 'Answer a held request' }).element());
+    expect(document.elementFromPoint(answerTitle.left + 4, answerTitle.top + answerTitle.height / 2)).toBe(answerRow.element());
+    // Tabbed to, the row shows the focus ring around the whole row.
+    things.getByRole('button', { name: 'Try to break it', exact: true }).element().focus();
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).toBe(answerRow.element());
+    const ring = getComputedStyle(answerRow.element(), '::after');
+    expect([ring.outlineStyle, ring.outlineWidth]).toEqual(['solid', '2px']);
+    const ringBox = { top: rows[2]!.getBoundingClientRect().top, bottom: rows[2]!.getBoundingClientRect().bottom };
+    expect(ringBox.bottom - ringBox.top).toBeGreaterThan(box(answerRow.element()).height);
+    await answerRow.click();
+    expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+
+    // "Try to break it" opens its ideas under the row, and says so.
+    const breakRow = things.getByRole('button', { name: 'Try to break it', exact: true });
+    await expect.element(breakRow).toHaveAttribute('aria-expanded', 'false');
+    await breakRow.click();
+    await expect.element(breakRow).toHaveAttribute('aria-expanded', 'true');
+    await expect.element(things.getByRole('group', { name: 'Ideas to try' })).toBeVisible();
+    await things.getByRole('group', { name: 'Ideas to try' }).getByRole('button').first().hover();
+
+    // "Hide this list" on the title's line, at its right; the caption under them.
+    const thingsTitle = box(things.getByRole('heading', { level: 2, name: 'Things to try' }).element());
+    const hide = box(things.getByRole('button', { name: 'Hide this list' }).element());
+    expect(hide.top + hide.height / 2).toBeCloseTo(thingsTitle.top + thingsTitle.height / 2, 0);
+    expect(box(document.querySelector('.cd-things__caption')!).top).toBeGreaterThanOrEqual(hide.bottom);
+    expectNoHorizontalScroll();
+
+    // "Create your own Desk" goes to setup through the router.
+    await things.getByRole('link', { name: 'Create your own Desk', exact: true }).click();
+    await expect.poll(() => router.state.location.pathname).toBe('/app/setup');
+  });
+
+  it.each(['desktop', 'phone'] as const)('held_request_card_shows_before_anything_is_held_on_%s', async (viewport) => {
+    // The caption counts four things, so all four show, "Answer a held request" with its line and no
+    // next step until something is held.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet', viewport });
+    const things = region(screen, 'Things to try');
+    await expect.element(things).toBeVisible();
+    const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
+    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    const row = () => things.getByRole('listitem').nth(2).element();
+    await expect.element(things.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
+    expect(drawnControls(row())).toEqual([]);
+    expect(row().querySelector('.cd-status-dot--held')).toBeNull();
+    expect(row().querySelector(`path[d="${CHEVRON_PATH}"]`)).toBeNull();
+
+    // The owner chats in a preview: one of the four is done, and all four still show.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(titles()).toHaveLength(4);
+
+    // Once something is held, the same card in the same place shows the dot and its next step.
+    await visitorSays('Can I get 50% off if I pay cash?');
+    await expect
+      .element(things.getByText('A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.', { exact: true }), { timeout: 3_000 })
+      .toBeVisible();
+    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    expect(row().querySelector('.cd-status-dot--held')).not.toBeNull();
+    const step = drawnControls(row());
+    expect(step).toHaveLength(1);
+    if (viewport === 'desktop') expect(step[0]!.textContent).toBe('Open the request');
+    else expect(step[0]!.getAttribute('aria-labelledby')).toBeTruthy();
   });
 });
 
