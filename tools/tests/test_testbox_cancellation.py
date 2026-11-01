@@ -86,3 +86,22 @@ worker.run([{sys.executable!r}, '-c', {('import os, time; from pathlib import Pa
                 os.kill(int(marker.read_text()), signal.SIGTERM)
             except ProcessLookupError:
                 pass
+
+
+def test_command_output_passes_through_byte_for_byte_with_its_exit_status(tmp_path):
+    """Carriage returns and bytes that aren't UTF-8 reach the caller unchanged, the job runs to its end, and its
+    own exit status comes back."""
+    import io
+    (tmp_path / 'repo').mkdir()
+    first, last = b'a\r\nb\rc\xff\xfe\n', b'after\n'
+    job = ('import sys, time; out = sys.stdout.buffer; out.write(' + repr(first) + '); out.flush(); '
+           'time.sleep(0.3); out.write(' + repr(last) + '); sys.exit(37)')
+    source = testbox_client.transaction_script(str(tmp_path), [sys.executable, '-c', job], [sys.executable, '-c', 'pass'])
+    holder = testbox_client.start_holder([sys.executable, '-c', source])
+    try:
+        assert testbox_client.read_remote_state(holder) is not None
+        received = io.BytesIO()
+        assert testbox_client.relay(holder, received) == 37
+        assert received.getvalue() == first + last
+    finally:
+        testbox_client.release(holder)

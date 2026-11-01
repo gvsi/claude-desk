@@ -197,6 +197,34 @@ def replace_host_key(known_hosts: Path, instance: str, host_key: list[str]):
         known.write(f"{instance} {host_key[0]} {host_key[1]}\n")
 
 
+def start_holder(command: list[str]) -> subprocess.Popen:
+    """Open the remote lane holder. Binary pipes, so the command's output passes through byte for byte."""
+    return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, start_new_session=True)
+
+
+def relay(holder, out) -> int:
+    """Start the job, copy its stdout to out unchanged as it arrives, and return its exit status."""
+    holder.stdin.write(b"run\n")
+    holder.stdin.flush()
+    while chunk := holder.stdout.read1(65536):
+        out.write(chunk)
+        out.flush()
+    return holder.wait()
+
+
+def release(holder):
+    """Close the lease, which tells the remote watchdog to stop this exact call, and wait for its acknowledgement."""
+    if not holder.stdin.closed:
+        try:
+            holder.stdin.close()
+        except BrokenPipeError:
+            pass
+    # Drain without writing: a closed caller stdout must not skip acknowledgement.
+    while holder.stdout.read(65536):
+        pass
+    holder.wait()
+
+
 def read_remote_state(holder):
     line = holder.stdout.readline()
     if line:
@@ -339,7 +367,7 @@ def run(args, root, lane, cache):
     cancel = ["sudo", "sh", "-c", f"systemctl stop {unit}.service 2>/dev/null || ! systemctl is-active --quiet {unit}.service"]
     transaction = transaction_script(base, ["sudo", "env", f"TESTBOX_PROTOCOL={PROTOCOL_VERSION}", f"TESTBOX_TIMING={int(os.environ.get('TESTBOX_TIMING') == '1')}", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/transfer/tools/testbox/worker.py", base], cancel)
     prepare = f"test -f /opt/testbox/ready || exit 75; exec 8</opt/testbox/bootstrap.lock; flock -s 8; test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c "
-    holder = subprocess.Popen(ssh + [prepare + shlex.quote(transaction)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, start_new_session=True)
+    holder = start_holder(ssh + [prepare + shlex.quote(transaction)])
     try:
         remote = read_remote_state(holder)
         if remote is None:
@@ -382,25 +410,16 @@ def run(args, root, lane, cache):
             timing.mark("source_transfer")
             print(f"testbox: sync complete ({time.monotonic() - start:.2f}s)", file=sys.stderr, flush=True)
             # Run the worker shipped by this client, even if the selected tree has no tools.
-            holder.stdin.write("run\n")
-            holder.stdin.flush()
-            for line in holder.stdout:
-                print(line, end="", flush=True)
-            code = holder.wait()
+            sys.stdout.flush()
+            code = relay(holder, sys.stdout.buffer)
             timing.mark("remote_execution")
             print(f"testbox: lane={lane} exit={code} elapsed={time.monotonic() - start:.2f}s", file=sys.stderr, flush=True)
             return code
     finally:
-        # Closing the lease tells the remote watchdog to stop this exact call. Wait for its
-        # acknowledgement before releasing the local lane lock or exiting on INT/TERM.
+        # Wait for the remote acknowledgement before releasing the local lane lock or exiting on INT/TERM.
         handlers = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
         try:
-            if not holder.stdin.closed:
-                holder.stdin.close()
-            # Drain without writing: a closed caller stdout must not skip acknowledgement.
-            for _ in holder.stdout:
-                pass
-            holder.wait()
+            release(holder)
         finally:
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)
