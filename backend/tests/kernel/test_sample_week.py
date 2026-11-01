@@ -159,6 +159,52 @@ async def test_a_hosted_copy_opens_on_a_sample_week(week_on, app, client, frozen
         assert shown <= now - timedelta(hours=1)
 
 
+async def live_lead(app, client, created: CopyCreated) -> str:
+    """A live visitor leaves details through `native.capture_lead`, decided and run as any call; its session's ID."""
+    [desk_row] = await rows_of(app, created.copy_id, select(Desk))
+    opened = (await client.post("/sessions", json={"desk_slug": desk_row.slug, "kind": "visitor"})).json()
+    session_id, headers = opened["state"]["session_id"], {auth.SESSION_HEADER: opened["session_token"]}
+    decided = await client.post("/decide", headers=headers, json={
+        "session_id": session_id, "generation": 0,
+        "call": {"call_id": "lead", "tool": "native.capture_lead", "args": {"name": "Sam", "note": "A new tap."}}})
+    assert decided.status_code == 200 and decided.json()["state"] == "allowed", decided.text
+    ran = await client.post("/execute", headers=headers, json={
+        "decision_id": decided.json()["decision_id"], "session_id": session_id, "generation": 0})
+    assert ran.status_code == 200 and ran.json()["state"] == "succeeded", ran.text
+    return session_id
+
+
+async def test_the_owner_sees_each_sample_conversation_transcript_and_lead_marked(week_on, app, client):
+    """Conversations, an opened transcript and People's leads say which are sample history (`replayed`), so the
+    owner's screens label them and offer no take-over on them; the live seeded hold and a live lead say they aren't."""
+    created = await create_copy(client, replay_night=True)
+    samples = {row.session_id for row in await sample_sessions(app, created)}
+    live = await live_lead(app, client, created)
+    seeded = created.seeded_chat.session_id
+    engine = create_async_engine(database_url("API"), connect_args={"options": API_CONNECT_OPTIONS})
+    try:
+        async with engine.connect() as conn:
+            await store_replayed_night(conn, created, ro_schema="kernel_ro")
+            await conn.commit()
+        async with KernelHttp("http://kernel", transport=httpx.ASGITransport(app)) as kernel, engine.connect() as conn:
+            ctx = OwnerCtx(copy_id=created.copy_id, desk_ids=tuple(created.desk_ids),
+                           owner_session_id=created.owner_session.session_id, owner_generation=0,
+                           kernel=kernel.owner(created.owner_token), ro=KernelRO(conn, created.copy_id))
+            desk_id = created.desk_ids[0]
+            listed = {summary.session_id: summary.model_dump(mode="json")["replayed"]
+                      for summary in await owner_reads.conversations(ctx, desk_id)}
+            opened = {session_id: await owner_reads.transcript_replayed(ctx, desk_id, session_id)
+                      for session_id in (*samples, seeded, live)}
+            leads = {lead.display_name: lead.model_dump(mode="json")["replayed"]
+                     for lead in await owner_reads.leads(ctx, desk_id)}
+    finally:
+        await engine.dispose()
+    assert {session_id: listed[session_id] for session_id in samples} == dict.fromkeys(samples, True)
+    assert (listed[seeded], listed[live]) == (False, False)
+    assert opened == {**dict.fromkeys(samples, True), seeded: False, live: False}
+    assert leads == {"Priya": True, "Sam": False}
+
+
 async def test_the_api_stores_the_sample_week_as_recorded_history(week_on, app, client):
     created = await create_copy(client, replay_night=True)
     engine = create_async_engine(database_url("API"), connect_args={"options": API_CONNECT_OPTIONS})

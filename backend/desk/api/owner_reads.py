@@ -22,7 +22,9 @@ Recorded history (Plan 01d): a copy may open on a night the kernel replayed into
 counts any of it, and the reports flag themselves when they do (`recorded_history`), from what the API's reads carry:
 its own rows' `replay_id`, and ledger entries the kernel marked `summary.replayed`, which also mark the decisions they
 record (a booking, a refusal; a decision whose entry can't be read counts as replayed, failing closed). Replayed rows
-never count as needing the owner, so "needs you" is never flagged.
+never count as needing the owner, so "needs you" is never flagged. A conversation, its transcript and a lead say
+whether they are recorded history too (`replayed`, from `history_sessions`), so the owner's screens label them and
+offer no take-over on them.
 """
 
 import asyncio
@@ -38,7 +40,7 @@ from sqlalchemy import func, select
 
 from desk.api.deps import OwnerCtx
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
-from desk.api.ro import decision_replayed, replayed
+from desk.api.ro import decision_replayed, replayed, ro_view, set_copy
 from desk.api.schemas import (
     Attempt,
     Briefing,
@@ -46,6 +48,7 @@ from desk.api.schemas import (
     BriefingList,
     BriefingNewest,
     ConversationSummary,
+    Lead,
     DeskSetup,
     Handoff,
     NeedsYouItem,
@@ -856,6 +859,49 @@ async def reports(ctx: OwnerCtx, desk_id: str, now: datetime, days: int) -> Repo
 # Conversations ------------------------------------------------------------------------------------------------
 
 
+async def history_sessions(ctx: OwnerCtx, desk_id: str) -> tuple[set[str], set[str]]:
+    """The Desk's sessions that are recorded history, and those known to be live. A session is recorded history when
+    the API stored its transcript with a `replay_id` (`store_replayed_night`) or the kernel marked one of its `session`
+    ledger entries replayed (which only the kernel writes, for history it wrote into the copy); it is known live when it
+    has `session` entries, none of them marked, and no stored row with a `replay_id`. A live session is never recorded
+    history: its rows carry no `replay_id`, and the kernel opens it with an unmarked entry."""
+    stored = set((await ctx.ro.conn.scalars(select(MESSAGES.c.session_id).distinct().where(
+        MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.replay_id.is_not(None)))).all())
+    entries = ro_view(ctx.ro.schema, "ledger_entries")
+    try:
+        await set_copy(ctx.ro.conn, ctx.copy_id)
+        events = (await ctx.ro.conn.execute(select(entries.c.event).where(
+            entries.c.copy_id == ctx.copy_id, entries.c.desk_id == desk_id,
+            entries.c.event.op("->>")("kind") == "session"))).scalars().all()
+    finally:
+        await ctx.ro.done()
+    recorded, opened = set(stored), set()
+    for event in events:
+        session_id = event.get("session_id") if isinstance(event, dict) else None
+        if isinstance(session_id, str):
+            opened.add(session_id)
+            if replayed({"event": event}):
+                recorded.add(session_id)
+    return recorded, opened - recorded
+
+
+async def transcript_replayed(ctx: OwnerCtx, desk_id: str, session_id: str) -> bool:
+    """Whether an opened conversation is recorded history (`history_sessions`)."""
+    recorded, _ = await history_sessions(ctx, desk_id)
+    return session_id in recorded
+
+
+async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
+    """The leads visitors left on the Desk, newest first, their names and notes as typed (untrusted text). A lead is
+    recorded history unless the session it was left in is known live (`history_sessions`), failing closed as
+    `decision_replayed` does: one with no session, or a session the ledger doesn't show opening, counts as history."""
+    _, live = await history_sessions(ctx, desk_id)
+    rows = sorted(await ctx.ro.rows("leads", desk_id=desk_id),
+                  key=lambda row: (utc(row["created_at"]), row["lead_id"]), reverse=True)
+    return [Lead(lead_id=row["lead_id"], display_name=row["display_name"], note=row["note"],
+                 created_at=row["created_at"], replayed=row["session_id"] not in live) for row in rows]
+
+
 async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:
     """The Desk's conversations: each visitor or agent session with a transcript row or a decision, the latest
     activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
@@ -875,6 +921,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
     visitors = [session_id for session_id, row in who.sessions.items()
                 if session_id in latest and row["kind"] == "visitor" and not row["preview"]]
     said = await last_texts(ctx, desk_id, visitors, kinds=("visitor_text",))
+    recorded, _ = await history_sessions(ctx, desk_id)
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
@@ -883,7 +930,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
             session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
             mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
-            latest_visitor_text=visitor_line(said.get(session_id))))
+            latest_visitor_text=visitor_line(said.get(session_id)), replayed=session_id in recorded))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found

@@ -8951,6 +8951,11 @@
               }
             ],
             "title": "Latest Visitor Text"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed",
+            "default": false
           }
         },
         "type": "object",
@@ -10537,6 +10542,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed",
+            "default": false
           }
         },
         "type": "object",
@@ -11299,6 +11309,11 @@
               }
             ],
             "title": "Typing Until"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed",
+            "default": false
           }
         },
         "type": "object",
