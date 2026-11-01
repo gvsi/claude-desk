@@ -489,9 +489,9 @@ it('seeds held CPA hours and prices with a stable revision that changes on PUT',
     revision: expect.any(String),
     hours: { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] },
     prices: { source: 'suggested', items: [
-      { title: 'Tax return review', unit_cents: 25000 },
-      { title: 'Business tax return', unit_cents: 60000 },
-      { title: 'Monthly bookkeeping', unit_cents: 15000 },
+      { item_id: 'tax-return-review', title: 'Tax return review', unit_cents: 25000 },
+      { item_id: 'business-tax-return', title: 'Business tax return', unit_cents: 60000 },
+      { item_id: 'monthly-bookkeeping', title: 'Monthly bookkeeping', unit_cents: 15000 },
     ] },
   } });
   if ('network' in read) throw new Error('read failed');
@@ -508,12 +508,35 @@ it('seeds held CPA hours and prices with a stable revision that changes on PUT',
   expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(saved);
 });
 
+it('confirms listed hours and prices only when explicitly selected and leaves every line untouched', async () => {
+  const params = await atRules();
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read) throw new Error('read failed');
+  let current = read.body as SetupPublicLines;
+  for (const key of ['hours', 'prices'] as const) {
+    const confirmed = await mockStore.dispatch('setupPublicLinesConfirm', { params, body: { keys: [key], revision: current.revision } });
+    if ('network' in confirmed) throw new Error('confirm failed');
+    expect(confirmed.status).toBe(200);
+    const next = confirmed.body as SetupPublicLines;
+    expect(next[key]).toEqual({ ...current[key], source: 'owner' });
+    const other = key === 'hours' ? 'prices' : 'hours';
+    expect(next[other]).toEqual(current[other]);
+    expect(next.lines).toEqual(current.lines);
+    expect(next.revision).not.toBe(current.revision);
+    expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(confirmed);
+    current = next;
+  }
+  expect(current.lines.every((line) => line.source === 'suggested')).toBe(true);
+});
+
 
 it('refuses missing, empty, unknown or unlisted confirmation keys and revisions without changing state', async () => {
   const params = await atRules();
   const seed = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in seed) throw new Error('read failed');
-  storePublicLines(mockStore.world, params.id, (seed.body as SetupPublicLines).lines.filter((line) => line.key !== 'contact'));
+  storePublicState(mockStore.world, params.id, {
+    lines: (seed.body as SetupPublicLines).lines.filter((line) => line.key !== 'contact'), hours: null, prices: null,
+  });
   const read = await mockStore.dispatch('setupPublicLines', { params });
   if ('network' in read) throw new Error('read failed');
   const { revision } = read.body as SetupPublicLines;

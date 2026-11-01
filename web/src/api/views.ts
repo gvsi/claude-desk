@@ -595,6 +595,7 @@ export interface SetupPublicHours {
 }
 
 export interface SetupPublicPriceItem {
+  item_id: string;
   title: string;
   unit_cents: number;
 }

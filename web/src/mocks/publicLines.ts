@@ -69,9 +69,9 @@ function read(sv: Server, req: Req): SetupPublicLines | Failure {
       }),
       hours: cpa ? { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] } : null,
       prices: cpa ? { source: 'suggested', items: [
-        { title: 'Tax return review', unit_cents: 25000 },
-        { title: 'Business tax return', unit_cents: 60000 },
-        { title: 'Monthly bookkeeping', unit_cents: 15000 },
+        { item_id: 'tax-return-review', title: 'Tax return review', unit_cents: 25000 },
+        { item_id: 'business-tax-return', title: 'Business tax return', unit_cents: 60000 },
+        { item_id: 'monthly-bookkeeping', title: 'Monthly bookkeeping', unit_cents: 15000 },
       ] } : null,
     });
   }
@@ -107,8 +107,13 @@ export const PUBLIC_LINES_ROUTES = {
     if ('status' in found) return found;
     const body = typeof req.body === 'object' && req.body !== null ? req.body as Record<string, unknown> : {};
     const { keys, revision } = body;
+    const listedKeys = new Set([
+      ...found.lines.filter((line) => SETUP_PUBLIC_LINE_KEYS.some((known) => known === line.key)).map((line) => line.key),
+      ...(found.hours !== null ? ['hours'] : []),
+      ...(found.prices !== null ? ['prices'] : []),
+    ]);
     if (req.malformed || !Array.isArray(keys) || keys.length === 0 || typeof revision !== 'string' || revision.length === 0
-      || keys.some((key) => typeof key !== 'string' || !SETUP_PUBLIC_LINE_KEYS.some((known) => known === key) || !found.lines.some((line) => line.key === key))) {
+      || keys.some((key) => typeof key !== 'string' || !listedKeys.has(key))) {
       return { status: 422, body: { error: 'invalid' } };
     }
     if (revision !== found.revision) return { status: 409, body: { error: 'conflict' } };
@@ -117,6 +122,8 @@ export const PUBLIC_LINES_ROUTES = {
     const refused = found.lines.find((line) => ((line.source === 'owner' && !line.held) || keys.includes(line.key)) && publicLineRefused(line.text));
     if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: ['mock_scan'] } };
     for (const line of found.lines) if (keys.includes(line.key)) line.source = 'owner';
+    if (keys.includes('hours') && found.hours) found.hours = { ...found.hours, source: 'owner' };
+    if (keys.includes('prices') && found.prices) found.prices = { ...found.prices, source: 'owner' };
     return { status: 200, body: structuredClone(storePublicState(sv.world, req.params.id!, found)) };
   },
 } satisfies ServedRoutes;
