@@ -141,6 +141,14 @@ it('inert_links_show_their_text_then_their_url_and_link_nowhere', () => {
   expect(md.textContent).toBe('Pay at this page (https://pay.example.net/rivera), see https://example.com/tank or mail me@example.com, not this.');
 });
 
+it('an_inert_bare_address_shows_once_with_or_without_a_path', () => {
+  // Hardening writes https://example.com as https://example.com/, which is the same address.
+  const text = 'See https://example.com, www.example.com, http://example.org and www.example.com/hours today.';
+  const md = reply(mount(<ChatMarkdown text={text} links="inert" />));
+  expect(md.querySelectorAll('a')).toHaveLength(0);
+  expect(md.textContent).toBe(text);
+});
+
 it('footnote_syntax_stays_as_its_own_words_in_place', () => {
   // Footnotes aren't a chat format: rendered, they would move a note to the end under a label and
   // a back link the reply never had.

@@ -122,13 +122,25 @@ function Link({ node, href, children }: ElementProps<'a'>) {
 }
 
 /**
+ * Whether two addresses are the same once written out in full, so `https://example.com` matches
+ * the `https://example.com/` hardening makes of it. Text that isn't an address matches nothing.
+ */
+function sameAddress(url: string, written: string): boolean {
+  try {
+    return new URL(url).href === new URL(written).href;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * For a stopped draft: the link text, then the URL in plain text, and nothing to click. A link
  * whose text is already its address (a bare URL, `www.` address or email) shows once.
  */
 function InertLink({ node, href, children }: ElementProps<'a'>) {
   const label = textOf(node);
   const url = linkTarget(href, label);
-  if (url === null || [label, `mailto:${label}`, `https://${label}`].includes(url)) return <>{children}</>;
+  if (url === null || [label, `mailto:${label}`, `https://${label}`].some((written) => sameAddress(url, written))) return <>{children}</>;
   return (
     <>
       {children} ({url})
