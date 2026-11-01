@@ -1979,7 +1979,7 @@ async def test_contact_asks_for_a_missing_owner_name_or_accepts_declining(
     state = await begin(owner, model, business_name="Fenster & Fenster", owner_display_name=None,
                         business_type="office")
     interview_id = state["interview_id"]
-    await consent(owner, interview_id, False)
+    await consent(owner, interview_id, False, model)
     await answered_up_to(owner, model, interview_id, "contact_and_after_hours")
     follow_up = question_text("contact_and_after_hours", "office")
 
