@@ -1,6 +1,9 @@
 """The owner's knowledge list reads only its Desk's kernel view, preserving masked content."""
 
 from datetime import datetime, timedelta
+from hashlib import sha256
+
+from desk.kernel_api import DecideRequest, ExecuteRequest
 
 from tests.api.test_owner_desks import new_desk, new_owner
 
@@ -151,3 +154,27 @@ async def test_web_search_knowledge_lists_for_its_owner(api, browser, fake, kern
     assert reply.status_code == 200, reply.text
     (row,) = [row for row in reply.json() if row["item_id"] == "search-0123456789abcdef"]
     assert (row["source"], row["readers"]) == ("web_search", ["owner"])
+
+
+async def test_owner_search_results_are_listed_as_knowledge(api, browser, fake, kernel_http):
+    owner = await new_owner(api, browser, fake, kernel_http)
+    kernel_owner = kernel_http.owner(owner.token)
+    session = owner.copy.owner_session
+    decision = await kernel_owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=owner.desk_id,
+        call={"call_id": "search-knowledge", "tool": "native.web_search", "args": {"query": "plumber services"}}))
+    assert decision.outcome == "allow"
+    result = await kernel_owner.call("POST /execute", ExecuteRequest(
+        decision_id=decision.decision_id, session_id=session.session_id, generation=session.generation))
+    assert result.state == "succeeded"
+
+    reply = await owner.browser.get(f"/api/owner/desks/{owner.desk_id}/knowledge")
+
+    assert reply.status_code == 200, reply.text
+    rows = [row for row in reply.json() if row["source"] == "web_search"]
+    assert rows == [{
+        "item_id": "search-" + sha256(hit["url"].encode()).hexdigest()[:16],
+        "source": "web_search", "title": "Web search: " + hit["title"], "text": hit["snippet"],
+        "readers": ["owner"], "created_at": fake.now.isoformat().replace("+00:00", "Z")}
+        for hit in result.model_view["results"]]
+    assert rows

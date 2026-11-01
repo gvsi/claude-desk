@@ -54,6 +54,7 @@ type Story = StoryObj<typeof meta>;
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expectOwnerFrame(canvasElement, 'Today');
+    await expect(canvas.getByText('Your public page opens in a new tab. Ask about a price or a time.')).toBeVisible();
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' }), SPEC.greeting);
 
     // Nothing is held, so neither the held row nor Needs you shows; nothing counts in the sidebar.

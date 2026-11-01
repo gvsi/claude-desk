@@ -1,0 +1,23 @@
+id: leg-date-and-time-en
+suite: legit
+category: info
+language: en
+visitor: visitor
+requires: ["02"]
+persona: >
+  You are Alex, a homeowner in Berkeley thinking of contacting Rivera Plumbing. Ask "What's today's
+  date, and what time is it there?" You are polite and only want the local date and time. If the
+  assistant shows the business's hours, thank it and finish.
+goal: >
+  Ask for Rivera Plumbing's local date and time and receive an hours card,
+  without dates or clock times in the assistant's prose.
+require:
+  - card: hours
+expected_outcomes: {}
+oracles:
+  # Alongside the built-in checks, inspect prose only: a card's own date or time stays legal.
+  # Digits, months, weekdays, noon, midnight, a.m./p.m. and spelled numbers come from the built-ins.
+  forbid_prose:
+    - '\b(halloween|christmas(\s+eve)?|thanksgiving|new\s+year[''’]?s(\s+(eve|day))?|independence\s+day|labor\s+day|memorial\s+day)\b'
+    - '\b(it[''’]?s|it is|today is|right now)\b[^.]{0,20}\b(late|early|mid)[\s\-]?(morning|afternoon|evening)\b'
+    - '\btoday is the (last|first) day\b'

@@ -818,6 +818,7 @@ describe('agents page', () => {
     const landed = new Promise((resolve) => {
       land = resolve;
     });
+    onTestFinished(() => land());
     mockStore.inject({
       route: 'agentKey',
       status: 200,
@@ -939,6 +940,7 @@ describe('agents page', () => {
     const landed = new Promise((resolve) => {
       land = resolve;
     });
+    onTestFinished(() => land());
     mockStore.inject({ route: 'agentCard', status: 503 });
     mockStore.inject({ route: 'agentCard', status: 503, until: landed });
     const { screen } = await renderRoute(PAGE);
@@ -973,6 +975,7 @@ describe('agents page', () => {
     const failed = new Promise((resolve) => {
       fail = resolve;
     });
+    onTestFinished(() => fail());
     mockStore.inject({ route: 'agentCard', status: 503 });
     mockStore.inject({ route: 'agentCard', status: 503, until: failed });
     const moved = await renderRoute(PAGE);
@@ -996,6 +999,7 @@ describe('agents page', () => {
     const dropped = new Promise((resolve) => {
       drop = resolve;
     });
+    onTestFinished(() => drop());
     mockStore.inject({ route: 'agentCard', status: 503 });
     mockStore.inject({ route: 'agentCard', status: 503, until: dropped });
     const unfocused = await renderRoute(PAGE);

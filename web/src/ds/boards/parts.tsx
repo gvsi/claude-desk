@@ -196,7 +196,7 @@ export const THINGS_TO_TRY = {
   chat: {
     icon: 'conversations',
     title: 'Chat as a customer',
-    detail: 'Your public page opens in a new tab. Ask about a leak, a price or a time.',
+    detail: 'Your public page opens in a new tab. Ask about a price or a time.',
     action: 'Open your public page',
   },
   breakIt: {
@@ -1186,8 +1186,10 @@ export function GeneralSettings({ answering, onDelete = fn() }: { answering: str
         <SectionHeader id="board-settings-business" title="Your business" />
         <DetailList items={GENERAL_DETAILS} />
       </section>
-      <Card as="section" label="Answering">
-        <Switch label="Answering" description={answering} checked onChange={fn()} />
+      <Card as="section" label="Answering" padding={0}>
+        <div className="board-settings__answering">
+          <Switch label="Answering" description={answering} checked onChange={fn()} />
+        </div>
       </Card>
       <section aria-labelledby="board-settings-delete" className="board-settings__section board-settings__delete">
         <SectionHeader id="board-settings-delete" title="Delete this Desk" />

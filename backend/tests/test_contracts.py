@@ -715,3 +715,12 @@ def test_a_copy_without_a_replay_carries_nothing_replayed():
 
 def test_schema_export_is_current():
     assert export_schema() == json.loads(Path("desk/contracts.schema.json").read_text())
+
+
+def test_knowledge_sources_share_one_contract_type():
+    from desk.contracts import KnowledgeItem, KnowledgeSource
+    from desk.api.schemas import KnowledgeRow
+
+    assert get_args(KnowledgeSource) == ("website", "upload", "setup", "memory_import", "web_search")
+    assert KnowledgeItem.model_fields["source"].annotation is KnowledgeSource
+    assert KnowledgeRow.model_fields["source"].annotation is KnowledgeSource

@@ -62,7 +62,15 @@ export const Board: Story = {
     // The short line everywhere, as the phone board writes it (owner decision, 2026-10-30).
     await expect(answering).toHaveAccessibleDescription('Claude answers under your rules.');
     const answeringCard = page.getByRole('region', { name: 'Answering' });
-    expectComputed(answeringCard, SPEC.card);
+    // The words line up with Business; the switch keeps its vertical inset and the card's height.
+    const label = within(answering).getByText('Answering', { exact: true });
+    await expect(Math.round(label.getBoundingClientRect().left)).toBe(
+      Math.round(within(business).getByText('Business', { exact: true }).getBoundingClientRect().left),
+    );
+    await expect(Math.round(answeringCard.getBoundingClientRect().height)).toBe(91);
+    await expect(Math.round(answering.getBoundingClientRect().top - answeringCard.getBoundingClientRect().top)).toBe(21);
+    await expect(Math.round(answeringCard.getBoundingClientRect().bottom - answering.getBoundingClientRect().bottom)).toBe(21);
+    expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
     await expect(Math.round(answeringCard.getBoundingClientRect().top - card.getBoundingClientRect().bottom)).toBe(20);
 
     // Delete this Desk: its heading 28 px under Answering, the line, and the neutral button at the column's right.
