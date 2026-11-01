@@ -91,7 +91,7 @@ function SetupShell({ business, step, live, exitTo, wide = false, chat = false, 
         <div className="cd-setup__lead">
           {/* The lockup leads home as "Save and exit" does: the same place, and the same way out
               (the shell's in-app links wait for `beforeLeave`), so progress is kept. Named by the
-              product's name, which its words begin with at every width. */}
+              product's name, which its words begin with at every width, then by what it does. */}
           <a className="cd-setup__brand" href={exitTo} aria-label={SETUP_COPY.brandHome}>
             <Mark size={20} />
             <Wordmark preview={!compact} />

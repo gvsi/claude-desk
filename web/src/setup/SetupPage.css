@@ -44,9 +44,17 @@
   flex: none;
   align-items: center;
   gap: var(--space-10);
-  /* A link home that keeps the lockup's look: its own ink, no underline. Focus takes the base ring. */
+  /* A link home that keeps the lockup's look: its own ink, no underline, and no change on hover. */
   color: inherit;
   text-decoration: none;
+  cursor: pointer;
+  border-radius: var(--radius-control);
+}
+
+/* The keyboard's ring stands 4 px off the lockup, so it clears the Preview badge. A click shows none. */
+.cd-setup__brand:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 4px;
 }
 
 .cd-setup__business {

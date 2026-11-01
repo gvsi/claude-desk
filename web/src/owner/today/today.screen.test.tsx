@@ -2521,7 +2521,7 @@ describe("Today's unfinished setup", () => {
     const state = await deskAtRules();
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
-    const lockup = screen.getByRole('banner').getByRole('link', { name: 'Claude Desk', exact: true });
+    const lockup = screen.getByRole('banner').getByRole('link', { name: 'Claude Desk, save and exit', exact: true });
     await expect.element(lockup).toHaveAttribute('href', `/app/${state.desk_id}/today`);
     const exit = screen.getByRole('banner').getByRole('link', { name: 'Save and exit' });
     expect(lockup.element().getAttribute('href')).toBe(exit.element().getAttribute('href'));
@@ -2559,7 +2559,7 @@ describe("Today's unfinished setup", () => {
    * the API has moved setup on, leaves with "Save and exit" at once, within the few seconds Today
    * counts the Desks read as fresh. Resolves on Today.
    */
-  async function leaveRightAfterAStep(meanwhile: () => void = () => undefined, by: 'Save and exit' | 'Claude Desk' = 'Save and exit'): Promise<RenderResult> {
+  async function leaveRightAfterAStep(meanwhile: () => void = () => undefined, by: 'Save and exit' | 'Claude Desk, save and exit' = 'Save and exit'): Promise<RenderResult> {
     const state = await deskAtTools();
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
@@ -2594,7 +2594,7 @@ describe("Today's unfinished setup", () => {
 
   it('leaving_setup_by_its_lockup_right_after_a_step_keeps_the_progress', async () => {
     // The lockup leaves as "Save and exit" does: the step the owner just reached is kept, and Today names it.
-    await expectCardAtRules(await leaveRightAfterAStep(undefined, 'Claude Desk'));
+    await expectCardAtRules(await leaveRightAfterAStep(undefined, 'Claude Desk, save and exit'));
   });
 
   it('leaving_setup_names_the_new_step_while_the_desks_are_still_read', async () => {

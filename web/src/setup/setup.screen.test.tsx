@@ -547,17 +547,19 @@ describe('setup', () => {
 
   it('the_lockup_leads_to_the_start_page_before_there_is_a_desk', async () => {
     // Before there is a Desk, the bar's lockup leads where "Save and exit" does: the app's start
-    // page. It is a link named by the product's name, keeps the lockup's look, and takes the warm
-    // focus ring from the keyboard.
+    // page. It is a link named by the product's name and what it does, keeps the lockup's look with
+    // a pointer, and takes the warm focus ring from the keyboard, 4 px off so it clears the badge.
     const firstVisit = holdFirstVisit();
     const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
     const bar = screen.getByRole('banner');
-    const lockup = bar.getByRole('link', { name: 'Claude Desk', exact: true });
+    const lockup = bar.getByRole('link', { name: 'Claude Desk, save and exit', exact: true });
     await expect.element(lockup).toHaveAttribute('href', '/');
     expect(lockup.element().getAttribute('href')).toBe(bar.getByRole('link', { name: 'Save and exit' }).element().getAttribute('href'));
     const look = getComputedStyle(lockup.element());
     expect(look.textDecorationLine).toBe('none');
     expect(look.color).toBe(getComputedStyle(bar.element()).color);
+    expect(look.cursor).toBe('pointer');
+    expect(look.outlineStyle, 'no ring before the keyboard').toBe('none');
     await userEvent.keyboard('{Tab}');
     (lockup.element() as HTMLElement).focus();
     expect(lockup.element().matches(':focus-visible')).toBe(true);
@@ -566,6 +568,8 @@ describe('setup', () => {
     document.body.append(probe);
     try {
       expect(getComputedStyle(lockup.element()).outlineColor).toBe(getComputedStyle(probe).color);
+      expect(getComputedStyle(lockup.element()).outlineOffset).toBe('4px');
+      expect(getComputedStyle(lockup.element()).outlineWidth).toBe('2px');
     } finally {
       probe.remove();
     }
