@@ -3294,7 +3294,7 @@ class FakeKernelState:
         if fields:
             summary = {"part": part, "refused": "promise", "fields": fields}
             if limit:
-                summary.update(keys=[safe_ref(key) for key in sorted(values)], policy_count=count,
+                summary.update(keys=[safe_ref(key) for key in sorted(values)[:40]], policy_count=count,
                                total_characters=total_characters, reason=limit)
             for target in targets:
                 self.append(target, "desk_data", summary)

@@ -456,7 +456,8 @@ async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str,
     """Refuse public prose the reply check would reject, before writing any of it.
 
     Detail names only refused keys and sorted rule IDs. The post-rollback ledger entry
-    also records keys, counts and a reason for cap refusals, never rejected text.
+    also records, for cap refusals, the first `PUBLIC_POLICY_MAX_COUNT` keys in order, the count
+    of all policies, their total characters and a reason, never rejected text.
     A refused creation has no Desk chain yet. Record it on the copy's existing Desks, in ID
     order, so the owner can audit the attempt without creating a row for refused input.
     """
@@ -472,7 +473,8 @@ async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str,
     desk_ids = await _refusal_desk_ids(ctx, desk_id)
     summary = {"part": part, "refused": "promise", "fields": fields}
     if limit is not None:
-        summary.update(keys=[ledger.safe_ref(key) for key in sorted(values)], policy_count=count,
+        keys = sorted(values)[:reply_check.PUBLIC_POLICY_MAX_COUNT]
+        summary.update(keys=[ledger.safe_ref(key) for key in keys], policy_count=count,
                        total_characters=total_characters, reason=limit)
     raise KernelFailure(422, "invalid", limit or "public_promise", detail=fields, persist=partial(
         _ledger_refusal, copy_id=ctx.copy_id, desk_ids=desk_ids, summary=summary))

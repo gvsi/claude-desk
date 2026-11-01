@@ -2511,7 +2511,7 @@ def quote_card(**limits) -> RuleCard:
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("count", "length", "reason"), [
-    (41, 40, "policy_count_limit"), (40, 201, "policy_text_limit"),
+    (41, 40, "policy_count_limit"), (40, 201, "policy_text_limit"), (400, 1, "policy_count_limit"),
 ])
 async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, reason):
     http, _, _ = kernel
@@ -2527,7 +2527,7 @@ async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, 
     assert page.chain_ok
     assert entry.event.summary == {
         "part": "charter", "refused": "promise", "fields": {"charter": [reason]},
-        "keys": sorted(claim.key for claim in claims), "policy_count": count,
+        "keys": sorted(claim.key for claim in claims)[:40], "policy_count": count,
         "total_characters": count * length, "reason": reason,
     }
     assert "x" * length not in entry.event.model_dump_json()

@@ -448,6 +448,7 @@ async def test_charter_refuses_unsupported_language_policy(client, app, text, ru
 @pytest.mark.parametrize(("count", "length", "code"), [
     (41, 40, "policy_count_limit"),
     (40, 201, "policy_text_limit"),
+    (400, 1, "policy_count_limit"),
 ])
 async def test_policy_limits_refuse_before_scanning_or_writing(app, client, monkeypatch, create, count, length, code):
     copy = await rivera(app, client)
@@ -474,7 +475,8 @@ async def test_policy_limits_refuse_before_scanning_or_writing(app, client, monk
     [entry] = (await entries_of(app, copy))[entries:]
     assert entry.event.summary == {
         "part": "desk" if create else "charter", "refused": "promise", "fields": {"charter": [code]},
-        "keys": sorted(claim["key"] for claim in claims), "policy_count": count,
+        # The first forty keys and the count of all of them: a huge charter can't grow the entry.
+        "keys": sorted(claim["key"] for claim in claims)[:40], "policy_count": count,
         "total_characters": count * length, "reason": code,
     }
     assert "x" * length not in entry.event.model_dump_json()
