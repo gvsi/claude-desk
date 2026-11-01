@@ -891,7 +891,12 @@ const SERVED: ServedRoutes = {
     if (isFailure(visitor)) return visitor;
     const deskId = visitor.desk.summary.desk_id;
     const own = sv.world.desks[0]?.summary.desk_id === deskId;
-    return ok({ task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other') } satisfies AgentTasks);
+    const payments = visitor.desk.tools.some((row) => row.status === 'enabled'
+      && (row.tool === 'native.payment_link' || row.tool === 'native.charge_mandate'));
+    return ok({
+      task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other'),
+      tasks: payments ? ['book_visit', 'quote_and_deposit', 'push_the_limit'] : ['book_visit'],
+    } satisfies AgentTasks);
   },
   sendAgent(sv, req) {
     const visitor = sv.visitor(req.params.slug, req.cookies);
