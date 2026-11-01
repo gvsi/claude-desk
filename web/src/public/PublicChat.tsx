@@ -250,13 +250,22 @@ function leftTheEnd(seen: ScrollerAt, now: ScrollerAt): boolean {
 }
 
 /**
- * How much of the conversation, up to `end`, is hidden under the composer that stays at the bottom
- * of the window: measured to the top of the shell's composer area around `composer`, whose top
- * padding counts.
+ * The room left under `end`, above the composer, once the conversation is scrolled to its end: the
+ * bottom padding of the conversation that `end` closes (PublicChat.css).
+ */
+function roomUnder(end: HTMLElement): number {
+  const conversation = end.parentElement;
+  return conversation === null ? 0 : Number.parseFloat(getComputedStyle(conversation).paddingBottom) || 0;
+}
+
+/**
+ * How much of the conversation, up to `end` and the room under it, is hidden under the composer
+ * that stays at the bottom of the window: measured to the top of the shell's composer area around
+ * `composer`, whose top padding counts.
  */
 function hiddenUnderComposer(end: HTMLElement, composer: HTMLElement): number {
   const area = composer.closest(COMPOSER_AREA) ?? composer;
-  return end.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
+  return end.getBoundingClientRect().bottom + roomUnder(end) - area.getBoundingClientRect().top;
 }
 
 /**
@@ -302,19 +311,19 @@ function visibleTop(scroller: Element): number {
 }
 
 /**
- * How much of the newest part of the conversation is hidden under the composer. That is its end,
- * except while a reply's words are being revealed: its cards, still to come, wait unseen below
- * them, so it is the last of those words, and never more than would take the reply's own start
- * above the top of the view, when the reply is taller than what the view shows.
+ * How much of the newest part of the conversation, with the room under it, is hidden under the
+ * composer. That is its end, except while a reply's words are being revealed: its cards, still to
+ * come, wait unseen below them, so it is the last of those words, and never more than would take
+ * the reply's own start above the top of the view, when the reply is taller than what the view shows.
  */
 function newestHidden(end: HTMLElement, composer: HTMLElement): number {
   const reply = [...(end.parentElement?.querySelectorAll(REVEALING) ?? [])].at(-1);
   const words = reply === undefined ? undefined : [...reply.querySelectorAll(PROSE)].at(-1);
   if (reply === undefined || words === undefined) return hiddenUnderComposer(end, composer);
   const area = composer.closest(COMPOSER_AREA) ?? composer;
-  const hidden = words.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
-  const room = reply.getBoundingClientRect().top - visibleTop(scrollerOf(end));
-  return Math.min(hidden, Math.max(0, room));
+  const hidden = words.getBoundingClientRect().bottom + roomUnder(end) - area.getBoundingClientRect().top;
+  const upTo = reply.getBoundingClientRect().top - visibleTop(scrollerOf(end));
+  return Math.min(hidden, Math.max(0, upTo));
 }
 
 /**
@@ -346,11 +355,12 @@ interface NewestInView {
 /**
  * Keeps the newest message in view, as a chat does: while the visitor is at the end of the
  * conversation, whatever arrives (a reply, its receipts, "Claude is writing", a notice) scrolls up
- * to sit just above the composer, and so does the end when the page changes size (the window
- * narrows and the rows rewrap, the composer grows). While a reply's words are being revealed, its
- * newest words sit there instead, with its cards, still to come, waiting below, and the reply's
- * start never scrolls above the top of the view; once its words are whole, the end comes back. A
- * visitor who has scrolled back to read stays where they are until they send.
+ * to sit above the composer, with the conversation's room under it (`roomUnder`), and so does the
+ * end when the page changes size (the window narrows and the rows rewrap, the composer grows).
+ * While a reply's words are being revealed, its newest words sit there instead, with its cards,
+ * still to come, waiting below, and the reply's start never scrolls above the top of the view; once
+ * its words are whole, the end comes back. A visitor who has scrolled back to read stays where they
+ * are until they send.
  *
  * Where the visitor is comes from the page's scroll events, and again just before each change the
  * page makes (`beforeChange`) if the conversation has scrolled since the page last knew: a scroll

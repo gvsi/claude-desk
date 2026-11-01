@@ -101,6 +101,15 @@
   align-items: start;
 }
 
+/* Room under the conversation's end, as a chat leaves it: once it has started, the conversation
+   keeps 24 px under what it shows last, so scrolled to its end (useNewestInView follows it there)
+   its last message, card or receipt sits 24 px above the composer area, 40 px above the composer
+   with the area's own 16 px. A conversation too short to scroll fills the region anyway, so it
+   doesn't move; the first view's greeting stays centred where it was. */
+.cd-public-chat-page .cd-public-shell:not(.cd-public-shell--first-view) .cd-public-shell__conversation {
+  padding-bottom: var(--space-24);
+}
+
 /* While a reply comes in (its words revealed, then its cards and receipts), the chat places the
    conversation itself (useNewestInView), so the browser's scroll anchoring stays out of it: an
    anchor the browser picked mid-arrival made the next change of size, such as the composer
