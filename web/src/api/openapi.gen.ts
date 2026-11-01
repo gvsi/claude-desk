@@ -47,13 +47,20 @@ export interface AgentRunStarted {
   run_id: string;
 }
 /**
- * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), which carries nothing, since
- * the agent's own words are never shown (the panel titles it), or the Desk's answer to it, with the blocks and
- * signed statuses the kernel checked and the Desk showed the agent.
+ * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
+ * with the blocks and signed statuses the kernel checked and the Desk showed the agent.
+ *
+ * An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
+ * 2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is
+ * (owner decision, 2026-11-01). The agent's model writes it from a fixed `DemoTask` and the Desk's kernel-checked
+ * replies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the
+ * Desk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
+ * blocks and statuses.
  */
 export interface AgentTurn {
   author: "agent" | "desk";
   n: number;
+  text: string | null;
   blocks: RenderedBlock[];
   receipts: (EvReceipt | EvHeld | EvResolved)[];
 }
@@ -157,8 +164,9 @@ export interface Triage {
   category: "prices" | "records" | "codes" | "instructions" | "limits" | "wording" | "other";
 }
 /**
- * "Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of
- * the full list (`BriefingList`).
+ * "Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `answers` counts the
+ * list's `answer` items, the conversations Claude answered alone; `total` is the length of the full list
+ * (`BriefingList`).
  */
 export interface Briefing {
   since: string;
@@ -166,6 +174,7 @@ export interface Briefing {
   bookings: number;
   leads: number;
   turned_down: number;
+  answers: number;
   total: number;
   newest: BriefingNewest;
 }
@@ -312,7 +321,10 @@ export interface ConnectorProposal {
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
  * anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
- * preview.
+ * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+ * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
+ * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
+ * written yet.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -325,6 +337,7 @@ export interface ConversationSummary {
     [k: string]: number;
   };
   owner_preview: boolean;
+  latest_visitor_text: string | null;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -544,8 +557,12 @@ export interface MoneyCapIn {
 /**
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
  * applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
- * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
- * thing they wrote (untrusted).
+ * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
+ * wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
+ * characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
+ * AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
+ * labelled as Claude's and never quoted as the visitor's), else None. A held request asks the owner for a decision, so
+ * it never carries AI-written text: a visitor could steer a summary to sway an approval.
  */
 export interface NeedsYouItem {
   decision: Decision | null;
@@ -554,6 +571,7 @@ export interface NeedsYouItem {
   handoff: Handoff | null;
   session: NeedsYouSession;
   from_the_visitor: string | null;
+  claude_summary: string | null;
 }
 /**
  * Who a held request or a callback request came from. `display_name` is the verified person's, else the name
