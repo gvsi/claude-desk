@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { Decision, DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -44,6 +44,7 @@ import {
   HELD_PROSE,
   LINK_CANCELLED,
   VISITOR_PLAIN,
+  afterAnswer,
   askedDiscountBp,
   linkCancelledBlock,
   matchRule,
@@ -371,6 +372,31 @@ describe('the scripted Desk', () => {
     expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
     expect(needsYou).toHaveLength(1);
   });
+
+  it.each(['missing', 'different decision', 'not approved', 'same ledger', 'later ledger'] as const)(
+    'answer_drops_snapshot_when_%s', async (reason) => {
+      const { session } = await openChat();
+      const chat = mockStore.world.sessions.get(session.session_id);
+      if (!chat) throw new Error('the visitor opened a chat');
+      const held = mockStore.world.decide(chat, DECISIONS.heldQuote, 'en');
+      const record = mockStore.world.decisions.get(held.decision_id);
+      if (!record) throw new Error('the discount was held');
+      const decision = mockStore.world.answer(record, 'allow_once');
+      const approved = record.approved;
+      if (!approved) throw new Error('the owner approved the discount');
+      const snapshots: Record<typeof reason, Decision | null> = {
+        missing: null,
+        'different decision': { ...approved, decision_id: 'another-decision' },
+        'not approved': { ...approved, state: 'held' },
+        'same ledger': { ...approved, ledger_seq: decision.ledger_seq },
+        'later ledger': { ...approved, ledger_seq: decision.ledger_seq + 1 },
+      };
+      const ctx = mockStore.world.context(chat, 'en', '');
+      const emitted = afterAnswer('allow_once', decision, snapshots[reason]).map((step) => step(ctx));
+      expect(emitted.map((ev) => ev.type)).toEqual(['resolved', 'writing', 'message']);
+      expect(emitted[0]).toEqual(ctx.status('resolved', decision));
+    },
+  );
 
   it('denied_answer_emits_only_the_denial_before_follow_up', async () => {
     const { events } = await openChat();

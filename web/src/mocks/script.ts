@@ -779,6 +779,9 @@ export function allows(answer: ApprovalAnswer): boolean {
  * is Claude's, so it does.
  */
 export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved: Decision | null): Step[] {
+  // As in the API's resume_after_answer, only an earlier approval for this decision can precede it.
+  if (approved !== null && (approved.decision_id !== decision.decision_id
+    || approved.state !== 'approved' || approved.ledger_seq >= decision.ledger_seq)) approved = null;
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
   if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
   const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
