@@ -48,7 +48,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Docs-Sidebar',
     canvasNote: [
-      'The sidebar with the “About this prototype” group just above the Answering block, behind its hairline: “Capability prediction” and “Product proposal”, nav rows with the document icon.',
+      'The sidebar with the “About this prototype” group just above the Claude acts for you block, behind its hairline: “Capability prediction” and “Product proposal”, nav rows with the document icon.',
       'The nav’s eight pages, Connectors after Rules, sit where the board draws them, as do the group and the foot.',
       'The board marks no row current; here the owner is reading the capability prediction, so its row is the current page, on the selected fill, and the main nav marks none.',
       'The board draws the mark 1 px and every row’s icon 2 px higher than the other signed boards do; the sidebar keeps their placement, so all its icons, the group’s included, sit as on Today and the recorded-history boards.',
@@ -106,12 +106,12 @@ export const Board: Story = {
     const connectors = pages[4] as HTMLElement;
     await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(270);
 
-    // focus_order_is_logical: the business, the main nav, the about links, then Answering.
+    // focus_order_is_logical: the business, the main nav, the about links, then Claude acts for you.
     await expectTabOrder(userEvent, [
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(nav).getAllByRole('link'),
       ...links,
-      within(column).getByRole('switch', { name: 'Answering' }),
+      within(column).getByRole('switch', { name: 'Claude acts for you' }),
     ]);
   },
 };

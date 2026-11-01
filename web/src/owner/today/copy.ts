@@ -22,27 +22,27 @@ export const CONTINUE_SETUP_COPY = {
 export const CONTINUE_SETUP_LINES: Readonly<Record<UnfinishedSetupStep, { pickUp: string; answeringOff: string }>> = {
   questions: {
     pickUp: 'Your answers are saved. Pick up at the questions.',
-    answeringOff: 'Answering stays off until your Desk is live.',
+    answeringOff: 'Claude takes messages only until your Desk is live.',
   },
   tools: {
     pickUp: 'Your answers are saved. Pick up at your tools.',
-    answeringOff: 'Answering stays off until your Desk is live.',
+    answeringOff: 'Claude takes messages only until your Desk is live.',
   },
   rules: {
     pickUp: "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   situations: {
     pickUp: "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   safety_check: {
     pickUp: "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live.",
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
   preview: {
     pickUp: 'Your answers are saved. Pick up at going live.',
-    answeringOff: 'Answering stays off until then.',
+    answeringOff: 'Claude takes messages only until then.',
   },
 };
 

@@ -258,7 +258,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
 
   const name = business ?? '';
   const wentLiveHere = state.step === 'live' && openedAt !== null && openedAt !== 'live';
-  // "Answering now" follows the latest Desks read alone, whatever this page saw happen: going live
+  // "Acting for you now" follows the latest Desks read alone, whatever this page saw happen: going live
   // here writes Answering on into them, and a Desk whose owner has turned Answering off since, here
   // or elsewhere, doesn't claim it. The check's drawing is the page's own history, kept apart.
   const answering = desk?.answering === true;
@@ -280,7 +280,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       break;
     case 'preview':
     case 'live':
-      // Live, the title names the business and "Answering now" follows the Desks, so while they are
+      // Live, the title names the business and "Acting for you now" follows the Desks, so while they are
       // first read (on a reload) the step waits whole on the loading line, rather than drawing a
       // title and a link that their arrival would rewrite and push down.
       body =
