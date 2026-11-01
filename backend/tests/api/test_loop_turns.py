@@ -849,13 +849,12 @@ async def test_a_delivered_handoff_allows_a_checked_later_turn(api_conn, caller,
     if blocked:
         fake.violation("canary")  # staged immediate handoff, orchestration only
     clauses = [] if blocked else [{"template": "handoff"}]
-    first = ScriptedModel([response(reply("Please help with this.", *clauses)), response()])
-    assert await run_turn(api_conn, caller, first) == ("handoff" if blocked else "done")
-    if blocked:
-        (result,) = tool_results(first.requests[1])
-        assert result["content"] == {"outcome": "delivered_handoff"}
-    else:
-        assert len(first.requests) == 1
+    first = ScriptedModel([response(reply("Please help with this.", *clauses))])
+    assert await run_turn(api_conn, caller, first) == "handoff"
+    assert len(first.requests) == 1                       # a shown handoff, like any shown reply, ends the turn
+    ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff"}
+    if not blocked:
         assert fake.called("/check_reply")[0].body["draft"]["clauses"] == [{"template": "handoff", "fact_id": None}]
     assert len(fake.handoffs) == 1 and card_handoffs(fake, caller) == ["open"]
     handoff_ids = set(fake.handoffs)
@@ -945,9 +944,10 @@ async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, 
 
     script = [response(tool_use("native__request_callback", {
         "name": "Alex", "contact": "alex@example.com", "reason": "Help with the request"}))] if callback else []
-    fake.violation("soft_promise", times=2)
-    model = ScriptedModel([*script, flagged_reply, flagged_reply, response()])
-    assert await run_turn(api_conn, caller, model) == "handoff"
+    fake.soft_checks("flag", "flag")
+    model = ScriptedModel([*script, flagged_reply, flagged_reply])
+    # The final block keeps the checked callback card as a reply, not a handoff; with no card, the handoff.
+    assert await run_turn(api_conn, caller, model) == ("done" if callback else "handoff")
     checks = fake.called("/check_reply")
     assert len(checks) == 2
     assert all(check.body["draft"]["prose"] == prose for check in checks)
@@ -957,12 +957,15 @@ async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, 
     assert len(shown) == 1
     # A failure only of the prose keeps the checked callback card alone; with no card, the handoff.
     assert [block.template for block in shown[0].blocks] == (["callback_confirmed"] if callback else ["handoff"])
+    assert shown[0].handoff is not callback
     assert prose not in [block.text for block in shown[0].blocks]
     stopped = await rows(api_conn, caller.session_id, "stopped_draft", "text")
     assert len(stopped) == 2
-    (blocked,) = tool_results(model.requests[-2])
-    assert blocked["is_error"] and blocked["content"] == {"outcome": "blocked", "instruction": REWRITE_INSTRUCTION,
-                                                          "violations": [{"kind": "soft_promise", "span": prose}]}
+    (blocked,) = tool_results(model.requests[-1])         # the final block ended the turn: no call after it
+    assert blocked["is_error"] and blocked["content"] == {
+        "outcome": "blocked", "instruction": REWRITE_INSTRUCTION, "delivered": False,
+        "violations": [{"kind": "soft_promise", "rule_id": "soft.promise"}],
+        "diagnostics": [prompts.REPLY_DIAGNOSTICS["soft.promise"]]}
     assert len(fake.handoffs) == 1
     (work,) = fake.handoffs.values()
     assert work["session_id"] == caller.session_id and work["status"] == "open"
