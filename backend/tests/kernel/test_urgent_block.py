@@ -38,6 +38,22 @@ def auto():
     return RuleCard(card_id='urgent-auto', applies_to=TOOL, mode='auto', who='anyone', reason='Report urgent problems.')
 
 
+async def test_urgent_title_refuses_bidi_controls_without_writing_business_data(app, client):
+    copy = await rivera(app, client)
+    before_facts = {row.fact_id: (row.claims, row.readers, row.status)
+                    for row in await rows_of(app, copy.copy_id, select(Fact))}
+    before_inbox = {row.entry_id for row in await rows_of(app, copy.copy_id, select(DemoInboxRow))}
+    response = await put(client, copy, [urgent(title='Urgent \u202edeetnaraug\u202c')])
+    assert response.status_code == 422, response.text
+    assert not await rows_of(app, copy.copy_id, select(Tool).where(Tool.source == 'business'))
+    assert not await rows_of(app, copy.copy_id, select(Handoff))
+    assert {row.fact_id: (row.claims, row.readers, row.status)
+            for row in await rows_of(app, copy.copy_id, select(Fact))} == before_facts
+    assert {row.entry_id for row in await rows_of(app, copy.copy_id, select(DemoInboxRow))} == before_inbox
+    [entry] = [row for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
+    assert entry.event.summary == {'tools': [], 'refused': 'public_promise'}
+
+
 async def configured(app, client, *, cards=None, prefs=()):
     copy = await rivera(app, client)
     assert (await put(client, copy, [urgent()])).status_code == 200
