@@ -883,8 +883,8 @@ async def test_question_choices_keep_to_the_seams_bounds(app, browser, kernel_ht
 def test_the_seam_models_hold_their_bounds():
     from desk.api.prompts import (
         BLOCK_FOR_JOB, CAPABILITIES, CONNECTOR_LABELS, BlockConfig, Choice, ConnectorKey,
-        ConnectorProposal, IntakeConfig, JobKind, JobProposal, ProposalCard, PurposePaymentConfig,
-        TypedBookingConfig, UrgentConfig, new_proposal_id,
+        ConnectorProposal, IntakeProposalConfig, JobKind, JobProposal, ProposalCard, PurposePaymentProposalConfig,
+        TypedBookingProposalConfig, UrgentProposalConfig, new_proposal_id,
     )
 
     job = JobProposal(job="answer", title="Answer questions", why="Save time", how="Use business facts",
@@ -908,10 +908,10 @@ def test_the_seam_models_hold_their_bounds():
             Choice(text=value, recommended=False)
     configs = TypeAdapter(BlockConfig)
     for value, expected in (
-        ({"block": "intake", "questions": ["What do you need?"]}, IntakeConfig),
-        ({"block": "typed_booking", "appointment_type": "Intro", "minutes": 15}, TypedBookingConfig),
-        ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}, PurposePaymentConfig),
-        ({"block": "urgent", "urgent_when": "A burst pipe"}, UrgentConfig),
+        ({"block": "intake", "questions": ["What do you need?"]}, IntakeProposalConfig),
+        ({"block": "typed_booking", "appointment_type": "Intro", "minutes": 15}, TypedBookingProposalConfig),
+        ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}, PurposePaymentProposalConfig),
+        ({"block": "urgent", "urgent_when": "A burst pipe"}, UrgentProposalConfig),
     ):
         assert isinstance(configs.validate_python(value), expected)
     booking = {"block": "typed_booking", "appointment_type": "Intro", "minutes": 60}
@@ -921,10 +921,10 @@ def test_the_seam_models_hold_their_bounds():
             configs.validate_python({**booking, "minutes": minutes})
     for questions in ([], ["a"] * 6, [""], ["a" * 121]):
         with pytest.raises(ValidationError):
-            IntakeConfig(block="intake", questions=questions)
+            IntakeProposalConfig(block="intake", questions=questions)
     for amount in (-1, 1_000_001, 1.5):
         with pytest.raises(ValidationError):
-            PurposePaymentConfig(block="purpose_payment", purpose="Deposit", amount_cents=amount)
+            PurposePaymentProposalConfig(block="purpose_payment", purpose="Deposit", amount_cents=amount)
     with pytest.raises(ValidationError):
         JobProposal(**{**job.model_dump(), "job": "price", "config": {"block": "intake", "questions": ["Why?"]}})
     for model_type, values in ((Choice, {"text": "A", "recommended": False}),
@@ -3956,14 +3956,14 @@ async def test_typing_a_question_keeps_the_card_waiting(app, browser, kernel_htt
 
 
 async def test_typed_text_cant_accept_an_unpriced_payment(app, browser, kernel_http, model, engine):
-    from desk.api.prompts import JobProposal, PurposePaymentConfig
+    from desk.api.prompts import JobProposal, PurposePaymentProposalConfig
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
     async with engine.begin() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)
         interview.latest_ask.card.job = JobProposal(job="payment", title="Take a deposit", why="Reserve work",
             how="Send a secure link", autonomy="ask", can_do_today=True,
-            config=PurposePaymentConfig(block="purpose_payment", purpose="Deposit", amount_cents=None))
+            config=PurposePaymentProposalConfig(block="purpose_payment", purpose="Deposit", amount_cents=None))
         await desk_setup._save(conn, interview)
     model.add(card_answer("accept", reply="Enter the amount on the card before accepting it."))
     response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",

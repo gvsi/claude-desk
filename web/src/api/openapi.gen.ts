@@ -427,7 +427,7 @@ export interface HealthOut {
   ok: boolean;
   kernel: Health | null;
 }
-export interface IntakeConfig {
+export interface IntakeProposalConfig {
   block: "intake";
   /**
    * 1 to 5 intake questions, each 1 to 120 characters.
@@ -464,9 +464,10 @@ export interface JobProposal {
   how: string;
   autonomy: "auto" | "ask";
   can_do_today: boolean;
-  config: (IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig) | null;
+  config:
+    (IntakeProposalConfig | TypedBookingProposalConfig | PurposePaymentProposalConfig | UrgentProposalConfig) | null;
 }
-export interface TypedBookingConfig {
+export interface TypedBookingProposalConfig {
   block: "typed_booking";
   /**
    * Appointment name, 1 to 60 characters.
@@ -477,7 +478,7 @@ export interface TypedBookingConfig {
    */
   minutes: number;
 }
-export interface PurposePaymentConfig {
+export interface PurposePaymentProposalConfig {
   block: "purpose_payment";
   /**
    * Payment purpose, 1 to 60 characters.
@@ -485,7 +486,7 @@ export interface PurposePaymentConfig {
   purpose: string;
   amount_cents: number | null;
 }
-export interface UrgentConfig {
+export interface UrgentProposalConfig {
   block: "urgent";
   /**
    * When a request is urgent, 1 to 300 characters.

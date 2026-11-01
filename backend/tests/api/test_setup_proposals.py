@@ -24,7 +24,7 @@ def proposal_entries(jobs, connectors, *, business_tools_enabled: bool = False) 
         except ValueError:
             continue
         proposed.can_do_today = setup.CAPABILITIES[proposed.job]
-        if isinstance(proposed.config, setup.PurposePaymentConfig):
+        if isinstance(proposed.config, setup.PurposePaymentProposalConfig):
             proposed.config.amount_cents = None
         if not business_tools_enabled:
             proposed.config = None

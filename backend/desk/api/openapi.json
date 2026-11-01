@@ -9626,7 +9626,7 @@
         ],
         "title": "InboxNotice"
       },
-      "IntakeConfig": {
+      "IntakeProposalConfig": {
         "properties": {
           "block": {
             "type": "string",
@@ -9653,7 +9653,7 @@
           "block",
           "questions"
         ],
-        "title": "IntakeConfig"
+        "title": "IntakeProposalConfig"
       },
       "JobProposal": {
         "properties": {
@@ -9713,25 +9713,25 @@
               {
                 "oneOf": [
                   {
-                    "$ref": "#/components/schemas/IntakeConfig"
+                    "$ref": "#/components/schemas/IntakeProposalConfig"
                   },
                   {
-                    "$ref": "#/components/schemas/TypedBookingConfig"
+                    "$ref": "#/components/schemas/TypedBookingProposalConfig"
                   },
                   {
-                    "$ref": "#/components/schemas/PurposePaymentConfig"
+                    "$ref": "#/components/schemas/PurposePaymentProposalConfig"
                   },
                   {
-                    "$ref": "#/components/schemas/UrgentConfig"
+                    "$ref": "#/components/schemas/UrgentProposalConfig"
                   }
                 ],
                 "discriminator": {
                   "propertyName": "block",
                   "mapping": {
-                    "intake": "#/components/schemas/IntakeConfig",
-                    "purpose_payment": "#/components/schemas/PurposePaymentConfig",
-                    "typed_booking": "#/components/schemas/TypedBookingConfig",
-                    "urgent": "#/components/schemas/UrgentConfig"
+                    "intake": "#/components/schemas/IntakeProposalConfig",
+                    "purpose_payment": "#/components/schemas/PurposePaymentProposalConfig",
+                    "typed_booking": "#/components/schemas/TypedBookingProposalConfig",
+                    "urgent": "#/components/schemas/UrgentProposalConfig"
                   }
                 }
               },
@@ -11603,7 +11603,7 @@
         ],
         "title": "PublicDesk"
       },
-      "PurposePaymentConfig": {
+      "PurposePaymentProposalConfig": {
         "properties": {
           "block": {
             "type": "string",
@@ -11638,7 +11638,7 @@
           "purpose",
           "amount_cents"
         ],
-        "title": "PurposePaymentConfig"
+        "title": "PurposePaymentProposalConfig"
       },
       "RecordedHistory": {
         "properties": {
@@ -13603,7 +13603,7 @@
         "title": "Triage",
         "description": "A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk\ndid, and a category for the Safety page's filters. AI-written, for the owner alone."
       },
-      "TypedBookingConfig": {
+      "TypedBookingProposalConfig": {
         "properties": {
           "block": {
             "type": "string",
@@ -13632,9 +13632,9 @@
           "appointment_type",
           "minutes"
         ],
-        "title": "TypedBookingConfig"
+        "title": "TypedBookingProposalConfig"
       },
-      "UrgentConfig": {
+      "UrgentProposalConfig": {
         "properties": {
           "block": {
             "type": "string",
@@ -13655,7 +13655,7 @@
           "block",
           "urgent_when"
         ],
-        "title": "UrgentConfig"
+        "title": "UrgentProposalConfig"
       },
       "VerifyCheckIn": {
         "properties": {

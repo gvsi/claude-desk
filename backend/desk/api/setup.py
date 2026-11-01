@@ -201,7 +201,7 @@ from desk.api.prompts import (
     ProposalCard,
     SetupNextStep,
     SetupCardAnswer,
-    PurposePaymentConfig,
+    PurposePaymentProposalConfig,
     QuestionKey,
     RuleCardDraft,
     SETUP_POLICY_CLAIMS,
@@ -1167,11 +1167,11 @@ def _check_decision(interview: Interview, proposal_id: str, decision: SetupPropo
         raise ApiProblem(422, "invalid")
     config = card.job.config if card.job is not None and configs else None
     if (decision.accept and card.job is not None and card.job.job == "payment"
-            and (not isinstance(config, PurposePaymentConfig)
+            and (not isinstance(config, PurposePaymentProposalConfig)
                  or (decision.amount_cents if decision.amount_cents is not None
                      else config.amount_cents or 0) < 1)):
         raise ApiProblem(422, "amount_required")
-    if decision.amount_cents is not None and not isinstance(config, PurposePaymentConfig):
+    if decision.amount_cents is not None and not isinstance(config, PurposePaymentProposalConfig):
         raise ApiProblem(422, "invalid")
     return card, decision
 
@@ -1637,7 +1637,7 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
         return None
     fields = draft.model_dump(mode="json")
     if draft.job == "payment" and fields["config"] is None:
-        fields["config"] = PurposePaymentConfig(block="purpose_payment", purpose=draft.title[:60],
+        fields["config"] = PurposePaymentProposalConfig(block="purpose_payment", purpose=draft.title[:60],
                                                  amount_cents=None).model_dump(mode="json")
     if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
         fields["config"]["amount_cents"] = None
@@ -2020,7 +2020,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
 
 def _unpriced_payment(job: JobProposal | None) -> bool:
     return (job is not None and job.job == "payment"
-            and (not isinstance(job.config, PurposePaymentConfig) or (job.config.amount_cents or 0) < 1))
+            and (not isinstance(job.config, PurposePaymentProposalConfig) or (job.config.amount_cents or 0) < 1))
 
 
 def settle_plan(interview: Interview) -> None:
@@ -2081,7 +2081,7 @@ def owner_job_answers(interview: Interview) -> list[dict[str, object]]:
             continue
         job = card.job
         answer = {"job": job.job, "title": job.title, "autonomy": job.autonomy}
-        if isinstance(job.config, PurposePaymentConfig) and job.config.amount_cents is not None:
+        if isinstance(job.config, PurposePaymentProposalConfig) and job.config.amount_cents is not None:
             answer["amount_cents"] = job.config.amount_cents
         answers.append(answer)
     return answers
