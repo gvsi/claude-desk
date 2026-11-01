@@ -1413,13 +1413,28 @@ async def test_suggestions_show_the_first_payment_line_before_the_closing_plan(
     transcript = (await stored(engine, interview_id))["transcript"]
     lines = [i for i, entry in enumerate(transcript)
              if entry["role"] == "claude" and entry["text"] == setup.PAYMENT_LINE]
-    assert len(lines) == 1
-    at = lines[0]
-    card = transcript[at - 1]["card"]
-    assert card["proposal_id"] == ids[2 if leftover == "stripe" else 1]
-    assert transcript[at + 1]["text"] == "The closing plan."
-    assert setup.Entry.model_validate(transcript[at]) == setup.Entry(role="claude", text=setup.PAYMENT_LINE)
+    assert len(lines) == (1 if leftover == "stripe" else 0)
+    if lines:
+        at = lines[0]
+        card = transcript[at - 1]["card"]
+        assert card["proposal_id"] == ids[2]
+        assert transcript[at + 1]["text"] == "The closing plan."
+        assert setup.Entry.model_validate(transcript[at]) == setup.Entry(role="claude", text=setup.PAYMENT_LINE)
+    else:
+        assert transcript[-2]["card"]["state"] == "declined"
+        assert transcript[-1]["text"] == "The closing plan."
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json() == response.json()
+
+
+@pytest.mark.parametrize("status", ["proposed", "accepted", "declined"])
+def test_payment_line_follows_only_proposed_or_accepted_cards(status):
+    state = plan_state([])
+    state.business_tools_enabled = True
+    card = setup._planned_job(state, setup.JobDraft.model_validate(
+        job("payment", config=None).model_dump(exclude={"can_do_today"})))
+    card.state = status
+    setup._show_card(state, card)
+    assert sum(entry.text == setup.PAYMENT_LINE for entry in state.transcript) == (status != "declined")
 
 
 @pytest.mark.parametrize("earlier", ["stripe", "payment"])
@@ -1470,7 +1485,8 @@ async def test_use_your_suggestions_accepts_the_unshown_planned_jobs(proposals, 
     cards = [entry['card'] for entry in tail if entry.get('card')]
     assert [card['proposal_id'] for card in cards] == ids[1:]
     assert [card['state'] for card in cards] == ['declined', 'accepted']
-    assert tail[2]['text'] == setup.PAYMENT_LINE
+    assert tail[2]['card']['proposal_id'] == ids[2]
+    assert tail[3]['text'] == setup.PAYMENT_LINE
     assert tail[4]['text'] == 'The closing plan.'
     assert len(tail) == 5
     assert shown(reply)[0]['state'] == 'accepted'
@@ -1530,7 +1546,7 @@ async def test_a_closing_card_turn_emits_leftover_cards_before_the_plan(proposal
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{ids[0]}?cards=1", json={"accept": True})
     assert reply.status_code == 200, reply.text
     tail = (await stored(engine, interview_id))["transcript"][len(row["transcript"]):]
-    assert [entry["text"] for entry in tail] == ["That works.", "", setup.PAYMENT_LINE, "", "The closing plan."]
+    assert [entry["text"] for entry in tail] == ["That works.", "", "", setup.PAYMENT_LINE, "The closing plan."]
     cards = [entry["card"] for entry in tail if entry.get("card")]
     assert [card["proposal_id"] for card in cards] == ids[1:]
     assert [card["state"] for card in cards] == ["declined", "accepted"]

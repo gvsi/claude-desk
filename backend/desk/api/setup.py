@@ -1865,8 +1865,8 @@ def _show_card(interview: Interview, card: ProposalCard) -> None:
     interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
     payment = bool((card.job and card.job.job == "payment") or
                    (card.connector and card.connector.app == "stripe"))
-    if payment and not interview.answers.auto_money_cap_cents and not any(
-            entry.role == "claude" and entry.text == PAYMENT_LINE for entry in interview.transcript):
+    if (payment and card.state in {"proposed", "accepted"} and not interview.answers.auto_money_cap_cents
+            and not any(entry.role == "claude" and entry.text == PAYMENT_LINE for entry in interview.transcript)):
         interview.transcript.append(Entry(role="claude", text=PAYMENT_LINE))
 
 
