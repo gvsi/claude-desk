@@ -35,9 +35,10 @@ export function useTextBox(box: RefObject<HTMLElement | null>, { parts, classNam
     if (!element) return;
     let live = true;
     const measure = () => {
-      if (!live || !element.isConnected) return;
+      if (!live || !element.isConnected || element.closest('[data-state="leaving"]')) return;
       const style = getComputedStyle(element);
-      const width = element.clientWidth - (Number.parseFloat(style.paddingLeft) || 0) - (Number.parseFloat(style.paddingRight) || 0);
+      const horizontal = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] as const;
+      const width = element.getBoundingClientRect().width - horizontal.reduce((sum, edge) => sum + (Number.parseFloat(style[edge]) || 0), 0);
       if (width <= 0) return;
       const probe = document.createElement('p');
       probe.className = className;
@@ -64,11 +65,15 @@ export function useTextBox(box: RefObject<HTMLElement | null>, { parts, classNam
           const lines = Math.max(1, Math.round(inner / lineHeight));
           setMeasured((was) => (was?.lines === lines && was.height === height ? was : { lines, height }));
         }
+        // Variable font settings can make the shorthand empty; its face is still requestable.
+        return own.font || `${own.fontStyle} ${own.fontWeight} ${own.fontSize} ${own.fontFamily}`;
       } finally {
         probe.remove();
       }
     };
-    measure();
+    const font = measure();
+    const text = parts.map((part) => typeof part === 'string' ? part : part.text).join('');
+    if (font) void document.fonts.load(font, text).then(measure, measure);
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
     observer?.observe(element);
     document.fonts.addEventListener('loadingdone', measure);
