@@ -101,7 +101,7 @@ async def test_clean_prose_with_a_quote_card_passes(app, client):
                                                                       verdict.message_id)
     assert entry.event.summary == {"message_id": verdict.message_id, "author": "claude", "ok": True, "language": "en",
                                    "violations": [], "rule_ids": [], "fact_ids": [quote.fact_id],
-                                   "soft_promise": FakeDecisions.SOFT_USAGE | {"status": "ok", "first_status": "ok", "tries": 1},   # the check passed it
+                                   "soft_promise": FakeDecisions.SOFT_USAGE | {"status": "ok"},   # the check passed it
                                    "soft_checks": {
                                        "sonnet": {"flags": {"promises_beyond_cards": False, "denies_being_ai": False},
                                                   "blocked": False},

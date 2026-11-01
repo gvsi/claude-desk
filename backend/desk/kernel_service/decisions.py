@@ -247,15 +247,6 @@ class CallUsage(BaseModel):
     latency_ms: int
 
 
-class SoftPromiseUsage(CallUsage):
-    """The reply ledger's soft-check usage: its one try (the owner's decision of 2026-10-31 replaced
-    an earlier unchanged-input recheck), so `tries` is 1 and `first_status` is `status`. The shape
-    is kept for readers of the ledger."""
-
-    first_status: CallStatus
-    tries: Literal[1]
-
-
 class Reviewed(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

@@ -102,7 +102,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
-from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseUsage
+from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import principal_for, verified
@@ -704,7 +704,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
-                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], SoftPromiseUsage | None, dict]:
+                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None, dict]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card), with the session's fixed next steps from its
     resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
@@ -712,8 +712,8 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
     error, a refusal, an unparsable answer) is `check_unavailable` (`soft.unavailable`). Optional
     Jev runs beside it, bounded on its own, and adds `soft.jev` (a `soft_promise`), also spanning
-    the prose's start. Returns the violations, Sonnet's usage as one try (its first status its
-    status) and both verdicts for the ledger. (`finalize` adds
+    the prose's start. Returns the violations, Sonnet's usage and both verdicts for the ledger.
+    (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
         Desk.desk_id == session_row.desk_id)))).one()
@@ -722,13 +722,12 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
                             next_steps=next_steps(tools))
     if ctx.settings.typesafe_api_key:
         # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
-        (verdict, call), jev_result = await asyncio.gather(
+        (verdict, usage), jev_result = await asyncio.gather(
             ctx.decisions.soft_promise(data),
             jev.evaluate(data.prose, data.cards, data.next_steps, api_key=ctx.settings.typesafe_api_key))
     else:
-        verdict, call = await ctx.decisions.soft_promise(data)
+        verdict, usage = await ctx.decisions.soft_promise(data)
         jev_result = jev.Result(status="off")
-    usage = None if call is None else SoftPromiseUsage(**call.model_dump(), first_status=call.status, tries=1)
     if verdict is None:
         violations = [Violation(kind="check_unavailable", span=_span(prose), rule_id="soft.unavailable")]
     else:
@@ -757,7 +756,7 @@ def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int
 
 async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[RenderedBlock],
                    violations: Sequence[Violation], language: render.Language, author: str,
-                   fact_ids: Sequence[str] = (), soft_promise: SoftPromiseUsage | None = None,
+                   fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None,
                    soft_checks: dict | None = None, seen: bool = False,
                    detected: render.Language | None = None, visitor_plain_key: str | None = None,
                    message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES,
