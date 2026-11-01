@@ -49,3 +49,50 @@ it('gives each link its own fact and cancels only that fact', () => {
   const cancelled = chat.events.flatMap(({ ev }) => ev.type === 'message' ? ev.blocks.filter((b) => b.template === 'link_cancelled') : []).at(-1);
   expect(cancelled?.fact_id).toBe(cards[1]?.fact_id);
 });
+
+it('cancels issued links when a confirmed rule asks the owner first', () => {
+  const { world } = mockStore;
+  const desk = world.desk(RIVERA.deskId)!;
+  const chat = world.addSession(desk);
+  const token = world.issueLink(chat, { title: 'Deposit', amountCents: 2000, language: 'en' });
+  const draft = world.draft(desk, [{ ...desk.policy.cards[0]!, card_id: 'ask-links', applies_to: 'native.payment_link', mode: 'ask', who: 'anyone' }]);
+  world.confirmDraft(desk, draft.version);
+  expect(world.links.get(token)?.view).toMatchObject({ state: 'cancelled', cancel_reason: 'rules_changed' });
+  expect(chat.events.some(({ ev }) => ev.type === 'message' && ev.blocks.some((b) => b.template === 'link_cancelled'))).toBe(true);
+});
+
+it('cancels an ended session link without posting a chat card', () => {
+  const { world } = mockStore;
+  const desk = world.desk(RIVERA.deskId)!;
+  const chat = world.addSession(desk);
+  const token = world.issueLink(chat, { title: 'Deposit', amountCents: 2000, language: 'en' });
+  chat.ended = true;
+  const before = chat.events.length;
+  const draft = world.draft(desk, [{ ...desk.policy.cards[0]!, card_id: 'stop-links', applies_to: 'native.payment_link', mode: 'never', who: 'anyone' }]);
+  world.confirmDraft(desk, draft.version);
+  expect(world.links.get(token)?.view.state).toBe('cancelled');
+  expect(chat.events).toHaveLength(before);
+});
+
+it('preserves an injected JSON null response body', async () => {
+  mockStore.inject({ route: 'paymentLink', status: 200, body: null });
+  expect(await mockStore.dispatch('paymentLink', { params: { token: 'unused' } })).toEqual({ status: 200, body: null });
+});
+
+it('isolates queued read faults from payment writes and clears them on reset', async () => {
+  const { world } = mockStore;
+  const desk = world.desk(RIVERA.deskId)!;
+  const chat = world.addSession(desk);
+  const token = world.issueLink(chat, { title: 'Deposit', amountCents: 2000, language: 'en' });
+  for (const status of ['network', 404, 429, 503] as const) mockStore.inject({ route: 'paymentLink', status, times: 1 });
+  expect(mockStore.pendingInjections).toHaveLength(4);
+  expect(await mockStore.dispatch('completePayment', { params: { token } })).toMatchObject({ status: 200, body: { state: 'paid' } });
+  expect(mockStore.pendingInjections).toHaveLength(4);
+  for (const status of ['network', 404, 429, 503] as const) {
+    expect(await mockStore.dispatch('paymentLink', { params: { token } })).toMatchObject(status === 'network' ? { network: true } : { status });
+  }
+  expect(mockStore.pendingInjections).toEqual([]);
+  mockStore.inject({ route: 'paymentLink', status: 503 });
+  mockStore.reset('rivera');
+  expect(mockStore.pendingInjections).toEqual([]);
+});

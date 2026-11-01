@@ -946,7 +946,7 @@ export class MockWorld {
       ref_id: token,
       summary: { state: 'cancelled', by },
     });
-    if (by === 'rules_changed') this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language, `payment_link:${token}`)]);
+    if (by === 'rules_changed' && !session.ended) this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language, `payment_link:${token}`)]);
   }
 
   /**
@@ -1285,13 +1285,14 @@ export class MockWorld {
       ref_id: String(version),
       summary: { version, parent_version: record.parent },
     });
-    // The mock's explicit never rules also reach outstanding checkout links when confirmed.
-    // Reuse the same scope matching as the mock's execution-time rule refusal above.
+    // Explicit ask/never rules revoke auto-allowed links in the scopes this mock models.
+    // The script issues only auto-allowed links: it has no owner-approved link provenance or
+    // full kernel rule evaluator (limits, hours, reviewer conditions and other principal scopes).
     const linkRules = rulesForTool({ tool: 'native.payment_link', effects: ['charge'] }, desk.policy.cards);
     for (const [token, link] of this.links) {
       if (link.deskId !== desk.summary.desk_id || link.view.state !== 'issued') continue;
       const session = this.sessions.get(link.sessionId);
-      if (session && linkRules.some((card) => card.mode === 'never' && (
+      if (session && linkRules.some((card) => card.mode !== 'auto' && (
         card.who === 'anyone' ||
         (card.who === 'verified' && session.state.verified) ||
         (card.who === 'person' && session.person?.personId === card.person_id)
