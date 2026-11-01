@@ -226,6 +226,9 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
     // Then the reply's turn ends, and the page no longer says "Claude is writing".
     await expect.poll(turnEnds, { message: "the reply's turn ended", timeout: wait.reply }).toBeGreaterThanOrEqual(sent + 1);
     await expect(publicTab.getByText('Claude is writing')).toHaveCount(0, { timeout: wait.update });
+    // The reply that arrived live has come in whole: its words revealed, its cards and receipts in.
+    const comingIn = '.cd-claude-message--revealing, .cd-claude-message--following, .cd-transcript-row--following';
+    await expect(publicTab.locator(comingIn), 'the reply came in whole').toHaveCount(0, { timeout: wait.update });
     await expectNoAxeViolations(publicTab, 'the public page');
   });
 

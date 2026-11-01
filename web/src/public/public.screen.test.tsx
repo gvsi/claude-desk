@@ -22,7 +22,7 @@ import { DEMO_CODE, HELD_PROSE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, type 
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
-import { expectRevealed, expectShownWhole, watchReveal } from '../test/reveal.ts';
+import { expectRevealed, expectShownWhole, watchReveal, watchRevealing } from '../test/reveal.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
@@ -1783,10 +1783,12 @@ describe('public chat page', () => {
     await say(first.screen, 'How much is drain clearing?');
 
     // A reload reads the stored conversation: the reply shows whole from its first frame, its card
-    // and its receipt with it.
+    // and its receipt with it, and nothing on the page is revealed.
+    const revealed = watchRevealing();
     const second = await renderRoute(PAGE);
     await ready(second.screen);
     expectShownWhole(await watchReveal(0));
+    expect(revealed()).toEqual([]);
   });
 
   it('under_reduced_motion_a_live_reply_shows_whole_with_its_card_and_receipt_at_once', async () => {
