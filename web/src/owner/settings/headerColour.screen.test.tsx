@@ -131,3 +131,23 @@ it('draws the public header in every picked palette, including No colour', async
     }
   }
 });
+
+
+it('uses the shared warm focus ring without changing the selected ring', async () => {
+  const { screen } = await renderRoute(GENERAL);
+  const teal = screen.getByRole('radio', { name: 'Teal', exact: true });
+  await expect.element(teal).toHaveAttribute('aria-checked', 'true');
+  const selectedRing = getComputedStyle(teal.element()).boxShadow;
+  await userEvent.keyboard('{Tab}');
+  (teal.element() as HTMLElement).focus();
+  expect(teal.element().matches(':focus-visible')).toBe(true);
+  const probe = document.createElement('span');
+  probe.style.color = 'var(--ring-focus, var(--text-primary))';
+  document.body.append(probe);
+  try {
+    expect(getComputedStyle(teal.element()).outlineColor).toBe(getComputedStyle(probe).color);
+    expect(getComputedStyle(teal.element()).boxShadow).toBe(selectedRing);
+  } finally {
+    probe.remove();
+  }
+});
