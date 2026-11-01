@@ -145,7 +145,12 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
     const log = turn?.closest<HTMLElement>('[role="log"]');
     if (!turn || !log) return undefined;
     const lead = turnOf(leadId) ?? turn;
-    revealExchange(log, lead, turn, turn);
+    // Where its own scrolling leaves the conversation, so it is never read as the owner's.
+    const reveal = (end: Element) => {
+      revealExchange(log, lead, turn, end);
+      follow.current.at = log.scrollTop;
+    };
+    reveal(turn);
     if (!drafted) return undefined;
     // The review's last button ("Keep my rules", or "Try again" when the rules couldn't be read)
     // closes it, and the exchange.
@@ -153,7 +158,7 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
       const buttons = turn.querySelectorAll('.cd-rule-draft button');
       const end = buttons[buttons.length - 1];
       if (end === undefined) return false;
-      revealExchange(log, lead, turn, end);
+      reveal(end);
       return true;
     };
     if (revealActions()) return undefined;
@@ -204,9 +209,9 @@ function useRevealGrowing(root: { current: HTMLElement | null }, turns: readonly
     const now = follow.current;
     if (now.lead !== leadId) {
       // A new question: its answer is followed from the start.
+      // Where the new question was brought into view stays recorded, so that scroll isn't the owner's.
       now.lead = leadId;
       now.mode = 'reveal';
-      now.at = null;
     }
     if (growing === null || now.mode === 'off') return;
     const answer = root.current?.querySelector<HTMLElement>('.cd-rule-chat__growing');

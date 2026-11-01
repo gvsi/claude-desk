@@ -201,6 +201,31 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
   });
 
+  it('follows_a_follow_up_answer_once_the_conversation_overflows', async () => {
+    // A first answer long enough that the conversation scrolls.
+    const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
+    mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
+    const { panel } = await ask(viewport);
+    await expect.element(panel.getByText(long, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    const log = panel.element().querySelector<HTMLElement>('[role="log"]')!;
+    expect(log.scrollHeight).toBeGreaterThan(log.clientHeight);
+    // A follow-up: Claude brings the owner's new question into view, then follows its answer.
+    const held = gate();
+    mockStore.planStream('ruleChat', { pauseAfter: 12, until: held.until });
+    await panel.getByRole('textbox', { name: 'Ask Claude' }).fill('Why?');
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => (growing(panel)?.textContent ?? '').split(' ').length).toBe(11);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const inView = (el: Element) => el.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1;
+    expect(inView(growing(panel)!)).toBe(true);
+    held.release();
+    const explained = 'I can explain what a rule does, or draft a change to one. Ask about a tool by name, such as quotes, bookings or refunds.';
+    const final = panel.getByText(explained, { exact: true });
+    await expect.element(final).toBeVisible();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(inView(final.element())).toBe(true);
+  });
+
   it('closes_the_stream_with_the_panel', async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 2, until: held.until });
