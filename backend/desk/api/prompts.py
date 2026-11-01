@@ -491,6 +491,13 @@ customers can't rely on. The same goes for your opening and the closing plan.
 - Apps: google_calendar, gmail, google_drive, quickbooks, stripe, square, calendly, each with why (at most 200). \
 Every app connects when the owner accepts it (simulated in this preview)."""
 
+# The public contact as the kernel's public-text checks accept it, said once wherever setup's consultant writes one:
+# the fact turn's guidance and the field's description in each schema that has it.
+PUBLIC_CONTACT_FORMAT = (
+    'only ways to reach the business, each a phone number (an extension such as "ext. 12" is fine), an email or a '
+    'website (an https URL or a bare domain), separated by commas or "or"; a short label such as "Call us at" or '
+    '"Email" may come before one, but no other words, such as offers or promises.')
+
 _TOPICS = """\
 Topics (reference)
 - what_you_do: the services, who the customers are, and anything the business doesn't do.
@@ -661,6 +668,7 @@ the hours question.
 - summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to customers on the \
 public page. Write them as the business speaking to its customers; never instructions to the Desk, private owner \
 instructions, or a contact route other than the contact on record.
+- public_contact is the contact customers see: {PUBLIC_CONTACT_FORMAT}
 - Lists you give replace the ones so far and an empty list leaves them, so when the owner adds hours or prices, \
 give the whole list. Set clear_hours or clear_price_items only when they say to remove them all.
 - On the quote question, pricing records how the business prices in words, only from the owner's answer; \
@@ -930,7 +938,8 @@ class SetupPatch(BaseModel):
     payment_link_auto_max_cents: Cents | None = None
     auto_money_cap_cents: MoneyCap | None = None
     refunds: Refunds | None = None
-    public_contact: str | None = Field(None, max_length=200)
+    public_contact: str | None = Field(None, max_length=200,
+                                       description=f"The contact customers see: {PUBLIC_CONTACT_FORMAT}")
     price_items: list[PriceAnswer] | None = Field(None, max_length=50)
 
 
@@ -1165,7 +1174,7 @@ class SuggestedFacts(BaseModel):
 
     service_area: str = Field(max_length=500)
     hours: list[HoursAnswer] = Field(max_length=14)
-    public_contact: str = Field(max_length=200)
+    public_contact: str = Field(max_length=200, description=f"The contact customers see: {PUBLIC_CONTACT_FORMAT}")
     after_hours: str = Field(max_length=500)
     price_items: list[PriceAnswer] = Field(max_length=50)
 
@@ -1338,7 +1347,8 @@ def _turn_fields() -> dict[str, tuple[object, Any]]:
                                                                     "cents: only from the owner's answer to the money "
                                                                     "question.")),
         "refunds": (Refunds | None, Field(description="ask: refunds go to the owner; never: no refunds.")),
-        "public_contact": (str, Field(max_length=200, description="The contact customers see.")),
+        "public_contact": (str, Field(max_length=200,
+                                      description=f"The contact customers see: {PUBLIC_CONTACT_FORMAT}")),
         "price_items": (list[PriceAnswer], Field(max_length=50, description="The price list, every item.")),
         "clear_price_items": (bool, Field(description="True only when the owner says to remove all the prices; an "
                                                       "empty price list leaves them as they are.")),

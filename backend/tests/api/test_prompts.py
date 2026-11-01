@@ -51,6 +51,7 @@ from desk.api.prompts import (
     Triage,
     conversation_system,
 )
+from desk.api.model import strict_schema
 from desk.api.store import DELIVERY_AUTHORS, ROW_KINDS
 from desk.contracts import ClauseTemplate
 
@@ -166,6 +167,25 @@ def test_the_opening_prompt_asks_only_for_its_own_fields():
     named_fields = set(re.findall(r"\b([a-z_]+):", system))
     assert named_fields.isdisjoint({"skip", "drop", "add_jobs", "plan"})
     assert "<answers_so_far>" not in system
+
+
+def test_setup_tells_the_consultant_the_public_contact_format_once_per_place():
+    """The kernel takes a public contact only as ways to reach the business, so each place setup's consultant writes
+    one says that format, in one sentence: the fact turn's guidance once, and the field's description in every turn
+    schema that has it, the suggested facts and the patch code merges."""
+    sentence = prompts.PUBLIC_CONTACT_FORMAT
+    for part in ('"ext. 12"', "an https URL or a bare domain", 'separated by commas or "or"', '"Call us at"',
+                 '"Email"', "no other words, such as offers or promises"):
+        assert part in sentence
+    assert SETUP_TURN_SYSTEM.count(sentence) == 1
+    for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert sentence not in system
+    turns = [turn for turn in SETUP_TURNS.values() if "public_contact" in turn.model_fields]
+    assert turns
+    for model in (*turns, prompts.SuggestedFacts, prompts.SetupPatch):
+        assert model.model_fields["public_contact"].description.count(sentence) == 1, model.__name__
+    for model in (*turns, prompts.SetupUnderstanding):
+        assert json.dumps(strict_schema(model)).count(json.dumps(sentence)[1:-1]) == 1, model.__name__
 
 
 def test_setup_planning_prompts_ask_prerequisites_before_proposing_jobs():
