@@ -6,9 +6,10 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 
 - **Start** (`start`): one structured model call reads the owner's description (`SetupStart`), then the kernel makes
   the Desk (`POST /desks`, which activates the `ask_first` preset: its auto cards cover the setup tools). Its ID is
-  committed as soon as the kernel returns it and kept on failure. The start then turns Answering off, so nothing
-  answers the public until setup takes the Desk live (tried twice; a Desk that stays
-  answering is deleted, and the request answers the kernel's error). Claude then asks for consent. Each start carries
+  committed as soon as the kernel returns it and kept on failure. A failed start deletes its Desk best effort;
+  a failed delete is logged by type, and the start's own failure still goes out. The start turns Answering off, so
+  nothing answers the public until setup takes the Desk live (tried twice; a Desk that stays answering is deleted,
+  and the request answers the kernel's error). Claude then asks for consent. Each start carries
   the client's `idempotency_key` (required) and writes the interview's row first, holding the key and its body's
   hash, with no Desk yet. A keyed start is finished only once its transcript is stored (`_start_finished`); a read
   before that is 404, even after the Desk is linked. An old unkeyed row counts as finished without this check.
@@ -286,8 +287,8 @@ LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
 # The longest a start can run: Claude's reading of the description and its one retry, each bounded by
-# `SETUP_TIMEOUT_S`, then its kernel calls (`POST /desks`, two tries at turning Answering off and the `DELETE` when
-# both fail), each bounded by the kernel client's timeout, with a minute's slack for the database and the process. A
+# `SETUP_TIMEOUT_S`, then its kernel calls (`POST /desks`, two tries at turning Answering off and a failed start's
+# `DELETE`), each bounded by the kernel client's timeout, with a minute's slack for the database and the process. A
 # keyed row still starting after this is abandoned: its request stopped.
 START_KERNEL_CALLS = 4
 START_ABANDONED_S = 2 * SETUP_TIMEOUT_S + START_KERNEL_CALLS * DEFAULT_TIMEOUT_S + 60
@@ -772,20 +773,16 @@ async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> E
 
 
 async def _answering_off(owner: OwnerCtx, desk_id: str) -> None:
-    """Turn the new Desk's Answering off, trying twice. When it stays on, the Desk is deleted (best effort: a failed
-    delete is logged) and the last failure raised, so no Desk the owner never got answers the public."""
+    """Turn the new Desk's Answering off, trying twice. Raise the last failure when it stays on; `start` deletes
+    the Desk best effort, as it does for any failure after the Desk is made."""
     for attempt in (1, 2):
         try:
             await owner.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False), path={"id": desk_id})
             return
-        except (KernelFailed, KernelUnavailable) as failure:
+        except (KernelFailed, KernelUnavailable):
             logger.warning("a new Desk's Answering couldn't be turned off (attempt %d)", attempt)
             if attempt == 2:
-                try:
-                    await owner.kernel.call("DELETE /desks/{id}", path={"id": desk_id})
-                except (KernelFailed, KernelUnavailable):
-                    logger.error("a new Desk that couldn't stop answering couldn't be deleted")
-                raise failure from None
+                raise
 
 
 async def _read_description(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
@@ -809,7 +806,7 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
     try:
         await link(created.desk_id)
     finally:
-        # A failed link write must still stop the new Desk answering (or delete it after both tries fail).
+        # A failed link write must still try to stop answering before start deletes the Desk.
         await _answering_off(owner, created.desk_id)
     site = website_url(described.website)
     interview = Interview(
@@ -955,6 +952,11 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
                 updated_at=func.now()))
             await conn.commit()
     except BaseException as error:                  # the Desk was asked for: the key keeps the outcome
+        if created_desk_id is not None:
+            try:
+                await owner.kernel.call("DELETE /desks/{id}", path={"id": created_desk_id})
+            except Exception as failed:
+                logger.error("a failed setup start's Desk couldn't be deleted (%s)", type(failed).__name__)
         await _settle(engine, update(INTERVIEWS).where(*keyed).values(
             desk_id=created_desk_id, start_error=_failure_record(error), updated_at=func.now()))
         raise

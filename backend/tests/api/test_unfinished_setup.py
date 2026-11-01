@@ -8,6 +8,7 @@ The app runs on FakeKernel with a scripted model.
 """
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -96,7 +97,7 @@ async def test_a_desk_list_read_mid_start_shows_the_desk_in_setup(app, browser, 
         assert await setups(owner) == {**seeded, desk_id: {"interview_id": interview_id, "step": "questions"}}
 
 
-async def test_a_failed_start_leaves_its_desk_in_setup(app, browser, kernel_http, model, db):
+async def test_a_start_that_fails_after_its_desk_is_made_deletes_it(app, browser, kernel_http, model, fake, db):
     owner = await new_owner(app, browser, kernel_http)
     seeded = await setups(owner)
     model.add(started())
@@ -116,16 +117,52 @@ async def test_a_failed_start_leaves_its_desk_in_setup(app, browser, kernel_http
     finally:
         event.remove(engine, "before_cursor_execute", fail_start_save)
     assert len(failed_writes) == 1
-    listed = await setups(owner)
-    (desk_id,) = listed.keys() - seeded.keys()
     ((interview_id, linked, failed),) = db.execute(
         "SELECT interview_id, desk_id, start_error IS NOT NULL FROM app.setup_interviews"
         " WHERE copy_id = %s", (owner.copy_id,)).fetchall()
-    assert (linked, failed) == (desk_id, True)
-    assert listed[desk_id] == {"interview_id": interview_id, "step": "questions"}
+    assert linked is not None and failed
+    (deleted,) = fake.called("DELETE /desks/{id}")
+    assert deleted.path == f"/desks/{linked}" and deleted.headers["x-owner-session"] == owner.token
+    assert fake.desks[linked].deleted_at is not None
+    assert await setups(owner) == seeded
     repeat = await owner.browser.post("/api/owner/setup", json=body)
     assert (repeat.status_code, repeat.json()) == (409, {"error": "key_spent"})
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).status_code == 404
+
+
+@pytest.mark.parametrize("delete_failure, failure_type", [("500", "KernelUnavailable"), ("422", "KernelFailed")])
+async def test_a_failed_delete_keeps_the_desk_in_setup(app, browser, kernel_http, model, fake, db, caplog,
+                                                     delete_failure, failure_type):
+    owner = await new_owner(app, browser, kernel_http)
+    seeded = await setups(owner)
+    model.add(started())
+    body = start_body()
+    fake.fail("DELETE /desks/{id}", delete_failure, times=1)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+
+    def fail_start_save(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("UPDATE app.setup_interviews SET") and "transcript=" in statement:
+            raise RuntimeError("start save failed")
+
+    engine = app.state.runtime.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", fail_start_save)
+    try:
+        with pytest.raises(RuntimeError, match="start save failed"):
+            await owner.browser.post("/api/owner/setup", json=body)
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_start_save)
+    ((interview_id, desk_id, failed),) = db.execute(
+        "SELECT interview_id, desk_id, start_error IS NOT NULL FROM app.setup_interviews"
+        " WHERE copy_id = %s", (owner.copy_id,)).fetchall()
+    assert desk_id is not None and failed
+    (deleted,) = fake.called("DELETE /desks/{id}")
+    assert deleted.path == f"/desks/{desk_id}"
+    assert fake.desks[desk_id].deleted_at is None and not fake.desks[desk_id].answering
+    assert await setups(owner) == {**seeded, desk_id: {"interview_id": interview_id, "step": "questions"}}
+    assert f"a failed setup start's Desk couldn't be deleted ({failure_type})" in caplog.messages
+    repeat = await owner.browser.post("/api/owner/setup", json=body)
+    assert (repeat.status_code, repeat.json()) == (409, {"error": "key_spent"})
+    assert len(fake.called("DELETE /desks/{id}")) == 1
 
 
 async def test_a_refused_start_claims_no_later_desk(app, browser, kernel_http, model, fake, db):
@@ -251,8 +288,9 @@ async def test_an_early_link_is_not_a_readable_or_repeatable_interview(app, brow
 
 @pytest.mark.parametrize("lose_settlement", [False, True])
 @pytest.mark.parametrize("clock_offset", [-600, -2, 2, 600])
-async def test_a_failed_link_stops_answering_and_keeps_the_desk_in_setup(app, browser, kernel_http, model, fake, db,
-                                                                       lose_settlement, clock_offset):
+@pytest.mark.parametrize("delete_fails", [False, True])
+async def test_a_failed_link_deletes_the_desk_or_keeps_it_in_setup(app, browser, kernel_http, model, fake, db,
+                                                                 lose_settlement, clock_offset, delete_fails):
     from desk.api import setup as desk_setup
 
     fake.now = db.execute("SELECT now()").fetchone()[0] + timedelta(seconds=clock_offset)
@@ -261,6 +299,8 @@ async def test_a_failed_link_stops_answering_and_keeps_the_desk_in_setup(app, br
     model.add(started())
     body = start_body()
     call = KernelView.call
+    if delete_fails:
+        fake.fail("DELETE /desks/{id}", "500", times=1)
 
     async def timed(view, route, body=None, **options):
         if route == "POST /desks":
@@ -283,13 +323,16 @@ async def test_a_failed_link_stops_answering_and_keeps_the_desk_in_setup(app, br
         finally:
             event.remove(engine, "before_cursor_execute", fail_link)
     listed = await setups(owner)
-    (desk_id,) = listed.keys() - seeded.keys()
+    (deleted,) = fake.called("DELETE /desks/{id}")
+    desk_id = deleted.path.removeprefix("/desks/")
     ((interview_id, linked, failed),) = db.execute(
         "SELECT interview_id, desk_id, start_error IS NOT NULL FROM app.setup_interviews"
         " WHERE copy_id = %s", (owner.copy_id,)).fetchall()
     assert not fake.desks[desk_id].answering
+    assert (fake.desks[desk_id].deleted_at is None) == delete_fails
     assert (linked, failed) == ((None, False) if lose_settlement else (desk_id, True))
-    assert listed[desk_id] == {"interview_id": interview_id, "step": "questions"}
+    assert listed == ({**seeded, desk_id: {"interview_id": interview_id, "step": "questions"}}
+                      if delete_fails else seeded)
     assert all(listed[seed] is None for seed in seeded)
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).status_code == 404
     repeat = await owner.browser.post("/api/owner/setup", json=body)
@@ -299,7 +342,7 @@ async def test_a_failed_link_stops_answering_and_keeps_the_desk_in_setup(app, br
                " WHERE interview_id = %s", (desk_setup.START_ABANDONED_S + 5, interview_id))
     repeat = await owner.browser.post("/api/owner/setup", json=body)
     assert (repeat.status_code, repeat.json()) == (409, {"error": "key_spent"})
-    assert await setups(owner) == listed  # no age releases the guard when both link writes were lost
+    assert await setups(owner) == listed  # a surviving Desk stays guarded even when both link writes were lost
 
 
 async def test_an_unfinished_setups_desk_lists_its_interview(app, browser, kernel_http, model):
