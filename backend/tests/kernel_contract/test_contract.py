@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
+from desk.api.deliver import Reply
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
 from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
@@ -1374,6 +1375,28 @@ async def test_check_reply_receipt_follows_the_shown_handoff_clause(kernel, ro_r
     assert verdict.ok is ok
     assert [block.template for block in verdict.blocks] == templates
     assert verdict.visitor_plain == receipt
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("prose", "clauses", "handoff"), [
+    ("", [Clause(template="handoff")], True),
+    (BLOCKED_PROSE, [], True),
+    (BLOCKED_PROSE, [Clause(template="hours", fact_id="charter:hours")], False),
+    ("Here are our opening hours.", [Clause(template="hours", fact_id="charter:hours")], False),
+], ids=["passing-handoff", "final-handoff", "final-kept-card", "passing-checked"])
+async def test_delivered_handoff_flag_matches_the_reply_receipt(kernel, ro_read, prose, clauses, handoff):
+    """The visitor's delivered event flag and the kernel's signed reply receipt can't disagree about a handoff."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=0, prose=prose, clauses=clauses)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply",
+                                                            CheckReplyRequest(draft=draft, final=True))
+    reply = Reply(verdict, "claude", "api")
+    assert reply.handoff is handoff
+    assert reply.handoff is ("handoff" in [block.template for block in verdict.blocks])
+    assert reply.handoff is (verdict.visitor_plain == "Passed to Maria Rivera to answer")
+    assert verdict.visitor_plain in ("Passed to Maria Rivera to answer", "Reply checked against Maria Rivera's rules")
 
 
 async def checked(http: KernelHttp, created: SessionCreated, prose: str, *, final: bool) -> ReplyVerdict:
