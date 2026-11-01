@@ -875,6 +875,12 @@ function draftCard(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'w
 /** Monday to Friday, all day. */
 const WEEKDAYS_ALL_DAY = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } satisfies RuleCard['hours'];
 
+/** Whether `card` applies on a Saturday or a Sunday: with no hours, it applies every day. */
+function coversAWeekend(card: RuleCard): boolean {
+  const hours = card.hours ?? null;
+  return hours === null || hours.days.some((day) => day === 'sat' || day === 'sun');
+}
+
 /** A request held for the owner, as Claude on Rules reads it: its tool, the kernel's line on it, and the reason of the rule that held it. */
 export interface HeldForChat {
   tool: ToolName;
@@ -908,7 +914,7 @@ export const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
 
 /**
  * How Rivera's Claude answers the owner on Rules, in place of the API's model turn: the Rules
- * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rule for
+ * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rules for
  * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
  * quote rule up to that amount); "Why was this refund held?" is answered about the newest held
  * request of the tool it names, with the rule that held it, and an offer to draft one unless it is
@@ -918,7 +924,8 @@ export const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
 export function ruleChatReply(text: string, active: readonly RuleCard[], held: readonly HeldForChat[] = []): RuleChatReply {
   const lower = text.toLowerCase();
   if (lower.includes('weekend') && lower.includes('quot')) {
-    const quote = active.find((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
+    const quotes = active.filter((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
+    const quote = quotes[0];
     const weekdays = draftCard({
       card_id: 'card-weekday-quotes',
       applies_to: 'native.quote',
@@ -928,9 +935,12 @@ export function ruleChatReply(text: string, active: readonly RuleCard[], held: r
       hours: WEEKDAYS_ALL_DAY,
       reason: 'Quotes from your price list on weekdays. Weekend quotes wait for your answer.',
     });
+    // Every other one that still quotes on its own at weekends, such as a water heater rule added
+    // since, moves to weekdays too, so the change isn't "No rules change" while one does.
+    const others = quotes.slice(1).filter(coversAWeekend).map((card) => ({ ...card, hours: WEEKDAYS_ALL_DAY, reason: `${card.reason.replace(/\.$/, '')}, on weekdays.` }));
     return {
       answer: "Here's that change: quotes stay automatic on weekdays, and on weekends they wait for your answer. Nothing changes until you confirm it.",
-      add: [weekdays],
+      add: [weekdays, ...others],
     };
   }
   if (lower.includes('water heater')) {

@@ -1414,3 +1414,87 @@ describe("Ask Claude's question about a hold", () => {
     expect(desk().drafts.size).toBe(0);
   });
 });
+
+describe("Rivera's fixed suggestions", () => {
+  type Screen = Awaited<ReturnType<typeof renderRoute>>['screen'];
+
+  /**
+   * On Rules, presses Rivera's suggestion `words`, confirms the change Claude drafts from it in Ask
+   * Claude beside the page, and waits for the receipt; returns the suggestions and the panel.
+   */
+  async function confirmSuggestion(screen: Screen, words: string) {
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await group.getByRole('button', { name: words, exact: true }).click();
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    const log = panel.getByRole('log');
+    const confirm = log.getByRole('button', { name: 'Confirm change' });
+    await expect.element(confirm).toBeEnabled();
+    const version = desk().lastVersion;
+    await confirm.click();
+    await expect.element(log.getByText(`Confirmed. Version ${version} of your rules, checked against the always-on rules.`, { exact: true })).toBeVisible();
+    expect(desk().policy.version).toBe(version);
+    return { group, panel };
+  }
+
+  /** Closes Ask Claude: focus can't go back to the suggestion that opened it, so the composer above the suggestions takes it. */
+  async function closeToTheComposer(screen: Screen, panel: Locator) {
+    await userEvent.keyboard('{Escape}');
+    await expect.element(panel).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Ask Claude to change a rule' })).toHaveFocus();
+  }
+
+  it('the_weekends_suggestion_goes_once_its_change_is_in_effect', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const { group, panel } = await confirmSuggestion(screen, 'Stop quoting on weekends');
+    // Quotes no longer go out on their own at weekends, so it isn't offered again; the other stays.
+    await expect.poll(() => chipWords(group)).toEqual(['Quote water heater installs up to $600']);
+    // Focus stays in Ask Claude, where the receipt landed.
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+    await closeToTheComposer(screen, panel);
+  });
+
+  it('the_water_heater_suggestion_goes_once_its_change_is_in_effect', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const { group, panel } = await confirmSuggestion(screen, 'Quote water heater installs up to $600');
+    await expect.poll(() => chipWords(group)).toEqual(['Stop quoting on weekends']);
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+    await closeToTheComposer(screen, panel);
+  });
+
+  it('a_weekend_quote_rule_added_since_brings_the_weekends_suggestion_back_with_a_change_to_draft', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const { group } = await confirmSuggestion(screen, 'Stop quoting on weekends');
+    await expect.poll(() => chipWords(group)).toEqual(['Quote water heater installs up to $600']);
+    // The water heater rule quotes on its own every day, weekends too, so stopping that is on offer again.
+    await confirmSuggestion(screen, 'Quote water heater installs up to $600');
+    await expect.poll(() => chipWords(group)).toEqual(['Stop quoting on weekends']);
+    // It drafts a change to that rule, not "No rules change"; once confirmed, both changes are in effect.
+    await confirmSuggestion(screen, 'Stop quoting on weekends');
+    await expect.element(group).not.toBeInTheDocument();
+    const quotes = desk().policy.cards.filter((card) => card.applies_to === 'native.quote' && card.mode === 'auto' && card.who === 'anyone');
+    expect(quotes.map((card) => [card.max_amount_cents ?? null, card.hours?.days])).toEqual([
+      [null, ['mon', 'tue', 'wed', 'thu', 'fri']],
+      [60_000, ['mon', 'tue', 'wed', 'thu', 'fri']],
+    ]);
+  });
+
+  it('both_show_on_first_load_while_the_rules_are_read_and_after', async () => {
+    let releaseRules!: () => void;
+    const rulesHeld = new Promise<void>((resolve) => { releaseRules = resolve; });
+    onTestFinished(() => releaseRules());
+    worker.use(http.get(ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId), async () => {
+      await rulesHeld;
+      return undefined;
+    }));
+    const { screen } = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    // While the rules are read, both are offered, in order, as before.
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[1], exact: true })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    // Rivera's rules have neither change, so both stay once they are drawn.
+    releaseRules();
+    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+});

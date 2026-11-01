@@ -39,7 +39,7 @@ import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.
 import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import { RulesSkeleton } from './RulesSkeleton.tsx';
-import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, rulesVersionLine } from './copy.ts';
+import { COMPOSER_HELPER, RULES_SUBTITLE, rulesChipsToOffer, rulesVersionLine } from './copy.ts';
 
 import './RulesPage.css';
 
@@ -143,11 +143,12 @@ export function RulesPage() {
   const { desk, reachPlace } = useOwnerDesk();
   useDocumentTitle(inApp(RULES_TITLE));
   const deskId = desk.desk_id;
-  const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? RULES_CHIPS : [];
   const navigate = useNavigate();
   const location = useLocation();
   const { ask, open: asking } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
+  // Rivera's fixed examples, less any whose change is already in effect: all of them until the rules are read.
+  const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? rulesChipsToOffer(rules.data?.active.cards) : [];
   const people = useQuery(peopleQuery(deskId));
   const suggestions = useQuery({ ...suggestionsQuery(deskId), refetchInterval: pollMs('rules') });
   // The Desk's held requests, as Needs you lists them: the latest is one more thing to ask about,
@@ -228,6 +229,29 @@ export function RulesPage() {
     });
     return () => cancelAnimationFrame(frame);
   }, [toReveal]);
+
+  // Closing Ask Claude gives focus back to what opened it. When that was a suggestion that has gone
+  // since, its change now in effect, the composer above the suggestions takes focus instead of the
+  // page's body or the panel sliding out, and the page doesn't scroll to it.
+  const askRow = useRef<HTMLDivElement>(null);
+  const openedBy = useRef<string | null>(null);
+  const pickChip = (words: string) => {
+    if (!asking) openedBy.current = words;
+    ask(words);
+  };
+  useEffect(() => {
+    if (asking) return;
+    const chip = openedBy.current;
+    openedBy.current = null;
+    if (chip === null || chips.includes(chip)) return;
+    // After the panel's own return of focus, which finds the suggestion gone.
+    requestAnimationFrame(() => {
+      const focused = document.activeElement;
+      if (focused !== null && page.current?.contains(focused) === true) return;
+      askRow.current?.querySelector('textarea')?.focus({ preventScroll: true });
+    });
+    // Only as the panel opens or closes, so `chips` is the suggestions drawn as it closed.
+  }, [asking]);
 
   /** Opens a card draft's review, with what it was drafted from. */
   const review = (draft: RulesDraft, from: PolicyVersionOut, extra: { preset?: RulesPreset; title?: string } = {}) => {
@@ -377,9 +401,9 @@ export function RulesPage() {
         />
       </div>
       {presetSaid === null ? null : <Notice tone={presetSaid.tone}>{presetSaid.line}</Notice>}
-      <div className="cd-rules__ask">
+      <div ref={askRow} className="cd-rules__ask">
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
-        {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
+        {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={pickChip} />}
       </div>
       {readError}
       <SkeletonScreen loading={loading} status="Reading your rules" skeleton={<RulesSkeleton withHeader={false} />} className="cd-rules__region">
