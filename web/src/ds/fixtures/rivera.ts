@@ -1626,6 +1626,7 @@ const utilityCards = [
   }),
   rule({ card_id: 'preset-fetch-website', applies_to: 'native.fetch_website', mode: 'auto', who: 'anyone', reason: 'Claude can read your website to learn about your business.' }),
   rule({ card_id: 'preset-read-memory', applies_to: 'native.read_memory', mode: 'auto', who: 'anyone', reason: 'Claude can read the notes you brought in to learn about your business.' }),
+  rule({ card_id: 'preset-web-search', applies_to: 'native.web_search', mode: 'auto', who: 'anyone', reason: 'Claude can search the web to learn how businesses like yours work.' }),
 ];
 
 const recommendedCards = [

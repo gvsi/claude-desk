@@ -41,6 +41,7 @@ const TOOL_EFFECTS = {
   'native.start_verification': ['send_message'],
   'native.fetch_website': ['read'],
   'native.read_memory': ['read'],
+  'native.web_search': ['read'],
   'payments.list_charges': ['private_data'],
   'payments.create_refund': ['pay_out', 'private_data'],
 } as const satisfies Record<ToolName, readonly Effect[]>;
