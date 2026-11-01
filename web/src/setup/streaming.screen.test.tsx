@@ -13,6 +13,7 @@ import { worker } from '../mocks/browser.ts';
 import { growingWords } from '../mocks/ownerStreams.ts';
 import { CPA_COPY, MEMORY_LABEL } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
+import { SETUP_COPY } from './copy.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
@@ -214,6 +215,26 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
     expect(screen.getByRole('log', { name: 'Setup questions' }).getByText('Both, about evenly', { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('keeps_a_retry_refused_right_after_a_failed_turn_in_the_message_box', async () => {
+    const state = await cpaInterview(true);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    // The turn fails: the answer stays, with "Try again".
+    mockStore.inject({ route: 'setupAnswer', status: 503, body: { error: 'model_unavailable' } });
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+    await expect.element(retry).toBeVisible();
+    await expect.element(screen.getByText(SETUP_COPY.questions.failed, { exact: true })).toBeVisible();
+    // Sent again the moment the error lands, the interview isn't free yet: refused, nothing stored.
+    // The words go back to send again, and nothing says it failed.
+    mockStore.inject({ route: 'setupAnswer', status: 409 });
+    await retry.click();
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
+    await expect.element(box).toHaveValue('Both, about evenly');
+    expect(screen.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText(SETUP_COPY.questions.failed, { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('alert').elements()).toHaveLength(0);
   });
 
   it('reads_the_interview_while_busy_when_the_stream_is_refused', async () => {

@@ -182,7 +182,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
    * the interview, and what came after the answer was sent settles it (`outcomeOf`): taken moves
    * the page on; refused puts the words back; unknown, or a read that fails, keeps them with
    * "Try again". Sent again (`again`), a 409 is settled the same way, since the first send may have
-   * been taken. Words a read shows stored are never sent again or put back.
+   * been taken; when nothing came since, the words go back in the composer. Words a read shows
+   * stored are never sent again or put back.
    */
   const submit = async (answer: Answer, again = false) => {
     if (composer.current?.contains(document.activeElement)) {
@@ -215,7 +216,9 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       }
       const outcome = outcomeOf(now, answer);
       if (outcome === 'taken') return;
-      if (outcome === 'refused') setRefill({ text: answer.text });
+      // Refused (409) with nothing stored since: the interview wasn't free yet, a moment after a turn
+      // ended or failed. The words go back to send again, and nothing says it failed.
+      if (outcome === 'refused' || refused) setRefill({ text: answer.text });
       else setFailed(answer);
     }
   };
