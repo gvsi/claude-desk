@@ -256,8 +256,10 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       onState(next);
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      if (err instanceof ApiError && err.status === 422 && err.code === 'amount_required') {
-        setAmountRequired(decision.proposal_id);
+      if (err instanceof ApiError && err.status === 422) {
+        await reread();
+        const proposal = state.messages.find(({ card }) => card?.proposal_id === decision.proposal_id)?.card;
+        if (proposal?.job?.job === 'payment') setAmountRequired(decision.proposal_id);
         return;
       }
       if (err instanceof ApiError && (err.kind === 'not_found' || err.kind === 'conflict')) {

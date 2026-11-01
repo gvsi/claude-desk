@@ -3361,7 +3361,7 @@ describe('consultant setup', () => {
     expect(requests('setupSuggestions')).toHaveLength(1);
   });
 
-  it.each([404, 409])('a_card_%s_rereads_and_shows_the_decision_the_server_holds', async (status) => {
+  it.each([404, 409, 422])('a_card_%s_rereads_and_shows_the_decision_the_server_holds', async (status) => {
     const state = await consultantAt('schedule');
     const id = state.interview_id;
     const { screen } = await renderRoute(`/app/setup/${id}`);
@@ -3423,13 +3423,15 @@ describe('consultant setup', () => {
     if (kind === 'google_calendar') await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
   });
 
-  it('shows_the_signed_amount_error_when_the_server_requires_an_amount', async () => {
+  it.each(['invalid', 'amount_required'] as const)('rereads_a_payment_422_%s_without_retrying_the_rejected_body', async (code) => {
     const state = await consultantAt('payment');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const card = screen.getByRole('article', { name: 'Send a retainer link' });
     await card.getByRole('textbox', { name: 'Amount', exact: true }).fill('750');
-    mockStore.inject({ route: 'setupProposal', status: 422, body: { error: 'amount_required' } });
+    const reads = requests('setup').length;
+    mockStore.inject({ route: 'setupProposal', status: 422, body: { error: code } });
     await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.poll(() => requests('setup').length).toBeGreaterThan(reads);
     await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
     await expect.element(card.getByRole('textbox', { name: 'Amount', exact: true })).toHaveValue('750');
     expect(card.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
