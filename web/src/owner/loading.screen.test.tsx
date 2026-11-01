@@ -6,7 +6,7 @@ import { cleanup } from 'vitest-browser-react';
 
 import { newIdempotencyKey, observeRequests, OWNER_ERROR_COPY, TIMEOUT_MS } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
-import type { SetupState } from '../api/views.ts';
+import type { ConversationSummary, SetupState } from '../api/views.ts';
 import { retryDelayMs } from '../app/poll.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
 import { Button, Greeting, Skeleton, SkeletonScreen } from '../ds/index.ts';
@@ -888,5 +888,271 @@ it.each(['desktop', 'phone'] as const)('customers_reload_hands_off at %s', async
     release: people.release,
   });
   expect(gaps()).toBe(0);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+const CONVERSATIONS = `/app/${RIVERA.deskId}/conversations`;
+const CONVERSATIONS_READ = ROUTES.conversations.path.replace('{desk_id}', RIVERA.deskId);
+const LIST_REGION = '.cd-conversations__region';
+
+/** The first conversation row in the list, the skeleton's while its layer is up, else the page's. */
+function firstListRow(): Element | null {
+  return document.querySelector(`${LIST_REGION} [data-skeleton-anchor="conversation-row-0"]`) ?? landedElement('.cd-conversations__items .cd-conversation-item');
+}
+
+it('conversations_without_recorded_history_moves_once', async () => {
+  // Decision 15: the skeleton draws a fresh copy's list, which replays recorded history and so says
+  // "Includes recorded history" 4 px under the title. A copy with none (the mock's) lands its list
+  // once, higher than its shapes by the caption's line and those 4 px: the first day then sits
+  // 16 px under the title, where the caption's 16 px gap put it under the caption.
+  // Today's Things to try reads the list too, so it is held from the start, as on a slow first read.
+  const list = holdReads(CONVERSATIONS_READ);
+  const { screen } = await openToday();
+  await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Conversations/ }).click();
+  await vi.waitFor(() => expect(document.querySelector(`${LIST_REGION} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
+  const caption = document.querySelector(`${LIST_REGION} .cd-conversations__caption`)!.getBoundingClientRect();
+  const tops = watchTop(firstListRow);
+  list.release();
+  await expect.element(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link').first()).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(screen.getByRole('link', { name: 'Includes recorded history' }).elements()).toHaveLength(0);
+  expect(tops()).toHaveLength(2);
+  expect(tops()[0]! - tops()[1]!).toBe(Math.round(caption.height) + 4);
+});
+
+/** The seeded chat whose 15% discount is held: what Today's "Open the request" opens. */
+const SEEDED_HOLD = 'ses-visitor-web';
+const conversationRead = (sessionId: string) => ROUTES.conversation.path.replace('{session_id}', sessionId);
+
+/**
+ * A fresh copy's list, which replays recorded history into the copy: the mock's own list with the
+ * seeded hold's chat marked replayed, so the page says "Includes recorded history" under its title.
+ */
+async function withRecordedHistory(): Promise<void> {
+  const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the conversations');
+  const list = answer.body as ConversationSummary[];
+  mockStore.inject({
+    route: 'conversations',
+    status: 200,
+    times: 10_000,
+    body: list.map((s) => (s.session_id === SEEDED_HOLD ? { ...s, replayed: true } : s)),
+  });
+}
+
+/** The list's parts the skeleton draws: the caption, the first day, and the seed's first and last rows. */
+const LIST_ANCHORS: readonly SkeletonAnchor[] = [
+  { name: 'conversations-caption', page: '.cd-conversations__caption' },
+  { name: 'conversations-day-0', page: '.cd-conversations__day' },
+  { name: 'conversation-row-0', page: '.cd-conversations__items > li:first-child > .cd-conversation-item', size: true },
+  { name: 'conversation-row-2', page: '.cd-conversations__items > li:nth-child(3) > .cd-conversation-item', size: true },
+];
+
+/** The open conversation's parts the skeleton draws: who it is with and its first message. */
+const PANE_ANCHORS: readonly SkeletonAnchor[] = [
+  { name: 'conversation-name', page: '.cd-conversation__name' },
+  { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message' },
+];
+
+it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', async (viewport) => {
+  await withRecordedHistory();
+  // Today's Things to try reads the list too, so it is held from the start, as on a slow first read.
+  const list = holdReads(CONVERSATIONS_READ);
+  const { screen, router } = await openToday(viewport);
+  await expectSkeletonLoad({
+    status: 'Reading your conversations',
+    anchors: LIST_ANCHORS,
+    stays: ['.cd-conversations__footer'],
+    open: async () => {
+      if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Conversations/ }).click();
+      else await router.navigate(CONVERSATIONS);
+    },
+    release: list.release,
+  });
+  expectNoHorizontalScroll();
+  expectNoWindowScroll();
+
+  // A conversation opens in place too. On a phone it opens at its latest, so the chat there is one
+  // short enough to show its first message.
+  let sessionId = SEEDED_HOLD;
+  if (viewport === 'phone') {
+    const chat = mockStore.world.addSession(mockStore.world.desk(RIVERA.deskId)!);
+    mockStore.world.visitorText(chat, 'Hi, can someone look at a dripping tap this week?');
+    sessionId = chat.state.session_id;
+  }
+  const chat = holdReads(conversationRead(sessionId));
+  await expectSkeletonLoad({
+    status: 'Opening the conversation',
+    anchors: PANE_ANCHORS,
+    stays: ['.cd-conversations__footer'],
+    open: async () => {
+      if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Needs you/ }).click();
+      else await router.navigate(`${CONVERSATIONS}/${sessionId}`);
+    },
+    release: chat.release,
+  });
+  await expect.element(screen.getByRole('log')).toBeVisible();
+  expectNoHorizontalScroll();
+  expectNoWindowScroll();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+const NEEDS_YOU_READ = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
+
+/**
+ * Opens the seeded hold's chat from Customers, which reads neither the list nor Needs you, with one
+ * of the pane's reads held (`key` at `path`): the others are read, and the pane keeps its shapes
+ * while the held one is out.
+ */
+async function openChatWithOneReadHeld(key: 'needsYou' | 'conversations', path: string, retryScale = 1) {
+  const rendered = await renderRoute(PEOPLE, { pollScale: 100, retryScale });
+  await expect.element(rendered.screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const held = holdReads(path);
+  const served = (route: string) => mockStore.requests.filter((request) => request.key === route).length;
+  const others = (['conversation', 'conversations', 'needsYou'] as const).filter((route) => route !== key);
+  const open = async () => {
+    await rendered.router.navigate(`${CONVERSATIONS}/${SEEDED_HOLD}`);
+    await vi.waitFor(() => expect(held.held()).toBe(1));
+    await vi.waitFor(() => expect(others.every((route) => served(route) > 0)).toBe(true));
+    await vi.waitFor(() => expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+    await nextFrames();
+    expect(landedElement('.cd-conversation__head'), `the chat waits for ${key}`).toBeNull();
+    expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown');
+  };
+  return { ...rendered, held, open };
+}
+
+it('conversation_waits_for_needs_you', async () => {
+  const { screen, held, open } = await openChatWithOneReadHeld('needsYou', NEEDS_YOU_READ);
+  await expectSkeletonLoad({
+    status: 'Opening the conversation',
+    anchors: PANE_ANCHORS,
+    stays: ['.cd-conversations__footer'],
+    open,
+    release: held.release,
+  });
+  await expect.element(screen.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}`, exact: true })).toBeVisible();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('conversation_waits_for_the_list_that_names_it', async () => {
+  // Decision 7: the list read only names who the chat is with, and still counts. A chat with a
+  // named visitor would otherwise land as "Visitor" and change its name under the reader.
+  const { screen, held, open } = await openChatWithOneReadHeld('conversations', CONVERSATIONS_READ);
+  await expectSkeletonLoad({
+    status: 'Opening the conversation',
+    anchors: PANE_ANCHORS,
+    stays: ['.cd-conversations__footer'],
+    open,
+    release: held.release,
+  });
+  await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor' })).toBeVisible();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('conversation_lands_on_its_needs_you_error', async () => {
+  const { screen, held, open } = await openChatWithOneReadHeld('needsYou', NEEDS_YOU_READ, 0);
+  mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
+  await open();
+  held.release();
+  const failed = screen.getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true });
+  await expect.element(failed).toBeVisible();
+  await expect.element(screen.getByRole('log')).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(failed.element().closest('.cd-conversation')).not.toBeNull();
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  expect(mockStore.requests.filter(({ key }) => key === 'needsYou')).toHaveLength(2);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('conversations_still_under_reduced_motion', async () => {
+  await withRecordedHistory();
+  const list = holdReads(CONVERSATIONS_READ);
+  const { screen } = await openToday();
+  await expectSkeletonStill({
+    status: 'Reading your conversations',
+    anchors: LIST_ANCHORS,
+    stays: ['.cd-conversations__footer'],
+    open: async () => {
+      await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Conversations/ }).click();
+    },
+    release: list.release,
+  });
+  const chat = holdReads(conversationRead(SEEDED_HOLD));
+  await expectSkeletonStill({
+    status: 'Opening the conversation',
+    anchors: PANE_ANCHORS,
+    stays: ['.cd-conversations__footer'],
+    open: async () => {
+      await screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Needs you/ }).click();
+    },
+    release: chat.release,
+  });
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('conversation_reload_hands_off at 390', async () => {
+  // A chat short enough to show its first message on a phone, where a chat opens at its latest.
+  const added = mockStore.world.addSession(mockStore.world.desk(RIVERA.deskId)!);
+  mockStore.world.visitorText(added, 'Hi, can someone look at a dripping tap this week?');
+  const sessionId = added.state.session_id;
+  const desks = holdReads(ROUTES.desks.path);
+  const chat = holdReads(conversationRead(sessionId));
+  const gaps = watchSkeletonGaps('.cd-conversation__head');
+  const { screen } = await renderRoute(`${CONVERSATIONS}/${sessionId}`, { viewport: 'phone', pollScale: 100 });
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await nextFrames();
+  // The full-page skeleton draws the way back and the open conversation's pane, as well as the frame.
+  expect(document.querySelector(`${FULL_LAYER} .cd-conversations--open .cd-conversations__back`)).not.toBeNull();
+  const names = PANE_ANCHORS.map(({ name }) => name);
+  const before = fullPageShapes(names);
+  await expectSkeletonLoad({
+    status: 'Opening the conversation',
+    continues: true,
+    anchors: PANE_ANCHORS,
+    stays: ['.cd-conversations__footer'],
+    open: async () => {
+      desks.release();
+      await expect.element(screen.getByRole('link', { name: 'All conversations' })).toBeVisible();
+      await vi.waitFor(() => expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+      expectSameShapes('.cd-conversation-pane', names, before);
+    },
+    release: chat.release,
+  });
+  expect(gaps()).toBe(0);
+  expectNoHorizontalScroll();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('conversations_reload_hands_off at 1440', async () => {
+  await withRecordedHistory();
+  const desks = holdReads(ROUTES.desks.path);
+  const list = holdReads(CONVERSATIONS_READ);
+  const gaps = watchSkeletonGaps('ul.cd-conversations__items');
+  const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await nextFrames();
+  // The full-page skeleton draws the list's title, its rows down the column and the page's own footer.
+  expect(document.querySelector(`${FULL_LAYER} .cd-conversations__title .cd-skeleton-line--page-title`)).not.toBeNull();
+  expect(document.querySelector(`${FULL_LAYER} .cd-conversations__footer .cd-concept-footer`)).not.toBeNull();
+  expect(document.querySelector(`${FULL_LAYER} .cd-owner-layout__footer`)).toBeNull();
+  const names = LIST_ANCHORS.map(({ name }) => name);
+  const before = fullPageShapes(names);
+  await expectSkeletonLoad({
+    status: 'Reading your conversations',
+    continues: true,
+    anchors: LIST_ANCHORS,
+    stays: ['.cd-conversations__footer'],
+    open: async () => {
+      desks.release();
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+      await vi.waitFor(() => expect(document.querySelector(`${LIST_REGION} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
+      expectSameShapes(LIST_REGION, names, before);
+    },
+    release: list.release,
+  });
+  expect(gaps()).toBe(0);
+  expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
 });

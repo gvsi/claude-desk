@@ -224,18 +224,17 @@ describe('Conversations', () => {
   });
 
   it('late_callback_reveals_its_card_then_scrolling_to_the_end_follows_arrivals', async () => {
+    // The chat opens once Needs you's first read is in, since it draws the requests held in it, so a
+    // callback comes late on a later read: she is still where the chat opened, at its latest.
     const chat = named(DANA_LIVE, DANA);
     const last = lengthen(chat);
-    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
-    const held = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
     const region = screen.container.querySelector('.cd-conversation__scroll')!;
     const endGap = () => region.scrollHeight - region.clientHeight - region.scrollTop;
     await expect.poll(endGap).toBeLessThanOrEqual(1);
     expect(region.scrollTop).toBeGreaterThan(0);
-    await expect.poll(held.held).toBeGreaterThan(0);
-    held.release();
+    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeInTheDocument();
     await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);

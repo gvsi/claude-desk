@@ -18,6 +18,7 @@ import {
   Notice,
   Pill,
   RecordedNote,
+  SkeletonScreen,
   StatusDot,
   TakeOverBar,
   Transcript,
@@ -34,6 +35,7 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
+import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
@@ -47,6 +49,8 @@ export interface ConversationDetailProps {
   sessionId: string;
   /** The chat as the list read it, which names who it is with; absent until the list has it. */
   summary: ConversationSummary | undefined;
+  /** The list's first read has settled, data or failure, so `summary` names who the chat is with if it can. */
+  listRead: boolean;
   /** A line the page that opened it left, such as why joining the chat didn't go through. */
   notice: string | null;
 }
@@ -142,7 +146,7 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
 }
 
-export function ConversationDetail({ sessionId, summary, notice }: ConversationDetailProps) {
+export function ConversationDetail({ sessionId, summary, listRead, notice }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const titleId = useId();
@@ -200,21 +204,26 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
     if (ended && (active === null || active === document.body)) composerRef.current?.querySelector('textarea')?.focus();
   }, [controls.sending]);
 
+  // The pane's first view draws from the chat, from Needs you (the requests held in it) and from the
+  // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
+  // way the pane ends up draws inside the one region, so it stays mounted as they change.
+  const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
+  const pane = (content: ReactNode) => (
+    <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
+      {content}
+    </SkeletonScreen>
+  );
+  if (loading) return pane(null);
   if (chat.data === undefined) {
     if (chat.error instanceof ApiError && chat.error.kind === 'not_found') {
-      return (
+      return pane(
         <EmptyState
           title="This conversation isn't in your copy"
           body="It may belong to another demo copy, or the link is wrong. Pick a conversation from the list."
-        />
+        />,
       );
     }
-    if (failure !== null) return <FailedRead failure={failure} />;
-    return (
-      <p className="cd-conversation__loading cd-type-meta" role="status">
-        Opening the conversation
-      </p>
-    );
+    return pane(failure === null ? null : <FailedRead failure={failure} />);
   }
 
   const read = chat.data;
@@ -296,7 +305,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
     );
   }
 
-  return (
+  return pane(
     <section className="cd-conversation" aria-labelledby={titleId}>
       <header className="cd-conversation__head">
         <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
@@ -367,6 +376,6 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
           {controls.messageError !== null ? <Notice tone="error">{controls.messageError}</Notice> : null}
         </div>
       )}
-    </section>
+    </section>,
   );
 }

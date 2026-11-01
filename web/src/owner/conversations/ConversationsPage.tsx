@@ -11,7 +11,7 @@ import { useLocation, useNavigate, useParams } from 'react-router';
 import { request } from '../../api/http.ts';
 import type { ConversationSummary } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
-import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, TextLink } from '../../ds/index.ts';
+import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, SkeletonScreen, TextLink } from '../../ds/index.ts';
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
@@ -21,6 +21,7 @@ import { entriesPath } from '../today/SinceLastNight.tsx';
 import { useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
+import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
 import { conversationPath, conversationStatus, whoLabel, type ConversationArrival } from './status.ts';
 
 import './Conversations.css';
@@ -84,15 +85,11 @@ export function ConversationsPage() {
   const groups = groupsOf(items, business.timezone, now);
   const open = sessionId === undefined ? undefined : items.find((s) => s.session_id === sessionId);
   const replayed = items.some((s) => s.replayed === true);
+  // The list's first read has settled, data or failure: until then its region draws its shapes.
+  const listRead = list.data !== undefined || failure !== null;
 
   let listBody;
-  if (list.data === undefined && failure === null) {
-    listBody = (
-      <p className="cd-conversations__quiet cd-type-meta" role="status">
-        Reading your conversations
-      </p>
-    );
-  } else if (list.data !== undefined && items.length === 0) {
+  if (list.data !== undefined && items.length === 0) {
     listBody = (
       <EmptyState
         title="No conversations yet"
@@ -135,24 +132,33 @@ export function ConversationsPage() {
         <h1 id={titleId} className="cd-conversations__title cd-type-page-title">
           {TITLE}
         </h1>
-        {replayed ? (
-          <p className="cd-conversations__caption">
-            <RecordedHistoryLink href={entriesPath(deskId)} />
-          </p>
-        ) : null}
-        {failure !== null ? (
-          <Notice
-            tone="error"
-            action={
-              <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-                Try again
-              </Button>
-            }
-          >
-            {failure.line}
-          </Notice>
-        ) : null}
-        {listBody}
+        <SkeletonScreen
+          loading={!listRead}
+          status="Reading your conversations"
+          skeleton={<ConversationsSkeleton withHeader={false} open={sessionId !== undefined} />}
+          className="cd-conversations__region"
+        >
+          <div className="cd-conversations__under">
+            {replayed ? (
+              <p className="cd-conversations__caption">
+                <RecordedHistoryLink href={entriesPath(deskId)} />
+              </p>
+            ) : null}
+            {failure !== null ? (
+              <Notice
+                tone="error"
+                action={
+                  <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
+                    Try again
+                  </Button>
+                }
+              >
+                {failure.line}
+              </Notice>
+            ) : null}
+            {listBody}
+          </div>
+        </SkeletonScreen>
       </nav>
       <div className="cd-conversations__open">
         {sessionId === undefined ? (
@@ -163,7 +169,7 @@ export function ConversationsPage() {
             <p className="cd-conversations__back cd-type-meta">
               <TextLink href={conversationsPath(deskId)}>All conversations</TextLink>
             </p>
-            <ConversationDetail key={sessionId} sessionId={sessionId} summary={open} notice={arrivalNotice(location.state)} />
+            <ConversationDetail key={sessionId} sessionId={sessionId} summary={open} listRead={listRead} notice={arrivalNotice(location.state)} />
           </>
         )}
       </div>

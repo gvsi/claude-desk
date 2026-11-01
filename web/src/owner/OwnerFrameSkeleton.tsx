@@ -3,6 +3,7 @@ import { useLocation } from 'react-router';
 
 import { ABOUT_LINKS } from '../about/links.ts';
 import { AppShell, ConceptFooter, ReviewerBarSkeleton, SidebarSkeleton, type NavKey } from '../ds/index.ts';
+import { ConversationsSkeleton } from './conversations/ConversationsSkeleton.tsx';
 import { CENTERED_PAGES, FILL_PAGES } from './OwnerLayout.tsx';
 import { PeopleSkeleton } from './people/PeopleSkeleton.tsx';
 import { TodaySkeleton } from './today/TodaySkeleton.tsx';
@@ -12,6 +13,10 @@ function pageShapes(page: string, rest: readonly string[]): ReactNode | null {
   const exact = rest.every((part) => part === '');
   if ((page === '' || page === 'today') && exact) return <TodaySkeleton />;
   if (page === 'people' && exact) return <PeopleSkeleton withHeader />;
+  if (page === 'conversations' && exact) return <ConversationsSkeleton withHeader open={false} />;
+  // One conversation open beside the list: `/conversations/:id`.
+  const [conversation = '', ...after] = rest;
+  if (page === 'conversations' && conversation !== '' && after.every((part) => part === '')) return <ConversationsSkeleton withHeader open />;
   return null;
 }
 
@@ -35,9 +40,12 @@ export function OwnerFrameSkeleton({ pathname }: { pathname: string }) {
     >
       <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}${centered ? ' cd-owner-layout--centered' : ''}`}>
         {page}
-        <footer className="cd-owner-layout__footer" data-skeleton-anchor="owner-footer">
-          <ConceptFooter />
-        </footer>
+        {/* A fill page draws the footer in its own columns, as the landed frame leaves it to the page. */}
+        {fill && page !== null ? null : (
+          <footer className="cd-owner-layout__footer" data-skeleton-anchor="owner-footer">
+            <ConceptFooter />
+          </footer>
+        )}
       </div>
     </AppShell>
   );
