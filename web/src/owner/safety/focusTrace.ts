@@ -1,5 +1,5 @@
-/** From this width Safety draws the list and the open trace side by side (Safety.css). */
-const SIDE_BY_SIDE = '(min-width: 1280px)';
+/** From this width Safety draws the list and the open attempt or trace side by side (Safety.css). */
+export const SIDE_BY_SIDE = '(min-width: 1280px)';
 
 /**
  * Moves focus to the full trace drawn in `box`, so a keyboard or screen reader user lands in it.

@@ -476,8 +476,9 @@ describe('Safety', () => {
     const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
     if (!beside) throw new Error('the trace sits in the column beside the list');
     expect(beside.scrollHeight).toBeGreaterThan(beside.clientHeight);
-    // No taller than the main area, so all of it shows once the page is scrolled to it.
-    expect(beside.getBoundingClientRect().height).toBeLessThanOrEqual(main.clientHeight);
+    // Exactly the main area's height inside its 24 px top and 20 px bottom padding, so all of it
+    // shows once the page is scrolled to it, 20 px clear of the main area's bottom.
+    expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
   });
 
   it('dev_key_is_labelled', async () => {
