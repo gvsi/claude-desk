@@ -2743,13 +2743,14 @@ class FakeKernelState:
             "answer": body.answer, "expires_at": decision.expires_at, "consumed_at": self.now})
         session, action = self.sessions[decision.session_id], decision.action
         execution, card_diff = None, None
+        approved = None
         if body.answer in ("allow_once", "allow_person") and (self._never(desk, action.tool) or (
                 action.tool == "native.charge_mandate" and not self._room_for(session, action))):
             # the re-check at execution (step 6): the rules in force no longer let the owner approve it
             self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
                              approval_id=approval_id, reason="rules changed")
         elif body.answer in ("allow_once", "allow_person"):
-            self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
+            approved = self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
             execution = self._run(record, session)
             if body.answer == "allow_person":
                 name = next(person.display_name for person in desk.people.values()
@@ -2764,7 +2765,7 @@ class FakeKernelState:
                 who = {"who": "person", "person_id": session.person_id} if session.person_id else {"who": "anyone"}
                 card_diff = [RuleCard(card_id=f"never-{session.person_id or 'anyone'}-{action.tool}",
                                       applies_to=action.tool, mode="never", reason="You said never for this.", **who)]
-        return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff)
+        return ApprovalResult(decision=record.decision, execution=execution, card_diff=card_diff, approved=approved)
 
     def check_reply(self, request: Request, body: CheckReplyRequest) -> ReplyVerdict:
         """Check Claude's draft; only what passes is in the blocks, and a failure is the handoff alone. An agent's

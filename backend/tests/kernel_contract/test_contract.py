@@ -453,6 +453,31 @@ async def test_discounted_quote_holds_and_answers_once(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+@pytest.mark.parametrize("choice", ["allow_once", "deny_once"])
+async def test_answer_includes_the_approved_snapshot_only_for_an_allow(kernel, ro_read, choice):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    held = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    result = await answer(http.owner(copy.owner_token), held.decision_id, choice)
+    assert "approved" in result.model_dump(mode="json")
+    if choice == "deny_once":
+        assert result.approved is None and result.decision.state == "denied"
+        assert result.execution is None
+        return
+
+    assert result.approved is not None
+    assert (result.approved.decision_id, result.approved.state, result.approved.visitor_plain) == (
+        held.decision_id, "approved", "Maria Rivera approved this")
+    assert result.approved.signature and result.approved.signature != result.decision.signature
+    assert result.approved.ledger_seq < result.decision.ledger_seq
+    assert result.decision.state == "executed" and result.execution.state == "succeeded"
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_limit_hold_offers_no_deny_always(kernel, ro_read, arrange):
     """"Deny always" is offered only on a hold an `ask` card decided (master "Decision lifecycle"). The seeded 15% quote
     is a limit hold, through `rv-quote`'s hold twin: its answers leave it out, and posting it is 422 `invalid` with

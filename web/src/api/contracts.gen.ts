@@ -156,6 +156,7 @@ export interface ApprovalResult {
   decision: Decision;
   execution: ExecResult | null;
   card_diff: RuleCard[] | null;
+  approved?: Decision | null;
 }
 export interface Decision {
   decision_id: string;

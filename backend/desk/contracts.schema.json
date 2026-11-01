@@ -249,6 +249,17 @@
             }
           ],
           "title": "Card Diff"
+        },
+        "approved": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
