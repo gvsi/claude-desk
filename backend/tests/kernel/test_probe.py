@@ -13,6 +13,7 @@ is a draft that never activates. `native.payment_link` and `native.charge_mandat
 """
 
 from datetime import datetime
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -26,7 +27,7 @@ from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.db.session import database_url, libpq_url
 from desk.db.tables import KERNEL_TABLES
 from desk.kernel_api import ToolConfirmed
-from desk.kernel_service import activation, mcp_pins
+from desk.kernel_service import activation, decide, mcp_pins
 
 from .fakes import FakeAdapter
 from .helpers import TEST_CAP, kernel_ctx, ledger_rows, rows_of
@@ -100,6 +101,18 @@ async def test_stranger_asking_half_off_asks_the_owner(app, client, reviewer):
     assert reviewer.inputs == []
 
 
+async def test_a_probe_with_no_deciding_policy_names_the_uncovered_request(app, client, monkeypatch):
+    desk = await setup_desk(app, client)
+    version = await drafted(client, desk, [QUOTES])
+    monkeypatch.setattr(decide, "evaluate", AsyncMock(return_value=decide.Evaluation(
+        "refuse", [], [], None, None, strike=False, needed_review=False)))
+    [result] = await probed(client, desk, version.version, [
+        probe("native.quote", quote_args(("visit", 1)), amount_cents=2_000)])
+    assert result.outcome == "refuse" and result.card_ids == []
+    assert result.reason_plain.endswith(decide.UNCOVERED_PLAIN)
+    assert decide.BASELINE_PLAIN not in result.reason_plain
+
+
 def row_counts() -> dict[str, int]:
     """How many rows each kernel table holds, read as desk_admin across every copy."""
     with psycopg.connect(libpq_url(database_url("ADMIN"))) as admin:
@@ -155,7 +168,7 @@ def stand_in(tool: str) -> FakeAdapter:
     return fake
 
 
-@pytest.mark.parametrize(("remaining", "outcome"), [(1_000, "refuse"), (5_000, "allow")])
+@pytest.mark.parametrize(("remaining", "outcome"), [(None, "refuse"), (1_000, "refuse"), (5_000, "allow")])
 async def test_agent_probe_uses_the_hypothetical_mandate(app, client, registry, remaining, outcome):
     desk = await setup_desk(app, client)
     charge = await enable(app, desk, stand_in("native.charge_mandate"))
@@ -165,10 +178,11 @@ async def test_agent_probe_uses_the_hypothetical_mandate(app, client, registry, 
         probe("native.charge_mandate", resource_kind="quote", actor="agent", amount_cents=2_000,
               agent_mandate_remaining_cents=remaining)])
     assert (result.outcome, result.depends_on_review) == (outcome, False)
-    if outcome == "refuse":                      # the always-on rule refuses a charge above the mandate's room
+    if outcome == "refuse":
         assert result.card_ids == []
         assert result.reason_plain == ("A visiting agent asks to be charged $20. It would be refused. "
-                                       + activation.BASELINE_REASONS["agent_charge_within_mandate"])
+                                       + (activation.PROBE_REFUSED_PLAIN["not_given"] if remaining is None else
+                                          activation.BASELINE_REASONS["agent_charge_within_mandate"]))
     else:
         assert result.card_ids == ["agent-charges"]
         assert result.reason_plain == ("A visiting agent asks to be charged $20. It would go ahead without asking "

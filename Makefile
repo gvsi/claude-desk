@@ -292,6 +292,14 @@ evals-soft-promise:
 	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise spends money: give MAX_USD=<dollars>, the most it may spend))
 	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
 
+# Compare frozen reviewer cases with prompts read from two refs. DRY_RUN=1 builds
+# inputs and estimates Sonnet 5.5 list-price cost without credentials or model calls.
+# Paid runs require an explicit MAX_USD; the tier 2 default does not count.
+.PHONY: evals-reviewer
+evals-reviewer:
+	$(if $(filter 1,$(DRY_RUN)),,$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-reviewer spends money: give MAX_USD=<dollars>, or DRY_RUN=1)))
+	$(EVALS) python -m evals.calibration.reviewer --samples $(SAMPLES)$(if $(filter 1,$(DRY_RUN)), --dry-run, --max-usd $(MAX_USD))$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(OLD_PROMPT_REF), --old-prompt-ref $(OLD_PROMPT_REF))
+
 # A finished pass, by its id under evals/out/passes (PASS=<id>). evals-gate judges it with no model call
 # (FINAL=1 for the final gate: no pending scenario, no skipped check, three runs and a recorded rate).
 # evals-latency makes TURNS turns of each kind for at most LATENCY_MAX_USD on the stack built from this
