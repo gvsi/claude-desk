@@ -23,7 +23,8 @@ def test_no_card_refusal_or_immediate_handoff_kind_keeps_cards():
 
 
 def test_prose_only_and_rewritable_differ_only_where_the_contract_says():
-    """Every prose-only kind but a soft-check outage gets one rewrite; the rewritable kinds beyond
-    the prose-only ones are the clause refusals, which hand off."""
-    assert PROSE_ONLY - REWRITABLE == {"check_unavailable"}
+    """Every prose-only kind gets one rewrite, a soft-check outage too (the owner's ruling of
+    2026-11-01: the final check makes its own try); the rewritable kinds beyond the prose-only ones
+    are the clause refusals, which hand off."""
+    assert PROSE_ONLY <= REWRITABLE
     assert REWRITABLE - PROSE_ONLY == {"unknown_fact", "stale_fact", "unentitled_fact"}

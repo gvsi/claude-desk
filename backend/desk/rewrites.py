@@ -17,7 +17,8 @@ from typing import get_args
 from desk.contracts import Violation
 
 REWRITABLE: frozenset[str] = frozenset({"number_in_prose", "promise_word", "soft_promise", "unknown_fact",
-                                        "stale_fact", "unentitled_fact", "uncertain_language"})
+                                        "stale_fact", "unentitled_fact", "uncertain_language",
+                                        "check_unavailable"})
 
 PROSE_ONLY: frozenset[str] = frozenset({"number_in_prose", "promise_word", "soft_promise", "uncertain_language",
                                         "check_unavailable"})

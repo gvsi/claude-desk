@@ -155,7 +155,7 @@ async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewe
     verdict = await checked(client, visitor, prose, clauses, final=final)
     assert not verdict.ok
     assert {v.kind for v in verdict.violations} == {"soft_promise" if kind == "denies_ai" else kind}
-    assert [b.template for b in verdict.blocks] == (["quote", "payment_link"] if final or kind == "check_unavailable" else [])
+    assert [b.template for b in verdict.blocks] == (["quote", "payment_link"] if final else [])
     assert all(b.kind == "card" for b in verdict.blocks)
     assert await handoffs_of(app, copy) == []
     assert await handoff_alerts(app, copy) == []
@@ -187,7 +187,10 @@ async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, 
         return None, CallUsage(model="claude-haiku-5-5", status="refusal", latency_ms=0)
 
     reviewer.soft_promise = refusal
-    verdict = await checked(client, visitor, CLEAN, clauses, final=False)
+    # A first attempt is rewritten (the owner's ruling of 2026-11-01): nothing shows, no owner item.
+    first = await checked(client, visitor, CLEAN, clauses, final=False)
+    assert [v.kind for v in first.violations] == ["check_unavailable"] and first.blocks == []
+    verdict = await checked(client, visitor, CLEAN, clauses, final=True)
     assert not verdict.ok and [v.kind for v in verdict.violations] == ["check_unavailable"]
     assert [b.template for b in verdict.blocks] == ["quote", "payment_link"]
     assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == before

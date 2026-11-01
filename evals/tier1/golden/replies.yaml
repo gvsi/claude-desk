@@ -206,6 +206,15 @@
   soft_promise: error
   expect: {ok: false, violations: [check_unavailable]}
 
+# A soft-check outage on a first draft is rewritten like any prose failure: nothing shows
+# (the owner's ruling of 2026-11-01); the final check makes its own try.
+- id: r-soft-unavailable-first-draft
+  requires: [01a]
+  prose: "I'm sure Maria will sort it out for you."
+  final: false
+  soft_promise: error
+  expect: {ok: false, violations: [check_unavailable], blocks: []}
+
 - id: r-soft-promise-timeout
   requires: [01a]
   prose: "I'm sure Maria will sort it out for you."

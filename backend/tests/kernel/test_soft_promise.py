@@ -760,15 +760,15 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
 @pytest.mark.parametrize(("status", "expected", "shown"), [
     ("pass", [], True),
     ("flag", [("soft_promise", "soft.promise")], False),
-    ("timeout", [("check_unavailable", "soft.unavailable")], True),
-    ("error", [("check_unavailable", "soft.unavailable")], True),
-    ("invalid", [("check_unavailable", "soft.unavailable")], True),
-    ("refusal", [("check_unavailable", "soft.unavailable")], True),
+    ("timeout", [("check_unavailable", "soft.unavailable")], False),
+    ("error", [("check_unavailable", "soft.unavailable")], False),
+    ("invalid", [("check_unavailable", "soft.unavailable")], False),
+    ("refusal", [("check_unavailable", "soft.unavailable")], False),
 ])
 async def test_soft_check_makes_one_try_and_ledgers_it(app, client, reviewer, status, expected, shown):
     """The owner's decision of 2026-10-31: one Sonnet try within `SOFT_PROMISE_TIMEOUT_S`, no recheck
-    and no fallback. No verdict is `check_unavailable`, shown at once even on a first attempt; a
-    flag on a first attempt is rewritten, so nothing is shown. The ledger keeps the one try's usage,
+    and no fallback. No verdict is `check_unavailable`; on a first attempt it is rewritten like a
+    flag (the owner's ruling of 2026-11-01), so nothing is shown and no handoff opens. The ledger keeps the one try's usage,
     as it keeps every model call's."""
     copy, visitor = await visitor_of(app, client)
     inputs = []

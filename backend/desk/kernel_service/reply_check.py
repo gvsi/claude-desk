@@ -39,7 +39,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (6 s), with no recheck and no
    fallback (the owner's decision of 2026-10-31), inside the API's 10 s for the route: no
    verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
-   (`soft.unavailable`), final. While the session has an open handoff the handoff card opened
+   (`soft.unavailable`), which gets one rewrite like the other prose kinds (the owner's ruling
+   of 2026-11-01); the final check makes its own try. While the session has an open handoff the
+   handoff card opened
    (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
    doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
    here" is backed, as the card that opened it said. A call-back request backs nothing (the

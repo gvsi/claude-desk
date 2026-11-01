@@ -765,6 +765,7 @@ async def test_public_agent_card_is_kernel_rendered(app, client, frozen_clock):
 
 @pytest.mark.parametrize("kind", ["canary", "unsupported_language", "session_paused", "check_unavailable",
                                   "uncertain_language"])
+# A soft-check outage is rewritten too (the owner's ruling of 2026-11-01), so its turn goes on.
 async def test_nonfinal_reply_kinds_end_only_unrecoverable_agent_turns(app, client, frozen_clock, reviewer, kind):
     copy, agent, created = await agent_on_rivera(app, client, frozen_clock)
     signed = turn(agent, copy.slug, created.state.session_id, frozen_clock)
@@ -785,8 +786,9 @@ async def test_nonfinal_reply_kinds_end_only_unrecoverable_agent_turns(app, clie
     verdict = ReplyVerdict.model_validate(response.json())
     assert {v.kind for v in verdict.violations} == {kind}
     response = await whoami_as(client, signed)
-    assert response.status_code == (200 if kind == "uncertain_language" else 409), response.text
-    if kind == "uncertain_language":
+    rewritable = kind in ("uncertain_language", "check_unavailable")
+    assert response.status_code == (200 if rewritable else 409), response.text
+    if rewritable:
         assert verdict.blocks == []
     else:
         assert response.json() == {"code": "replayed"}
