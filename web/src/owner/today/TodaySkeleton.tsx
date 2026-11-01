@@ -1,26 +1,68 @@
-import { Skeleton, SkeletonCard } from '../../ds/index.ts';
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
+import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
+import { greetingFor } from '../../lib/format.ts';
+import { THINGS_TO_TRY } from '../arrival/ideas.ts';
+import { doneCaption } from '../arrival/doneSignals.ts';
 import { publicLink } from '../customerLink.ts';
 
 import './Today.css';
 
 const BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control';
 
-/** Line boxes use Today's responsive layout; widths suggest text without drawing any words. */
-function Lines({ count, text = 'meta' }: { count: number | { wide: number; phone: number }; text?: 'meta' | 'body' | 'summary' }) {
-  const wide = typeof count === 'number' ? count : count.wide;
-  const phone = typeof count === 'number' ? count : count.phone;
+// Decision 15: these are the fresh copy's words, used only in invisible measurement probes.
+// A different Desk's names, request, rule or recorded activity may land with one accepted move.
+const DETAILS = [
+  'Your public page opens in a new tab. Ask about a price or a time.',
+  "Ask for a discount, another customer's address or Maria's home number. Safety shows what was refused and why.",
+  'A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.',
+  'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',
+] as const;
+
+/** Intrinsic grid/flex columns take the words' width in the real font, rather than a pill's width. */
+function useWordWidth(box: RefObject<HTMLElement | null>, words: string | readonly TextPart[], className: string, intrinsic: boolean) {
+  const [width, setWidth] = useState<number>();
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element || !intrinsic || typeof words !== 'string') return;
+    let live = true;
+    const measure = () => {
+      if (!live || !element.isConnected) return;
+      const probe = document.createElement('span');
+      probe.className = className;
+      probe.inert = true;
+      probe.setAttribute('aria-hidden', 'true');
+      Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', display: 'block', width: 'max-content', maxWidth: 'none' });
+      probe.textContent = words;
+      element.append(probe);
+      // Text probes use clientWidth; round up so a fractional intrinsic width doesn't add a line.
+      try { setWidth(Math.ceil(probe.getBoundingClientRect().width)); }
+      finally { probe.remove(); }
+    };
+    measure();
+    void document.fonts.ready.then(measure);
+    document.fonts.addEventListener('loadingdone', measure);
+    return () => { live = false; document.fonts.removeEventListener('loadingdone', measure); };
+  }, [box, words, className, intrinsic]);
+  return intrinsic ? width : undefined;
+}
+
+/** Measure known words in their real type and wrapping rules, without leaving words in the layer. */
+function TextLines({ words, text = 'meta', className = '', probeClassName = className, anchor, intrinsic = false }: {
+  words: string | readonly TextPart[]; text?: SkeletonText; className?: string; probeClassName?: string; anchor?: string; intrinsic?: boolean;
+}) {
+  const box = useRef<HTMLSpanElement>(null);
+  const width = useWordWidth(box, words, `${probeClassName} cd-type-${text}`, intrinsic);
+  const count = useTextLines(box, {
+    parts: typeof words === 'string' ? [words] : words,
+    className: `${probeClassName} cd-type-${text}`,
+  }, 1);
   return (
-    <>
-      {Array.from({ length: Math.max(wide, phone) }, (_, i) => (
-        <Skeleton
-          key={i}
-          shape="line"
-          text={text}
-          width={i === Math.max(wide, phone) - 1 ? '75%' : '100%'}
-          className={`${i >= wide ? 'cd-today-skeleton__phone-line' : ''} ${i >= phone ? 'cd-today-skeleton__wide-line' : ''}`}
-        />
+    <span ref={box} className={`${className} cd-today-skeleton__text`} style={width === undefined ? undefined : { width }} data-skeleton-anchor={anchor}>
+      {Array.from({ length: count }, (_, i) => (
+        <Skeleton key={i} shape="line" text={text} width={i === count - 1 ? '75%' : '100%'} />
       ))}
-    </>
+    </span>
   );
 }
 
@@ -43,8 +85,13 @@ export function TodaySkeleton() {
         <div className="cd-today__greeting">
           <div className="cd-greeting">
             <div className="cd-greeting__text">
-              <Skeleton shape="line" text="greeting" width="100%" anchor="greeting" />
-              <Skeleton shape="line" text="body" width="80%" className="cd-today-skeleton__presence" />
+              <TextLines words={`${greetingFor(new Date(), 'America/Los_Angeles')}, Maria`} text="greeting" probeClassName="cd-greeting__title" anchor="greeting" intrinsic />
+              <div className="cd-greeting__presence">
+                <span className="cd-greeting__glyphs">
+                  <Skeleton shape="block" radius="full" width="calc(var(--size-avatar) - var(--space-6))" height="calc(var(--size-avatar) - var(--space-6))" />
+                </span>
+                <TextLines words="One person is talking to your Desk right now." text="body" intrinsic />
+              </div>
             </div>
             <Skeleton
               shape="block"
@@ -63,10 +110,8 @@ export function TodaySkeleton() {
         </div>
         <div className="cd-things">
           <div className="cd-things__head">
-            <Skeleton shape="line" text="section" width={85} anchor="things-title" />
-            <div className="cd-things__caption">
-              <Lines count={1} />
-            </div>
+            <TextLines words="Things to try" text="section" className="cd-things__title" anchor="things-title" intrinsic />
+            <TextLines words={doneCaption(0)} className="cd-things__caption" />
             <div className="cd-things__hide">
               <Skeleton shape="block" measure={{ label: 'Hide this list', className: 'cd-button cd-button--ghost cd-button--inline cd-type-control' }} height="var(--size-control)" anchor="things-hide" />
             </div>
@@ -77,10 +122,8 @@ export function TodaySkeleton() {
                 <div key={i} className={`cd-things__item cd-today-skeleton__thing-${i}`}>
                   <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor={`thing-tile-${i}`} />
                   <div className="cd-things__text">
-                    <Skeleton shape="line" text="control" width="90%" />
-                    <div className="cd-things__detail">
-                      <Lines count={{ wide: i === 1 || i === 2 ? 3 : 2, phone: i === 1 || i === 2 ? 3 : 2 }} />
-                    </div>
+                    <TextLines words={THINGS_TO_TRY[i]!.title} text="control" className="cd-things__item-title" />
+                    <TextLines words={DETAILS[i]!} className="cd-things__detail" />
                   </div>
                   <div className="cd-things__action">
                     <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 3 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
@@ -89,9 +132,7 @@ export function TodaySkeleton() {
               ))}
             </div>
           </SkeletonCard>
-          <div className="cd-things__vision">
-            <Lines count={1} />
-          </div>
+          <TextLines words="Vision: where a Desk could go next" className="cd-things__vision" />
         </div>
         <div className="cd-today__section">
           <SectionTitle anchor="needs-title" />
@@ -99,17 +140,11 @@ export function TodaySkeleton() {
             <div className="cd-approval-card__top">
               <Skeleton shape="line" text="caption" width="80%" />
             </div>
-            <div className="cd-approval-card__reason">
-              <Lines count={{ wide: 2, phone: 3 }} text="summary" />
-            </div>
-            <div className="cd-approval-card__context">
-              <Lines count={2} />
-            </div>
+            <TextLines words="A visitor not on record asked for a drain clearing quote at 15% off, $153.00 instead of $180.00." text="summary" className="cd-approval-card__reason" />
+            <TextLines words="From the visitor: “How much to clear a clogged drain? Can I get 15% off if I pay cash?”" className="cd-approval-card__context" />
             <div className="cd-approval-card__held-by">
               <Skeleton shape="block" width={16} height={16} />
-              <div className="cd-today-skeleton__rule">
-                <Lines count={{ wide: 1, phone: 2 }} />
-              </div>
+              <TextLines words="Held by your rule: Quotes from your price list, at list price." className="cd-today-skeleton__rule" />
             </div>
             <div className="cd-approval-card__answers">
               <div className="cd-approval-card__row">
@@ -147,13 +182,11 @@ export function TodaySkeleton() {
                     <div className="cd-briefing-row__words">
                       {kind === 'booking' ? (
                         <>
-                          <Skeleton shape="line" text="meta" />
-                          <div>
-                            <Lines count={2} />
-                          </div>
+                          <TextLines words="Dana Whitfield" />
+                          <TextLines words="A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours." className="cd-briefing-row__line" />
                         </>
                       ) : (
-                        <Lines count={1} />
+                        <TextLines words={['Claude answered ', { text: "Alex Kim's assistant", className: 'cd-user-name' }, '.']} className="cd-briefing-row__line" />
                       )}
                     </div>
                   </div>
@@ -167,10 +200,8 @@ export function TodaySkeleton() {
         <SkeletonCard padding={16} anchor="public-card">
           <div className="cd-today-aside__public">
             <Skeleton shape="line" text="section" width={130} />
-            <Skeleton shape="line" text="meta" width="65%" />
-            <div className="cd-today-aside__text">
-              <Lines count={2} />
-            </div>
+            <TextLines words={publicLink('rivera-plumbing-abc123')} className="cd-today-aside__link" />
+            <TextLines words="Chats on it are real conversations with your Desk. They show up in Conversations." className="cd-today-aside__text" />
             <div className="cd-today-aside__action">
               <Skeleton shape="block" measure={{ label: 'Chat as a customer', className: BUTTON, tagName: 'a' }} height="var(--size-control)" anchor="public-page-action" />
             </div>
@@ -202,13 +233,13 @@ export function TodaySkeleton() {
               </div>
             </div>
             <div className="cd-week__part">
-              <Skeleton shape="line" text="control" width="70%" />
+              <TextLines words="Handled by Claude, or by you" text="control" className="cd-week__title" />
               <Skeleton shape="block" height="var(--space-6)" />
-              <Skeleton shape="line" text="meta" />
+              <TextLines words="Claude handled 2 You stepped in 1 time" className="cd-week__legend" />
             </div>
             <div className="cd-week__part">
               <Skeleton shape="line" text="control" width="70%" />
-              <Skeleton shape="line" text="meta" width="65%" />
+              <TextLines words="Nothing turned down in the last 7 days." className="cd-week__line" />
               <Skeleton shape="line" text="meta" width="30%" />
             </div>
           </div>
