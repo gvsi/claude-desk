@@ -1,6 +1,8 @@
 """Public policy examples shared by scanner, service and both contract targets."""
 
 AMENITY_REFUSALS = [
+    ("Calentador de agua" + " " * 189 + "y café gratis.", "lex.es.promise"),
+    ("Free" + " " * 195 + "water heater inspection.", "lex.en.promise"),
     *[(text, "lex.en.promise") for text in (
         "Free water heater flush.", "Free water heater flush with every repair.",
         "Free water heater inspection.", "Free water heater inspections.",

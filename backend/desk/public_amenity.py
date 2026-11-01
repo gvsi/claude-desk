@@ -38,10 +38,13 @@ def offers_amenity(text: str, start: int, end: int) -> bool:
     English list at a sentence boundary. `text` is one policy's text, so a
     neighbouring card never supplies the amenity. Each context window is at most 200 characters."""
     word = re.sub(r"[\s-]+", " ", _plain(text[start:end])).casefold()
+    # A cut window edge is not a sentence boundary or the end of the policy.
+    before = ("\0" if start > 200 else "") + _plain(text[max(0, start - 200):start])
+    after = _plain(text[end:end + 200]) + ("\0" if end + 200 < len(text) else "")
     if word in EN_WORDS:
-        return _EN_AFTER.match(_plain(text[end:end + 200])) is not None
+        return _EN_AFTER.match(after) is not None
     if word in ES_WORDS:
-        return _ES_BEFORE.search(_plain(text[max(0, start - 200):start])) is not None
+        return _ES_BEFORE.search(before) is not None
     if word in {"cost nothing", "costs nothing"}:
-        return _EN_BEFORE.search(_plain(text[max(0, start - 200):start])) is not None
+        return _EN_BEFORE.search(before) is not None
     return False
