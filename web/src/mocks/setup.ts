@@ -37,6 +37,7 @@ import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { formatHours } from '../lib/format.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
+import { appendBusinessTools } from './businessTools.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
@@ -677,8 +678,8 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
   }
   interview.state.question = null;
   interview.state.pending_card = null;
+  const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
   if (interview.consultant) {
-    const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
     const has = (kind: JobProposal['job']) => jobs.some(({ job }) => job === kind);
     const standard = ['schedule', 'intake', 'payment', 'status'].every((kind) => has(kind as JobProposal['job']))
       && jobs.filter(({ job }) => job === 'schedule' || job === 'intake').every(({ autonomy }) => autonomy === 'auto')
@@ -699,6 +700,7 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
     say(interview, 'claude', QUESTIONS_DONE);
   }
   moveTo(interview, 'tools');
+  if (interview.consultant) appendBusinessTools(world.desk(interview.state.desk_id), jobs);
   for (const { card } of interview.state.messages) {
     if (card) connectAcceptedProposal(world, interview, card);
   }
