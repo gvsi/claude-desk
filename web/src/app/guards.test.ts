@@ -765,6 +765,7 @@ describe('app source guards', () => {
       '<Button variant="primary">Sending...</Button>',
       'const label = pending ? `Sending your answer…` : `Allow this time`;',
       '<Button>Saving…</Button>',
+      '<Button>Checking…</Button>',
     ];
     for (const text of bad) expect(hits(BUSY_LABEL, sample(text)), text).toHaveLength(1);
     const fine = [
