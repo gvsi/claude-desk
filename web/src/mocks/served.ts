@@ -509,7 +509,7 @@ const SERVED: ServedRoutes = {
     }
     const session = sv.world.sessions.get(record.decision.session_id);
     const decision = sv.world.answer(record, given);
-    if (session) sv.runTurn(session, afterAnswer(given, decision), session.language, '');
+    if (session) sv.runTurn(session, afterAnswer(given, decision, record.approved ?? null), session.language, '');
     const out: ApprovalAnswerOut = {
       decision,
       execution_state: allows(given) ? 'succeeded' : null,
