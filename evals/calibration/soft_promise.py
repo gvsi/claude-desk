@@ -80,6 +80,7 @@ every sample asked for.
 import argparse
 import ast
 import asyncio
+import copy
 import hashlib
 import json
 import math
@@ -276,18 +277,25 @@ def prompt_in(source: str, where: str) -> str:
 # The calls
 
 class _Messages:
-    def __init__(self, messages: Any, system: str):
+    def __init__(self, messages: Any, system: str, request_hashes: frozenset[str] | None = None):
         self._messages, self._system = messages, system
+        self._request_hashes = request_hashes
+        self.diverged = False
 
     async def create(self, **request: Any) -> Any:
-        return await self._messages.create(**{**request, "system": self._system})
+        wire = copy.deepcopy({**request, "system": self._system})
+        actual = hashlib.sha256(json.dumps(wire, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        if self._request_hashes is not None and actual not in self._request_hashes:
+            self.diverged = True
+            raise Refused("actual request differs from the recorded experiment hashes")
+        return await self._messages.create(**wire)
 
 
 class _WithSystem:
     """The SDK client as `AnthropicDecisions` calls it, with `system` sent in place of the kernel's prompt."""
 
-    def __init__(self, client: Any, system: str):
-        self.messages = _Messages(client.messages, system)
+    def __init__(self, client: Any, system: str, request_hashes: frozenset[str] | None = None):
+        self.messages = _Messages(client.messages, system, request_hashes)
 
 
 def anthropic_client(key: str) -> Any:
@@ -524,10 +532,14 @@ def month_guard(deps: Deps, spend_file: Path, estimate: float) -> None:
                       f"${max(allowed - spent, 0):.4f} remains")
 
 
-async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
+async def run(config: Config, deps: Deps, *, cases: tuple[Case, ...] | None = None,
+              prompt: Prompt | None = None,
+              request_hashes: frozenset[str] | None = None) -> tuple[RunResult, Path]:
     """Measure the check as the module docstring says; the run and where its results file is."""
-    cases = load_cases(deps.cases)
-    prompt = load_prompt(deps.root, ref=config.prompt_ref, file=config.prompt_file)
+    if cases is None:
+        cases = tuple(load_cases(deps.cases))
+    if prompt is None:
+        prompt = load_prompt(deps.root, ref=config.prompt_ref, file=config.prompt_file)
     label = config.label or default_label(config)
     if not LABEL.fullmatch(label):
         raise Refused("--label is up to 64 letters, digits, '.', '_' and '-', starting with a letter or digit")
@@ -550,7 +562,8 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
     tallies = {case.id: CaseResult(id=case.id, group=case.group, language=case.language,
                                    input_sha256=input_sha256(inputs[case.id]), expected=case.expected,
                                    code_blocked=code_blocked(case), requested=config.samples) for case in cases}
-    checker = AnthropicDecisions(_WithSystem(deps.client(key), prompt.text))
+    wire_client = _WithSystem(deps.client(key), prompt.text, request_hashes)
+    checker = AnthropicDecisions(wire_client)
     meter = _Meter(config.max_usd)
     bounds = {case.id: call_bound(prompt.text, inputs[case.id]) for case in cases}
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next
@@ -565,6 +578,8 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
                 verdict, usage = await checker.soft_promise(inputs[case.id])
             finally:   # a call cut short is charged its bound
                 meter.end(bounds[case.id], usage)
+            if wire_client.messages.diverged:
+                raise Refused("actual request differs from the recorded experiment hashes")
             tallies[case.id].count(verdict, usage)
 
     row_id = f"{CALIBRATION_PREFIX}soft-promise-{label}-{stamp}"

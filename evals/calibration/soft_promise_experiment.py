@@ -174,7 +174,9 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
         save()
         outcome, path = await sp.run(sp.Config(
             samples=config.samples, max_usd=remaining, label=arm, input_shape=arm,
-            prompt_ref=config.baseline_sha if arm == "old" else None, concurrency=config.concurrency), arm_deps)
+            prompt_ref=config.baseline_sha if arm == "old" else None, concurrency=config.concurrency), arm_deps,
+            cases=tuple(sp.Case.model_validate(case) for case in manifest), prompt=prompts[arm],
+            request_hashes=frozenset(identity["arms"][arm]["requests_sha256"].values()))
         history["cumulative_spend_usd"] += outcome.spend_usd - reservation
         attempt["reserved_usd"] = 0
         attempt["spend_usd"] += outcome.spend_usd

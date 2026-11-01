@@ -25,6 +25,31 @@ def test_retry_cannot_hide_an_unsafe_sample(deps, tmp_path):
     assert second["attempts"][1]["acceptance"]["unsafe_or_unmeasured"] == ["promise-sort"]
 
 
+def test_both_arms_use_the_recorded_cases_and_prompts_during_edits(deps, tmp_path, monkeypatch):
+    import yaml
+    from evals.calibration import soft_promise_experiment as exp
+    write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
+    baseline = commit(deps.root, "freeze the baseline")
+    config = exp.Experiment(baseline_sha=baseline, samples=1, max_usd=1,
+                            output=tmp_path / "experiment.json")
+
+    def answer(prose):
+        data = yaml.safe_load(deps.cases.read_text())
+        data["cases"][1].update(prose="How can I help?", expected="pass")
+        deps.cases.write_text(yaml.safe_dump(data))
+        monkeypatch.setattr(exp.sp.decisions, "SOFT_PROMISE_SYSTEM", "edited during the run")
+        return "flag" if "sort everything" in prose else "pass"
+
+    deps.client.client.answer = answer
+    history = asyncio.run(exp.experiment(config, deps))
+    for arm, requests in zip(("old", "new"), (deps.client.client.requests[:2], deps.client.client.requests[2:])):
+        recorded = history["experiment"]["arms"][arm]
+        assert list(recorded["requests_sha256"].values()) == [exp.digest(request) for request in requests]
+        saved = history["attempts"][0]["arms"][arm]["outcome"]
+        assert saved["cases"][1]["expected"] == "flag"
+    assert history["attempts"][0]["acceptance"]["accepted"]
+
+
 def test_different_output_cannot_reset_the_experiment_budget(deps, tmp_path, monkeypatch):
     from evals.calibration import soft_promise_experiment as exp
     write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
