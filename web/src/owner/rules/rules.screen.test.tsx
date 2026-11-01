@@ -686,6 +686,35 @@ describe('rules page', () => {
     expect(desk().policy.version).toBe(7);
   });
 
+  it('confirming_a_suggested_rule_leaves_focus_on_the_row_it_landed_on', async () => {
+    desk().suggestions.push(DANA_REFUNDS);
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const card = screen.getByRole('region', { name: 'Suggested rule' });
+    await expect.element(card.getByText(DANA_REFUNDS.text, { exact: true })).toBeVisible();
+    card.getByRole('button', { name: 'Draft this rule' }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Review the change' })).toBeVisible();
+    screen.getByRole('button', { name: 'Confirm change' }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+
+    // Its rule confirmed, the suggestion that opened the review is done with, so focus goes to the
+    // row the change landed on: Refund, which has no control of its own while the Connectors pages
+    // aren't built, so the row itself takes focus, from a script only, never as a Tab stop.
+    const refund = () =>
+      [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].find(
+        (row) => row.querySelector('.cd-connector-section__tool-name')?.textContent === 'Refund',
+      );
+    await expect.poll(() => refund()?.querySelector('.cd-pill')?.textContent).toBe('Updated');
+    await expect.poll(() => document.activeElement === refund()).toBe(true);
+    expect(refund()?.getAttribute('tabindex')).toBe('-1');
+    // Tab goes on from there, and the row stops taking focus.
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).not.toBe(refund());
+    expect(refund()?.hasAttribute('tabindex')).toBe(false);
+  });
+
   it('unset_limit_copy_names_the_next_step', async () => {
     desk().policy = { ...desk().policy, auto_money_cap_cents: 0 };
     desk().suggestions.push(DANA_REFUNDS);

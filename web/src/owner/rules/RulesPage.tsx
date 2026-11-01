@@ -151,6 +151,18 @@ function firstControl(row: HTMLElement): HTMLElement | null {
   return usable(row.querySelector<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])'));
 }
 
+/**
+ * `row` itself, for a landed row with no control of its own (a tool's row while the Connectors pages
+ * aren't built): it takes focus from a script only, never as a Tab stop, until focus leaves it.
+ */
+function focusableRow(row: HTMLElement): HTMLElement {
+  if (!row.hasAttribute('tabindex')) {
+    row.setAttribute('tabindex', '-1');
+    row.addEventListener('blur', () => row.removeAttribute('tabindex'), { once: true });
+  }
+  return row;
+}
+
 /** "Start from a preset", in Rules' header. */
 const presetButton = (page: HTMLElement) => usable(page.querySelector<HTMLElement>('.cd-preset-menu > button'));
 
@@ -295,7 +307,8 @@ export function RulesPage() {
 
   // A review this entry of Rules opened, back by Keep my rules, Confirm change or Back: once Rules is
   // drawn, at the place it restored, focus goes back to the control that opened it, or, when that
-  // has gone, to the first control of the first row the change landed on, without moving the place.
+  // has gone, to the first control of the first row the change landed on, or that row itself when it
+  // has none, without moving the place.
   const [returning] = useState(() => (opener !== null && opener.deskId === deskId && opener.key === location.key ? opener : null));
   const refocused = useRef(false);
   useLayoutEffect(() => {
@@ -303,7 +316,7 @@ export function RulesPage() {
     refocused.current = true;
     if (opener === returning) opener = null;
     const row = ready && landing !== null ? firstLandedRow(page.current, landing) : null;
-    const target = returning.find(page.current, row !== null) ?? (row === null ? null : firstControl(row));
+    const target = returning.find(page.current, row !== null) ?? (row === null ? null : (firstControl(row) ?? focusableRow(row)));
     target?.focus({ preventScroll: true });
   }, [returning, drawn, ready, landing]);
 
