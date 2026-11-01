@@ -182,6 +182,81 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
 ];
 const TODAY_CONTENT_ANCHORS = TODAY_ANCHORS.filter(({ name }) => name !== 'owner-footer');
 
+// These widths also compare every anchor's height during the fade and at replacement;
+// the cases below check top and bottom independently after landing.
+const TODAY_WIDTH_ANCHORS: readonly SkeletonAnchor[] = [
+  ...TODAY_ANCHORS,
+  { name: 'live-title', page: '.cd-today__section:has(.cd-live) .cd-section-header__heading' },
+  { name: 'week-bar-6', page: '.cd-week__day:last-child .cd-week__bar' },
+].map((anchor) => ({ ...anchor, dimensions: ['height', ...(anchor.dimensions ?? [])] as const }));
+
+it.each([620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s', async (width) => {
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { screen, router } = await renderRoute(`/app/${RIVERA.deskId}/conversations`, {
+    viewport: { width, height: 900 }, pollScale: 100,
+  });
+  await expect.element(screen.getByRole('heading', { name: 'Conversations', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+  queryClient.removeQueries({ queryKey: todayKey(RIVERA.deskId) });
+  queryClient.removeQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+  const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
+  onTestFinished(() => reads.forEach((read) => read.release()));
+  const gaps = watchSkeletonGaps('.cd-greeting__title');
+  let before: DOMRect[] = [];
+  let footer: DOMRect;
+  const anchors = TODAY_WIDTH_ANCHORS.filter(({ name }) => name !== 'owner-footer');
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors,
+    stays: ['.cd-owner-layout__footer'],
+    open: async () => { await router.navigate(TODAY); },
+    release: () => {
+      before = anchors.map(({ name }) => document.querySelector(`[data-skeleton-anchor="${name}"]`)!.getBoundingClientRect());
+      footer = landedRect('.cd-owner-layout__footer');
+      reads.forEach((read) => read.release());
+    },
+  });
+  for (const [i, { name, page }] of anchors.entries()) {
+    const after = landedRect(page);
+    for (const edge of ['top', 'bottom'] as const) {
+      expect(Math.abs(before[i]![edge] - after[edge]), `${name} ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    }
+  }
+  for (const edge of ['top', 'bottom'] as const) {
+    expect(Math.abs(footer![edge] - landedRect('.cd-owner-layout__footer')[edge]), `footer ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  }
+  expect(gaps()).toBe(0);
+  expectNoHorizontalScroll();
+  expectNoWindowScroll();
+});
+
+it.each([620, 820, 1024, 1279, 1512])('today_content_reload_lands_in_place at %s', async (width) => {
+  const reads = [ROUTES.desks.path, ROUTES.today.path.replace('{desk_id}', RIVERA.deskId), ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId)].map(holdReads);
+  onTestFinished(() => reads.forEach((read) => read.release()));
+  const gaps = watchSkeletonGaps('.cd-greeting__title');
+  let before: DOMRect[] = [];
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors: TODAY_WIDTH_ANCHORS,
+    open: async () => { await renderRoute(TODAY, { viewport: { width, height: 900 }, pollScale: 100 }); },
+    release: () => {
+      before = TODAY_WIDTH_ANCHORS.map(({ name }) => document.querySelector(`[data-skeleton-anchor="${name}"]`)!.getBoundingClientRect());
+      reads.forEach((read) => read.release());
+    },
+  });
+  for (const [i, { name, page }] of TODAY_WIDTH_ANCHORS.entries()) {
+    const after = landedRect(page);
+    for (const edge of ['top', 'bottom'] as const) {
+      expect(Math.abs(before[i]![edge] - after[edge]), `${name} ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    }
+  }
+  expect(gaps()).toBe(0);
+  expectNoHorizontalScroll();
+  expectNoWindowScroll();
+});
+
 /**
  * Decision 15's accepted move on a Desk switch. A copy with two Desks has made a Desk of its own, so
  * Things to try's last row lands ticked ("Create your own Desk", one done line) where the skeleton
