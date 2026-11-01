@@ -129,7 +129,7 @@ database() {
 
 {
   printf '%s\n' "DESK_ENV=production" "DESK_DB_URLS=KERNEL,MOCKPAY" "KERNEL_DB_USER=desk_kernel" \
-    "MOCKPAY_DB_USER=desk_mockpay"
+    "MOCKPAY_DB_USER=desk_mockpay" "SAMPLE_WEEK=1"
   database
   printf '%s\n' "KERNEL_DB_PASSWORD=$KERNEL_ROLE_PASSWORD" "MOCKPAY_DB_PASSWORD=$MOCKPAY_ROLE_PASSWORD" \
     "DESK_SIGNING_SEED=$seed" "ANTHROPIC_API_KEY=not-a-key" "MOCKPAY_KEY=$mockpay_key" "TYPESAFE_API_KEY="
