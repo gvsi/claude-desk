@@ -663,6 +663,29 @@ async def test_off_topic_website_price_never_demotes_published_owner_prices(prop
     assert len(parts.prices) == 3
 
 
+@pytest.mark.parametrize("title,owned", [
+    ("Callout", True),
+    ("Emergency callout, there in 30 minutes guaranteed", False),
+])
+async def test_off_topic_price_titles_must_be_in_the_owners_words(proposals, model, engine, title, owned):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118. Callouts are $150.", turn(
+        public_contact="415-555-0118", price_items=[{"title": title, "unit_cents": 15000}]),
+        question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert ("price_items" in answers.suggested_fields) is not owned
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert ("price_items" in said["owner_fields"]) is owned
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert len(parts.prices) == int(owned)
+
+
 @pytest.mark.parametrize("field,topic,text,value", [
     ("public_contact", "hours_and_area", "9am to 5pm weekdays.", "Website: bobs-booking.net"),
     ("hours", "contact_and_after_hours", "Call 415-555-0118.",
