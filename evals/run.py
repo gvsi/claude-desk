@@ -456,7 +456,8 @@ class ReportRefused(RuntimeError):
 # and read, and each decision's full form. They are left out before a transcript is read, since the runner
 # redacts every code a run saw wherever it appears, and a code that matches a timestamp's microseconds
 # leaves that timestamp unreadable. The report reads the records, usage and verdict, which are read whole,
-# and of the turns only when each visitor turn ended (`report.visitor_turn_ends`), read before they're left out.
+# and of the turns only how many visitor messages there were and when each Desk turn ended (`report.desk_turn_times`),
+# read before they're left out.
 UNREAD_ARTIFACT_FIELDS: dict[str, Any] = {"turns": [], "owner_actions": [], "documents_fetched": [],
                                           "decisions_full": {}, "owner_inbox": []}
 
@@ -542,7 +543,7 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
     """Each run of the pass as the report reads it, from its row and its transcript, and the artifacts of
     its judged legitimate runs. A transcript that is missing, unreadable, another run's, or holds another
     verdict than its row refuses."""
-    from evals.report import ReportRun, visitor_turn_ends
+    from evals.report import ReportRun, desk_turn_times
     from evals.tier2.passes import pass_dir
     from evals.tier2.runner import RunOutcome
 
@@ -550,11 +551,11 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
     runs, legit = [], []
     for row in result.runs:
         name = f"{row.scenario_id} rep {row.rep}"
-        turn_ends = None
+        turn_times = None
         try:
             data = json.loads((transcripts / f"{row.scenario_id}-{row.rep}.json").read_bytes())
             if isinstance(data, dict) and isinstance(data.get("artifact"), dict):
-                turn_ends = visitor_turn_ends(data["artifact"])   # when each visitor turn ended, nothing it said
+                turn_times = desk_turn_times(data["artifact"])   # when each Desk turn ended, nothing it said
                 data["artifact"] = {**data["artifact"], **UNREAD_ARTIFACT_FIELDS}
             outcome = RunOutcome.model_validate(data)
         except (OSError, ValueError) as error:   # ValueError: JSON that doesn't parse, or a ValidationError
@@ -568,7 +569,7 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
         if scenario is None:
             raise ReportRefused(f"{name} names a scenario the suite doesn't hold")
         common: dict[str, Any] = {"rep": row.rep, "fallback_turns": outcome.simulator.fallback_turns,
-                                  "switches": outcome.simulator.switches, "turn_ends": turn_ends}
+                                  "switches": outcome.simulator.switches, "turn_times": turn_times}
         try:
             if row.status == "incomplete":
                 # An incomplete run keeps its error's kind; one with no error had a verdict that didn't fit a
