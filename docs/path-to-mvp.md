@@ -25,7 +25,7 @@ For an MVP, run the database across availability zones, rehearse restores and fa
 
 ## Model integration
 
-Opus handles conversation, Sonnet reviews actions and Haiku judges possible promises inside the kernel's reply check. For the conversation model, [prompt caching](../backend/desk/api/model.py) covers the unchanging start of its prompt and the conversation so far. Keep each route's model explicit, with no silent fallback to another: if the reviewer fails, the action is held for the owner. Compare completion, violations, holds, cost and latency before changing models.
+Opus handles conversation, Sonnet reviews actions and Haiku judges possible promises and denials of being an AI inside the kernel's reply check. For the conversation model, [prompt caching](../backend/desk/api/model.py) covers the unchanging start of its prompt and the conversation so far. Keep each route's model explicit, with no silent fallback to another: if the reviewer fails, the action is held for the owner. Compare completion, violations, holds, cost and latency before changing models.
 
 | Metric | Value | Source |
 |---|---|---|
@@ -40,8 +40,8 @@ Model cost and latency may limit useful traffic before the infrastructure does; 
 
 | Constraint | Value | Source |
 |---|---|---|
-| Opus cost per Desk reply (one reply the visitor waits for), mean / p50 / p95, including calls after tools | [measured: Opus cost per reply, final held-out pass] | [measured: source, final held-out pass] |
-| Opus model time per Desk reply (one reply the visitor waits for), p50 / p95, including calls after tools | [measured: Opus model time per reply, final held-out pass] | [measured: source, final held-out pass] |
+| Opus cost per Desk reply (one reply the visitor waits for) in legitimate-task conversations, mean / p50 / p95, including calls after tools | [measured: Opus cost per reply, final held-out pass] | [measured: source, final held-out pass] |
+| Opus model time per Desk reply (one reply the visitor waits for) in legitimate-task conversations, p50 / p95, including calls after tools | [measured: Opus model time per reply, final held-out pass] | [measured: source, final held-out pass] |
 | Proof, Rivera Plumbing's starter rules, local p50 / p95 | 381 / 702 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
 | Proof, 30 rule cards, local p50 / p95 | 1,172 / 2,390 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
 | SSE streams per task, steady state | estimate: at most min(3S, 30I) for S visitor sessions across I internet addresses subject to the per-address limit; no total task cap | estimate: min(3 × S, 30 × I) = stream ceiling; [stream slots](../backend/desk/api/ratelimit.py). Excludes streams with no per-address limit and brief overlap while an older stream closes after a new one replaces it. |
@@ -53,17 +53,17 @@ Before scaling, load-test three things: slow and reconnecting readers of the liv
 
 ## Latency and cost per conversation
 
-Each source names its report, pass, date and latency run. Cost per legitimate-task conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column gives the [master plan's estimates](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) where specified, with the conversation size it assumed.
+Each source names its report, pass, date and latency run. Cost per legitimate-task conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column shows an estimate where the [master plan](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) gives one, beside local measurements, with the conversation size it assumed.
 
 | Metric | Environment | Value | Source | Planned estimate |
 |---|---|---|---|---|
 | Cost per legitimate-task conversation, mean / p50 / p95 | Local evals | [measured: cost per conversation, final held-out pass] | [measured: source, final held-out pass] | $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache |
-| Full turn, warm and cold first turns apart, p50 / p95 | Local | [measured: local full-turn latency, final held-out pass] | [measured: source, final held-out pass] | No full-turn estimate specified |
+| Full turn, warm and cold first turns apart, p50 / p95 | Local | [measured: local full-turn latency, final held-out pass] | [measured: source, final held-out pass] | — |
 | Finished model reply to reveal, p50 / p95 | Local | [measured: local reveal latency p50 and p95, final held-out pass] | [measured: source, final held-out pass] | 0.3–0.8 s, capped at 2 s |
 | Reply check, p50 / p95 | Local, server-side | [measured: local reply-check latency, final held-out pass] | [measured: source, final held-out pass] | — |
-| Decide, p50 / p95 | Local, server-side | [measured: local decide latency, final held-out pass] | [measured: source, final held-out pass] | No separate estimate specified |
+| Decide, p50 / p95 | Local, server-side | [measured: local decide latency, final held-out pass] | [measured: source, final held-out pass] | — |
 | Reviewer when called, p50 / p95 | Local, server-side | [measured: local reviewer latency, final held-out pass] | [measured: source, final held-out pass] | 0.8–1.5 s, 4 s timeout |
-| Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | No full-turn estimate specified |
+| Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | — |
 | Reviewer when called, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | — |
 
 All latency here is local: `make evals-latency PASS=<id>` measures it. Hosted latency wasn't measured. The harness refuses a run against the deployment until the deployment reports what its model calls cost, so that a run can stop at its spending limit.
