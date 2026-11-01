@@ -400,7 +400,7 @@ async def test_use_your_suggestions_finishes_with_every_limit_asking(proposals, 
     reply = await owner.browser.post(path, json={})
     assert reply.status_code == 200, reply.text
     assert reply.json()["step"] == "tools" and reply.json()["question"] is None
-    assert reply.json()["messages"][-1]["text"] == setup.QUESTIONS_DONE
+    assert reply.json()["messages"][-1]["text"] == "Your Desk will take customer requests."
     saved = (await stored(engine, interview_id))["answers"]
     for field in ("quote_auto_max_cents", "discount_auto_max_bp", "payment_link_auto_max_cents", "refunds"):
         assert saved[field] == ("ask" if field == "refunds" else None)
@@ -841,7 +841,7 @@ async def test_cards_are_left_out_without_cards_1(proposals):
     assert shown(reply) == []
     reply = await owner.browser.post(path + "/suggestions", json={})
     assert shown(reply) == []
-    assert reply.json()["messages"][-1]["text"] == setup.QUESTIONS_DONE
+    assert reply.json()["messages"][-1]["text"] == "Your Desk will take customer requests."
 
 
 async def test_decided_cards_survive_a_reload(proposals):
@@ -974,7 +974,7 @@ async def test_the_last_answer_uses_the_same_finish_and_post_commit_work(proposa
     assert calls == []
     reply = await owner.browser.post(path + "/suggestions", json={})
     assert reply.status_code == 200, reply.text
-    assert reply.json()["step"] == "tools" and reply.json()["messages"][-1]["text"] == setup.QUESTIONS_DONE
+    assert reply.json()["step"] == "tools" and reply.json()["messages"][-1]["text"] == "Your Desk will take customer requests."
     cards = shown(await owner.browser.get(path + "?cards=1"))
     assert [card["state"] for card in cards] == ["accepted", "declined", "accepted"]
     record = await stored(engine, interview_id)
@@ -1253,6 +1253,7 @@ def test_settle_plan_is_idempotent_and_emits_each_leftover_card_once():
     assert [card.proposal_id for card in shown] == [planned[i].proposal_id for i in (0, 1, 3)]
     assert [card.state for card in shown] == ['accepted', 'declined', 'accepted']
     assert shown[1] is not planned[1]
+    assert sum(entry.role == "claude" and entry.text == setup.PAYMENT_LINE for entry in state.transcript) == 1
     assert not state.pending_card and not state.unshown
     before = setup._stored(state)
     setup.settle_plan(state)
@@ -1310,6 +1311,74 @@ def test_a_decision_on_a_card_that_isnt_pending_is_409():
     assert (refused.value.status, refused.value.error) == (409, 'conflict')
 
 
+@pytest.mark.parametrize("leftover", ["stripe", "payment"])
+async def test_suggestions_show_the_first_payment_line_before_the_closing_plan(
+        proposals, model, engine, monkeypatch, leftover):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        # Keep just one payment-related card, still hidden behind the pending scheduling card.
+        interview.transcript[-2].planned = [card for card in interview.transcript[-2].planned
+                                           if card.proposal_id != ids[1 if leftover == "stripe" else 2]]
+        await setup._save(conn, interview)
+    before = (await stored(engine, interview_id))["transcript"]
+    assert not any(entry.get("text") == setup.PAYMENT_LINE for entry in before)
+
+    async def connect(*args):
+        pass
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    model.add(next_step("what_you_do", next={"kind": "done"}, reply="", plan="The closing plan."))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions?cards=1", json={})
+    assert response.status_code == 200, response.text
+    transcript = (await stored(engine, interview_id))["transcript"]
+    lines = [i for i, entry in enumerate(transcript)
+             if entry["role"] == "claude" and entry["text"] == setup.PAYMENT_LINE]
+    assert len(lines) == 1
+    at = lines[0]
+    card = transcript[at - 1]["card"]
+    assert card["proposal_id"] == ids[2 if leftover == "stripe" else 1]
+    assert transcript[at + 1]["text"] == "The closing plan."
+    assert setup.Entry.model_validate(transcript[at]) == setup.Entry(role="claude", text=setup.PAYMENT_LINE)
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json() == response.json()
+
+
+@pytest.mark.parametrize("earlier", ["stripe", "payment"])
+async def test_suggestions_do_not_repeat_an_individually_shown_payment_line(
+        proposals, model, engine, monkeypatch, earlier):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        card = next(card for card in interview.planned
+                    if card.proposal_id == ids[2 if earlier == "stripe" else 1])
+        setup._show_card(interview, card)
+        await setup._save(conn, interview)
+    before = (await stored(engine, interview_id))["transcript"]
+    assert sum(entry["role"] == "claude" and entry["text"] == setup.PAYMENT_LINE for entry in before) == 1
+
+    async def connect(*args):
+        pass
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    model.add(next_step("what_you_do", next={"kind": "done"}, reply="", plan="The closing plan."))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions?cards=1", json={})
+    assert response.status_code == 200, response.text
+    transcript = (await stored(engine, interview_id))["transcript"]
+    assert sum(entry["role"] == "claude" and entry["text"] == setup.PAYMENT_LINE for entry in transcript) == 1
+    assert not any(entry["text"] == setup.PAYMENT_LINE for entry in transcript[len(before):])
+    assert transcript[-1]["text"] == "The closing plan."
+    assert [card["proposal_id"] for card in shown(response)] == [ids[0], ids[2 if earlier == "stripe" else 1],
+                                                              ids[1 if earlier == "stripe" else 2]]
+    async with engine.connect() as conn:
+        reloaded = await setup._load(conn, owner.copy_id, interview_id)
+    saved = setup._stored(reloaded)
+    setup.settle_plan(reloaded)
+    assert setup._stored(reloaded) == saved
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json() == response.json()
+
+
 async def test_use_your_suggestions_accepts_the_unshown_planned_jobs(proposals, model, engine):
     owner, state, ids = proposals
     interview_id = state['interview_id']
@@ -1320,10 +1389,11 @@ async def test_use_your_suggestions_accepts_the_unshown_planned_jobs(proposals, 
     transcript = (await stored(engine, interview_id))['transcript']
     tail = transcript[len(before):]
     assert tail[0]['role'] == 'owner' and tail[0]['text'] == 'Use your suggestions'
-    assert [entry['card']['proposal_id'] for entry in tail[1:3]] == ids[1:]
-    assert [entry['card']['state'] for entry in tail[1:3]] == ['declined', 'accepted']
-    assert tail[3]['text'] == 'The closing plan.'
-    assert tail[4]['text'] == setup.QUESTIONS_DONE
+    cards = [entry['card'] for entry in tail if entry.get('card')]
+    assert [card['proposal_id'] for card in cards] == ids[1:]
+    assert [card['state'] for card in cards] == ['declined', 'accepted']
+    assert tail[2]['text'] == setup.PAYMENT_LINE
+    assert tail[4]['text'] == 'The closing plan.'
     assert len(tail) == 5
     assert shown(reply)[0]['state'] == 'accepted'
     saved = (await stored(engine, interview_id))['answers']
@@ -1345,12 +1415,12 @@ async def test_a_decision_changes_the_card_and_claude_asks_the_next_thing(propos
     transcript = (await stored(engine, interview_id))['transcript']
     assert transcript[len(before)-1]['card']['state'] == 'accepted'
     assert [entry['text'] for entry in transcript[len(before):]] == [
-        'An intro call makes sense.', 'Take a retainer?', '']
-    assert transcript[-1]['card']['proposal_id'] == ids[1]
+        'An intro call makes sense.', 'Take a retainer?', '', setup.PAYMENT_LINE]
+    assert transcript[-2]['card']['proposal_id'] == ids[1]
     assert sum(entry['role'] == 'owner' for entry in transcript) == sum(entry['role'] == 'owner' for entry in before)
     assert not any('decided' in entry for entry in transcript)
     assert reply.json()['pending_card'] == ids[1] and reply.json()['question'] is None
-    assert reply.json()['messages'][-1]['card'] == transcript[-1]['card']
+    assert reply.json()['messages'][-2]['card'] == transcript[-2]['card']
     text = model.requests[-1].messages[0]['content'][0]['text']
     assert '<owner_decision>' in text and 'accepted' in text and ids[0] in text
     known_unshown = await owner.browser.post(f'/api/owner/setup/{interview_id}/proposals/{ids[2]}', json={'accept': True})
@@ -1382,9 +1452,10 @@ async def test_a_closing_card_turn_emits_leftover_cards_before_the_plan(proposal
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{ids[0]}?cards=1", json={"accept": True})
     assert reply.status_code == 200, reply.text
     tail = (await stored(engine, interview_id))["transcript"][len(row["transcript"]):]
-    assert [entry["text"] for entry in tail] == ["That works.", "", "", "The closing plan.", setup.QUESTIONS_DONE]
-    assert [entry["card"]["proposal_id"] for entry in tail[1:3]] == ids[1:]
-    assert [entry["card"]["state"] for entry in tail[1:3]] == ["declined", "accepted"]
+    assert [entry["text"] for entry in tail] == ["That works.", "", setup.PAYMENT_LINE, "", "The closing plan."]
+    cards = [entry["card"] for entry in tail if entry.get("card")]
+    assert [card["proposal_id"] for card in cards] == ids[1:]
+    assert [card["state"] for card in cards] == ["declined", "accepted"]
     assert reply.json()["step"] == "tools" and reply.json()["pending_card"] is None
 
 
@@ -1405,7 +1476,7 @@ async def test_a_decision_that_closes_setup_runs_after_finish_after_the_commit(p
     async def after(owner_ctx, interview):
         saved = await stored(engine, interview_id)
         assert saved["step"] == interview.step == "tools"
-        assert saved["transcript"][-1]["text"] == setup.QUESTIONS_DONE
+        assert saved["transcript"][-1]["text"] == "The closing plan."
         assert interview_id in setup._RUNNING
         calls.append(interview_id)
     monkeypatch.setattr(setup, "after_finish", after)

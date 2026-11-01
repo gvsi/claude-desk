@@ -2044,7 +2044,7 @@ def settle_plan(interview: Interview) -> None:
     pending = interview.pending_card
     for card in interview.unshown:
         card.state = "declined" if _unpriced_payment(card.job) else "accepted"
-        interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
+        _show_card(interview, card)
     if pending is not None:
         card = next(entry.card for entry in reversed(interview.transcript)
                     if entry.card is not None and entry.card.proposal_id == pending)
