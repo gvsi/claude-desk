@@ -111,8 +111,8 @@ RIVERA_KNOWLEDGE: list[KnowledgeItem] = [
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
                   text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
-                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. Each "
-                       "price is given in a quote from this list.",
+                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
+                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 
