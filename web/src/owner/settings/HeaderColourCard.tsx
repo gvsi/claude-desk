@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useId, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 
 import type { BrandPalette } from '../../api/contracts.ts';
 import { isUncertain, OWNER_ERROR_COPY, request } from '../../api/http.ts';
@@ -29,11 +29,6 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
       body: { name: business.name, owner_display_name: business.owner_display_name, timezone: business.timezone, brand_palette: palette, brand: {} },
     }),
     onMutate: () => queryClient.cancelQueries({ queryKey: DESKS_KEY }),
-    onSuccess: async (_, palette) => {
-      // A read sent while the save was out may still carry the old pick.
-      await queryClient.cancelQueries({ queryKey: DESKS_KEY });
-      queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => now?.map((item) => item.business_id === business.business_id ? { ...item, brand: paletteBrand(palette) } : item));
-    },
     onError: async (err) => {
       const previous = paletteKey(business.brand);
       if (isUncertain(err)) {
@@ -50,11 +45,24 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
       }
       setFailure(`That didn't save, so your header is still ${previous === null ? 'Custom colour' : PALETTE_NAMES[previous]}.`);
     },
-    onSettled: () => {
-      if (!unconfirmed.current) setOptimistic(null);
+    onSettled: async () => {
+      // Responses can arrive out of order across mounts. Read the server after every outcome;
+      // never carry a mutation's old palette into the shared cache.
+      await queryClient.invalidateQueries({ queryKey: DESKS_KEY });
       saving.current = false;
     },
   });
+
+  useEffect(() => {
+    // Keep the preview through the write and its readback. If both reads failed, keep it until
+    // a later successful read (or leaving the page) settles the unconfirmed choice.
+    if (save.isPending || queryClient.getQueryState(DESKS_KEY)?.status !== 'success') return;
+    setOptimistic(null);
+    if (unconfirmed.current) {
+      setFailure(null);
+      unconfirmed.current = false;
+    }
+  }, [business, save.isPending, queryClient]);
 
   function pick(palette: BrandPalette) {
     if (saving.current || palette === selected) return;

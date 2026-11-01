@@ -1,6 +1,9 @@
-import { expect, it } from 'vitest';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
+import { expect, it, onTestFinished } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
+import { ROUTES } from '../../api/routes.ts';
+import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
@@ -179,4 +182,46 @@ it('keeps an unconfirmed pick when the save response and reread both fail', asyn
   await expect.element(card.getByRole('alert')).toHaveTextContent("We couldn't reach Claude Desk. Check your connection, then try again.");
   await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
+});
+
+
+it('keeps the server pick when an earlier response returns after leaving and coming back', async () => {
+  const { screen, router } = await renderRoute(GENERAL);
+  const group = screen.getByRole('radiogroup', { name: 'Header colour' });
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  let release!: () => void;
+  const until = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(() => release());
+  let committed = false;
+  let returned = false;
+  worker.use(http.put(ROUTES.setBusiness.path.replace('{desk_id}', ':desk_id'), async ({ request, cookies }) => {
+    if (committed) return undefined;
+    const answer = await mockStore.dispatch('setBusiness', {
+      params: { desk_id: RIVERA.deskId }, body: await request.json(), cookies,
+    });
+    committed = true;
+    await until;
+    returned = true;
+    if ('network' in answer) return HttpResponse.error();
+    return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+  }));
+  await group.getByRole('radio', { name: 'Navy', exact: true }).click();
+  await expect.poll(() => committed).toBe(true);
+  await expect.element(group.getByRole('radio', { name: 'Navy', exact: true })).toHaveAttribute('aria-checked', 'true');
+  // The same-mount guard also prevents another write while Navy's response is held.
+  (group.getByRole('radio', { name: 'Clay', exact: true }).element() as HTMLButtonElement).click();
+  expect(mockStore.requests.filter(({ key }) => key === 'setBusiness')).toHaveLength(1);
+  await router.navigate(`/app/${RIVERA.deskId}/settings/knowledge`);
+  await expect.element(group).not.toBeInTheDocument();
+  await router.navigate(GENERAL);
+  await expect.element(group).toBeVisible();
+  await group.getByRole('radio', { name: 'Plum', exact: true }).click();
+  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await expect.element(group.getByRole('radio', { name: 'Plum', exact: true })).toHaveAttribute('aria-checked', 'true');
+  const reads = mockStore.requests.filter(({ key }) => key === 'desks').length;
+  release();
+  await expect.poll(() => returned).toBe(true);
+  await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'desks').length).toBeGreaterThan(reads);
+  await expect.element(group.getByRole('radio', { name: 'Plum', exact: true })).toHaveAttribute('aria-checked', 'true');
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'plum' });
 });
