@@ -20,7 +20,7 @@ ambiguities]
 
 ## Before you begin
 
-Read AGENTS.md. Its safety invariants, test rules and evals gate bind you. If `.local/constitution.md` exists, read it too and hold user-visible work to it.
+Read AGENTS.md. Its safety invariants, test rules and evals gate bind you.
 If the requirements, approach, dependencies or assumptions are unclear, ask
 now: report NEEDS_CONTEXT with your questions.
 
