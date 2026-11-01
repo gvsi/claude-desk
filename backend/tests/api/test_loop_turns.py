@@ -7,7 +7,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import httpx2
@@ -17,11 +17,12 @@ from sqlalchemy import text
 
 import desk.api.loop as loop_module
 from desk.api import prompts
+from desk.api.a2a import shown_since
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import MAX_MODEL_CALLS, run_turn
 from desk.api.model import AnthropicModel, ModelUsage
 from desk.api.prompts import NOTES, REWRITE_INSTRUCTION, DeskIdentity, conversation_system
-from desk.api.store import append_message, append_note_once, has_pending
+from desk.api.store import append_message, append_note_once, has_pending, start_fresh_context, transcript
 from desk.api.tools import Caller
 from desk.contracts import AgentAuth
 from desk.events import SseEvent
@@ -135,7 +136,7 @@ async def test_reply_turn_reveals_after_the_check(api_conn, engine, caller, visi
     assert request.tools[-1]["name"] == "send_reply" and "native__quote" in {tool["name"] for tool in request.tools}
     (user,) = request.messages
     assert user["role"] == "user" and [block["text"].split(">")[0] for block in user["content"]] == [
-        "<visitor_message", "<desk_context"]
+        "<visitor_message", "<desk_context", "<note"]
     assert user["content"][0]["text"] == "<visitor_message>Hi, when are you open?</visitor_message>"
     # the reply is Claude's, by its call, and its result is in the history
     assert await rows(api_conn, caller.session_id, "delivered", "author", "call_id", "ref_id") == [
@@ -163,6 +164,97 @@ async def test_the_desks_catalog_reaches_claude_in_the_desk_context(api_conn, ca
         ("deposit", "Service call deposit"), ("drain", "Drain clearing"), ("heater", "Water heater flush"),
         ("leak", "Leak repair")]
     assert {claim["kind"] for claim in catalog["claims"]} == {"text"}            # no price, amount or unit
+
+
+@pytest.mark.parametrize("kind", ["visitor", "agent"])
+async def test_kernel_local_time_is_a_model_only_note(api_conn, caller, fake, kind):
+    fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)  # Saturday in the business's zone, Sunday in UTC
+    caller = replace(caller, kind=kind)
+    await append_message(api_conn, caller.ids, f"{kind}_text", text="Can you help?")
+    await api_conn.commit()
+    model = ScriptedModel([response(reply("Yes, what do you need?"))])
+
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    note = "The business's local time is Saturday, 2026-10-31, 17:40 (America/Los_Angeles)."
+    texts = [block.get("text", "") for message in model.requests[0].messages for block in message["content"]]
+    assert [value for value in texts if value.startswith("<note>")] == [f"<note>{note}</note>"]
+    assert await rows(api_conn, caller.session_id, "note", "text", "visibility", "wake") == [
+        (note, "model", False)]
+    for audience in ("visitor", "owner"):
+        items = await transcript(api_conn, caller.ids, audience)
+        assert "note" not in {item.kind for item in items}
+        assert note not in json.dumps([item.model_dump(mode="json") for item in items])
+    assert note not in json.dumps([event.model_dump(mode="json") for event in await events(api_conn, caller.session_id)])
+    answer, _ = await shown_since(api_conn, caller.ids, 0)
+    assert note not in answer.model_dump_json()
+    assert [block.text for block in answer.blocks] == ["Yes, what do you need?"]
+
+
+async def test_time_notes_refresh_after_ten_minutes_from_the_last_note(api_conn, caller, fake):
+    fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)
+    model = ScriptedModel([response(reply("How can I help?")) for _ in range(5)])
+    for advance, count in ((0, 1), (9, 1), (1, 2), (9, 2), (1, 3)):
+        fake.now += timedelta(minutes=advance)
+        await said(api_conn, caller, "Can you help?")
+        assert await run_turn(api_conn, caller, model) == "done"
+        assert len(await rows(api_conn, caller.session_id, "note", "text")) == count
+        assert sum(block.get("text", "").startswith("<note>") for message in model.requests[-1].messages
+                   for block in message["content"]) == count
+        # Time is separate from the facts: it never changes the desk_context row or its hash.
+        assert len(await rows(api_conn, caller.session_id, "desk_context", "text")) == 1
+    assert await rows(api_conn, caller.session_id, "note", "text", "ref_id") == [
+        (f"The business's local time is Saturday, 2026-10-31, {at} (America/Los_Angeles).",
+         f"business_local_time:2026-10-31T{at}-07:00") for at in ("17:40", "17:50", "18:00")]
+
+
+async def test_time_notes_refresh_at_local_midnight_before_ten_minutes(api_conn, caller, fake):
+    fake.now = datetime(2026, 11, 1, 6, 59, tzinfo=UTC)
+    model = ScriptedModel([response(reply("How can I help?")) for _ in range(2)])
+    for _ in range(2):
+        await said(api_conn, caller, "Can you help?")
+        assert await run_turn(api_conn, caller, model) == "done"
+        fake.now += timedelta(minutes=1)
+    assert await rows(api_conn, caller.session_id, "note", "text") == [
+        (f"The business's local time is {weekday}, {date}, {at} (America/Los_Angeles).",)
+        for weekday, date, at in (("Saturday", "2026-10-31", "23:59"), ("Sunday", "2026-11-01", "00:00"))]
+
+
+async def test_a_kernel_without_a_context_clock_still_runs_the_turn(api_conn, caller, fake, visitor):
+    class WithoutClock(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            result = await httpx.ASGITransport(app=fake_kernel_app(fake)).handle_async_request(request)
+            if request.url.path.startswith("/context/"):
+                body = json.loads(await result.aread())
+                body.pop("clock")
+                return httpx.Response(result.status_code, json=body)
+            return result
+
+    await said(api_conn, caller, "Can you help?")
+    model = ScriptedModel([response(reply("Yes, what do you need?"))])
+    async with KernelHttp("http://fake-kernel", transport=WithoutClock()) as http:
+        assert await run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model) == "done"
+    assert len(model.requests) == 1
+    assert await rows(api_conn, caller.session_id, "note", "text") == []
+
+
+async def test_a_fresh_context_keeps_only_the_latest_time_note(api_conn, caller, fake):
+    fake.now = datetime(2026, 11, 1, 0, 40, tzinfo=UTC)
+    model = ScriptedModel([response(reply("How can I help?")) for _ in range(3)])
+    for _ in range(2):
+        await said(api_conn, caller, "Can you help?")
+        assert await run_turn(api_conn, caller, model) == "done"
+        fake.now += timedelta(minutes=10)
+    fake.now -= timedelta(minutes=9)
+    request = model.requests[-1]
+    await start_fresh_context(api_conn, caller.ids, request.tools, system=request.system)
+    await said(api_conn, caller, "Can you help?")
+    assert await run_turn(api_conn, caller, model) == "done"
+    texts = json.dumps(model.requests[-1].messages)
+    assert texts.count("The business's local time is") == 1
+    assert "Saturday, 2026-10-31, 17:50 (America/Los_Angeles)" in texts
+    assert "17:40" not in texts
+    assert len(await rows(api_conn, caller.session_id, "note", "text")) == 2
 
 
 async def test_end_turn_text_becomes_prose(api_conn, caller, fake):
