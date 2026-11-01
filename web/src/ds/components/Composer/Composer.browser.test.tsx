@@ -179,3 +179,21 @@ it('a_send_tried_again_and_held_leaves_focus_to_the_screen_until_its_reply_has_c
   await expect.element(box).toBeEnabled();
   expect(document.activeElement).not.toBe(box.element());
 });
+
+it('a_click_on_the_box_focuses_the_text_inside_an_ancestor_that_takes_focus', async () => {
+  // An owner page's main region, or Ask Claude's sheet, takes focus itself (tabIndex -1): a click on
+  // the box's empty row still puts the caret in the text.
+  const screen = await render(
+    <div tabIndex={-1}>
+      <Composer variant="owner" label="Message" placeholder="Message" onSend={() => {}} />
+    </div>,
+  );
+  const input = screen.getByRole('textbox', { name: 'Message' });
+  const box = input.element() as HTMLTextAreaElement;
+  await input.click();
+  await userEvent.keyboard('Thursday works');
+  box.blur();
+  await clickBoxSurface('owner', box);
+  expect(document.activeElement).toBe(box);
+  expect(box.selectionStart).toBe('Thursday works'.length);
+});

@@ -156,16 +156,20 @@ export function Composer({
   // at the end of the text, as on claude.ai. Only a press that starts there counts, so a selection
   // made in the text box and released outside it stays, and the press itself moves no focus.
   const pressedBox = useRef(false);
-  const ownClick = (target: EventTarget) => !(target instanceof Element) || target.closest(OWN_CLICK) !== null;
+  // A control of the box's own: one outside it (a page or sheet that takes focus itself) doesn't count.
+  const ownClick = (event: MouseEvent<HTMLDivElement>) => {
+    const control = event.target instanceof Element ? event.target.closest(OWN_CLICK) : null;
+    return !(event.target instanceof Element) || (control !== null && event.currentTarget.contains(control));
+  };
   const handleBoxMouseDown = (event: MouseEvent<HTMLDivElement>) => {
-    pressedBox.current = event.button === 0 && !disabled && !ownClick(event.target);
+    pressedBox.current = event.button === 0 && !disabled && !ownClick(event);
     if (pressedBox.current) event.preventDefault();
   };
   const handleBoxClick = (event: MouseEvent<HTMLDivElement>) => {
     const pressed = pressedBox.current;
     pressedBox.current = false;
     const box = inputRef.current;
-    if (!pressed || disabled || !box || ownClick(event.target)) return;
+    if (!pressed || disabled || !box || ownClick(event)) return;
     // Words already selected in the text box stay selected.
     if (document.activeElement === box && box.selectionStart !== box.selectionEnd) return;
     box.focus();
