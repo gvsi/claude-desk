@@ -142,15 +142,23 @@ def test_the_case_file_holds_every_group():
     assert Counter(c.group for c in cases) == {
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
-        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 4}
+        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 4, "voice_examples": 4}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
         "offer_plus_promise": {"flag": 7}, "past_tense_claims": {"flag": 5}, "follow_up": {"flag": 5, "pass": 2},
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
-        "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 4}}
-    assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases}
+        "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 4},
+        "voice_examples": {"pass": 4}}
+    assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
+    # The voice examples quote the English system prompt; its two policy examples carry their cards.
+    from desk.api.prompts import VOICE_EXAMPLES
+
+    voice = [c for c in cases if c.group == "voice_examples"]
+    assert [c.prose for c in voice] == [" ".join(parts) for parts, _ in VOICE_EXAMPLES]
+    assert all(c.language == "en" and not code_blocked(c) for c in voice)
+    assert [bool(c.cards) for c in voice] == [False, True, True, False]
     # prose too short for the kernel to tell its language reaches the check in the turn's language, which
     # the visitor's newest message sets: each such draft is sent twice, the same words and cards told en
     # and told es, and the detection reads none of them
@@ -220,7 +228,8 @@ def uncovered(cases: list[Case], expected: tuple[str, ...] = ("flag", "flag_ai")
 
 
 def test_every_flag_group_and_pass_group_has_a_case_in_each_language_the_model_alone_decides():
-    cases = load_cases(CASES_FILE)
+    # Exact English prompt examples are checked separately above; all other groups stay bilingual.
+    cases = [c for c in load_cases(CASES_FILE) if c.group != "voice_examples"]
     assert uncovered(cases) == set()
     assert uncovered(cases, ("pass",)) == set()
     # Spanish past-tense claims would be uncovered without the one with no date word: the code
