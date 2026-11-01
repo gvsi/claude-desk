@@ -29,7 +29,7 @@ import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -4504,5 +4504,32 @@ describe('consultant setup', () => {
     expect(screen.getByRole('article').elements()).toHaveLength(0);
     expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
     expect(screen.getByText(/Question \d of|About seven/).elements()).toHaveLength(0);
+  });
+});
+
+describe('the test-client offer', () => {
+  it.each(['desktop', 'phone'] as const)('a_yes_says_done_and_continue_goes_to_tools_while_turns_stream_on_%s', async (viewport) => {
+    // A scripted run to the end of its questions, the owner's own contact typed on the last: the offer follows.
+    const state = await startInterview(false, 'Lakeview Accounts. I’m Lee. We help local businesses.');
+    const id = state.interview_id;
+    for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) await mockStore.dispatch('setupAnswer', { params: { id }, body: { question, text: 'Yes' } });
+    await mockStore.dispatch('setupAnswer', {
+      params: { id },
+      body: { question: 'contact_and_after_hours', text: 'Email me at lee@example.com. After hours, take a message.' },
+    });
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport });
+    const offer = screen.getByRole('region', { name: TEST_CLIENT_OFFER, exact: true });
+    await expect.element(offer).toBeVisible();
+    // The offer's answer runs as a streamed turn, as on the API, and its stream says only done.
+    mockStore.streamSetupTurns();
+    mockStore.planStream('setup', { quiet: true });
+    await offer.getByRole('button', { name: TEST_CLIENT_YES, exact: true }).click();
+    await expect.element(screen.getByText(TEST_CLIENT_ADDED, { exact: true })).toBeVisible();
+    const proceed = screen.getByRole('button', { name: SETUP_COPY.tools.continue, exact: true });
+    await expect.element(proceed).toBeVisible();
+    expect(screen.container.querySelector('.cd-setup-growing')).toBeNull();
+    await proceed.click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'test_client', text: TEST_CLIENT_YES });
   });
 });
