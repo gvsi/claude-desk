@@ -36,6 +36,7 @@ import type {
 import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { formatHours } from '../lib/format.ts';
+import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { appendBusinessTools } from './businessTools.ts';
 import type { Language } from './script.ts';
@@ -97,6 +98,8 @@ interface Interview {
   ownerName: string | null;
   about: string | null;
   timezone: string;
+  /** Include "search fails" in the description to preview the API's single search failure label. */
+  searchFails: boolean;
   /** The money limit the owner answered, in cents: 0 until then, as the API's default. */
   capCents: number;
   /** The rules draft the interview made, once it has one. */
@@ -833,7 +836,15 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
 
 /** The reads and first question after the owner gives (or declines) consent. */
 function completeConsent(interview: Interview): void {
-  if (interview.state.consent) say(interview, 'tool_label', MEMORY_LABEL);
+  if (interview.state.consent) {
+    say(interview, 'tool_label', MEMORY_LABEL);
+    if (interview.searchFails) {
+      say(interview, 'tool_label', "Couldn't search the web just now");
+    } else {
+      say(interview, 'tool_label', 'Searched the web: hair salon deposits and late cancellations');
+      say(interview, 'tool_label', 'Searched the web: salon new client consultation form');
+    }
+  }
   if (interview.consultant) openConsultant(interview);
   else {
     const first = SETUP_QUESTIONS[0];
@@ -1044,6 +1055,11 @@ function connectPayments(desk: DeskRecord): void {
   }
 }
 
+/** How Claude's first words thank the owner: by the name they gave, if any, with one stop after it ("Bob Smith Jr."). */
+export function thanksTo(ownerName: string | null): string {
+  return ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}${afterName(ownerName, '.')}`;
+}
+
 /** A new interview and its Desk, made with Answering off from the owner's description. */
 function newInterview(world: MockWorld, text: string, timezone: string): Interview {
   const business = businessNameOf(text);
@@ -1060,7 +1076,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     suggestions: [],
   };
   world.desks.push(desk);
-  const greeting = ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}.`;
+  const greeting = thanksTo(ownerName);
   const interview: Interview = {
     consultant: CPA_FIRM.test(text),
     words: situationWordsOf(text),
@@ -1092,6 +1108,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     ownerName,
     about: aboutOf(text),
     timezone,
+    searchFails: /search fails/i.test(text),
     capCents: 0,
     draftVersion: null,
     holdNext: false,

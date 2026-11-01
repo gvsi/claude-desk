@@ -45,7 +45,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator
 
-from desk.contracts import Effect, NormalizedAction, Review, RuleCard, ToolName
+from desk.contracts import AnyToolName, Effect, NormalizedAction, Review, RuleCard
 from desk.env import is_development
 
 if TYPE_CHECKING:
@@ -117,7 +117,7 @@ NO_API_KEY = "no-key"
 _KEY = re.compile(r"[!-~]+")
 
 SOFT_PROMISE_MODEL = "claude-sonnet-5-5"
-SOFT_PROMISE_TIMEOUT_S = 6.0
+SOFT_PROMISE_TIMEOUT_S = 8.0
 SOFT_PROMISE_MAX_TOKENS = 1024
 # The owner's decision of 2026-10-30: the check flags promises the cards don't back and prose that
 # denies being an AI, not prose restating what a card beside it shows, which the card carries.
@@ -163,7 +163,7 @@ class ReviewAction(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tool: ToolName
+    tool: AnyToolName
     effects: list[Effect]
     resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
     list_cents: int | None
@@ -421,16 +421,17 @@ class AnthropicDecisions:
             SoftPromiseVerdict, data, model=SOFT_PROMISE_MODEL, max_tokens=SOFT_PROMISE_MAX_TOKENS,
             system=SOFT_PROMISE_SYSTEM, schema=SOFT_PROMISE_SCHEMA,
             thinking={"type": "adaptive"},
-            timeout_s=SOFT_PROMISE_TIMEOUT_S, failed="soft_promise_failed")
+            timeout_s=SOFT_PROMISE_TIMEOUT_S, failed="soft_promise_failed", done="soft_promise_done")
 
     async def _ask(self, answer: type[Answer], data: BaseModel, *, model: str, max_tokens: int, system: str,
                    schema: dict[str, Any], thinking: dict[str, str], timeout_s: float,
-                   failed: str, effort: str = "low") -> tuple[Answer | None, CallUsage]:
+                   failed: str, effort: str = "low", done: str | None = None) -> tuple[Answer | None, CallUsage]:
         """One structured call at effort low: `data` as one JSON object (its letters as themselves,
         so Spanish reaches the model as text, not escapes), one try inside `timeout_s`, no tools and
         no fallback model (the client makes no retries, and the timeout goes with the request).
         The parsed answer, or None on any failure, logged as `failed` by kind and never with what
-        came back; and the call's usage."""
+        came back; an answer is logged as `done` when given, with its latency and token counts only;
+        and the call's usage."""
         started = time.perf_counter()
         message, parsed, status, kind = None, None, "ok", None
         try:
@@ -452,9 +453,13 @@ class AnthropicDecisions:
         except Exception as exc:   # anything else is a failed call too; never BaseException (cancellation)
             status, kind = "error", f"unexpected_{type(exc).__name__}"
         latency_ms = round((time.perf_counter() - started) * 1000)
+        usage = _usage(message, status, latency_ms, model=model)
         if parsed is None:
             log.warning("%s status=%s kind=%s latency_ms=%d", failed, status, kind, latency_ms)
-        return parsed, _usage(message, status, latency_ms, model=model)
+        elif done is not None:
+            log.info("%s status=%s latency_ms=%d input_tokens=%d output_tokens=%d", done, status, latency_ms,
+                     usage.input_tokens, usage.output_tokens)
+        return parsed, usage
 
 
 def _parse(message: Any, answer: type[Answer]) -> tuple[Answer | None, CallStatus, str | None]:

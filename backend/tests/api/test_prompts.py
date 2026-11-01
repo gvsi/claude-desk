@@ -31,6 +31,7 @@ from desk.api.prompts import (
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
     SETUP_NEXT_HEAD,
+    SETUP_PLAN_NOT_CONNECTED,
     SETUP_TURN_HEAD,
     SETUP_TURN_SYSTEM,
     SETUP_TURNS,
@@ -121,9 +122,9 @@ def test_system_prompt_uses_the_business_policies():
         "Only on their yes, ask for what's missing of their name, a phone number or email and the reason, reusing "
         "what they've already given, and make that one call: the business tool for urgent requests (its "
         'description starts "Saves an urgent callback request") if one of your tools is one, otherwise '
-        "native__request_callback. Beside its callback_confirmed card, say plainly that the request is in and the "
-        "card shows when to expect the call. Never present a callback window as help on the way, and never say "
-        "how soon. If they'd rather book, find open times instead.",
+        "native__request_callback. Beside its callback_confirmed card, say plainly that the request is in; when the "
+        "card gives a time, it shows when to expect the call. Never present a callback window as help on the way, "
+        "and never say how soon. If they'd rather book, find open times instead.",
         "- When charter:policy:after_hours is there and they ask about reaching Rivera Plumbing outside its "
         "hours, show it with the policy clause.",
         "- When charter:policy:how_we_help is there, offer only the work it lists and what your tools do. For "
@@ -203,7 +204,7 @@ def test_urgent_requests_get_a_safety_step_then_ask_before_involving_the_owner()
     assert ('make that one call: the business tool for urgent requests (its description starts "Saves an urgent '
             'callback request") if one of your tools is one, otherwise native__request_callback.') in urgent
     # honest about timing, and nothing the soft-promise check reads as a promise
-    assert "say plainly that the request is in and the card shows when to expect the call" in urgent
+    assert "say plainly that the request is in; when the card gives a time, it shows when to expect the call." in urgent
     assert "Never present a callback window as help on the way, and never say how soon." in urgent
     assert "If they'd rather book, find open times instead." in urgent
     for promise in ("right away", "will call", "promise", "shortly"):
@@ -276,7 +277,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.18"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.21"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -492,8 +493,22 @@ def test_setup_app_acknowledgment_waits_for_code_to_connect():
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
         assert "code connects it after your reply" in system
         assert "never that it's already connected" in system
-        assert "Every app connects when the owner accepts it" in system
+        assert ("Apps other than Stripe connect when the owner accepts them (simulated in this preview); code tries "
+                "to connect Stripe after your reply.") in system
+        assert "Every app connects when the owner accepts it" not in system
         assert 'Never "Done"' in system or 'never "Done"' in system
+
+
+def test_setup_never_calls_an_app_connected_once_its_connection_failed():
+    rule = ('If <setup_plan> shows an app as "accepted, not connected", its connection didn\'t go through: never say '
+            "it's connected, and when you mention it, say they can finish connecting it on the Tools step; jobs "
+            "that use it stay in the plan.")
+    assert f'"{SETUP_PLAN_NOT_CONNECTED}"' in rule
+    for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert f"never that it's already connected. {rule} You can't change a card" in system
+        assert "  " not in system
+    assert ('its id and status: planned, shown, accepted, "accepted, not connected", declined, changed or dropped'
+            in SETUP_TURN_SYSTEM)
 
 
 def test_added_setup_jobs_have_bounded_short_names_and_one_plain_line():
@@ -600,6 +615,61 @@ def test_drafting_prompts_leave_verification_to_the_built_in_rule():
     assert "keep any card on native.start_verification exactly as it is, and never add one" in RULES_CHAT_SYSTEM
 
 
+def test_reply_correction_uses_fixed_codes_and_the_same_plain_text_instruction():
+    from desk.api.prompts import NOTES, REPLY_DIAGNOSTICS, REPLY_RULE_IDS
+
+    assert REWRITE_INSTRUCTION in NOTES["prose_blocked"]
+    assert "or use the handoff clause" not in REWRITE_INSTRUCTION
+    assert ("For soft.unavailable, this check returned no verdict: fix any other violations listed; if there are "
+            "none, send the reply again as it is.") in REWRITE_INSTRUCTION
+    assert "nothing was flagged" not in REWRITE_INSTRUCTION
+    assert "harness" not in REWRITE_INSTRUCTION
+    assert ("For language_uncertain, write a plain sentence with everyday words beside the cards, for example "
+            "'Here is the link to pay.'") in REWRITE_INSTRUCTION
+    # the pointer rule is for flagged wording, so it never pulls against sending an unflagged reply again as it is
+    assert ("For flagged wording, use a brief neutral pointer without repeating it or adding a commitment."
+            in REWRITE_INSTRUCTION)
+    assert "Use a brief neutral pointer" not in REWRITE_INSTRUCTION
+    assert "Do not repeat a business action" in REWRITE_INSTRUCTION
+    assert "soft.unavailable" in REPLY_RULE_IDS
+    assert REPLY_DIAGNOSTICS["soft.unavailable"] == (
+        "This check returned no verdict. Fix any other violations listed; if there are none, send the reply again as "
+        "it is.")
+    assert "lex.en.untrusted" not in REPLY_RULE_IDS
+    assert "soft.handoff_closed" in REPLY_RULE_IDS
+    assert REPLY_DIAGNOSTICS["language_uncertain"] == (
+        "Write a plain sentence with everyday words, for example 'Here is the link to pay.'")
+
+
+def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
+    """Each rule ID the reply check can give a rewritable violation reaches Claude by name with a fixed line, never as
+    `other`: every lexicon category in either language, and the literal IDs of the scans, clause checks, the signing
+    recheck and the soft check."""
+    from desk.api.prompts import REPLY_DIAGNOSTICS, REPLY_RULE_IDS
+    from desk.api.tools import CLAUSE_RULE_IDS
+    from desk.kernel_service import reply_check
+
+    lexicon = {f"lex.{language}.{category}" for language, entries in reply_check.LEXICONS.items()
+               for category, _ in entries}
+    clauses = {"names_no_fact", "no_such_fact", "not_a_reader", "template_mismatch", "not_current", "nothing_to_show",
+               "template_unavailable", "kernel_only_template", "claims_changed"}
+    literal = {"digit", "currency", "percent_sign", "language_uncertain", "soft.promise", "soft.denies_ai",
+               "soft.unavailable", "soft.jev", reply_check.HANDOFF_CLOSED, "policy_combined", *clauses}
+    assert {"lex.en.callback", "lex.es.callback"} <= lexicon
+    assert lexicon | literal <= REPLY_RULE_IDS
+    assert clauses | {"policy_combined"} <= CLAUSE_RULE_IDS
+    assert REPLY_DIAGNOSTICS["lex.en.callback"] == REPLY_DIAGNOSTICS["lex.es.callback"] == (
+        "Remove the call or callback claim unless a callback_confirmed card shows it.")
+    assert REPLY_DIAGNOSTICS["soft.jev"] == REPLY_DIAGNOSTICS["soft.promise"]
+    assert REPLY_DIAGNOSTICS["claims_changed"] == REPLY_DIAGNOSTICS["not_current"]
+
+
+def test_reply_prompt_explains_when_only_cards_were_shown():
+    text = conversation_system(RIVERA)[0]["text"]
+    assert ('If send_reply answers "delivered" or "delivered_handoff" with prose_shown false, your prose wasn\'t '
+            "shown, only the cards or the handoff; don't refer to that prose later.") in text
+
+
 def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
     assert "every money tool, including payment links, charge mandates and business money tools" in CARD_DRAFT_SYSTEM
     assert prompts.CARD_ERRORS["link_limit"] == (
@@ -610,6 +680,7 @@ def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
 
 PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
                 "TIME_NOTE", "WEEKDAYS",
+                "REPLY_DIAGNOSTICS", "REPLY_RULE_IDS", "INVALID_REPLY_DIAGNOSTIC", "INVALID_REPLY_SHAPES",
                 "REPLY_EXAMPLES", "STATUS_LINES",
                 "REWRITE_INSTRUCTION", "NOTES", "DEMO_TASKS", "DemoTask", "VISITING_AGENT_SYSTEM", "AGENT_TASK",
                 "RECEIPT_LINE", "agent_task", "AgentStep", "desk_reply_text",
@@ -652,7 +723,10 @@ def _from_prompts(tree: ast.Module) -> set[str]:
 
 def _fixed() -> set[str]:
     """The fixed strings a model reads, as prompts.py holds them: no other module may hold one."""
+    from desk.api.prompts import INVALID_REPLY_DIAGNOSTIC, REPLY_DIAGNOSTICS
+
     return {REWRITE_INSTRUCTION, TIME_NOTE, *NOTES.values(), *DEMO_TASKS.values(), SEND_REPLY_TOOL["description"],
+            INVALID_REPLY_DIAGNOSTIC, *REPLY_DIAGNOSTICS.values(),
             *(line for line in conversation_system(RIVERA)[0]["text"].splitlines() if len(line) > 20),
             *(line for line in VISITING_AGENT_SYSTEM.splitlines() if len(line) > 20),
             *AGENT_TASK.split("{task}"), RECEIPT_LINE,

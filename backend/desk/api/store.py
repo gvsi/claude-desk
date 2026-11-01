@@ -58,7 +58,7 @@ labels (`SUMMARY_LABELS`, `SHOWN_LABELS`).
 import hashlib
 import json
 import secrets
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
@@ -329,6 +329,23 @@ async def triaged(conn: AsyncConnection, copy_id: str, **where: str) -> dict[str
     return found
 
 
+async def newest_triage(conn: AsyncConnection, copy_id: str, desk_id: str,
+                        session_ids: Iterable[str]) -> dict[str, Triage]:
+    """Each of the Desk's given sessions' newest triage row that reads back as its `Triage`, by `session_id`; a
+    session with none is left out."""
+    wanted = sorted(set(session_ids))
+    if not wanted:
+        return {}
+    rows = await conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(
+        MESSAGES.c.copy_id == copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "triage",
+        MESSAGES.c.session_id.in_(wanted)).order_by(MESSAGES.c.n))
+    found = {}
+    for session_id, text in rows:
+        if (triage := _read_triage(text)) is not None:
+            found[session_id] = triage
+    return found
+
+
 _LEGACY_TRIAGE_CATEGORIES = {
     "discount_push": "prices", "private_data": "records", "code_redirect": "codes",
     "injection": "instructions", "over_limit": "limits", "impersonation": "other",
@@ -521,8 +538,10 @@ async def unread_results(conn: AsyncConnection, session_id: str) -> UnreadResult
 
 async def delivered_reply(conn: AsyncConnection, session_id: str, call_id: str) -> Any | None:
     """What Claude's `send_reply` call `call_id` put on the visitor's screen: its `delivered` row's kernel message ID
-    (`ref_id`) and `blocks`, or None when nothing was shown for that call."""
-    return (await conn.execute(select(MESSAGES.c.ref_id, MESSAGES.c.blocks).where(
+    (`ref_id`), its `blocks` and its event's `handoff` flag, or None when nothing was shown for that call."""
+    return (await conn.execute(select(MESSAGES.c.ref_id, MESSAGES.c.blocks,
+                                     RUN_EVENTS.c.payload["handoff"].as_boolean().label("handoff"))
+        .select_from(WITH_EVENTS).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "delivered", MESSAGES.c.call_id == call_id)
         .order_by(MESSAGES.c.n).limit(1))).first()
 

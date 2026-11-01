@@ -288,7 +288,16 @@
 }
 
 @media (min-height: 480px) {
+  /* The opening (SetupOpening) stays around the step, so it passes the column's height on to it. */
+  .cd-setup__main--wide .cd-setup-opening,
+  .cd-setup__main--wide .cd-setup-opening > .cd-skeleton-screen__body {
+    display: flex;
+    flex-direction: column;
+  }
+
   .cd-setup__main--wide > .cd-setup__column,
+  .cd-setup__main--wide .cd-setup-opening,
+  .cd-setup__main--wide .cd-setup-opening > .cd-skeleton-screen__body,
   .cd-setup__main--wide .cd-setup-step {
     flex: 1 0 auto;
   }

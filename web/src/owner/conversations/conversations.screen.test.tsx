@@ -14,7 +14,7 @@ import { ROUTES } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { typingPingMs } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
-import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, turnEnd, writing } from '../../mocks/script.ts';
+import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, writing } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
@@ -23,7 +23,7 @@ import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLan
 import { watchLandings } from '../../test/landings.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
@@ -184,6 +184,27 @@ async function served<T>(key: 'conversations' | 'conversation' | 'needsYou', par
   const answer = await mockStore.dispatch(key, { params });
   if ('network' in answer || answer.status !== 200) throw new Error(`the mock reads ${key}`);
   return answer.body as T;
+}
+
+/**
+ * Alex Kim's assistant books the earliest visit, as the agents page sends it from a visitor's chat:
+ * the agent's chat once its run is done.
+ */
+async function bookTheEarliestVisit(): Promise<string> {
+  const slug = RIVERA.slug;
+  const opened = await mockStore.dispatch('openSession', { params: { slug } });
+  if ('network' in opened || opened.status !== 200) throw new Error("the visitor's chat opens");
+  const sent = await mockStore.dispatch('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'book-the-earliest-visit' } });
+  if ('network' in sent || sent.status !== 202) throw new Error('the agent is sent');
+  const runId = (sent.body as { run_id: string }).run_id;
+  const runState = async () => {
+    const run = await mockStore.dispatch('agentRun', { params: { slug, run_id: runId } });
+    return 'network' in run ? null : (run.body as { state: string }).state;
+  };
+  await expect.poll(runState, { timeout: 5_000 }).toBe('done');
+  const agent = [...mockStore.world.sessions.values()].filter((chat) => chat.state.kind === 'agent').at(-1);
+  if (!agent) throw new Error('the run has its agent chat');
+  return agent.state.session_id;
 }
 
 /** A held request's card, by what was asked. */
@@ -464,6 +485,34 @@ describe('Conversations', () => {
     await expect.element(quiet.screen.getByText('When someone writes to your Desk, it shows up here.', { exact: true })).toBeVisible();
     expect(quiet.screen.getByText('Choose a conversation to read it.').elements()).toHaveLength(0);
     await expectScreenBasics(quiet.screen.container, { owner: true });
+  });
+
+  it.each(['desktop', 'phone'] as const)('the_head_says_what_got_done_on_%s', async (viewport) => {
+    // Alex Kim's assistant booked the earliest visit: the head says so, where it said the reply was checked.
+    const booked = await bookTheEarliestVisit();
+    const { screen } = await renderRoute(conversation(booked), { viewport });
+    await expect.element(screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name })).toBeVisible();
+    const latest = screen.getByText('Latest: Visit booked', { exact: true });
+    await expect.element(latest).toBeVisible();
+    // The same line in the same place: the head's meta line in the secondary text color.
+    const line = latest.element();
+    expect(line.tagName).toBe('P');
+    expect(line.className).toBe('cd-conversation__latest cd-type-meta');
+    expect(line.parentElement?.classList.contains('cd-conversation__head')).toBe(true);
+    expect(getComputedStyle(line).color).toBe(tokenColor('--text-secondary'));
+    // The booked card and its checks stay under their message.
+    await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
+    await expect.element(log(screen).getByRole('button', { name: "Reply checked against Maria Rivera's rules Open the full trace." }).last()).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+
+    // The seeded agent chat paid its deposit within its signed limit, and Dana's chat ended with her visit booked.
+    for (const [sessionId, words] of [['ses-alex-agent', 'Latest: Deposit paid'], [DANA_LIVE, 'Latest: Visit booked']] as const) {
+      const other = await renderRoute(conversation(sessionId), { viewport });
+      await expect.element(other.screen.getByText(words, { exact: true })).toBeVisible();
+      await expectScreenBasics(other.screen.container, { owner: true });
+      expectNoHorizontalScroll();
+    }
   });
 
   it('agent_name_reads_as_its_own_words', async () => {
@@ -1299,6 +1348,66 @@ describe('Conversations', () => {
     expect(translation.element().parentElement?.textContent).toBe('Translated by Claude: Can you come Thursday afternoon?');
     await expectScreenBasics(screen.container, { owner: true });
   });
+  it('passed_handoff_card_shows_its_held_receipt_in_the_owner_transcript', async () => {
+    const chat = session(DANA_LIVE);
+    const ctx = mockStore.world.context(chat, 'en', 'Talk to Maria');
+    const rule = SCRIPT.find((rule) => rule.name === 'talk');
+    if (!rule) throw new Error('the script has its handoff row');
+    for (const step of [...rule.steps, turnEnd]) mockStore.world.emit(chat, step(ctx));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const line = receipt(screen, VISITOR_PLAIN.en.reply_handed_off);
+    await expect.element(line).toBeVisible();
+    expect(line.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+  });
+
+  it('cards_only_failure_shows_its_handled_check_in_the_owner_transcript', async () => {
+    const world = mockStore.world;
+    const desk = world.desk(RIVERA.deskId);
+    if (!desk) throw new Error('the copy has its Desk');
+    const chat = world.addSession(desk);
+    const text = 'cards-only';
+    world.visitorText(chat, text);
+    const ctx = world.context(chat, 'en', text);
+    for (const step of [...matchRule(text).steps, turnEnd]) world.emit(chat, step(ctx));
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const card = log(screen).getByRole('article', { name: 'Quote', exact: true });
+    await expect.element(card).toBeVisible();
+    const line = receipt(screen, VISITOR_PLAIN.en.reply_checked);
+    await expect.element(line).toBeVisible();
+    expect(line.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
+    expect(log(screen).getByRole('article', { name: 'Handed to a person', exact: true }).elements()).toHaveLength(0);
+    const row = line.element().closest('.cd-transcript-row');
+    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
+      `${VISITOR_PLAIN.en.reply_checked} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+    ]);
+  });
+
+  it('kept_cards_with_drafted_handoff_show_the_held_line_in_the_owner_transcript', async () => {
+    const world = mockStore.world;
+    const desk = world.desk(RIVERA.deskId);
+    if (!desk) throw new Error('the copy has its Desk');
+    const chat = world.addSession(desk);
+    const text = 'cards-kept-handoff';
+    world.visitorText(chat, text);
+    const ctx = world.context(chat, 'en', text);
+    for (const step of [...matchRule(text).steps, turnEnd]) world.emit(chat, step(ctx));
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const quote = log(screen).getByRole('article', { name: 'Quote', exact: true });
+    await expect.element(quote).toBeVisible();
+    const line = receipt(screen, VISITOR_PLAIN.en.reply_handed_off);
+    await expect.element(line).toBeVisible();
+    const row = line.element().closest('.cd-transcript-row');
+    expect(row?.contains(quote.element())).toBe(true);
+    expect([...row!.querySelectorAll('article')].map((card) => card.getAttribute('aria-label'))).toEqual(['Quote', 'Handed to a person']);
+    expect(line.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+    await expect.element(screen.getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
+    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
+      `${VISITOR_PLAIN.en.reply_handed_off} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+    ]);
+  });
+
   it('owner_receipts_show_the_kernel_reason', async () => {
     const { chat, refund, refunded, quote, booking } = danasChatWithThreeDecisions();
     const replyChecked = VISITOR_PLAIN.en.reply_checked;
@@ -1321,8 +1430,11 @@ describe('Conversations', () => {
     await expect.element(receipt(screen, booking.visitor_plain)).toBeVisible();
     expect(log(screen).getByText(booking.reason_plain, { exact: false }).elements()).toHaveLength(0);
     expect(decisionReads(booking.decision_id)).toHaveLength(0);
-    // Each reply's check keeps its own line.
-    await expect.poll(() => receipt(screen, replyChecked).elements().length).toBe(3);
+    // The quote's reply keeps its checked line; the refund and booking replies show a handoff.
+    await expect.poll(() => receipt(screen, replyChecked).elements().length).toBe(1);
+    const handedOff = receipt(screen, VISITOR_PLAIN.en.reply_handed_off);
+    expect(handedOff.elements()).toHaveLength(2);
+    for (const line of handedOff.elements()) expect(line.querySelector('.cd-status-dot--held')).not.toBeNull();
     // The visitor's words for the hold and the quote show nowhere: the owner's replace them.
     expect(log(screen).getByText(refund.visitor_plain, { exact: true }).elements()).toHaveLength(0);
     expect(log(screen).getByText(quote.visitor_plain, { exact: true }).elements()).toHaveLength(0);

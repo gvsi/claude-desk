@@ -67,7 +67,7 @@ from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, Docume
                              OwnerMessageRequest, PaymentLinkActionRequest, PaymentLinkStateResult, PaymentLinkView,
                              PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest, ToolConfirmed,
                              ToolsConfirmRequest, ToolsConnectRequest, ToolsSimulateChangeRequest)
-from desk.kernel_service import (activation, agents, approvals, auth, context, copies, decide, demo_inbox, desks,
+from desk.kernel_service import (activation, agents, approvals, auth, business_tools, context, copies, decide, demo_inbox, desks,
                                  execute, labels, ledger, mcp_pins, payments, public, reply_check, sessions, turn,
                                  verification)
 from desk.kernel_service.adapters import release_document
@@ -358,6 +358,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(verification.router)
     app.include_router(agents.router)
     app.include_router(desk_router)
+    app.include_router(business_tools.router)
     app.include_router(document_link_router)
     app.include_router(payment_link_router)
     app.include_router(inbox_router)
@@ -751,6 +752,12 @@ async def _kernel_failure(request: Request, exc: KernelFailure) -> JSONResponse:
 
 
 async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if route_template(request) == "PUT /desks/{id}/business_tools":
+        try:
+            async with kernel_transaction(request.app.state.kernel) as ctx:
+                await business_tools.refuse_invalid_request(ctx, request)
+        except KernelFailure as failure:
+            return await _kernel_failure(request, failure)
     return error_response(422, "invalid")
 
 

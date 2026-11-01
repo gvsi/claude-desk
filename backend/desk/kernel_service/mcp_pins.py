@@ -74,23 +74,33 @@ def native_pin(tool: str) -> str:
     return adapters.profile_sha256(adapters.ADAPTERS[tool].profile)
 
 
-def pinned_profile(tool: str, definition_sha256: str | None) -> ToolProfile:
+class BusinessProfileChanged(ValueError):
+    """A configured definition no longer matches the pin a draft was proved against."""
+
+
+def pinned_profile(tool: str, definition_sha256: str | None, stored: ToolProfile | None = None) -> ToolProfile:
     """The adapter's profile for `tool`, enabled, an MCP tool's pinned at `definition_sha256` (a
     native tool's profile carries no hash): what a version enabling it is proved over."""
-    profile = adapters.ADAPTERS[tool].profile
+    from desk.contracts import is_business_tool
+    if is_business_tool(tool):
+        if stored is None or stored.source != "business" or stored.tool != tool or stored.definition_sha256 != definition_sha256:
+            raise BusinessProfileChanged("business_profile_changed")
+        profile = stored
+    else:
+        profile = adapters.ADAPTERS[tool].profile
     return profile.model_copy(update={
-        "status": "enabled", "definition_sha256": definition_sha256 if profile.source == "mcp" else None,
+        "status": "enabled", "definition_sha256": definition_sha256 if profile.source in ("mcp", "business") else None,
         "pending_definition_text": None, "pending_sha256": None, "review_reason": None})
 
 
 def pin_row(row: Tool, tool: str, definition_sha256: str, *, status: str, review_reason: str | None) -> Tool:
     """Points `row` at the adapter's profile pinned at `definition_sha256` (a native tool's
     `profile_sha256`), at `status`, with no pending definition."""
-    profile = pinned_profile(tool, definition_sha256)
+    profile = pinned_profile(tool, definition_sha256, row.profile)
     row.source, row.effects, row.reversible = profile.source, profile.effects, profile.reversible
     row.description_confirmed, row.profile = profile.description_confirmed, profile
     row.profile_sha256 = adapters.profile_sha256(profile)
-    row.definition_sha256 = definition_sha256 if profile.source == "mcp" else row.profile_sha256
+    row.definition_sha256 = definition_sha256 if profile.source in ("mcp", "business") else row.profile_sha256
     row.status, row.review_reason = status, review_reason
     row.pending_definition_text = row.pending_sha256 = None
     return row
@@ -111,7 +121,8 @@ def pending_text(entry: Mapping[str, Any]) -> str:
 
 
 async def _rows(ctx: KernelCtx, desk_id: str, tools: Iterable[str], *, lock: bool) -> dict[str, Tool]:
-    stmt = select(Tool).where(Tool.desk_id == desk_id, Tool.tool.in_(sorted(set(tools)))).order_by(Tool.tool)
+    stmt = (select(Tool).where(Tool.desk_id == desk_id, Tool.tool.in_(sorted(set(tools))))
+            .order_by(Tool.tool).execution_options(populate_existing=True))
     if lock:
         stmt = stmt.with_for_update().execution_options(populate_existing=True)
     return {row.tool: row for row in await ctx.db.scalars(ctx.repo.scoped(stmt))}
@@ -266,7 +277,7 @@ def _named_by(row: Tool) -> set[str]:
     """The hashes the owner may name a tool by to turn it off: what they see on its row (its pin or
     its pending hash), or a native tool's current adapter profile."""
     hashes = {row.definition_sha256, row.pending_sha256}
-    if not is_mcp(row.tool):
+    if row.source == "native":
         hashes.add(native_pin(row.tool))
     return {sha for sha in hashes if sha is not None}
 
@@ -294,8 +305,9 @@ async def confirm_tools(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, pins: Seq
     if not enable and always_on.ALWAYS_ON_TOOLS & set(names):
         raise _refused(ctx, desk_id, pins, enable, 422, "invalid", "always_on")
     rows = await _rows(ctx, desk_id, names, lock=not enable)
-    if any(rows.get(tool) is None or rows[tool].profile is None or tool not in adapters.ADAPTERS for tool in names):
-        raise _refused(ctx, desk_id, pins, enable, 404, "not_found", "unknown_tool")
+    for tool in names:
+        if rows.get(tool) is None or rows[tool].profile is None or await adapters.resolve(ctx, desk_id, tool) is None:
+            raise _refused(ctx, desk_id, pins, enable, 404, "not_found", "unknown_tool")
 
     def answer(draft=None) -> ToolConfirmed:
         return ToolConfirmed(profiles=[owner_profile(rows[tool]) for tool in names], draft=draft)
@@ -325,6 +337,8 @@ async def confirm_tools(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, pins: Seq
         if is_mcp(tool):
             entry = listed.get(MCP_OPERATIONS[tool])
             current = pin_sha256(entry) if entry is not None else None
+        elif row.source == "business":
+            current = row.definition_sha256
         else:
             current = native_pin(tool)
         if current is None or pin.definition_sha256 != current:
@@ -358,7 +372,13 @@ async def check_enables(ctx: KernelCtx, desk_id: str, enables: Sequence[ToolPin]
     adapter profile unchanged, an MCP tool listed at exactly that hash (`check_pin`, which records a
     drift it finds in the caller's transaction). Stops at the first that isn't."""
     drifted: list[str] = []
+    rows = await _rows(ctx, desk_id, [pin.tool for pin in enables], lock=False)
     for pin in sorted(enables, key=lambda pin: pin.tool):
+        row = rows.get(pin.tool)
+        if row is not None and row.source == "business":
+            if row.definition_sha256 != pin.definition_sha256 or await adapters.resolve(ctx, desk_id, pin.tool) is None:
+                return EnablesCheck("changed")
+            continue
         if not is_mcp(pin.tool):
             if pin.tool not in adapters.ADAPTERS or native_pin(pin.tool) != pin.definition_sha256:
                 return EnablesCheck("changed")
@@ -381,12 +401,13 @@ async def record_drift(ctx: KernelCtx, desk_id: str, tools: Iterable[str]) -> No
         await check_pin(ctx, desk_id, tool)
 
 
-def enabled_with(profiles: Sequence[ToolProfile], enables: Sequence[ToolPin]) -> list[ToolProfile]:
+def enabled_with(profiles: Sequence[ToolProfile], enables: Sequence[ToolPin],
+                 available: Mapping[str, ToolProfile] | None = None) -> list[ToolProfile]:
     """The enabled `profiles` plus the profiles `enables` turns on, each pinned at its hash (one a
     draft re-pins replaces the enabled one), by tool name."""
     by_tool = {profile.tool: profile for profile in profiles}
     for pin in enables:
-        by_tool[pin.tool] = pinned_profile(pin.tool, pin.definition_sha256)
+        by_tool[pin.tool] = pinned_profile(pin.tool, pin.definition_sha256, (available or {}).get(pin.tool))
     return [by_tool[tool] for tool in sorted(by_tool)]
 
 
@@ -395,10 +416,17 @@ async def enable_tools(ctx: KernelCtx, desk_id: str, version: int, enables: Sequ
     the hash the version was proved with, its pending fields and review reason cleared. Returns
     their `tool_pin` `{tool, event: "enabled", version, definition_sha256}` events, which the
     activation ledgers after its `policy` entry."""
+    from desk.kernel_service.activation import ConfirmConflict
+
     rows = await _rows(ctx, desk_id, [pin.tool for pin in enables], lock=True)
     events = []
     for pin in sorted(enables, key=lambda pin: pin.tool):
-        pin_row(rows[pin.tool], pin.tool, pin.definition_sha256, status="enabled", review_reason=None)
+        if pin.tool not in rows:
+            raise ConfirmConflict(ctx.copy_id, desk_id, version, "pin_changed")
+        try:
+            pin_row(rows[pin.tool], pin.tool, pin.definition_sha256, status="enabled", review_reason=None)
+        except BusinessProfileChanged:
+            raise ConfirmConflict(ctx.copy_id, desk_id, version, "pin_changed") from None
         events.append(LedgerEvent(kind="tool_pin", origin="kernel", summary={
             "tool": pin.tool, "event": "enabled", "version": version, "definition_sha256": pin.definition_sha256}))
     await ctx.db.flush()
