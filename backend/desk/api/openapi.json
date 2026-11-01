@@ -3054,6 +3054,258 @@
         }
       }
     },
+    "/api/owner/setup/{id}/proposals/{proposal_id}": {
+      "post": {
+        "summary": "Setup Proposal",
+        "description": "Answer the waiting proposal and receive Claude's reply and next ask.",
+        "operationId": "owner_setup_proposal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Proposal Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupProposalIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/setup/{id}/suggestions": {
+      "post": {
+        "summary": "Setup Suggestions",
+        "description": "Use the current proposals and finish questions with safe defaults for unanswered limits.",
+        "operationId": "owner_setup_suggestions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupSuggestionsIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/owner/setup/{id}/tools": {
       "get": {
         "summary": "Setup Tools",
@@ -8041,6 +8293,11 @@
           "connectable": {
             "type": "boolean",
             "title": "Connectable"
+          },
+          "connected": {
+            "type": "boolean",
+            "title": "Connected",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -9369,7 +9626,7 @@
         ],
         "title": "InboxNotice"
       },
-      "IntakeConfig": {
+      "IntakeProposalConfig": {
         "properties": {
           "block": {
             "type": "string",
@@ -9396,7 +9653,7 @@
           "block",
           "questions"
         ],
-        "title": "IntakeConfig"
+        "title": "IntakeProposalConfig"
       },
       "JobProposal": {
         "properties": {
@@ -9456,25 +9713,25 @@
               {
                 "oneOf": [
                   {
-                    "$ref": "#/components/schemas/IntakeConfig"
+                    "$ref": "#/components/schemas/IntakeProposalConfig"
                   },
                   {
-                    "$ref": "#/components/schemas/TypedBookingConfig"
+                    "$ref": "#/components/schemas/TypedBookingProposalConfig"
                   },
                   {
-                    "$ref": "#/components/schemas/PurposePaymentConfig"
+                    "$ref": "#/components/schemas/PurposePaymentProposalConfig"
                   },
                   {
-                    "$ref": "#/components/schemas/UrgentConfig"
+                    "$ref": "#/components/schemas/UrgentProposalConfig"
                   }
                 ],
                 "discriminator": {
                   "propertyName": "block",
                   "mapping": {
-                    "intake": "#/components/schemas/IntakeConfig",
-                    "purpose_payment": "#/components/schemas/PurposePaymentConfig",
-                    "typed_booking": "#/components/schemas/TypedBookingConfig",
-                    "urgent": "#/components/schemas/UrgentConfig"
+                    "intake": "#/components/schemas/IntakeProposalConfig",
+                    "purpose_payment": "#/components/schemas/PurposePaymentProposalConfig",
+                    "typed_booking": "#/components/schemas/TypedBookingProposalConfig",
+                    "urgent": "#/components/schemas/UrgentProposalConfig"
                   }
                 }
               },
@@ -11346,7 +11603,7 @@
         ],
         "title": "PublicDesk"
       },
-      "PurposePaymentConfig": {
+      "PurposePaymentProposalConfig": {
         "properties": {
           "block": {
             "type": "string",
@@ -11381,7 +11638,7 @@
           "purpose",
           "amount_cents"
         ],
-        "title": "PurposePaymentConfig"
+        "title": "PurposePaymentProposalConfig"
       },
       "RecordedHistory": {
         "properties": {
@@ -12265,6 +12522,63 @@
         "title": "SetupMessage",
         "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text."
       },
+      "SetupProposalIn": {
+        "properties": {
+          "accept": {
+            "type": "boolean",
+            "title": "Accept"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60,
+                "minLength": 1,
+                "pattern": "^[^\\n\\r]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cents"
+          },
+          "autonomy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "ask"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomy"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "accept"
+        ],
+        "title": "SetupProposalIn",
+        "description": "The owner's decision on a setup proposal, with optional changes when accepting it."
+      },
       "SetupStartIn": {
         "properties": {
           "description": {
@@ -12412,6 +12726,13 @@
         ],
         "title": "SetupState",
         "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+      },
+      "SetupSuggestionsIn": {
+        "properties": {},
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SetupSuggestionsIn",
+        "description": "Finish setup questions with the current suggestions; no additional answers are supplied."
       },
       "SetupTools": {
         "properties": {
@@ -13282,7 +13603,7 @@
         "title": "Triage",
         "description": "A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk\ndid, and a category for the Safety page's filters. AI-written, for the owner alone."
       },
-      "TypedBookingConfig": {
+      "TypedBookingProposalConfig": {
         "properties": {
           "block": {
             "type": "string",
@@ -13311,9 +13632,9 @@
           "appointment_type",
           "minutes"
         ],
-        "title": "TypedBookingConfig"
+        "title": "TypedBookingProposalConfig"
       },
-      "UrgentConfig": {
+      "UrgentProposalConfig": {
         "properties": {
           "block": {
             "type": "string",
@@ -13334,7 +13655,7 @@
           "block",
           "urgent_when"
         ],
-        "title": "UrgentConfig"
+        "title": "UrgentProposalConfig"
       },
       "VerifyCheckIn": {
         "properties": {

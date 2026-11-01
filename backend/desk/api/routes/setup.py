@@ -36,6 +36,8 @@ from desk.api.schemas import (
     SafetyCheck,
     SetupAnswerIn,
     SetupConsentIn,
+    SetupProposalIn,
+    SetupSuggestionsIn,
     SetupStartIn,
     SetupState,
     SetupTools,
@@ -95,7 +97,8 @@ async def start_setup(body: SetupStartIn, request: Request,
     async def admit() -> None:
         await _moving_on(request, ctx)
 
-    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards)
+    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards,
+                             business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 409, 422, 503))
@@ -103,7 +106,8 @@ async def setup_interview(interview_id: InterviewId, request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """The setup interview as it stands, removing abandoned turn entries and reopening consent if needed."""
     state = runtime(request).started()
-    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards)
+    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards,
+                            business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.post("/{id}/consent", response_model=SetupState,
@@ -146,7 +150,44 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
 
     answer = await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, card=body.card,
                                 runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
-                                 cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
+                                cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
+
+
+@router.post("/{id}/proposals/{proposal_id}", response_model=SetupState,
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
+async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, Path(max_length=64)],
+                          body: SetupProposalIn, request: Request,
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
+    """Answer the waiting proposal and receive Claude's reply and next ask."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    answer = await setup.decide_proposal(ctx, state.database(), state.model, interview_id, proposal_id, body, cards=cards,
+                                         business_tools_enabled=state.settings.business_tools_enabled,
+                                         runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
+
+
+@router.post("/{id}/suggestions", response_model=SetupState,
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
+async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn, request: Request,
+                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
+    """Use the current proposals and finish questions with safe defaults for unanswered limits."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    answer = await setup.use_suggestions(ctx, state.database(), state.model, interview_id, cards=cards,
+                                         business_tools_enabled=state.settings.business_tools_enabled,
+                                         runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)
     return answer

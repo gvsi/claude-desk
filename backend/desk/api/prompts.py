@@ -54,7 +54,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.16"
+PROMPT_VERSION = "2026-10-31.17"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -1206,7 +1206,7 @@ BLOCK_FOR_JOB: dict[JobKind, Block | None] = {
 }
 
 
-class IntakeConfig(BaseModel):
+class IntakeProposalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     block: Literal["intake"]
@@ -1214,7 +1214,7 @@ class IntakeConfig(BaseModel):
         min_length=1, max_length=5, description="1 to 5 intake questions, each 1 to 120 characters.")
 
 
-class TypedBookingConfig(BaseModel):
+class TypedBookingProposalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     block: Literal["typed_booking"]
@@ -1222,7 +1222,7 @@ class TypedBookingConfig(BaseModel):
     minutes: int = Field(ge=15, le=60, description="Appointment length, 15 to 60 minutes.")
 
 
-class PurposePaymentConfig(BaseModel):
+class PurposePaymentProposalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     block: Literal["purpose_payment"]
@@ -1230,14 +1230,14 @@ class PurposePaymentConfig(BaseModel):
     amount_cents: Cents | None
 
 
-class UrgentConfig(BaseModel):
+class UrgentProposalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     block: Literal["urgent"]
     urgent_when: str = Field(min_length=1, max_length=300, description="When a request is urgent, 1 to 300 characters.")
 
 
-BlockConfig = Annotated[IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig,
+BlockConfig = Annotated[IntakeProposalConfig | TypedBookingProposalConfig | PurposePaymentProposalConfig | UrgentProposalConfig,
                         Field(discriminator="block")]
 
 
@@ -1267,6 +1267,7 @@ class ConnectorProposal(BaseModel):
     label: str
     why: str = Field(max_length=200, description="Why this helps, at most 200 characters.")
     connectable: bool
+    connected: bool = False  # Written by connection code, never a model draft.
 
 
 class ProposalCard(BaseModel):
@@ -1310,7 +1311,7 @@ class PurposePaymentDraft(BaseModel):
         return value
 
 
-BlockConfigDraft = Annotated[IntakeConfig | TypedBookingConfig | PurposePaymentDraft | UrgentConfig,
+BlockConfigDraft = Annotated[IntakeProposalConfig | TypedBookingProposalConfig | PurposePaymentDraft | UrgentProposalConfig,
                              Field(discriminator="block")]
 
 

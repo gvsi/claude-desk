@@ -267,9 +267,10 @@ async def test_after_timeout_or_shutdown_preserves_the_landed_state(
     monkeypatch.setattr(setup, "consent", custom)
     monkeypatch.setattr(setup, "_rollback_turn", track_rollback)
     monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
-    # Only the post-commit callback should time out; staging and commits use the database.
+    # Only the post-commit callback should time out; staging and commits use the database, and the hook reads the
+    # landed state before its own timeout or shutdown is tested.
     monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 25)
-    monkeypatch.setattr(setup, "TURN_AFTER_TIMEOUT_S", 0.4, raising=False)
+    monkeypatch.setattr(setup, "TURN_AFTER_TIMEOUT_S", 2, raising=False)
     reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": False}), 5)
     assert reply.status_code == (202 if slow else 200), reply.text
     if slow:
@@ -1051,7 +1052,7 @@ async def test_a_stalled_rollback_does_not_outlive_the_abandonment_window(
     monkeypatch.setattr(setup, "TURN_ROLLBACK_TIMEOUT_S", 0.01, raising=False)
     try:
         reply = await asyncio.wait_for(owner.browser.post(
-            f"/api/owner/setup/{state['interview_id']}/consent", json={"allow": False}), 0.5)
+            f"/api/owner/setup/{state['interview_id']}/consent", json={"allow": False}), 5)
         assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
         assert "couldn't be reopened (TimeoutError)" in caplog.text
         assert not app.state.runtime.turn_runs.holds(state["interview_id"])

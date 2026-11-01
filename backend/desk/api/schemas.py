@@ -29,6 +29,8 @@ from desk.api.prompts import (
     CARD_REASON_MAX_LENGTH,
     OWNER_CARDS_MAX,
     Choice,
+    Autonomy,
+    Cents,
     ProposalCard,
     PlannedOutcome,
     DemoTask,
@@ -632,6 +634,38 @@ class SetupAnswerIn(BaseModel):
         if (self.question is None) == (self.card is None):
             raise ValueError("exactly one of question and card is required")
         return self
+
+
+class SetupProposalIn(BaseModel):
+    """The owner's decision on a setup proposal, with optional changes when accepting it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accept: bool
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60,
+                                            pattern=r"^[^\n\r]*$")] | None = None
+    amount_cents: Cents | None = None
+    autonomy: Autonomy | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def one_line_title(cls, value: object) -> object:
+        if isinstance(value, str) and ("\n" in value or "\r" in value):
+            raise ValueError("proposal title must be one line")
+        return value
+
+    @model_validator(mode="after")
+    def accepting_changes(self) -> "SetupProposalIn":
+        changes = self.model_fields_set - {"accept"}
+        if changes and (not self.accept or any(getattr(self, name) is None for name in changes)):
+            raise ValueError("proposal changes require accepting and a value")
+        return self
+
+
+class SetupSuggestionsIn(BaseModel):
+    """Finish setup questions with the current suggestions; no additional answers are supplied."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class SetupMessage(BaseModel):
