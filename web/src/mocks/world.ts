@@ -38,6 +38,7 @@ import type {
   TranscriptKind,
 } from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
+import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
 import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -719,19 +720,25 @@ export class MockWorld {
     let state: DecisionState = 'denied';
     let ledgerSeq = approval.seq;
     if (allows(answer)) {
+      // Scripted execution recheck: an owner has since made this tool (or an effect) Never
+      // for everyone. The approval cannot override the new rules.
+      const action = record.decision.action;
+      const rulesRefuse = action != null && desk.policy.version !== record.decision.policy_version &&
+        rulesForTool(action, desk.policy.cards).some((card) => card.mode === 'never' && card.who === 'anyone');
+      state = rulesRefuse ? 'refused_at_execution' : 'executed';
       const ran = this.appendLedger(desk, {
         kind: 'execute',
         origin: 'kernel',
         session_id: sessionId,
         ref_id: decisionId,
-        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state: 'executed' },
+        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state },
       });
-      state = 'executed';
       ledgerSeq = ran.seq;
     }
     record.decision = {
       ...record.decision,
       state,
+      owner_plain: state === 'refused_at_execution' ? "Your rules changed before this ran, so it wasn't done." : null,
       visitor_plain: statusLine(session.language, state, record.decision.action?.tool ?? null),
       inbox: [],
       ledger_seq: ledgerSeq,
@@ -751,6 +758,7 @@ export class MockWorld {
     record.decision = {
       ...record.decision,
       state,
+      owner_plain: state === 'refused_at_execution' ? "This Desk was deleted before this ran, so it wasn't done." : null,
       visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null),
       inbox: [],
       signature: sign(`${record.decision.decision_id}:${state}`),

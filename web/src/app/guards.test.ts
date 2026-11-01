@@ -674,6 +674,18 @@ function hookAssignments(text: string): { all: string[]; bad: string[] } {
 }
 
 describe('app source guards', () => {
+  it('public_files_never_reference_the_owner_only_refusal_field', () => {
+    const publicRoot = path.join(SRC, 'public');
+    const files = readdirSync(publicRoot, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+    expect(files.length).toBeGreaterThan(0);
+    const forbidden = /owner_plain/;
+    expect(forbidden.test('decision.owner_plain')).toBe(true);
+    expect(files.flatMap((entry) => {
+      const file = path.join(entry.parentPath, entry.name);
+      return forbidden.test(readFileSync(file, 'utf8')) ? [path.relative(SRC, file)] : [];
+    })).toEqual([]);
+  });
+
   beforeAll(() => {
     // The scan reaches the app and skips what it exempts, or every guard below fails.
     const files = sources.map((s) => s.file);

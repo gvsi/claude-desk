@@ -49,7 +49,6 @@ import {
   PAUSED_TURN,
   afterAnswer,
   afterVerify,
-  allows,
   cardDiffFor,
   ruleChatReply,
   scriptedTurn,
@@ -512,7 +511,7 @@ const SERVED: ServedRoutes = {
     if (session) sv.runTurn(session, afterAnswer(given, decision, record.approved ?? null), session.language, '');
     const out: ApprovalAnswerOut = {
       decision,
-      execution_state: allows(given) ? 'succeeded' : null,
+      execution_state: decision.state === 'executed' ? 'succeeded' : null,
       card_diff: cardDiffFor(given, decision, session?.person ?? null),
     };
     return ok(out);
@@ -538,7 +537,7 @@ const SERVED: ServedRoutes = {
     if (!session) return NOT_FOUND;
     if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const after = Number(req.query.get('after') ?? '0');
-    return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0, sv.world.now()));
+    return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0, sv.world.now(), sv.world));
   },
   takeover(sv, req) {
     const session = ownerSession(sv, req);

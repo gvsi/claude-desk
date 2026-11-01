@@ -783,6 +783,7 @@ export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved
   if (approved !== null && (approved.decision_id !== decision.decision_id
     || approved.state !== 'approved' || approved.ledger_seq >= decision.ledger_seq)) approved = null;
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
+  if (decision.state === 'refused_at_execution') return [resolved];
   if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
   const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {
