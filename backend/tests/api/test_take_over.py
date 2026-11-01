@@ -386,7 +386,7 @@ async def test_hand_back_resumes_claude_with_the_visitor_credential(app, browser
     assert sent.body == {"mode": "ai", "generation": 1}
     assert sent.headers[OWNER] == held.owner_token and VISITOR not in sent.headers
     # The visitor sees the owner leave, then Claude follows up, at the new generation.
-    assert types(events) == ["owner_joined", "resolved", "owner_left", "writing", "message", "turn_end"]
+    assert types(events) == ["owner_joined", "receipt", "resolved", "owner_left", "writing", "message", "turn_end"]
     assert (events[-2][1].author, events[-2][1].generation) == ("claude", 2)
     # Claude read the outcome and that the owner handed the conversation back, in its user turn.
     follow_up = json.dumps(model.requests[-1].messages)
@@ -424,9 +424,10 @@ async def test_resume_after_breaker_pause(app, browser, fake, kernel_http, model
     async with Stream(app, events_path(held.slug, "after=4"), headers=[cookie(held.token)]) as stream:
         events = await stream.until(lambda events: "turn_end" in types(events))
     await app.state.runtime.runner.drain()
-    assert types(events) == ["resolved", "writing", "message", "turn_end"]
-    assert (events[0][1].decision_id, events[0][1].state) == (held.decision_id, "executed")
-    assert events[2][1].blocks[0].text == "Good news: Maria said yes." and events[2][1].generation == 1
+    assert types(events) == ["receipt", "resolved", "writing", "message", "turn_end"]
+    assert (events[0][1].decision_id, events[0][1].state) == (held.decision_id, "approved")
+    assert (events[1][1].decision_id, events[1][1].state) == (held.decision_id, "executed")
+    assert events[3][1].blocks[0].text == "Good news: Maria said yes." and events[3][1].generation == 1
     follow_up = json.dumps(model.requests[-1].messages)
     assert f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\">' in follow_up
     assert f"<note>{NOTES['resumed']}</note>" in follow_up

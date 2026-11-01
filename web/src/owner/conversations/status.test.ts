@@ -22,6 +22,18 @@ function summary(fields: Partial<ConversationSummary> = {}): ConversationSummary
 }
 
 describe('conversationStatus', () => {
+  it('open_handoff_follows_held_requests_and_paused_chats', () => {
+    const chat = summary({ display_name: 'Dana Whitfield' });
+    expect(conversationStatus(chat, 0, true)).toEqual({ tone: 'held', text: 'Wants you' });
+    expect(conversationStatus(chat, 1, true)).toEqual({ tone: 'held', text: 'Needs you' });
+    expect(conversationStatus({ ...chat, mode: 'paused' }, 0, true)).toEqual({ tone: 'held', text: 'Paused after blocked attempts' });
+    expect(conversationStatus({ ...chat, mode: 'paused' }, 1, true)).toEqual({ tone: 'held', text: 'Needs you' });
+    for (const fields of [{ mode: 'owner' }, { owner_preview: true }, { kind: 'agent' }, { verified: true }] as const) {
+      expect(conversationStatus({ ...chat, ...fields }, 0, true)).toEqual({ tone: 'held', text: 'Wants you' });
+    }
+    expect(conversationStatus(summary(), 0, true)).toEqual({ tone: 'held', text: 'Wants you' });
+    expect(conversationStatus(summary(), 0, false)).toBeNull();
+  });
   it('status_follows_the_table', () => {
     // Each row in order, and each one wins over every row after it.
     const everything = summary({ mode: 'owner', owner_preview: true, kind: 'agent', verified: true });

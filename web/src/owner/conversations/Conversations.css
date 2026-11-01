@@ -253,3 +253,15 @@
   gap: var(--space-12);
   min-width: 0;
 }
+
+/* Today's handoff cards, in Needs you order, above the transcript. */
+.cd-conversation__handoffs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
+.cd-conversation__name:focus:not(:focus-visible) {
+  outline: none;
+}

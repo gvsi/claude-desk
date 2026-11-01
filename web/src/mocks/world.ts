@@ -458,6 +458,7 @@ export class MockWorld {
       ref_id: messageId,
       summary: { author: 'owner', ok: true, language, violations: [] },
     });
+    this.closeCardHandoffs(session, 'owner_message');
     const blocks = [cardBlock('owner_said', { fact_id: `owner:${messageId}`, title: text })];
     const signature = sign(messageId);
     const visitorPlain = VISITOR_PLAIN[language].owner_said;
@@ -1021,9 +1022,10 @@ export class MockWorld {
   /**
    * A handoff closed, a call-back request's or the handoff card's, as the kernel records it: a
    * `desk_data` entry naming it, on no chat and with no `kind`. The owner marking it done gives no
-   * more; a call-back closing it adds `replaced_by`, the call-back's own handoff.
+   * more; a call-back closing it adds `replaced_by`, the call-back's own handoff; handling a card
+   * handoff adds `closed_by`, naming the owner's action.
    */
-  closeHandoff(record: HandoffRecord, replacedBy?: string): void {
+  closeHandoff(record: HandoffRecord, replacedBy?: string, closedBy?: 'takeover' | 'owner_message'): void {
     const desk = this.desk(record.deskId);
     if (!desk) throw new Error(`handoff ${record.handoff.handoff_id} has no Desk`);
     record.handoff = { ...record.handoff, status: 'done' };
@@ -1032,8 +1034,22 @@ export class MockWorld {
       origin: 'kernel',
       session_id: null,
       ref_id: null,
-      summary: { part: 'handoffs', refs: [record.handoff.handoff_id], ...(replacedBy === undefined ? {} : { replaced_by: replacedBy }) },
+      summary: {
+        part: 'handoffs',
+        refs: [record.handoff.handoff_id],
+        ...(replacedBy === undefined ? {} : { replaced_by: replacedBy }),
+        ...(closedBy === undefined ? {} : { closed_by: closedBy }),
+      },
     });
+  }
+
+  /** Handling the conversation closes card handoffs; a promised call-back is still owed. */
+  private closeCardHandoffs(session: SessionRecord, by: 'takeover' | 'owner_message'): void {
+    for (const record of this.handoffs.values()) {
+      if (record.handoff.session_id === session.state.session_id && record.handoff.status === 'open' && record.handoff.kind === 'card') {
+        this.closeHandoff(record, undefined, by);
+      }
+    }
   }
 
   /**
@@ -1051,6 +1067,7 @@ export class MockWorld {
       ref_id: null,
       summary: { from: previous, to: 'owner', generation: session.state.generation },
     });
+    this.closeCardHandoffs(session, 'takeover');
     this.emit(session, { type: 'owner_joined', name: BUSINESS.owner_display_name });
     return session.state;
   }

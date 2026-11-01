@@ -2,12 +2,65 @@
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from evals.tests.eval_repo import commit, write
 from evals.tests.test_soft_promise_calibration import deps
+
+
+def test_committed_next_steps_calibration_reproduces_the_model_decision():
+    from evals.calibration import soft_promise_experiment as exp
+
+    root = Path(__file__).resolve().parents[1] / "calibration/results/soft-promise-next-steps"
+    files = {
+        "old": ["old-20261101-001425.json"],
+        "first": ["new-20261101-001819.json"],
+        "new": ["new-20261101-005158.json"],
+        "sonnet": ["sonnet-20261101-005654.json", "sonnet-20261101-010426.json"],
+    }
+
+    def saved_run(name):
+        data = json.loads((root / name).read_text())
+        # Saved cases include computed samples/outcome fields, as arm_runs also handles.
+        data["cases"] = [{key: value for key, value in case.items() if key in exp.sp.CaseResult.model_fields}
+                         for case in data["cases"]]
+        return exp.sp.RunResult.model_validate(data)
+
+    reports = {}
+    for arm, names in files.items():
+        runs = [saved_run(name) for name in names]
+        reports[arm] = exp.summarize_runs(runs)
+        assert all(len(run.cases) == 220 for run in runs)
+        blocked = {case.id for run in runs for case in run.cases
+                   if case.expected == "pass" and case.samples > case.verdicts.get("pass", 0)}
+        if arm in {"old", "sonnet"}:
+            assert len(blocked) == {"old": 12, "sonnet": 4}[arm]
+    assert {arm: len(report["flag_slips"]) for arm, report in reports.items()} == {
+        "old": 44, "first": 40, "new": 36, "sonnet": 6}
+    assert reports["new"]["timeouts"] == 20
+    sonnet = reports["sonnet"]
+    assert sonnet["latency_ms"] == {"p50": 1092.5, "p95": 2784.05, "max": 5246, "calls": 1100}
+    assert sonnet["mean_cost_per_check_usd"] == pytest.approx(0.0017128818181818182)
+    ledger = json.loads((root / "experiment.json").read_text())
+    assert ledger["experiment_id"] == exp.EXPERIMENT_ID
+    assert ledger["frozen_baseline_sha"] == ledger["experiment"]["baseline_sha"]
+    assert ledger["total_cap_usd"] == 3.20
+    assert ledger["cumulative_spend_usd"] == pytest.approx(2.202614)
+    assert len(ledger["revisions"]) == 11
+    assert len(ledger["attempts"]) == 4
+    assert sum(attempt["spend_usd"] for attempt in ledger["attempts"]) == pytest.approx(2.202614)
+    for attempt in ledger["attempts"]:
+        assert attempt["stale"] == all(arm["stale"] for arm in attempt["arms"].values())
+        for arm in attempt["arms"].values():
+            run = saved_run(arm["results"])
+            assert arm["spend_usd"] == run.spend_usd
+    import re
+    for path in root.glob("*.json"):
+        assert not re.search(r"sk-ant|api[_-]?key|session|/(?:Users|private|tmp|home|var)/",
+                             path.read_text(), re.IGNORECASE)
 
 
 def test_sonnet_request_and_identity_are_distinct_from_new(deps, tmp_path):
@@ -192,6 +245,26 @@ def test_retry_cannot_hide_an_unsafe_sample(deps, tmp_path):
     assert second["attempts"][1]["acceptance"]["unsafe_or_unmeasured"] == ["promise-sort"]
 
 
+def test_attempt_staleness_requires_every_arm_to_be_stale():
+    from evals.calibration import soft_promise_experiment as exp
+
+    measured = {"baseline_sha": "0" * 40, "case_manifest": [],
+                "arms": {"new": "first wording", "sonnet": "shipped wording"}}
+    current = {**measured, "arms": {"new": "revised wording", "sonnet": "shipped wording"}}
+    revision = exp.digest(measured)
+    history = {"experiment": current, "revisions": [{"identity_sha256": revision, "experiment": measured}],
+               "attempts": [{"identity_sha256": revision, "arms": {name: {} for name in names}}
+                            for names in [("sonnet",), ("new", "sonnet"), ("new",)]]}
+    exp.refresh_evidence(history)
+    assert [attempt["stale"] for attempt in history["attempts"]] == [False, False, True]
+    assert history["attempts"][1]["arms"]["new"]["stale"]
+    assert not history["attempts"][1]["arms"]["sonnet"]["stale"]
+    # Removing the current Sonnet arm makes its evidence stale too.
+    del current["arms"]["sonnet"]
+    exp.refresh_evidence(history)
+    assert all(attempt["stale"] for attempt in history["attempts"])
+
+
 def test_both_arms_use_the_recorded_cases_and_prompts_during_edits(deps, tmp_path, monkeypatch):
     import yaml
     from evals.calibration import soft_promise_experiment as exp
@@ -229,8 +302,66 @@ def test_different_output_cannot_reset_the_experiment_budget(deps, tmp_path, mon
     with pytest.raises(exp.sp.Refused, match="remaining"):
         asyncio.run(exp.experiment(config.model_copy(update={"output": tmp_path / "second.json"}), deps))
     assert len(deps.client.client.requests) == count
-    canonical = deps.root / "evals/out/soft-promise" / f"{baseline}.json"
+    canonical = deps.root / exp.LEDGER_PATH
     assert json.loads(canonical.read_text())["cumulative_spend_usd"] == history["cumulative_spend_usd"]
+
+
+def test_every_ledger_load_refreshes_the_cap_without_changing_spend(tmp_path, monkeypatch):
+    from evals.calibration import soft_promise_experiment as exp
+
+    ledger = tmp_path / "experiment.json"
+    baseline = "0" * 40
+    original = {"experiment": {"baseline_sha": baseline}, "attempts": [],
+                "total_cap_usd": 1.70, "cumulative_spend_usd": 1.20}
+    for cap in (3.20, 3.40):
+        ledger.write_text(json.dumps(original))
+        monkeypatch.setattr(exp, "TOTAL_USD", cap)
+        loaded = exp.load_history(ledger, tmp_path / "unused.json", baseline)
+        assert loaded["total_cap_usd"] == cap
+        assert loaded["cumulative_spend_usd"] == original["cumulative_spend_usd"]
+        assert loaded["frozen_baseline_sha"] == baseline
+
+
+def test_frozen_baseline_cannot_be_replaced_to_reset_cap(deps, tmp_path, monkeypatch):
+    from evals.calibration import soft_promise_experiment as exp
+    monkeypatch.setattr(exp, "TOTAL_USD", 0.0022)
+    write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
+    baseline = commit(deps.root, "freeze the baseline")
+    config = exp.Experiment(baseline_sha=baseline, samples=1, max_usd=1,
+                            output=tmp_path / "first.json")
+    first = asyncio.run(exp.experiment(config, deps))
+    count = len(deps.client.client.requests)
+    changed = config.model_copy(update={"baseline_sha": commit(deps.root, "unrelated empty commit"),
+                                        "output": tmp_path / "second.json"})
+    with pytest.raises(exp.sp.Refused, match="baseline is frozen"):
+        asyncio.run(exp.experiment(changed, deps))
+    assert len(deps.client.client.requests) == count
+    ledger = deps.root / "evals/out/soft-promise/experiment.json"
+    assert json.loads(ledger.read_text()) == first
+    assert first["experiment_id"] == "soft-promise-next-steps"
+    assert first["frozen_baseline_sha"] == baseline
+
+
+def test_legacy_ledger_migrates_before_refusing_a_different_baseline(deps, tmp_path):
+    from evals.calibration import soft_promise_experiment as exp
+    write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
+    baseline = commit(deps.root, "freeze the baseline")
+    config = exp.Experiment(baseline_sha=baseline, samples=1, max_usd=1, output=tmp_path / "first.json")
+    first = asyncio.run(exp.experiment(config, deps))
+    ledger = deps.root / exp.LEDGER_PATH
+    legacy = ledger.with_name(f"{baseline}.json")
+    ledger.rename(legacy)
+    data = json.loads(legacy.read_text())
+    del data["experiment_id"], data["frozen_baseline_sha"]
+    legacy.write_text(json.dumps(data))
+    count = len(deps.client.client.requests)
+    changed = config.model_copy(update={"baseline_sha": commit(deps.root, "unrelated empty commit"),
+                                        "output": tmp_path / "second.json"})
+    with pytest.raises(exp.sp.Refused, match="baseline is frozen"):
+        asyncio.run(exp.experiment(changed, deps))
+    assert json.loads(ledger.read_text()) == first
+    assert json.loads(legacy.read_text()) == data
+    assert len(deps.client.client.requests) == count
 
 
 def test_experiment_refuses_the_whole_estimate_before_any_call(deps, tmp_path):
@@ -250,7 +381,7 @@ def test_experiment_refuses_concurrent_access_before_any_call(deps, tmp_path):
     import fcntl
     from evals.calibration import soft_promise_experiment as exp
     baseline = "0" * 40
-    ledger = deps.root / "evals/out/soft-promise" / f"{baseline}.lock"
+    ledger = (deps.root / exp.LEDGER_PATH).with_suffix(".lock")
     ledger.parent.mkdir(parents=True)
     with ledger.open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -283,7 +414,7 @@ def test_experiment_records_both_requests_and_cumulative_budget(deps, tmp_path, 
     assert len(deps.client.client.requests) == count
 
 
-def test_a_prompt_revision_keeps_the_budget_and_marks_prior_evidence_stale(deps, tmp_path, monkeypatch):
+def test_a_prompt_revision_keeps_the_budget_and_marks_only_revised_arms_stale(deps, tmp_path, monkeypatch):
     from evals.calibration import soft_promise_experiment as exp
     write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
     baseline = commit(deps.root, "freeze the baseline")
@@ -293,7 +424,9 @@ def test_a_prompt_revision_keeps_the_budget_and_marks_prior_evidence_stale(deps,
     second = asyncio.run(exp.experiment(config, deps))
     assert second["cumulative_spend_usd"] == pytest.approx(first["cumulative_spend_usd"] * 2)
     assert len(second["revisions"]) == 2
-    assert second["attempts"][0]["stale"]
+    assert second["attempts"][0]["arms"]["new"]["stale"]
+    assert not second["attempts"][0]["arms"]["old"]["stale"]
+    assert not second["attempts"][0]["stale"]
     assert not second["attempts"][1]["stale"]
     assert second["revisions"][0]["identity_sha256"] != second["revisions"][1]["identity_sha256"]
 

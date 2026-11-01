@@ -3,7 +3,7 @@
 `measure_local` drives visitor turns of each kind through the API over the real kernel and reads the
 API's and the kernel's records after them. With the soft-promise check answering after 0.3 s, every
 reply's reveal delay (Plan 02a's `RevealMetric`, from the model's finish to the reply on the stream)
-holds that wait and stays inside the reply client's 10 s budget. It waits for `02` in `landed.toml`, since the
+holds that wait and stays within 2 s. It waits for `02` in `landed.toml`, since the
 API's chat routes and records come with Plan 02.
 """
 
@@ -31,4 +31,4 @@ async def test_latency_run_against_the_api_target(k, fake, api):
     found = reveals(measured.samples, measured.run_events)
     assert len(found) == len(measured.samples), "every turn's reply has its reveal metric"
     delays = [metric.model_finish_to_reveal_ms for metric in found]
-    assert all(300 <= ms <= 10_000 for ms in delays), delays
+    assert all(300 <= ms <= 2_000 for ms in delays), delays

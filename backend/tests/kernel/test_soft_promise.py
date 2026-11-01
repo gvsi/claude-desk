@@ -75,7 +75,7 @@ def test_the_check_asks_only_about_promises_the_cards_dont_hold():
     owner will follow up here when a card says so; saying so without such a card, a claim the step
     already happened, or anything an offer adds, still is. The owner selected Sonnet on
     2026-10-31 after the 220-case calibration."""
-    # Results: evals/out/soft-promise/next-steps-experiment.json
+    # Results: evals/calibration/results/soft-promise-next-steps/experiment.json
     # The measured sonnet request is now the production request.
     assert SOFT_PROMISE_SYSTEM == (
         "You check one reply from a business's AI assistant before a customer sees it. The cards were rendered "

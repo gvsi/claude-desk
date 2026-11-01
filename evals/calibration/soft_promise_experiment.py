@@ -1,6 +1,6 @@
 """One budgeted soft-promise experiment with Haiku and Sonnet candidates and a steps-only diagnostic.
 
-MAX_USD is the remaining allowance for this invocation. A canonical ledger per baseline
+MAX_USD is the remaining allowance for this invocation. One stable experiment ledger
 retains cumulative spend regardless of --output and enforces the experiment's $3.20 cap.
 --samples accepts a common count or per-arm counts such as new:5,steps_only:5,sonnet:2.
 The Sonnet estimate scales Haiku's $0.0005 allowance by list prices ($0.0100 per check).
@@ -25,6 +25,8 @@ from evals.calibration import soft_promise as sp
 
 TOTAL_USD = 3.20      # the owner's cap for the whole experiment, raised from $1.70 on 2026-10-31 for the Sonnet arm
 ARM_NAMES = {"old", "new", "sonnet", "steps_only"}
+EXPERIMENT_ID = "soft-promise-next-steps"
+LEDGER_PATH = Path("evals/out/soft-promise/experiment.json")
 SYMPATHY_SENTENCE = (
     "Sympathy, and general advice any professional in this trade would give that commits the business "
     "to no outcome, time, price or action, is not a promise."
@@ -112,7 +114,7 @@ def refresh_evidence(history: dict) -> None:
         for name, arm in attempt["arms"].items():
             arm["identity_sha256"] = arm_identity(measured, name)
             arm["stale"] = name not in current["arms"] or arm["identity_sha256"] != arm_identity(current, name)
-        attempt["stale"] = attempt["arms"].get("new", {}).get("stale", True)
+        attempt["stale"] = all(arm["stale"] for arm in attempt["arms"].values())
 
 
 def arm_runs(history: dict, name: str) -> list[sp.RunResult]:
@@ -209,7 +211,7 @@ def arm_reports(history: dict) -> dict:
 
 
 async def experiment(config: Experiment, deps: sp.Deps) -> dict:
-    ledger = deps.root / "evals/out/soft-promise" / f"{config.baseline_sha}.json"
+    ledger = deps.root / LEDGER_PATH
     ledger.parent.mkdir(parents=True, exist_ok=True)
     # Keep one lock through admission, reservations and settlement. A second process
     # refuses immediately instead of blocking an event loop or racing its allowance.
@@ -221,7 +223,48 @@ async def experiment(config: Experiment, deps: sp.Deps) -> dict:
         return await _experiment(config, deps, ledger)
 
 
+def load_history(ledger: Path, output: Path, baseline_sha: str) -> dict | None:
+    """Discover and migrate paid evidence before considering any new admission."""
+    source = ledger
+    if not source.exists():
+        # Discover the former SHA ledger independently of the caller's chosen SHA.
+        prior = [path for path in ledger.parent.glob("*.json")
+                 if len(path.stem) == 40 and all(c in "0123456789abcdef" for c in path.stem)]
+        if len(prior) > 1:
+            raise sp.Refused("multiple legacy experiment ledgers require reconciliation")
+        legacy = ledger.parent / "next-steps-experiment.json"
+        source = prior[0] if prior else legacy if legacy.exists() else output
+    if not source.exists():
+        return None
+    try:
+        history = json.loads(source.read_text())
+        frozen = history.get("frozen_baseline_sha", history["experiment"]["baseline_sha"])
+        if (history.get("experiment_id", EXPERIMENT_ID) != EXPERIMENT_ID
+                or history["experiment"]["baseline_sha"] != frozen):
+            raise ValueError
+        previous = float(history["cumulative_spend_usd"])
+        if not math.isfinite(previous) or previous < 0 or previous > TOTAL_USD:
+            raise ValueError
+        for prior in history["attempts"]:
+            for arm in prior["arms"].values():
+                arm["results"] = str((source.parent / arm["results"]).resolve())
+                if "outcome" not in arm:
+                    arm["outcome"] = json.loads(Path(arm["results"]).read_text())
+        history.update(experiment_id=EXPERIMENT_ID, frozen_baseline_sha=frozen, total_cap_usd=TOTAL_USD)
+        # A zero-budget invocation still durably migrates all spend and arm evidence.
+        if source != ledger:
+            temporary = ledger.with_suffix(".tmp")
+            temporary.write_text(json.dumps(history, ensure_ascii=False, indent=1) + "\n")
+            temporary.replace(ledger)
+        if frozen != baseline_sha:
+            raise sp.Refused("the experiment baseline is frozen; keep its original --baseline-sha")
+        return history
+    except (OSError, ValueError, KeyError, TypeError):
+        raise sp.Refused("the experiment ledger is invalid") from None
+
+
 async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
+    saved = load_history(ledger, config.output, config.baseline_sha)
     selected = config.arms.split(",")
     if set(selected) - ARM_NAMES or len(set(selected)) != len(selected):
         raise sp.Refused("--arms must select distinct arms from old,new,sonnet,steps_only")
@@ -241,33 +284,14 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
                          for arm, prompt in prompts.items()}}
     revision = {"experiment": identity, "identity_sha256": digest(identity)}
     history = {**revision, "revisions": [revision], "total_cap_usd": TOTAL_USD,
+               "experiment_id": EXPERIMENT_ID, "frozen_baseline_sha": config.baseline_sha,
                "cumulative_spend_usd": 0.0, "attempts": []}
-    source = ledger
-    if not source.exists():
-        # Import the pre-ledger experiment, including any paid run, before admitting
-        # more calls. Its conventional output is discovered even with another --output.
-        legacy = ledger.parent / "next-steps-experiment.json"
-        source = legacy if legacy.exists() else config.output
-    if source.exists():
-        try:
-            history = json.loads(source.read_text())
-            if history["experiment"]["baseline_sha"] != config.baseline_sha:
-                raise sp.Refused("the experiment baseline is frozen; keep its original --baseline-sha")
-            previous = float(history["cumulative_spend_usd"])
-            if not math.isfinite(previous) or previous < 0 or previous > TOTAL_USD:
-                raise ValueError
-            for prior in history["attempts"]:
-                for arm in prior["arms"].values():
-                    arm["results"] = str((source.parent / arm["results"]).resolve())
-                    if "outcome" not in arm:
-                        arm["outcome"] = json.loads(Path(arm["results"]).read_text())
-            if history["identity_sha256"] != digest(identity):
-                # A wording iteration is still the same experiment and allowance. Retain
-                # the old full manifest and hashes; its answers certify no revised input.
-                history["revisions"].append(revision)
-                history.update(revision)
-        except (OSError, ValueError, KeyError, TypeError):
-            raise sp.Refused("the experiment ledger is invalid") from None
+    if saved is not None:
+        history = saved
+        if history["identity_sha256"] != digest(identity):
+            # A wording iteration retains the old full manifest, evidence and allowance.
+            history["revisions"].append(revision)
+            history.update(revision)
     history["diagnostic_arms"] = ["steps_only"]
     refresh_evidence(history)
     reused = []
@@ -287,7 +311,7 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
             temporary.replace(target)
 
     # Import legacy spend and preserve the revision even when MAX_USD=0 refuses calls.
-    if source.exists():
+    if saved is not None:
         save()
     remaining = min(config.max_usd, TOTAL_USD - history["cumulative_spend_usd"])
     calls = len(cases) * sum(samples.values())
