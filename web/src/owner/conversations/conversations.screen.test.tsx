@@ -11,7 +11,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { Decision, StatusEvent } from '../../api/contracts.ts';
 import type { Attempt, ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
 import { ROUTES } from '../../api/routes.ts';
-import { rivera } from '../../ds/fixtures/index.ts';
+import { proseBlock, rivera } from '../../ds/fixtures/index.ts';
 import { typingPingMs } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
 import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, writing } from '../../mocks/script.ts';
@@ -566,6 +566,21 @@ describe('Conversations', () => {
       await expectScreenBasics(other.screen.container, { owner: true });
       expectNoHorizontalScroll();
     }
+  });
+
+  it('a_reply_in_markdown_shows_bold_and_a_list', async () => {
+    // A reply of Claude's in Markdown, in Dana's chat: the owner reads it as she did.
+    const items = ['Is the water heater leaking from the top or the bottom?', 'Is the pilot light still on?'];
+    const chat = named(DANA_LIVE, DANA);
+    const text = `We can look at that. **Two things** help me point you the right way:\n\n${items.map((item) => `- ${item}`).join('\n')}`;
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock(text)]));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const bold = log(screen).getByText('Two things', { exact: true });
+    await expect.element(bold).toBeVisible();
+    expect(bold.element().tagName).toBe('STRONG');
+    const message = bold.element().closest('.cd-claude-message') as HTMLElement;
+    expect([...message.querySelectorAll('li')].map((el) => el.textContent)).toEqual(items);
+    expect(message.textContent).not.toMatch(/\*|^- /m);
   });
 
   it('agent_name_reads_as_its_own_words', async () => {
