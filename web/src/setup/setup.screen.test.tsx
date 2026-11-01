@@ -3063,6 +3063,37 @@ describe('consultant setup', () => {
     expectNoHorizontalScroll();
   });
 
+  it('keeps_1200_character_question_paragraphs_and_choices_in_one_phone_scroll_area', async () => {
+    const state = await consultantAt();
+    const question = state.messages.at(-1)!;
+    const paragraphs = ['Which clients should your Desk help first? '.repeat(20).slice(0, 599), 'Which services do they ask you about most? '.repeat(20).slice(0, 599)];
+    question.text = paragraphs.join('\n\n');
+    expect(question.text).toHaveLength(1200);
+    mockStore.inject({ route: 'setup', status: 200, body: state });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    expect([...panel.element().querySelectorAll('.cd-setup-q3__question p')].map((p) => p.textContent)).toEqual(paragraphs);
+    const area = panel.element().querySelector<HTMLElement>('.cd-setup-q3__scroll')!;
+    expect(area).not.toBeNull();
+    expect(area.contains(panel.element().querySelector('.cd-setup-q3__question'))).toBe(true);
+    expect(area.contains(panel.element().querySelector('ol'))).toBe(true);
+    expect(area.scrollHeight).toBeGreaterThan(area.clientHeight);
+    expect(panel.element().getBoundingClientRect().height).toBeLessThanOrEqual(window.innerHeight * 0.6 + 1);
+    const options = [...panel.element().querySelectorAll<HTMLElement>('.cd-setup-q3__list button, .cd-setup-q3__list input')];
+    options[0]!.focus({ preventScroll: true });
+    await userEvent.keyboard('4');
+    await expect.poll(() => {
+      const row = options[3]!.getBoundingClientRect();
+      const bounds = area.getBoundingClientRect();
+      return row.top >= bounds.top && row.bottom <= bounds.bottom;
+    }).toBe(true);
+    const composer = screen.getByRole('textbox', { name: 'Your answer' }).element().getBoundingClientRect();
+    expect(composer.top).toBeGreaterThan(0);
+    expect(composer.bottom).toBeLessThanOrEqual(window.innerHeight);
+    expectNoHorizontalScroll();
+  });
+
   it('caps_long_phone_questions_and_scrolls_every_choice_inside_the_panel_by_touch_and_keys', async () => {
     const state = await consultantAt();
     const question = state.messages.at(-1)!;
@@ -3072,7 +3103,7 @@ describe('consultant setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
     const panel = screen.getByRole('region', { name: question.text, exact: true });
     await expect.element(panel).toBeVisible();
-    const list = panel.element().querySelector<HTMLElement>('.cd-setup-q3__list')!;
+    const list = panel.element().querySelector<HTMLElement>('.cd-setup-q3__scroll')!;
     const box = screen.getByRole('textbox', { name: 'Your answer', exact: true }).element();
     const inView = (element: Element) => {
       const rect = element.getBoundingClientRect();

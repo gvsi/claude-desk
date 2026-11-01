@@ -25,6 +25,12 @@
   min-height: 0;
 }
 
+.cd-setup-q3__scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .cd-setup-q3__head {
   flex: none;
   display: flex;
@@ -42,6 +48,9 @@
   line-height: 25px;
 }
 
+.cd-setup-q3__question > p { margin: 0; }
+.cd-setup-q3__question > p + p { margin-top: var(--space-12); }
+
 .cd-setup-q3__list {
   display: flex;
   flex-direction: column;
@@ -49,9 +58,6 @@
   margin: 0 calc(var(--space-8) * -1);
   padding: 0;
   list-style: none;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .cd-setup-q3__row {

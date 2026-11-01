@@ -35,13 +35,13 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
         setActive(index);
         const control = root.current?.querySelectorAll<HTMLElement>('.cd-setup-q3__list button, .cd-setup-q3__list input')[index];
         control?.focus({ preventScroll: true });
-        const list = root.current?.querySelector<HTMLElement>('.cd-setup-q3__list');
+        const area = root.current?.querySelector<HTMLElement>('.cd-setup-q3__scroll');
         const row = control?.closest('.cd-setup-q3__row');
-        if (list && row) {
-          const bounds = list.getBoundingClientRect();
+        if (area && row) {
+          const bounds = area.getBoundingClientRect();
           const rect = row.getBoundingClientRect();
-          if (rect.top < bounds.top) list.scrollTop += rect.top - bounds.top;
-          else if (rect.bottom > bounds.bottom) list.scrollTop += rect.bottom - bounds.bottom;
+          if (rect.top < bounds.top) area.scrollTop += rect.top - bounds.top;
+          else if (rect.bottom > bounds.bottom) area.scrollTop += rect.bottom - bounds.bottom;
         }
       };
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -61,8 +61,9 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
   return (
     <div className="cd-setup-question-panel"><Card as="section" label={question} padding={16}>
       <div className="cd-setup-q3" ref={root}>
+        <div className="cd-setup-q3__scroll">
         <div className="cd-setup-q3__head">
-          <p className="cd-setup-q3__question cd-type-reply">{question}</p>
+          <div className="cd-setup-q3__question cd-type-reply">{question.split(/\n\s*\n/).map((text, index) => <p key={index}>{text}</p>)}</div>
           <IconButton label={copy.dismiss} icon="close" onClick={onDismiss} />
         </div>
         <ol className="cd-setup-q3__list" role="list">
@@ -80,6 +81,7 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
               maxLength={maxLength} disabled={disabled} onFocus={() => setActive(choices.length)} onChange={(event) => setOther(event.target.value)} />
           </label></li>
         </ol>
+        </div>
         <p className="cd-setup-q3__hint cd-type-meta">
           <kbd className="cd-setup-kbd cd-setup-kbd--arrow cd-type-meta"><Icon name="chevron-down" size={14} className="cd-setup-kbd__up" /><span className="cd-sr-only">{copy.upArrow}</span></kbd>
           <kbd className="cd-setup-kbd cd-setup-kbd--arrow cd-type-meta"><Icon name="chevron-down" size={14} /><span className="cd-sr-only">{copy.downArrow}</span></kbd> {copy.move}
