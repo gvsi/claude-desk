@@ -358,12 +358,12 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       : step.current?.querySelector<HTMLElement>('.cd-setup-c3__actions button:not(:disabled)') : null;
     const target = failed ? composer.current?.querySelector<HTMLElement>('button:not(:disabled)')
       : decisionFailed ? step.current?.querySelector<HTMLElement>('.cd-setup-c3__failed button:not(:disabled)')
-      : panel ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE)
+      : panel || consentPanel !== null ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE)
       : closing ? step.current?.querySelector<HTMLElement>('.cd-setup-dock button')
       : returnToTextarea.current ? field
       : cardTarget ?? (window.matchMedia('(pointer: fine)').matches ? field : null);
     target?.focus({ preventScroll: true });
-  }, [blocked, failed, decisionFailed, closing, panel?.index, state.pending_card, state.messages]);
+  }, [blocked, failed, decisionFailed, closing, panel?.index, consentPanel, state.pending_card, state.messages]);
 
   useLayoutEffect(() => {
     const pane = scroll.current;
@@ -459,7 +459,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
         onChoose={(text) => { returnFocus.current = true; returnToTextarea.current = false; send(text); }} /> : null}
       {asking && !busy && consentError !== null ? <Notice tone="error">{consentError}</Notice> : null}
       {consentPanel === null ? null : <SetupChoices key="consent" kind="consent" question={state.messages[consentPanel]!.text} choices={CONSENT_CHOICES}
-        maxLength={ANSWER_MAX} disabled={blocked} onDismiss={toComposer} onChoose={(text) => void consent(text === copy.allow)} />}
+        maxLength={ANSWER_MAX} disabled={blocked} onDismiss={toComposer}
+        onChoose={(text) => { returnFocus.current = true; returnToTextarea.current = false; void consent(text === copy.allow); }} />}
       {closing ? <div className="cd-setup-step__actions"><Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button></div> : (
         <div ref={composer}>
           <Composer

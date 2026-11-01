@@ -59,6 +59,8 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       } else if (!otherInput && /^[1-9]$/.test(event.key) && Number(event.key) <= rows) {
         event.preventDefault(); move(Number(event.key) - 1);
       } else if (event.key === 'Enter') {
+        // Reading the owner's memory and website takes a choice made in the panel, never an Enter from the page.
+        if (!offersOther && !inside) return;
         event.preventDefault();
         const text = offersOther && active === choices.length ? other.trim() : choices[active]?.text;
         if (text) onChoose(text);

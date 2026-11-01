@@ -141,6 +141,34 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: false }]);
   });
 
+  it('never_consents_on_enter_from_the_page', async () => {
+    const { state, ask } = await waitingInterview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await expect.element(screen.getByRole('region', { name: ask, exact: true })).toBeVisible();
+    // "Yes, use it" is the active row, but Enter reads nothing until focus is in the panel.
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    await userEvent.keyboard('{Enter}');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(requests('setupConsent')).toHaveLength(0);
+    await expect.element(screen.getByRole('region', { name: ask, exact: true })).toBeVisible();
+    // A number key moves into the panel; then Enter answers.
+    await userEvent.keyboard('1');
+    await expect.element(screen.getByRole('button', { name: YES, exact: true })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupConsent').map((r) => r.body)).toEqual([{ allow: true }]);
+  });
+
+  it('puts_focus_back_on_its_answer_when_the_consent_fails', async () => {
+    const { state, ask } = await waitingInterview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    mockStore.inject({ route: 'setupConsent', status: 503 });
+    await screen.getByRole('button', { name: YES, exact: true }).click();
+    await expect.element(screen.getByRole('alert')).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: ask, exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: YES, exact: true })).toHaveFocus();
+  });
+
   it('keeps_typed_words_for_the_first_question_and_reads_nothing', async () => {
     const { state } = await waitingInterview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
