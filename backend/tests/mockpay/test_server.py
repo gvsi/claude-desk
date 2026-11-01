@@ -486,22 +486,25 @@ async def test_delay_switch_is_per_copy_and_off_in_production(mockpay_url, mockp
                 "charge_id": paid if copy == slow else theirs, "amount_cents": 100, "idempotency_key": new_copy()}),
             "tools": lambda client, copy: listed_tools(mockpay_url, mockpay_key, copy),
         }
+        # The delay is long enough that an undelayed call on a loaded CI runner (once 0.9 s) still reads as undelayed.
+        slow_s = 1.5
         for op, call in calls.items():
             pending = {slow: await checkout(http, f"{op}-slow"), fast: await checkout(other, f"{op}-fast")}
-            await delay(op, 0.5)
+            await delay(op, slow_s)
             slow_took, _ = await timed(call(http, slow))
             fast_took, _ = await timed(call(other, fast))
-            assert slow_took >= 0.5 and fast_took < 0.5, (op, slow_took, fast_took)   # the delayed copy alone
+            assert slow_took >= slow_s and fast_took < slow_s, (op, slow_took, fast_took)   # the delayed copy alone
             await delay(op, 0)
-            assert (await timed(call(http, slow)))[0] < 0.5, op                          # zero turns it off
+            assert (await timed(call(http, slow)))[0] < slow_s, op                          # zero turns it off
 
         # the delay comes before any lock: a cancel sent during a delayed completion settles first
+        # A cancel that waited for the completion would take at least 2.8 s.
         held = await checkout(http, "before-the-lock")
-        await delay("complete", 1)
+        await delay("complete", 3)
         completion = asyncio.create_task(http.post(f"/provider/checkouts/{held}/complete", json={}))
         await asyncio.sleep(0.2)
         cancel_took, cancelled = await timed(http.post(f"/provider/checkouts/{held}/cancel", json={}))
-        assert cancelled.json() == {"state": "cancelled"} and cancel_took < 0.5
+        assert cancelled.json() == {"state": "cancelled"} and cancel_took < 2
         assert (await completion).status_code == 409
 
     # in production the switch isn't there, whichever setting names it
