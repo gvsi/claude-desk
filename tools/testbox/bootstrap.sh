@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Root, on the disposable Ubuntu 24.04 arm64 test machine. Safe to retry via SSM.
+set -euo pipefail
+exec > >(tee -a /var/log/desk-testbox-bootstrap.log) 2>&1
+trap 'echo "testbox bootstrap failed at line $LINENO"' ERR
+exec 9>/run/desk-testbox-bootstrap.lock
+flock 9
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y build-essential pkg-config libssl-dev curl unzip git rsync openssh-server postgresql-16 postgresql-client-16 python3 acl iproute2 iptables socat
+install -d -o ubuntu -g ubuntu /srv/testbox /srv/testbox/lanes /srv/testbox/cache
+install -d -o root -g root /opt/testbox
+# This server holds only disposable test data. Never apply these settings elsewhere.
+cat > /etc/postgresql/16/main/conf.d/testbox.conf <<'PG'
+listen_addresses = '127.0.0.1,10.200.0.1'
+fsync = off
+synchronous_commit = off
+full_page_writes = off
+max_connections = 1000
+shared_buffers = '8GB'
+PG
+# A bridge provides internet egress while each lane keeps its own loopback and fixed test ports.
+cat > /opt/testbox/network.sh <<'NET'
+#!/usr/bin/env bash
+set -euo pipefail
+ip link show testbox0 >/dev/null 2>&1 || ip link add testbox0 type bridge
+ip addr replace 10.200.0.1/16 dev testbox0
+ip link set testbox0 up
+sysctl -w net.ipv4.ip_forward=1
+iptables -t nat -C POSTROUTING -s 10.200.0.0/16 ! -d 10.200.0.0/16 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.200.0.0/16 ! -d 10.200.0.0/16 -j MASQUERADE
+NET
+chmod 755 /opt/testbox/network.sh
+cat > /etc/systemd/system/desk-testbox-network.service <<'UNIT'
+[Unit]
+Description=Disposable test lane network
+Before=postgresql.service
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/opt/testbox/network.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+UNIT
+mkdir -p /etc/systemd/system/postgresql@16-main.service.d
+cat > /etc/systemd/system/postgresql@16-main.service.d/testbox.conf <<'UNIT'
+[Unit]
+Requires=desk-testbox-network.service
+After=desk-testbox-network.service
+UNIT
+# Resolve the host name inside lane namespaces too, without a DNS lookup by sudo.
+python3 - <<'HOSTS'
+import socket
+from pathlib import Path
+hosts = Path('/etc/hosts')
+name = socket.gethostname()
+if not any(name in line.split()[1:] for line in hosts.read_text().splitlines()):
+    with hosts.open('a') as output:
+        output.write('127.0.1.1 ' + name + '\n')
+HOSTS
+systemctl daemon-reload
+systemctl enable --now desk-testbox-network
+if ! grep -q '10.200.0.0/16' /etc/postgresql/16/main/pg_hba.conf; then
+  echo 'host all all 10.200.0.0/16 scram-sha-256' >> /etc/postgresql/16/main/pg_hba.conf
+fi
+systemctl restart postgresql
+runuser -u postgres -- psql -v ON_ERROR_STOP=1 <<'SQL'
+SELECT 'CREATE ROLE desk_admin LOGIN SUPERUSER PASSWORD ''change-me-admin'''
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'desk_admin') \gexec
+ALTER ROLE desk_admin PASSWORD 'change-me-admin';
+SQL
+# No passwords, cloud credentials, model keys or owner environment files are installed.
+cat > /opt/testbox/install-user.sh <<'USER'
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+cd /opt/testbox
+mkdir -p /tmp/desk-testbox-install
+if ! command -v rustup >/dev/null; then
+  curl -fsSLo /tmp/desk-testbox-install/rustup-init https://static.rust-lang.org/rustup/archive/1.29.1/aarch64-unknown-linux-gnu/rustup-init
+  echo '15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433  /tmp/desk-testbox-install/rustup-init' | sha256sum -c --strict
+  chmod +x /tmp/desk-testbox-install/rustup-init
+  /tmp/desk-testbox-install/rustup-init -y --profile minimal --default-toolchain none --no-modify-path
+fi
+rustup toolchain install 1.99.1 --profile minimal --no-self-update
+rustup default 1.99.1
+if ! uv --version 2>/dev/null | grep -q 'uv 0.13.0'; then
+  curl -fsSL https://github.com/astral-sh/uv/releases/download/0.13.0/uv-aarch64-unknown-linux-gnu.tar.gz -o /tmp/testbox-uv.tar.gz
+  tar -xzf /tmp/testbox-uv.tar.gz -C /tmp
+  install -D /tmp/uv-aarch64-unknown-linux-gnu/uv "$HOME/.local/bin/uv"
+fi
+uv python install 3.13
+USER
+chmod 755 /opt/testbox/install-user.sh
+runuser -l ubuntu -c 'bash /opt/testbox/install-user.sh'
+if ! /usr/local/bin/node --version 2>/dev/null | grep -q '^v24.21.0$'; then
+  cd /tmp
+  curl -fsSLO https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-arm64.tar.xz
+  curl -fsSLO https://nodejs.org/dist/v24.21.0/SHASUMS256.txt
+  grep ' node-v24.21.0-linux-arm64.tar.xz$' SHASUMS256.txt | sha256sum -c --strict
+  tar -xJf node-v24.21.0-linux-arm64.tar.xz -C /usr/local --strip-components=1
+fi
+cd /opt/testbox
+if [ ! -x cvc5/bin/cvc5 ]; then
+  curl -fsSLo cvc5-Linux-arm64-static.zip https://github.com/cvc5/cvc5/releases/download/cvc5-1.4.2/cvc5-Linux-arm64-static.zip
+  grep ' cvc5-Linux-arm64-static.zip$' cvc5.sha256 | sha256sum -c --strict
+  unzip -qo cvc5-Linux-arm64-static.zip
+  mv cvc5-Linux-arm64-static cvc5
+fi
+# Browser binaries are shared, browser profiles and test output remain per lane.
+PLAYWRIGHT_BROWSERS_PATH=/opt/testbox/browsers npx --yes playwright@1.64.0 install --with-deps chromium webkit
+chmod -R a+rX /opt/testbox
+chown -R ubuntu:ubuntu /opt/testbox/browsers
+# Ubuntu's AppArmor user namespace restriction otherwise prevents Chromium sandbox startup.
+# Playwright's CI browser processes run only on this disposable host.
+sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+printf 'kernel.apparmor_restrict_unprivileged_userns=0\n' > /etc/sysctl.d/60-testbox.conf
+chown root:root /opt/testbox/lane-exec.py
+chmod 755 /opt/testbox/lane-exec.py
+printf 'ready\n' > /opt/testbox/ready
