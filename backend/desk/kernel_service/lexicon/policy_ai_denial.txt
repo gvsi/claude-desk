@@ -1,0 +1,15 @@
+# Policy-only AI denials: claims about who the visitor is chatting with. Whole phrases, case-insensitive
+# and accent-folded. Directions to reach a person ("Talk to a real person by phone.") and AI disclosures
+# ("This is an AI assistant, not a real person.") make no such claim and pass.
+folded	you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+an?\s+(?:(?:real|live|actual)\s+)?(?:human|person)
+folded	you(?:\s+are\s+not|['’]re\s+not|\s+aren['’]t)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)
+folded	(?:this\s+is|you(?:['’]ve|\s+have)\s+reached)\s+an?\s+(?:(?:human|real|live|actual)\s+(?:receptionist|agent|assistant|person|human)|human(?=\s*(?:[^\w\s-]|$)))
+folded	I(?:\s+am|['’]m)\s+(?:a\s+(?:real|live|actual)\s+(?:person|human)|a\s+human\s+(?:receptionist|agent|assistant|representative|operator)\b|(?:a\s+)?human(?:\s+being)?(?=\s*(?:[^\w\s-]|$)|\s+(?:and|too|here|who)\b))
+folded	(?:I(?:\s+am|['’]m)\s+not|this\s+(?:is\s+not|isn['’]t))\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)
+folded	(?<!no\s)esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con\s+(?:una\s+persona|un\s+(?:ser\s+)?humano|una?\s+(?:agente|asistente|recepcionista)\s+human[oa])
+folded	no\s+(?:esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con|soy)\s+(?:un\s+(?:bot|robot|chatbot)|una\s+(?:IA|maquina))(?!-)
+folded	(?<!no\s)soy\s+(?:una\s+persona(?:\s+(?:real|de\s+verdad))?(?=\s*(?:[^\w\s-]|$)|\s+que\b)|un(?:a)?\s+(?:recepcionista|agente|asistente)\s+human[oa]|un\s+(?:ser\s+)?humano|human[oa])
+folded	(?:esto|este\s+chat)\s+no\s+es\s+(?:un\s+(?:bot|robot|chatbot)|una\s+IA)(?!-)
+folded	(?:este\s+(?:chat|asistente)|quien\s+(?:(?:le|te|les)\s+)?(?:responde|atiende|contesta|escribe))\s+es\s+(?:una\s+persona|un\s+(?:ser\s+)?humano)
+folded	you(?:['’]ll|\s+will)\s+be\s+(?:talking|chatting|speaking)\s+(?:to|with)\s+an?\s+(?:real\s+)?(?:human|person)(?=\s*(?:[^\w\s-]|$)|\s+(?:and|too|here|who)\b)(?![^.!?]{0,40}\b(?:when|if|once)\s+you\s+(?:call|phone|ring|visit)\b|\s+(?:by|on\s+the|over\s+the)\s+phone\b)
+folded	(?<!no\s)(?:hablaras?|vas?\s+a\s+hablar)\s+con\s+(?:una\s+persona(?:\s+real)?|un\s+(?:ser\s+)?humano)(?=\s*(?:[^\w\s-]|$)|\s+(?:y|tambien|aqui|que)\b)(?![^.!?]{0,40}\b(?:cuando|si)\s+(?:usted\s+)?(?:llam[ae]s?|visite?s?)\b|\s+por\s+telefono\b)

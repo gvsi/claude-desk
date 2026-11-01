@@ -94,6 +94,9 @@ from fastapi import APIRouter, Request
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from desk.public_amenity import offers_amenity
+from desk.public_person import future_person_direction
+from desk.public_contact import valid_public_contact
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Person
@@ -286,9 +289,9 @@ CALLBACK_LINES = [(f"lex.{language}.callback", pattern) for language, entries in
                   for category, pattern in entries if category == "callback"]
 
 
-def _load_other_promises() -> dict[bool, list[re.Pattern[str]]]:
+def _load_policy_phrases(filename: str) -> dict[bool, list[re.Pattern[str]]]:
     """Policy-only terms; accented entries preserve marks in both pattern and reading."""
-    path = LEXICON_DIR / "other_promises.txt"
+    path = LEXICON_DIR / filename
     entries: dict[bool, list[re.Pattern[str]]] = {False: [], True: []}
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip() or line.startswith("#"):
@@ -302,17 +305,26 @@ def _load_other_promises() -> dict[bool, list[re.Pattern[str]]]:
     return entries
 
 
-OTHER_PROMISES = _load_other_promises()
+POLICY_PHRASES = {
+    "language": _load_policy_phrases("other_promises.txt"),
+    "policy.ai_denial": _load_policy_phrases("policy_ai_denial.txt"),
+    "policy.free_price": _load_policy_phrases("policy_free_price.txt"),
+}
 
 
-def _other_promise_spans(text: str) -> set[tuple[int, int]]:
-    """Whole commitment spans for policies, independent of the language detector."""
+def _policy_phrase_spans(text: str) -> set[tuple[int, int, str]]:
+    """Whole policy-only phrases with their rule IDs, independent of the language detector."""
     spans = set()
-    for keep_accents, patterns in OTHER_PROMISES.items():
-        for reading, origin in _readings(text, keep_accents=keep_accents).items():
-            for pattern in patterns:
-                for match in pattern.finditer(reading):
-                    spans.add((origin[match.start()], origin[match.end() - 1] + 1))
+    readings = {keep: _readings(text, keep_accents=keep) for keep in (False, True)}
+    for rule, entries in POLICY_PHRASES.items():
+        for keep_accents, patterns in entries.items():
+            for reading, origin in readings[keep_accents].items():
+                for pattern in patterns:
+                    for match in pattern.finditer(reading):
+                        start = origin[match.start()]
+                        if rule == "policy.ai_denial" and future_person_direction(text, start):
+                            continue
+                        spans.add((start, origin[match.end() - 1] + 1, rule))
     return spans
 
 
@@ -532,10 +544,15 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
 
 
 def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
-    """Allow real words across case, width and accents, without substituting lookalikes."""
+    """A promise hit in public text passes only as a real word the owner allowed for this key, read across
+    case, width and accents without substituting lookalikes, or as an English or Spanish free-price
+    phrase offering an amenity (`offers_amenity`): "Free parking." passes, "Free estimates." and
+    "Consultations are complimentary." don't. `text` is the key's own text."""
     word = "".join(char for char in unicodedata.normalize("NFKD", text[start:end])
                    if unicodedata.category(char) not in ("Mn", "Me")).casefold()
-    return rule.startswith("lex.") and rule.endswith(".promise") and word in allow_words
+    promise = rule.startswith("lex.") and rule.endswith(".promise")
+    return ((promise and word in allow_words)
+            or ((promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
 
 
 # The service area's allowance (the owner's ruling: distances, number words, years and day words).
@@ -547,41 +564,69 @@ _CARDINAL = (r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
              r"|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince"
              r"|dieci(?:s[eé]is|siete|ocho|nueve)|veinte|veinti\w+"
              r"|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)")
-# A distance unit straight after a number, singular or plural, with a hyphen or blanks between
-# ("25 miles", "a 30-mile radius", "1 kilómetro", "50-km").
-SERVICE_AREA_DISTANCE = re.compile(rf"{_BLANK}*{_DISTANCE_UNIT}", re.IGNORECASE)
+_DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la{_BLANK}+semana)\b"
+# After a number: a distance unit, singular or plural, with a hyphen or blanks between ("25 miles",
+# "a 30-mile radius", "1 kilómetro", "50-km"), maybe after a range to a second number ("20-30 miles",
+# "20 to 30 miles", "20 a 30 km", "20 hasta 30 km"); or "days a week" ("7 días a la semana").
+SERVICE_AREA_AFTER_DIGITS = re.compile(
+    rf"(?:(?:{_BLANK}*[-–—]{_BLANK}*|{_BLANK}+(?:to|a|hasta){_BLANK}+)[0-9]+(?:[.,][0-9]+)*)?"
+    rf"{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK}", re.IGNORECASE)
+SERVICE_AREA_YEAR_PREFIX = re.compile(r"\b(?:since|in|from|est\.|established|founded|desde|en)\s+$", re.IGNORECASE)
 SERVICE_AREA_YEAR = re.compile(r"(?:19|20)[0-9]{2}")
 SERVICE_AREA_CARDINAL = re.compile(_CARDINAL, re.IGNORECASE)
-# After a cardinal, the rest of a compound number ("twenty-five", "treinta y cinco"), then a distance
-# unit or "days a week" ("días a la semana").
-_DAYS_A_WEEK = rf"(?:days?{_BLANK}+a{_BLANK}+week|d[ií]as?{_BLANK}+a{_BLANK}+la{_BLANK}+semana)\b"
-SERVICE_AREA_AFTER_CARDINAL = re.compile(
-    rf"(?:{_BLANK}+(?:y{_BLANK}+)?{_CARDINAL}\b){{0,2}}(?:{_BLANK}*{_DISTANCE_UNIT}|{_BLANK}+{_DAYS_A_WEEK})",
-    re.IGNORECASE)
+# Half or a hundred is a distance only right before its unit ("half a mile", "a hundred miles").
+SERVICE_AREA_HALF_OR_HUNDRED = re.compile(rf"half|(?:one{_BLANK}+)?hundred|cien", re.IGNORECASE)
+SERVICE_AREA_BEFORE_UNIT = re.compile(rf"{_BLANK}+(?:an?{_BLANK}+)?{_DISTANCE_UNIT}", re.IGNORECASE)
 SERVICE_AREA_UNIT_WORDS = re.compile(r"miles|millas", re.IGNORECASE)   # the Spanish lexicon's "miles" (thousands)
 # Weekdays, weekends and the parts of the day, but no date, time or time window.
 SERVICE_AREA_DAY_WORDS = re.compile(
     r"(?:mon|tues|wednes|thurs|fri|satur|sun)days?|weekends?"
     rf"|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bados?|domingos?|fin(?:es)?{_BLANK}+de{_BLANK}+semana"
     r"|mornings|afternoons|evenings|nights|ma[nñ]anas|tardes|noches", re.IGNORECASE)
+SERVICE_AREA_MORNING = re.compile(r"\b(?:por|en|de)\s+la\s+$", re.IGNORECASE)
+
+# ZIP ranges keep both five-digit endpoints under the same postal marker.
+SERVICE_AREA_POSTAL_PREFIX = re.compile(
+    r"\b(?:(?i:zip(?:\s+codes?)?|c[oó]digo\s+postal)|(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|"
+    r"LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY))"
+    r"\s+(?:[0-9]{5}\s*[-–—]\s*)?$")
+SERVICE_AREA_ROAD_PREFIX = re.compile(r"\b(?:I-\s*|(?:Highway|Hwy)\s+)$", re.IGNORECASE)
+SERVICE_AREA_ALWAYS = re.compile(r"\b24/7\b")
+SERVICE_AREA_PREFIX_REACH = 40   # a year, ZIP or road marker sits right before its number: read only that far back
+
+
+def _service_area_prefix(pattern: re.Pattern[str], text: str, start: int) -> bool:
+    return pattern.search(text, max(0, start - SERVICE_AREA_PREFIX_REACH), start) is not None
 
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
-    """Whether the hit `text[start:end]` of `rule` is one a service area may hold: a number right before a
-    distance unit or a year; a cardinal number word right before a distance unit or "days a week", or
-    "miles" as the unit; a weekday, weekend or part of the day. Nothing else: no fraction, amount, time
-    window or date, so "half off", "trip fee 1500" and "same-day" stay refused as under any other key."""
+    """Allow only the service area's numeric, geographic and day-part shapes, within its own text.
+
+    Digits need a distance unit (possibly after a range), "days a week", an explicit year marker,
+    a ZIP or road prefix, or literal "24/7". Cardinal words pass anywhere; half or a hundred needs
+    a distance unit. Weekdays, weekends and day parts pass, with singular mañana needing morning
+    context. A fee written in words ("trip fee: fifty") passes: a known limit. Other amounts,
+    fractions, dates and time windows retain their ordinary refusals."""
     if key not in {"policy:service_area", "charter:policy:service_area"}:
         return False
     hit = text[start:end]
     if rule == "digit":
-        return SERVICE_AREA_YEAR.fullmatch(hit) is not None or SERVICE_AREA_DISTANCE.match(text, end) is not None
+        return ((SERVICE_AREA_YEAR.fullmatch(hit) is not None
+                 and _service_area_prefix(SERVICE_AREA_YEAR_PREFIX, text, start))
+                or SERVICE_AREA_AFTER_DIGITS.match(text, end) is not None
+                or (re.fullmatch(r"[0-9]{5}", hit) is not None
+                    and _service_area_prefix(SERVICE_AREA_POSTAL_PREFIX, text, start))
+                or (hit.isascii() and hit.isdigit() and _service_area_prefix(SERVICE_AREA_ROAD_PREFIX, text, start))
+                or any(match.start() <= start and end <= match.end()
+                       for match in SERVICE_AREA_ALWAYS.finditer(text, max(0, start - 4), end + 4)))
     if rule in ("lex.en.number", "lex.es.number"):
-        return SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or (
-            SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
-            and SERVICE_AREA_AFTER_CARDINAL.match(text, end) is not None)
+        return (SERVICE_AREA_UNIT_WORDS.fullmatch(hit) is not None or SERVICE_AREA_CARDINAL.fullmatch(hit) is not None
+                or (SERVICE_AREA_HALF_OR_HUNDRED.fullmatch(hit) is not None
+                    and SERVICE_AREA_BEFORE_UNIT.match(text, end) is not None))
     if rule in ("lex.en.date", "lex.es.date"):
-        return SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
+        return (SERVICE_AREA_DAY_WORDS.fullmatch(hit) is not None
+                or (hit.casefold() in {"mañana", "manana"}
+                    and _service_area_prefix(SERVICE_AREA_MORNING, text, start)))
     return False
 
 
@@ -589,8 +634,9 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
                      policy_key: str | None = None) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
-    Both prose lexicons run, whatever the text's language. Positive language evidence or
-    a policy-only other-language commitment is refused; undetermined text keeps passing.
+    Both prose lexicons run, whatever the text's language. Policy-only phrases also refuse
+    AI denials, implied free prices and selected other-language commitments. Positive language
+    evidence is refused; undetermined text keeps passing.
     Format controls are refused because
     policy cards render the original text, whereas the prose scan reads normalized text.
     Pure: no reads or writes, and no matched text returned to callers that record a refusal.
@@ -599,7 +645,9 @@ def scan_public_text(text: str, allow_words: frozenset[str] = frozenset(), *,
     rules = {rule for start, end, rule, _ in _prose_hits(normalized)
              if not _allowed_public_hit(normalized, start, end, rule, allow_words)
              and not _allowed_service_area_hit(policy_key, normalized, start, end, rule)}
-    if lang.positive_other_language(normalized) or _other_promise_spans(normalized):
+    rules.update(rule for start, end, rule in _policy_phrase_spans(normalized)
+                 if not _allowed_public_hit(normalized, start, end, rule, allow_words))
+    if lang.positive_other_language(normalized):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
@@ -646,10 +694,15 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
                 fields[key].add("language")
     # Attribute lexical commitments only to intersecting policies. A term wholly inside
     # reply prose stays with the existing prose rules, even beside a harmless policy card.
-    for start, end in _other_promise_spans(combined):
+    for start, end, rule in _policy_phrase_spans(combined):
+        if any(key is not None and low <= start and end <= high
+               and _allowed_public_hit(combined[low:high], start - low, end - low, rule,
+                                       allow_words.get(key, frozenset()))
+               for key, low, high in ranges):
+            continue
         for key, low, high in ranges:
             if key is not None and low < high and low < end and start < high:
-                fields[key].add("language")
+                fields[key].add(rule)
     right_context: RightContext = {}
     hits = _prose_hits(combined, right_context=right_context)
     boundaries = [high for _, _, high in ranges]
@@ -667,7 +720,8 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
                     break
         contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]
         if any(key is not None and low <= start and end <= high
-               and (_allowed_public_hit(combined, start, match_end, rule, allow_words.get(key, frozenset()))
+               and (_allowed_public_hit(combined[low:high], start - low, match_end - low, rule,
+                                        allow_words.get(key, frozenset()))
                     or _allowed_service_area_hit(key, combined[low:high], start - low, match_end - low, rule))
                for key, low, high in contributors):
             continue
@@ -807,6 +861,9 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
             continue
         if found := block_canaries(block, canaries):
             violations.append(canary_violation(found))
+            continue
+        if template.name == "contact" and not valid_public_contact(block.text):
+            violations.append(_clause_violation(clause, "unknown_fact", "contact_format"))
             continue
         blocks.append(block)
     return blocks, violations

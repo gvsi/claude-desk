@@ -26,7 +26,7 @@ from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PriceItem as PriceRow
 from desk.kernel_api import DeskCreated, PublicDesk
-from desk.kernel_service import desks, public
+from desk.kernel_service import desks
 
 from .helpers import kernel_ctx, rows_of
 from .test_adapters import Rivera, rivera
@@ -314,11 +314,10 @@ async def withheld_alerts(app: FastAPI, copy: Rivera) -> list[str]:
         InboxRow.preview == "Hidden from your public page").order_by(InboxRow.created_at))]
 
 
-@pytest.mark.parametrize(("unsafe", "cause"), [
-    ("Free consultations for everyone.", "it makes a promise"),
-    ("Bonjour nous vous nous vous nous vous.", "it isn't in English or Spanish"),
-])
-async def test_public_withholds_only_the_failing_policy_and_alerts_once(app, client, frozen_clock, unsafe, cause):
+@pytest.mark.parametrize("unsafe", ["Free consultations for everyone.", "Bonjour nous vous nous vous nous vous."])
+async def test_public_withholds_only_the_failing_policy_without_an_alert(app, client, unsafe):
+    """The owner's decision of 2026-11-01: a stored policy line that fails the public-text scan is
+    left off the page, and the owner isn't alerted."""
     from .test_decide import open_visitor
     from .test_reply_check import assert_handed_off, checked, clause, public_key, verify_verdict
 
@@ -337,13 +336,7 @@ async def test_public_withholds_only_the_failing_policy_and_alerts_once(app, cli
         page = await public_page(client, copy, language)
         assert [(block.fact_id, block.text) for block in page.charter if block.template == "policy"] == [
             ("charter:policy:about", honest)]
-    [alert] = await withheld_alerts(app, copy)
-    # The line's public label and a cause from its rules, never its key or its text
-    assert alert == f"Your public page is hiding Pricing, because {cause}."
-    assert honest not in alert and unsafe not in alert and "policy:" not in alert
-    frozen_clock.advance(59 * 60)
-    await public_page(client, copy)
-    assert await withheld_alerts(app, copy) == [alert]
+    assert await withheld_alerts(app, copy) == []
     visitor = await open_visitor(client, copy)
     verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:about")])
     assert verdict.ok and verdict.violations == []
@@ -353,30 +346,6 @@ async def test_public_withholds_only_the_failing_policy_and_alerts_once(app, cli
     assert_handed_off(verdict)
     assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
         ("policy_combined", ["charter:policy:pricing"])]
-
-
-@pytest.mark.parametrize(("policies", "alert"), [
-    ({"service_area": ["digit"]},
-     "Your public page is hiding Service area, because it names a number."),
-    # A price names its number already.
-    ({"pricing": ["currency", "digit", "percent_sign"]},
-     "Your public page is hiding Pricing, because it names a price or a discount."),
-    ({"pricing": ["lex.en.number", "lex.en.promise"]},
-     "Your public page is hiding Pricing, because it names a number and makes a promise."),
-    ({"about": ["lex.en.promise"], "pricing": ["lex.en.promise"]},
-     "Your public page is hiding About us and Pricing, because they make a promise."),
-    ({"intake": ["lex.es.booking"], "after_hours": ["lex.en.callback"], "urgent": ["lex.es.number"]},
-     "Your public page is hiding After hours, Getting started and Urgent help, because they name a number and "
-     "confirm a booking or a call."),
-    ({"how_we_help": ["language", "mixed_script"]},
-     "Your public page is hiding How we help, because it isn't in English or Spanish."),
-    # A line the page shows as "Policy" is named by its key's words.
-    ({"first_visit": ["lex.en.date", "format_control"]},
-     "Your public page is hiding First visit, because it names a date or a time and has hidden formatting "
-     "characters."),
-])
-def test_the_withheld_policy_alert_names_labels_and_causes(policies, alert):
-    assert public.withheld_policy_alert(policies) == alert
 
 
 async def test_a_stored_canary_is_withheld_from_the_public_page(app, client, frozen_clock):
