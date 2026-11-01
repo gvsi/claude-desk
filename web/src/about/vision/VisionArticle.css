@@ -340,10 +340,13 @@
   outline-offset: 2px;
 }
 
+/* The phone keeps its own height rather than the picture's, so its frame runs on past the picture's foot and the
+   cut falls across the bezel's straight sides, never at the frame's own lower corners. */
 .vision-article .va-card__top {
   display: flex;
   flex: none;
   justify-content: center;
+  align-items: flex-start;
   height: 150px;
   padding-top: 16px;
   overflow: hidden;

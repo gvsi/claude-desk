@@ -80,6 +80,28 @@ function flat(el: Element | null | undefined): string {
   return (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * A phone as the page draws it, in the page's pixels after any scaling: the frame's and the screen's boxes, the
+ * bezel's width at the left, the right and the top, and the frame's and the screen's radius at the two top corners.
+ */
+function measurePhone(phone: Element) {
+  const screen = phone.querySelector('.va-screen');
+  if (!(phone instanceof HTMLElement) || !(screen instanceof HTMLElement)) throw new Error('not a drawn phone');
+  const frame = phone.getBoundingClientRect();
+  const inner = screen.getBoundingClientRect();
+  const scale = frame.width / phone.offsetWidth;
+  const radius = (el: Element, corner: 'borderTopLeftRadius' | 'borderTopRightRadius') => parseFloat(getComputedStyle(el)[corner]) * scale;
+  return {
+    frame,
+    screen: inner,
+    bezel: { left: inner.left - frame.left, right: frame.right - inner.right, top: inner.top - frame.top },
+    corners: (['borderTopLeftRadius', 'borderTopRightRadius'] as const).map((corner) => ({
+      frame: radius(phone, corner),
+      screen: radius(screen, corner),
+    })),
+  };
+}
+
 afterEach(() => {
   writeLocal('lastDesk', null);
 });
@@ -244,6 +266,48 @@ describe('The Vision article', () => {
     await screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).click();
     await expect.poll(() => router.state.location.pathname).toBe(CARDS[0].href);
     await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
+  });
+
+  it('the_picture_cards_draw_their_phones_with_an_even_bezel_and_a_clean_crop', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      const section = screen.getByRole('region', { name: CARDS_HEADING, exact: true });
+      await expect.element(section.getByText(CARDS_LEAD, { exact: true }), { message: viewport }).toBeVisible();
+      // The article's own phone, drawn full size beside its caption: each card's phone is a smaller copy of it.
+      const full = measurePhone(screen.getByRole('img', { name: FIGURES[0].label, exact: true }).element());
+      const tops = section.getByRole('link').elements().map((link) => link.firstElementChild);
+      expect(tops, viewport).toHaveLength(CARDS.length);
+      const shown: number[] = [];
+      for (const [i, top] of tops.entries()) {
+        const where = `${CARDS[i]?.name ?? i} at ${viewport}`;
+        const phone = top?.querySelector('.va-phone');
+        if (!top || !phone) throw new Error(`${where} has no phone`);
+        const { frame, screen: inner, bezel, corners } = measurePhone(phone);
+        // One bezel all round: as wide at the left and the right as at the top.
+        expect(bezel.top, where).toBeGreaterThan(0);
+        expect(Math.abs(bezel.left - bezel.top), where).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(bezel.right - bezel.top), where).toBeLessThanOrEqual(0.5);
+        // The screen's corners follow the frame's: its radius is the frame's less the bezel.
+        for (const corner of corners) expect(Math.abs(corner.screen - (corner.frame - bezel.top)), where).toBeLessThanOrEqual(0.5);
+        // In the article's phone's proportions, scaled down: its bezel and its corners for its width.
+        const width = frame.width;
+        expect(Math.abs((bezel.top / width - full.bezel.top / full.frame.width) * width), where).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(((corners[0]?.frame ?? 0) / width - (full.corners[0]?.frame ?? 0) / full.frame.width) * width), where).toBeLessThanOrEqual(0.5);
+        // The card's picture cuts the phone straight across its sides: the picture's foot falls below the frame's
+        // top corners, and the frame, its corners and its screen go on past it, so the bezel runs straight down to
+        // the cut on both sides. The phone fits inside the picture's width.
+        const area = top.getBoundingClientRect();
+        const curve = corners[0]?.frame ?? 0;
+        expect(area.bottom, where).toBeGreaterThanOrEqual(frame.top + curve);
+        expect(frame.bottom - curve, where).toBeGreaterThanOrEqual(area.bottom);
+        expect(inner.bottom, where).toBeGreaterThan(area.bottom);
+        expect(frame.left, where).toBeGreaterThanOrEqual(area.left);
+        expect(frame.right, where).toBeLessThanOrEqual(area.right);
+        shown.push(area.bottom - frame.top);
+      }
+      // And at the same point on every card.
+      expect(Math.max(...shown) - Math.min(...shown), viewport).toBeLessThanOrEqual(0.5);
+    }
   });
 
   it('the_cover_band_is_decoration_hidden_on_phones', async () => {
