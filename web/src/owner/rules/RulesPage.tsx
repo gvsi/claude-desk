@@ -185,11 +185,19 @@ export function RulesPage() {
   const [limit, setLimit] = useState<LimitField | null>(null);
 
   const active = rules.data?.active;
+  // A change the owner confirmed (in Ask Claude, or on its own review page), waiting to land here.
+  const landing = useLanding(deskId);
+  // A review Rules opened comes back with its change confirmed, often before the rules read has the
+  // version it made. Until it does, Rules shows its reading state, never the old rules, then draws
+  // the new rows and lands the change on them. A read that fails shows the rules it has, with its
+  // error. A change confirmed in Ask Claude lands on rows already drawn, as before.
+  const [openedWithLanding] = useState(() => landing !== null);
+  const awaitingLanding = openedWithLanding && landing !== null && active !== undefined && active.version < landing.version && !rules.isError;
   // Suggestions use the capped optional wait above; they must not keep this region busy after it expires.
   const settled = [rules, people].every((read) => read.isFetched || read.isPaused);
   const [firstReadsEnded, setFirstReadsEnded] = useState(settled);
   if (settled && !firstReadsEnded) setFirstReadsEnded(true);
-  const loading = (!settled && !firstReadsEnded) || waitingForOpening;
+  const loading = (!settled && !firstReadsEnded) || waitingForOpening || awaitingLanding;
   const drawn = !loading && active !== undefined;
   // Back and "Keep my rules" may return while the gate leaves the page too short to restore.
   useLayoutEffect(() => {
@@ -201,7 +209,6 @@ export function RulesPage() {
   // changed once Rules is drawn with the version it made, so its words cross-fade as the row lights
   // up; while Ask Claude is a sheet over the page, once the sheet closes. Each row keeps "Updated"
   // until the owner leaves Rules.
-  const landing = useLanding(deskId);
   const [kept, setKept] = useState<Landed>(NOTHING_LANDED);
   const [toReveal, setToReveal] = useState<Landing | null>(null);
   // Where Ask Claude is a sheet over the page, a change lands once the sheet closes.

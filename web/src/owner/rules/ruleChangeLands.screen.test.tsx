@@ -372,6 +372,42 @@ function holdNeedsYou(): { held: () => number; release: () => void } {
   return { held: () => waiting, release };
 }
 
+/** The main Desk's rules, as the app reads them. */
+const RULES_PATH = apiPath('rules', { desk_id: RIVERA.deskId });
+
+/** Holds every read of the main Desk's rules until `release()` lets them through to the mock. */
+function holdRules(): { held: () => number; release: () => void } {
+  let waiting = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.get(RULES_PATH, async () => {
+      waiting += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => waiting, release };
+}
+
+/**
+ * Whether `root` draws an element matching `selector` (a selector starting with ".") or text holding
+ * `words`, anywhere but in its loading shapes, which are laid out with the page's own classes and
+ * words.
+ */
+function showsOutsideShapes(root: HTMLElement, selectorOrWords: string): boolean {
+  const outside = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest('.cd-skeleton-screen__layer') == null;
+  if (selectorOrWords.startsWith('.')) return [...root.querySelectorAll(selectorOrWords)].some(outside);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (node.textContent?.includes(selectorOrWords) && outside(node)) return true;
+  }
+  return false;
+}
+
 /** Text that starts with `words`, whatever follows them. */
 const startingWith = (words: string) => new RegExp(`^${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
@@ -407,7 +443,7 @@ describe('a preset or a new payment limit', () => {
     // Every row whose rules it changed lands, and those it left alone (the starter's own) don't.
     const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
     await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
-    for (const name of changed) expect(fillOf(toolRow(root, name)), name).toBe(SELECTED);
+    for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
     for (const name of ['Find open times', 'Save a lead', 'Request a callback']) expect(fillOf(toolRow(root, name)), name).toBe('none');
     expect(flashed).toBe(false);
     await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
@@ -436,6 +472,41 @@ describe('a preset or a new payment limit', () => {
       expect(saysUpdated(toolRow(root, name)), name).toBe(false);
       expect(fillOf(toolRow(root, name)), name).toBe('none');
     }
+  });
+
+  it('back_on_rules_the_reading_state_shows_until_the_rules_read_has_the_new_version', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const root = screen.container;
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    const version = desk().lastVersion;
+    // Every read of the rules after the confirm is held, as on a slow network.
+    const reads = holdRules();
+    // Whether Rules draws any of the old version's rows, or its line, while the read is held.
+    let oldShown = false;
+    const watch = new MutationObserver(() => {
+      if (showsOutsideShapes(root, '.cd-connector-section__tool') || showsOutsideShapes(root, 'Version 7 of your rules')) oldShown = true;
+    });
+    watch.observe(root, { childList: true, subtree: true, characterData: true });
+    onTestFinished(() => watch.disconnect());
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+
+    // Back on Rules, the read held: its reading state, never the old rules.
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.poll(reads.held).toBeGreaterThan(0);
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await pause(300);
+    watch.disconnect();
+    expect(oldShown).toBe(false);
+    expect(updatedRows(root)).toEqual([]);
+
+    // The read lands: the new version's line, and the rows it changed say so.
+    reads.release();
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.poll(() => updatedRows(root)).toContain('Quote');
+    await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
+    expect(showsOutsideShapes(root, 'Version 7 of your rules')).toBe(false);
   });
 
   it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
