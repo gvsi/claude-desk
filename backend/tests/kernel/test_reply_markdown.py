@@ -17,7 +17,7 @@ from desk.kernel_service import reply_check
 
 from .helpers import rows_of
 from .test_adapters import visitor_of
-from .test_reply_check import assert_kept, change_fact, checked, clause, own_quote
+from .test_reply_check import assert_kept, assert_offered, change_fact, checked, clause, own_quote
 
 STEPS = "1. Turn off the main valve\n2. Open the lowest tap\n3. Wait for Maria\n4. Keep the area dry"
 # The business's contact as its owner might write it: a phone, an email and a website, in its accepted form.
@@ -164,7 +164,7 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     verdict = await checked(client, visitor, prose)
     assert verdict.ok is False
     assert rule_ids <= {violation.rule_id for violation in verdict.violations}, verdict.violations
-    assert [block.template for block in verdict.blocks] == ["handoff"]      # none of the prose is shown
+    assert_offered(verdict)                     # none of the prose is shown: the call-back offer Rivera's Desk has
 
 
 def test_struck_through_text_is_still_read_with_one_tilde_or_two():

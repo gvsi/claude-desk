@@ -674,8 +674,8 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     garbled = await guest(kernel_http, fake, owner)
     await write(engine, db, garbled.ids, "visitor_text", text="x" * 250)
     await write(engine, db, garbled.ids, "triage", text="not json")
-    for who in (handed, garbled):
-        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose="That's 1,400 dollars.")
+    for who in (handed, garbled):              # another language: the handoff card, which opens a handoff
+        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose=OTHER_LANGUAGE)
         verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
         assert not verdict.ok
     held = await guest(kernel_http, fake, owner)

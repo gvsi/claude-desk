@@ -1700,8 +1700,8 @@ async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booki
     await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
 
     visitor, other = await new_visitor(http, slug), await new_visitor(http, slug)
-    for created in (visitor, other):
-        assert not (await checked(http, created, BLOCKED_PROSE, final=True)).ok
+    for created in (visitor, other):              # another language: the handoff card, which opens a card handoff
+        assert not (await checked(http, created, OTHER_LANGUAGE, final=True)).ok
     ((card_id, kind, status),) = session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)
     assert (kind, status) == ("card", "open")
     view = http.session(visitor.session_token)
