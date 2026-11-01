@@ -100,7 +100,15 @@ export function ConnectorReview({ connector, job, intro, tools, onChangeOutcome,
           <dl className="cd-connector-review__setup">
             {job.rows.filter((row) => row.value.trim() !== '').map((row) => (
               <div key={row.label} className="cd-connector-review__setup-row cd-type-meta">
-                <dt>{row.label}</dt><dd>{row.value}</dd>
+                <dt>{row.label}</dt>
+                <dd>
+                  {/* A list value (an intake's questions) takes one numbered line per entry, in its order. */}
+                  {row.items && row.items.length > 0 ? (
+                    <ol className="cd-connector-review__setup-list">
+                      {row.items.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+                    </ol>
+                  ) : row.value}
+                </dd>
               </div>
             ))}
           </dl>

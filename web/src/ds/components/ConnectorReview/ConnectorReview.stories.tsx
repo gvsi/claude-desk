@@ -274,3 +274,29 @@ export const BusinessJobPhone: Story = {
     await expect(context.canvas.getByText('Ask me first', { exact: true }).getBoundingClientRect().top).toBeGreaterThanOrEqual(text.getBoundingClientRect().bottom);
   },
 };
+
+const intakeQuestions = ['Which tax year is this for?', 'Is it for a business?', 'Who did your books last year?'];
+const intakeDef = { title: 'Before an intro call', description: 'Asks questions.', config: { block: 'intake' as const, questions: intakeQuestions } };
+
+/** An intake job: its questions in the Asks row, one numbered line each, in asking order. */
+export const IntakeJob: Story = {
+  ...BusinessJob,
+  args: {
+    connector: undefined,
+    job: { title: intakeDef.title, glyph: businessGlyph(intakeDef.config)!, rows: businessRows(intakeDef, 'ask') },
+    tools: [reviewTool({ ...introCall, tool: 'desk.intake_1', business: intakeDef }, [])], onChangeOutcome: undefined,
+  },
+  parameters: { canvas: 'none', canvasNote: 'The intake questions board (canvas v279), not yet in the reference registry.' },
+  play: async ({ canvas }) => {
+    const setup = canvas.getByRole('region', { name: 'How it’s set up' });
+    const list = setup.querySelector('dd > ol');
+    await expect(list).not.toBeNull();
+    await expect([...list!.querySelectorAll('li')].map((item) => item.textContent)).toEqual(intakeQuestions);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const IntakeJobPhone: Story = {
+  ...IntakeJob,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+};
