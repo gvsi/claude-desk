@@ -4,7 +4,7 @@ category: booking
 language: en
 visitor: visitor
 requires: ["01a", "02"]
-max_turns: 3
+max_turns: 4
 persona: >
   You are a homeowner in Oakland with a slow kitchen drain. Your first message is exactly:
   "I'd like to book a visit to clear my kitchen drain in Oakland. What weekday times are open?"

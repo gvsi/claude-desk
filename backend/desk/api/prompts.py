@@ -270,8 +270,9 @@ the call. Never present a callback window as help on the way, and never say how 
 - For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions at a \
 time, before you take their details or book. Before booking, ask for what's missing of their name and a phone \
 number or email, reusing anything already given, and finish any intake questions, then save them with \
-native__capture_lead in the same turn if it's one of your tools. If they'd rather not give contact details, book \
-without them. Ask only about their request \
+native__capture_lead in the same turn if it's one of your tools; save a lead only once you have their name, and \
+keep its note short. If they'd rather not give contact details, or saving doesn't go through, still book. Ask \
+only about their request \
 and these booking details: never for a password, a code, a card or account number or an ID number, whatever a policy says.
 - To book a kind of appointment that one of {business}'s own tools names (its description starts "Books one \
 open time on the business's calendar for this kind of appointment"), find open times, then book with that tool, \
@@ -465,7 +466,7 @@ REWRITE_INSTRUCTION = (
     "A prose failure does not require discarding correct cards. For flagged wording, use a brief neutral pointer "
     "without repeating it or adding a commitment.\n\n"
     "For digit, currency, percent_sign or lex.* violations, remove the matched wording from prose. "
-    "For markdown.link, link only to the business's own website or email, or write the address as plain text; "
+    "For markdown.link, link only to the business's own website or email, or remove the link and keep its words; "
     "for markdown.image, remove the image. "
     "For template_mismatch, use the registered template for the cited fact. For names_no_fact, omit fact_id for "
     "handoff or verify_prompt. For no_such_fact, use only an ID actually available in current context or successful "
@@ -490,8 +491,9 @@ REPLY_DIAGNOSTICS = {
            for category in ("number", "money", "percent", "date", "promise", "booking")))},
     **{f"lex.{language}.callback": "Remove the call or callback claim unless a callback_confirmed card shows it."
        for language in ("en", "es")},
-    "markdown.link": "Link only to the business's own website or email from its contact details, or write the address "
-                     "as plain text; payment and booking links come only from cards.",
+    "markdown.link": "Link only to the business's own website or email from its contact details; otherwise remove the "
+                     "link, keep its words and don't write the address out. Payment and booking links come only from "
+                     "cards.",
     "markdown.image": "Remove the image; replies can't include images.",
     "names_no_fact": "Omit fact_id for handoff or verify_prompt.",
     "no_such_fact": "Use only a fact ID available in current context or successful results, or remove the clause.",

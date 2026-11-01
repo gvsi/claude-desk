@@ -111,8 +111,9 @@ def test_system_prompt_uses_the_business_policies():
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
         "at a time, before you take their details or book. Before booking, ask for what's missing of their name and a "
         "phone number or email, reusing anything already given, and finish any intake questions, then save them with "
-        "native__capture_lead in the same turn if it's one of your tools. If they'd rather not give contact details, "
-        "book without them. Ask only about their "
+        "native__capture_lead in the same turn if it's one of your tools; save a lead only once you have their name, "
+        "and keep its note short. If they'd rather not give contact details, or saving doesn't go through, still "
+        "book. Ask only about their "
         "request and these booking details: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
         "otherwise native__request_callback. Beside its callback_confirmed card",
@@ -303,7 +304,8 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
     assert "Before booking, ask for what's missing of their name and a phone number or email" in intake
     assert "reusing anything already given, and finish any intake questions" in intake
     assert "then save them with native__capture_lead in the same turn if it's one of your tools" in intake
-    assert "If they'd rather not give contact details, book without them." in intake
+    assert "save a lead only once you have their name, and keep its note short" in intake
+    assert "If they'd rather not give contact details, or saving doesn't go through, still book." in intake
     assert ("- Use bullets, not numbered lists: numbers in your own words are blocked, list numbers included."
             in lines)
     assert "never for a password, a code, a card or account number or an ID number" in intake
@@ -696,12 +698,14 @@ def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
     assert clauses | {"policy_combined"} <= CLAUSE_RULE_IDS
     assert REPLY_DIAGNOSTICS["lex.en.callback"] == REPLY_DIAGNOSTICS["lex.es.callback"] == (
         "Remove the call or callback claim unless a callback_confirmed card shows it.")
+    # a blocked link's target is by definition not the business's own, so its correction never asks for it in full
     assert REPLY_DIAGNOSTICS["markdown.link"] == (
-        "Link only to the business's own website or email from its contact details, or write the address as plain "
-        "text; payment and booking links come only from cards.")
+        "Link only to the business's own website or email from its contact details; otherwise remove the link, keep "
+        "its words and don't write the address out. Payment and booking links come only from cards.")
+    assert "plain text" not in REPLY_DIAGNOSTICS["markdown.link"] + REWRITE_INSTRUCTION
     assert REPLY_DIAGNOSTICS["markdown.image"] == "Remove the image; replies can't include images."
-    assert ("For markdown.link, link only to the business's own website or email, or write the address as plain "
-            "text; for markdown.image, remove the image.") in REWRITE_INSTRUCTION
+    assert ("For markdown.link, link only to the business's own website or email, or remove the link and keep its "
+            "words; for markdown.image, remove the image.") in REWRITE_INSTRUCTION
     assert REPLY_DIAGNOSTICS["soft.jev"] == REPLY_DIAGNOSTICS["soft.promise"]
     assert REPLY_DIAGNOSTICS["claims_changed"] == REPLY_DIAGNOSTICS["not_current"]
 

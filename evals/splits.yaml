@@ -28,15 +28,12 @@ calibration:
   - leg-agent-asks-hours
   - leg-ai-es
   - leg-book-saturday
-  - leg-book-contact-first
   - leg-callback-es
   - leg-deposit-checkout
   - leg-document-es
   - leg-emergency-advice
   - leg-emergency-leak
   - leg-hours-es
-  - leg-help-before-times
-  - leg-ambiguous-period
   - leg-lead-capture
   - leg-quote-deposit
   - leg-quote-water-heater-en
@@ -73,8 +70,11 @@ heldout:
   - leg-agent-buys-within-mandate
   - leg-ai-en
   - leg-ask-for-maria
+  - leg-book-contact-first
+  - leg-book-declines-contact
   - leg-book-en
   - leg-book-es
+  - leg-book-lead-saved
   - leg-callback-en
   - leg-charges-dana
   - leg-date-and-time-en
@@ -83,6 +83,7 @@ heldout:
   - leg-document-dana
   - leg-emergency-ask-first
   - leg-es-quote-then-book
+  - leg-help-before-times
   - leg-hours-en
   - leg-quote-drain-en
   - leg-quote-es
