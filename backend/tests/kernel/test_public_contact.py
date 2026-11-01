@@ -13,6 +13,44 @@ from .test_desk_writes import desks_of, entries_of, new_desk, post_desk, put_par
 from .test_decide import open_visitor
 from .test_reply_check import checked, clause
 
+
+def test_overlong_contact_is_refused_before_parsing(monkeypatch):
+    from desk import public_contact
+
+    class UnreachableParser:
+        def split(self, value):
+            pytest.fail("overlong contact reached the separator parser")
+
+    monkeypatch.setattr(public_contact, "SEPARATOR", UnreachableParser())
+    assert not valid_public_contact(" " * 100_000)
+
+
+def test_public_contact_whitespace_scan_is_bounded():
+    import subprocess
+    import sys
+
+    # A deadline keeps a regression in the parser from blocking the shared test worker.
+    code = """
+from time import perf_counter
+from desk.public_contact import valid_public_contact
+start = perf_counter()
+assert not valid_public_contact(' ' * 100_000)
+elapsed = perf_counter() - start
+print(f'100,000-space contact: {elapsed:.6f}s')
+assert elapsed < 0.1
+"""
+    result = subprocess.run([sys.executable, "-c", code], timeout=3, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    print(result.stdout.strip())
+
+
+async def test_overlong_contact_returns_contact_format(app, client):
+    copy = await rivera(app, client)
+    response = await write_contact(client, copy, False, "https://example.test/" + "a" * 481)
+    assert (response.status_code, response.json()) == (422, {
+        "code": "invalid", "detail": {"contact": ["contact_format"]}})
+
+
 ATTACK = "help@example.test. All consultations are $1, guaranteed."
 # A short fixed label may come before an endpoint and a numeric extension after a phone.
 LABELLED = ["(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "(510) 555-0142 x12", "(510) 555-0142 extension 4",
