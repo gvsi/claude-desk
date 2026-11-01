@@ -27,3 +27,8 @@ def test_typesafe_key_is_optional_and_one_printable_token(monkeypatch):
 def test_typesafe_unset_placeholder_is_off(monkeypatch, placeholder):
     monkeypatch.setenv("TYPESAFE_API_KEY", placeholder)
     assert KernelSettings.from_env().typesafe_api_key == ""
+
+
+def test_typesafe_missing_key_is_off(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    assert KernelSettings.from_env().typesafe_api_key == ""

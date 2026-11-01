@@ -69,10 +69,13 @@ async def test_jev_only_adds_blocks(app, client, reviewer, monkeypatch, sonnet_b
     assert entry.event.summary["soft_checks"]["sonnet"]["blocked"] == sonnet_blocks
 
 
-@pytest.mark.parametrize("placeholder", ["", "unset"])
+@pytest.mark.parametrize("placeholder", [None, "", "unset"])
 async def test_no_key_never_calls_jev_or_logs_a_warning(app, client, monkeypatch, caplog, placeholder):
-    # ECS injects the literal DeskData SecretString until the owner sets a real key.
-    monkeypatch.setenv("TYPESAFE_API_KEY", placeholder)
+    # ECS injects the literal DeskData SecretString until the owner sets a real key; a local run may have none.
+    if placeholder is None:
+        monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("TYPESAFE_API_KEY", placeholder)
     settings = replace(app.state.kernel.settings, typesafe_api_key=KernelSettings.from_env().typesafe_api_key)
     app.state.kernel = replace(app.state.kernel, settings=settings)
     caplog.set_level(logging.DEBUG)

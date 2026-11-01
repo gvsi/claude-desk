@@ -40,9 +40,10 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   No memory or website read ever runs after no, and a website the owner names later is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
-  answered in that question's own model (`SETUP_TURNS`). The exchange starts with this topic's first ask and keeps
-  its follow-ups. Its patch merges into the answers. Each limit (the quote, discount and payment link limits, the
-  documents rule, the money cap and the refunds rule, which is the money question's: refunds are money going out) is
+  answered in that question's own model (`SETUP_TURNS`). With one ask, the exchange starts after it; with follow-ups,
+  it starts at this topic's first ask, keeping every question and answer in view. Its patch merges into the answers.
+  Each limit (the quote, discount and payment link limits, the documents rule, the money cap and the refunds rule,
+  which is the money question's: refunds are money going out) is
   a field only of its own question's model, whose message leaves the memory and website out, and code drops it from
   any other turn's patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
   fact either (its turn reads none of the facts so far), and code drops a fact from a limit turn's patch too, but for
@@ -1352,8 +1353,9 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
     even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
-    turn includes earlier owner answers and Claude replies since this topic began, including its follow-up asks,
-    never tool labels or their content. On a limit question these replies were made under the same isolation;
+    turn includes earlier owner answers and Claude replies since this topic began, including its follow-up asks.
+    With more than one ask, the exchange includes the first ask too. It never includes tool labels or their content.
+    On a limit question these replies were made under the same isolation;
     earlier questions' replies, which may repeat memory or website text, never enter the exchange. The run's staged
     entries never enter history: its current answer appears only in `owner_answer`."""
     transcript = _history(interview, run_id)
@@ -1380,12 +1382,16 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
         parts.append(SETUP_CLIENT_CARDS[interview.shows_cards])
         parts.append(wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview, run_id=run_id), ensure_ascii=False)))
     start = len(transcript)
+    asks = 0
     for index in range(len(transcript) - 1, -1, -1):
         entry = transcript[index]
         if entry.card is not None or (entry.question is not None and entry.question != key):
             break
         if entry.question == key:
+            asks += 1
             start = index + 1
+    if asks > 1:
+        start -= 1
     lines = [summary_line(SETUP_EXCHANGE_LABELS[entry.role], entry.text)
              for entry in transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS and entry.card is None]
     if lines:
@@ -1541,6 +1547,15 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     return answer
 
 
+# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. One inside a
+# link or mid-word ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
+_ENDS_A_QUESTION = re.compile(r"\?(?=\s|$|[\"'\u201d\u2019)\]])")
+
+
+def _asks(text: str) -> bool:
+    return _ENDS_A_QUESTION.search(text) is not None
+
+
 @dataclass
 class _TurnReplies:
     """Keep reply provenance for the whole answer, including any recursive planning calls."""
@@ -1571,11 +1586,14 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
         reason = "topic_again"
         reply = next((entry for entry, _ in reversed(replies.entries) if entry.text.strip()), None)
         asked = _ask(interview, key)
-        if key in LIMIT_CHOICES and reply is not None:
+        if key in LIMIT_CHOICES and reply is not None and _asks(reply.text):
             reply.question = key
             reply.choices = asked.choices
             return
         if key not in LIMIT_CHOICES:
+            if reply is not None and _asks(reply.text):
+                reply.question = key
+                return
             question = follow_up.question.strip()
             fitting = follow_up.next.kind == "done" or (follow_up.next.kind == "topic"
                                                         and follow_up.next.topic not in LIMIT_CHOICES)
@@ -1583,11 +1601,10 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
                 asked.text = question
                 asked.choices = _normalize_choices(follow_up.choices)
                 reason = "turn_question"
-            elif reply is not None and reply.text.rstrip().endswith("?"):
-                reply.question = key
-                return
     else:
-        following = _next_ask(interview, None, interview.unshown)
+        added = {card.proposal_id for entry in interview.transcript[since:] for card in entry.planned}
+        available = [card for card in interview.unshown if card.proposal_id not in added]
+        following = _next_ask(interview, None, available)
         if isinstance(following, str):
             asked = _ask(interview, following)
         elif isinstance(following, ProposalCard):
