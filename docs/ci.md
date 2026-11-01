@@ -45,6 +45,8 @@ The classifier ([`tools/desk_tools/changed_paths.py`](../tools/desk_tools/change
 
 Scoping fails closed: each scoped job depends on `changes` and uses `${{ !cancelled() && needs.changes.outputs.<flag> != 'false' }}`. A `false` output skips a suite before it takes a machine. The classifier writes only lowercase `true` or `false`; GitHub compares expression strings without regard to case. A failed classifier or missing output runs the suite unless the workflow is cancelled. A skipped job reports as skipped. The required shard check jobs keep `if: always()` and require either four successes or an explicit `false` flag with four skipped shards; failure, cancellation, or missing results fail the check. A suite ruled out by paths with a failed shard also fails its check.
 
+Rejected designs: workflow-level `paths` filters leave required checks missing; a plain `if: needs.changes.outputs...` skips suites when classification fails; a third-party paths-filter action adds another pinned dependency for work handled by one standard-library script.
+
 ## When a check skips or fails
 
 Some checks run code that other parts of the project add over time. Each of those commands runs through a gate, `tools/desk_tools/gate.py`:
