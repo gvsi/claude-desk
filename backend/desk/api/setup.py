@@ -969,9 +969,9 @@ async def _asking_for_desk(owner: OwnerCtx, engine: AsyncEngine, keyed: tuple) -
     row isn't there to record it on (a repeat took it over)."""
     # This boundary is in the kernel's clock domain, not Postgres's: only a Desk newer than every Desk
     # already in this copy can belong to this start, even when the two processes' clocks disagree.
-    desks = await owner.ro.desks()
-    boundary = max((desk["created_at"] for desk in desks), default=datetime(1970, 1, 1, tzinfo=UTC))
     async with engine.connect() as conn:
+        desks = await KernelRO(conn, owner.copy_id, owner.ro.schema).desks()
+        boundary = max((desk["created_at"] for desk in desks), default=datetime(1970, 1, 1, tzinfo=UTC))
         recorded = await conn.execute(update(INTERVIEWS).where(*keyed, INTERVIEWS.c.desk_requested_at.is_(None))
                                       .values(desk_requested_at=boundary, updated_at=func.now()))
         await conn.commit()

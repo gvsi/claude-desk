@@ -2046,6 +2046,21 @@ def idle_in_transaction(db) -> int:
                       " AND usename = 'desk_api' AND state LIKE 'idle in transaction%'").fetchone()[0]
 
 
+async def test_start_holds_no_transaction_while_the_kernel_makes_its_desk(
+        app, browser, kernel_http, model, fake, db):
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started())
+    release = fake.gate("POST /desks")
+    first = asyncio.create_task(owner.browser.post("/api/owner/setup", json=start_body()))
+    try:
+        await until(lambda: fake.called("POST /desks"))
+        assert idle_in_transaction(db) == 0
+    finally:
+        release.set()
+        reply = await asyncio.wait_for(first, 10)
+        assert reply.status_code == 201, reply.text
+
+
 async def lockable(engine, interview_id: str) -> None:
     """Lock the interview's row from a transaction of its own, failing at once (55P03) when another holds it."""
     async with engine.connect() as conn, conn.begin():
