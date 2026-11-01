@@ -15,18 +15,18 @@ let root: Root | null = null;
 let work: ReturnType<typeof useSetupWork>;
 const reread = vi.fn<() => Promise<SetupState | null>>();
 
-function Probe({ state }: { state: SetupState }) {
-  work = useSetupWork(state, reread);
+function Probe({ state, progress }: { state: SetupState; progress: number }) {
+  work = useSetupWork(state, reread, progress);
   return null;
 }
 
-function show(state: SetupState) {
+function show(state: SetupState, progress = 0) {
   act(() => {
     root ??= createRoot(document.createElement('div'));
     root.render(createElement(
       StrictMode,
       null,
-      createElement(MemoryRouter, { initialEntries: ['/app/setup/s1'] }, createElement(Probe, { state })),
+      createElement(MemoryRouter, { initialEntries: ['/app/setup/s1'] }, createElement(Probe, { state, progress })),
     ));
   });
 }
@@ -133,4 +133,24 @@ it('retries_a_rejected_read_and_stops_when_the_step_moves_on_even_if_busy_stays_
   await advance(100000);
   expect(reread).toHaveBeenCalledTimes(2);
   expect(work.gaveUp).toBe(false);
+});
+
+it('gives_up_a_whole_wait_after_the_turn_last_streamed_anything', async () => {
+  // How long the step waits on a busy turn that streams nothing, read from the step itself.
+  show(busy, 0);
+  let wait = 0;
+  while (!work.gaveUp && wait < 600_000) {
+    await advance(1000);
+    wait += 1000;
+  }
+  expect(work.gaveUp).toBe(true);
+  // Something more streams after all: the notice goes, and the whole wait starts again from there.
+  show(busy, 1);
+  expect(work.gaveUp).toBe(false);
+  await advance(wait - 2000);
+  show(busy, 2);
+  await advance(wait - 1000);
+  expect(work.gaveUp).toBe(false);
+  await advance(1000);
+  expect(work.gaveUp).toBe(true);
 });

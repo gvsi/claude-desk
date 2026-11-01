@@ -29,7 +29,7 @@ import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
 import { SETUP_WORK_GIVE_UP_MS } from './useSetupWork.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -128,6 +128,21 @@ async function microtasks(): Promise<void> {
 
 /** The idempotency key of each start the page sent, in order. */
 const startKeys = () => requests('startSetup').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+
+/**
+ * Resolves once `key`'s next request has its answer on the page. The memory question's answer and
+ * Claude's writing dots show the moment it is pressed, before its request is answered, so a test
+ * that lets a held turn go, or moves time on, waits for this first.
+ */
+function answerOf(key: RouteKey): Promise<void> {
+  return new Promise((resolve) => {
+    const stop = observeRequests((outcome) => {
+      if (outcome.key !== key) return;
+      stop();
+      resolve();
+    });
+  });
+}
 
 /** Where `key`'s first request sits in the request log, or -1. */
 const firstAt = (key: RouteKey) => mockStore.requests.findIndex((r) => r.key === key);
@@ -1350,8 +1365,12 @@ describe('setup', () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       const state = await startInterview(null);
       const finish = holdNextConsent(mockStore.world, state.interview_id);
+      // The line is for a step that can't follow the reads as they stream: here the stream is refused.
+      mockStore.inject({ route: 'setupEvents', status: 503, times: 10 });
       const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const answered = answerOf('setupConsent');
       await screen.getByRole('button', { name: 'Yes, use it' }).click();
+      await answered;
       const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
       const wait = screen.getByText(words, { exact: true });
       await expect.element(writing).toBeVisible();
@@ -1391,9 +1410,11 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
+    await answered;
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
@@ -1416,9 +1437,11 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
+    await answered;
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     expectNoHorizontalScroll();
     finish('failed');
@@ -1438,11 +1461,13 @@ describe('setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
+    await answered;
     // A turn may run to the API's 110 s run deadline, well past the old 90 s give-up.
     await vi.advanceTimersByTimeAsync(108000);
     expect(screen.container.querySelector('[role="alert"]')).toBeNull();
@@ -1471,11 +1496,13 @@ describe('setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
+    await answered;
     await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS - 1);
     expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
@@ -1530,7 +1557,7 @@ describe('setup', () => {
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
-    expect(requests('setup', mark)).toHaveLength(1);
+    await expect.poll(() => requests('setup', mark)).toHaveLength(1);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
     finish('landed');
@@ -1590,11 +1617,13 @@ describe('setup', () => {
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { routes: firstVisit.routes });
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
+    await answered;
     await vi.advanceTimersByTimeAsync(SETUP_WORK_GIVE_UP_MS);
     await until(() => {
       vi.advanceTimersByTime(0);
@@ -4163,7 +4192,7 @@ describe('consultant setup', () => {
     await mockStore.dispatch('setupSuggestions', { params: { id: state.interview_id }, query: { cards: '1' }, body: {} });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'A few questions', exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('heading', { name: "Let's set up your Desk", exact: true }).elements()).toHaveLength(0);
     expect(screen.container.querySelector('.cd-setup-dock')).toBeNull();
   });
 
@@ -4407,7 +4436,7 @@ describe('consultant setup', () => {
     const state = await consultantAt('intake');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
-    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: "Let's set up your Desk" })).toBeVisible();
     await expect.element(screen.getByText('Here’s the rest, as I’d set it up.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
     const payment = screen.getByRole('article', { name: 'Send a retainer link' });
@@ -4592,10 +4621,37 @@ describe('consultant setup', () => {
   it('opens_with_choices_and_no_cards_or_question_subtitle', async () => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: "Let's set up your Desk" })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Both, about evenly' })).toBeVisible();
     expect(screen.getByRole('article').elements()).toHaveLength(0);
     expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
     expect(screen.getByText(/Question \d of|About seven/).elements()).toHaveLength(0);
+  });
+});
+
+describe('the test-client offer', () => {
+  it.each(['desktop', 'phone'] as const)('a_yes_says_done_and_continue_goes_to_tools_while_turns_stream_on_%s', async (viewport) => {
+    // A scripted run to the end of its questions, the owner's own contact typed on the last: the offer follows.
+    const state = await startInterview(false, 'Lakeview Accounts. I’m Lee. We help local businesses.');
+    const id = state.interview_id;
+    for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) await mockStore.dispatch('setupAnswer', { params: { id }, body: { question, text: 'Yes' } });
+    await mockStore.dispatch('setupAnswer', {
+      params: { id },
+      body: { question: 'contact_and_after_hours', text: 'Email me at lee@example.com. After hours, take a message.' },
+    });
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport });
+    const offer = screen.getByRole('region', { name: TEST_CLIENT_OFFER, exact: true });
+    await expect.element(offer).toBeVisible();
+    // The offer's answer runs as a streamed turn, as on the API, and its stream says only done.
+    mockStore.streamSetupTurns();
+    mockStore.planStream('setup', { quiet: true });
+    await offer.getByRole('button', { name: TEST_CLIENT_YES, exact: true }).click();
+    await expect.element(screen.getByText(TEST_CLIENT_ADDED, { exact: true })).toBeVisible();
+    const proceed = screen.getByRole('button', { name: SETUP_COPY.tools.continue, exact: true });
+    await expect.element(proceed).toBeVisible();
+    expect(screen.container.querySelector('.cd-setup-growing')).toBeNull();
+    await proceed.click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'test_client', text: TEST_CLIENT_YES });
   });
 });
