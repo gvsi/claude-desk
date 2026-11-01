@@ -26,7 +26,7 @@ from desk.api.store import append_message, append_note_once, has_pending, start_
 from desk.api.tools import Caller
 from desk.contracts import AgentAuth, Claim, Fact, Label
 from desk.events import SseEvent
-from tests.api.conftest import new_visitor
+from tests.api.conftest import new_visitor, without_call_backs
 from tests.api.fakes import (
     FINISHED_AT,
     FakeMessagesApi,
@@ -578,9 +578,11 @@ async def test_a_failed_check_of_prose_ends_the_turn_with_the_error(api_conn, ke
     await ended_as(caller, "session_ended", "session")
 
 
-async def test_blocked_prose_gets_one_rewrite_then_the_handoff(api_conn, kernel_http, fake, ro_schema):
-    async def turn(*texts: str):
+async def test_blocked_prose_gets_one_rewrite_then_the_offer_or_the_handoff(api_conn, kernel_http, fake, ro_schema):
+    async def turn(*texts: str, call_backs: bool = True):
         caller = await new_caller(kernel_http, fake, ro_schema)
+        if not call_backs:
+            without_call_backs(fake, caller.desk_id)
         await said(api_conn, caller, "How much is a drain clearing?")
         model = ScriptedModel([response({"type": "text", "text": words}) for words in texts])
         return caller, model, await run_turn(api_conn, caller, model)
@@ -595,8 +597,16 @@ async def test_blocked_prose_gets_one_rewrite_then_the_handoff(api_conn, kernel_
     assert (writing.type, message.type, end.type) == ("writing", "message", "turn_end")
     assert not message.handoff and message.blocks[0].text == "Let me get you a quote card for that."
 
-    # blocked twice: the handoff, with no third call
+    # blocked twice: the call-back offer, which asks before involving the owner, with no third call
     caller, model, outcome = await turn("It's $180.", "Still $180.")
+    assert outcome == "done" and len(model.requests) == 2
+    _, message, _ = await events(api_conn, caller.session_id)
+    assert not message.handoff and [(block.template, block.text) for block in message.blocks] == [
+        (None, prompts.STATUS_LINES["offer_callback"]["en"])]
+    assert card_handoffs(fake, caller) == []
+
+    # on a Desk that offers no call back: the handoff, with no third call
+    caller, model, outcome = await turn("It's $180.", "Still $180.", call_backs=False)
     assert outcome == "handoff" and len(model.requests) == 2
     _, message, _ = await events(api_conn, caller.session_id)
     assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
@@ -619,7 +629,7 @@ async def test_a_first_draft_claude_can_rewrite_is_checked_as_not_final_and_neve
     """A first draft blocked only for kinds a rewrite fixes (`desk.rewrites`), while the turn has a model call left,
     is checked with `final` false: the kernel then opens no owner handoff, and the API shows nothing of it, not on the
     stream and not in the transcript, and asks Claude to rewrite. The rewrite, attempt 2, is checked as final: blocked
-    again, the handoff it shows is the one the kernel opened for the owner."""
+    again for its prose alone, it shows the call-back offer, and the kernel opens no owner handoff."""
     async def turn(*texts: str):
         caller = await new_caller(kernel_http, fake, ro_schema)
         await said(api_conn, caller, "How much is a drain clearing?")
@@ -636,25 +646,28 @@ async def test_a_first_draft_claude_can_rewrite_is_checked_as_not_final_and_neve
     assert delivered == [["Let me get you a quote card for that."]]
 
     caller, model, outcome = await turn("It's $180.", "Still $180.")
-    assert outcome == "handoff" and finals(fake, caller) == [False, True]
-    assert card_handoffs(fake, caller) == ["open"]
+    assert outcome == "done" and finals(fake, caller) == [False, True]
+    assert card_handoffs(fake, caller) == []
     (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
-    assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
+    assert not message.handoff and [(block.template, block.text) for block in message.blocks] == [
+        (None, prompts.STATUS_LINES["offer_callback"]["en"])]
 
 
 async def test_a_first_draft_on_the_turns_last_call_is_final(api_conn, caller, fake):
-    """On the turn's last allowed model call Claude can't rewrite, so its first draft is checked as final: blocked,
-    the handoff that check shows, and the kernel opened for the owner, goes out at once, with no further check."""
+    """On the turn's last allowed model call Claude can't rewrite, so its first draft is checked as final: blocked
+    for its prose alone, the call-back offer that check shows goes out at once, with no further check, and ends the
+    turn, so the out-of-calls handoff never follows it."""
     await said(api_conn, caller, "Keep checking, then tell me the price.")
     model = ScriptedModel([*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(MAX_MODEL_CALLS - 1)),
                            response(reply("It's $180."))])
 
-    assert await run_turn(api_conn, caller, model) == "handoff"
+    assert await run_turn(api_conn, caller, model) == "done"
 
     assert len(model.requests) == MAX_MODEL_CALLS and finals(fake, caller) == [True]
-    assert card_handoffs(fake, caller) == ["open"]
+    assert card_handoffs(fake, caller) == []
     (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
-    assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
+    assert not message.handoff and [(block.template, block.text) for block in message.blocks] == [
+        (None, prompts.STATUS_LINES["offer_callback"]["en"])]
 
 
 async def test_a_first_draft_blocked_for_a_kind_no_rewrite_fixes_shows_the_handoff(api_conn, caller, fake):
@@ -1037,8 +1050,9 @@ async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, 
         "name": "Alex", "contact": "alex@example.com", "reason": "Help with the request"}))] if callback else []
     fake.soft_checks("flag", "flag")
     model = ScriptedModel([*script, flagged_reply, flagged_reply])
-    # The final block keeps the checked callback card as a reply, not a handoff; with no card, the handoff.
-    assert await run_turn(api_conn, caller, model) == ("done" if callback else "handoff")
+    # The final block keeps the checked callback card as a reply, not a handoff; with no card, the call-back offer,
+    # a reply that asks the visitor before involving the owner (the owner's decision of 2026-11-01).
+    assert await run_turn(api_conn, caller, model) == "done"
     checks = fake.called("/check_reply")
     assert len(checks) == 2
     assert all(check.body["draft"]["prose"] == prose for check in checks)
@@ -1046,9 +1060,11 @@ async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, 
         [{"template": "callback_confirmed", "fact_id": fact_ids[0]}] if callback else []) for check in checks)
     shown = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
     assert len(shown) == 1
-    # A failure only of the prose keeps the checked callback card alone; with no card, the handoff.
-    assert [block.template for block in shown[0].blocks] == (["callback_confirmed"] if callback else ["handoff"])
-    assert shown[0].handoff is not callback
+    # A failure only of the prose keeps the checked callback card alone; with no card, the call-back offer.
+    assert [block.template for block in shown[0].blocks] == (["callback_confirmed"] if callback else [None])
+    if not callback:
+        assert shown[0].blocks[0].text == prompts.STATUS_LINES["offer_callback"]["en"]
+    assert not shown[0].handoff
     assert prose not in [block.text for block in shown[0].blocks]
     stopped = await rows(api_conn, caller.session_id, "stopped_draft", "text")
     assert len(stopped) == 2
@@ -1057,11 +1073,10 @@ async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, 
         "outcome": "blocked", "instruction": REWRITE_INSTRUCTION, "delivered": False,
         "violations": [{"kind": "soft_promise", "rule_id": "soft.promise"}],
         "diagnostics": [prompts.REPLY_DIAGNOSTICS["soft.promise"]]}
-    assert len(fake.handoffs) == 1
-    (work,) = fake.handoffs.values()
-    assert work["session_id"] == caller.session_id and work["status"] == "open"
-    assert work["kind"] == ("callback" if callback else "card")
+    assert len(fake.handoffs) == int(callback)                     # the call-back's own, and no card's
     if callback:
+        (work,) = fake.handoffs.values()
+        assert work["session_id"] == caller.session_id and work["status"] == "open" and work["kind"] == "callback"
         assert fact_ids == ["handoff:" + work["handoff_id"]]
 
 

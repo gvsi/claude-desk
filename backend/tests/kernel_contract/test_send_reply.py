@@ -129,6 +129,34 @@ async def test_a_final_prose_failure_delivers_the_kept_card_then_the_drafted_han
 
 
 @pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("drafted_handoff", [False, True], ids=["prose-alone", "drafted-handoff"])
+async def test_a_final_prose_failure_with_nothing_to_keep_delivers_the_call_back_offer(kernel, ro_read, conn,
+                                                                                      drafted_handoff):
+    """Only the prose fails on the final check and no card is kept, on a Desk that offers call backs: the kernel's
+    call-back offer is shown as a reply, as kept cards are, not a handoff (the owner's decision of 2026-11-01). The
+    delivered event carries no handoff flag, Claude reads `delivered` with `prose_shown` false, since its own prose
+    wasn't shown, and no owner handoff opens or alerts, even when Claude drafted the handoff clause."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    draft = {"prose": "It comes to $89 for the visit.",
+             "clauses": [{"template": "handoff"}] if drafted_handoff else []}
+    outcome = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_offer")
+    assert outcome.result == {"outcome": "delivered", "message_id": outcome.message_id, "prose_shown": False}
+    assert outcome.delivered == "reply" and not outcome.is_error
+    assert [check["final"] for check in caller.kernel.checks] == [True]
+    assert await delivered(conn, session_id) == [[None]]
+    (payload,) = (await conn.execute(text(
+        "SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"), {"s": session_id})).one()
+    assert not payload["handoff"]
+    assert [block["text"] for block in payload["blocks"]] == ["Would you like me to arrange a callback?"]
+    assert payload["visitor_plain"] == "Reply checked against Maria Rivera's rules"
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+    assert await handed_to_you(http, copy) == 0
+
+
+@pytest.mark.kernel_plan("01b")
 async def test_a_clause_missing_its_fact_id_is_pointed_at_in_the_correction(kernel, ro_read, conn):
     """A card template sent with no fact ID names no fact in the kernel's violation, so the correction points at the
     clause by its place and template."""

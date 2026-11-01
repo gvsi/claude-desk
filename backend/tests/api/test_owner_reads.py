@@ -71,6 +71,9 @@ def test_reply_reason_distinguishes_checker_outage_from_unclear_language():
         "A reply was stopped before it was shown, because it didn't read clearly as English or Spanish.")
 
 OWNER = "x-owner-session"
+# A reply in another language: blocked for what no rewrite fixes, so the kernel shows the handoff card in its place
+# (a reply blocked only for its prose, with no card to keep, shows the call-back offer instead).
+OTHER_LANGUAGE = "Bonjour, je peux vous aider."
 
 
 @pytest.fixture
@@ -200,7 +203,7 @@ class Scene:
             self.fake.now = when
             verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
                 session_id=who.session_id, generation=who.generation,
-                prose="That's 180 dollars." if blocked else "", clauses=[Clause(template="handoff")])))
+                prose=OTHER_LANGUAGE if blocked else "", clauses=[Clause(template="handoff")])))
             assert verdict.ok is not blocked
         else:
             verdict = ReplyVerdict(ok=True, language="en", blocks=[
@@ -636,7 +639,8 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
     """A conversation the kernel's handoff card handed to the owner (#96) is in Needs you as a handoff of kind `card`:
     no call-back window, since none was promised, and the kernel's reason, never the draft's words. A call-back
     request is kind `callback`, so the owner's screens can tell the two apart though neither has a window here, and a
-    session whose call-back request is open gets no second handoff from a blocked reply."""
+    session whose call-back request is open gets no second handoff from a blocked reply. (A reply blocked for what no
+    rewrite fixes, another language, shows the handoff card: one blocked only for its prose would ask first.)"""
     owner = await new_owner(app, browser, fake, kernel_http)
     caller = await guest(kernel_http, fake, owner)
     await caller.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
@@ -645,7 +649,7 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
     handed = await guest(kernel_http, fake, owner)
     await write(engine, db, handed.ids, "visitor_text", text="How much is a new water heater?")
     for who in (handed, caller):
-        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose="That's 1,400 dollars.")
+        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose=OTHER_LANGUAGE)
         verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
         assert not verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
     # one handoff each: the caller's is its call back
@@ -761,7 +765,9 @@ async def test_briefing_uses_event_flag_for_cards_and_a_handoff_clause(scene, cl
     await scene.text(who, when)
     clauses = [] if blocked and handoff else [Clause(template="hours", fact_id="charter:hours")]
     verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
-        session_id=who.session_id, generation=0, prose="That's 180 dollars." if blocked else "Here is the information.",
+        session_id=who.session_id, generation=0,
+        prose=(OTHER_LANGUAGE if handoff and not clauses else "That's 180 dollars.") if blocked
+        else "Here is the information.",
         clauses=[*clauses, *([Clause(template="handoff")] if handoff else [])])))
     assert verdict.ok is not blocked
     assert any(block.template == "handoff" for block in verdict.blocks) is handoff
