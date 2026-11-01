@@ -1234,8 +1234,9 @@ describe('setup', () => {
     const prose = log.element().querySelector('.cd-type-reply');
     if (!bubble || !prose) throw new Error('the chat has the owner\'s words and Claude\'s');
     for (const el of [bubble, prose]) expect([getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]).toEqual(['16px', '24px']);
-    const question = document.querySelector('.cd-setup-q3__question');
-    if (question) expect([getComputedStyle(question).fontSize, getComputedStyle(question).lineHeight]).toEqual(['17px', '25px']);
+    for (const el of document.querySelectorAll('.cd-setup-q3__question, .cd-setup-q3__question .cd-type-reply')) {
+      expect([getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]).toEqual(['17px', '25px']);
+    }
     expectNoHorizontalScroll();
   });
 
