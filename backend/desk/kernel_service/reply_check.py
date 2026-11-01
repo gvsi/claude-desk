@@ -627,21 +627,29 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
             or ((promise or rule == "policy.free_price") and offers_amenity(text, start, end)))
 
 
-async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str, raw: Sequence[Violation],
+def markdown_reading(prose: str) -> markdown_text.MarkdownText | None:
+    """The prose as a visitor sees it rendered (`markdown_text.read`), or None when the parser can't
+    read it whole (`markdown_text.TooDeep`, or any error), which `markdown_violations` refuses."""
+    try:
+        return markdown_text.read(prose)
+    except Exception as error:   # any failure fails closed: the reply is refused
+        log_error(logger, error, "markdown_unread")
+        return None
+
+
+async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str,
+                              reading: markdown_text.MarkdownText | None, raw: Sequence[Violation],
                               scan: Callable[[str], list[Violation]]) -> list[Violation]:
-    """What the prose shows once rendered as Markdown (`markdown_text.read`, the owner's decision of
-    2026-11-01) that the raw scan didn't report: `scan` (the prose scan, with the draft's canaries,
-    names and passed cards) on the visible text, each violation whose kind, rule ID and span `raw`
-    doesn't hold, in order. Then a `promise_word` (`markdown.link`, spanning the link's text) for each
+    """What the prose shows once rendered as Markdown (`reading`, the owner's decision of 2026-11-01)
+    that the raw scan didn't report: `scan` (the prose scan, with the draft's canaries, names and
+    passed cards) on the visible text, each violation whose kind, rule ID and span `raw` doesn't
+    hold, in order. Then a `promise_word` (`markdown.link`, spanning the link's text) for each
     link whose text isn't its own target and whose target isn't the business's own contact
     (`own_target`): payment and booking links come only from cards. Any image is one `promise_word`
     (`markdown.image`, spanning "image"), since a picture could show anything. Prose the parser can't
-    read whole (`markdown_text.TooDeep`, or any error) is one `promise_word` (`markdown.parse`), and
-    nothing of its reading is trusted."""
-    try:
-        reading = markdown_text.read(prose)
-    except Exception as error:   # any failure fails closed: the reply is refused
-        log_error(logger, error, "markdown_unread")
+    read whole (no `reading`) is one `promise_word` (`markdown.parse`), and nothing of it is trusted:
+    the raw scan then blanks no list marker either."""
+    if reading is None:
         return [Violation(kind="promise_word", span=_span(prose), rule_id="markdown.parse")]
     reported = {(violation.kind, violation.rule_id, violation.span) for violation in raw}
     found = [violation for violation in scan(reading.visible)
@@ -1121,9 +1129,13 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     names = await desk_names(ctx, desk_id)
     passed = {"booking_card": any(card.template == "booking_confirmed" for card in cards),
               "callback_card": any(card.template == "callback_confirmed" for card in cards)}
-    raw = scan_prose(draft.prose, canaries, names, **passed)
+    reading = markdown_reading(prose)
+    # A passing list's typed markers are no number (the owner's decision of 2026-11-01): the raw scan
+    # reads the prose with them blanked, and otherwise the draft's prose as ever.
+    markers = reading.list_markers if reading is not None else ()
+    raw = scan_prose(markdown_text.blank(prose, markers) if markers else draft.prose, canaries, names, **passed)
     violations += raw
-    violations += await markdown_violations(ctx, desk_id, prose, raw,
+    violations += await markdown_violations(ctx, desk_id, prose, reading, raw,
                                             lambda visible: scan_prose(visible, canaries, names, **passed))
     violations += refused
     violations += policy_card_violations(prose, cards)

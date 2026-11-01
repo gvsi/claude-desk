@@ -4,22 +4,33 @@
 `read` parses the prose with markdown-it (CommonMark, tables and strikethrough, no linkify, HTML left
 as the text it is) and returns what a reader sees of it: the text of every block, a newline after
 each, with entities and escapes decoded, emphasis joined to the letters around it, code as written,
-table cells, link and image text, link titles, and each ordered list item's number as the list
-renders it ("N. ", counted from its start), so formatting can hide no number or word from the
-reply check's scan. Every link, with its text and target (inline, reference and autolink forms; a
-target of any scheme, which the reply check judges), and whether there is an image. Pure, with no
-I/O.
+table cells, link and image text, link titles, and each ordered list item's number as its list
+renders it ("N. ", counted from its start), so formatting can hide no number or word from the reply
+check's scan. Every link, with its text and target (inline, reference and autolink forms; a target
+of any scheme, which the reply check judges), and whether there is an image. Pure, with no I/O.
+
+A numbered list of steps passes (the owner's decision of 2026-11-01): an ordered list that starts at
+1 and has at most nine items, as the parser reads it, shows only the numbers 1 to 9, so its numbers
+are left out of the visible reading and `list_markers` gives where its typed markers ("1.", "2)")
+are in the text, for the raw scan to blank (`blank`). Every other list keeps its numbers in the
+visible reading and its markers in the raw text: one that starts at another number ("5. Call us",
+"0. a"), one of ten items or more, and any digit the parser doesn't read as a list marker.
+`blank_list_markers` is the same blanking for the evals' oracles, so the two can't disagree.
 
 Prose nested deeper than markdown-it follows (`MAX_NESTING`) is dropped from its token stream, so
 it raises `TooDeep`, which the reply check refuses rather than trust a reading with text missing.
 """
 
+import re
 from dataclasses import dataclass
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 MAX_NESTING = 20          # markdown-it's own default, named so a reading that reached it is refused
+PASSING_ITEMS = 9         # a list from 1 with at most this many items shows only 1 to 9, which may pass
+LINE_BREAK = re.compile(r"\r\n?|\n")                # where markdown-it breaks lines
+MARKER_PREFIX = re.compile(r"[ \t>*+-]*")           # indentation, quote and bullet marks before an item's marker
 INLINE_TEXT = frozenset({"text", "code_inline"})
 LINE_BREAKS = frozenset({"softbreak", "hardbreak"})
 
@@ -42,6 +53,7 @@ class MarkdownText:
     visible: str
     links: tuple[Link, ...]
     images: bool
+    list_markers: tuple[tuple[int, int], ...]     # the passing lists' typed markers, as [start, end) in the text
 
 
 def _parser() -> MarkdownIt:
@@ -55,23 +67,50 @@ def _parser() -> MarkdownIt:
 PARSER = _parser()
 
 
-def _list_numbers(tokens: list[Token]) -> dict[int, int]:
-    """Each ordered list item's token index, with the number its list renders for it."""
-    numbers: dict[int, int] = {}
-    lists: list[tuple[int, int] | None] = []     # (start, items so far) per open list; None for a bullet list
+def _ordered_items(tokens: list[Token]) -> dict[int, tuple[int, bool]]:
+    """Each ordered list item's token index, with the number its list renders for it and whether its
+    list passes: it starts at 1 and has at most `PASSING_ITEMS` items."""
+    items: dict[int, tuple[int, bool]] = {}
+    lists: list[tuple[int, list[int]] | None] = []     # (start, item indices) per open list; None for bullets
     for index, token in enumerate(tokens):
         if token.type == "ordered_list_open":
             start = token.attrGet("start")
-            lists.append((int(start) if start is not None else 1, 0))
+            lists.append((int(start) if start is not None else 1, []))
         elif token.type == "bullet_list_open":
             lists.append(None)
-        elif token.type in ("ordered_list_close", "bullet_list_close"):
-            lists.pop()
+        elif token.type in ("ordered_list_close", "bullet_list_close") and lists:
+            closed = lists.pop()
+            if closed is not None:
+                start, indices = closed
+                passes = start == 1 and len(indices) <= PASSING_ITEMS
+                items.update((item, (start + count, passes)) for count, item in enumerate(indices))
         elif token.type == "list_item_open" and lists and lists[-1] is not None:
-            start, count = lists[-1]
-            numbers[index] = start + count
-            lists[-1] = (start, count + 1)
-    return numbers
+            lists[-1][1].append(index)
+    return items
+
+
+def _marker_spans(text: str, tokens: list[Token], items: dict[int, tuple[int, bool]]) -> tuple[tuple[int, int], ...]:
+    """Where the passing lists' items have their typed markers in `text`: each on its item's first
+    line, after only indentation, quote and bullet marks and the markers of items before it on that
+    line. A marker not found there is left out, and so stays in the raw scan."""
+    breaks = list(LINE_BREAK.finditer(text))
+    starts = [0, *(found.end() for found in breaks)]
+    ends = [*(found.start() for found in breaks), len(text)]
+    cursor: dict[int, int] = {}
+    spans: list[tuple[int, int]] = []
+    for index in sorted(items):
+        token = tokens[index]
+        if not token.map or token.map[0] >= len(starts):
+            continue
+        line = token.map[0]
+        marker = f"{token.info}{token.markup}"
+        at = MARKER_PREFIX.match(text, cursor.get(line, starts[line]), ends[line]).end()
+        if not (text.startswith(marker, at) and at + len(marker) <= ends[line]):
+            continue
+        cursor[line] = at + len(marker)
+        if items[index][1]:
+            spans.append((at, at + len(marker)))
+    return tuple(spans)
 
 
 def _inline(children: list[Token], links: list[Link]) -> tuple[str, bool]:
@@ -106,17 +145,37 @@ def read(text: str) -> MarkdownText:
     tokens = PARSER.parse(text)
     if any(token.level >= MAX_NESTING - 1 for token in tokens):
         raise TooDeep("the prose nests deeper than the parser follows")
-    numbers = _list_numbers(tokens)
+    items = _ordered_items(tokens)
     parts: list[str] = []
     links: list[Link] = []
     images = False
     for index, token in enumerate(tokens):
-        if index in numbers:
-            parts.append(f"{numbers[index]}. ")
+        if index in items:
+            number, passes = items[index]
+            if not passes:
+                parts.append(f"{number}. ")
         elif token.type == "inline":
             shown, has_image = _inline(token.children or [], links)
             parts.append(f"{shown}\n")
             images = images or has_image
         elif token.type in ("code_block", "fence"):
             parts.append(token.content if token.content.endswith("\n") else f"{token.content}\n")
-    return MarkdownText(visible="".join(parts), links=tuple(links), images=images)
+    return MarkdownText(visible="".join(parts), links=tuple(links), images=images,
+                        list_markers=_marker_spans(text, tokens, items))
+
+
+def blank(text: str, spans: tuple[tuple[int, int], ...]) -> str:
+    """`text` with each of `spans` blanked out, every other character kept where it was."""
+    chars = list(text)
+    for start, end in spans:
+        chars[start:end] = " " * (end - start)
+    return "".join(chars)
+
+
+def blank_list_markers(text: str) -> str:
+    """`text` with the passing lists' typed markers blanked out (`read`'s `list_markers`), as the raw
+    scan reads it; prose too deep to read keeps every marker."""
+    try:
+        return blank(text, read(text).list_markers)
+    except TooDeep:
+        return text
