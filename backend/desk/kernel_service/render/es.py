@@ -33,12 +33,16 @@ STATUS: dict[str, str] = {
     "owner_say_blocked": "No se envió: incluía texto de un documento privado",
 }
 
-# Owner-only (`en.OWNER_STATUS`): unused until an owner-facing field carries it, and kept out of
-# `STATUS`, since a decision's status line reaches the visitor, who mustn't read why their session ended.
+# Owner-only (`en.OWNER_STATUS`): why an action was refused at execution, a decision's `owner_plain`,
+# kept out of `STATUS`, since a decision's status line reaches the visitor, who mustn't read why their
+# session ended.
 OWNER_STATUS: dict[str, str] = {
     "refused_contact_changed": "No se compartió: su sesión terminó cuando cambió su contacto",
     "refused_person_removed": "No se compartió: se quitó a esta persona de tus registros",
     "refused_session_closed": "No se compartió: su sesión terminó antes de tu respuesta",
+    "refused_rules_changed": "Tus reglas cambiaron antes de que se hiciera, así que no se hizo.",
+    "refused_desk_deleted": "Este Desk se eliminó antes de que se hiciera, así que no se hizo.",
+    "refused_fallback": "No se pudo hacer, así que no se hizo.",
 }
 
 EXECUTED: dict[str, str] = {

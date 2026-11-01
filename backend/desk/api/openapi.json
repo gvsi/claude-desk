@@ -1566,7 +1566,7 @@
     "/api/owner/conversations/{session_id}": {
       "get": {
         "summary": "Conversation",
-        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).",
+        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders.",
         "operationId": "owner_conversation",
         "parameters": [
           {
@@ -2076,7 +2076,7 @@
     "/api/owner/approvals/{decision_id}/answer": {
       "post": {
         "summary": "Answer Approval",
-        "description": "The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs\nthere and then, as the visitor's session (also during a take-over); the visitor sees the outcome, and Claude\nfollows up, once the resume job ran and the visitor's own credential is present (the open stream or the next\nrequest). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never\nwaits on a proof.\n\nWhen the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the\ndecision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)\nresume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the\ndecision. A decision still `held` keeps the kernel's own error, its code included (\"Errors\"): a 409 is\n`{error: \"kernel\", code}`, and an answer that never reached the kernel is 503, `seed_unproved` and `internal`\nkept. A decision that can't be read is 503 `kernel_unavailable`. In each case answering again is safe. An answer\nthe request doesn't offer is the kernel's 422 `invalid`.",
+        "description": "The owner's answer to a held request. The kernel decides it with the owner's credential, and an allow runs\nthere and then, as the visitor's session (also during a take-over); the visitor sees the signed approved status\nbefore the outcome when the answer includes it, and Claude follows up once the resume job ran and the visitor's\nown credential is present (the open stream or the next\nrequest). Drafted rule cards come back in `card_diff`; proving them is a rules route's work, so an answer never\nwaits on a proof.\n\nWhen the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the\ndecision is read as it stands: once it left `held` and `approved`, an outcome the visitor wasn't shown yet gets\nthe (idempotent) resume job, so a lost response still resumes the chat. While `approved`, publish its signed\nreceipt without waking Claude and leave a `decision_pending` row under the session's run lock. The visitor's\nnext request can then read its final outcome even if the first answer never queues a job. Either case answers\n409 `already_resolved` with the decision. A decision still `held` keeps the kernel's own error, its code included\n(\"Errors\"): a 409 is\n`{error: \"kernel\", code}`, and an answer that never reached the kernel is 503, `seed_unproved` and `internal`\nkept. A decision that can't be read is 503 `kernel_unavailable`. In each case answering again is safe. An answer\nthe request doesn't offer is the kernel's 422 `invalid`.",
         "operationId": "owner_answer_approval",
         "parameters": [
           {
@@ -8309,6 +8309,17 @@
             "type": "string",
             "title": "Reason Plain"
           },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain"
+          },
           "visitor_plain": {
             "type": "string",
             "title": "Visitor Plain"
@@ -10529,6 +10540,18 @@
                 "type": "null"
               }
             ]
+          },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain",
+            "description": "Owner-only execution refusal reason for this exact status, fetched with the owner's credential; never part of the stored or signed visitor event."
           }
         },
         "type": "object",
@@ -10541,10 +10564,11 @@
           "cursor",
           "owner_translation",
           "triage",
-          "stopped_draft"
+          "stopped_draft",
+          "owner_plain"
         ],
         "title": "OwnerTranscriptItem",
-        "description": "The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each\ndraft of Claude's the reply check stopped.\n\n`cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto\nit, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest\none read). Items come in transcript order (`n`), each once per read.\n\nA `stopped_draft` item (Plan 02b) stands where the check stopped the draft, before the rewrite or the handoff that\nfollowed: its `stopped_draft` holds the draft and why it was stopped, and it has no `text` or `event`. Every other\nitem's `stopped_draft` is null."
+        "description": "The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each\ndraft of Claude's the reply check stopped.\n`owner_plain` is always present: the owner-only reason for this exact execution refusal, or null.\n\n`cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto\nit, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest\none read). Items come in transcript order (`n`), each once per read.\n\nA `stopped_draft` item (Plan 02b) stands where the check stopped the draft, before the rewrite or the handoff that\nfollowed: its `stopped_draft` holds the draft and why it was stopped, and it has no `text` or `event`. Every other\nitem's `stopped_draft` is null."
       },
       "PaymentConflict": {
         "properties": {
@@ -12748,6 +12772,18 @@
             "type": "string",
             "title": "Reason Plain"
           },
+          "owner_plain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plain",
+            "description": "Owner-only kernel reason for an execution refusal, fetched with the owner's credential; null otherwise."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -12770,6 +12806,7 @@
           "outcome",
           "state",
           "reason_plain",
+          "owner_plain",
           "created_at",
           "ledger_seq",
           "replayed"

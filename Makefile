@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
+.PHONY: kernel test db-roles db-throwaway web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -61,6 +61,19 @@ db-roles:
 		docker compose exec -T -e KERNEL_ROLE_PASSWORD -e API_ROLE_PASSWORD -e MOCKPAY_ROLE_PASSWORD \
 			db psql -X -q -U desk_admin -d "$(DB_NAME)" < backend/desk/db/role_passwords.psql; \
 	fi
+
+# For a database thrown away after the run, as each CI job's is: skip durable commits (no WAL flush
+# at commit, no fsync), since the tests spend much of their time committing. ALTER SYSTEM changes the
+# whole Postgres instance, and a crash with fsync off can corrupt it, so the target refuses to run
+# unless CI is set: never on a database whose data matters, such as docker-compose's. Discard the
+# instance afterwards rather than turning the settings back on.
+db-throwaway: DB_NAME ?= desk
+db-throwaway:
+	@if [ -z "$$CI" ]; then echo "db-throwaway: only for CI's throwaway database (CI isn't set): it turns off durable commits for the whole Postgres instance" >&2; exit 1; fi; \
+	if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+	PGPASSWORD="$$DESK_ADMIN_PASSWORD" psql -X -q -o /dev/null -v ON_ERROR_STOP=1 -h "$(DB_HOST)" -p "$(DB_PORT)" -U desk_admin \
+		-d "$(DB_NAME)" -c 'ALTER SYSTEM SET fsync = off' -c 'ALTER SYSTEM SET synchronous_commit = off' \
+		-c 'ALTER SYSTEM SET full_page_writes = off' -c 'SELECT pg_reload_conf()'
 
 # The web app's checks, as CI's `web tests` runs them: install, type-check and unit tests, then the
 # production build, its check and the mocked end-to-end test (which uses web-test's install). WebKit
