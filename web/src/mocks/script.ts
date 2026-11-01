@@ -258,22 +258,78 @@ const bookedCard: Record<Language, CardBlock> = {
 };
 
 /**
- * Claude's checked words when nothing more specific fits, as the signed board answers a question
- * only Maria can: no digits, amounts, dates or promises, and the way to reach her.
+ * Claude's checked words that name the Desk's owner: `help` when nothing more specific fits, a
+ * question only the owner can answer, with the way to reach them; `held` after a request is held
+ * for them, whose answer comes back into this chat. No digits, amounts, dates or promises, and no
+ * promise of what the owner will say.
  */
-const helpProse: Record<Language, RenderedBlock> = {
-  en: proseBlock('Maria can tell you once she sees it. You can ask for her here anytime.'),
-  es: proseBlock('Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.'),
+interface OwnerProse {
+  help: string;
+  held: string;
+}
+
+/** Rivera's words, as the signed boards write them, `{owner}` for Maria. */
+const RIVERA_PROSE: Record<Language, OwnerProse> = {
+  en: {
+    help: '{Owner} can tell you once she sees it. You can ask for her here anytime.',
+    held: "That's for {owner} to decide, so I've asked her. Her answer will show up here.",
+  },
+  es: {
+    help: '{Owner} te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.',
+    held: 'Eso lo decide {owner}, así que ya le pregunté. Su respuesta aparecerá aquí.',
+  },
+};
+
+/** The same words with no pronoun, for an owner whose pronouns the Desk doesn't know. */
+const PRONOUN_FREE_PROSE: Record<Language, OwnerProse> = {
+  en: {
+    help: '{Owner} can tell you after taking a look. You can ask for {owner} here anytime.',
+    held: "That's for {owner} to decide, so I've asked. The answer will show up here.",
+  },
+  es: {
+    help: '{Owner} te lo puede decir cuando lo vea. Puedes pedir hablar con {owner} aquí cuando quieras.',
+    held: 'Eso lo decide {owner}, así que ya le pregunté. Su respuesta aparecerá aquí.',
+  },
 };
 
 /**
- * Claude's checked words after a request is held for Maria, as the signed board writes them: she
- * decides, and her answer comes back into this chat. No amount, discount or date, and no promise
- * of what she'll say.
+ * Claude's words for a named owner other than Maria Rivera, by first name. Proposed here for the
+ * project owner's sign-off. Should he decline, set this to `RIVERA_PROSE`: Rivera's sentences with
+ * the owner's name in them, pronouns kept.
  */
+export const NAMED_OWNER_PROSE: Record<Language, OwnerProse> = PRONOUN_FREE_PROSE;
+
+/** An owner's first name, the one Claude's words call them by: "Maria" for Maria Rivera. */
+function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
+}
+
+/**
+ * Claude's words `line` on a Desk whose owner is `owner`, in `language`: Rivera's signed words on
+ * her Desk (setup names an owner by one word, so no Desk it makes has her name), else
+ * `NAMED_OWNER_PROSE` by first name.
+ */
+function ownerProse(language: Language, owner: DeskOwner, line: keyof OwnerProse): string {
+  if (owner.name === null) return naming(PRONOUN_FREE_PROSE[language][line], ownerIn(language, owner), language);
+  const prose = owner.name === RIVERA_OWNER.name ? RIVERA_PROSE : NAMED_OWNER_PROSE;
+  return naming(prose[language][line], firstName(owner.name), language);
+}
+
+/** Claude's checked words after a request is held for the Desk's owner. */
+export function heldProse(language: Language, owner: DeskOwner): string {
+  return ownerProse(language, owner, 'held');
+}
+
+/** Claude's checked words after a request is held for Maria, on Rivera's Desk. */
 export const HELD_PROSE: Record<Language, string> = {
-  en: "That's for Maria to decide, so I've asked her. Her answer will show up here.",
-  es: 'Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.',
+  en: heldProse('en', RIVERA_OWNER),
+  es: heldProse('es', RIVERA_OWNER),
+};
+
+/** Claude's checked words when nothing more specific fits, on Rivera's Desk. */
+const helpProse: Record<Language, RenderedBlock> = {
+  en: proseBlock('Maria can tell you once she sees it. You can ask for her here anytime.'),
+  es: proseBlock('Maria te lo puede decir cuando lo vea. Puedes pedir hablar con ella aquí cuando quieras.'),
 };
 
 /**
@@ -532,6 +588,8 @@ export interface TurnContext {
    * business when its owner gave no name (`MockWorld.handoffNameOf`).
    */
   readonly handoffName: string;
+  /** Whom the Desk's lines name (`MockWorld.ownerOf`), read only when a step names them. */
+  readonly owner: DeskOwner;
   /** Records a decision with its ledger entries. */
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
@@ -673,10 +731,10 @@ export const SCRIPT: readonly ScriptRule[] = [
     tools: ['native.quote'],
     steps: [
       writing,
-      // The percent the visitor asked for, held past the quote card's limit for Maria.
+      // The percent the visitor asked for, held past the quote card's limit for the owner.
       (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
-      // Claude's checked words say Maria decides; the held receipt under them says what waits.
-      (ctx) => ctx.reply([proseBlock(HELD_PROSE[ctx.language])]),
+      // Claude's checked words say the owner decides; the held receipt under them says what waits.
+      (ctx) => ctx.reply([proseBlock(heldProse(ctx.language, ctx.owner))]),
     ],
   },
   {

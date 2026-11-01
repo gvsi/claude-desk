@@ -893,6 +893,7 @@ export class MockWorld {
   context(session: SessionRecord, language: Language, text: string): TurnContext {
     // Looked up only when a step hands off, so making a context still never reads the Desk.
     const handoffName = () => this.handoffNameOf(session);
+    const owner = () => this.ownerOf(session);
     return {
       language,
       text,
@@ -901,6 +902,9 @@ export class MockWorld {
       },
       get handoffName() {
         return handoffName();
+      },
+      get owner() {
+        return owner();
       },
       decide: (spec) => this.decide(session, spec, language),
       status: (type, decision) => statusEvent(type, decision),

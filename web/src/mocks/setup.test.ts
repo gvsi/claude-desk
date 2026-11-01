@@ -1159,18 +1159,25 @@ describe('a Desk setup made, speaking for its own owner', () => {
     return slug;
   }
 
+  /** The events this browser's chat with the Desk on `slug` gets while `act` runs and its turn plays out. */
+  async function eventsWhile(slug: string, act: () => Promise<unknown>): Promise<SseEvent[]> {
+    const events: SseEvent[] = [];
+    const stop = mockStore.listen(slug, 0, (_seq, ev) => events.push(ev));
+    const before = events.length;
+    await act();
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 12);
+    stop();
+    return events.slice(before);
+  }
+
   /** The events of the Desk's turn answering `text`, sent in this browser's chat with the Desk on `slug`. */
   async function turnOn(slug: string, text: string): Promise<SseEvent[]> {
     const opened = await mockStore.dispatch('openSession', { params: { slug } });
     if ('network' in opened || opened.status !== 200) throw new Error('the mock opens a chat');
-    const events: SseEvent[] = [];
-    const stop = mockStore.listen(slug, 0, (_seq, ev) => events.push(ev));
-    const before = events.length;
-    const sent = await mockStore.dispatch('sendMessage', { params: { slug }, body: { text } });
-    if ('network' in sent || sent.status !== 202) throw new Error('the mock takes the message');
-    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 12);
-    stop();
-    return events.slice(before);
+    return eventsWhile(slug, async () => {
+      const sent = await mockStore.dispatch('sendMessage', { params: { slug }, body: { text } });
+      if ('network' in sent || sent.status !== 202) throw new Error('the mock takes the message');
+    });
   }
 
   /** The blocks of the Desk's replies to `text`, sent in this browser's chat with the Desk on `slug`. */
@@ -1182,6 +1189,38 @@ describe('a Desk setup made, speaking for its own owner', () => {
   function linesOf(events: readonly SseEvent[]): string[] {
     return events.flatMap((ev) => ('visitor_plain' in ev ? [ev.visitor_plain] : []));
   }
+
+  /** Claude's own words in a turn's replies. */
+  function proseOf(events: readonly SseEvent[]): (string | null)[] {
+    return events.flatMap((ev) => (ev.type === 'message' ? ev.blocks.filter((b) => b.kind === 'prose').map((b) => b.text) : []));
+  }
+
+  it('rivera_keeps_her_signed_held_line', async () => {
+    // Rivera's Desk keeps the signed boards' words, in either language.
+    const asked = await turnOn(RIVERA.slug, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for Maria Rivera to approve', "Reply checked against Maria Rivera's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for Maria to decide, so I've asked her. Her answer will show up here."]);
+    const pedido = await turnOn(RIVERA.slug, '¿Me hacen un descuento?');
+    expect(linesOf(pedido)).toEqual(['Esperando la aprobación de Maria Rivera', 'Respuesta revisada con las reglas de Maria Rivera']);
+    expect(proseOf(pedido)).toEqual(['Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.']);
+  });
+
+  it('a_held_request_waits_for_that_owner_by_name', async () => {
+    // A discount past the quote card's limit waits for Linda. Claude says so naming her, with no
+    // pronoun the Desk can't know, and her answer comes back naming her too.
+    const slug = await liveDesk(CPA);
+    const asked = await turnOn(slug, 'Can I get 10% off?');
+    expect(linesOf(asked)).toEqual(['Waiting for Linda to approve', "Reply checked against Linda's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for Linda to decide, so I've asked. The answer will show up here."]);
+    const pedido = await turnOn(slug, '¿Me hacen un descuento?');
+    expect(linesOf(pedido)).toEqual(['Esperando la aprobación de Linda', 'Respuesta revisada con las reglas de Linda']);
+    expect(proseOf(pedido)).toEqual(['Eso lo decide Linda, así que ya le pregunté. Su respuesta aparecerá aquí.']);
+
+    const held = asked.find((ev) => ev.type === 'held');
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    const answered = await eventsWhile(slug, () => mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } }));
+    expect(linesOf(answered)).toEqual(['Linda lo aprobó', 'Cotizado con la lista de precios de Linda', 'Respuesta revisada con las reglas de Linda']);
+  });
 
   it('the_status_lines_name_that_owner', async () => {
     // As the kernel renders them from the Desk's owner_display_name: on Linda's Desk a quote's
