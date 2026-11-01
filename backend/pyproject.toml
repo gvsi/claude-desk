@@ -58,9 +58,6 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-# A test still running after 5 minutes prints every thread's stack to the log, so a hang (a CI shard once
-# printed nothing for 19 minutes before it was cancelled) names its test and where it waits. It fails nothing.
-faulthandler_timeout = 300
 markers = [
     "real_kernel: runs against a kernel process at DESK_KERNEL_URL instead of the fake",
     "live_model: calls a live model, the Claude API or Amazon Bedrock (MODEL_PROVIDER=bedrock); runs only with DESK_LIVE_MODEL=1 and the provider's credential",
