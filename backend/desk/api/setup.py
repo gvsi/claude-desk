@@ -474,6 +474,8 @@ class Entry(BaseModel):
     owner_fields: list[str] = []  # Fact fields this owner turn set or explicitly cleared.
     owner_decided: bool = False
     connector_connect_attempted: bool = False
+    # On the owner's answer to the test-client offer: "yes" once their yes is saved, "added" once they're on record.
+    test_client: Literal["yes", "added"] | None = None
 
 
 class ConnectedApp(BaseModel):
@@ -2395,8 +2397,9 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             connect = _claim_connector_connect(interview, None if interview.step == "tools" else card)
             return
         if question == TEST_CLIENT:
-            await _answer_test_client(ctx, interview, text)
-            connect = _claim_connector_connect(interview)
+            _answer_test_client(interview, staged[0])
+            if interview.step == "tools":
+                connect = _claim_connector_connect(interview)
             return
         since = len(interview.transcript)
         key = question
@@ -2461,6 +2464,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             connect = _claim_connector_connect(interview)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if question == TEST_CLIENT:
+            await _put_test_client(ctx, engine, interview)
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
@@ -2734,30 +2739,65 @@ def _reads_yes(text: str) -> bool | None:
     return None
 
 
-async def _answer_test_client(owner: OwnerCtx, interview: Interview, text: str) -> None:
-    """The owner's answer to the test-client offer, read by code with no model call (`_reads_yes`). An answer that is
-    neither a yes nor a no gets the same offer again; a yes or a no moves setup on to its Tools step. Only a yes puts
-    the owner on record as a client (`PUT /desks/{id}/people`, ref `TEST_CLIENT_REF`), in their display name and with
-    the contact they typed (`_owner_contact`), and adds `TEST_CLIENT_ADDED`; a no writes nothing and adds no line. It
-    is a person on record and nothing else: no limit, rule, fact, document or public line. A failed write never stops
-    setup: it is logged by type, never with the contact, and adds no line."""
-    said = _reads_yes(text)
-    if said is None:
+def _answer_test_client(interview: Interview, said: Entry) -> None:
+    """The owner's answer to the test-client offer (`said`), read by code with no model call (`_reads_yes`). An answer
+    that is neither a yes nor a no gets the same offer again; a yes or a no moves setup on to its Tools step. A yes,
+    with a contact the owner typed (`_owner_contact`), is marked on their answer, which the turn saves before anyone
+    is put on record (`_put_test_client`, after the save); a no writes nothing and adds no line."""
+    answer = _reads_yes(said.text)
+    if answer is None:
         _ask_test_client(interview)
         return
-    contact = _owner_contact(interview)
-    if said and contact is not None:
-        try:
-            desk_id = owner.desk(interview.desk_id)
-            business = await _business(owner, desk_id)
-            await owner.kernel.call("PUT /desks/{id}/people", DeskPeopleRequest(upsert=[PersonUpsert(
-                ref=TEST_CLIENT_REF, display_name=business["owner_display_name"], contact=contact)]),
-                path={"id": desk_id})
-        except Exception as failed:
-            logger.warning("setup couldn't add the owner as a test client (%s)", type(failed).__name__)
-        else:
-            interview.transcript.append(Entry(role="claude", text=TEST_CLIENT_ADDED))
+    if answer and _owner_contact(interview) is not None:
+        said.test_client = "yes"
     interview.step = "tools"
+
+
+def _record_test_client(interview: Interview) -> bool:
+    """Mark the owner's saved yes as done, with `TEST_CLIENT_ADDED` right after it; False when no yes waits on it."""
+    entries = interview.transcript
+    index = next((index for index in range(len(entries) - 1, -1, -1) if entries[index].test_client == "yes"), None)
+    if index is None:
+        return False
+    entries[index].test_client = "added"
+    entries.insert(index + 1, Entry(role="claude", text=TEST_CLIENT_ADDED))
+    return True
+
+
+async def _put_test_client(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
+    """After the owner's yes to the test-client offer is saved, put them on record as a client
+    (`PUT /desks/{id}/people`, ref `TEST_CLIENT_REF`, which makes a repeat the same person), in their display name and
+    with the contact they typed (`_owner_contact`), then save `TEST_CLIENT_ADDED` (`_record_test_client`), retrying
+    once on a conflict. It is a person on record and nothing else: no limit, rule, fact, document or public line.
+    Nothing runs once the yes is marked done, and a failure never stops setup: it is logged by type, never with the
+    contact, and Claude says nothing."""
+    contact = _owner_contact(interview)
+    if contact is None or not any(entry.test_client == "yes" for entry in interview.transcript):
+        return
+    try:
+        desk_id = owner.desk(interview.desk_id)
+        business = await _business(owner, desk_id)
+        await owner.kernel.call("PUT /desks/{id}/people", DeskPeopleRequest(upsert=[PersonUpsert(
+            ref=TEST_CLIENT_REF, display_name=business["owner_display_name"], contact=contact)]),
+            path={"id": desk_id})
+    except Exception as failed:
+        logger.warning("setup couldn't add the owner as a test client (%s)", type(failed).__name__)
+        return
+    for attempt in range(2):
+        try:
+            current = await _read(engine, owner, interview.interview_id)
+            seen = _stored(current)
+            current.business_tools_enabled = interview.business_tools_enabled
+            if not _record_test_client(current):
+                return
+            await _commit(engine, owner, current, seen)
+        except Exception as failed:
+            if isinstance(failed, ApiProblem) and failed.status == 409 and failed.error == "conflict" and attempt == 0:
+                continue
+            logger.warning("setup couldn't save that the owner is a test client (%s)", type(failed).__name__)
+            return
+        _record_test_client(interview)
+        return
 
 
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:

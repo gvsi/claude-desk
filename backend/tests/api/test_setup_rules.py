@@ -18,7 +18,7 @@ import contextlib
 import json
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from time import monotonic
@@ -435,8 +435,66 @@ async def test_a_failed_test_client_write_is_logged_without_the_contact_and_setu
     (logged,) = [record for record in caplog.records if "test client" in record.getMessage()]
     assert logged.name == setup.__name__ and logged.levelno == logging.WARNING
     assert OWNER_EMAIL not in caplog.text and "555" not in caplog.text
+    # The yes stays saved, with no "Done".
+    reloaded = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    assert reloaded["step"] == "tools" and reloaded["messages"][-2:] == [OFFER, owner_line(setup.TEST_CLIENT_YES)]
     fake.fail("PUT /desks/{id}/people", None)
     await drafted_rules(owner, model, done)               # setup goes on to its rules
+
+
+def failing_commits(monkeypatch, failing: Callable[[int], bool]) -> list[int]:
+    """Make setup's interview saves fail with 409 `conflict` where `failing(n)` holds for the n-th save from now (the
+    first of a turn is its busy save, the second its own); the list counts them."""
+    commit, commits = setup._commit, []
+
+    async def counted(*args, **kwargs):
+        commits.append(len(commits) + 1)
+        if failing(len(commits)):
+            raise ApiProblem(409, "conflict")
+        await commit(*args, **kwargs)
+
+    monkeypatch.setattr(setup, "_commit", counted)
+    return commits
+
+
+async def test_the_owners_yes_is_saved_before_the_test_client_write(app, browser, fake, kernel_http, model,
+                                                                    monkeypatch):
+    owner, state = await offered(app, browser, kernel_http, model)
+    fake.calls.clear()
+    failing_commits(monkeypatch, lambda n: n == 2)
+    reply = await say(owner, state, setup.TEST_CLIENT_YES)
+    # The answer's own save failed: nothing was written, and the offer still waits.
+    assert (reply.status_code, reply.json()) == (409, {"error": "conflict"})
+    assert kernel_writes(fake) == [] and not fake.desks[state["desk_id"]].people
+    waiting = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    assert waiting["question"] == "test_client" and waiting["messages"][-1] == OFFER
+    monkeypatch.undo()
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 200
+    assert kernel_writes(fake) == [] and not fake.desks[state["desk_id"]].people
+
+
+async def test_a_second_run_of_the_test_client_write_adds_no_one(app, browser, fake, kernel_http, model, engine,
+                                                                 monkeypatch):
+    from desk.api.deps import owner_context
+
+    owner, state = await offered(app, browser, kernel_http, model)
+    commits = failing_commits(monkeypatch, lambda n: n > 2)
+    reply = await say(owner, state, setup.TEST_CLIENT_YES)
+    assert reply.status_code == 200, reply.text
+    # On record after the saved yes, but the outcome's save and its one retry failed: no "Done".
+    assert commits == [1, 2, 3, 4] and reply.json()["messages"][-1] == owner_line(setup.TEST_CLIENT_YES)
+    assert len(fake.desks[state["desk_id"]].people) == 1
+    monkeypatch.undo()
+    async with owner_context(app.state.runtime, owner.token) as ctx:
+        for _ in range(2):
+            interview = await setup._read(engine, ctx, state["interview_id"])
+            await setup._put_test_client(ctx, engine, interview)
+    # The next run puts the same person again, by its ref, and saves "Done"; the one after writes nothing.
+    assert len(fake.called("PUT /desks/{id}/people")) == 2
+    assert [(person.ref, person.contact) for person in fake.desks[state["desk_id"]].people.values()] == [
+        ("test-client", OWNER_EMAIL)]
+    reloaded = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    assert reloaded["messages"][-3:] == [OFFER, owner_line(setup.TEST_CLIENT_YES), ADDED]
 
 
 @pytest.mark.parametrize("said", [
