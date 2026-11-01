@@ -1858,6 +1858,8 @@ def test_public_policy_language_checks_the_combined_rendering():
 
 PUBLIC_ALLOW_WORD_CASES = [
     ({"a:title": "Book a free intro consult"}, {}),
+    ({"a:title": "ƒree"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "frꬲꬲ"}, {"a:title": ["lex.en.promise"]}),
     ({"a:title": "Book a $0 intro consult"}, {"a:title": ["currency", "digit"]}),
     ({"a:title": "Free consult, 50% off"}, {"a:title": ["digit", "percent_sign"]}),
     ({"b:type": "free"}, {"b:type": ["lex.en.promise"]}),
@@ -1873,7 +1875,7 @@ PUBLIC_ALLOW_WORD_CASES = [
     ({"a:title": "Intro consult no", "b:type": "charge"},
      {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
     ({"a:title": "discount"}, {"a:title": ["lex.en.promise"]}),
-    ({"a:title": "frее"}, {"a:title": ["language", "mixed_script"]}),
+    ({"a:title": "frее"}, {"a:title": ["language", "lex.en.promise", "mixed_script"]}),
     ({"a:title": "free dollars"}, {"a:title": ["lex.en.money"]}),
     ({"a:title": "free Monday"}, {"a:title": ["lex.en.date"]}),
     ({"a:title": "free guarantee"}, {"a:title": ["lex.en.promise"]}),
@@ -1890,9 +1892,10 @@ def test_public_policy_allow_words_are_scoped_to_a_whole_hit_in_one_key(values, 
 
 @pytest.mark.parametrize("word", ["free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas",
                                   "FREE", "frée", "GRÁTUITA", "Ｆｒｅｅ"])
-def test_public_text_allows_only_explicit_owner_words_with_reply_folding(word):
+def test_public_text_allows_only_explicit_owner_words_with_case_width_and_accent_normalization(word):
     assert reply_check.FREE_WORDS == frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
     assert reply_check.scan_public_text(word, allow_words=reply_check.FREE_WORDS) == []
+    assert reply_check.scan_public_policies({"title": word}, allow_words={"title": reply_check.FREE_WORDS}) == {}
     assert reply_check.scan_public_text(word)  # default callers remain strict
 
 
