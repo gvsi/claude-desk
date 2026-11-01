@@ -37,7 +37,7 @@ function words(element: Element): string {
 const meta = {
   title: 'Conversation/ChatMarkdown',
   component: ChatMarkdown,
-  // Links open, as the board draws them; ClaudeMessage's InertLink story shows them inert.
+  // Links open, as the board draws them and ClaudeMessage's Link story shows them.
   args: { text: REPLY, links: 'open' },
   decorators: [inReadingColumn],
   parameters: {

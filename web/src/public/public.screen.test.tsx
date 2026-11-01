@@ -2152,22 +2152,27 @@ describe('public chat page', () => {
     expect(reply.textContent).not.toMatch(/\*|^- /m);
   });
 
-  it('a_link_in_a_reply_shows_where_it_goes_and_opens_nothing', async () => {
-    // The reply check doesn't read Markdown link targets yet, so a link that showed only its text
-    // could hide a target nothing checked: it shows its text, then its address, and opens nothing.
+  it('a_link_in_a_reply_shows_its_words_and_opens_in_a_new_tab', async () => {
+    // The kernel checked the link before delivery; the reply shows only its words.
     const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
     const chat = mockStore.visitorSession(RIVERA.slug);
     if (!chat) throw new Error('this browser has a chat');
     const messages = shownMessages().length;
-    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock('You can [Pay here](https://evil.example/pay) today.')]));
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock('You can see our hours on [our website](https://riveraplumbing.example/hours).')]));
     await vi.waitFor(() => expect(shownMessages()).toHaveLength(messages + 1));
     // It arrived live, so its words are revealed: read it once it shows whole.
     await vi.waitFor(() => expect(document.querySelector(COMING_IN)).toBeNull(), { timeout: 5_000 });
 
     const reply = shownMessages()[messages] as HTMLElement;
-    expect(reply.querySelectorAll('a')).toHaveLength(0);
-    expect(reply.textContent).toBe('You can Pay here (https://evil.example/pay) today.');
+    expect(reply.querySelectorAll('a')).toHaveLength(1);
+    const link = reply.querySelector('a');
+    expect(link?.textContent).toBe('our website');
+    expect(link?.getAttribute('href')).toBe('https://riveraplumbing.example/hours');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(reply.textContent).toBe('You can see our hours on our website.');
+    expect(reply.textContent).not.toContain('https://riveraplumbing.example/hours');
   });
 
   it('a_replayed_join_doesnt_confirm_the_owner_while_her_hand_back_is_on_its_way', async () => {
