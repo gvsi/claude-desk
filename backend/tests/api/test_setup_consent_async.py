@@ -332,6 +332,8 @@ async def test_an_empty_model_reply_never_leaves_the_interview_busy(
     assert reply.status_code == 200, reply.text
     answered = reply.json()
     assert answered["messages"][-1] == {
+        "role": "claude", "text": setup.question_text("what_you_do", "trade"), "choices": [], "card": None}
+    assert answered["messages"][-2] == {
         "role": "owner", "text": "We repair water heaters.", "choices": [], "card": None}
     assert answered["busy"] is False
     db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"

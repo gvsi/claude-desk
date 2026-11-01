@@ -3,7 +3,7 @@
  * each one, an attempt's detail in tiers, and every entry of the signed record with its chain,
  * each saying where it came from and when it happened.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
@@ -209,6 +209,7 @@ function held(): { until: Promise<void>; release: () => void } {
   const until = new Promise<void>((resolve) => {
     release = resolve;
   });
+  onTestFinished(() => release());
   return { until, release };
 }
 

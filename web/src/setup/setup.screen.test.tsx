@@ -128,6 +128,7 @@ function holdStartRetry(): { release: () => void; posts: () => number } {
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+  onTestFinished(() => release());
   let posts = 0;
   worker.use(
     http.post('/api/owner/setup', async () => {
@@ -974,6 +975,7 @@ describe('setup', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    onTestFinished(() => release());
     worker.use(
       http.post(
         '/api/owner/setup',
@@ -2524,6 +2526,7 @@ describe('setup', () => {
     const until = new Promise<void>((resolve) => {
       release = resolve;
     });
+    onTestFinished(() => release());
     mockStore.inject({ route: 'desks', status: 200, until, body: read.body });
     const mark = mockStore.requests.length;
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -2557,6 +2560,7 @@ describe('setup', () => {
     const slow = new Promise<void>((resolve) => {
       land = resolve;
     });
+    onTestFinished(() => land());
     // Every read of them is slow: the step's own, and the one the app sends as any go-live settles.
     mockStore.inject({
       route: 'desks',
