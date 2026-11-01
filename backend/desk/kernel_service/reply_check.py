@@ -533,7 +533,10 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
 
 
 SERVICE_AREA_RULES = frozenset({"lex.en.number", "lex.es.number", "lex.en.date", "lex.es.date"})
-SERVICE_AREA_DISTANCE = re.compile(r"\s*(?:miles|mi|km|kilometers|kilómetros|millas)\b", re.IGNORECASE)
+# A distance unit straight after a number, singular or plural, with a hyphen or blanks between
+# ("25 miles", "a 30-mile radius", "1 kilómetro", "50-km").
+SERVICE_AREA_DISTANCE = re.compile(
+    r"[\s\-‐‑]*(?:miles?|mi|kms?|kilomet(?:er|re)s?|kil[oó]metros?|millas?)\b", re.IGNORECASE)
 
 
 def _allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:

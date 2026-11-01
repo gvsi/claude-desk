@@ -944,7 +944,8 @@ def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, r
         return False
     return rule in {"lex.en.number", "lex.es.number", "lex.en.date", "lex.es.date"} or (rule == "digit" and (
         re.fullmatch(r"[0-9]{4}", text[start:end]) is not None
-        or re.match(r"\s*(?:miles|mi|km|kilometers|kilómetros|millas)\b", text[end:], re.IGNORECASE) is not None))
+        or re.match(r"[\s\-‐‑]*(?:miles?|mi|kms?|kilomet(?:er|re)s?|kil[oó]metros?|millas?)\b",
+                    text[end:], re.IGNORECASE) is not None))
 
 
 def public_policy_rules(text: str, key: str | None = None) -> list[str]:

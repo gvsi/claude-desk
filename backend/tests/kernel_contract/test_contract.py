@@ -2739,6 +2739,11 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
     ("Serving the East Bay since 1998.", []),
     ("We do evenings and weekends.", []),
     ("Trabajamos fines de semana.", []),
+    ("Within a 25-mile radius of Oakland.", []),
+    ("We serve a 30 mile radius around Oakland.", []),
+    ("Within 1 mile of Lake Merritt.", []),
+    ("A 50-km radius.", []),
+    ("Dentro de 1 kilómetro.", []),
     ("Within 25 miles, $50 trip fee.", ["currency", "digit"]),
 ])
 async def test_service_area_policy_contract(kernel, ro_read, text, rules):

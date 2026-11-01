@@ -2313,6 +2313,10 @@ def test_scan_public_text(text, rules):
     "Within 25 kilometers of Oakland.", "Dentro de 25 kilómetros.", "Dentro de 25 millas.",
     "We drive a few miles past Oakland.", "The East Bay, seven days a week.",
     "Serving the East Bay since 1998.", "We do evenings and weekends.", "Trabajamos fines de semana.",
+    # A distance with a hyphen or a space before a singular or plural unit.
+    "Within a 25-mile radius of Oakland.", "We serve a 30 mile radius around Oakland.",
+    "Within 1 mile of Lake Merritt.", "A 50-km radius.", "Dentro de 1 kilómetro.",
+    "Within 25 kms of Oakland.", "Within 25 kilometres of Oakland.", "Hasta 40 kilometros de Madrid.",
 ])
 def test_public_service_area_allowance_stays_with_its_key(text):
     assert reply_check.scan_public_policies({"policy:service_area": text}) == {}
@@ -2326,6 +2330,9 @@ def test_public_service_area_allowance_stays_with_its_key(text):
     "Within 25 miles, your appointment is confirmed.", "Within 25 miles, consultas gratis.",
     "Within 25 miles, Nous garantissons le service.", "Within 25 miles, Привет мир.",
     "Trip fee: 50.",
+    # Outside the distance allowance: round-the-clock hours, ZIP codes and years in business.
+    "Oakland and Berkeley, 24/7.", "Oakland, Berkeley and Alameda (zip codes 94601-94612).",
+    "Serving Oakland for 25 years.",
 ])
 def test_public_service_area_keeps_price_promise_and_language_refusals(text):
     assert reply_check.scan_public_policies({"policy:service_area": text})
