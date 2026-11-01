@@ -269,7 +269,8 @@ class AgentTurn(BaseModel):
 
     An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
     2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is
-    (owner decision, 2026-11-01). The agent's model writes it from a fixed `DemoTask` and the Desk's kernel-checked
+    (owner decision, 2026-11-01). The agent's model writes it from a fixed task line that code picks from signed
+    templates, keyed by the Desk's setup business type, with no owner or visitor text, and the Desk's kernel-checked
     replies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the
     Desk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
     blocks and statuses."""
