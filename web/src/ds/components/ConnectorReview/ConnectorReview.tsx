@@ -134,7 +134,7 @@ export function ConnectorReview({ connector, job, intro, connection, onConnect, 
             <li className="cd-connector-review__tool cd-connector-review__tool--placeholder">
               <div className="cd-connector-review__layout">
                 <div className="cd-connector-review__text">
-                  <p className="cd-connector-review__name cd-type-body">{`${name}'s tools`}</p>
+                  <p className="cd-connector-review__name cd-type-body">{`${name}’s tools`}</p>
                   <p className="cd-connector-review__description cd-type-meta">
                     {`They show here once ${name} is connected, each with the rule it starts at.`}
                   </p>

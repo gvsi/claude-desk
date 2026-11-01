@@ -318,7 +318,7 @@ export const AppNotConnected: Story = {
     await expect(canvas.getByText('Connect it first, so Claude Desk can read what Stripe lets Claude do. Nothing runs until you turn it on.')).toBeVisible();
     const tools = canvas.getByRole('region', { name: 'Tools' });
     await expect(within(tools).getAllByRole('listitem')).toHaveLength(1);
-    await expect(within(tools).getByText("Stripe's tools", { exact: true })).toBeVisible();
+    await expect(within(tools).getByText('Stripe’s tools', { exact: true })).toBeVisible();
     await expect(within(tools).getByText('They show here once Stripe is connected, each with the rule it starts at.')).toBeVisible();
     await expect(within(tools).getByText('Not connected', { exact: true })).toBeVisible();
     await expect(canvasElement.querySelector('.cd-connector-review__status .cd-status-dot--held')).not.toBeNull();

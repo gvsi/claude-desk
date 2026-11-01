@@ -1826,7 +1826,7 @@ describe('setup', () => {
     // holds one row that says so, and nothing is connected until the owner connects it here.
     await expect.element(screen.getByText('Connect it first, so Claude Desk can read what Stripe lets Claude do. Nothing runs until you turn it on.', { exact: true })).toBeVisible();
     const waiting = screen.getByRole('region', { name: 'Tools' });
-    await expect.element(waiting.getByText("Stripe's tools", { exact: true })).toBeVisible();
+    await expect.element(waiting.getByText('Stripe’s tools', { exact: true })).toBeVisible();
     await expect.element(waiting.getByText('They show here once Stripe is connected, each with the rule it starts at.', { exact: true })).toBeVisible();
     await expect.element(waiting.getByText('Not connected', { exact: true })).toBeVisible();
     expect(waiting.element().querySelector('.cd-status-label .cd-status-dot--held')).not.toBeNull();
