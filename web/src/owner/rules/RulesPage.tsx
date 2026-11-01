@@ -37,23 +37,17 @@ import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.
 import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import { RulesSkeleton } from './RulesSkeleton.tsx';
+import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, rulesVersionLine } from './copy.ts';
 
 import './RulesPage.css';
 
 /** The Rules page's title, which the pages under it (All rules, a change's review) name it by. */
 export const RULES_TITLE = 'Rules';
 
-/**
- * Rivera's examples of what the owner can ask Claude for on Rules, in her words (the presets board's).
- * While a request is held, any Desk can also ask why the latest one was (`holdQuestion`).
- */
-const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
-
 // The optional reads share one deadline, starting when the rules read settles.
 const NEEDS_YOU_FIRST_LOAD_WAIT_MS = 3_000;
 
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
-const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
 
 /** RulesPage.css hides the chips below 640 px, so their read cannot move a phone's sections. */
 const CHIPS_HIDDEN = '(max-width: 639.98px)';
@@ -240,7 +234,7 @@ export function RulesPage() {
     body = (
       <>
         <BusinessJobs view={rules.data} people={people.data ?? null} />
-        <ConnectorList summary={`Version ${active.version} of your rules, checked against the always-on rules`}>
+        <ConnectorList summary={rulesVersionLine(active.version)}>
           {sections.map((section) => {
             const editing = limit !== null && limit.group === section.connector.id ? limit : null;
             return (
@@ -284,7 +278,7 @@ export function RulesPage() {
       <div className="cd-rules__header">
         <PageHeader
           title={RULES_TITLE}
-          subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
+          subtitle={RULES_SUBTITLE}
           actions={
             <>
               <span className="cd-type-control">

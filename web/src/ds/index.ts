@@ -262,7 +262,7 @@ export {
   type ConnectorDirectoryProps,
   type DirectoryRowView,
 } from './components/ConnectorDirectory/ConnectorDirectory.tsx';
-export { AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
+export { ALWAYS_ON, AlwaysOnList, type AlwaysOnListProps } from './components/AlwaysOnList/AlwaysOnList.tsx';
 export {
   ChangeReview,
   type ChangeReviewProps,

@@ -115,6 +115,7 @@
     gap: var(--space-16);
   }
   .cd-rules__header .cd-preset-menu .cd-skeleton {
+    /* Skeleton measures this control's width inline; the phone preset must fill its row instead. */
     width: 100% !important;
   }
 }

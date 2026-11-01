@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
-import { Skeleton, SkeletonCard, outcomePhrase, type SkeletonText } from '../../ds/index.ts';
+import { ALWAYS_ON, Skeleton, SkeletonCard, outcomePhrase, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
 import { CONNECTOR_PAGES_BUILT } from '../connectors/pages.ts';
-import { SUGGESTION_EXAMPLE } from './copy.ts';
+import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, SUGGESTION_EXAMPLE, rulesVersionLine } from './copy.ts';
+import { moneyLimitLine } from './ruleWords.ts';
 
 import './RulesPage.css';
 
@@ -113,7 +114,9 @@ function Outcome({ words }: { words: string }) {
   useLayoutEffect(() => {
     const element = box.current;
     if (!element) return;
+    let live = true;
     const measure = () => {
+      if (!live || !element.isConnected) return;
       const probe = document.createElement('div');
       probe.className = className;
       probe.inert = true;
@@ -136,7 +139,11 @@ function Outcome({ words }: { words: string }) {
     };
     measure();
     document.fonts.addEventListener('loadingdone', measure);
-    return () => document.fonts.removeEventListener('loadingdone', measure);
+    void document.fonts.ready.then(measure);
+    return () => {
+      live = false;
+      document.fonts.removeEventListener('loadingdone', measure);
+    };
   }, [words]);
   return (
     <div ref={box} className={className}>
@@ -153,7 +160,7 @@ function Header() {
           <div className="cd-page-header__text">
             <Skeleton shape="line" text="page-title" width={100} className="cd-page-header__title" anchor="rules-title" />
             <Lines
-              words="What Claude can do on this Desk, where each tool comes from, and your rules for it."
+              words={RULES_SUBTITLE}
               className="cd-page-header__subtitle cd-type-body"
               anchor="rules-subtitle"
             />
@@ -179,7 +186,7 @@ function Header() {
             <Skeleton shape="line" text="message" className="cd-composer__input" width="60%" />
             <div className="cd-composer__tools">
               <Lines
-                words="Claude shows you the change and example situations before anything applies."
+                words={COMPOSER_HELPER}
                 className="cd-composer__helper cd-type-caption"
                 text="caption"
               />
@@ -188,7 +195,7 @@ function Header() {
           </div>
         </div>
         <div className="cd-suggestion-chips">
-          {['Stop quoting on weekends', 'Quote water heater installs up to $600', 'Why was this quote held?'].map((label) => (
+          {[...RULES_CHIPS, 'Why was this quote held?'].map((label) => (
             <Control key={label} label={label} className="cd-chip cd-type-pill" />
           ))}
         </div>
@@ -196,14 +203,6 @@ function Header() {
     </>
   );
 }
-
-const ALWAYS = [
-  "Always says it's an AI",
-  'Private data only to its verified owner',
-  'Codes only go to the contact on record',
-  'No money moves without your rule or a signed limit',
-  'Every attempt is logged and shown to you',
-];
 
 /** The fresh copy's suggestion, connector groups and always-on rules, all measured before drawing. */
 function Body() {
@@ -224,7 +223,7 @@ function Body() {
       </div>
       <div className="cd-connector-list">
         <div className="cd-connector-list__body">
-          <Lines words="Version 7 of your rules, checked against the always-on rules" className="cd-connector-list__summary cd-type-meta" text="meta" />
+          <Lines words={rulesVersionLine(7)} className="cd-connector-list__summary cd-type-meta" text="meta" />
           <div className="cd-connector-list__items">
             {rivera.connectors.sections.map(({ connector, tools }, i) => (
               <SkeletonCard key={connector.id} padding={0}>
@@ -243,7 +242,7 @@ function Body() {
                       <div className="cd-money-limit">
                         <div className="cd-money-limit__reading">
                           <Lines
-                            words="No payment over $500 goes through without asking you, whatever the rules below say."
+                            words={moneyLimitLine(50_000)}
                             className="cd-money-limit__line cd-type-body"
                           />
                           <Control label="Change" className="cd-button cd-button--secondary cd-type-control" />
@@ -299,7 +298,7 @@ function Body() {
           />
         </div>
         <div className="cd-always-on__list">
-          {ALWAYS.map((words) => (
+          {ALWAYS_ON.map((words) => (
             <div key={words} className="cd-always-on__item cd-type-body">
               <Skeleton shape="block" width={14} height="1lh" className="cd-always-on__lock" />
               <Lines words={words} className="cd-type-body cd-rules-skeleton__rule" />

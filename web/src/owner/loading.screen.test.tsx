@@ -1390,6 +1390,30 @@ const RULES_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'rules-always', page: '.cd-always-on .cd-section-header__heading', dimensions: ['bottom', 'height'] },
 ];
 
+it('rules_outcome_shapes_remeasure_when_fonts_become_ready', async () => {
+  let ready!: (fonts: FontFaceSet) => void;
+  const pending = new Promise<FontFaceSet>((resolve) => { ready = resolve; });
+  const fonts = vi.spyOn(document.fonts, 'ready', 'get').mockReturnValue(pending);
+  onTestFinished(() => fonts.mockRestore());
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  onTestFinished(() => { root.unmount(); host.remove(); ready(document.fonts); });
+  flushSync(() => root.render(<RulesSkeleton withHeader={false} />));
+  const outcome = host.querySelector<HTMLElement>('.cd-connector-section__tool-outcome')!;
+  const shape = outcome.querySelector<HTMLElement>('.cd-skeleton')!;
+  const before = Number.parseFloat(shape.style.width);
+  expect(before).toBeGreaterThan(0);
+  // A changed font metric becomes available with fonts.ready, without a loadingdone event.
+  host.className = 'cd-test-rules-fonts';
+  const style = document.createElement('style');
+  style.textContent = '.cd-test-rules-fonts .cd-connector-section__tool-outcome { font-size: 24px; }';
+  document.head.append(style);
+  onTestFinished(() => style.remove());
+  ready(document.fonts);
+  await vi.waitFor(() => expect(Number.parseFloat(shape.style.width)).toBeGreaterThan(before));
+});
+
 it.each(['desktop', 'phone'] as const)('rules_load_in_place at %s', async (viewport) => {
   withFreshRules();
   const { router } = await openToday(viewport);
