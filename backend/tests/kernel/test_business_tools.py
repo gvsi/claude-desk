@@ -695,6 +695,28 @@ async def test_intake_hold_and_setup_probe_name_the_configured_tool(app, client)
     assert missing.reason_plain.startswith("A stranger asked for something this Desk can't do. ")
 
 
+async def test_intake_review_card_calls_the_scripted_reviewer(app, client, reviewer):
+    from .test_decide import PASS
+
+    reviewer.answer = PASS
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    card = RuleCard(card_id='review-intake', applies_to='desk.new-enquiry', mode='auto',
+                    who='anyone', review=True, reason='Review new enquiries.')
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == copy.desk_id, Tool.tool == 'desk.new-enquiry')))
+        row.status, row.review_reason = 'enabled', None
+        await activate_cards(ctx, copy.desk_id, [card])
+    visitor = await open_visitor(client, copy)
+    decision = await decided(client, visitor, row.tool, {'name': 'Dana', 'answers': ['Consult']})
+    assert (decision.outcome, decision.review) == ('allow', PASS)
+    [seen] = reviewer.inputs
+    assert seen.action.tool == row.tool
+    assert [candidate.card_id for candidate in seen.cards] == [card.card_id]
+
+
 async def test_intake_hold_quotes_each_answer_separately(app, client):
     copy = await rivera(app, client)
     assert (await put(client, copy, [intake(config={'block': 'intake', 'questions': ['What?', 'Where?']})])).status_code == 200
