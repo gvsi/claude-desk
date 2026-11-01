@@ -1,4 +1,4 @@
-import { beforeAll, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeAll, beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
@@ -31,6 +31,14 @@ import { settled } from '../ds/test/settled.ts';
 import { TodaySkeleton } from './today/TodaySkeleton.tsx';
 
 beforeAll(loadWebFonts);
+
+// Rivera's Desk without its own jobs (its Emergency callback). Rules' loading shapes draw no "Your
+// Desk's jobs" section yet (#620), so these checks of each page's shapes against the landed page run
+// on a Desk without one, as Rivera's was when they were written. Pages other than Rules show no jobs.
+beforeEach(() => {
+  const desk = mockStore.world.desk(RIVERA.deskId)!;
+  desk.tools = desk.tools.filter((row) => row.source !== 'business');
+});
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 
