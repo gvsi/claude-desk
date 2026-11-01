@@ -37,7 +37,7 @@ from desk.db.session import database_url, libpq_url
 from desk.kernel_service import activation, adapters, compiler, desks
 from desk.kernel_service import app as app_module
 from desk.kernel_service.app import create_app
-from desk.kernel_service.decide import BASELINE_PLAIN
+from desk.kernel_service.decide import UNCOVERED_PLAIN
 
 from .fakes import FakeDecisions, FrozenClock
 from .helpers import kernel_ctx, rows_of
@@ -341,7 +341,7 @@ async def test_every_enabled_tool_has_a_rule_after_startup(app, client, frozen_c
 async def test_a_payment_link_holds_on_a_desk_whose_version_predates_it(app, client, registry, desk_prove,
                                                                         frozen_clock, reviewer):
     # a Desk set up before the payments plan, on the starter rules at a $0 money cap with no card for money: its
-    # version had no rule for the payment link, so a visitor's link was refused by the always-on rules rather than
+    # version had no rule for the payment link, so a visitor's link was refused, as no rule covered it, rather than
     # held for the owner. Startup leaves the rebuild to a live proof in the background.
     desk = await setup_desk(app, client)
     link = payment_link(5_000)
@@ -355,7 +355,7 @@ async def test_a_payment_link_holds_on_a_desk_whose_version_predates_it(app, cli
     await compiled_without(app, desk, "native.payment_link")
     visitor = await open_visitor(client, desk)
     refused = await decided(client, visitor, "native.payment_link", call_id="before")
-    assert refused.outcome == "refuse" and BASELINE_PLAIN in refused.reason_plain
+    assert refused.outcome == "refuse" and UNCOVERED_PLAIN in refused.reason_plain
 
     async with upgraded_kernel(frozen_clock, reviewer) as http:
         visitor = await open_visitor(http, desk)

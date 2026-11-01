@@ -45,6 +45,7 @@ const PLAN_02: Record<RouteKey, string> = {
   suggestions: 'GET /api/owner/desks/{desk_id}/suggestions',
   simulateToolChange: 'POST /api/owner/desks/{desk_id}/tools/simulate_change',
   addKnowledge: 'POST /api/owner/desks/{desk_id}/knowledge',
+  knowledge: 'GET /api/owner/desks/{desk_id}/knowledge',
   people: 'GET /api/owner/desks/{desk_id}/people',
   // Proving
   ruleChat: 'POST /api/owner/policy/{desk_id}/chat',

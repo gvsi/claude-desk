@@ -20,7 +20,7 @@ import {
   type Block,
   type Inline,
 } from './documents.ts';
-import { ABOUT_LINKS, DOCUMENT_LINKS } from './links.ts';
+import { ABOUT_LINKS, ABOUT_SET_LINKS, readNext } from './links.ts';
 
 const DOCS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../docs');
 
@@ -160,16 +160,20 @@ describe('the About documents', () => {
   });
 
   it('the_registry_and_the_links_name_each_page', () => {
-    // The two documents, then the Vision article, which the reader's switch between the documents leaves out.
-    const documents = [
+    // The two documents, then the Vision article: the sidebar's group and every About page's switch.
+    const set = [
       { id: 'prediction', label: 'Capability prediction', href: '/about/prediction' },
       { id: 'proposal', label: 'Product proposal', href: '/about/proposal' },
+      { id: 'vision', label: 'Vision', href: '/about/vision' },
     ];
-    expect(ABOUT_LINKS).toEqual({
-      title: 'About this prototype',
-      links: [...documents, { id: 'vision', label: 'Vision', href: '/about/vision' }],
-    });
-    expect(DOCUMENT_LINKS).toEqual(documents);
+    expect(ABOUT_LINKS).toEqual({ title: 'About this prototype', links: set });
+    expect(ABOUT_SET_LINKS).toEqual(set);
+    // "Read next" runs through the set in its order, and from the Vision article back to the prediction.
+    expect((['prediction', 'proposal', 'vision'] as const).map((id) => readNext(id).route)).toEqual([
+      '/about/proposal',
+      '/about/vision',
+      '/about/prediction',
+    ]);
     const { blocks: _proposal, ...proposal } = ABOUT_DOCUMENTS.proposal;
     expect(proposal).toEqual({
       route: '/about/proposal',

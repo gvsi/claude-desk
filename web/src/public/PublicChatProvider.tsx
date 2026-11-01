@@ -20,13 +20,22 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { PublicDesk, SessionState, SseEvent } from '../api/contracts.ts';
+import type { PublicDesk, SessionMode, SessionState, SseEvent } from '../api/contracts.ts';
 import { ApiError, isUncertain, request } from '../api/http.ts';
 import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
-import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, type ChatState, type SendFailure } from './chatReducer.ts';
+import {
+  chatReducer,
+  initialChatState,
+  lowerOnly,
+  ownerInChatNow,
+  ownerTypingDelayMs,
+  type ChatAction,
+  type ChatState,
+  type SendFailure,
+} from './chatReducer.ts';
 
 export type ChatStatus = 'loading' | 'ready' | 'not_found' | 'unavailable';
 
@@ -77,6 +86,15 @@ export interface VisitorChatSnapshot {
   cancelFailed: string | null;
   /** Where the last demo code the visitor sent stands. */
   verifyStatus: VerifyStatus;
+  /**
+   * The owner is in the chat (a take-over), which the chat's head says in the AI disclosure's place:
+   * only from the kernel's session mode (`session.mode === 'owner'`, `ownerInChatNow`). Only the
+   * read the chat opens with (when the stored conversation doesn't say she is out) and the stream's
+   * `owner_joined` put the chat in her hands; her leave, Claude writing and any later answer can
+   * only take it out of them. It shows only while the chat is ready, follows the stream, and knows
+   * the mode since it last lost track of it. The page passes it to PublicShell as it is.
+   */
+  ownerInChat: boolean;
 }
 
 export interface VisitorChatActions {
@@ -117,7 +135,11 @@ export async function ensureSession(slug: string, previewDeskId?: string): Promi
 
 const sessionGone = (err: unknown) => err instanceof ApiError && err.kind === 'unauthorized';
 
-/** A chat as it opened: its session, and its stored conversation, or null when the session was gone before it could be read. */
+/**
+ * A chat as it opened: its session, as the read of its stored conversation answered it when there was
+ * one (the latest the kernel said, its mode included), and that conversation, or null when the
+ * session was gone before it could be read.
+ */
 export interface OpenedChat {
   session: SessionState;
   transcript: VisitorTranscript | null;
@@ -141,7 +163,8 @@ export async function openChat(slug: string, previewDeskId?: string): Promise<Op
   }
   const opened = await ensureSession(slug, previewDeskId);
   try {
-    return { session: opened.state, transcript: await request('visitorSession', { params: { slug } }) };
+    const transcript = await request('visitorSession', { params: { slug } });
+    return { session: transcript.state, transcript };
   } catch (err) {
     if (!sessionGone(err)) throw err;
     return { session: opened.state, transcript: null };
@@ -168,6 +191,7 @@ class VisitorChat {
     cancelling: null,
     cancelFailed: null,
     verifyStatus: 'idle',
+    ownerInChat: false,
   };
   private readonly listeners = new Set<() => void>();
   /** Pages showing this chat; the stream is open only while there is one. */
@@ -180,6 +204,8 @@ class VisitorChat {
    * those still belong to this chat, which shows them when a page comes back.
    */
   private generation = 0;
+  /** Greatest kernel session generation seen, independent of the event cursor and this chat's lifecycle. */
+  private sessionGeneration = -1;
   /** Messages whose answer was lost, by id, until a read of the conversation shows whether they went through. */
   private readonly lost = new Map<string, string>();
   /** A read for the lost messages is out. */
@@ -199,6 +225,27 @@ class VisitorChat {
   private ownerTypingTimer: ReturnType<typeof setTimeout> | null = null;
   /** Says the chat has caught up once the stream it is catching up on has been quiet long enough. */
   private caughtUpTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The seq as of which the chat knows the session's mode: the cursor (`last_seq`) of the latest read
+   * it took the mode from, or the seq of the latest stream event that changed it (a join, a leave,
+   * Claude writing or a message not hers), whichever is later. A mode event at or before it is older
+   * than what the chat knows, and changes nothing; a read older than it says nothing of the mode.
+   */
+  private modeAt = 0;
+  /**
+   * The chat knows the session's mode now: from the read it opened with, and since it last lost
+   * track of the stream, from a join it follows live or a read of the session sent after the stream
+   * reopened. A join it replays while catching up doesn't count: a hand-back may still be on its way.
+   */
+  private modeKnown = false;
+  /** Bumped each time the chat loses track of the stream (a drop, the page going away), so a read sent before then confirms nothing. */
+  private tracked = 0;
+  /** The stream is open again since the chat last lost track of it: a read sent now can confirm the mode. */
+  private following = false;
+  /** The `tracked` count the last confirming read was sent for. */
+  private confirming = -1;
+  /** The mode cursor that read was sent to confirm; a later replayed join needs another read. */
+  private confirmingAt = -1;
 
   constructor(
     private readonly slug: string,
@@ -215,9 +262,69 @@ class VisitorChat {
 
   readonly getSnapshot = (): VisitorChatSnapshot => this.snapshot;
 
-  private set(patch: Partial<VisitorChatSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...patch };
+  /** Applies `patch`, and with it whether the owner is in the chat, which only `ownerInChatNow` says. */
+  private set(patch: Partial<Omit<VisitorChatSnapshot, 'ownerInChat'>>): void {
+    const next = { ...this.snapshot, ...patch };
+    this.snapshot = {
+      ...next,
+      ownerInChat: ownerInChatNow({ session: next.session, state: next.state, ready: next.status === 'ready', modeKnown: this.modeKnown }),
+    };
     for (const listener of [...this.listeners]) listener();
+  }
+
+  /**
+   * The chat has lost track of the stream (a drop, the page going away): what it holds of the
+   * session's mode may be old, so the head shows the AI disclosure until a join or a read since
+   * says otherwise. The caller sets the state next, which says so.
+   */
+  private loseTrack(): void {
+    this.tracked += 1;
+    this.modeKnown = false;
+    this.following = false;
+  }
+
+  /**
+   * The session as the chat opens with it, from the read of its stored conversation: the one read
+   * that may put the chat in the owner's hands, and the read that confirms the mode once the stream
+   * has reopened. The API reads the session's mode, the conversation and its cursor as one snapshot,
+   * so its mode stands as read, as of that cursor.
+   */
+  private openedSession(transcript: VisitorTranscript): SessionState {
+    this.observeSession(transcript.state);
+    this.modeKnown = true;
+    this.modeAt = transcript.last_seq;
+    return transcript.state;
+  }
+
+  /**
+   * A session from an answer after the chat has opened (a verify, a read of the session): it may
+   * take the chat out of the owner's hands, never put it in them (`lowerOnly`), since the answer may
+   * have been taken before a hand-back the stream has shown since. `said` is the mode it says.
+   */
+  private laterSession(next: SessionState, said: SessionMode | null): SessionState {
+    this.observeSession(next);
+    return { ...next, mode: lowerOnly(this.snapshot.session?.mode ?? null, said) };
+  }
+
+  private observeSession(session: SessionState): void {
+    this.sessionGeneration = Math.max(this.sessionGeneration, session.generation);
+  }
+
+  /**
+   * A session from a later read of the stored conversation, sent when the chat had last lost track
+   * `since`, and while it was `following` the reopened stream or not. Older than what the chat knows
+   * of the mode (`modeAt`), it says nothing of it. Otherwise it says the mode as of its `last_seq`,
+   * which may only lower it. Only an applied mode moves the cursor: a refused owner's mode must
+   * leave its join available to the stream. It confirms the mode if it was sent after the stream
+   * reopened, with nothing lost since.
+   */
+  private laterRead(transcript: VisitorTranscript, since: number, following: boolean): SessionState {
+    const read = transcript.state;
+    if (transcript.last_seq < this.modeAt) return this.laterSession(read, null);
+    const session = this.laterSession(read, read.mode);
+    if (session.mode === read.mode) this.modeAt = transcript.last_seq;
+    if (following && since === this.tracked) this.modeKnown = true;
+    return session;
   }
 
   private dispatch(action: ChatAction): void {
@@ -236,6 +343,7 @@ class VisitorChat {
     }
     // Back on the page: the stream picks up after the last seq the chat holds, so what came
     // meanwhile arrives first, and draws still.
+    this.loseTrack();
     this.dispatch({ type: 'catching_up' });
     this.startStream();
   }
@@ -246,6 +354,12 @@ class VisitorChat {
     this.epoch += 1;
     this.loading = false;
     this.stop();
+    // The chat no longer follows the stream, and says so now, so a page that shows it again (a
+    // remount, the preview reopened) draws it catching up from its first render.
+    if (this.loaded) {
+      this.loseTrack();
+      this.dispatch({ type: 'catching_up' });
+    }
     // Nobody is watching: the lost messages are read for again when the stream next opens.
     this.clearCheckTimer();
   }
@@ -300,7 +414,8 @@ class VisitorChat {
   private async open(epoch: number): Promise<void> {
     const { session, transcript } = await openChat(this.slug, this.previewDeskId);
     if (epoch !== this.epoch) return;
-    this.set({ session });
+    if (transcript === null) this.set({ session: this.laterSession(session, session.mode) });
+    else this.set({ session: this.openedSession(transcript) });
     if (transcript === null) {
       this.loaded = true;
       this.end();
@@ -337,7 +452,10 @@ class VisitorChat {
     // Still catching up: the stream isn't quiet yet.
     if (this.caughtUpTimer !== null) this.awaitCaughtUp();
     if (ev.type !== 'owner_typing') {
+      // An event the chat has already seen (a replay from an earlier seq) changes nothing.
+      const fresh = seq > this.snapshot.state.lastSeq;
       this.dispatch({ type: 'event', seq, ev });
+      if (fresh) this.followMode(seq, ev);
       return;
     }
     if (seq <= this.snapshot.state.lastSeq) return;
@@ -352,6 +470,30 @@ class VisitorChat {
       this.ownerTypingTimer = null;
       this.dispatch({ type: 'owner_typing_over' });
     }, delay);
+  }
+
+  /**
+   * The session's mode as the stream changes it, at `seq`: the owner's take-over (`owner_joined`) is
+   * the one event that puts the chat in her hands, and confirms it after the chat lost track of the
+   * stream. Her hand-back (`owner_left`) puts it in Claude's, and so does anything that comes only
+   * while the chat is in Claude's hands: Claude starting to write, or a message that isn't hers
+   * (past the model's budget, the loop hands off with a message and no writing first). So a
+   * hand-back whose leave never came still ends hers.
+   */
+  private followMode(seq: number, ev: SseEvent): void {
+    const notHers = ev.type === 'owner_left' || ev.type === 'writing' || (ev.type === 'message' && ev.author !== 'owner');
+    const mode: SessionMode | null = ev.type === 'owner_joined' ? 'owner' : notHers ? 'ai' : null;
+    const { session, state } = this.snapshot;
+    // Older than a read the chat took the mode from: that read already counts it.
+    if (mode === null || session === null || seq <= this.modeAt) return;
+    this.modeAt = seq;
+    // A join the chat follows live confirms her. One it replays while catching up may be older than
+    // a hand-back still on its way, so only a read of the session sent now can confirm it.
+    const confirm = ev.type === 'owner_joined' && state.catchingUp;
+    if (confirm) this.modeKnown = false;
+    if (ev.type === 'owner_joined' && !state.catchingUp) this.modeKnown = true;
+    this.set({ session: { ...session, mode } });
+    if (confirm) void this.confirmMode(this.epoch);
   }
 
   private clearOwnerTypingTimer(): void {
@@ -369,20 +511,49 @@ class VisitorChat {
     if (state === 'closed') {
       this.stopStream = null;
       this.clearCaughtUpTimer();
+      this.loseTrack();
       void this.afterClose(epoch);
       return;
     }
+    if (state !== 'open') this.loseTrack();
     this.dispatch({ type: 'connection', connection: state });
     if (state !== 'open') {
       // Dropped: the browser opens it again from the last seq, and the chat catches up then.
       this.clearCaughtUpTimer();
       return;
     }
+    this.following = true;
     this.awaitCaughtUp();
+    // Back on the stream with the chat in the owner's hands, as it last knew: the stream's silence
+    // doesn't say she is still there, and the stream has no word for "that was everything you
+    // missed", so the chat reads the session to confirm it, or to learn she has left.
+    if (!this.modeKnown && this.snapshot.session?.mode === 'owner') void this.confirmMode(epoch);
     this.reopens = 0;
     // The server answers again: a good moment to settle any message whose answer was lost.
     this.checkRetries = 0;
     void this.checkLost(this.generation);
+  }
+
+  /**
+   * Reads the session to confirm the owner's mode, once the stream has reopened after the chat lost
+   * track of it, and again if a replayed join advances beyond that read. Until it answers (or if it never does), the head shows the
+   * AI disclosure. Sent after the stream reopened, with nothing lost since and no older than what the
+   * stream has said of the mode, it is the session as it stands, as the opening read is.
+   */
+  private async confirmMode(epoch: number): Promise<void> {
+    if (this.confirming === this.tracked && this.confirmingAt >= this.modeAt) return;
+    this.confirming = this.tracked;
+    this.confirmingAt = this.modeAt;
+    const since = this.tracked;
+    try {
+      const transcript = await request('visitorSession', { params: { slug: this.slug } });
+      if (epoch !== this.epoch) return;
+      this.observeSession(transcript.state);
+      if (since === this.tracked && transcript.last_seq >= this.modeAt && transcript.state.generation >= this.sessionGeneration) this.set({ session: this.openedSession(transcript) });
+      else this.set({ session: this.laterRead(transcript, since, false) });
+    } catch {
+      // Unanswered: nothing is confirmed, and the head keeps the AI disclosure.
+    }
   }
 
   /**
@@ -392,7 +563,8 @@ class VisitorChat {
   private async afterClose(epoch: number): Promise<void> {
     this.dispatch({ type: 'connection', connection: 'reconnecting' });
     try {
-      await request('visitorSession', { params: { slug: this.slug } });
+      const transcript = await request('visitorSession', { params: { slug: this.slug } });
+      if (epoch === this.epoch) this.observeSession(transcript.state);
     } catch (err) {
       if (epoch !== this.epoch) return;
       if (sessionGone(err)) {
@@ -427,6 +599,7 @@ class VisitorChat {
   readonly newChat = (): void => {
     this.epoch += 1;
     this.generation += 1;
+    this.sessionGeneration = -1;
     const epoch = this.epoch;
     this.stop();
     this.loaded = false;
@@ -437,8 +610,11 @@ class VisitorChat {
     this.clearCheckTimer();
     this.checkRetries = 0;
     this.clearOwnerTypingTimer();
-    this.dispatch({ type: 'reset' });
+    // The old session goes before the chat empties, so no state holds its mode beside an empty chat.
+    this.loseTrack();
+    this.modeAt = 0;
     this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null, verifyStatus: 'idle' });
+    this.dispatch({ type: 'reset' });
     this.loading = true;
     this.open(epoch)
       .catch((err: unknown) => {
@@ -521,6 +697,7 @@ class VisitorChat {
       this.checkLater(generation);
       return;
     }
+    this.observeSession(transcript.state);
     this.checkRetries = 0;
     for (const [id, text] of lost) {
       this.lost.delete(id);
@@ -600,7 +777,9 @@ class VisitorChat {
     try {
       const { state } = await request('verifyCheck', { params: { slug: this.slug }, body: { code } });
       if (generation !== this.generation) return;
-      this.set(state.verified ? { verifyStatus: 'idle', session: state } : { verifyStatus: 'failed' });
+      this.observeSession(state);
+      // The answer may have been taken before a hand-back the stream has shown since: it may lower the mode only.
+      this.set(state.verified ? { verifyStatus: 'idle', session: this.laterSession(state, state.mode) } : { verifyStatus: 'failed' });
     } catch (err) {
       if (generation !== this.generation) return;
       if (sessionGone(err)) {
@@ -612,16 +791,25 @@ class VisitorChat {
         this.set({ verifyStatus: 'failed' });
         return;
       }
-      const session = isUncertain(err) ? await this.currentSession() : null;
+      const read = isUncertain(err) ? await this.readSession() : null;
       if (generation !== this.generation) return;
-      this.set(session?.verified ? { verifyStatus: 'idle', session } : { verifyStatus: 'unreachable' });
+      this.set(
+        read?.transcript.state.verified ? { verifyStatus: 'idle', session: this.laterRead(read.transcript, read.since, read.following) } : { verifyStatus: 'unreachable' },
+      );
     }
   }
 
-  /** The chat's session as the API holds it now, or null when it can't be read. */
-  private async currentSession(): Promise<SessionState | null> {
+  /**
+   * The session's stored conversation as the API holds it now, when the chat had last lost track as it
+   * was sent, and whether it was following the reopened stream then; or null when it can't be read.
+   */
+  private async readSession(): Promise<{ transcript: VisitorTranscript; since: number; following: boolean } | null> {
+    const { tracked: since, following } = this;
+    const generation = this.generation;
     try {
-      return (await request('visitorSession', { params: { slug: this.slug } })).state;
+      const transcript = await request('visitorSession', { params: { slug: this.slug } });
+      if (generation === this.generation) this.observeSession(transcript.state);
+      return { transcript, since, following };
     } catch {
       return null;
     }
@@ -629,8 +817,10 @@ class VisitorChat {
 
   /** Whether the conversation holds an outcome for `decisionId`: a lost cancel that went through. */
   private async wasResolved(decisionId: string): Promise<boolean> {
+    const generation = this.generation;
     try {
       const transcript = await request('visitorSession', { params: { slug: this.slug } });
+      if (generation === this.generation) this.observeSession(transcript.state);
       return transcript.items.some((item) => item.event?.type === 'resolved' && item.event.decision_id === decisionId);
     } catch {
       return false;

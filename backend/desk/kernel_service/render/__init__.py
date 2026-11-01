@@ -11,10 +11,12 @@ visitor or agent asked for that ran says what was done, one line per tool
 (`executed_status`), in place of the generic executed line, which only the owner's own setup
 actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
 messages and the Demo inbox's code entry, the one text that carries a code. A session reads them
-in its `last_language`, else English (`language`). Owner alert previews (`owner_preview`) are
-English and owner-only. The owner-only lines (`OWNER_STATUS`: why an action was refused at
-execution, a decision's `owner_plain`) sit apart from the status lines, so `status` can't render one
-into any visitor text; `owner_line` renders them in the owner's language (`OWNER_LANGUAGE`).
+in its `last_language`, else English (`language`): the language of the visitor's latest message,
+recorded at turn start (`turn`), or of Claude's last reply (`reply_check.finalize`). Owner alert
+previews (`owner_preview`) are English and owner-only. The owner-only lines (`OWNER_STATUS`: why an
+action was refused at execution, a decision's `owner_plain`) sit apart from the status lines, so
+`status` can't render one into any visitor text; `owner_line` renders them in the owner's language
+(`OWNER_LANGUAGE`).
 
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
 they are rendered by code from a fact, never from text a model wrote; the `owner_said` card holds

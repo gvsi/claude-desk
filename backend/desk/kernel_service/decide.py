@@ -80,6 +80,7 @@ from desk.kernel_service import (activation, adapters, auth, clock, compiler, de
                                  render, repo)
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, claudes_note, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
+from desk.kernel_service.baseline_reasons import BASELINE_RULE_PLAIN
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template
 from desk.kernel_service.sessions import principal_for, verified
@@ -554,6 +555,7 @@ REFUSED_PLAIN: dict[str, str] = {
     "evaluation_error": "Your rules couldn't be checked for it, so it was refused.",
 }
 BASELINE_PLAIN = "The always-on safety rules don't allow it."
+UNCOVERED_PLAIN = "None of your rules covers this yet, so it was refused."
 # How the deciding rules decided, said before their own text (the owner's wording, 2026-10-30).
 RULE_LEAD_INS: dict[str, str] = {
     "allow": "Your rule allows it",
@@ -566,7 +568,7 @@ RULE_LEAD_INS: dict[str, str] = {
 DEFAULT_ASK_PLAIN = compiler.DEFAULT_REASON
 REVIEW_PLAIN: dict[str, str] = {
     "absent": "The reviewer couldn't check it.",
-    "block": "The reviewer flagged it as an attempt to get around your rules.",
+    "block": "The reviewer flagged something in the request as a possible way around your rules.",
     "hold": "The reviewer suggested asking you.",
     "unsure": "The reviewer wasn't sure enough to let it through.",
     "allow": "The reviewer checked it.",
@@ -910,7 +912,15 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
             # a rule's text is the owner's own words: quoted whole, never cut as free text is
             parts.append(f"{lead_in}: " + ", ".join(quoted(card.reason) for card in deciding))
         elif outcome == "refuse":
-            parts.append(BASELINE_PLAIN)
+            baseline_ids = {policy_id.removeprefix("B.") for policy_id in evaluation.policy_ids
+                            if policy_id.startswith("B.")}
+            if len(baseline_ids) == 1:
+                baseline_id = next(iter(baseline_ids))
+                parts.append(BASELINE_PLAIN if baseline_id == "agent_charge_within_mandate"
+                             and not _over_mandate(call, evaluation)
+                             else BASELINE_RULE_PLAIN.get(baseline_id, BASELINE_PLAIN))
+            else:
+                parts.append(BASELINE_PLAIN if baseline_ids else UNCOVERED_PLAIN)
     if evaluation is not None and evaluation.needed_review:
         review = evaluation.review
         if review is None:
@@ -927,6 +937,14 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
 MANDATE_POLICY = "B.agent_charge_within_mandate"     # the baseline's bound on an agent's charge
 
 
+def _over_mandate(call: _Call, evaluation: Evaluation) -> bool:
+    """Only a charge above an existing mandate's remaining limit names that cause."""
+    action, left = call.action, call.mandate_remaining_cents
+    return (evaluation.policy_ids == [MANDATE_POLICY] and call.principal.kind == "agent"
+            and left is not None and action is not None and action.amount_cents is not None
+            and action.amount_cents > left)
+
+
 def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluation | None) -> str:
     """The status line a new decision is stored with: its state's, except for a refusal the
     evaluation made (no early `reason`) with the baseline's mandate rule as its only deciding
@@ -934,11 +952,8 @@ def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluat
     (`refused_over_mandate`). Any other refusal by that rule (no mandate, no amount), or one
     another policy also decided, keeps the generic line, so the line never names a cause that
     isn't the real one."""
-    action, left = call.action, call.mandate_remaining_cents
     over = (state == "refused" and reason is None and evaluation is not None
-            and evaluation.policy_ids == [MANDATE_POLICY] and call.principal.kind == "agent"
-            and left is not None and action is not None and action.amount_cents is not None
-            and action.amount_cents > left)
+            and _over_mandate(call, evaluation))
     return "refused_over_mandate" if over else state
 
 

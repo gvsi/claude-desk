@@ -60,9 +60,9 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
     setError(null);
     try {
       setWentLive(await request('goLive', { params: { id } }));
-      // It went live here, so this Desk answers now: the Desks say so at once, and are read again.
+      // It went live here, so this Desk answers now: the Desks say so at once. Setup carries the live
+      // step into them as it moves on (`onLive`), which reads them again.
       queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => withAnswering(now, state.desk_id, true));
-      void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
       onLive();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;

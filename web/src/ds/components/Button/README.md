@@ -43,7 +43,7 @@
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
 | `onKeyDown` | `(event) => void` | Keys pressed on the button. Not on a link. |
 | `buttonRef` | `Ref<HTMLButtonElement>` | The `<button>`, for a screen that has to know about it. React lets go of it (a callback gets `null`) before the button leaves the page, so whether it had focus can still be read then, as `PublicShell` does for "Ask for {owner}". Not on a link. |
-| `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500), held as one run of text, so words around a name stay together and the gap only separates them from a menu button's chevron. |
+| `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500), held as one run of text, so words around a name stay together and the gap only separates them from a menu button's chevron. A label with a status, such as Safety's "1 held for you", is a whole `StatusLabel`, which keeps the one line `size-control` tall. |
 
 ## States
 
@@ -60,6 +60,8 @@ A menu button keeps its variant's look, and its hover fill while its menu is ope
 Disabled dims every variant to 40%. Busy never dims, even on a button that is disabled too: busy wins, and each variant steps to its busy colors and shows its spinner, as `busy` above says. Focus shows the base stylesheet's 2 px `accent-blue` ring at a 2 px offset on every variant.
 
 A label longer than its line, such as a long name on a phone or in the take-over bar's controls column, wraps inside the button in balanced lines, and the button grows taller with the same padding. A word wider than the line, such as a name with no spaces, breaks inside the button too (`overflow-wrap: anywhere`), even in a row of buttons. It is never wider than its container, and one line of label keeps it exactly `size-control` (or `size-control-main`) tall.
+
+On a touch screen (`pointer: coarse`), a button under `size-touch` (44 px) tall or wide reaches it with an unseen hit area centred on it (`::after`), so a 32 px button takes a tap 6 px above or below it. Nothing is drawn and nothing moves. A layout that puts controls closer together than the hit area would reach caps it at half its gap, with `--cd-touch-reach-block` (above and below) and `--cd-touch-reach-inline` (either side), so neighbours' hit areas never overlap; buttons in a row are already wider than 44 px, so theirs only grow up and down.
 
 Hover fills change at `motion-instant`; a press scales to 0.98 at `motion-fast` with `motion-ease-emphasis`; a busy spinner turns once every `motion-spin`. Nothing moves under reduced motion.
 

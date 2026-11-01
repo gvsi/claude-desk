@@ -403,6 +403,8 @@ class ApprovalResult(BaseModel):
     decision: Decision
     execution: ExecResult | None          # allow_once / allow_person execute inside the answer call
     card_diff: list[RuleCard] | None      # allow_person / deny_always: cards the owner proves (/policy/draft) and confirms
+    approved: Decision | None = None     # signed approved state: "{owner} approved this" for an answer that runs
+                                         # None for a denial or an approval refused before execution
 
 # Replies: typed clauses plus guarded prose
 ClauseTemplate = Literal["quote", "booking_options", "booking_confirmed", "payment_link", "document_link",
@@ -448,7 +450,8 @@ class ReplyVerdict(BaseModel):
     ok: bool
     language: Literal["en", "es"]         # the blocks' language: detected, else the fallback ("Language" row)
     blocks: list[RenderedBlock]           # exactly what may be shown; a failed check of Claude's draft gives the handoff clause,
-                                          # a blocked owner say none
+                                          # but none on a first attempt the API rewrites (CheckReplyRequest.final false, every
+                                          # violation rewritable); a blocked owner say none
     violations: list[Violation]
     message_id: str
     generation: int                       # the session generation it was checked at; deliver() drops it once stale
@@ -465,11 +468,17 @@ class ReplayedEvent(BaseModel):           # one moment of the recorded night as 
     verdict: ReplyVerdict | None          # reply: a full signed ReplyVerdict
     decision: Decision | None             # receipt: a full signed Decision, in its final state
 
+class SeededChat(BaseModel):
+    session_id: str
+    visitor_line: str                     # the visitor's own words (untrusted text)
+    decision: Decision                   # the signed held decision
+
 class CopyCreated(BaseModel):             # POST /copies; the owner token is the copy credential
     copy_id: str
     desk_ids: list[str]
     owner_session: SessionState
     owner_token: str                      # 256-bit CSPRNG, stored hashed, sent as X-Owner-Session
+    seeded_chat: SeededChat | None = None  # None when the copy seeds no held request
     replayed_messages: list[ReplayedEvent] = []   # in shown order; empty without a replay
     replay_id: str | None = None          # the recording id the replayed kernel rows carry; None without a replay
 

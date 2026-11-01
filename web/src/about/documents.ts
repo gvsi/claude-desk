@@ -36,13 +36,13 @@ export function proposalForThePage(markdown: string): string {
 export interface AboutDocument {
   route: string;
   title: string;
-  /** The one line under the title. */
+  /** The one line under the title (`links.ts`). */
   summary: string;
   /** A sentence of the document, shown after its first section. */
   pullQuote: string;
   /** The figure under the summary; its marker in the article renders nothing. */
   hero: FigureName;
-  /** The other document, for "Read next". */
+  /** The other document: "Also read" beside this one, and the one a relative link in it may name. */
   next: AboutId;
   blocks: Block[];
 }
@@ -52,7 +52,7 @@ interface Source {
   next: AboutId;
   /** The page's named changes to the Markdown, applied before parsing. */
   forThePage: (markdown: string) => string;
-  words: Pick<AboutDocument, 'summary' | 'pullQuote' | 'hero'>;
+  words: Pick<AboutDocument, 'pullQuote' | 'hero'>;
 }
 
 const SOURCES: Record<AboutId, Source> = {
@@ -61,7 +61,6 @@ const SOURCES: Record<AboutId, Source> = {
     next: 'prediction',
     forThePage: proposalForThePage,
     words: {
-      summary: 'What Claude Desk is, who it’s for, what v1 enforces in code, and how we’ll know it works.',
       pullQuote: 'Talking Claude around can’t make it act past the owner’s rules.',
       hero: 'architecture',
     },
@@ -71,8 +70,6 @@ const SOURCES: Record<AboutId, Source> = {
     next: 'proposal',
     forThePage: (markdown) => markdown,
     words: {
-      summary:
-        'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
       pullQuote: 'It will still be talked around often enough that its limits must sit in code.',
       hero: 'tau3',
     },

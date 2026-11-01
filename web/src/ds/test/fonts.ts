@@ -77,3 +77,15 @@ export async function webFontsLoaded(): Promise<void> {
   };
   await withinDeadline(loading(), FONT_TIMEOUT, 'The web fonts');
 }
+
+/** Load the app's font sheet in a browser test whose harness does not include index.html. */
+export async function loadWebFonts(): Promise<void> {
+  const want = new URL(FONT_SHEET_URL).href;
+  if (![...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')].some((link) => link.href === want)) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = FONT_SHEET_URL;
+    document.head.append(link);
+  }
+  await webFontsLoaded();
+}

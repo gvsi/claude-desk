@@ -8,6 +8,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -179,6 +180,10 @@ const HOOK_ASSIGNMENT = /\bopenStatus\s*(?::\s*[^=;]+)?=(?![=>{])\s*([^;]+);/g;
 const FROM_AN_ANSWER = /^(?:null|[\w.]+\.open_status \?\? null)$/;
 const OPEN_AND_TEXT = /\{[^{}]*\}/g;
 const STATUS_TIME = /\.(?:until|opens_at|as_of|refresh_at)\b|\[\s*['"`](?:until|opens_at|as_of|refresh_at)['"`]\s*\]|\{[^{}]*\b(?:until|opens_at|as_of|refresh_at)\b[^{}]*\}\s*=/g;
+
+// The owner line is sourced from the visitor chat, whose mode follows the kernel session.
+const VISITOR_CHAT_FILE = 'public/PublicChatProvider.tsx';
+const CHAT_REDUCER_FILE = 'public/chatReducer.ts';
 
 // The first visit's dialog: the design system's, once its index exports it, with no stand-in left.
 const DS_INDEX_FILE = 'ds/index.ts';
@@ -371,6 +376,293 @@ function bindingsNotFromTheHook(scanned: Source[]): string[] {
     if (OTHER_DECLARATION.test(text)) bad.push(`${file}: openStatus is declared or assigned elsewhere`);
     return bad;
   });
+}
+
+/** `text` without its comments, so a comment that names something isn't taken for code. */
+function codeOf(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+}
+
+/** The index just past the brace, bracket or parenthesis that closes the one at `open` in `code`. */
+function pastTheClose(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i += 1) {
+    const c = code[i] ?? '';
+    if ('{[('.includes(c)) depth += 1;
+    else if ('}])'.includes(c) && (depth -= 1) === 0) return i + 1;
+  }
+  return code.length;
+}
+
+/** The expression that starts at `start` in `code`: up to the first `,`, `;`, closing brace or line end outside brackets. */
+function expressionAt(code: string, start: number): string {
+  let i = start;
+  while (i < code.length && !',;}\n'.includes(code[i] ?? '')) i = '{[('.includes(code[i] ?? '') ? pastTheClose(code, i) : i + 1;
+  return code.slice(start, i).trim();
+}
+
+/** Parse the syntax React actually accepts, including factory calls and nested JSX props. */
+function syntax(text: string): ts.SourceFile {
+  return ts.createSourceFile('guard.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+}
+
+function nodes(root: ts.Node): ts.Node[] {
+  const found: ts.Node[] = [];
+  const visit = (node: ts.Node): void => {
+    found.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+  return found;
+}
+
+function unwrapped(node: ts.Expression): ts.Expression {
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node)) node = node.expression;
+  return node;
+}
+
+function keyName(node: ts.Node | undefined): string | undefined {
+  if (!node) return undefined;
+  if (ts.isIdentifier(node) || ts.isStringLiteral(node)) return node.text;
+  if (ts.isComputedPropertyName(node)) return keyName(node.expression);
+  return undefined;
+}
+
+function memberName(node: ts.Node): string | undefined {
+  if (ts.isPropertyAccessExpression(node)) return node.name.text;
+  if (ts.isElementAccessExpression(node)) return keyName(node.argumentExpression);
+  return undefined;
+}
+
+function assignment(node: ts.Node): node is ts.BinaryExpression {
+  return ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+}
+
+const compact = (node: ts.Node): string => node.getText().replace(/\s+/g, ' ');
+
+/** Resolve imports and const aliases in their lexical scopes, including destructured namespaces. */
+function symbols(root: ts.SourceFile): (expression: ts.Expression) => string {
+  type Binding = string | { expression: ts.Expression; member?: string };
+  const scopes = new Map<ts.Node, Map<string, Binding>>();
+  const scopeOf = (node: ts.Node): ts.Node => {
+    while (!ts.isSourceFile(node) && !ts.isBlock(node) && !ts.isFunctionLike(node)) node = node.parent;
+    return node;
+  };
+  const bind = (node: ts.Node, name: string, value: Binding): void => {
+    const scope = scopeOf(node);
+    if (!scopes.has(scope)) scopes.set(scope, new Map());
+    scopes.get(scope)?.set(name, value);
+  };
+  for (const node of nodes(root)) {
+    if (ts.isImportSpecifier(node)) bind(root, node.name.text, (node.propertyName ?? node.name).text);
+    if (ts.isNamespaceImport(node)) bind(root, node.name.text, node.name.text);
+    if (ts.isImportClause(node) && node.name) bind(root, node.name.text, node.name.text);
+    if (!ts.isVariableDeclaration(node) || !node.initializer || !ts.isVariableDeclarationList(node.parent) || !(node.parent.flags & ts.NodeFlags.Const)) continue;
+    if (ts.isIdentifier(node.name)) bind(node.parent, node.name.text, { expression: node.initializer });
+    if (ts.isObjectBindingPattern(node.name)) {
+      for (const element of node.name.elements) {
+        if (ts.isIdentifier(element.name) && !element.dotDotDotToken) bind(node.parent, element.name.text, { expression: node.initializer, member: keyName(element.propertyName ?? element.name) });
+      }
+    }
+  }
+  const knownMember = (base: string, member: string): string =>
+    ['PublicShell', 'createElement', 'jsx', 'jsxs', 'jsxDEV'].includes(member) ? member : `${base}.${member}`;
+  const resolve = (expression: ts.Expression, seen = new Set<Binding>()): string => {
+    const node = unwrapped(expression);
+    if (node.kind === ts.SyntaxKind.ThisKeyword) return 'this';
+    if (ts.isIdentifier(node)) {
+      for (let at: ts.Node | undefined = node.parent; at; at = at.parent) {
+        const binding = scopes.get(at)?.get(node.text);
+        if (binding === undefined) continue;
+        if (typeof binding === 'string') return binding;
+        if (seen.has(binding)) return '';
+        const nextSeen = new Set([...seen, binding]);
+        const base = resolve(binding.expression, nextSeen);
+        return binding.member ? knownMember(base, binding.member) : base;
+      }
+      return node.text;
+    }
+    const member = memberName(node);
+    if (member && (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) return knownMember(resolve(node.expression, seen), member);
+    return '';
+  };
+  return resolve;
+}
+
+/** Every route by which a page could give PublicShell an independently derived owner line. */
+function ownerInChatNotFromTheChat(scanned: Source[]): string[] {
+  return scanned.flatMap(({ file, text }) => {
+    const root = syntax(text);
+    const all = nodes(root);
+    const resolve = symbols(root);
+    const spreads: string[] = [];
+    const factories: string[] = [];
+    const fields: string[] = [];
+    const writes: string[] = [];
+    const props: string[] = [];
+    let ownerProps = 0;
+    for (const node of all) {
+      if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && resolve(node.tagName as ts.Expression) === 'PublicShell') {
+        for (const prop of node.attributes.properties) if (ts.isJsxSpreadAttribute(prop)) spreads.push(`${file}: PublicShell takes a spread: ${compact(prop)}`);
+      }
+      if (ts.isCallExpression(node) && ['createElement', 'jsx', 'jsxs', 'jsxDEV'].includes(resolve(node.expression)) && node.arguments[0] && resolve(node.arguments[0]) === 'PublicShell') {
+        factories.push(`${file}: PublicShell made with ${resolve(node.expression)}(${compact(node.arguments[0])}`);
+      }
+      if ((ts.isPropertyAssignment(node) || ts.isPropertySignature(node)) && keyName(node.name) === 'ownerInChat') {
+        const quoted = ts.isStringLiteral(node.name);
+        if (file !== VISITOR_CHAT_FILE || quoted) {
+          const value = ts.isPropertyAssignment(node) ? node.initializer : node.type;
+          fields.push(`${file}: ${quoted ? node.name.getText() : 'ownerInChat'}: ${value ? compact(value) : ''}`);
+        }
+      }
+      if (assignment(node) && memberName(node.left) === 'ownerInChat') writes.push(`${file}: ${compact(node.left)} ${node.operatorToken.getText()} ${compact(node.right)}`);
+      if (ts.isBindingElement(node) && keyName(node.propertyName ?? node.name) === 'ownerInChat') props.push(`${file}: ownerInChat`);
+      if (ts.isJsxAttribute(node) && keyName(node.name) === 'ownerInChat') {
+        ownerProps += 1;
+        const value = node.initializer;
+        if (!value || !ts.isJsxExpression(value) || !value.expression || compact(value.expression) !== 'chat.ownerInChat') props.push(`${file}: ${compact(node)}`);
+      }
+    }
+    if (ownerProps > 0) {
+      const declarations = all.filter(ts.isVariableDeclaration).filter((node) => keyName(node.name) === 'chat');
+      const hook = declarations.some((node) => node.initializer && ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) && node.initializer.expression.text === 'useVisitorChat');
+      if (!hook) props.push(`${file}: chat doesn't come from useVisitorChat`);
+      const assigned = all.filter(assignment).filter((node) => ts.isIdentifier(node.left) && node.left.text === 'chat');
+      const other = declarations.some((node) => !ts.isVariableDeclarationList(node.parent) || !(node.parent.flags & ts.NodeFlags.Const)) || all.some((node) => ts.isParameter(node) && keyName(node.name) === 'chat');
+      if (declarations.length + assigned.length !== 1 || other) props.push(`${file}: chat is declared or assigned elsewhere`);
+    }
+    return [...spreads, ...factories, ...fields, ...writes, ...props];
+  });
+}
+
+/** Public files and every other TypeScript file that references PublicShell, including imports. */
+function shellFiles(all: Source[]): Source[] {
+  return all.filter(({ file, text }) => /\.tsx?$/.test(file) && (file.startsWith('public/') || nodes(syntax(text)).some((node) => ts.isIdentifier(node) && node.text === 'PublicShell')));
+}
+
+/** The enclosing method, excluding nested functions that do not inherit its authority. */
+function enclosingMethod(node: ts.Node): ts.MethodDeclaration | undefined {
+  for (let at = node.parent; at; at = at.parent) {
+    if (ts.isMethodDeclaration(at)) return at;
+    if (ts.isFunctionLike(at)) return undefined;
+  }
+  return undefined;
+}
+
+function methodBody(code: string, name: string): [number, number] | null {
+  const method = nodes(syntax(code)).find((node) => ts.isMethodDeclaration(node) && keyName(node.name) === name);
+  return method && ts.isMethodDeclaration(method) && method.body ? [method.body.getStart(), method.body.end] : null;
+}
+
+/** A condition is required only when it is a conjunct, never an alternative way through a guard. */
+function conjuncts(expression: ts.Expression): ts.Expression[] {
+  const node = unwrapped(expression);
+  return ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ? [...conjuncts(node.left), ...conjuncts(node.right)] : [node];
+}
+
+/** Compare syntax, so comments, whitespace and parentheses cannot affect a guard. */
+function sameExpression(node: ts.Expression, expected: string): boolean {
+  const compare = (left: ts.Node, right: ts.Node): boolean => {
+    if (ts.isParenthesizedExpression(left)) return compare(left.expression, right);
+    if (ts.isParenthesizedExpression(right)) return compare(left, right.expression);
+    if (left.kind !== right.kind) return false;
+    if (ts.isIdentifier(left) || ts.isStringLiteral(left)) return (right as ts.Identifier | ts.StringLiteral).text === left.text;
+    const children = (parent: ts.Node): ts.Node[] => {
+      const result: ts.Node[] = [];
+      ts.forEachChild(parent, (child) => { result.push(child); });
+      return result;
+    };
+    const a = children(left);
+    const b = children(right);
+    return a.length === b.length && a.every((child, i) => b[i] !== undefined && compare(child, b[i]));
+  };
+  const statement = syntax(`(${expected});`).statements[0];
+  return !!statement && ts.isExpressionStatement(statement) && compare(node, statement.expression);
+}
+
+/** Required positive conditions enclosing this node's execution in the same method. */
+function guardedBy(node: ts.Node, required: string[]): boolean {
+  const conditions: ts.Expression[] = [];
+  for (let child = node, parent = node.parent; parent; child = parent, parent = parent.parent) {
+    if (ts.isFunctionLike(parent)) break;
+    if (ts.isIfStatement(parent) && parent.thenStatement === child) conditions.push(...conjuncts(parent.expression));
+  }
+  return required.every((condition) => conditions.some((candidate) => sameExpression(candidate, condition)));
+}
+
+/** Session writes and the only places allowed to raise mode or its confirmation. */
+function sessionModeWrites(chat: string): string[] {
+  const root = syntax(chat);
+  const all = nodes(root);
+  const resolve = symbols(root);
+  const bad: string[] = [];
+  const methodOf = (node: ts.Node) => keyName(enclosingMethod(node)?.name);
+  for (const node of all) {
+    if (ts.isCallExpression(node) && resolve(node.expression) === 'this.openedSession') {
+      const method = methodOf(node);
+      const current = method === 'confirmMode' && guardedBy(node, [
+        'since === this.tracked',
+        'transcript.last_seq >= this.modeAt',
+        'transcript.state.generation >= this.sessionGeneration',
+      ]);
+      if (method !== 'open' && !current) bad.push(`${VISITOR_CHAT_FILE}: openedSession outside open or a current confirming read`);
+    }
+    if (assignment(node) && memberName(node.left) === 'modeKnown' && unwrapped(node.right).kind === ts.SyntaxKind.TrueKeyword) {
+      const method = methodOf(node);
+      const allowed = method === 'openedSession'
+        || (method === 'laterRead' && guardedBy(node, ['following', 'since === this.tracked']))
+        || (method === 'followMode' && guardedBy(node, ['!state.catchingUp']));
+      if (!allowed) bad.push(`${VISITOR_CHAT_FILE}: modeKnown raised outside its guarded confirmation paths`);
+    }
+    if (ts.isCallExpression(node) && sameExpression(node.expression, 'this.set')) {
+      for (const key of node.arguments.flatMap(nodes)) {
+        if (ts.isShorthandPropertyAssignment(key) && key.name.text === 'session') bad.push(`${VISITOR_CHAT_FILE}: session (shorthand)`);
+        if (!ts.isPropertyAssignment(key) || keyName(key.name) !== 'session') continue;
+        const value = unwrapped(key.initializer);
+        const helper = ts.isCallExpression(value) && ['this.openedSession', 'this.laterSession', 'this.laterRead'].includes(resolve(value.expression));
+        const follow = methodOf(key) === 'followMode' && ts.isObjectLiteralExpression(value) && value.properties.length === 2 && ts.isSpreadAssignment(value.properties[0]!) && sameExpression(value.properties[0]!.expression, 'session') && ts.isShorthandPropertyAssignment(value.properties[1]!) && value.properties[1]!.name.text === 'mode';
+        if (value.kind !== ts.SyntaxKind.NullKeyword && !helper && !follow) bad.push(`${VISITOR_CHAT_FILE}: session: ${compact(value)}`);
+      }
+    }
+    const property = (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && keyName(node.name) === 'mode';
+    const assigned = assignment(node) && memberName(node.left) === 'mode';
+    if ((property || assigned) && !['openedSession', 'followMode'].includes(methodOf(node) ?? '')) {
+      const lowering = ts.isPropertyAssignment(node) && ts.isCallExpression(node.initializer) && sameExpression(node.initializer.expression, 'lowerOnly');
+      if (!lowering) {
+        const write = assigned ? `${ts.isElementAccessExpression(node.left) ? node.left.getText().slice(node.left.expression.end - node.left.getStart()) : '.mode'} ${node.operatorToken.getText()}` : ts.isShorthandPropertyAssignment(node) ? ', mode' : ts.isPropertyAssignment(node) ? `${node.name.getText()}:` : '';
+        bad.push(`${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: ${write}`);
+      }
+    }
+    if (ts.isStringLiteral(node) && node.text === 'owner' && methodOf(node) === 'followMode') {
+      const parent = node.parent;
+      if (ts.isBinaryExpression(parent) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken].includes(parent.operatorToken.kind)) continue;
+      if (!ts.isConditionalExpression(parent) || parent.whenTrue !== node || !sameExpression(parent.condition, "ev.type === 'owner_joined'")) bad.push(`${VISITOR_CHAT_FILE}: followMode sets the owner's mode for something but owner_joined`);
+    }
+  }
+  return bad;
+}
+
+/** Values attached to the owner flag; object and interface declarations are distinct AST nodes. */
+function ownerInChatNodes(chat: string): (ts.PropertyAssignment | ts.PropertySignature)[] {
+  return nodes(syntax(chat)).filter((node): node is ts.PropertyAssignment | ts.PropertySignature => (ts.isPropertyAssignment(node) || ts.isPropertySignature(node)) && keyName(node.name) === 'ownerInChat');
+}
+
+function anotherYes(root: ts.Node): boolean {
+  return nodes(root).some((node) => node.kind === ts.SyntaxKind.TrueKeyword || ts.isConditionalExpression(node) || (ts.isBinaryExpression(node) && [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)));
+}
+
+function ownerInChatSources(chat: string, reducer: string): string[] {
+  const bad = ownerInChatNodes(chat).flatMap((node) => {
+    if (ts.isPropertySignature(node) && node.type?.kind === ts.SyntaxKind.BooleanKeyword) return [];
+    const value = ts.isPropertyAssignment(node) ? unwrapped(node.initializer) : undefined;
+    if (value && (value.kind === ts.SyntaxKind.FalseKeyword || (ts.isCallExpression(value) && sameExpression(value.expression, 'ownerInChatNow') && !anotherYes(value)))) return [];
+    return [`${VISITOR_CHAT_FILE}: ownerInChat: ${value ? compact(value) : ts.isPropertySignature(node) ? node.type?.getText() ?? '' : ''}`];
+  });
+  const fn = nodes(syntax(reducer)).find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'ownerInChatNow');
+  const returned = fn && ts.isFunctionDeclaration(fn) && fn.body ? nodes(fn.body).filter(ts.isReturnStatement).flatMap((node) => node.expression ? [node.expression] : []) : [];
+  if (!returned.length || !returned.every((value) => conjuncts(value).some((part) => sameExpression(part, "session?.mode === 'owner'")))) bad.push(`${CHAT_REDUCER_FILE}: ownerInChatNow doesn't read the session's mode`);
+  else if (returned.some(anotherYes)) bad.push(`${CHAT_REDUCER_FILE}: ownerInChatNow has another way to say yes`);
+  return bad;
 }
 
 /** Assignments to `openStatus` in the hook whose value isn't an answer's `.open_status` or null. */
@@ -688,6 +980,178 @@ describe('app source guards', () => {
     expect(functionBody(hook?.text ?? '', 'openStatusDelayMs'), 'openStatusDelayMs is in useOpenStatus.ts').not.toBeNull();
     const reducer = visitor.find((s) => s.file === 'public/chatReducer.ts');
     expect(functionBody(reducer?.text ?? '', 'ownerTypingDelayMs'), 'ownerTypingDelayMs is in chatReducer.ts').not.toBeNull();
+  });
+
+  it('finds_PublicShell_through_import_and_const_factory_aliases', () => {
+    const fixtures = [
+      "import { jsx as _jsx } from 'react/jsx-runtime'; _jsx(PublicShell, props);",
+      "import { jsxs as _jsxs } from 'react/jsx-runtime'; const make = _jsxs; make(PublicShell, props);",
+      "import { jsxDEV as dev } from 'react/jsx-dev-runtime'; const make = dev; make(PublicShell, props);",
+      "import { createElement as make } from 'react'; make(PublicShell, props);",
+      "import * as React from 'react'; const make = React.createElement; const again = make; again(PublicShell, props);",
+      "import * as runtime from 'react/jsx-runtime'; const { jsx: make } = runtime; make(PublicShell, props);",
+      "import { PublicShell as Shell } from '../ds/index.ts'; const Head = Shell; const Page = Head; <Page {...props} />;",
+      "import * as ds from '../ds/index.ts'; const { PublicShell: Shell } = ds; const Head = Shell; <Head {...props} />;",
+    ];
+    expect(fixtures.map((text) => ownerInChatNotFromTheChat(sample(text)).length > 0)).toEqual(fixtures.map(() => true));
+  });
+
+  it('pins_mode_raises_and_confirmation_to_their_guarded_paths', () => {
+    const method = (name: string, body: string) => `class VisitorChat { private ${name}() { ${body} } }`;
+    const guard = 'since === this.tracked && transcript.last_seq >= this.modeAt && transcript.state.generation >= this.sessionGeneration';
+    const opened = 'this.set({ session: this.openedSession(transcript) });';
+    const negative = [
+      method('checkCode', opened),
+      method('confirmMode', opened),
+      method('confirmMode', `if (transcript.last_seq >= this.modeAt && transcript.state.generation >= this.sessionGeneration) ${opened}`),
+      method('confirmMode', `if (since === this.tracked && transcript.state.generation >= this.sessionGeneration) ${opened}`),
+      method('confirmMode', `if (since === this.tracked && transcript.last_seq >= this.modeAt) ${opened}`),
+      method('confirmMode', `if ((${guard}) || enabled) ${opened}`),
+      method('confirmMode', `if (${guard}) {} else { ${opened} }`),
+      method('open', `const deferred = () => { ${opened} };`),
+      method('checkCode', 'this.modeKnown = true;'),
+      method('laterRead', 'this.modeKnown = true;'),
+      method('laterRead', 'if (following) this.modeKnown = true;'),
+      method('laterRead', 'if (since === this.tracked) this.modeKnown = true;'),
+      method('laterRead', 'if (following || since === this.tracked) this.modeKnown = true;'),
+      method('followMode', 'this.modeKnown = true;'),
+      method('followMode', 'if (state.catchingUp) this.modeKnown = true;'),
+      method('followMode', 'if (!state.catchingUp || enabled) this.modeKnown = true;'),
+    ];
+    expect(negative.map((text) => sessionModeWrites(text).length > 0)).toEqual(negative.map(() => true));
+    const positive = [
+      method('open', opened),
+      method('confirmMode', `if (${guard}) ${opened}`),
+      method('confirmMode', `if ((since === this.tracked) && /* current cursor */ (transcript.last_seq >= this.modeAt) && (transcript.state.generation >= this.sessionGeneration)) { ${opened} }`),
+      method('openedSession', 'this.modeKnown = true;'),
+      method('laterRead', 'if (following && since === this.tracked) this.modeKnown = true;'),
+      method('followMode', "if (ev.type === 'owner_joined' && !state.catchingUp) this.modeKnown = true;"),
+    ];
+    expect(positive.flatMap(sessionModeWrites)).toEqual([]);
+  });
+
+  it('owner_in_chat_comes_only_from_the_sessions_mode', () => {
+    // Every file under `public/`, and every other file that renders PublicShell, the vision pages among them.
+    const visitor = shellFiles(sources);
+    expect(visitor.map(({ file }) => file)).toEqual(expect.arrayContaining(['public/PublicChat.tsx', 'vision/CityOfficePage.tsx', 'vision/ClaudeAccountPage.tsx']));
+    const planted: Source = { file: 'vision/Planted.tsx', text: 'export const Page = () => <PublicShell ownerInChat brand={brand} />;' };
+    expect(ownerInChatNotFromTheChat(shellFiles([...sources, planted]))).toContain('vision/Planted.tsx: ownerInChat');
+    const hook = "const chat = useVisitorChat(slug, previewDeskId);\n";
+
+    // Props: only the visitor chat's own value, by its own name, from the hook.
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell ownerInChat={true} />`))).toEqual(['sample.tsx: ownerInChat={true}']);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell ownerInChat />`))).toEqual(['sample.tsx: ownerInChat']);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell ownerInChat={ready && joined(state)} />`))).toHaveLength(1);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}const { ownerInChat } = chat;\n<PublicShell ownerInChat={ownerInChat} />`))).toHaveLength(2);
+    expect(ownerInChatNotFromTheChat(sample('const chat = { ownerInChat: true };\n<PublicShell ownerInChat={chat.ownerInChat} />'))).toHaveLength(2);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}chat = other;\n<PublicShell ownerInChat={chat.ownerInChat} />`))).toHaveLength(1);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}// ownerInChat={true} in a comment\n<PublicShell ownerInChat={chat.ownerInChat} />`))).toEqual([]);
+    expect(ownerInChatNotFromTheChat(sample("type Set = Omit<Snapshot, 'ownerInChat'>;"))).toEqual([]);
+    // Nothing reaches PublicShell another way: no spread into it, and no `ownerInChat` key outside the
+    // visitor chat, as an object a spread or `createElement` would pass.
+    expect(ownerInChatNotFromTheChat(sample(`${hook}const shellProps = { ownerInChat: true };\n<PublicShell {...shellProps} />`))).toEqual([
+      'sample.tsx: PublicShell takes a spread: {...shellProps}',
+      'sample.tsx: ownerInChat: true',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell\n  brand={brand}\n  composer={<div onInput={(e) => typed(e)}>{box}</div>}\n  {...rest}\n/>`))).toEqual([
+      'sample.tsx: PublicShell takes a spread: {...rest}',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample('createElement(PublicShell, { ...props, ownerInChat: enabled });'))).toEqual([
+      'sample.tsx: PublicShell made with createElement(PublicShell',
+      'sample.tsx: ownerInChat: enabled',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell brand={brand} composer={<Composer {...composerProps} />} ownerInChat={chat.ownerInChat} />`))).toEqual([]);
+    // Nor assigned to anything, or written as a quoted key.
+    expect(ownerInChatNotFromTheChat(sample('shellProps.ownerInChat = true;'))).toEqual(['sample.tsx: shellProps.ownerInChat = true']);
+    expect(ownerInChatNotFromTheChat(sample("shellProps['ownerInChat'] = enabled;"))).toEqual(["sample.tsx: shellProps['ownerInChat'] = enabled"]);
+    expect(ownerInChatNotFromTheChat(sample("const shellProps = { 'ownerInChat': true, \"ownerInChat\": joined };"))).toEqual([
+      "sample.tsx: 'ownerInChat': true",
+      'sample.tsx: "ownerInChat": joined',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample('if (shellProps.ownerInChat === chat.ownerInChat) show();'))).toEqual([]);
+    // Compound assignments are assignments too.
+    expect(ownerInChatNotFromTheChat(sample('chat.ownerInChat ||= true;'))).toEqual(['sample.tsx: chat.ownerInChat ||= true']);
+    expect(ownerInChatNotFromTheChat(sample('shellProps.ownerInChat ??= joined;'))).toEqual(['sample.tsx: shellProps.ownerInChat ??= joined']);
+    expect(ownerInChatNotFromTheChat(sample("shellProps['ownerInChat'] &&= enabled;"))).toEqual(["sample.tsx: shellProps['ownerInChat'] &&= enabled"]);
+    // PublicShell by another name is still PublicShell, in any file that names it, and so is one made
+    // with `createElement`, which takes its props whole.
+    const aliased: Source = { file: 'vision/Aliased.tsx', text: "import { PublicShell as Shell } from '../ds/index.ts';\nexport const Page = () => <Shell {...props} />;" };
+    expect(shellFiles([...sources, aliased]).map(({ file }) => file)).toContain('vision/Aliased.tsx');
+    expect(ownerInChatNotFromTheChat([aliased])).toEqual(['vision/Aliased.tsx: PublicShell takes a spread: {...props}']);
+    expect(ownerInChatNotFromTheChat(sample('const Shell = PublicShell;\nconst page = <Shell brand={brand} {...rest} />;'))).toEqual([
+      'sample.tsx: PublicShell takes a spread: {...rest}',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample("import * as ds from '../ds/index.ts';\nconst page = <ds.PublicShell {...props} />;"))).toEqual([
+      'sample.tsx: PublicShell takes a spread: {...props}',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample('const page = createElement(PublicShell, props);'))).toEqual(['sample.tsx: PublicShell made with createElement(PublicShell']);
+    expect(ownerInChatNotFromTheChat(sample("import { PublicShell as Shell } from '../ds/index.ts';\nconst page = React.createElement(Shell, { brand });"))).toEqual([
+      'sample.tsx: PublicShell made with createElement(Shell',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample("import { PublicShell as Shell } from '../ds/index.ts';\nconst page = <Shell brand={brand} ownerInChat={chat.ownerInChat} />;"))).toEqual([
+      "sample.tsx: chat doesn't come from useVisitorChat",
+      'sample.tsx: chat is declared or assigned elsewhere',
+    ]);
+    expect(ownerInChatNotFromTheChat(visitor)).toEqual([]);
+    // It is passed where it is meant to be, so the check can't pass by finding nothing.
+    expect(visitor.filter(({ text }) => /\bownerInChat=\{chat\.ownerInChat\}/.test(codeOf(text))).map(({ file }) => file)).toEqual(['public/PublicChat.tsx']);
+
+    // In the visitor chat, the value is `ownerInChatNow`'s, which reads the session's mode and only
+    // ANDs on what keeps it false.
+    const now = "export function ownerInChatNow({ session, state }: OwnerInChatFacts): boolean {\n  return session?.mode === 'owner' && !state.catchingUp;\n}\n";
+    const call = 'ownerInChatNow({\n      session: next.session,\n      state: next.state,\n      ready: next.status === \'ready\',\n    })';
+    expect(ownerInChatSources(`interface Snapshot { ownerInChat: boolean; }\nconst initial = { ownerInChat: false };\nthis.snapshot = { ...next, ownerInChat: ${call} };`, now)).toEqual([]);
+    expect(ownerInChatSources('({ ownerInChat: state.rows.some(joined), });', now)).toHaveLength(1);
+    expect(ownerInChatSources('({ ownerInChat: ownerInChatNow(facts) || joined, });', now)).toHaveLength(1);
+    // Exactly the call: nothing around it that could say yes on its own.
+    expect(ownerInChatSources('({ ownerInChat: enabled ? enabled : ownerInChatNow(facts), });', now)).toEqual([
+      'public/PublicChatProvider.tsx: ownerInChat: enabled ? enabled : ownerInChatNow(facts)',
+    ]);
+    expect(ownerInChatSources('({ ownerInChat: ready && ownerInChatNow(facts), });', now)).toHaveLength(1);
+    expect(ownerInChatSources('({ ownerInChat: ownerInChatNow({ session, state, ready: true }), });', now)).toHaveLength(1);
+    expect(ownerInChatSources('', now.replace("session?.mode === 'owner'", 'joined(state)'))).toHaveLength(1);
+    expect(ownerInChatSources('', now.replace('&& !state.catchingUp', '|| joined(state)'))).toHaveLength(1);
+    expect(ownerInChatSources('', now.replace("return session?.mode === 'owner'", "return enabled ? session?.mode === 'owner' : joined(state)"))).toHaveLength(1);
+
+    // In the visitor chat, only the open path (`openedSession`) and `followMode` set the session's
+    // mode, and `followMode` sets the owner's only for `owner_joined`. Every other session it keeps
+    // goes through a helper that can only lower the mode, and nothing else writes one.
+    const chatSample = (method: string, body: string) => `class VisitorChat {\n  private ${method}(ev: SseEvent): void {\n${body}\n  }\n}\n`;
+    const follow = "    const mode = ev.type === 'owner_joined' ? 'owner' : ev.type === 'message' && ev.author !== 'owner' ? 'ai' : null;\n    this.set({ session: { ...session, mode } });";
+    const opened = "    return { ...read, mode: read.mode === 'owner' && out ? 'ai' : read.mode };";
+    const fine = [
+      chatSample('followMode', follow),
+      chatSample('openedSession', opened),
+      chatSample('laterSession', '    return { ...next, mode: lowerOnly(this.snapshot.session?.mode ?? null, said) };'),
+      chatSample('open', '    if (gone) this.set({ session: this.laterSession(session, session.mode) });\n    else this.set({ session: this.openedSession(transcript) });'),
+      chatSample('checkCode', "    this.set(ok ? { verifyStatus: 'idle', session: this.laterRead(read.transcript, read.since) } : { verifyStatus: 'unreachable' });\n    this.set({ session: null, status: 'loading' });"),
+      chatSample('confirmMode', "    if (this.snapshot.session?.mode === 'owner') void this.read();\n    const mode: SessionMode | null = null;"),
+    ].join('');
+    expect(sessionModeWrites(fine)).toEqual([]);
+    expect(sessionModeWrites(chatSample('checkCode', "    this.set(state.verified ? { verifyStatus: 'idle', session: state } : { verifyStatus: 'failed' });"))).toEqual([
+      `${VISITOR_CHAT_FILE}: session: state`,
+    ]);
+    expect(sessionModeWrites(chatSample('open', '    this.set({ session });'))).toEqual([`${VISITOR_CHAT_FILE}: session (shorthand)`]);
+    expect(sessionModeWrites(chatSample('open', '    this.set({ session: gone ? this.laterSession(session, session.mode) : transcript.state });'))).toHaveLength(1);
+    expect(sessionModeWrites(chatSample('confirmMode', "    this.set({ session: this.laterSession({ ...read, mode: 'owner' }, null) });"))).toEqual([
+      `${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: mode:`,
+    ]);
+    expect(sessionModeWrites(chatSample('confirmMode', "    session.mode = 'owner';"))).toEqual([`${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: .mode =`]);
+    expect(sessionModeWrites(chatSample('confirmMode', "    session.mode ||= 'owner';"))).toEqual([`${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: .mode ||=`]);
+    expect(sessionModeWrites(chatSample('confirmMode', "    session['mode'] ??= 'owner';"))).toHaveLength(1);
+    expect(sessionModeWrites(chatSample('followMode', follow.replace("ev.type === 'owner_joined' ? 'owner'", "ev.type === 'owner_typing' ? 'owner'")))).toEqual([
+      `${VISITOR_CHAT_FILE}: followMode sets the owner's mode for something but owner_joined`,
+    ]);
+    expect(sessionModeWrites(chatSample('followMode', `${follow}\n    this.set({ session: { ...session, mode: 'owner' } });`))).toHaveLength(2);
+    const chat = visitor.find((s) => s.file === VISITOR_CHAT_FILE);
+    const reducer = visitor.find((s) => s.file === CHAT_REDUCER_FILE);
+    expect(chat, VISITOR_CHAT_FILE).toBeDefined();
+    expect(reducer, CHAT_REDUCER_FILE).toBeDefined();
+    expect(ownerInChatSources(chat?.text ?? '', reducer?.text ?? '')).toEqual([]);
+    expect(sessionModeWrites(chat?.text ?? '')).toEqual([]);
+    // The rules read the methods they name, so they can't pass by finding nothing.
+    for (const method of ['openedSession', 'followMode', 'laterSession', 'laterRead']) expect(methodBody(codeOf(chat?.text ?? ''), method), method).not.toBeNull();
+    expect(ownerInChatNodes(chat?.text ?? '').some((node) => ts.isPropertyAssignment(node) && ts.isCallExpression(node.initializer) && sameExpression(node.initializer.expression, 'ownerInChatNow')), 'the chat sets it from ownerInChatNow').toBe(true);
   });
 
   it('mark_tile_only_in_the_app_icon', () => {

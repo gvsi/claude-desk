@@ -225,11 +225,14 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
     await decide.set_state(ctx, row, "approved", kind="approval", summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer, "state": "approved"})
     await ctx.db.commit()
+    approved = await decide.decision_contract(ctx, row)
     execution = await execute.run_approved(ctx, row, checked=checked)
     final = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
         DecisionRow.decision_id == row.decision_id).execution_options(populate_existing=True)))).one()
+    if final.state == "refused_at_execution":
+        approved = None                   # T2 refused it after all: nothing ran, so it isn't shown as approved
     return ApprovalResult(decision=await decide.decision_contract(ctx, final, for_owner=True), execution=execution,
-                          card_diff=card_diff)
+                          card_diff=card_diff, approved=approved)
 
 
 async def cancel(ctx: KernelCtx, session_row: SessionRow, decision_id: str) -> Decision:

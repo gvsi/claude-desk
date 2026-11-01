@@ -36,17 +36,16 @@ import type {
   ToolName,
   ToolProfile,
 } from './contracts.ts';
+import type { Attempt as ApiAttempt, DeskSetup, DeskSummary } from './openapi.gen.ts';
 
 // Copy and Desks
 
-export interface DeskSummary {
-  desk_id: string;
-  slug: string;
-  name: string;
-  business_name: string;
-  hours: HoursWindow[];
-  answering: boolean;
-}
+/**
+ * One of the copy's Desks (`DeskSummary`), with its setup interview while that hasn't gone live
+ * (`DeskSetup`), or null: the API's own models, from its document. Answering is separate from
+ * setup: an owner can turn it on before setup finishes, and the Desk still names its setup.
+ */
+export type { DeskSetup, DeskSummary };
 
 /** The demo copy this browser's owner cookie names (copies, `me`, `start_over`). */
 export interface CopyOut {
@@ -80,7 +79,7 @@ export interface ConversationSummary {
   replayed?: boolean;
 }
 
-export type BriefingKind = 'blocked' | 'booking' | 'lead' | 'answer';
+export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
 
 /** One thing that happened since last night, as the API core's briefing lists it. */
 export interface BriefingItem {
@@ -91,13 +90,15 @@ export interface BriefingItem {
   session_id: string | null;
   /** As `ConversationSummary.display_name`. Untrusted. */
   display_name: string | null;
-  /** The `Attempt.ref_id` for `blocked`; the decision for a booking; the `lead_id`; the session for an answer. */
+  /** The refused decision for `turned_down` (its `Attempt.ref_id`); the decision for a booking; the `lead_id`; the session for an answer. */
   ref_id: string;
   /**
    * A refusal's or a booking's `reason_plain` (the kernel's owner text); a lead's note (untrusted, and
-   * it may hold the contact as typed); null for a blocked reply and for an answer.
+   * it may hold the contact as typed); null for an answer.
    */
   line: string | null;
+  /** Why a `turned_down` request was refused, as a closed code; null for the other kinds and for a refusal the API can't place. */
+  cause: RefusalCause | null;
 }
 
 /** "Since last night": from 18:00 yesterday in the business's time zone, to now. */
@@ -107,11 +108,12 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
-  blocked: number;
+  /** The requests the kernel refused. Claude's drafts the reply check stopped stay on Safety, out of the briefing. */
+  turned_down: number;
   /** The full list's length (`BriefingList.items`). */
   total: number;
   newest: {
-    blocked: BriefingItem | null;
+    turned_down: BriefingItem | null;
     booking: BriefingItem | null;
     /** The newer of the newest lead and the newest answer. */
     lead_or_answer: BriefingItem | null;
@@ -180,14 +182,23 @@ export interface Reports {
   needed_you: number;
 }
 
+/**
+ * A conversation handed to the owner: a visitor's call-back request (`callback`), or one the
+ * handoff card handed over in a chat (`card`), which promises no call back.
+ */
 export interface Handoff {
   handoff_id: string;
   session_id: string;
-  /** `<name> · <contact> · <reason>` as the visitor typed them. Untrusted. */
+  /**
+   * A call-back request's `<name> · <contact> · <reason>` as the visitor typed them; a card's, the
+   * Desk's own words ("The Desk handed this to you."). Untrusted.
+   */
   reason: string;
-  /** `<start>/<end>`, or null when the visitor named no open hour. */
+  /** `<start>/<end>`, or null when the visitor named no open hour. Always null for a card. */
   callback_window: string | null;
   status: string;
+  /** Optional until the API sends it (plan 02b); a handoff without one is a call-back request. */
+  kind?: 'callback' | 'card';
 }
 
 export interface NeedsYouSession {
@@ -205,7 +216,7 @@ interface NeedsYouBase {
 }
 
 /**
- * One held request or one open callback that waits for the owner. The API sends every field, the
+ * One held request or one open handoff that waits for the owner. The API sends every field, the
  * other alternative's as null (openapi.json), so code tells them apart with `!= null`.
  */
 export type NeedsYouItem =
@@ -288,6 +299,12 @@ export interface Triage {
   category: TriageCategory;
 }
 
+/**
+ * Why the kernel refused a request: a closed code from the API's own document, which the web holds
+ * the words for. A value the document adds is a compile error until the words are written.
+ */
+export type RefusalCause = NonNullable<ApiAttempt['cause']>;
+
 export interface Attempt {
   ref_id: string;
   kind: 'refused' | 'held' | 'reply_blocked';
@@ -298,6 +315,11 @@ export interface Attempt {
   /** Null until the API owner plan's triage task (plan 02b) writes one; screens check its shape before using it. */
   triage: Triage | null;
   ledger_seq: number;
+  /**
+   * Why a refused request was refused, or null: for a held request, a stopped draft, and a
+   * refusal the API can't place. The API sends it on every entry, and only a refused one may have one.
+   */
+  cause: RefusalCause | null;
 }
 
 /** `GET /api/health`. */
@@ -419,7 +441,13 @@ export interface RuleChatOut {
 
 // Setup
 
-export type SetupStep = 'questions' | 'tools' | 'rules' | 'situations' | 'safety_check' | 'preview' | 'live';
+/** Setup's steps, in the order an interview goes through them: it only ever moves forward, and `live` is the last. */
+export const SETUP_STEPS = ['questions', 'tools', 'rules', 'situations', 'safety_check', 'preview', 'live'] as const;
+
+export type SetupStep = (typeof SETUP_STEPS)[number];
+
+/** The steps a setup that hasn't gone live can be at, as the API's `DeskSetup` names them: every step but `live`. */
+export type UnfinishedSetupStep = DeskSetup['step'];
 
 /** The setup interview's seven questions (plan 02b Task 6, `QUESTION_KEYS`). */
 export type QuestionKey =
@@ -444,6 +472,11 @@ export interface SetupState {
   messages: SetupMessage[];
   /** Whether the owner let Claude read their memory and website; null until asked. */
   consent: boolean | null;
+  /**
+   * Derived from the stored transcript: Claude is working on the owner's last message with no
+   * reply yet. Absent means false on older APIs.
+   */
+  busy?: boolean;
   /** The question waiting for an answer; null before consent and after the last one. */
   question: QuestionKey | null;
 }
@@ -597,6 +630,8 @@ export interface ToolBody {
 export interface KnowledgeBody {
   item: KnowledgeItem;
 }
+
+export type { KnowledgeRow } from './openapi.gen.ts';
 
 export interface TextBody {
   text: string;

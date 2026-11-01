@@ -84,6 +84,20 @@
   margin-left: calc(-1 * var(--space-6));
 }
 
+/* On a touch screen the buttons' hit areas reach halfway across the gaps between them and the text
+   box, and no further, so a tap between two controls lands on the nearer one. */
+@media (pointer: coarse) {
+  /* Only adjacent buttons share the 4 px gap; a sole Send keeps its full square. */
+  .cd-composer__tools > .cd-icon-button:has(+ .cd-icon-button),
+  .cd-composer__tools > .cd-icon-button + .cd-icon-button {
+    --cd-touch-reach-inline: calc(var(--space-4) / 2);
+  }
+
+  .cd-composer__box--inline > .cd-icon-button {
+    --cd-touch-reach-inline: calc(var(--space-8) / 2);
+  }
+}
+
 .cd-composer__helper {
   flex: 1 1 auto;
   min-width: 0;

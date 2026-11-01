@@ -8,12 +8,14 @@ export interface TextLinkProps {
   children: ReactNode;
   /** Leaves the app: opens a new tab with `rel="noopener noreferrer"`. */
   external?: boolean;
+  /** Inside a sentence: only the words take taps, with no enlarged touch hit area. */
+  runningText?: boolean;
 }
 
-export function TextLink({ href, children, external = false }: TextLinkProps) {
+export function TextLink({ href, children, external = false, runningText = false }: TextLinkProps) {
   return (
     <a
-      className="cd-text-link"
+      className={`cd-text-link${runningText ? ' cd-text-link--running-text' : ''}`}
       href={href}
       {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
     >

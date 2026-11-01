@@ -4,12 +4,15 @@
  * then a scripted interview of seven questions, the money limit among them. Its tools step lists
  * the new Desk's tools and connects the mock payments server; its rules are drafted from the
  * answers at the answered money limit, tried on real situations and on a safety check, and confirmed
- * with Answering still off; going live turns Answering on. The interviews are kept per copy beside
- * its world, so a start over leaves none behind.
+ * with Answering still off; going live turns Answering on. Until then the owner's Desks name the
+ * interview and its step. The interviews are kept per copy beside its world, so a start over leaves
+ * none behind.
  */
 import type { Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   BusinessOut,
+  DeskSetup,
+  DeskSummary,
   PaymentLinkOut,
   PolicyVersionOut,
   QuestionKey,
@@ -25,6 +28,7 @@ import type {
   ToolRow,
   WentLive,
 } from '../api/views.ts';
+import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
@@ -81,6 +85,9 @@ interface Interview {
   holdNext: boolean;
   /** An answer turn still running: the API refuses another answer until it commits. */
   running: { text: string } | null;
+  /** Consent runs in the background when a test holds it; its result lands on a later GET. */
+  holdConsent: boolean;
+  consentResult: 'landed' | 'failed' | null;
 }
 
 const INTERVIEWS = new WeakMap<MockWorld, Map<string, Interview>>();
@@ -132,6 +139,8 @@ const CALLED = /\b(?:called|named)\s+([A-ZÀ-Ý0-9][^,]*)/;
 const MY_SHOP_IS = new RegExp(String.raw`\b(?:[Mm]y|[Oo]ur)\s+${SHOP}\s+is\s+(?:(?:called|named)\s+)?([A-ZÀ-Ý0-9][^,]*)`);
 /** A sentence that starts "X is my shop" (or "our business", "my café", "es mi negocio", …). */
 const IS_MY = new RegExp(String.raw`^([A-ZÀ-Ý0-9].*?)\s+(?:is\s+(?:my|our)\s+${SHOP}|es\s+(?:mi|nuestr[oa])\s+${TIENDA})(?![A-Za-zÀ-ÿ])`);
+/** A business followed by its work: "X is a salon", "X fixes leaks", and the Spanish equivalents. */
+const DESCRIBES = /^([A-ZÀ-Ý0-9].*?)\s+(?:is\s+a|fixes|manages|es\s+una?|arregla|administra)\s/;
 
 /** A greeting that can open an introduction ("Hi, I'm Ana", "Hola, soy Ana"). */
 const GREETING = String.raw`(?:[Hh]i|[Hh]ello|[Hh]ey|[Hh]ola)\b[\s,]*`;
@@ -179,7 +188,11 @@ const PHRASES: readonly [phrase: RegExp, end: RegExp][] = [
 
 /** The name a sentence gives the business with a phrase naming it, or null. */
 function namedIn(sentence: string): string | null {
-  const names = [...PHRASES.map(([phrase, end]) => phrase.exec(sentence)?.[1]?.split(end)[0]), IS_MY.exec(sentence)?.[1]];
+  const names = [
+    ...PHRASES.map(([phrase, end]) => phrase.exec(sentence)?.[1]?.split(end)[0]),
+    IS_MY.exec(sentence)?.[1],
+    DESCRIBES.exec(sentence)?.[1],
+  ];
   return names.find((name): name is string => name !== undefined && !PRONOUN.test(name) && !SCHEDULE.test(name)) ?? null;
 }
 
@@ -219,10 +232,10 @@ function nameAsKept(name: string): string | null {
   return kept === '' ? null : kept;
 }
 
-/** The description's sentences, each with its closing punctuation. */
+/** The description's sentences; "Co. is a" and "Co. es un/una" keep the business's abbreviation. */
 const sentencesOf = (description: string): string[] =>
   description
-    .split(/(?<=[.!?])\s+|\n+/)
+    .split(/(?<=[.!?])(?<!\bCo\.)\s+|(?<=\bCo\.)(?!\s+(?:is\s+a|es\s+una?)\s)\s+|\n+/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence !== '');
 /** A sentence without its closing punctuation. */
@@ -472,9 +485,8 @@ function safetyCheckFor(ownerName: string | null): SafetyCheck {
   return { rows, blocked: rows.filter((r) => r.blocked).length, total: rows.length, seconds: 1.4 };
 }
 
-/** The steps in order: an interview only moves forward. */
-const STEP_ORDER: readonly SetupState['step'][] = ['questions', 'tools', 'rules', 'situations', 'safety_check', 'preview', 'live'];
-const atLeast = (step: SetupState['step'], than: SetupState['step']) => STEP_ORDER.indexOf(step) >= STEP_ORDER.indexOf(than);
+/** Whether `step` is `than` or past it, in setup's order (`SETUP_STEPS`): an interview only moves forward. */
+const atLeast = (step: SetupState['step'], than: SetupState['step']) => SETUP_STEPS.indexOf(step) >= SETUP_STEPS.indexOf(than);
 
 function moveTo(interview: Interview, step: SetupState['step']): void {
   if (!atLeast(interview.state.step, step)) interview.state.step = step;
@@ -482,6 +494,28 @@ function moveTo(interview: Interview, step: SetupState['step']): void {
 
 function say(interview: Interview, role: SetupMessage['role'], text: string): void {
   interview.state.messages.push({ role, text });
+}
+
+/** The reads and first question after the owner gives (or declines) consent. */
+function completeConsent(interview: Interview): void {
+  if (interview.state.consent) say(interview, 'tool_label', MEMORY_LABEL);
+  const first = SETUP_QUESTIONS[0];
+  if (first) {
+    interview.state.question = first.key;
+    say(interview, 'claude', first.text);
+  }
+  interview.state.busy = false;
+}
+
+/** For tests: consent answers 202 until the returned function lets a later GET land its result. */
+export function holdNextConsent(world: MockWorld, interviewId: string): (outcome: 'landed' | 'failed') => void {
+  const interview = interviewsOf(world).get(interviewId);
+  if (!interview) throw new Error(`no setup interview ${interviewId}`);
+  interview.holdConsent = true;
+  return (outcome) => {
+    if (!interview.state.busy) throw new Error('no consent turn is running');
+    interview.consentResult = outcome;
+  };
 }
 
 /**
@@ -588,6 +622,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
       slug: desk.summary.slug,
       step: 'questions',
       consent: null,
+      busy: false,
       question: null,
       messages: [
         {
@@ -604,6 +639,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     draftVersion: null,
     holdNext: false,
     running: null,
+    holdConsent: false,
+    consentResult: null,
   };
   interviewsOf(world).set(interview.state.interview_id, interview);
   return interview;
@@ -687,7 +724,18 @@ export const SETUP_ROUTES: ServedRoutes = {
   },
   setup(sv, req) {
     const found = interviewOf(sv, req);
-    return isFailure(found) ? found : ok(stateOf(found.interview));
+    if (isFailure(found)) return found;
+    const { interview } = found;
+    if (interview.consentResult === 'landed') {
+      interview.consentResult = null;
+      completeConsent(interview);
+    } else if (interview.consentResult === 'failed') {
+      interview.consentResult = null;
+      interview.state.busy = false;
+      interview.state.consent = null;
+      interview.state.messages.pop();
+    }
+    return ok(stateOf(interview));
   },
   setupConsent(sv, req) {
     const found = interviewOf(sv, req);
@@ -695,16 +743,17 @@ export const SETUP_ROUTES: ServedRoutes = {
     const allow = isRecord(req.body) ? req.body.allow : undefined;
     if (req.malformed || typeof allow !== 'boolean') return INVALID;
     const { interview } = found;
+    if (interview.state.busy) return { status: 202, body: stateOf(interview) };
     if (interview.state.consent != null) return CONFLICT;
     interview.state.consent = allow;
     say(interview, 'owner', allow ? 'Yes, use it' : "No, I'll type it");
-    // With consent, the memory read runs as the owner's own tool; without it, nothing is ever read.
-    if (allow) say(interview, 'tool_label', MEMORY_LABEL);
-    const first = SETUP_QUESTIONS[0];
-    if (first) {
-      interview.state.question = first.key;
-      say(interview, 'claude', first.text);
+    if (interview.holdConsent) {
+      interview.holdConsent = false;
+      interview.state.busy = true;
+      return { status: 202, body: stateOf(interview) };
     }
+    // Without consent, nothing is ever read.
+    completeConsent(interview);
     return ok(stateOf(interview));
   },
   setupAnswer(sv, req) {
@@ -833,8 +882,24 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
 }
 
 /**
+ * A Desk's setup interview while it hasn't gone live, as the owner's Desks name it (issue 233): null
+ * for a Desk setup didn't make, and once its interview is live.
+ */
+function unfinishedSetup(world: MockWorld, deskId: string): DeskSetup | null {
+  const interview = interviewForDesk(world, deskId);
+  if (!interview || interview.state.step === 'live') return null;
+  return { interview_id: interview.state.interview_id, step: interview.state.step };
+}
+
+/** The copy's Desks as the copy (`me`) lists them: each Desk setup made names its setup until it goes live. */
+export function withSetupDesks(world: MockWorld, desks: DeskSummary[]): DeskSummary[] {
+  return desks.map((desk) => ({ ...desk, setup: unfinishedSetup(world, desk.desk_id) }));
+}
+
+/**
  * The copy's businesses as the owner reads them: each Desk setup made is a business of its own,
- * with its owner, as the API makes one at the start of setup; the others stay as they are.
+ * with its owner, as the API makes one at the start of setup, naming its setup until it goes live;
+ * the others stay as they are.
  */
 export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[]): BusinessOut[] {
   const made = [...interviewsOf(world).values()];
@@ -849,7 +914,7 @@ export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[])
         name: interview.business,
         owner_display_name: interview.ownerName ?? interview.business,
         timezone: interview.timezone,
-        desks: [{ ...desk.summary }],
+        desks: [{ ...desk.summary, setup: unfinishedSetup(world, desk.summary.desk_id) }],
       },
     ];
   });

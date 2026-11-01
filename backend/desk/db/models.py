@@ -551,8 +551,11 @@ class PaymentLink(Base):
 
 
 class Handoff(Base):
-    """A callback a visitor asked for: one per `native.request_callback` action, `open` until the
-    owner marks it `done` (01b_2_handoffs)."""
+    """A conversation handed to the owner, `open` until the owner marks it `done`: one the handoff
+    card opened, or a callback a visitor asked for (`native.request_callback`, 01b_2_handoffs),
+    which first closes the session's open ones. A row's kind never changes. The kernel keeps one
+    open handoff per session, of either kind, under the session row, not by a constraint, so rows
+    from before may hold several (01b_2b_handoff_kind)."""
 
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}
@@ -563,9 +566,11 @@ class Handoff(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     callback_window: Mapped[str | None] = mapped_column(Text)    # ISO 8601 "<start>/<end>", or None
     status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
-    action_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)                      # "callback" or "card"; the kernel names it
+    action_id: Mapped[str] = mapped_column(Text)                 # a call-back's action; a card's own handoff_id
     window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null without a window
     window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null on rows from before
 
 
 class NotificationPref(Base):

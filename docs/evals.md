@@ -6,7 +6,7 @@ Claude Desk is tested in two tiers. Tier 1 checks the kernel's boundary cases on
 
 **Tier 1** runs on every commit with no model calls (`make evals-tier1`). It covers the golden `/decide` table, reply-check fixtures in English and Spanish, a scan of everything that reaches a visitor's screen, forged requests and session tokens, cross-copy access, stale and replayed approvals, verification limits, restart races and ledger verification. Its cases are in [`evals/tier1/`](../evals/tier1/).
 
-**Tier 2** runs Claude for real. A simulated stranger or agent drives the real API and kernel through 51 attack scenarios in eight categories: money, verification, private data, commitments, injection, agents, disclosure and language. A simulated customer works through 31 legitimate tasks in English and Spanish, such as getting a quote, booking a visit, paying a deposit, fetching a document, asking for a callback or getting advice when a pipe bursts.
+**Tier 2** runs Claude for real. A simulated stranger or agent drives the real API and kernel through 50 attack scenarios in eight categories: money, verification, private data, commitments, injection, agents, disclosure and language. A simulated customer works through 31 legitimate tasks in English and Spanish, such as getting a quote, booking a visit, paying a deposit, fetching a document, asking for a callback or getting advice when a pipe bursts.
 
 Each scenario is in one of two splits, listed in [`evals/splits.yaml`](../evals/splits.yaml):
 
@@ -90,7 +90,7 @@ The repo's own gate uses other sizes. The bar comes from a three-run held-out pa
 
 Tier 1 runs in CI on every push. Tier 2 runs locally, with the developer's model credentials, because CI holds no Anthropic key.
 
-Some changes need a tier 2 results file, `evals/results/<inputs>.json`, committed with them. These are changes to the kernel (with the shared contracts it decides over and the mock payment server behind its money tools), the prompts, the policies (setup's rule card templates, the presets and the money cap's cards), the model settings, and the tier 2 scenarios and judges (the scenarios, splits, the plans they wait for, the verdict and the oracles). Other changes rely on tier 1 and CI. `<inputs>` is a hash of those paths at the commit, which `make evals-key` prints. A scenario that needs a part of the product that hasn't landed yet is listed as pending, with no rows.
+Some changes need a tier 2 results file, `evals/results/<inputs>.json`, committed with them. These are changes to the kernel (with the shared contracts it decides over, the violations a rewrite can fix and the mock payment server behind its money tools), the prompts, the policies (setup's rule card templates, the presets and the money cap's cards), the model settings, and the tier 2 scenarios and judges (the scenarios, splits, the plans they wait for, the verdict and the oracles). Other changes rely on tier 1 and CI. `<inputs>` is a hash of those paths at the commit, which `make evals-key` prints. A scenario that needs a part of the product that hasn't landed yet is listed as pending, with no rows.
 
 On pull requests, CI runs `make evals-results-check`. It:
 
@@ -102,7 +102,7 @@ On pull requests, CI runs `make evals-results-check`. It:
 
 Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; it refuses when both the PR and `origin/main` changed gated inputs, recorded rates or results files since their merge base. Rebase onto `origin/main`, regenerate results for the combined inputs (`make evals-tier2 MAX_USD=0` while every scenario is pending; a pass that runs scenarios spends money and needs the owner's go first), remove the stale file, push and wait for green before checking readiness again and merging.
 
-On pushes to `main`, CI also runs the results check against `HEAD~1`, the previous main commit, to detect merged gated inputs without matching results.
+On pushes to `main` and manual runs, CI checks the head against the repository's root commit to require passing results for the head's gated inputs, so a gap left by a merge whose run was cancelled still fails the next run.
 
 Its limit, said plainly: CI can recompute pass or fail from the committed rows, but it can't prove the rows came from a real run, since it holds no model credentials. The results files are self-attested.
 

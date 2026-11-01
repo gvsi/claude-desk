@@ -109,8 +109,10 @@ function holdAtRest(): void {
 }
 
 export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBasicsOptions): Promise<void> {
+  await vi.waitFor(() => expect(root.ownerDocument.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await nextFrames();
   await animationsSettled(root);
-  const footers = root.querySelectorAll('[data-ds="concept-footer"]');
+  const footers = [...root.querySelectorAll('[data-ds="concept-footer"]')].filter((footer) => !footer.closest('.cd-skeleton-screen__layer'));
   expect(footers, 'one concept footer').toHaveLength(1);
   expect(footers[0]?.textContent?.replace(/\s+/g, ' ').trim()).toBe(CONCEPT_FOOTER_TEXT);
   assertCleanCopy(root);

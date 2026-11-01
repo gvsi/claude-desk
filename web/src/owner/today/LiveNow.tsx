@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type Ref } from 'react';
 
 import type { ConversationSummary } from '../../api/views.ts';
 import { ConversationListItem, SectionHeader } from '../../ds/index.ts';
@@ -9,18 +9,20 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 export interface LiveNowProps {
   /** Today's live conversations: activity in the last five minutes, newest first. */
   live: readonly ConversationSummary[];
+  /** The section, which takes focus when dismissing Needs you's last request takes Needs you away. */
+  sectionRef?: Ref<HTMLElement>;
 }
 
 /**
  * Today's "Live now": each conversation with activity in the last five minutes, a link to watch
  * it. The owner's own chat as a customer is among them, as "Your preview".
  */
-export function LiveNow({ live }: LiveNowProps) {
+export function LiveNow({ live, sectionRef }: LiveNowProps) {
   const { business, desk } = useOwnerDesk();
   const titleId = useId();
   const n = live.length;
   return (
-    <section className="cd-today__section" aria-labelledby={titleId}>
+    <section ref={sectionRef} className="cd-today__section" aria-labelledby={titleId} tabIndex={-1}>
       <SectionHeader
         id={titleId}
         title="Live now"

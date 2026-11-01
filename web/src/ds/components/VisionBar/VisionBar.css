@@ -1,6 +1,6 @@
 /* VisionBar: a 40 px line across the top of a vision page, on the panel with a hairline under it,
    as every vision board draws it: the Vision pill, its line 12 px after it in secondary meta, and
-   "Back to your Desk" at the right, 24 px in. On a phone the gutters are 16 px and the line wraps,
+   "Back to Vision" at the right, 24 px in. On a phone the gutters are 16 px and the line wraps,
    the link dropping under it; the bar grows with them. */
 
 .cd-vision-bar {

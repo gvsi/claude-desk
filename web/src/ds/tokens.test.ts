@@ -486,9 +486,22 @@ describe('design tokens', () => {
     expect(tokenValue('size-agents-column')).toBe('760px');
   });
 
+  test('touch_target_is_a_token', () => {
+    // The least a finger needs in each dimension on a touch screen. Controls drawn smaller keep
+    // their look and reach it with an unseen hit area under a coarse pointer.
+    expect(tokenValue('size-touch')).toBe('44px');
+  });
+
   test('settings_measures_are_tokens', () => {
     // Settings' section links, 200 px wide beside the content, as the signed Settings boards draw them.
     expect(tokenValue('size-sub-nav')).toBe('200px');
+  });
+
+  test('skeleton_band_is_a_token', () => {
+    // The one band of light that sweeps a loading page's shapes, 900 px wide, as the signed skeleton
+    // boards draw it. Its loop is the writing indicator's, so it adds no motion token.
+    expect(tokenValue('size-skeleton-band')).toBe('900px');
+    expect(tokens.motion.tokens.map((t) => t.name).filter((name) => name.includes('skeleton'))).toEqual([]);
   });
 
   test('every_color_token_is_classified', () => {

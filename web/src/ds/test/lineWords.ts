@@ -1,14 +1,15 @@
 /**
  * The words of an element's text, grouped by the line the browser set each on, top to bottom, so a
  * test can read a title's wrapping word by word: whether "live" sits alone on the last line. It
- * comes from the layout (each word's own boxes), never from counting characters. A word is a run of
- * non-space characters; one split across elements ("Bay<b>view</b>") counts once on its line. A word
- * the browser breaks across lines (`overflow-wrap: anywhere`) is read on every line it takes, as the
- * part drawn there, so the lines read back are the lines drawn. Text the browser draws nowhere
+ * comes from the layout (each character's own box), never from counting characters. A word is a run
+ * of non-space characters; one split across elements ("Bay<b>view</b>") counts once on its line. A
+ * word the browser breaks across lines (`overflow-wrap: anywhere`) is read on every line it takes,
+ * as the part drawn there, so the lines read back are the lines drawn. Text the browser draws nowhere
  * (`display: none`) is left out.
  *
- * A box joins a line when its vertical middle falls inside that line's top and bottom, which grow to
- * hold every box on it, so words of different sizes on one line stay on it.
+ * Every box is collected first, then two boxes are on one line when the middle of either falls
+ * inside the other's top and bottom, and so are boxes linked through others. The order the boxes
+ * come in doesn't matter, so words of any sizes on one line stay on it, whichever comes first.
  */
 export function lineWords(element: Element): string[][] {
   const doc = element.ownerDocument;
@@ -34,55 +35,70 @@ export function lineWords(element: Element): string[][] {
     throw new Error(`lineWords: no text at ${offset}`);
   };
 
-  /** The boxes the browser draws the text from `from` to `to` in, leaving out empty ones. */
-  const boxesOf = (from: number, to: number): DOMRect[] => {
+  /** The first box the browser draws the text from `from` to `to` in, leaving out empty ones. */
+  const boxOf = (from: number, to: number): DOMRect | undefined => {
     const range = doc.createRange();
     range.setStart(...point(from, false));
     range.setEnd(...point(to, true));
-    return [...range.getClientRects()].filter((box) => box.width > 0 && box.height > 0);
+    return [...range.getClientRects()].find((box) => box.width > 0 && box.height > 0);
   };
 
-  type Line = { top: number; bottom: number; words: string[] };
-  const lines: Line[] = [];
-  /** The line a box sits on: the one its vertical middle falls in, grown to hold it, or a new one. */
-  const lineOf = (box: DOMRect): Line => {
-    const middle = (box.top + box.bottom) / 2;
-    const line = lines.find((at) => at.top <= middle && middle <= at.bottom);
-    if (line === undefined) {
-      const added = { top: box.top, bottom: box.bottom, words: [] };
-      lines.push(added);
-      return added;
-    }
-    line.top = Math.min(line.top, box.top);
-    line.bottom = Math.max(line.bottom, box.bottom);
-    return line;
-  };
-
+  // Each word, as its characters (graphemes) and the box each is drawn in, if any.
+  type Piece = { text: string; box: DOMRect | undefined };
   const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-  for (const match of text.matchAll(/\S+/g)) {
-    const word = match[0];
-    const boxes = boxesOf(match.index, match.index + word.length);
-    const on = new Set(boxes.map(lineOf));
-    if (on.size === 1) {
-      [...on][0]?.words.push(word);
-      continue;
+  const words: Piece[][] = [...text.matchAll(/\S+/g)].map((match) =>
+    [...graphemes.segment(match[0])].map(({ segment, index }) => ({
+      text: segment,
+      box: boxOf(match.index + index, match.index + index + segment.length),
+    })),
+  );
+
+  // The lines: the boxes grouped by vertical overlap, whatever order they come in.
+  const boxes = words.flat().flatMap((piece) => (piece.box === undefined ? [] : [piece.box]));
+  const parent = boxes.map((_, at) => at);
+  const root = (at: number): number => {
+    let top = at;
+    while (parent[top] !== top) top = parent[top] as number;
+    parent[at] = top;
+    return top;
+  };
+  /** Whether `inner`'s vertical middle falls inside `outer`'s top and bottom. */
+  const holds = (outer: DOMRect, inner: DOMRect): boolean => {
+    const middle = (inner.top + inner.bottom) / 2;
+    return outer.top <= middle && middle <= outer.bottom;
+  };
+  for (let a = 0; a < boxes.length; a += 1) {
+    for (let b = a + 1; b < boxes.length; b += 1) {
+      const [boxA, boxB] = [boxes[a] as DOMRect, boxes[b] as DOMRect];
+      if (holds(boxA, boxB) || holds(boxB, boxA)) parent[root(a)] = root(b);
     }
-    if (on.size === 0) continue;
-    // Broken across lines: each character goes to the line its box is on, and the run of them on one
-    // line is the part read there. A character with no box of its own stays with its neighbours.
+  }
+  type Line = { top: number; words: string[] };
+  const lines = new Map<number, Line>();
+  const lineOf = new Map<DOMRect, Line>();
+  boxes.forEach((box, at) => {
+    const key = root(at);
+    const line = lines.get(key) ?? { top: box.top, words: [] };
+    line.top = Math.min(line.top, box.top);
+    lines.set(key, line);
+    lineOf.set(box, line);
+  });
+
+  // Each word goes to its line in the text's order. A word on more than one line goes as its parts,
+  // a run of characters on each, and a character with no box of its own stays with its neighbours.
+  for (const pieces of words) {
     let part = '';
     let partLine: Line | undefined;
-    for (const { segment, index } of graphemes.segment(word)) {
-      const box = boxesOf(match.index + index, match.index + index + segment.length)[0];
-      const line = box === undefined ? partLine : lineOf(box);
+    for (const piece of pieces) {
+      const line = piece.box === undefined ? partLine : lineOf.get(piece.box);
       if (partLine !== undefined && line !== partLine) {
         partLine.words.push(part);
         part = '';
       }
       partLine = line;
-      part += segment;
+      part += piece.text;
     }
-    if (part !== '') partLine?.words.push(part);
+    if (partLine !== undefined) partLine.words.push(part);
   }
-  return lines.sort((a, b) => a.top - b.top).map((line) => line.words);
+  return [...lines.values()].sort((a, b) => a.top - b.top).map((line) => line.words);
 }

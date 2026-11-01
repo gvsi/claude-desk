@@ -1003,6 +1003,11 @@
   color: var(--text-secondary);
 }
 
+.cd-about-meta__links {
+  display: grid;
+  gap: var(--space-8);
+}
+
 /* The article: the document in serif, its headings in sans. Only the article's own blocks: a figure inside
    it lays out its paragraphs and lists itself. */
 

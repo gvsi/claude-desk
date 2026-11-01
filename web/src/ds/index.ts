@@ -43,6 +43,14 @@ export {
 export { EmptyState, type EmptyStateProps } from './components/EmptyState/EmptyState.tsx';
 export { DisclosureLine, type DisclosureLineProps } from './components/DisclosureLine/DisclosureLine.tsx';
 export { LoadingLine, type LoadingLineProps } from './components/LoadingLine/LoadingLine.tsx';
+export {
+  Skeleton,
+  SkeletonCard,
+  type SkeletonCardProps,
+  type SkeletonProps,
+  type SkeletonText,
+} from './components/Skeleton/Skeleton.tsx';
+export { SKELETON_DELAY_MS, SkeletonScreen, type SkeletonScreenProps } from './components/Skeleton/SkeletonScreen.tsx';
 
 // Controls
 export { Switch, type SwitchProps } from './components/Switch/Switch.tsx';
@@ -85,6 +93,8 @@ export {
   type PublicShellScrollerDetail,
 } from './components/PublicShell/PublicShell.tsx';
 export { PublicBrandHeader, type PublicBrandHeaderProps } from './components/PublicShell/PublicBrandHeader.tsx';
+export { PublicShellSkeleton } from './components/PublicShell/PublicShellSkeleton.tsx';
+export { PublicBrandHeaderSkeleton } from './components/PublicShell/PublicBrandHeaderSkeleton.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
 // Vision pages
@@ -262,6 +272,7 @@ export {
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
 export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
 export { AskClaudePanel, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+export { clickedControl } from './components/AskClaudePanel/clickedControl.ts';
 
 // The preset menu and the payment limit
 export { MoneyLimit, type MoneyLimitProps } from './components/MoneyLimit/MoneyLimit.tsx';
@@ -316,3 +327,7 @@ export {
 
 // Icons
 export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from './icons/index.tsx';
+
+export { SidebarSkeleton } from './components/Sidebar/SidebarSkeleton.tsx';
+export { ReviewerBarSkeleton } from './components/ReviewerBar/ReviewerBarSkeleton.tsx';
+export { PageHeaderSkeleton, type PageHeaderSkeletonProps } from './components/PageHeader/PageHeaderSkeleton.tsx';

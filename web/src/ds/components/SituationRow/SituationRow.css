@@ -1,4 +1,4 @@
-/* SituationRow: a hairline over each row, padded 14 px top and bottom. The situation at the left,
+/* SituationRow: hairlines between rows, padded 14 px top and bottom. The situation at the left,
    the outcome and its reason in a 300 px column at the right, both from the top. Narrow, the
    outcome drops under who is asking. A live row lands motion-stagger after the one before it. */
 
@@ -7,6 +7,9 @@
   box-sizing: border-box;
   min-width: 0;
   padding: var(--space-14) 0;
+}
+
+li + li > .cd-situation-row {
   border-top: 1px solid var(--line-hairline);
 }
 

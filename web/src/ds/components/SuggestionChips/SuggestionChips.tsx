@@ -5,14 +5,13 @@ import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 
 import './SuggestionChips.css';
 
-/** The most suggestions a row shows. */
-const MAX_SUGGESTIONS = 3;
-
 export interface SuggestionChipsProps {
   /** The group's name, read by screen readers: "Suggestions". */
   label: string;
-  /** Things to ask, in the person's words. Only the first three show. */
+  /** Things to ask, in the person's words. At most `max` show (three by default). */
   suggestions: readonly string[];
+  /** The most suggestions shown, three by default. Only setup's start step raises it, to four starters. */
+  max?: number;
   /** Called with the picked suggestion's words. */
   onPick: (suggestion: string) => void;
   /**
@@ -28,8 +27,8 @@ export interface SuggestionChipsProps {
   disabled?: boolean;
 }
 
-/** A row of at most three suggestion chips, each a thing to ask, handed to the screen when picked. */
-export function SuggestionChips({ label, suggestions, onPick, inertSuggestions = false, disabled = false }: SuggestionChipsProps) {
+/** A row of at most `max` suggestion chips (three by default), handed to the screen when picked. */
+export function SuggestionChips({ label, suggestions, max = 3, onPick, inertSuggestions = false, disabled = false }: SuggestionChipsProps) {
   const [inertPressed, setInertPressed] = useState(false);
   const lineRef = useRef<HTMLParagraphElement>(null);
   // The chips can end a scroll region, as they end the conversation on a public page, so the line
@@ -48,7 +47,7 @@ export function SuggestionChips({ label, suggestions, onPick, inertSuggestions =
   };
   const group = (
     <div role="group" aria-label={label} className="cd-suggestion-chips">
-      {suggestions.slice(0, MAX_SUGGESTIONS).map((suggestion) => (
+      {suggestions.slice(0, max).map((suggestion) => (
         <Chip key={suggestion} disabled={disabled} onClick={() => pick(suggestion)}>
           {suggestion}
         </Chip>

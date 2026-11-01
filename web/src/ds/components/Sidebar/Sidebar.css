@@ -26,6 +26,12 @@
   padding: var(--space-2) var(--space-8) var(--space-12);
 }
 
+.cd-sidebar__skeleton-wordmark {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
 .cd-sidebar__ellipsis {
   flex: 1 1 auto;
   min-width: 0;

@@ -80,6 +80,7 @@
   --size-margin: 220px;
   --size-control: 32px;
   --size-control-main: 40px;
+  --size-touch: 44px;
   --size-nav-row: 36px;
   --size-icon: 20px;
   --size-dot: 6px;
@@ -97,6 +98,7 @@
   --size-recent-when: 120px;
   --size-sub-nav: 200px;
   --size-agents-column: 760px;
+  --size-skeleton-band: 900px;
   --motion-instant: 60ms;
   --motion-fast: 120ms;
   --motion-base: 200ms;

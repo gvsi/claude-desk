@@ -3,12 +3,12 @@
  * intro dialog, which draws Today itself from it. It holds the Rivera seed as a new copy opens on
  * it: the business and its Main line Desk, Alex Kim's assistant's chat (a visiting agent's quote and
  * deposit, about 40 minutes before), the seeded hold (a visitor not on record asking for 15% off, 12
- * minutes before), Dana's chat (live, booked, with Maria's whisper) and the reply the check stopped,
- * the briefing and the last 7 days they make, and the hold's alert in the Demo inbox. The held
- * request and the names come from the design system's Rivera fixtures. Each part of the seed is
- * dated back from `now` as the seed dates it, and counted on its own day on the business's clock, so
- * just after midnight what happened before it is yesterday's. Nothing here is read from the API: no
- * copy exists yet.
+ * minutes before) with the reply the check stopped (on Safety, so in no read here), Dana's chat
+ * (live, booked, with Maria's whisper), the briefing and the last 7 days they make, and the hold's
+ * alert in the Demo inbox. The held request and the names come from the design system's Rivera
+ * fixtures. Each part of the seed is dated back from `now` as the seed dates it, and counted on its
+ * own day on the business's clock, so just after midnight what happened before it is yesterday's.
+ * Nothing here is read from the API: no copy exists yet.
  */
 import type { QueryKey } from '@tanstack/react-query';
 
@@ -29,10 +29,9 @@ const SEEDED = {
   /** Alex Kim's assistant's two messages, 20 s apart from its chat's start 40 minutes before, and Claude's last answer. */
   agentMessages: [39 * MINUTE + 40_000, 39 * MINUTE],
   agentAnswered: 38 * MINUTE + 40_000,
-  /** The held visitor's message, its hold (when the owner's alert came too), and the reply the check stopped. */
+  /** The held visitor's message, and its hold (when the owner's alert came too). */
   heldMessage: 12 * MINUTE,
   held: 12 * MINUTE - 150,
-  stoppedReply: 12 * MINUTE - 450,
   /** Dana's three messages, the booking in her last turn, and that turn's end. */
   danaMessages: [5 * MINUTE, 2 * MINUTE + 59_400, 38_800],
   booked: 38_650,
@@ -95,6 +94,7 @@ export function stillToday(now: Date): StillToday {
     business_name: rivera.business.name,
     hours: [],
     answering: true,
+    setup: null,
   };
   const business: BusinessOut = {
     business_id: 'preview-business',
@@ -127,14 +127,23 @@ export function stillToday(now: Date): StillToday {
       conversations: 3,
       bookings: 1,
       leads: 0,
-      blocked: 1,
-      total: 3,
+      // The seed refused nothing. The reply the check stopped in the held visitor's chat stays on
+      // Safety, and a chat with a hold isn't one Claude answered.
+      turned_down: 0,
+      total: 2,
       newest: {
-        // The reply the check stopped in the held visitor's chat: a price in Claude's own words.
-        blocked: { kind: 'blocked', at: iso(SEEDED.stoppedReply), session_id: held.session_id, display_name: null, ref_id: 'preview-stopped-reply', line: null },
-        booking: { kind: 'booking', at: iso(SEEDED.booked), session_id: danaSession, display_name: null, ref_id: 'preview-booking', line: DANA_BOOKED },
+        turned_down: null,
+        booking: { kind: 'booking', at: iso(SEEDED.booked), session_id: danaSession, display_name: null, ref_id: 'preview-booking', line: DANA_BOOKED, cause: null },
         // Claude's last answer in Alex Kim's assistant's chat, which held nothing else.
-        lead_or_answer: { kind: 'answer', at: iso(SEEDED.agentAnswered), session_id: agent.session.session_id, display_name: agent.name, ref_id: agent.session.session_id, line: null },
+        lead_or_answer: {
+          kind: 'answer',
+          at: iso(SEEDED.agentAnswered),
+          session_id: agent.session.session_id,
+          display_name: agent.name,
+          ref_id: agent.session.session_id,
+          line: null,
+          cause: null,
+        },
       },
     },
     this_week: {
@@ -148,7 +157,7 @@ export function stillToday(now: Date): StillToday {
       handled: 2,
       stepped_in: 1,
       // Only a refused request counts as stopped here, and the seed has none: the reply the check
-      // stopped is the briefing's, not the week's.
+      // stopped is Safety's, not the week's.
       stopped: 0,
       // Each on its own day: a conversation counts on each day it has a message in.
       days: [-6, -5, -4, -3, -2, -1, 0].map((offset) => {

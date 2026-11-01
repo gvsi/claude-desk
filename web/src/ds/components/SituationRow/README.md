@@ -17,7 +17,7 @@
 
 ## What it shows
 
-- A hairline over the row, which is padded 14 px top and bottom.
+- Hairlines only between list items; the first row has none. Each row is padded 14 px top and bottom.
 - At the left, the situation in `control` type at weight 520 and who is asking 2 px under it, in `meta`, `text-secondary`.
 - At the right, in a 300 px column 24 px from the situation, the outcome in words beside its dot, in `meta`, `text-primary`, and the reason 2 px under it in `meta`, `text-secondary`:
 
@@ -32,7 +32,7 @@
 
 - When `matches` is false, "Not what we planned" in `caption`, `text-primary`, 6 px under who is asking, beside a 2 px `status-held` bar, 8 px from it. The words carry it; the bar only echoes them.
 - Below 560 px of row width, as on a phone, the outcome and reason drop under who is asking, 8 px under it, from the same edge.
-- One line on each side: 69 px with the hairline.
+- One line on each side: 68 px for the first row, 69 px for later rows with the hairline.
 
 ## Motion
 

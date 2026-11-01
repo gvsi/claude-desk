@@ -1,9 +1,9 @@
-/* Today: the page's column (the greeting, "Things to try", and the sections Today adds) and the
-   right column beside it from 1280 px, 420 px wide; under that the right column stacks under the
-   page. "Things to try" is a heading with its caption and "Hide this list" at the right, then one
-   card of rows divided by hairlines: a 32 px icon tile, the title and its line, and the next step
-   at the right, which drops under the words on a phone. The preview behind the intro dialog is
-   this page, drawn from a new copy's reads. */
+/* Today: the page's column (the greeting, "Not live yet" while setup isn't finished, "Things to
+   try", and the sections Today adds) and the right column beside it from 1280 px, 420 px wide;
+   under that the right column stacks under the page. "Things to try" is a heading with its caption
+   and "Hide this list" at the right, then one card of rows divided by hairlines: a 32 px icon
+   tile, the title and its line, and the next step at the right, which drops under the words on a
+   phone. The preview behind the intro dialog is this page, drawn from a new copy's reads. */
 
 .cd-today {
   display: grid;
@@ -35,6 +35,60 @@
 /* The preview fills the window behind the dialog, as the app does. */
 .cd-today-preview {
   min-height: 100dvh;
+}
+
+/* Not live yet: a Desk whose setup isn't finished, first in the page's column. The words, with
+   "Continue setup" at their right, then the setup steps under them. */
+
+.cd-continue-setup__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+}
+
+.cd-continue-setup__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-16);
+}
+
+.cd-continue-setup__words {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-continue-setup__status,
+.cd-continue-setup__title,
+.cd-continue-setup__line {
+  margin: 0;
+}
+
+.cd-continue-setup__status {
+  color: var(--text-secondary);
+}
+
+.cd-continue-setup__title {
+  margin-top: var(--space-6);
+  color: var(--text-primary);
+}
+
+.cd-continue-setup__line {
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+}
+
+.cd-continue-setup__action {
+  display: flex;
+  flex: none;
+}
+
+/* On a phone "Continue setup" drops under the words, from their left edge, as Things to try's next
+   steps do. */
+@media (max-width: 639.98px) {
+  .cd-continue-setup__head {
+    flex-direction: column;
+    gap: var(--space-12);
+  }
 }
 
 /* Things to try */
@@ -152,7 +206,7 @@
   justify-content: flex-end;
 }
 
-/* Where this is going: one quiet link under the list, to the vision pages. */
+/* One quiet link under the list, to the Vision article. */
 .cd-things__vision {
   margin: 0;
 }
@@ -342,6 +396,13 @@
 .cd-callback__when {
   margin: 0;
   color: var(--text-secondary);
+}
+
+/* The visitor's words, as a held request's card quotes them. */
+.cd-callback__context {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .cd-callback__actions {
@@ -606,4 +667,18 @@
   .cd-briefing-row__words {
     grid-column: 1 / -1;
   }
+}
+
+/* Shapes share the page's layout and line boxes. */
+.cd-today-skeleton__link { flex: none; margin-top: var(--space-6); }
+.cd-today-skeleton__rule { flex: 1; min-width: 0; }
+.cd-today--skeleton .cd-greeting__text { flex-basis: 100%; }
+
+.cd-today-skeleton__presence { min-height: calc(var(--size-avatar) - var(--space-6)); }
+
+.cd-today-skeleton__phone-line { display: none; }
+@media (max-width: 639.98px) {
+  .cd-today-skeleton__phone-line { display: flex; }
+  .cd-today-skeleton__wide-line { display: none; }
+  .cd-today-skeleton__answer { min-height: calc(var(--size-control-main) + var(--space-4)); }
 }

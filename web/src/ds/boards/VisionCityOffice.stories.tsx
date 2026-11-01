@@ -284,7 +284,7 @@ export const Board: Story = {
     await expect(canvasElement.querySelectorAll('[href*="/api/"]')).toHaveLength(0);
 
     // focus_order_is_logical: the bar, Ask for Permit Center staff, the suggestions, then the composer.
-    await expectTabOrder(userEvent, [within(bar).getByRole('link', { name: 'Back to your Desk' }), askStaff, ...chipButtons, composer]);
+    await expectTabOrder(userEvent, [within(bar).getByRole('link', { name: 'Back to Vision' }), askStaff, ...chipButtons, composer]);
 
     // A vision page sends nothing, and each pictured control says so once, in its own line under it.
     // Send: typed words stay after Send and after Enter.

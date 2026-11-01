@@ -19,10 +19,11 @@ import { worker } from '../mocks/browser.ts';
 import { copyOut } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
+import { holdReads } from '../test/holdReads.ts';
 import { renderRoute, VIEWPORTS } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 import { pageNow, watchFor, watchPages } from '../test/watch.ts';
-import { FRESH_MS } from './useDesks.ts';
+import { FRESH_MS, READ_AHEAD_MS } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
@@ -235,24 +236,26 @@ describe('Arrival', () => {
   });
 
   it('slow_first_visit_waits_out_one_read_ahead', { timeout: 20_000 }, async () => {
-    // On a slow network the visit has one 3 s read ahead, whichever page waits on it. The Desks
-    // come in after it and Needs you later still: Today opens as soon as the Desks are in, still
-    // reading Needs you, rather than wait out a second 3 s on the owner's loading page.
+    // The frame still gets one 3 s read ahead. Plan 08c decision 7 replaces #186's partial Today
+    // with Today's own skeleton until Needs you settles; Desks arriving at 3.4 s must release the
+    // frame immediately, rather than start another 3 s full-page wait.
     delayNextRead(ROUTES.desks.path, 3_400);
-    delayNextRead(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId), 10_000);
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
     const started = performance.now();
     const { screen, router } = await renderRoute('/');
     const pages = watchPages();
-    // Today itself, not the still preview of it behind the intro dialog.
-    const todayDrawn = () => document.querySelector('.cd-today') !== null && document.querySelector('.cd-today-preview') === null;
-    await expect.poll(todayDrawn, { timeout: 10_000, interval: 50 }).toBe(true);
+    await expect.element(screen.getByRole('navigation', { name: 'Main' }), { timeout: 10_000 }).toBeVisible();
     const drawnAt = performance.now() - started;
     expect(router.state.location.pathname).toBe(TODAY);
-    // Once the Desks were in, at 3.4 s; a second full wait would draw Today at 6 s or later.
+    // Once the Desks were in, at 3.4 s; a second full wait would draw the frame at 6 s or later.
     expect(drawnAt).toBeGreaterThan(3_400);
     expect(drawnAt).toBeLessThan(5_000);
-    expect(pages()).toEqual(['preview', 'loading', 'today without its held request']);
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening']));
+    expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
     expect(heldCard(screen).elements()).toHaveLength(0);
+    needsYou.release();
+    await expect.element(heldCard(screen)).toBeVisible();
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening', 'today']));
   });
 
   it('returning_owner_leaving_while_today_is_read_stays', async () => {
@@ -602,8 +605,10 @@ describe('Arrival', () => {
     });
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY);
-    await expect.element(heldCard(screen)).toBeVisible();
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
+    // Today keeps its own skeleton while that read is out (plan 08c, decision 7): the frame lands at
+    // the read ahead's deadline, and Today's sections wait for the inbox.
+    await expectTodayHoldsForItsInbox();
     mockStore.reset('rivera', { signedIn: false });
     await expect.poll(() => router.state.location.pathname).toBe('/');
     await expect.element(introDialog(screen)).toBeVisible();
@@ -1142,8 +1147,9 @@ describe('OwnerLayout', () => {
     // Polls far apart, so only the reads that open a page land.
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
-    await expect.element(heldCard(screen)).toBeVisible();
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
+    // Today keeps its own skeleton while that read is out (plan 08c, decision 7).
+    await expectTodayHoldsForItsInbox();
 
     // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
     const newDesks = holdReads(ROUTES.desks.path);
@@ -1153,7 +1159,7 @@ describe('OwnerLayout', () => {
     const fresh = `/app/${mockStore.world.ids.deskId}/today`;
     expect(router.state.location.pathname).toBe(fresh);
     await vi.waitFor(() => expect(newDesks.held()).toBeGreaterThan(0));
-    // The old copy's Today is gone (its inbox was still opening), and the new copy's loading page is up.
+    // The old copy's Today is gone (still on its skeleton, its inbox still out), and the new copy's loading page is up.
     expect(pageNow()).toBe('loading');
     const sawItOpening = watchFor('Opening your Demo inbox');
 
@@ -1251,7 +1257,7 @@ describe('OwnerLayout', () => {
       {
         path: SAFETY_ENTRIES,
         settled: async (screen: RenderResult) => {
-          await expect.element(screen.getByText(/^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/)).toBeVisible();
+          await expect.element(screen.getByText(/^I turned down \d+ requests? this week\.$/)).toBeVisible();
           await expect.element(screen.getByRole('list', { name: 'Every entry, newest first' })).toBeVisible();
         },
         controls: (screen: RenderResult) => [
@@ -1272,6 +1278,16 @@ describe('OwnerLayout', () => {
 });
 
 describe('Today', () => {
+  it('chat_row_suggests_questions_any_business_gets', async () => {
+    // "Chat as a customer" suggests what any business is asked, not the plumbing demo's own leak:
+    // every new Desk's Today shows the same row.
+    const { screen } = await renderRoute(TODAY);
+    const chat = screen.getByRole('region', { name: 'Things to try' }).getByRole('listitem').first();
+    await expect.element(chat.getByRole('heading', { level: 3, name: 'Chat as a customer' })).toBeVisible();
+    await expect.element(chat.getByText('Your public page opens in a new tab. Ask about a price or a time.', { exact: true })).toBeVisible();
+    expect(chat.element().textContent).not.toMatch(/leak/i);
+  });
+
   it('held_request_item_waits_for_a_hold', async () => {
     const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
     const things = screen.getByRole('region', { name: 'Things to try' });
@@ -2074,13 +2090,26 @@ function mainLinePath(key: 'conversations' | 'ledger'): string {
  * The animations that ran in Things to try, by name, from now until the test ends, read every frame
  * (a reload included: it watches the document, not one list).
  */
+/**
+ * Today's frame is up (after the read ahead's deadline) with Today still on its own skeleton, its
+ * sections waiting for the copy's Demo inbox.
+ */
+async function expectTodayHoldsForItsInbox(): Promise<void> {
+  await vi.waitFor(() => expect(document.querySelector('nav[aria-label="Main"]')).not.toBeNull(), { timeout: READ_AHEAD_MS + 2_000 });
+  expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer')).not.toBeNull();
+  expect(document.querySelector('.cd-needs-you')).toBeNull();
+}
+
 function watchListAnimations(): () => string[] {
   const seen = new Set<string>();
   let frame = 0;
   const look = () => {
     for (const animation of document.getAnimations()) {
       const target = (animation.effect as KeyframeEffect | null)?.target;
-      if (target instanceof Element && target.closest('.cd-things') !== null) seen.add((animation as CSSAnimation).animationName);
+      // The list itself, not the skeleton's shapes of it, which sweep while Today opens.
+      if (target instanceof Element && target.closest('.cd-things') !== null && target.closest('.cd-skeleton-screen__layer') === null) {
+        seen.add((animation as CSSAnimation).animationName);
+      }
     }
     frame = requestAnimationFrame(look);
   };
@@ -2469,27 +2498,6 @@ function intlRefusing(refuses: (options: Intl.DateTimeFormatOptions | undefined)
   const restore = () => put(own);
   onTestFinished(restore);
   return restore;
-}
-
-/**
- * Holds every read of `path` until `release()`, or the test's end, lets them through to the mock:
- * `held()` counts the reads that came.
- */
-function holdReads(path: string): { held: () => number; release: () => void } {
-  let held = 0;
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  onTestFinished(() => release());
-  worker.use(
-    http.get(path, async () => {
-      held += 1;
-      await released;
-      return undefined;
-    }),
-  );
-  return { held: () => held, release };
 }
 
 /**

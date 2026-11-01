@@ -176,7 +176,7 @@ async def test_mandate_oracle(desk_prove, app, client, frozen_clock):
             # the baseline refuses it at /decide: the mandate has nothing left
             assert (decision.outcome, decision.card_ids) == ("refuse", []), decision.reason_plain
             assert decision.action is not None and decision.action.amount_cents == 2_000
-            assert "The always-on safety rules don't allow it." in decision.reason_plain
+            assert "It was more than this agent's signed limit allows, so it was refused." in decision.reason_plain
             outcomes.append(("refused", None))
     assert outcomes == [("executed", "succeeded")] * 5 + [("refused", None)] * 5
     # five charges at the provider, one per executed action, each to the agent; $100 committed, nothing held
@@ -198,7 +198,7 @@ async def test_charge_above_per_charge_is_refused_at_decide(desk_prove, app, cli
         refused = await asked(client, signed, tool, visit, call_id=call_id)
         assert (refused.outcome, refused.card_ids) == ("refuse", []), (tool, refused.reason_plain)
         assert refused.action.amount_cents == 2_500
-        assert "The always-on safety rules don't allow it." in refused.reason_plain
+        assert "It was more than this agent's signed limit allows, so it was refused." in refused.reason_plain
     # the links card alone would let anyone have a $25 link: a visitor gets one
     visitor = await open_visitor(client, setup.desk)
     allowed = await asked(client, visitor, LINK, await quoted(client, visitor, "visit"))
@@ -259,8 +259,7 @@ async def test_an_agent_over_its_mandate_is_told_it_is_over_the_signed_limit(des
     assert refused.visitor_plain == OVER_THE_LIMIT[language]
     verify_signature((await client.get("/health")).json()["public_key_hex"], refused)
     assert (await read(client, signed.headers, refused)).visitor_plain == OVER_THE_LIMIT[language]
-    # the owner's account is unchanged
-    assert "The always-on safety rules don't allow it." in refused.reason_plain
+    assert "It was more than this agent's signed limit allows, so it was refused." in refused.reason_plain
 
 
 @pytest.mark.solver

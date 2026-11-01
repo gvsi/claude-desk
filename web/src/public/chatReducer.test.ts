@@ -4,11 +4,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { EvMessage, EvOwnerJoined, EvOwnerTyping, SseEvent, StatusEvent } from '../api/contracts.ts';
+import { EV_ERROR_CODES, type EvMessage, type EvOwnerJoined, type EvOwnerTyping, type SessionState, type SseEvent, type StatusEvent } from '../api/contracts.ts';
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
+import { chatReducer, initialChatState, lowerOnly, ownerInChatNow, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
 
 /** The fixtures' quote turn: the action's receipt, writing, the checked reply, the turn's end. */
 const [quoteReceipt, , quoteMessage] = rivera.events.quoteTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
@@ -52,9 +52,9 @@ describe('chatReducer', () => {
     const replied = run(events([handoff, { type: 'turn_end' }], 3), asked);
     expect(replied.rows.map((row) => row.receipts)).toEqual([[], [receiptFromEvent(handoff), receiptFromEvent(held)]]);
 
-    // After the reply, a status attaches to the last row at once: the owner answered.
+    // After the reply, the owner's answer replaces the waiting receipt under that message.
     const answered = run(events([resolved], 5), replied);
-    expect(answered.rows.at(-1)?.receipts).toEqual([receiptFromEvent(handoff), receiptFromEvent(held), receiptFromEvent(resolved)]);
+    expect(answered.rows.at(-1)?.receipts).toEqual([receiptFromEvent(handoff), receiptFromEvent(resolved)]);
     expect(answered.openHolds).toEqual([]);
 
     // A turn that ends with no reply keeps its receipts, under the visitor's message.
@@ -301,7 +301,49 @@ describe('chatReducer', () => {
     expect(liveOf(run(events([ownerJoined], 5), read))).toEqual([false, true]);
   });
 
-  it('later_statuses_attach_to_their_hold', () => {
+  it('receipt_outcomes_replace_unknown_live_and_after_reload', () => {
+    const unknown: StatusEvent = {
+      ...quoteReceipt,
+      type: 'receipt',
+      state: 'unknown',
+      visitor_plain: rivera.decisions.unknown.visitor_plain,
+      ledger_seq: 20,
+    };
+    const executed: StatusEvent = { ...quoteReceipt, type: 'receipt', ledger_seq: 21 };
+    const later: EvMessage = { ...quoteMessage, message_id: 'msg-later' };
+    // The chat has moved on before the action's final receipt arrives.
+    const live = run([
+      { type: 'sent', id: 'v1', text: 'How much is drain clearing?' },
+      ...events([unknown, quoteMessage, { type: 'turn_end' }, later, executed]),
+    ]);
+    const expected = [[], [receiptFromEvent(quoteMessage), receiptFromEvent(executed)], [receiptFromEvent(later)]];
+    const receipts = (state: ChatState) => state.rows.map((row) => row.receipts);
+    expect(receipts(live)).toEqual(expected);
+    expect(live.openHolds).toEqual([]);
+
+    const stored: TranscriptItem[] = [
+      visitorText(1, 'How much is drain clearing?'),
+      { ...item(2, 'status'), event: unknown },
+      { ...item(3, 'delivered'), event: quoteMessage },
+      { ...item(4, 'delivered'), event: later },
+    ];
+    const reloaded = run([{
+      type: 'history',
+      transcript: transcript(5, [...stored, { ...item(5, 'status'), event: executed }]),
+    }]);
+    expect(receipts(reloaded)).toEqual(expected);
+    expect(reloaded.openHolds).toEqual([]);
+
+    const awaiting = run([{ type: 'history', transcript: transcript(4, stored) }]);
+    expect(awaiting.openHolds).toEqual([]);
+    const finished = run(events([executed], 5), awaiting);
+    expect(receipts(finished)).toEqual(expected);
+    expect(finished.openHolds).toEqual([]);
+    // Replayed statuses cannot restore the superseded unknown receipt.
+    expect(receipts(run(events([unknown, executed], 6), finished))).toEqual(expected);
+  });
+
+  it('later_statuses_replace_their_hold', () => {
     const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
     const cancelled: StatusEvent = { ...held, type: 'resolved', state: 'cancelled', visitor_plain: 'Cancelled', ledger_seq: 9 };
     const r = receiptFromEvent;
@@ -315,17 +357,17 @@ describe('chatReducer', () => {
     // The visitor cancels: the outcome goes under the message that holds the hold, and nothing new
     // under the quote.
     const resolved = run(events([cancelled], 9), goneOn);
-    expect(receiptsOf(resolved)).toEqual([[], [r(handoff), r(held), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt)]]);
+    expect(receiptsOf(resolved)).toEqual([[], [r(handoff), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt)]]);
     expect(resolved.openHolds).toEqual([]);
 
     // A status for a decision never held on the page still goes under the last row.
     const other: StatusEvent = { ...quoteReceipt, decision_id: 'dec-elsewhere', ledger_seq: 10 };
     const elsewhere = run(events([other], 10), resolved);
-    expect(receiptsOf(elsewhere)).toEqual([[], [r(handoff), r(held), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt), r(other)]]);
+    expect(receiptsOf(elsewhere)).toEqual([[], [r(handoff), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt), r(other)]]);
 
     // While the hold's own turn waits for its reply, a later status waits with it.
     const early = run([{ type: 'sent', id: 'v1', text: 'Can I get 15% off?' }, ...events([held, { type: 'writing' }, cancelled, handoff])]);
-    expect(receiptsOf(early)).toEqual([[], [r(handoff), r(held), r(cancelled)]]);
+    expect(receiptsOf(early)).toEqual([[], [r(handoff), r(cancelled)]]);
 
     // Reloading the conversation puts every line back where it was.
     const stored: TranscriptItem[] = [
@@ -341,6 +383,82 @@ describe('chatReducer', () => {
     const reloaded = run([{ type: 'history', transcript: transcript(10, stored) }]);
     expect(receiptsOf(reloaded)).toEqual(receiptsOf(elsewhere));
     expect(reloaded.openHolds).toEqual([]);
+  });
+
+  it('replaces_a_hold_that_resolves_twice_live_and_after_reload', () => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const unknown: StatusEvent = {
+      ...held, type: 'resolved', state: 'unknown', visitor_plain: rivera.decisions.unknown.visitor_plain, ledger_seq: 20,
+    };
+    const executed: StatusEvent = {
+      ...held, type: 'resolved', state: 'executed', visitor_plain: rivera.decisions.executed.visitor_plain, ledger_seq: 21,
+    };
+    const waiting = run([
+      { type: 'sent', id: 'v1', text: 'Can I get 10% off?' },
+      ...events([held, handoff, { type: 'turn_end' }]),
+    ]);
+    expect(waiting.openHolds).toEqual([held.decision_id]);
+    const confirming = run(events([unknown], 4), waiting);
+    expect(confirming.rows[1]?.receipts).toEqual([receiptFromEvent(handoff), receiptFromEvent(unknown)]);
+    expect(confirming.openHolds).toEqual([]);
+    const live = run(events([executed], 5), confirming);
+    const expected = [[], [receiptFromEvent(handoff), receiptFromEvent(executed)]];
+    const receipts = (state: ChatState) => state.rows.map((row) => row.receipts);
+    expect(receipts(live)).toEqual(expected);
+    expect(live.openHolds).toEqual([]);
+
+    const stored: TranscriptItem[] = [
+      visitorText(1, 'Can I get 10% off?'),
+      { ...item(2, 'status'), event: held },
+      { ...item(3, 'delivered'), event: handoff },
+      { ...item(4, 'status'), event: unknown },
+    ];
+    const confirmingAfterReload = run([{ type: 'history', transcript: transcript(4, stored) }]);
+    expect(receipts(confirmingAfterReload)).toEqual(receipts(confirming));
+    expect(confirmingAfterReload.openHolds).toEqual([]);
+    expect(receipts(run(events([executed], 5), confirmingAfterReload))).toEqual(expected);
+    const reloaded = run([{
+      type: 'history', transcript: transcript(5, [...stored, { ...item(5, 'status'), event: executed }]),
+    }]);
+    expect(receipts(reloaded)).toEqual(expected);
+    expect(reloaded.openHolds).toEqual([]);
+  });
+
+  it.each(['executed', 'denied', 'expired'] as const)('replaces_a_hold_with_its_%s_outcome_live_and_after_reload', (state) => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const decision = rivera.decisions[state];
+    const resolved: StatusEvent = {
+      ...held,
+      type: 'resolved',
+      state,
+      visitor_plain: decision.visitor_plain,
+      ledger_seq: decision.ledger_seq,
+    };
+    const receipts = (chat: ChatState) => [...chat.leading, ...chat.pending, ...chat.rows.flatMap((row) => row.receipts)];
+    const expected = [receiptFromEvent(handoff), receiptFromEvent(resolved)];
+    const live = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, handoff, { type: 'turn_end' }, resolved])]);
+    expect(receipts(live)).toEqual(expected);
+    expect(live.openHolds).toEqual([]);
+
+    const history = run([{
+      type: 'history',
+      transcript: transcript(4, [
+        visitorText(1, 'Can I get 10% off?'),
+        { ...item(2, 'status'), event: held },
+        { ...item(3, 'delivered'), event: handoff },
+        { ...item(4, 'status'), event: resolved },
+      ]),
+    }]);
+    expect(receipts(history)).toEqual(expected);
+    expect(history.openHolds).toEqual([]);
+    // Replaying statuses after the read cannot restore waiting or duplicate the outcome.
+    expect(receipts(run(events([held, resolved], 5), history))).toEqual(expected);
+
+    // Resolve before the reply: both pending and leading receipts are replaced in place.
+    const pending = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, resolved])]);
+    expect(pending.pending).toEqual([receiptFromEvent(resolved)]);
+    expect(receipts(run(events([handoff], 3), pending))).toEqual(expected);
+    expect(run(events([held, resolved])).leading).toEqual([receiptFromEvent(resolved)]);
   });
 
   it('owner_typing_until_the_owner_writes', () => {
@@ -509,6 +627,65 @@ describe('chatReducer', () => {
     expect(lines(reloaded)).toEqual([['n2', 'owner_left']]);
     expect(shown(reloaded)).toEqual(shown(live));
     expect(flags(reloaded)).toEqual(flags(live));
+  });
+
+  it('owner_in_chat_is_the_sessions_mode', () => {
+    const inOwnersHands: SessionState = { ...rivera.sessions.public, mode: 'owner' };
+    const open = initialChatState();
+    const now = (session: SessionState | null, state: ChatState = open) => ownerInChatNow({ session, state, ready: true, modeKnown: true });
+    // The kernel's mode is the only source: the owner's, and nothing else, says she is in the chat.
+    expect(now(inOwnersHands)).toBe(true);
+    expect(now(rivera.sessions.public)).toBe(false);
+    expect(now({ ...inOwnersHands, mode: 'paused' })).toBe(false);
+    // No session yet, or a mode the page doesn't know.
+    expect(now(null)).toBe(false);
+    expect(now({ ...inOwnersHands, mode: 'owner_soon' as SessionState['mode'] })).toBe(false);
+    // The chat's own lines never turn it on: a join last with the session in Claude's hands.
+    expect(now(rivera.sessions.public, run(events([ownerJoined])))).toBe(false);
+    expect(now(inOwnersHands, run(events([quoteMessage])))).toBe(true);
+  });
+
+  it('owner_in_chat_fails_safe_to_false', () => {
+    const inOwnersHands: SessionState = { ...rivera.sessions.public, mode: 'owner' };
+    const joined = run(events([ownerJoined]));
+    const now = (state: ChatState, facts: { ready?: boolean; modeKnown?: boolean } = {}) =>
+      ownerInChatNow({ session: inOwnersHands, state, ready: facts.ready ?? true, modeKnown: facts.modeKnown ?? true });
+    expect(now(joined)).toBe(true);
+    // The chat isn't ready (loading, or it couldn't load), or it doesn't know the mode now: it lost
+    // track of the stream, and nothing has confirmed the mode since.
+    expect(now(joined, { ready: false })).toBe(false);
+    expect(now(joined, { modeKnown: false })).toBe(false);
+    // Any error on the stream, the chat ending included, and a send that found it ended (a 401).
+    for (const code of EV_ERROR_CODES) expect(now(run(events([{ type: 'error', code }], 2), joined)), code).toBe(false);
+    expect(now(run([{ type: 'ended' }], joined))).toBe(false);
+
+    // The stream drops or closes: until it has caught up again, the chat can't know she's still there.
+    const dropped = run([{ type: 'connection', connection: 'reconnecting' }], joined);
+    expect(now(dropped)).toBe(false);
+    expect(now(run([{ type: 'connection', connection: 'closed' }], joined))).toBe(false);
+    const reopened = run([{ type: 'connection', connection: 'open' }], dropped);
+    expect(now(reopened)).toBe(false);
+    expect(now(run([{ type: 'caught_up' }], reopened))).toBe(true);
+    // The page coming back to the chat catches up the same way.
+    const back = run([{ type: 'catching_up' }], joined);
+    expect(now(back)).toBe(false);
+    expect(now(run([{ type: 'caught_up' }], back))).toBe(true);
+  });
+
+  it('an_answer_after_the_chat_loaded_only_lowers_the_mode', () => {
+    // An answer after the chat has loaded (a verify, a read of the session) may lower the mode to
+    // Claude's or a pause, never raise it to the owner's.
+    expect(lowerOnly('ai', 'owner')).toBe('ai');
+    expect(lowerOnly('paused', 'owner')).toBe('paused');
+    expect(lowerOnly(null, 'owner')).toBe('ai');
+    expect(lowerOnly('owner', 'owner')).toBe('owner');
+    expect(lowerOnly('owner', 'ai')).toBe('ai');
+    expect(lowerOnly('owner', 'paused')).toBe('paused');
+    expect(lowerOnly(null, 'ai')).toBe('ai');
+    // A read older than the stream's latest change of mode says nothing of it: the mode stays.
+    expect(lowerOnly('owner', null)).toBe('owner');
+    expect(lowerOnly('ai', null)).toBe('ai');
+    expect(lowerOnly(null, null)).toBe('ai');
   });
 });
 

@@ -412,19 +412,29 @@ export async function expectAgentsDisclosure(root: HTMLElement): Promise<void> {
 export const VISION_BAR_LINE = 'Vision, not in the prototype. Nothing here is live.';
 
 /**
- * vision_page_is_labelled: the vision bar first on the page, across the window's width at its top,
- * 40 px tall on the panel, with the "Vision" pill, its line, and "Back to your Desk" to `backHref`.
+ * vision_page_is_labelled: the vision bar before all but AppShell's skip link, across the window's width at its top,
+ * 40 px tall on the panel, with the "Vision" pill, its line, and "Back to Vision" to `backHref`.
  */
 export async function expectVisionBar(root: HTMLElement, backHref: string): Promise<HTMLElement> {
   const bar = within(root).getByRole('note', { name: 'Vision' });
   const box = bar.getBoundingClientRect();
   await expect([box.top, box.left, box.width]).toEqual([0, 0, document.documentElement.clientWidth]);
   expectComputed(bar, { height: '40px', backgroundColor: 'rgb(34, 34, 32)', borderBottomColor: 'rgba(250, 249, 245, 0.12)' });
-  await expect(bar).toHaveTextContent(`Vision${VISION_BAR_LINE}Back to your Desk`);
-  await expect(within(bar).getByRole('link', { name: 'Back to your Desk' })).toHaveAttribute('href', backHref);
-  // Nothing on the page comes before it: it is the first thing a screen reader and the keyboard reach.
-  const first = root.querySelector('[role="note"], a[href], button, h1, h2, main, nav, aside, header');
-  await expect(bar.contains(first)).toBe(true);
+  await expect(bar).toHaveTextContent(`Vision${VISION_BAR_LINE}Back to Vision`);
+  await expect(within(bar).getByRole('link', { name: 'Back to Vision' })).toHaveAttribute('href', backHref);
+  const elements = Array.from(root.querySelectorAll('[role="note"], a[href], button, h1, h2, main, nav, aside, header'));
+  const shell = bar.closest<HTMLElement>('.cd-app-shell');
+  if (shell) {
+    // Only the shell's single skip link may precede the bar, and it must target this shell's main.
+    const skip = within(shell).getByRole('link', { name: /^Skip to content$/ });
+    const main = within(shell).getByRole('main');
+    await expect(main.id).not.toBe('');
+    await expect(skip).toHaveAttribute('href', `#${main.id}`);
+    await expect(root.ownerDocument.getElementById(main.id)).toBe(main);
+    await expect(elements.shift()).toBe(skip);
+  }
+  // The bar still precedes every other link, control, heading and landmark on the page.
+  await expect(bar.contains(elements[0] ?? null)).toBe(true);
   return bar;
 }
 

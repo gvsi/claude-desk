@@ -12,7 +12,7 @@ type Assert<T extends true> = T;
 export type Models = [
   C.A2ARequest, C.A2AResponse, C.AgentAuth, C.AnswerRequest, C.Approval, C.ApprovalResult,
   C.BusinessSeed, C.CalendarSlot, C.CancelRequest, C.CardOption, C.CheckReplyRequest, C.Claim,
-  C.Clause, C.CopyCreated, C.CreateCopyRequest, C.CreateDeskRequest, C.CreateSessionRequest,
+  C.Clause, C.ContextClock, C.CopyCreated, C.CreateCopyRequest, C.CreateDeskRequest, C.CreateSessionRequest,
   C.DecideRequest, C.Decision, C.DemoAgentIssued, C.DemoAgentRequest, C.DemoInboxEntry,
   C.DeskAnsweringRequest, C.DeskBusinessRequest, C.DeskCalendarRequest, C.DeskCharterRequest,
   C.DeskCreated, C.DeskHoursRequest, C.DeskNotificationsRequest, C.DeskPeopleRequest,
@@ -28,7 +28,8 @@ export type Models = [
   C.ReplyDraft, C.ReplyVerdict, C.ResourceRef, C.Review, C.ReviewThresholds, C.RuleCard, C.SeedDocument,
   C.SeedPerson, C.SessionContext, C.SessionCreated, C.SessionState, C.SseEvent, C.ToolCall,
   C.ToolConfirmed, C.ToolProfile, C.ToolsConfirmRequest, C.ToolsConnectRequest,
-  C.ToolsSimulateChangeRequest, C.VerifyCheckRequest, C.VerifyStartRequest, C.VerifyStarted,
+  C.ToolsSimulateChangeRequest, C.TurnRequest, C.TurnStarted, C.VerifyCheckRequest, C.VerifyStartRequest,
+  C.VerifyStarted,
   C.Violation, C.WhoAmI,
 ];
 

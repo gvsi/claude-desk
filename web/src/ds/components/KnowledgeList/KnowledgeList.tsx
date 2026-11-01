@@ -19,8 +19,9 @@ export interface KnowledgeRowView {
   /**
    * The line under the title, in the screen's words: where the item came from ("From your answers
    * in setup", "rivera-plumbing.example, read during setup") or when it was added ("Added Oct 27").
+   * Null leaves the line out when the date was not recorded.
    */
-  detail: string;
+  detail: string | null;
   /**
    * Who may read it: the item's `label.readers`, as the kernel returned them. With "public" the row
    * says "Customers can see this"; otherwise "Only you".
@@ -62,7 +63,7 @@ export function KnowledgeList({ items }: KnowledgeListProps) {
                       {item.title}
                     </p>
                   )}
-                  <p className="cd-knowledge-list__detail cd-type-meta">{item.detail}</p>
+                  {item.detail === null ? null : <p className="cd-knowledge-list__detail cd-type-meta">{item.detail}</p>}
                 </div>
                 <Pill>{customersCanSee ? 'Customers can see this' : 'Only you'}</Pill>
               </li>

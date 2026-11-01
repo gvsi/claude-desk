@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { ownerErrorCopy } from '../../api/http.ts';
-import { Greeting, LoadingLine, NAV_LABELS } from '../../ds/index.ts';
+import { Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
@@ -13,12 +12,15 @@ import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
+import { useReadFailure } from '../useReadFailure.ts';
+import { ContinueSetup } from './ContinueSetup.tsx';
 import { LiveNow } from './LiveNow.tsx';
-import { NeedsYou, type CallbackItem, type ReadFailure } from './NeedsYou.tsx';
+import { NeedsYou, type CallbackItem } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
 import { requestInHash } from './requestLink.ts';
 import { SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
+import { TodaySkeleton } from './TodaySkeleton.tsx';
 
 import './Today.css';
 
@@ -42,13 +44,14 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
 export const COPIED_FOR_MS = 1_600;
 
 /**
- * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy,
- * "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
- * "Since last night" always; the right column has the public page a new tab away and the last 7
- * days. Today opens no visitor chat itself, and has no composer: changing a rule by asking Claude
- * lives on Rules. An address that names a held request (`#request-<id>`, as the Demo inbox links an
- * owner's alert) brings that request's card into view and focus. Until what the page first shows is
- * read, it holds the loading line alone, so it opens drawn however the owner came to it.
+ * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy, "Not
+ * live yet" while the Desk's setup hasn't gone live, "Things to try", then, in this order, "Needs
+ * you" and "Live now" when they have something, and "Since last night" always; the right column
+ * has the public page a new tab away and the last 7 days. Today opens no visitor chat itself, and
+ * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
+ * request (`#request-<id>`, as the Demo inbox links an owner's alert) brings that request's card
+ * into view and focus. Until what the page first shows is read, it holds its own shapes, so it
+ * opens drawn however the owner came to it.
  */
 export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const { business, desk, reachPlace } = useOwnerDesk();
@@ -58,7 +61,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const opening = useTodayOpening(deskId);
-  // Back to Today while it was still opening, one line high, couldn't reach the owner's place on it.
+  // Back to Today restores the owner's place once the page has drawn its real content.
   useLayoutEffect(() => {
     if (!opening) reachPlace(location.key);
   }, [opening, reachPlace, location.key]);
@@ -81,6 +84,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const [inboxOpen, setInboxOpen] = useState(false);
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
+  // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
+  // and for a Desk listed without it (an API from before it).
+  const setup = desk.setup ?? null;
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
@@ -104,15 +110,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // nothing needs the owner. It stays until a read works: React Query starts each read of a query
   // with nothing read yet as loading again and drops the error, so the section would blink out at
   // every poll, and while "Try again" reads.
-  const [failure, setFailure] = useState<{ at: number; error: unknown } | null>(null);
-  if (needsYou.error !== null && failure?.at !== needsYou.errorUpdatedAt) setFailure({ at: needsYou.errorUpdatedAt, error: needsYou.error });
-  const [retrying, setRetrying] = useState(false);
-  const retry = () => {
-    setRetrying(true);
-    void needsYou.refetch().finally(() => setRetrying(false));
-  };
-  const readFailure: ReadFailure | null =
-    failure !== null && needsYou.errorUpdatedAt > needsYou.dataUpdatedAt ? { line: ownerErrorCopy(failure.error), retrying, retry } : null;
+  const readFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
 
   const registerCard = useCallback((decisionId: string, el: HTMLElement | null) => {
     if (el) cards.current.set(decisionId, el);
@@ -120,6 +118,27 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   }, []);
   // Focus brings the card into view too. A request with no card here is left alone.
   const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
+  // Decide from the committed sections, since dismissing before the answer's refresh lands can
+  // expose a cached hold and keep Needs you mounted. Only move on once that section is gone.
+  const needsYouSection = useRef<HTMLElement>(null);
+  const liveNow = useRef<HTMLElement>(null);
+  const sinceLastNight = useRef<HTMLElement>(null);
+  const dismissedFocus = useRef<{ next: string | undefined } | null>(null);
+  const dismissAnswer = (id: string, next: string | undefined) => {
+    dismissedFocus.current = { next };
+    answers.dismiss(id);
+  };
+  useLayoutEffect(() => {
+    const dismissed = dismissedFocus.current;
+    if (dismissed === null) return;
+    dismissedFocus.current = null;
+    if (needsYouSection.current !== null) {
+      const card = dismissed.next === undefined ? undefined : answeredFocus.cardFor(dismissed.next);
+      (card ?? needsYouSection.current).focus();
+    } else {
+      (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true });
+    }
+  });
   const focusFirstHeld = () => {
     if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
   };
@@ -139,7 +158,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   });
   if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
   const requested = visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
-  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt;
+  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused;
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
@@ -157,10 +176,11 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     card?.focus();
   }, [opening, requested, inboxOpen, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
   // While it waits because Needs you can't be read, the owner's first pointer or key press spends
-  // it: a read that works later doesn't pull focus from what they're doing by then.
-  const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt;
+  // it: a read that works later doesn't pull focus from what they're doing by then. Listen in
+  // the commit, before paint, so input on the new address cannot slip ahead of a passive effect.
+  const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt || needsYou.isPaused;
   const waitsOnFailure = requested !== null && readFailing;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!waitsOnFailure) return undefined;
     const key = location.key;
     const spend = () => setVisit((now) => (now.key === key ? { ...now, spent: true } : now));
@@ -188,49 +208,46 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
       );
   };
 
-  // Where the greeting will be, and nothing in the right column, which stacks under the page on a
-  // narrow window and would be pushed down once the page is drawn. The heading, for assistive
-  // technology, names the page as the sidebar does until the greeting takes its place.
-  if (opening) {
-    return (
-      <div className="cd-today">
-        <div className="cd-today__main">
-          <h1 className="cd-sr-only">Today</h1>
-          <LoadingLine>Opening your Desk</LoadingLine>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="cd-today" onClick={followInAppLinks(navigate)}>
-      <div className="cd-today__main">
-        <div className="cd-today__greeting">
-          <Greeting
-            text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
-            presence={today.data ? greetingPresence(live) : undefined}
-            link={{ label: link, onCopy: copyLink, copied: copied !== null }}
-          />
-          <p className="cd-sr-only" role="status">
-            {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
-          </p>
+    <>
+      {opening ? <h1 className="cd-sr-only">Today</h1> : null}
+      <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton />} className="cd-today-opening">
+        <div className="cd-today" onClick={followInAppLinks(navigate)}>
+          <div className="cd-today__main">
+            <div className="cd-today__greeting">
+              <Greeting
+                text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
+                presence={today.data ? greetingPresence(live) : undefined}
+                link={{ label: link, onCopy: copyLink, copied: copied !== null }}
+              />
+              <p className="cd-sr-only" role="status">
+                {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
+              </p>
+            </div>
+            {setup !== null ? (
+              <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} answering={desk.answering} />
+            ) : null}
+            <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
+            {/* Drawn while it lists something or a read has failed: its Dismiss sends focus on when neither is left. */}
+            {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
+              <NeedsYou
+                held={held}
+                callbacks={callbacks}
+                answers={answers}
+                readAt={readAt}
+                registerCard={registerCard}
+                answeredFocus={answeredFocus}
+                readFailure={readFailure}
+                sectionRef={needsYouSection}
+                onDismiss={dismissAnswer}
+              />
+            ) : null}
+            {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} /> : null}
+            <SinceLastNight sectionRef={sinceLastNight} />
+          </div>
+          <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
         </div>
-        <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
-        {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
-          <NeedsYou
-            held={held}
-            callbacks={callbacks}
-            answers={answers}
-            readAt={readAt}
-            registerCard={registerCard}
-            answeredFocus={answeredFocus}
-            readFailure={readFailure}
-          />
-        ) : null}
-        {live.length > 0 ? <LiveNow live={live} /> : null}
-        <SinceLastNight />
-      </div>
-      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
-    </div>
+      </SkeletonScreen>
+    </>
   );
 }

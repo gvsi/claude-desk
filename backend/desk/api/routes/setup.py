@@ -2,6 +2,8 @@
 and an interview is read only within it.
 
 - Under `/api/owner/setup`: the interview (start, consent, answers), and the new Desk's tools and their connection.
+  Consent and answers use one turn runner: 200 when done within its wait, otherwise 202 `SetupState` with `busy`.
+  A busy repeat runs nothing and never counts on the limits. GET recovers abandoned turns.
 - Under `/api/owner/policy/setup/{id}` (`id` is the interview's), the proving routes: the rules draft, the
   situations, the safety check, the confirm and going live. Each runs its work through `desk.api.proving`: past
   `PROVING_WAIT_S` it answers 202 `ProvingPending`, and the same request sent again joins the work or takes its
@@ -65,7 +67,7 @@ async def _moving_on(request: Request, ctx: OwnerCtx, *, model: bool = True) -> 
 @router.post("", status_code=201, response_model=SetupState,
              responses=error_responses(401, 404, 409, 422, 429, 503))
 async def start_setup(body: SetupStartIn, request: Request,
-                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
+                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with
     Answering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives
     here is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude
@@ -93,37 +95,61 @@ async def start_setup(body: SetupStartIn, request: Request,
     async def admit() -> None:
         await _moving_on(request, ctx)
 
-    return await setup.start(ctx, state.database(), state.model, body, admit=admit)
+    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards)
 
 
-@router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 422, 503))
+@router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 409, 422, 503))
 async def setup_interview(interview_id: InterviewId, request: Request,
-                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
-    """The setup interview as it stands."""
-    return await setup.read(ctx, runtime(request).started().database(), interview_id)
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
+    """The setup interview as it stands, removing abandoned turn entries and reopening consent if needed."""
+    state = runtime(request).started()
+    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards)
 
 
 @router.post("/{id}/consent", response_model=SetupState,
-             responses=error_responses(401, 404, 409, 422, 429, 503))
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request: Request,
-                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
-    """The owner's answer to whether Claude may read their Claude memory and website, given once (409 `conflict`
-    after). On yes, both are read through the kernel as the owner's setup tools, each shown as a label; on no,
-    neither ever is. Then the first question."""
-    state = await _moving_on(request, ctx)
-    return await setup.consent(ctx, state.database(), interview_id, body.allow)
+                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
+    """Use the shared turn runner to store consent, then read Claude memory and the named website through the
+    kernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the
+    busy commit; answer 200 when finished within 25 seconds, otherwise 202 `SetupState` with `busy: true`.
+    Cancelling the request leaves the run working. A repeat while busy answers 202 without starting or
+    counting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    answer = await setup.consent(ctx, state.database(), state.model, interview_id, body.allow,
+                                 runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
+                                 cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
 
 
 @router.post("/{id}/answer", response_model=SetupState,
-             responses=error_responses(401, 404, 409, 422, 429, 503))
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: Request,
-                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
-    """The owner's answer to the question waiting, which the answer names (409 `conflict` when none is waiting or
-    another is, so an answer sent twice answers once): Claude replies, the answers are updated and, once the question
-    is covered, the next one is asked. 503 `model_unavailable` when Claude couldn't answer, with nothing stored, so the
-    same answer can be sent again."""
-    state = await _moving_on(request, ctx)
-    return await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text)
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
+    """Use the shared turn runner for the owner's answer to the question waiting, which the answer names
+    (409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Claude replies,
+    updates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to
+    25 seconds: 200 with the landed state or 202 `SetupState` with `busy: true`. Any turn while busy answers 202
+    without running or counting on the limits. Cancelling the request leaves the turn working. Failure or
+    abandonment removes the staged answer and leaves the same question waiting, so the owner can retry.
+    503 `model_unavailable` when Claude couldn't answer or the run deadline expires."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    answer = await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, card=body.card,
+                                runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
+                                 cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
 
 
 @router.get("/{id}/tools", response_model=SetupTools, responses=error_responses(401, 404, 422, 503))
