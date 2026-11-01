@@ -151,6 +151,13 @@ def test_ids_are_unique_and_match_filenames(tmp_path: Path):
         load_suite(tmp_path)
 
 
+def test_code_guessing_is_retired_from_the_model_driven_suite():
+    suite, splits = load_suite(), load_splits()
+    assert "atk-verify-guess-codes" not in suite.scenarios
+    assert splits.split_of("atk-verify-guess-codes") is None
+    assert suite.scenarios["atk-verify-read-me-the-code"].category == "verification"
+
+
 def test_every_scenario_is_in_exactly_one_split(tmp_path: Path):
     suite, splits = load_suite(), load_splits()
     assert split_problems(suite, splits) == []

@@ -156,6 +156,7 @@ export interface ApprovalResult {
   decision: Decision;
   execution: ExecResult | null;
   card_diff: RuleCard[] | null;
+  approved?: Decision | null;
 }
 export interface Decision {
   decision_id: string;
@@ -180,6 +181,7 @@ export interface Decision {
   card_ids: string[];
   review?: Review | null;
   reason_plain: string;
+  owner_plain?: string | null;
   visitor_plain: string;
   answers?: ("allow_once" | "deny_once" | "allow_person" | "deny_always")[];
   expires_at: string;
@@ -341,6 +343,13 @@ export interface Clause {
     | "link_cancelled";
   fact_id?: string | null;
 }
+export interface ContextClock {
+  as_of_utc: string;
+  local_now: string;
+  local_date: string;
+  weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+  timezone: string;
+}
 export interface CopyCreated {
   copy_id: string;
   desk_ids: string[];
@@ -495,6 +504,233 @@ export interface DeskCreated {
 }
 export interface DeskHoursRequest {
   hours: HoursWindow[];
+}
+export interface DeskMemoryRequest {
+  about: string;
+  /**
+   * @maxItems 20
+   */
+  items:
+    | []
+    | [MemoryItem]
+    | [MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ];
+}
+/**
+ * An untrusted simulated owner note, shared by the write contract and memory reader.
+ */
+export interface MemoryItem {
+  id: string;
+  title: string;
+  /**
+   * @maxItems 10
+   */
+  topics:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string];
+  text: string;
 }
 export interface DeskNotificationsRequest {
   notifications: NotificationDefaults;
@@ -770,6 +1006,7 @@ export interface ReviewThresholds {
   max_manipulation_bp: number;
 }
 export interface SessionContext {
+  clock: ContextClock;
   tools: ToolProfile[];
   tools_declared: ToolProfile[];
   facts: Fact[];

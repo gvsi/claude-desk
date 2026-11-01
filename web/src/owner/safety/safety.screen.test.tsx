@@ -9,6 +9,7 @@ import type { RenderResult } from 'vitest-browser-react';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
 import type { Attempt, Today, TriageCategory } from '../../api/views.ts';
+import { rivera } from '../../ds/fixtures/index.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { isoTime } from '../../mocks/world.ts';
@@ -663,6 +664,106 @@ describe('Safety', () => {
     await expect.element(recordRow(screen, 4).getByText(REPORTED, { exact: true })).toBeVisible();
     for (const seq of [1, 2, 3]) await expect.element(recordRow(screen, seq).getByText(CHECKED, { exact: true })).toBeVisible();
     noOldWords();
+  });
+
+  it('takeover_and_handback_have_distinct_record_labels', async () => {
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    const session = mockStore.visitorSession(RIVERA.slug);
+    if (!session) throw new Error('the visitor has a chat');
+    const params = { session_id: session.state.session_id };
+    await mockStore.dispatch('takeover', { params, body: { generation: session.state.generation } });
+    await mockStore.dispatch('handback', { params, body: { generation: session.state.generation } });
+    const entries = (await mockLedger()).entries.filter((e) => e.event.kind === 'takeover');
+    expect(entries).toHaveLength(2);
+    const [taken, returned] = entries;
+    if (!taken || !returned) throw new Error('both mode changes are recorded');
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, taken.seq).getByText('Take over', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, returned.seq).getByText('Hand back to Claude', { exact: true })).toBeVisible();
+    expect(taken.event.summary).toEqual({ from: 'ai', to: 'owner', generation: 2 });
+    expect(returned.event.summary).toEqual({ from: 'owner', to: 'ai', generation: 3 });
+    await expectScreenBasics(screen.container, { owner: true });
+    await recordRow(screen, returned.seq).click();
+    const trace = region(screen, `Full trace of entry ${returned.seq}`);
+    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeVisible();
+    expect(trace.element().textContent).toContain('"from": "owner"');
+    expect(trace.element().textContent).toContain('"to": "ai"');
+  });
+
+  it('handoff_entries_say_which_they_are', async () => {
+    // A visitor asks for Maria, the handoff card hands her the chat, and she marks it done: the
+    // record names the two entries the checkpoint wrote for what they are. Any other change to the
+    // Desk's details reads as before.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    const [handoffId = ''] = mockStore.world.handoffs.keys();
+    await mockStore.dispatch('handoffDone', { params: { handoff_id: handoffId } });
+    const { entries } = await mockLedger();
+    const handoffs = entries.filter((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs');
+    expect(handoffs.map((e) => e.event.summary)).toEqual([
+      { part: 'handoffs', refs: [handoffId], kind: 'card' },
+      { part: 'handoffs', refs: [handoffId] },
+    ]);
+    const [opened, done] = handoffs.map((e) => e.seq);
+    const hours = entries.length + 1;
+    injectLedger(ledgerPage([...entries, entry(hours, isoTime(Date.now()), { kind: 'desk_data', summary: { part: 'hours', refs: [] } })]));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, opened ?? 0).getByText('Chat handed to you', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, done ?? 0).getByText('Chat marked done', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, hours).getByText('Desk details changed', { exact: true })).toBeVisible();
+    expect(screen.getByText('Desk details changed').elements()).toHaveLength(1);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('handoff_closed_by_a_call_back_says_so', async () => {
+    // The handoff card hands Maria the chat, then the visitor asks for a call back, which closes
+    // the card's handoff and opens its own: the record calls that closing what it was, never the
+    // owner's Mark done.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(2);
+    const { entries } = await mockLedger();
+    const closed = entries.find((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs' && Object.hasOwn(e.event.summary, 'replaced_by'));
+    if (!closed) throw new Error('the call-back closed the card handoff');
+    injectLedger(ledgerPage(entries));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, closed.seq).getByText('Chat moved to a call-back', { exact: true })).toBeVisible();
+    expect(screen.getByText('Chat marked done', { exact: true }).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('handoff_closed_by_the_owner_handling_the_chat_says_how', async () => {
+    // The kernel closes the handoff card's handoff when Maria takes the chat over or writes in it:
+    // the record names each closing, never her Mark done.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    const session = mockStore.visitorSession(RIVERA.slug);
+    if (!session) throw new Error('the visitor has a chat');
+    const params = { session_id: session.state.session_id };
+    await mockStore.dispatch('takeover', { params, body: { generation: session.state.generation } });
+    // In the chat she has taken over, the handoff card again, then her own words.
+    mockStore.world.reply(session, [rivera.blocks.handoff.en], 'en');
+    expect(mockStore.world.handoffs.size).toBe(2);
+    await mockStore.dispatch('ownerMessage', { params, body: { text: 'I can help with that.', kind: 'say' } });
+    const { entries } = await mockLedger();
+    const closings = entries.filter((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs' && Object.hasOwn(e.event.summary, 'closed_by'));
+    expect(closings.map((e) => e.event.summary.closed_by)).toEqual(['takeover', 'owner_message']);
+    const [tookOver, wrote] = closings;
+    if (!tookOver || !wrote) throw new Error('both closings are recorded');
+    injectLedger(ledgerPage(entries));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, tookOver.seq).getByText('Handoff closed when you took over', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, wrote.seq).getByText('Handoff closed when you wrote in the chat', { exact: true })).toBeVisible();
+    expect(screen.getByText('Chat marked done', { exact: true }).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it('filters_start_with_all', async () => {

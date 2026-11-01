@@ -1,4 +1,4 @@
-.PHONY: kernel test db-roles web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
+.PHONY: kernel test db-roles db-throwaway web-test web-e2e image image-check infra-check image-smoke evals-unit evals-tier1 evals-tier1-stub evals-tier1-kernel evals-tier1-api kernel-contract api-serve kernel-serve proofs check-presets
 
 # Rebuild the kernel's Python module into the backend environment, and the
 # proof binary the kernel runs. desk-prove and its tests find cvc5 through
@@ -62,10 +62,24 @@ db-roles:
 			db psql -X -q -U desk_admin -d "$(DB_NAME)" < backend/desk/db/role_passwords.psql; \
 	fi
 
+# For a database thrown away after the run, as each CI job's is: skip durable commits (no WAL flush
+# at commit, no fsync), since the tests spend much of their time committing. ALTER SYSTEM changes the
+# whole Postgres instance, and a crash with fsync off can corrupt it, so the target refuses to run
+# unless CI is set: never on a database whose data matters, such as docker-compose's. Discard the
+# instance afterwards rather than turning the settings back on.
+db-throwaway: DB_NAME ?= desk
+db-throwaway:
+	@if [ -z "$$CI" ]; then echo "db-throwaway: only for CI's throwaway database (CI isn't set): it turns off durable commits for the whole Postgres instance" >&2; exit 1; fi; \
+	if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+	PGPASSWORD="$$DESK_ADMIN_PASSWORD" psql -X -q -o /dev/null -v ON_ERROR_STOP=1 -h "$(DB_HOST)" -p "$(DB_PORT)" -U desk_admin \
+		-d "$(DB_NAME)" -c 'ALTER SYSTEM SET fsync = off' -c 'ALTER SYSTEM SET synchronous_commit = off' \
+		-c 'ALTER SYSTEM SET full_page_writes = off' -c 'SELECT pg_reload_conf()'
+
 # The web app's checks, as CI's `web tests` runs them: install, type-check and unit tests, then the
-# production build, its check and the mocked end-to-end test (which uses web-test's install).
+# production build, its check and the mocked end-to-end test (which uses web-test's install). WebKit
+# runs the skeleton's sweep checks (the `ds-webkit` project), as iPhones draw it.
 web-test:
-	cd web && npm ci && npx playwright install --with-deps chromium && npm run typecheck && npm test
+	cd web && npm ci && npx playwright install --with-deps chromium webkit && npm run typecheck && npm test
 
 web-e2e:
 	cd web && npm run build && npm run check:build && npm run e2e:mock
@@ -258,9 +272,10 @@ evals-tier1:
 # evals-key prints <inputs>, the hash of the gated inputs. evals-results-check is the one tier 2 check
 # CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
 # rate or results file changed since BASE (renames count both paths), else when the committed file for
-# the head's inputs is complete and its gate passes.
+# the head's inputs is complete and its gate passes, or every head scenario is pending (no recorded rate).
 # evals-merge-ready refuses a merge when both HEAD and origin/main changed results inputs since
-# their merge base. Fetch origin first; rebase and regenerate the results file when it refuses.
+# their merge base and a scenario can run under their combined landed plans or in their merge.
+# Recorded rates also prevent the unarmed shortcut. Fetch origin first; rebase and regenerate when refused.
 .PHONY: evals-tier2 evals-key evals-results-check evals-merge-ready
 RUNS ?= 1
 MAX_USD ?= 40
@@ -290,6 +305,14 @@ SAMPLES ?= 5
 evals-soft-promise:
 	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise spends money: give MAX_USD=<dollars>, the most it may spend))
 	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
+
+# Compare frozen reviewer cases with prompts read from two refs. DRY_RUN=1 builds
+# inputs and estimates Sonnet 5.5 list-price cost without credentials or model calls.
+# Paid runs require an explicit MAX_USD; the tier 2 default does not count.
+.PHONY: evals-reviewer
+evals-reviewer:
+	$(if $(filter 1,$(DRY_RUN)),,$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-reviewer spends money: give MAX_USD=<dollars>, or DRY_RUN=1)))
+	$(EVALS) python -m evals.calibration.reviewer --samples $(SAMPLES)$(if $(filter 1,$(DRY_RUN)), --dry-run, --max-usd $(MAX_USD))$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(OLD_PROMPT_REF), --old-prompt-ref $(OLD_PROMPT_REF))
 
 # A finished pass, by its id under evals/out/passes (PASS=<id>). evals-gate judges it with no model call
 # (FINAL=1 for the final gate: no pending scenario, no skipped check, three runs and a recorded rate).

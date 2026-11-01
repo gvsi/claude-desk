@@ -106,6 +106,7 @@ export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, e
               checked={added.readers.includes('public')}
               onChange={(next) => added.onPublicChange(next)}
               waiting={busy === 'switch'}
+              disabled={inFlight}
             />
           </div>
           {/* Always there, so the screen's line is read out when it comes. */}

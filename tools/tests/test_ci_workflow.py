@@ -232,7 +232,11 @@ def test_job_names_are_the_required_checks():
     assert [job["name"] for job in workflow_jobs] == REQUIRED_CHECKS
     assert documented_checks() == REQUIRED_CHECKS
     for job in workflow_jobs:
-        assert job["timeout-minutes"] == 25, job["name"]
+        assert job["timeout-minutes"] == LONG_JOBS.get(job["name"], 25), job["name"]
+
+
+# The two suites that run past 20 minutes get 40; every other job keeps 25.
+LONG_JOBS = {"backend tests": 40, "tier 1 evals": 40}
 
 
 # The runner switch: on when the repository variable CI_RUNNER_MODE is "ec2", except for a pull
@@ -242,12 +246,12 @@ SWITCH = (
     "|| github.event.pull_request.head.repo.full_name == github.repository)"
 )
 # Where each job runs: GitHub-hosted ubuntu-24.04 unless the switch is on; then a single-use
-# self-hosted runner, spot for pull requests and on-demand otherwise, whose label names the run,
+# self-hosted on-demand runner for every event (docs/ci.md, "Runners"), whose label names the run,
 # the attempt and the job. <suffix> is the job's own part of the label.
 RUNS_ON = (
     "${{ " + SWITCH + " && fromJSON(format("
     """'["self-hosted","desk-ci-{0}-{1}-{2}-<suffix>"]', """
-    "github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) "
+    "'ondemand', github.run_id, github.run_attempt)) "
     "|| 'ubuntu-24.04' }}"
 )
 # The runner launcher's suffixes, one per job.
@@ -353,6 +357,8 @@ def test_backend_job_fails_on_two_alembic_heads():
 
 GATE = ["uv", "run", "--project", "tools", "python", "-m", "desk_tools.gate"]
 MIGRATIONS = [SETTINGS, ONE_HEAD, MIGRATE, "make db-roles"]
+# The job's database is thrown away with its runner, so it skips durable commits.
+THROWAWAY = "make db-throwaway"
 TIER2_BASE_SETUP = (
     'if [ -z "$RESULTS_BASE" ]; then\n'
     '  RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"\n'
@@ -362,12 +368,13 @@ TIER2_BASE_SETUP = (
 # What each check runs after its setup, as Plan 06a Task 2's job table says: a string is a plain
 # command, a list is the gate's arguments.
 CHECKS = {
-    "backend tests": [*MIGRATIONS, "cd backend && uv run pytest -q"],
+    "backend tests": [*MIGRATIONS, THROWAWAY, "cd backend && uv run pytest -q"],
     "kernel tests": ["cd kernel && cargo test --locked"],
     # Exactly the arguments test_gate's proofs regression exercises.
     "proofs": ["desk-prove --selftest", PROOFS_GATE],
     "tier 1 evals": [
         *MIGRATIONS,
+        THROWAWAY,
         [
             "--name", "tier1",
             "--run-if", "evals/run.py",

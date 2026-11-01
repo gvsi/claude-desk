@@ -95,7 +95,7 @@ from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Ledge
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import agents, auth, context, decisions, demo_inbox, labels, lang, ledger, render
+from desk.kernel_service import agents, auth, context, decisions, demo_inbox, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseUsage
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
@@ -993,6 +993,8 @@ async def owner_message(ctx: KernelCtx, owner: OwnerCtx, session_row: SessionRow
                                  violations=[canary_violation(found)],
                                  visitor_plain_key="owner_say_blocked", message_id=message_id)
         return OwnerMessageResult(message_id=message_id, verdict=verdict, ledger_seq=verdict.ledger_seq)
+    # the owner saying something in the conversation is the owner handling it: the card's handoff closes
+    closing = await sessions.close_card_handoffs(ctx, session_row)
     fact = Fact(fact_id=f"owner:{message_id}", kind="owner_statement", status="available", source="owner",
                 claims=[Claim(key="text", kind="text", value=typed)],
                 label=Label(readers=["owner", f"session:{session_id}"]))
@@ -1001,6 +1003,7 @@ async def owner_message(ctx: KernelCtx, owner: OwnerCtx, session_row: SessionRow
                                  await _desk_info(ctx, desk_id))
     verdict = await finalize(ctx, session_row, blocks=[block], violations=[], language=language, author="owner",
                              fact_ids=[fact.fact_id], visitor_plain_key="owner_said", message_id=message_id)
+    await sessions.ledger_card_handoffs_closed(ctx, session_row, closing, "owner_message")
     return OwnerMessageResult(message_id=message_id, verdict=verdict, ledger_seq=verdict.ledger_seq)
 
 

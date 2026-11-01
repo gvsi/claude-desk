@@ -337,8 +337,9 @@ describe('design tokens', () => {
     add(['mark-tile'], ['bg-app'], 3);
     add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
     add(['mark-ink'], ['mark-clay'], 3);
-    // The About pages' app icon: its clay field, the icon's edge, on the page.
-    add(['clay'], ['bg-app'], 3);
+    // Claude's writing dots carry the waiting status on the page and in the Ask Claude panel;
+    // the About pages' app icon has its clay field, the icon's edge, on the page too.
+    add(['clay'], ['bg-app', 'bg-panel'], 3);
     // The switch: its track when on, its knob on the track, on or off.
     add(['button-primary'], ['bg-app', 'bg-panel'], 3);
     add(['bg-app'], ['button-primary'], 3);
@@ -497,6 +498,13 @@ describe('design tokens', () => {
     expect(tokenValue('size-sub-nav')).toBe('200px');
   });
 
+  test('skeleton_band_is_a_token', () => {
+    // The one band of light that sweeps a loading page's shapes, 900 px wide, as the signed skeleton
+    // boards draw it. Its loop is the writing indicator's, so it adds no motion token.
+    expect(tokenValue('size-skeleton-band')).toBe('900px');
+    expect(tokens.motion.tokens.map((t) => t.name).filter((name) => name.includes('skeleton'))).toEqual([]);
+  });
+
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
       'clay',
@@ -522,10 +530,12 @@ describe('design tokens', () => {
   });
 
   test('motion_stays_in_range', () => {
-    const loops = ['motion-breathe', 'motion-writing', 'motion-spin'];
-    const easings = ['motion-ease', 'motion-ease-emphasis'];
+    const loops = ['motion-breathe', 'motion-writing', 'motion-dots', 'motion-spin'];
+    const easings = ['motion-ease', 'motion-ease-emphasis', 'motion-ease-bounce'];
     const names = tokens.motion.tokens.map((t) => t.name);
     for (const name of [...loops, ...easings]) expect(names).toContain(name);
+    expect(tokenValue('motion-dots')).toBe('1200ms');
+    expect(tokenValue('motion-ease-bounce')).toBe('cubic-bezier(0.37, 0, 0.63, 1)');
 
     for (const token of tokens.motion.tokens) {
       expect(token.name).toMatch(/^motion-/);

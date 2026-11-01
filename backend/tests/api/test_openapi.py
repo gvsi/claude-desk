@@ -49,6 +49,33 @@ def test_briefing_contract_counts_only_turned_down_requests():
         assert "blocked" not in schemas[name]["properties"]
 
 
+def test_knowledge_list_has_required_nullable_fields():
+    document = export_openapi()
+    operation = document["paths"]["/api/owner/desks/{desk_id}/knowledge"]["get"]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "type": "array", "items": {"$ref": "#/components/schemas/KnowledgeRow"}, "title": "Response Owner Knowledge"}
+    schema = document["components"]["schemas"]["KnowledgeRow"]
+    fields = ["item_id", "title", "text", "readers", "source", "created_at"]
+    assert schema["required"] == fields
+    assert set(schema["properties"]) == set(fields)
+    assert all("default" not in prop for prop in schema["properties"].values())
+    for field in ("title", "text"):
+        assert schema["properties"][field]["anyOf"] == [{"type": "string"}, {"type": "null"}]
+    assert schema["properties"]["created_at"]["anyOf"] == [
+        {"type": "string", "format": "date-time"}, {"type": "null"}]
+    assert schema["properties"]["readers"]["items"] == {"type": "string"}
+    assert schema["properties"]["source"]["enum"] == ["website", "upload", "setup", "memory_import"]
+
+
+def test_owner_refusal_reasons_are_required_and_nullable():
+    schemas = export_openapi()["components"]["schemas"]
+    for name in ("OwnerTranscriptItem", "ToolDecisionRow"):
+        assert "owner_plain" in schemas[name]["required"], name
+        field = schemas[name]["properties"]["owner_plain"]
+        assert field["anyOf"] == [{"type": "string"}, {"type": "null"}]
+        assert "default" not in field
+
+
 def test_every_route_has_typed_responses():
     document = export_openapi()
     schemas = document["components"]["schemas"]

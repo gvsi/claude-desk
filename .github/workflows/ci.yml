@@ -30,8 +30,8 @@ defaults:
 jobs:
   backend:
     name: backend tests
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
-    timeout-minutes: 25
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
     services:
       postgres:
         # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
@@ -68,12 +68,14 @@ jobs:
         run: cd backend && uv run alembic upgrade head
       - name: Set the role passwords
         run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
       - name: Run the backend tests
         run: cd backend && uv run pytest -q
 
   kernel:
     name: kernel tests
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-kernel"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-kernel"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,7 +89,7 @@ jobs:
 
   proofs:
     name: proofs
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-proofs"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-proofs"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,8 +103,8 @@ jobs:
 
   tier1:
     name: tier 1 evals
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
-    timeout-minutes: 25
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    timeout-minutes: 40
     services:
       postgres:
         # Docker Hub on GitHub-hosted runners, whose shared addresses run into ECR Public's anonymous
@@ -139,6 +141,8 @@ jobs:
         run: cd backend && uv run alembic upgrade head
       - name: Set the role passwords
         run: make db-roles
+      - name: Make the job's database skip durable commits
+        run: make db-throwaway
       - name: Run the tier 1 evals
         run: uv run --project tools python -m desk_tools.gate --name tier1 --run-if evals/run.py --required-if backend/desk/kernel_service/app.py -- make evals-tier1
       - name: Run the kernel contract tests against the real kernel
@@ -146,7 +150,7 @@ jobs:
 
   tier2:
     name: tier 2 results
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier2"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -167,7 +171,7 @@ jobs:
 
   web:
     name: web tests
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-web"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -192,7 +196,7 @@ jobs:
 
   infra:
     name: infra synth
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-infra"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-infra"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -217,7 +221,7 @@ jobs:
 
   secret-scan:
     name: secret scan
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-secret-scan"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-secret-scan"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -253,7 +257,7 @@ jobs:
 
   repo:
     name: repo checks
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-repo"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-repo"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

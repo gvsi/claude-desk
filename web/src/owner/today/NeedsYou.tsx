@@ -1,19 +1,12 @@
-import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useId, useState, type Ref } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useId, type Ref } from 'react';
 
-import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
-import type { NeedsYouItem } from '../../api/views.ts';
-import { Button, Card, Notice, SectionHeader, StatusLabel } from '../../ds/index.ts';
-import { callbackLine } from '../../lib/format.ts';
+import { Button, Notice, SectionHeader } from '../../ds/index.ts';
 import { HeldRequest, type AnsweredFocus } from '../approvals/HeldRequest.tsx';
 import type { HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
-import { conversationPath, type ConversationArrival } from '../conversations/status.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { heldOldestFirst, needsYouKey, todayKey } from '../useDesks.ts';
+import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
+import { heldOldestFirst } from '../useDesks.ts';
 
-/** An open callback as Needs you lists it. */
-export type CallbackItem = Extract<NeedsYouItem, { handoff: object }>;
+export type { CallbackItem } from '../handoffs/CallbackCard.tsx';
 
 /** Why the latest read of what needs the owner failed, in owner words, and a way to read it again. */
 export interface ReadFailure {
@@ -31,7 +24,7 @@ function countLabel(n: number): string {
 export interface NeedsYouProps {
   /** Held requests still waiting for the owner, oldest first. */
   held: readonly HeldItem[];
-  /** Open callbacks, in the order Needs you lists them. */
+  /** Open handoffs, in the order Needs you lists them. */
   callbacks: readonly CallbackItem[];
   answers: UseAnswer;
   /** When Needs you was last read (its `dataUpdatedAt`), which tells whether `held` shows a request as it stands since a conflict. */
@@ -51,7 +44,7 @@ export interface NeedsYouProps {
 /**
  * Today's "Needs you": a failed read first, when the latest one failed; then one list of the held
  * requests and those answered here, oldest first, each an approval card answered in place, then
- * each open callback. A request answered here stays where it was answered, with its final line and
+ * each open handoff. A request answered here stays where it was answered, with its final line and
  * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
 export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, sectionRef, onDismiss }: NeedsYouProps) {
@@ -119,85 +112,5 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
         </ul>
       ) : null}
     </section>
-  );
-}
-
-/**
- * A visitor who asked for the owner: their name, contact and reason as they typed them, the
- * callback they were promised, a way into the chat, and a way to close it.
- */
-function CallbackCard({ item }: { item: CallbackItem }) {
-  const { business, desk } = useOwnerDesk();
-  const deskId = desk.desk_id;
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { handoff } = item;
-  const [joining, setJoining] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reread = () =>
-    Promise.all([queryClient.invalidateQueries({ queryKey: needsYouKey(deskId) }), queryClient.invalidateQueries({ queryKey: todayKey(deskId) })]);
-
-  // Reads the chat for its generation, takes it over at that generation, and opens it. A take-over
-  // that fails still opens the chat, which then says why.
-  const join = async () => {
-    setJoining(true);
-    setError(null);
-    let notice: string | null = null;
-    try {
-      const chat = await request('conversation', { params: { session_id: handoff.session_id } });
-      await request('takeover', { params: { session_id: handoff.session_id }, body: { generation: chat.state.generation } });
-    } catch (err) {
-      if (err instanceof ApiError && err.kind === 'unauthorized') {
-        setJoining(false);
-        return;
-      }
-      notice = ownerErrorCopy(err);
-    }
-    void reread();
-    const state: ConversationArrival | undefined = notice === null ? undefined : { notice };
-    void navigate(conversationPath(deskId, handoff.session_id), state === undefined ? undefined : { state });
-  };
-
-  // Closed already, or gone from the copy: Needs you reads again and says nothing went wrong.
-  const markDone = async () => {
-    setClosing(true);
-    setError(null);
-    try {
-      await request('handoffDone', { params: { handoff_id: handoff.handoff_id } });
-    } catch (err) {
-      if (err instanceof ApiError && (err.kind === 'not_found' || err.kind === 'conflict' || err.kind === 'unauthorized')) {
-        // Nothing to say: the next read shows where it stands.
-      } else {
-        setError(ownerErrorCopy(err));
-      }
-    }
-    await reread().catch(() => undefined);
-    setClosing(false);
-  };
-
-  return (
-    <Card as="article" label="Wants you">
-      <div className="cd-callback">
-        <p className="cd-callback__top cd-type-caption">
-          <StatusLabel tone="held">Wants you</StatusLabel>
-        </p>
-        <p className="cd-callback__reason cd-type-body" data-copy="user">
-          {handoff.reason}
-        </p>
-        <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>
-        {/* Only the pressed button spins; the other waits, its words shown, until its request settles. */}
-        <div className="cd-callback__actions">
-          <Button variant="secondary" busy={joining} waiting={closing} onClick={() => void join()}>
-            Join the chat
-          </Button>
-          <Button variant="ghost" busy={closing} waiting={joining} onClick={() => void markDone()}>
-            Mark done
-          </Button>
-        </div>
-        {error !== null ? <Notice tone="error">{error}</Notice> : null}
-      </div>
-    </Card>
   );
 }

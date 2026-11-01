@@ -234,8 +234,11 @@ async def test_put_parts_replace_and_ledger(app, client, frozen_clock):
     # no entry names a contact, and the chain still verifies
     page = (await client.get(f"/ledger/{copy.desk_id}", headers=copy.owner)).json()
     assert page["chain_ok"] is True
-    summaries = json.dumps([entry["event"]["summary"] for entry in page["entries"]])
-    assert "0123" not in summaries and "555" not in summaries
+    summaries = json.dumps([entry["event"]["summary"] for entry in page["entries"]], ensure_ascii=False)
+    # Eve's contact in no form; IDs and hashes may hold her digits by chance, never set apart as a number
+    for form in ("+1 (510) 555-0123", "(510) 555-0123", "555-0123", "5105550123", "\u2022\u2022\u2022\u2022 0123"):
+        assert form not in summaries, form
+    assert re.search(r"(?<![0-9A-Za-z])(?:555|0123)(?![0-9A-Za-z])", summaries) is None
 
 
 async def people_of(app: FastAPI, copy: Rivera) -> dict[str, Person]:

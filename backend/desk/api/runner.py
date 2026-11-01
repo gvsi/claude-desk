@@ -131,7 +131,8 @@ class TurnRunner:
                              start: bool = True) -> bool:
         """Do what the row left for the session's credential (module docstring) on `conn`, committing what it
         publishes with its claim, then start the session's turns (unless `start` is False); True when this caller
-        claimed it. Kernel failures leave the row for a later request."""
+        claimed it. Decision rows wake Claude only when they publish a new state. Kernel failures leave the row
+        for a later request."""
         if (row.copy_id, row.session_id) != (caller.copy_id, caller.session_id):
             raise ValueError("a control row is handled only with its own session's credential")
         if row.type == "run_resumable":
@@ -152,14 +153,15 @@ class TurnRunner:
                 await conn.rollback()
                 return False
             phase = "receipt" if decision.outcome == "allow" else "resolved"
-            if await deliver(conn, caller.ids, Status(decision, phase), ro_schema=caller.ro_schema) is not None:
+            published = await deliver(conn, caller.ids, Status(decision, phase), ro_schema=caller.ro_schema) is not None
+            if published:
                 await append_message(conn, caller.ids, "action_update", text=decision.visitor_plain,
                                      ref_id=decision.decision_id, state=decision.state)
             await conn.commit()
         except BaseException:
             await conn.rollback()
             raise
-        if start:
+        if start and published:
             self.start(caller)
         return True
 

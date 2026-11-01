@@ -89,6 +89,8 @@ from desk.kernel_api import (
     PublicDesk,
     SessionContext,
     ToolsConnectRequest,
+    ToolsConfirmRequest,
+    ToolPin,
     ToolsSimulateChangeRequest,
     TurnRequest,
     TurnStarted,
@@ -451,6 +453,32 @@ async def test_discounted_quote_holds_and_answers_once(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+@pytest.mark.parametrize("choice", ["allow_once", "deny_once"])
+async def test_answer_includes_the_approved_snapshot_only_for_an_allow(kernel, ro_read, choice):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    held = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    result = await answer(http.owner(copy.owner_token), held.decision_id, choice)
+    assert "approved" in result.model_dump(mode="json")
+    if choice == "deny_once":
+        assert result.approved is None and result.decision.state == "denied"
+        assert result.execution is None
+        return
+
+    assert result.approved is not None
+    assert (result.approved.decision_id, result.approved.state, result.approved.visitor_plain) == (
+        held.decision_id, "approved", "Maria Rivera approved this")
+    assert result.approved.signature and result.approved.signature != result.decision.signature
+    assert result.approved.owner_plain is None
+    assert result.approved.ledger_seq < result.decision.ledger_seq
+    assert result.decision.state == "executed" and result.execution.state == "succeeded"
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_limit_hold_offers_no_deny_always(kernel, ro_read, arrange):
     """"Deny always" is offered only on a hold an `ask` card decided (master "Decision lifecycle"). The seeded 15% quote
     is a limit hold, through `rv-quote`'s hold twin: its answers leave it out, and posting it is 422 `invalid` with
@@ -541,9 +569,15 @@ async def test_approving_after_the_rules_changed_runs_nothing(kernel, ro_read, a
 
     result = await answer(owner, held.decision_id, "allow_once")
     assert (result.decision.decision_id, result.decision.state) == (held.decision_id, "refused_at_execution")
-    assert result.execution is None and result.card_diff is None
+    assert result.execution is None and result.card_diff is None and result.approved is None
     assert result.decision.ledger_seq > held.ledger_seq and result.decision.answers == []
-    assert await read_decision(view, held.decision_id) == result.decision
+    owner_line = "Your rules changed before this ran, so it wasn't done."
+    assert result.decision.owner_plain == owner_line
+    assert await read_decision(owner, held.decision_id) == result.decision
+    # the session reads the owner's answer without the owner's line (`owner_plain`), which only the owner's reads carry
+    read = await read_decision(view, held.decision_id)
+    assert read.owner_plain is None
+    assert read.model_copy(update={"owner_plain": owner_line}) == result.decision
     assert ro_read(ro_schema, copy.copy_id, "SELECT count(*) AS n FROM {ro}.quotes WHERE session_id = %s",
                    (session_id,)) == [{"n": 0}]
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
@@ -2216,7 +2250,51 @@ async def test_charge_mandate_bounds_and_commits(kernel, ro_read):
     assert mandate == {"committed_cents": 10_000, "reserved_cents": 0}
 
 
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize("path", ["allow", "approval"])
+async def test_expired_mandate_at_execution_names_no_rule_change(kernel, ro_read, arrange, path):
+    """Expiry changes the mandate's authority, not the owner's rules: both kernels ledger `conditions`,
+    charge nothing and give the owner the fallback, on allow and `allow_once` paths alike."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    if path == "approval":
+        await arrange.ask(owner, ro_read, ro_schema, copy, "native.charge_mandate")
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, issued, slug)
+    session_id = created.state.session_id
+    view = turn_view(http, issued, slug, session_id, "Please charge the deposit")
+    deposit = item_id(ro_read, ro_schema, copy, "Service call deposit")
+    quoted = await execute(view, await decide(view, session_id, 0, "call-quote", "native.quote",
+                                              quote_args(deposit)), 0)
+    decision = await decide(view, session_id, 0, "call-charge", "native.charge_mandate",
+                            {"quote_id": quoted.model_view["quote_id"]})
+    assert decision.outcome == ("allow" if path == "allow" else "hold")
+    arrange.expire_mandate(issued.mandate.mandate_id)
+
+    if path == "allow":
+        assert await refused(execute(view, decision, 0)) == (409, "conflict")
+    else:
+        result = await answer(owner, decision.decision_id, "allow_once")
+        assert result.execution is None
+
+    read = await read_decision(owner, decision.decision_id)
+    assert read.state == "refused_at_execution"
+    page = await ledger_page(owner, copy.desk_ids[0])
+    entries = [entry.event.summary for entry in page.entries
+               if entry.event.ref_id == decision.decision_id
+               and entry.event.kind == ("execute" if path == "allow" else "approval")]
+    assert entries[-1]["check"] == "conditions"
+    assert read.owner_plain == "This couldn't run, so it wasn't done."
+    assert (await read_decision(view, decision.decision_id)).owner_plain is None
+    (mandate,) = ro_read(ro_schema, copy.copy_id, "SELECT committed_cents, reserved_cents FROM {ro}.mandates"
+                                                  " WHERE mandate_id = %s", (issued.mandate.mandate_id,))
+    assert mandate == {"committed_cents": 0, "reserved_cents": 0}
+
+
 # Setup: a new Desk and the owner's setup tools (Plans 01b and 01c) ---------------------------------------------------
+
 
 SETUP_TOOLS = {"native.fetch_website", "native.read_memory"}
 # `PRESETS["ask_first"]`: auto for anyone on these, everything else asks (Plan 01a).
@@ -2404,6 +2482,18 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     session = (await owner.whoami()).session
     assert tools(await context(owner, session.session_id, created.desk_id)) == (SETUP_TOOLS, SETUP_TOOLS)
 
+    from desk.kernel_api import DeskMemoryRequest
+
+    empty = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="empty-memory", tool="native.read_memory", args={"query": "business hours"})))
+    assert (await execute(owner, empty, session.generation)).model_view == {"simulated": True, "items": []}
+
+    memory = DeskMemoryRequest.model_validate({"about": "Simulated CPA notes.", "items": [
+        {"id": "business", "title": "Chen CPA", "topics": ["business"], "text": "Chen CPA prepares tax returns."}]})
+    updated = await owner.call("PUT /desks/{id}/memory", memory, path={"id": created.desk_id})
+    assert isinstance(updated, DeskUpdated) and updated.desk_id == created.desk_id
+
     call = ToolCall(call_id="setup-memory", tool="native.read_memory", args={"query": "business hours"})
     decision = await owner.call("POST /decide", DecideRequest(session_id=session.session_id,
                                                               generation=session.generation, call=call,
@@ -2411,7 +2501,8 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     assert decision.outcome == "allow" and decision.session_id == session.session_id
     assert decision.action.desk_id == created.desk_id and decision.action.resource.kind == "desk"
     result = await execute(owner, decision, session.generation)
-    assert result.state == "succeeded" and result.model_view["simulated"] is True and result.model_view["items"]
+    assert result.state == "succeeded" and result.model_view == {"simulated": True, "items": [
+        {"title": "Chen CPA", "text": "Chen CPA prepares tax returns."}]}
     knowledge = ro_read(ro_schema, copy.copy_id, "SELECT source, readers FROM {ro}.knowledge_items"
                                                  " WHERE desk_id = %s", (created.desk_id,))
     assert knowledge and all(row == {"source": "memory_import", "readers": ["owner"]} for row in knowledge)
@@ -2432,13 +2523,36 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     assert await refused(elsewhere) == (404, "not_found")
 
 
+@pytest.mark.kernel_plan("01c")
+async def test_memory_nul_item_is_refused(kernel):
+    from desk.kernel_api import DeskMemoryRequest
+
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    memory = DeskMemoryRequest.model_validate({"about": "Simulated CPA notes.", "items": [
+        {"id": "business", "title": "Chen CPA", "topics": ["business"], "text": "before\0after"}]})
+    start = (await ledger_page(owner, created.desk_id)).entries[-1].seq
+    assert await refused(owner.call("PUT /desks/{id}/memory", memory, path={"id": created.desk_id})) == (
+        422, "invalid")
+    assert [(entry.event.kind, entry.event.summary)
+            for entry in (await ledger_page(owner, created.desk_id)).entries if entry.seq > start] == [
+        ("desk_data", {"part": "memory", "refused": "invalid"})]
+    session = (await owner.whoami()).session
+    decision = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="refused-memory", tool="native.read_memory", args={"query": "business"})))
+    assert (await execute(owner, decision, session.generation)).model_view == {"simulated": True, "items": []}
+
+
 # Setup: a new Desk's parts, rules drafts, probes and connected tools (Plans 01a, 01b and 01c) -------------------------
 
 HOURS = [HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), end=time(17))]
 
 
 def active_version(ro_read, ro_schema: str, copy_id: str, desk_id: str) -> dict:
-    (active,) = ro_read(ro_schema, copy_id, "SELECT version, cards FROM {ro}.policy_versions"
+    (active,) = ro_read(ro_schema, copy_id, "SELECT version, cards, auto_money_cap_cents FROM {ro}.policy_versions"
                                             " WHERE desk_id = %s AND status = 'active'", (desk_id,))
     return active
 
@@ -2922,6 +3036,115 @@ async def test_connecting_payments_pins_its_tools_for_review(kernel, ro_read):
     assert not {"payments.list_charges", "payments.create_refund"} & given
 
 
+@pytest.mark.kernel_plan("01c")
+async def test_confirming_payments_drafts_enables_until_policy_confirmation(kernel, ro_read):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    configured = await owner.call("POST /policy/draft", PolicyDraftRequest(
+        desk_id=created.desk_id, cards=[*owner_cards(active), quote_card(max_amount_cents=1_000)],
+        expected_parent=active["version"], auto_money_cap_cents=2_300))
+    proved_or_skip(configured)
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id, version=configured.version))
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    body = ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles])
+    reviewed = await owner.call("POST /tools/confirm", body)
+    assert reviewed.profiles == profiles
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    assert reviewed.draft.parent_version == active["version"]
+    assert [card for card in reviewed.draft.cards if not card.is_default] == owner_cards(active)
+    assert reviewed.draft.auto_money_cap_cents == active["auto_money_cap_cents"]
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+    assert (await owner.call("POST /tools/confirm", body)).draft == reviewed.draft
+    probe = PolicyProbeRequest(desk_id=created.desk_id, probes=[Probe(
+        actor="visitor", who="record_owner", resource_kind="charge", resource_owner="caller",
+        call=ToolCall(call_id="review-charges", tool="payments.list_charges", args={}))])
+    result = await owner.call("POST /policy/{version}/probe", probe, path={"version": reviewed.draft.version})
+    assert result[0].outcome == "hold"
+    result = await owner.call("POST /policy/{version}/probe", probe, path={"version": active["version"]})
+    assert result[0].outcome == "refuse"
+
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    assert {row["tool"]: row["status"] for row in rows} == {profile.tool: "enabled" for profile in profiles}
+    assert (await owner.call("POST /tools/confirm", body)).draft is None
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_tool_review_refusals_and_disable_are_atomic(kernel, ro_read):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    unknown = ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool="payments.create_refund", definition_sha256="0" * 64)])
+    assert await refused(owner.call("POST /tools/confirm", unknown)) == (404, "not_found")
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    pins = [ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles]
+    for enable in (True, False):
+        stale = ToolsConfirmRequest(desk_id=created.desk_id, enable=enable, tools=[
+            pins[0], pins[1].model_copy(update={"definition_sha256": "0" * 64})])
+        assert await refused(owner.call("POST /tools/confirm", stale)) == (409, "conflict")
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    assert [row["status"] for row in rows] == ["needs_review", "needs_review"]
+    disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=False, tools=pins))
+    assert disabled.draft is None and all(profile.status == "disabled" for profile in disabled.profiles)
+    reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=True, tools=pins))
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    await owner.call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
+        desk_id=created.desk_id, tool=pins[-1].tool))
+    assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    # a drift on a disabled tool leaves it disabled, its changed definition pending (`mcp_pins.check_pin`)
+    assert {row["tool"]: row["status"] for row in rows} == {
+        pins[0].tool: "disabled", pins[-1].tool: "disabled"}
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_a_tool_review_draft_is_refused_once_the_desks_tools_change(kernel, ro_read):
+    # The draft was proved against the tools enabled then plus its own enables; turning another tool off before it is
+    # confirmed changes what it would enable, so the confirm is refused and nothing it enables is turned on.
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles]))
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    (book,) = ro_read(ro_schema, copy.copy_id, "SELECT tool, definition_sha256 FROM {ro}.tools"
+                                               " WHERE desk_id = %s AND tool = 'native.book'", (created.desk_id,))
+    disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=False,
+        tools=[ToolPin(tool=book["tool"], definition_sha256=book["definition_sha256"])]))
+    assert disabled.draft is None and disabled.profiles[0].status == "disabled"
+    assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+    rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s"
+                                            " AND (source = 'mcp' OR tool = 'native.book')", (created.desk_id,))
+    assert {row["tool"]: row["status"] for row in rows} == {
+        **{profile.tool: "needs_review" for profile in profiles}, "native.book": "disabled"}
+
+
 # The owner's knowledge, documents and tool changes (Plans 01b and 01c) ---------------------------------------
 
 
@@ -2960,6 +3183,44 @@ async def test_copy_starts_with_public_website_and_price_list_knowledge(kernel, 
 def knowledge_item(readers: list[str], text: str = "Street parking is free after 6 pm.") -> KnowledgeItem:
     return KnowledgeItem(item_id="upload-parking", source="upload", title="Parking", text=text,
                          label=Label(readers=readers))
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_knowledge_created_at_reads_in_kernel_order_and_survives_replacement(kernel, arrange, api_ro_conn):
+    """The API's reader exposes each stored first-added time, ordered by time then ID, even after replacement."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    reader = KernelRO(api_ro_conn, copy.copy_id, ro_schema, own_transactions=True)
+    for item_id in ("upload-z", "upload-a"):
+        item = knowledge_item(["owner"]).model_copy(update={"item_id": item_id})
+        await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=item))
+
+    async def read() -> list[dict]:
+        rows = await reader.rows("knowledge_items", desk_id=desk_id, order_by=("created_at", "item_id"))
+        recorded = arrange.recorded_knowledge_created_at(desk_id)
+        assert {row["item_id"]: row["created_at"] for row in rows} == recorded
+        assert all(isinstance(row["created_at"], datetime) and row["created_at"].tzinfo for row in rows)
+        assert [(row["created_at"], row["item_id"]) for row in rows] == sorted(
+            (at, item_id) for item_id, at in recorded.items())
+        return rows
+
+    first = await read()
+    first_times = {row["item_id"]: row["created_at"] for row in first}
+    # Fake time is fixed; move it so resetting created_at on replacement would fail on both kernels.
+    if state is not None:
+        state.now += timedelta(seconds=1)
+    later = knowledge_item(["owner"]).model_copy(update={"item_id": "upload-later"})
+    await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=later))
+    replacement = knowledge_item(["public"], text="Updated parking directions.").model_copy(
+        update={"item_id": "upload-z"})
+    await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=replacement))
+    after = await read()
+    assert {row["item_id"]: row["created_at"] for row in after if row["item_id"] in first_times} == first_times
+    updated = next(row for row in after if row["item_id"] == "upload-z")
+    assert (updated["text"], updated["readers"]) == (replacement.text, ["public"])
+    assert after[-1]["item_id"] == "upload-later"
+    assert after[-1]["created_at"] > max(first_times.values())
 
 
 @pytest.mark.kernel_plan("01b")

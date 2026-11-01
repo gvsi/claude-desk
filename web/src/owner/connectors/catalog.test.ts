@@ -10,7 +10,8 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import type { ConnectorIconName } from '../../ds/index.ts';
 import { TOOL_LABELS } from '../../mocks/script.ts';
 import { riveraTools } from '../../mocks/seed.ts';
-import { CONNECTORS, TOOL_NAMES, TOOL_RESOURCES, connectorByKey, connectorOf, connectorOn, hasRecordOwner, toolNoun, toolState } from './catalog.ts';
+import { chenBusinessTools } from '../../mocks/businessTools.ts';
+import { CONNECTORS, NO_BUSINESS_TOOLS, TOOL_NAMES, TOOL_RESOURCES, businessTools, connectorByKey, connectorOf, connectorOn, hasRecordOwner, isBusinessToolName, isCatalogTool, toolDisplayName, toolNoun, toolState } from './catalog.ts';
 
 /** Every tool the contracts name: a tool added to or dropped from them fails to compile here. */
 const EVERY_TOOL = {
@@ -62,6 +63,43 @@ function row(fields: Partial<ToolRow> = {}): ToolRow {
 }
 
 describe('the connector catalog', () => {
+  it('resolves business titles and catalog names without exposing unknown identifiers', () => {
+    const map = businessTools(chenBusinessTools);
+    expect(toolDisplayName('desk.intro-call', map)).toBe('Book a free intro call');
+    expect(toolDisplayName('native.quote', map)).toBe('Quote');
+    expect(toolDisplayName('desk.unknown', map)).toBeNull();
+    expect(toolDisplayName('toString', map)).toBeNull();
+    expect(toolDisplayName('desk.intro-call', NO_BUSINESS_TOOLS)).toBeNull();
+    expect(Object.isFrozen(NO_BUSINESS_TOOLS)).toBe(true);
+    expect(NO_BUSINESS_TOOLS.size).toBe(0);
+    expect(toolNoun('desk.intro-call')).toBeNull();
+    for (const tool of Object.keys(EVERY_TOOL)) expect(isCatalogTool(tool), tool).toBe(true);
+    for (const tool of ['desk.intro-call', 'toString', 'native.unknown']) expect(isCatalogTool(tool), tool).toBe(false);
+  });
+
+  it('keeps only listed business tools with nonblank titles', () => {
+    const [intro, intake] = chenBusinessTools;
+    if (!intro?.business || !intake) throw new Error('Chen has both business tools');
+    const map = businessTools([
+      intro, intake,
+      { ...intro, tool: 'desk.native', source: 'native' },
+      { ...intro, tool: 'native.quote' },
+      { ...intro, tool: 'desk.Intro' },
+      { ...intro, tool: 'desk.missing', business: null },
+      { ...intro, tool: 'desk.absent', business: undefined },
+      { ...intro, tool: 'desk.blank', business: { ...intro.business, title: ' \t ' } },
+    ]);
+    expect([...map]).toEqual(chenBusinessTools.map((tool) => [tool.tool, tool.business]));
+  });
+
+  it('recognizes only kernel business tool names', () => {
+    expect(isBusinessToolName('desk.intro-call')).toBe(true);
+    expect(isBusinessToolName(`desk.a${'a'.repeat(39)}`)).toBe(true);
+    for (const tool of ['desk.', 'desk.Intro', 'desk.1abc', `desk.a${'a'.repeat(40)}`, 'native.quote', 'desk.intro_call']) {
+      expect(isBusinessToolName(tool), tool).toBe(false);
+    }
+  });
+
   it('catalog_covers_every_tool', () => {
     // The keys are the design system's connector ids, in the boards' order, each with its own view.
     expect(CONNECTORS.map((c) => c.key)).toEqual(Object.keys(DS_CONNECTOR_IDS));
@@ -156,7 +194,10 @@ describe('the connector catalog', () => {
 
   it('record_owners_only_where_the_kernel_resolves_one', () => {
     // What each tool acts on is its profile's, as the mock serves the kernel's profiles.
-    for (const profile of riveraTools()) expect(TOOL_RESOURCES[profile.tool], profile.tool).toBe(profile.resource_kind);
+    for (const profile of riveraTools()) {
+      if (!isCatalogTool(profile.tool)) throw new Error('Rivera seeds catalog tools');
+      expect(TOOL_RESOURCES[profile.tool], profile.tool).toBe(profile.resource_kind);
+    }
     // Only a document or a charge has an owner, so only these tools' records do.
     const owned = (Object.keys(EVERY_TOOL) as ToolName[]).filter((tool) => hasRecordOwner(tool));
     expect(owned).toEqual(['native.release_document', 'payments.list_charges', 'payments.create_refund']);

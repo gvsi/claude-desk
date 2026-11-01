@@ -22,7 +22,8 @@ import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../test/screen.ts';
-import { CAUGHT_UP_AFTER_MS } from './PublicChatProvider.tsx';
+import { CAUGHT_UP_AFTER_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
+import { PublicPage } from './PublicPage.tsx';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -373,6 +374,66 @@ describe('public chat page', () => {
     expect(screen.container.querySelectorAll('.cd-margin-receipt button, button.cd-margin-receipt')).toHaveLength(0);
   });
 
+  it('approved_request_has_no_cancel_while_its_outcome_is_pending', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).toBeVisible();
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    const record = held?.type === 'held' ? mockStore.world.decisions.get(held.decision_id) : undefined;
+    if (!chat || !record) throw new Error('the discount was held');
+    mockStore.world.answer(record, 'allow_once');
+    const approved = record.approved;
+    if (!approved) throw new Error('the owner approved the discount');
+    // The approve request can time out: only approval reaches the visitor until a later request.
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').status('receipt', approved));
+    await expect.element(screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(chatEvents().some(({ ev }) => ev.type === 'resolved')).toBe(false);
+    expect(screen.getByText(record.decision.visitor_plain, { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Cancel this request' }).elements()).toHaveLength(0);
+    expectNoHorizontalScroll();
+
+    const phone = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(phone.screen);
+    await expect.element(phone.screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(phone.screen.getByText(record.decision.visitor_plain, { exact: true }).elements()).toHaveLength(0);
+    expect(phone.screen.getByRole('button', { name: 'Cancel this request' }).elements()).toHaveLength(0);
+    expectNoHorizontalScroll();
+  });
+
+  it('allowed_request_keeps_approval_then_outcome_under_the_message_live_and_reloaded', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    const waiting = screen.getByText(rivera.decisions.held.visitor_plain, { exact: true });
+    const heldRow = rowOf(waiting.element());
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    await request('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } });
+    const approved = screen.getByText('Maria Rivera approved this', { exact: true });
+    const outcome = screen.getByText("Quoted from Maria Rivera's price list", { exact: true });
+    await expect.element(approved).toBeVisible();
+    await expect.element(outcome).toBeVisible();
+    expect(rowOf(approved.element())).toBe(heldRow);
+    expect(rowOf(outcome.element())).toBe(heldRow);
+    // A stranger's public chat leaves out the reply check's own line, so the approval comes first.
+    const expected = ['Maria Rivera approved this', "Quoted from Maria Rivera's price list"];
+    expect(receiptsOf(heldRow)).toEqual(expected);
+    expect(outcome.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(approved.element().getBoundingClientRect().bottom);
+    await expect.element(waiting).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(shownMessages()).toHaveLength(2));
+    expect(receiptsOf(heldRow)).toEqual(expected);
+
+    const phone = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(phone.screen);
+    const loadedApproval = phone.screen.getByText('Maria Rivera approved this', { exact: true });
+    await expect.element(loadedApproval).toBeVisible();
+    expect(receiptsOf(rowOf(loadedApproval.element()))).toEqual(expected);
+    expectNoHorizontalScroll();
+  });
+
   it('cancelled_line_under_a_landed_reply_shows_at_once', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);
@@ -474,6 +535,41 @@ describe('public chat page', () => {
     );
     const states = chatEvents().flatMap(({ ev }) => (ev.type === 'resolved' ? [[ev.decision_id, ev.state]] : []));
     expect(states).toEqual(holds.map((id) => [id, 'cancelled']));
+  });
+
+  it('uncertain_cancel_sets_no_failure_when_the_transcript_holds_approval', async () => {
+    let chat: VisitorChatView | undefined;
+    function ObservedPage() {
+      chat = useVisitorChat(RIVERA.slug);
+      return <PublicPage />;
+    }
+    const { screen } = await renderRoute(PAGE, { routes: [{ path: '/d/:slug', Component: ObservedPage }] });
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    const session = mockStore.visitorSession(RIVERA.slug);
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    const record = held?.type === 'held' ? mockStore.world.decisions.get(held.decision_id) : undefined;
+    if (!session || !record) throw new Error('the discount was held');
+
+    let release = () => {};
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'cancelRequest', status: 'network', until });
+    await screen.getByRole('button', { name: 'Cancel this request' }).click();
+    await vi.waitFor(() => expect(requests('cancelRequest')).toHaveLength(1));
+    mockStore.world.answer(record, 'allow_once');
+    const approved = record.approved;
+    if (!approved) throw new Error('the owner approved the discount');
+    mockStore.world.emit(session, mockStore.world.context(session, 'en', '').status('receipt', approved));
+    await expect.element(screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(chatEvents().some(({ ev }) => ev.type === 'resolved')).toBe(false);
+
+    const reads = requests('visitorSession').length;
+    release();
+    await vi.waitFor(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await vi.waitFor(() => expect(chat?.cancelling).toBeNull());
+    expect(chat?.cancelFailed).toBeNull();
+    expect(chat?.state.openHolds).toEqual([]);
   });
 
   it('error_event_shows_static_copy', async () => {
@@ -2363,8 +2459,9 @@ describe('public chat page', () => {
   });
 
   it('break_it_idea_leaves_focus_where_the_visitor_put_it', async () => {
-    // The chat opens late, and meanwhile the visitor has moved to a link in the about column: the
-    // idea is typed in, and focus stays on the link.
+    // The chat opens late. Its whole first view waits for the session read, so its about links
+    // aren't usable yet. A visitor who focuses a link elsewhere keeps that focus when the idea
+    // is typed in; nothing in the skeleton itself can take focus.
     let release = (): void => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -2380,13 +2477,16 @@ describe('public chat page', () => {
       }),
     );
     const { screen } = await renderRoute(`${PAGE}?try=${handOff()}`);
-    const link = screen.getByRole('link', { name: 'What agents can do here' });
-    await expect.element(link).toBeVisible();
-    (link.element() as HTMLElement).focus();
+    await vi.waitFor(() => expect(held).toBe(true));
+    const link = document.body.appendChild(document.createElement('a'));
+    link.href = '#elsewhere';
+    link.textContent = 'A link elsewhere';
+    onTestFinished(() => link.remove());
+    link.focus();
     release();
     await expect.element(chatBox(screen)).toHaveValue(IDEA);
     await frames();
-    expect(document.activeElement).toBe(link.element());
+    expect(document.activeElement).toBe(link);
   });
 
   it('break_it_idea_stays_with_its_desk', async () => {

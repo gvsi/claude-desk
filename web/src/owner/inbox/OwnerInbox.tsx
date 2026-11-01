@@ -14,9 +14,10 @@
  * counts what is there and the sheet opens onto entries already read, never onto an inbox that only
  * looks empty. It is read again as the sheet opens and every few seconds while it is open, with
  * each linked Desk's Needs you that is no longer fresh, and sends no new read from the moment it
- * closes (a read already out finishes, with its one retry). If Today opens while that first read is
- * still out (it ran long), the button's place says the inbox is opening; if it failed, Today opens
- * on it, without sending it again, and the inbox's title says it couldn't be opened, with "Try
+ * closes (a read already out finishes, with its one retry). Today keeps its skeleton until that
+ * first read settles; if the inbox has nothing read and no failure after that (its entries dropped
+ * for a new copy), the button's place says the inbox is opening. If the first read failed, Today
+ * opens on it, without sending it again, and the inbox's title says it couldn't be opened, with "Try
  * again". A later read that fails says the same under the sheet's button, and inside the sheet
  * while it is open, where the page behind is out of reach, so the entries read before never pass
  * for current.
@@ -67,7 +68,7 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
     refetchOnWindowFocus: () => (openNow.current ? 'always' : false),
     refetchOnReconnect: () => (openNow.current ? 'always' : false),
   });
-  const failure = useReadFailure(inbox);
+  const failure = useReadFailure(inbox, { pausedRoute: 'ownerInbox' });
 
   // Read again as the sheet opens, so it shows what is there now.
   const { refetch } = inbox;

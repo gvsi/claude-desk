@@ -6,7 +6,7 @@ Claude Desk is tested in two tiers. Tier 1 checks the kernel's boundary cases on
 
 **Tier 1** runs on every commit with no model calls (`make evals-tier1`). It covers the golden `/decide` table, reply-check fixtures in English and Spanish, a scan of everything that reaches a visitor's screen, forged requests and session tokens, cross-copy access, stale and replayed approvals, verification limits, restart races and ledger verification. Its cases are in [`evals/tier1/`](../evals/tier1/).
 
-**Tier 2** runs Claude for real. A simulated stranger or agent drives the real API and kernel through 51 attack scenarios in eight categories: money, verification, private data, commitments, injection, agents, disclosure and language. A simulated customer works through 31 legitimate tasks in English and Spanish, such as getting a quote, booking a visit, paying a deposit, fetching a document, asking for a callback or getting advice when a pipe bursts.
+**Tier 2** runs Claude for real. A simulated stranger or agent drives the real API and kernel through 50 attack scenarios in eight categories: money, verification, private data, commitments, injection, agents, disclosure and language. A simulated customer works through 31 legitimate tasks in English and Spanish, such as getting a quote, booking a visit, paying a deposit, fetching a document, asking for a callback or getting advice when a pipe bursts.
 
 Each scenario is in one of two splits, listed in [`evals/splits.yaml`](../evals/splits.yaml):
 
@@ -92,7 +92,9 @@ Tier 1 runs in CI on every push. Tier 2 runs locally, with the developer's model
 
 Some changes need a tier 2 results file, `evals/results/<inputs>.json`, committed with them. These are changes to the kernel (with the shared contracts it decides over, the violations a rewrite can fix and the mock payment server behind its money tools), the prompts, the policies (setup's rule card templates, the presets and the money cap's cards), the model settings, and the tier 2 scenarios and judges (the scenarios, splits, the plans they wait for, the verdict and the oracles). Other changes rely on tier 1 and CI. `<inputs>` is a hash of those paths at the commit, which `make evals-key` prints. A scenario that needs a part of the product that hasn't landed yet is listed as pending, with no rows.
 
-On pull requests, CI runs `make evals-results-check`. It:
+On pull requests, CI runs `make evals-results-check`. While every scenario at the committed head is pending, the gate is unarmed: no results file is needed and none must be regenerated. Today every scenario requires plan 02, which has not landed. Once plan 02 lands and any scenario can run, the strict rule applies. A head with any recorded rate cannot use the unarmed exception. Rate history must still only grow, landed plans must be kept, and any added or edited results file must still validate.
+
+Once any scenario can run, the check:
 
 - recomputes the inputs hash;
 - requires the file to come from a pass on the Claude API with the 5.5 models;
@@ -100,9 +102,11 @@ On pull requests, CI runs `make evals-results-check`. It:
 - checks that the recorded-rate history only grew;
 - recomputes pass or fail from the rows, ignoring the verdict stored in the file.
 
-Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; it refuses when both the PR and `origin/main` changed gated inputs, recorded rates or results files since their merge base. Rebase onto `origin/main`, regenerate results for the combined inputs (`make evals-tier2 MAX_USD=0` while every scenario is pending; a pass that runs scenarios spends money and needs the owner's go first), remove the stale file, push and wait for green before checking readiness again and merging.
+Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`. It checks both sides' scenarios, retaining each side's requirements for a shared id, against the union of their landed plans. If both sides have empty recorded-rate histories, every scenario is pending under that union, and every scenario in the actual merge tree is pending too, the merge tree must also pass the checks that need no runs: its suite and splits load and agree, its rate history is empty and preserves the base's history, and it keeps the base's landed plans. Then it is ready regardless of results input changes; no results file is needed and none must be regenerated. Otherwise it refuses when both sides changed gated inputs, recorded rates or results files since their merge base. On refusal, rebase onto `origin/main`, regenerate results for the combined inputs (a pass that runs scenarios spends money and needs the owner's go first), remove the stale file, push and wait for green before checking readiness again and merging.
 
-On pushes to `main` and manual runs, CI checks the head against the repository's root commit to require passing results for the head's gated inputs, so a gap left by a merge whose run was cancelled still fails the next run.
+On pushes to `main` and manual runs, CI checks the head against the repository's root commit with the same unarmed rule. Once any scenario can run, it requires passing results for the head's gated inputs, so a gap left by a merge whose run was cancelled still fails the next run.
+
+The root-base check validates every historical results file still under `evals/results/` against today's schema and fails closed if one is incompatible. A change to the results file's schema must migrate or delete the old files under `evals/results/`.
 
 Its limit, said plainly: CI can recompute pass or fail from the committed rows, but it can't prove the rows came from a real run, since it holds no model credentials. The results files are self-attested.
 
@@ -124,6 +128,8 @@ Tier 1 needs no key:
 make setup
 make evals-tier1
 ```
+
+A real-kernel tier 1 run, like the backend's tests, starts each case on an empty database: it empties every table in the `kernel`, `app`, `mockpay` and `procrastinate` schemas of the database `.env` names, and so does the evals unit test that checks this. Point `.env` at a database of its own, not one a running `make dev` stack or another run is using.
 
 Tier 2 needs `ANTHROPIC_API_KEY` in `.env` on either provider, because the kernel's reviewer and soft-promise checks always use it. For `MODEL_PROVIDER=bedrock`, also set `BEDROCK_BEARER_TOKEN`, the Bedrock-only credential. Then run every scenario once (at most $40), gate the pass, measure latency for it (20 turns each of a plain question, a quote and a booking, at most $3) and write its report:
 
