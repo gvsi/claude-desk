@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from desk.contracts import BusinessToolDef, Claim, Fact, Label, ToolName, ToolProfile
 from desk.kernel_service import labels
-from desk.kernel_service.adapters.base import AdapterRefusal, AdapterResult, ExecCtx, Normalized, NormalizeCtx, quoted
+from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, AdapterResult, ExecCtx, Normalized, NormalizeCtx, quoted
 from desk.kernel_service.adapters.book import BookArgs
 from desk.kernel_service.adapters.capture_lead import ADAPTER as CAPTURE_LEAD, CaptureLeadArgs
 from desk.kernel_service.adapters.request_callback import RequestCallbackArgs
@@ -65,6 +65,7 @@ def profile(tool: str, definition: BusinessToolDef) -> ToolProfile:
 
 
 class BlockAdapter:
+    """The trusted intake implementation; each later block supplies its own adapter class."""
     Args = IntakeArgs
     free_text_fields = frozenset({"name", "contact", "answers"})
     model_view_keys = CAPTURE_LEAD.model_view_keys
@@ -96,3 +97,14 @@ class BlockAdapter:
 
     async def reconcile(self, xctx: ExecCtx, action) -> AdapterResult | None:
         return await CAPTURE_LEAD.reconcile(xctx, action)
+
+
+BLOCK_ADAPTERS: dict[Block, type] = {"intake": BlockAdapter}
+
+
+def adapter_for(definition: BusinessToolDef, tool: str) -> Adapter:
+    """Select trusted code only; every registered class takes one code-built ToolProfile."""
+    block = definition.config.block
+    if block not in SUPPORTED_BLOCKS or block not in BLOCK_ADAPTERS:
+        raise ValueError("unsupported_block")
+    return BLOCK_ADAPTERS[block](profile(tool, definition))

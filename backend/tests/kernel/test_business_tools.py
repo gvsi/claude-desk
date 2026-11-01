@@ -166,10 +166,11 @@ async def test_resolver_logs_factory_failures_without_owner_text(app, client, mo
     assert (await put(client, copy, [intake()])).status_code == 200
     secret = 'untrusted owner text must not reach the log'
 
-    def broken(*args):
-        raise RuntimeError(secret)
+    class BrokenAdapter:
+        def __init__(self, stored):
+            raise RuntimeError(secret)
 
-    monkeypatch.setattr(blocks, 'BlockAdapter', broken)
+    monkeypatch.setitem(blocks.BLOCK_ADAPTERS, 'intake', BrokenAdapter)
     with caplog.at_level(logging.ERROR, logger='desk.kernel_service.adapters'):
         async with kernel_ctx(app) as ctx:
             ctx.bind(copy.copy_id)
@@ -177,6 +178,41 @@ async def test_resolver_logs_factory_failures_without_owner_text(app, client, mo
     assert 'business_adapter_resolution_failed' in caplog.text
     assert 'kind=RuntimeError' in caplog.text
     assert secret not in caplog.text
+
+
+async def test_resolver_logs_a_supported_block_with_no_registered_adapter(app, client, monkeypatch, caplog):
+    import logging
+    from desk.kernel_service.adapters import blocks
+
+    copy = await rivera(app, client)
+    marker = 'Owner-only description marker'
+    assert (await put(client, copy, [intake(description=marker)])).status_code == 200
+    assert 'intake' in blocks.SUPPORTED_BLOCKS
+    monkeypatch.setattr(blocks, 'BLOCK_ADAPTERS', {}, raising=False)
+    with caplog.at_level(logging.ERROR, logger='desk.kernel_service.adapters'):
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            assert await adapters.resolve(ctx, copy.desk_id, 'desk.new-enquiry') is None
+    assert 'business_adapter_resolution_failed' in caplog.text
+    assert 'kind=ValueError' in caplog.text
+    assert marker not in caplog.text
+
+
+def test_fake_does_not_give_a_supported_block_without_a_registered_adapter(monkeypatch):
+    from types import SimpleNamespace
+    from desk.contracts import BusinessToolDef
+    from desk.kernel_service.adapters import blocks
+    from tests.kernel_contract.fake_kernel import FakeKernelState
+
+    tool = 'desk.new-enquiry'
+    profile = blocks.profile(tool, BusinessToolDef.model_validate({
+        key: value for key, value in intake().items() if key != 'tool'})).model_copy(update={'status': 'enabled'})
+    desk = SimpleNamespace(answering=True, tools={tool: profile})
+    session = SimpleNamespace(kind='visitor', verified=False, preview=False)
+    fake = object.__new__(FakeKernelState)
+    monkeypatch.delitem(blocks.BLOCK_ADAPTERS, 'intake')
+    assert fake._business_profile(desk, tool) is None
+    assert tool not in fake.tools_given(session, desk)
 
 
 async def test_intake_recovery_resolves_privacy_before_checking_a_closed_session(app, client, frozen_clock, monkeypatch):
@@ -669,6 +705,8 @@ def test_business_tool_standings_follow_shared_block_bases(monkeypatch, kind, ma
                    'urgent': {'urgent_when': 'No heating'}}
     # Exercise the common giving rules for future adapters without enabling them in production.
     monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset(definitions))
+    # Only registration presence is used here; these standing tests do not execute future classes.
+    monkeypatch.setattr(blocks, 'BLOCK_ADAPTERS', {block: blocks.BlockAdapter for block in definitions})
     profiles = {f'desk.{block.replace("_", "-")}': blocks.profile(
         f'desk.{block.replace("_", "-")}', BusinessToolDef(
             title='Service', description='Take details.', config={'block': block, **config}))
