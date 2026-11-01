@@ -114,11 +114,12 @@ def test_system_prompt_uses_the_business_policies():
         "- When they describe something charter:policy:urgent treats as urgent, or an emergency happening now "
         "(water spraying or flooding, a gas smell, no heat in freezing weather), that comes first: skip the intake "
         "questions and give the one practical safety step a good professional would give. If anyone could be in "
-        "danger (gas, water near electrics, an injury), suggest the local emergency number. Ask before you bring "
-        "Maria Rivera in: if one of your tools is a business tool for urgent requests (its description starts "
-        '"Saves an urgent callback request"), offer it by its title, asking whether they\'d like you to send this '
-        'to Maria Rivera as urgent; otherwise ask en: "Would you like me to arrange a callback?" / es: "¿Quiere '
-        'que solicite una llamada?". Only on their yes, ask for what\'s missing of their name, a phone number or '
+        "danger (gas, water near electrics, an injury), suggest they call their local emergency number, in words, "
+        "never the number itself. Ask before you bring Maria Rivera in: if one of your tools is a business tool "
+        'for urgent requests (its description starts "Saves an urgent callback request"), offer it by its title as '
+        "a way to arrange a callback, asking whether they'd like you to arrange one with it; otherwise ask en: "
+        '"Would you like me to arrange a callback?" / es: "¿Quiere que solicite una llamada?". Only on their yes, '
+        "ask for what's missing of their name, a phone number or "
         "email and the reason, reusing what they've already given, and make that one call: the urgent tool, or "
         "native__request_callback. Beside its callback_confirmed card, say plainly that the request is in and the "
         "card shows when to expect the call. Never present a callback window as help on the way, and never say "
@@ -165,14 +166,19 @@ def test_urgent_requests_get_a_safety_step_then_ask_before_involving_the_owner()
     urgent = next(line for line in text.splitlines() if line.startswith("- When they describe something"))
     # what counts: what the business's own policy treats as urgent, or an emergency happening now
     assert "something charter:policy:urgent treats as urgent, or an emergency happening now" in urgent
-    # it comes first, with a safety step, and danger gets the local emergency number
+    # it comes first, with a safety step, and danger gets the local emergency number in words: a number's digits
+    # or its number words would be blocked by the reply check
     assert "that comes first: skip the intake questions and give the one practical safety step" in urgent
-    assert ("If anyone could be in danger (gas, water near electrics, an injury), suggest the local emergency "
-            "number.") in urgent
-    # it asks first: the business tool for urgent requests by its title when there is one, else the approved offer
+    assert ("If anyone could be in danger (gas, water near electrics, an injury), suggest they call their local "
+            "emergency number, in words, never the number itself.") in urgent
+    # it asks first: the business tool for urgent requests by its title, as a way to arrange a callback, when there
+    # is one, else the approved offer. The title and the kernel's receipt carry the urgency, never Claude's words,
+    # since the soft-promise check reads a priority no card backs as a promise.
     ask = urgent.index("Ask before you bring Maria Rivera in:")
     assert ('if one of your tools is a business tool for urgent requests (its description starts "Saves an urgent '
-            'callback request"), offer it by its title') in urgent
+            "callback request\"), offer it by its title as a way to arrange a callback, asking whether they'd like "
+            "you to arrange one with it;") in urgent
+    assert "as urgent;" not in urgent and "send this to" not in urgent
     assert ('otherwise ask en: "Would you like me to arrange a callback?" / es: "¿Quiere que solicite una '
             'llamada?"') in urgent
     # only on their yes does it ask for what's missing and make the call
@@ -202,8 +208,8 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "kind, knowledgeable and useful.",
         "start with them, not with the business",
         "Keep each reply to two to four short sentences",
-        "give one practical tip any good professional in this trade would give",
-        "general and committing Rivera Plumbing to nothing",
+        "give one practical tip any good professional in this trade would give (how to stop a leak for now, what "
+        "to have ready), general and committing Rivera Plumbing to nothing",
         "for a health, legal or money question outside Rivera Plumbing's own work, point them to the right professional "
         "(a pharmacist or doctor, a lawyer) instead of advising",
         "Facts about Rivera Plumbing itself, such as what it does, where it works or what something costs, "
@@ -231,6 +237,7 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "These shape how you sound; the rules above still decide what you say.",
     ):
         assert instruction in section, instruction
+    assert "until help arrives" not in text   # the urgent rule never presents a callback as help on the way
     assert section.split("How it can sound (illustrative; vary it, and keep to the reply rules above):\n")[1] == (
         '- "That\'s awful, I\'m sorry. If you can, turn off the main water valve; it\'s usually near the meter '
         'or where the water line comes into the house. Would you like me to arrange a callback?"\n'
