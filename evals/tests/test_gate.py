@@ -133,6 +133,46 @@ def test_pending_scenario_fails_the_final_gate():
     assert no_rate.reasons == ["a final gate needs a recorded rate, and the history is empty"]
 
 
+def test_a_pass_that_judged_no_run_is_not_evaluated_and_never_passes():
+    """A pass with no row (every scenario pending, or nothing selected) judged nothing, so it never passes:
+    its first reason says nothing was evaluated, ahead of any other, so a one-line summary leads with it,
+    and the final gate fails with it too. A pass with a row, scored or incomplete, is judged as before."""
+    waiting = {"atk-later": "01c", "leg-later": "01c"}
+    nothing = gate(a_pass([], pending=waiting), EMPTY)
+    assert not nothing.passed
+    assert nothing.reasons == ["nothing was evaluated: no run was judged (2 scenarios pending)"]
+    assert gate(a_pass([]), EMPTY).reasons == ["nothing was evaluated: no run was judged (0 scenarios pending)"]
+    against_a_rate = gate(a_pass([], pending=waiting), rates())
+    assert against_a_rate.reasons == ["nothing was evaluated: no run was judged (2 scenarios pending)",
+                                      "no held-out legitimate run was scored to compare with the recorded rate"]
+    final = gate(a_pass([], pending=waiting, runs_per_scenario=3), rates(), final=True, target=target(waiting=waiting))
+    assert not final.passed
+    assert final.reasons == ["nothing was evaluated: no run was judged (2 scenarios pending)",
+                             "no held-out legitimate run was scored to compare with the recorded rate",
+                             "2 scenarios are pending: atk-later, leg-later"]
+    # One scored clean row beside pending scenarios passes as today, and one incomplete row fails as today.
+    one = gate(a_pass([row("atk-one")], pending=waiting), EMPTY)
+    assert one.passed and one.reasons == []
+    incomplete = gate(a_pass([row("atk-one", status="incomplete", success=None)], pending=waiting), EMPTY)
+    assert incomplete.reasons == ["1 incomplete runs: atk-one run 1"]
+
+
+def test_a_pass_that_judged_no_run_prints_as_not_evaluated(capsys):
+    """The gate's verdict line says a pass in which no run was judged wasn't evaluated, never that it passed
+    or failed, and counts nothing it didn't judge; any other reason follows on its own line."""
+    from evals.run import _print_gate
+
+    waiting = {"atk-later": "01c", "leg-later": "01c"}
+    _print_gate(gate(a_pass([], pending=waiting), EMPTY))
+    assert capsys.readouterr().out == "gate: not evaluated; no run was judged (2 scenarios pending)\n"
+    _print_gate(gate(a_pass([], pending=waiting, stopped_by_budget=True), rates()))
+    assert capsys.readouterr().out.splitlines() == [
+        "gate: not evaluated; no run was judged (2 scenarios pending)",
+        "gate: the pass stopped at its --max-usd budget, so runs are missing",
+        "gate: no held-out legitimate run was scored to compare with the recorded rate",
+    ]
+
+
 def test_final_gate_reconciles_the_pass_with_the_whole_suite():
     """The fixture suite's four scenarios, of which a pass ran only leg-held, three times."""
     four = target("atk-cal", "atk-held", "leg-cal", "leg-held")

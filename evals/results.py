@@ -30,7 +30,8 @@ it. A pass on Bedrock is supported, and explores.
 
 **The results file** `evals/results/<inputs>.json` (`ResultsFile`) is written by
 `tier2 --suite all --split all --results` from a clean tree under `GATED_PATHS`, on the in-process
-stack and the Claude API, and re-exported by `results --pass <id>` after a rate is recorded. Only a
+stack and the Claude API, and re-exported by `results --pass <id>` after a rate is recorded. A pass
+that judged no run (every scenario pending) writes none: the gate reads it as not evaluated. Only a
 `--results` pass is exported (`unchecked_refusal`): it alone refused to start with an uncommitted
 gated change and built the kernel from that tree, while any other pass records its commit's inputs
 key whatever its tree held. That is read from what the pass recorded before its runs (its config,
@@ -625,7 +626,11 @@ def results_file(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT) -> Res
 def write_results(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT) -> Path:
     """Write the pass's results file as `evals/results/<inputs>.json`. Refused when `results_file` refuses
     (a pass that wasn't a `--results` pass among them) and when the gated paths have uncommitted changes or
-    moved since the pass, so the file always names the inputs it was run on."""
+    moved since the pass, so the file always names the inputs it was run on. A pass that judged no run (every
+    scenario pending) writes none: the gate reads it as not evaluated, and there is nothing to record."""
+    if not p.runs:
+        raise ResultsRefused(f"pass {p.pass_id} judged no run ({len(p.pending)} scenarios pending): nothing was "
+                             "evaluated, so there is nothing to record and no results file is written")
     file = results_file(p, rates, root=root)
     if dirty := dirty_gated(root):
         raise ResultsRefused("a results file needs every gated path committed; uncommitted: "
