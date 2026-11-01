@@ -479,6 +479,7 @@ describe('rule draft review', () => {
     const until = new Promise<void>((resolve) => {
       release = resolve;
     });
+    onTestFinished(() => release());
     const read = await mockStore.dispatch('ruleDraft', { params: { desk_id: RIVERA.deskId, version: String(preset.version) } });
     mockStore.inject({ route: 'ruleDraft', status: 200, until, body: (read as { body: unknown }).body });
     const reloaded = await openDraft(preset.version);

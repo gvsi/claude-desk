@@ -29,6 +29,7 @@ import {
 } from '../api/contracts.ts';
 import { RIVERA_MONEY_CAP_CENTS, cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine, type ExecutedTool } from '../ds/fixtures/receipts.ts';
+import { afterName } from '../lib/names.ts';
 
 export type Language = 'en' | 'es';
 
@@ -218,7 +219,7 @@ export const HELD_PROSE: Record<Language, string> = {
  */
 export const LINK_CANCELLED: Record<Language, string> = {
   en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
-  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pídelo de nuevo si todavía quieres pagar.`,
+  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}${afterName(OWNER, '. Pídelo de nuevo si todavía quieres pagar.')}`,
 };
 
 /**
@@ -226,9 +227,9 @@ export const LINK_CANCELLED: Record<Language, string> = {
  * fact, in the chat's language: the link's amount as its title, then what the link was for and the
  * kernel's line. It cites the deposit card's fact, as the script's payment link card does.
  */
-export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language): CardBlock {
+export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language, factId = blocks.payment_link[language].fact_id ?? null): CardBlock {
   return cardBlock('link_cancelled', {
-    fact_id: blocks.payment_link[language].fact_id ?? null,
+    fact_id: factId,
     title: moneyText(link.amount_cents),
     lines: [link.title, LINK_CANCELLED[language]],
   });
@@ -598,7 +599,7 @@ export const SCRIPT: readonly ScriptRule[] = [
         return ctx.status('receipt', decision);
       },
       // The card points at the link this turn issued, by its own token.
-      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], href: `/pay/${ctx.latestLink()}` }]),
+      (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], fact_id: `payment_link:${ctx.latestLink()}`, href: `/pay/${ctx.latestLink()}` }]),
     ],
   },
   {

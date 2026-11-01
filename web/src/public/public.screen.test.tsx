@@ -20,6 +20,7 @@ import { DEMO_CODE, HELD_PROSE, SCRIPT, matchRule, turnEnd, type RuleName } from
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
+import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../test/screen.ts';
 import { CAUGHT_UP_AFTER_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
@@ -1597,6 +1598,7 @@ describe('public chat page', () => {
     chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
     const slowRead = { body: await request('visitorSession', { params: { slug: RIVERA.slug } }), release: () => {} };
     mockStore.inject({ route: 'visitorSession', status: 200, body: slowRead.body, until: new Promise<void>((resolve) => (slowRead.release = resolve)) });
+    onTestFinished(() => slowRead.release());
     const reads = requests('visitorSession').length;
     const texts = watchTexts();
     // The page's timers are fake from here, so the chat calls itself caught up only when the test
@@ -1674,6 +1676,7 @@ describe('public chat page', () => {
     // The read of the session the page sends to confirm her is slow too.
     const slowRead = { body: await request('visitorSession', { params: { slug: RIVERA.slug } }), release: () => {} };
     mockStore.inject({ route: 'visitorSession', status: 200, body: slowRead.body, until: new Promise<void>((resolve) => (slowRead.release = resolve)) });
+    onTestFinished(() => slowRead.release());
     const texts = watchTexts();
     useTimers();
     await router.navigate(PAGE);
@@ -1714,6 +1717,7 @@ describe('public chat page', () => {
     let release = () => {};
     mockStore.inject({ route: 'visitorSession', status: 200, body: earlier });
     mockStore.inject({ route: 'visitorSession', status: 200, body: later, until: new Promise<void>((resolve) => (release = resolve)) });
+    onTestFinished(() => release());
     const replay = holdStreamEvents();
     const reads = requests('visitorSession').length;
     const texts = watchTexts();
@@ -2466,6 +2470,7 @@ describe('public chat page', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    onTestFinished(() => release());
     let held = false;
     worker.use(
       http.get(`/api/public/desks/${RIVERA.slug}/session`, async () => {
@@ -3082,6 +3087,7 @@ async function staleOwnerReopen(drop: boolean): Promise<void> {
   const older = await request('visitorSession', { params: { slug: RIVERA.slug } });
   let release = () => {};
   mockStore.inject({ route: 'visitorSession', status: 200, body: older, until: new Promise<void>((resolve) => (release = resolve)) });
+  onTestFinished(() => release());
   const native = window.EventSource;
   let source: EventSource | undefined;
   window.EventSource = class extends native {
@@ -3105,6 +3111,7 @@ async function staleOwnerReopen(drop: boolean): Promise<void> {
     source?.dispatchEvent(new Event('error'));
     await until(() => expect(screen.container.textContent).toContain('Reconnecting to the chat'));
     mockStore.inject({ route: 'visitorSession', status: 200, body: { ...older, state: chat.state }, until: new Promise<void>((resolve) => (releaseCurrent = resolve)) });
+    onTestFinished(() => releaseCurrent());
   } else {
     mockStore.emit(RIVERA.slug, { type: 'owner_left' });
     await until(() => expect(systemLines().at(-1)).toBe('Claude is helping again.'));
@@ -3140,6 +3147,7 @@ async function newerVerificationBeforeReopen(fallback: boolean): Promise<void> {
   const older = await request('visitorSession', { params: { slug: RIVERA.slug } });
   let release = () => {};
   mockStore.inject({ route: 'visitorSession', status: 200, body: older, until: new Promise<void>((resolve) => (release = resolve)) });
+  onTestFinished(() => release());
   const reads = requests('visitorSession').length;
   const texts = watchTexts();
   useTimers();
@@ -3255,3 +3263,101 @@ const DAYS = 'monday|tuesday|wednesday|thursday|friday|saturday|sunday';
 const DIAS = 'lunes|martes|miércoles|jueves|viernes|sábado|domingo';
 /** A price or a date in prose: a currency sign, any digit, or a month or weekday name. */
 const PRICE_OR_DATE = new RegExp(`[$€£]|\\d|(?<![\\p{L}])(?:${MONTHS}|${MESES}|${DAYS}|${DIAS})(?![\\p{L}])`, 'iu');
+
+describe('a Desk whose owner gave no name', () => {
+  /** A business described with no owner's name: setup gives its Desk the fallback, "Owner". */
+  const FENSTER = 'Fenster & Fenster. Bespoke windows and doors in Oakland.';
+
+  /** The chat's head and what Ask sends with no owner's name, in the owner's approved words. */
+  const NO_NAME = {
+    en: {
+      disclosure: "You're chatting with Claude, an AI answering for Fenster & Fenster. Ask for a person anytime.",
+      ask: 'Ask for a person',
+      ownerInChat: 'The business owner is in this chat. Claude, an AI, is paused until they hand it back.',
+      sends: "I'd like to talk to a person.",
+    },
+    es: {
+      disclosure: 'Estás hablando con Claude, una IA que responde por Fenster & Fenster. Puedes pedir hablar con una persona cuando quieras.',
+      ask: 'Pedir hablar con una persona',
+      ownerInChat: 'El dueño del negocio está en este chat. Claude, una IA, está en pausa hasta que le devuelva el chat.',
+      sends: 'Quiero hablar con una persona.',
+    },
+  } as const;
+
+  /** Waits until the chat on `slug` has ended a turn past `before`. */
+  async function turnEndedOn(slug: string, before: number): Promise<void> {
+    await vi.waitFor(
+      () => {
+        const events = mockStore.visitorSession(slug)?.events ?? [];
+        expect(events.length).toBeGreaterThan(before);
+        expect(events.at(-1)?.ev.type).toBe('turn_end');
+      },
+      { timeout: 5_000 },
+    );
+  }
+
+  /** Presses Ask in the chat's head and waits for its turn to end: the words it sent, as the page shows them. */
+  async function ask(screen: RenderResult, slug: string, name: string, sends: string): Promise<void> {
+    const before = mockStore.visitorSession(slug)?.events.length ?? 0;
+    await screen.getByRole('button', { name }).click();
+    await turnEndedOn(slug, before);
+    expect(requests('sendMessage').map((r) => r.body)).toEqual([{ text: sends }]);
+    await expect.element(screen.getByText(sends, { exact: true })).toBeVisible();
+  }
+
+  it('no_owner_name_asks_for_a_person', async () => {
+    const slug = await liveSetupDesk(FENSTER);
+    const { screen } = await renderRoute(`/d/${slug}`);
+    await ready(screen);
+    // The disclosure and Ask name no one: "a person" is the page's own words, never "Owner".
+    expect(chatHead()).toEqual({ line: NO_NAME.en.disclosure, asks: [NO_NAME.en.ask] });
+    const head = document.querySelector('.cd-public-shell__chat-head');
+    expect(head?.textContent).not.toMatch(/Owner/);
+    expect([...(head?.querySelectorAll('[data-copy="user"]') ?? [])].map((name) => name.textContent)).toEqual(['Fenster & Fenster', 'Fenster & Fenster']);
+    await ask(screen, slug, NO_NAME.en.ask, NO_NAME.en.sends);
+    await expectScreenBasics(screen.container, { owner: false });
+  });
+
+  it('a_name_the_owner_gave_is_asked_for_as_before', async () => {
+    // The same setup with the owner's name in it: the page asks for her by name, as ever.
+    const slug = await liveSetupDesk("I'm Ana. I run Ana's Bakery in Oakland.");
+    const { screen } = await renderRoute(`/d/${slug}`);
+    await ready(screen);
+    expect(chatHead()).toEqual({ line: "You're chatting with Claude, an AI answering for Ana's Bakery. Ask for Ana anytime.", asks: ['Ask for Ana'] });
+    const head = document.querySelector('.cd-public-shell__chat-head');
+    expect([...(head?.querySelectorAll('[data-copy="user"]') ?? [])].map((name) => name.textContent)).toEqual(["Ana's Bakery", "Ana's Bakery", 'Ana', 'Ana']);
+    await ask(screen, slug, 'Ask for Ana', "I'd like to talk to Ana.");
+  });
+
+  it('no_owner_name_in_spanish', async () => {
+    const slug = await liveSetupDesk(FENSTER);
+    const { screen } = await renderRoute(`/d/${slug}`, { language: 'es-MX' });
+    await ready(screen);
+    expect(chatHead()).toEqual({ line: NO_NAME.es.disclosure, asks: [NO_NAME.es.ask] });
+    expect(document.querySelector('.cd-public-shell__chat-head')?.textContent).not.toMatch(/Owner/);
+    await ask(screen, slug, NO_NAME.es.ask, NO_NAME.es.sends);
+    await expectScreenBasics(screen.container, { owner: false });
+  });
+
+  it('no_owner_name_owner_in_chat_line', async () => {
+    // The owner takes the chat over: the head says the business owner is in the chat, names no one,
+    // still names Claude as an AI, and has no Ask. Once they hand back, Ask for a person returns.
+    const slug = await liveSetupDesk(FENSTER);
+    const { screen } = await renderRoute(`/d/${slug}`);
+    await ready(screen);
+    const chat = mockStore.visitorSession(slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual({ line: NO_NAME.en.ownerInChat, asks: [] }));
+    expect(document.querySelector('.cd-public-shell__disclosure [data-copy="user"]')).toBeNull();
+    mockStore.world.handBack(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual({ line: NO_NAME.en.disclosure, asks: [NO_NAME.en.ask] }));
+
+    // In Spanish, the same chat taken over again.
+    const es = await renderRoute(`/d/${slug}`, { language: 'es-MX' });
+    await ready(es.screen);
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual({ line: NO_NAME.es.ownerInChat, asks: [] }));
+    await expectScreenBasics(es.screen.container, { owner: false });
+  });
+});

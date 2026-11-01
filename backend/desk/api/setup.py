@@ -5,21 +5,31 @@ going live (part 2, from "Setup, part 2" below).
 An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs in three kinds of request:
 
 - **Start** (`start`): one structured model call reads the owner's description (`SetupStart`), then the kernel makes
-  the Desk (`POST /desks`, which activates the `ask_first` preset: its auto cards cover the setup tools) and turns
-  Answering off, so nothing answers the public until setup takes the Desk live (tried twice; a Desk that stays
-  answering is deleted, and the request answers the kernel's error). Claude then asks for consent. Each start carries
+  the Desk (`POST /desks`, which activates the `ask_first` preset: its auto cards cover the setup tools). Its ID is
+  committed as soon as the kernel returns it and kept on failure. A failed start deletes its Desk best effort;
+  a failed delete is logged by type, and the start's own failure still goes out. The start turns Answering off, so
+  nothing answers the public until setup takes the Desk live (tried twice; a Desk that stays answering is deleted,
+  and the request answers the kernel's error). Claude then asks for consent. Each start carries
   the client's `idempotency_key` (required) and writes the interview's row first, holding the key and its body's
-  hash, with no Desk yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row
+  hash, with no Desk yet. A keyed start is finished only once its transcript is stored (`_start_finished`); a read
+  before that is 404, even after the Desk is linked. An old unkeyed row counts as finished without this check.
+  A unique index on `(copy_id, idempotency_key)` lets one row
   in a copy hold a key. A start that fails before the kernel is asked for the Desk (Claude couldn't answer, say)
   deletes its row, since nothing was made, so the same request can be sent again. Before the kernel is asked for the
-  Desk, the start records it on the row (`desk_requested_at`, committed); from then on the row keeps the outcome, a
-  failure too (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands, with
+  Desk, the start records a boundary in the kernel's clock domain on the row (`desk_requested_at`, committed): the
+  copy's newest Desk creation time, or 1970-01-01 UTC when none exists. From then on the row keeps the outcome, a
+  failure too (`start_error`). The Desk-list guard assumes no Desk is made outside setup between this read and
+  `POST /desks` (the web never does that), and the kernel clock does not step backwards during the start. An outside
+  Desk in that gap can take the claim; a backwards clock can leave the start's own Desk reading live. Removing
+  these assumptions requires a kernel request tag on the Desk.
+  A repeat (`repeated_start`) finds the row and answers its interview as it stands, with
   nothing made: 409 `conflict` for another body, 409 `key_spent` when the first failed (the key can't start again,
   so a new click sends a new key), and while the first is still starting, 409 `in_progress` at once (`retry_after`
   2 s), holding nothing while the client waits. A row still starting after the longest a start can take
   (`START_ABANDONED_S`) has stopped. One that never recorded asking for its Desk is abandoned, and a repeat deletes
-  it. One that did record it, with no Desk and no failure, stays uncertain (the Desk may exist, its answer lost): it
-  is kept, and its key is spent (409 `key_spent`), so only a new key starts again.
+  it. One that did record it, with no Desk and no failure, stays uncertain (the Desk may exist, its answer lost).
+  A linked-but-unfinished row has its Desk ID but no transcript. Both states are kept and their keys spent
+  (409 `key_spent`) after abandonment, so only a new key starts again.
   The lookup, the limits and the claim run under the key's lock in this process (`ADMISSIONS`), so a concurrent
   repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
   instead. A row written before the key was required may hold none (the column stays nullable); it is read and
@@ -30,11 +40,12 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   No memory or website read ever runs after no, and a website the owner names later is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
-  answered in that question's own model (`SETUP_TURNS`). The exchange starts after this question's last ask. Its
-  patch merges into the answers. Each limit (the quote, discount and payment link limits, the documents rule, the
-  money cap and the refunds rule, which is the money question's: refunds are money going out) is a field only of its
-  own question's model, whose message leaves the memory and website out, and code drops it from any other turn's
-  patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
+  answered in that question's own model (`SETUP_TURNS`). With one ask, the exchange starts after it; with follow-ups,
+  it starts at this topic's first ask, keeping every question and answer in view. Its patch merges into the answers.
+  Each limit (the quote, discount and payment link limits, the documents rule, the money cap and the refunds rule,
+  which is the money question's: refunds are money going out) is
+  a field only of its own question's model, whose message leaves the memory and website out, and code drops it from
+  any other turn's patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
   fact either (its turn reads none of the facts so far), and code drops a fact from a limit turn's patch too, but for
   the quote question's prices, named from the owner's answer alone (the turn reads no price list): code updates the
   item of each title or adds it, never removing one. A fact question clears the hours or the prices only by its
@@ -163,6 +174,7 @@ from desk.api.prompts import (
     SETUP_TURNS,
     SETUP_UNDERSTAND_HEAD,
     SETUP_UNDERSTAND_SYSTEM,
+    SETUP_PAYMENT_UNAVAILABLE_LINE,
     SITUATIONS_HEAD,
     SITUATIONS_SYSTEM,
     SITUATION_CALLER_TOOL_REQUIRED,
@@ -277,8 +289,8 @@ TURN_MAX_TOKENS = 4096
 # The most one structured setup call may take, the SDK's retries included (and each of its tries): a stalled call ends
 # as 503 `model_unavailable` instead of holding the owner's request. A rules chat has its own (`rules.CHAT_TIMEOUT_S`).
 SETUP_TIMEOUT_S = 60.0
-UNDERSTAND_TIMEOUT_S = 90.0
-UNDERSTAND_MAX_TOKENS = 4096
+UNDERSTAND_TIMEOUT_S = 60.0
+UNDERSTAND_MAX_TOKENS = 8192
 TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
 TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
 TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
@@ -288,8 +300,8 @@ LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
 # The longest a start can run: Claude's reading of the description and its one retry, each bounded by
-# `SETUP_TIMEOUT_S`, then its kernel calls (`POST /desks`, two tries at turning Answering off and the `DELETE` when
-# both fail), plus the sample memory write, each bounded by the kernel client's timeout, with a minute's slack for
+# `SETUP_TIMEOUT_S`, then its kernel calls (`POST /desks`, two tries at turning Answering off and a failed start's
+# `DELETE`), plus the sample memory write, each bounded by the kernel client's timeout, with a minute's slack for
 # the database and the process. A keyed row still starting after this is abandoned: its request stopped.
 START_KERNEL_CALLS = 5
 START_ABANDONED_S = 2 * SETUP_TIMEOUT_S + START_KERNEL_CALLS * DEFAULT_TIMEOUT_S + 60
@@ -314,6 +326,8 @@ WEBSITE_LABEL = "Read {host}"
 WEBSITE_PAGES_LABEL = "Read {host}, {pages} pages"
 WEBSITE_FAILED_LABEL = "Couldn't read {host}"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
+PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
+                "now or later in Rules.")
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -419,6 +433,7 @@ class Interview:
     draft_cards: list[RuleCard] = field(default_factory=list)   # setup's own cards for its rules draft, once drafted
     draft_version: int | None = None                            # the kernel's version of the last rules draft
     business_tools_enabled: bool = False   # runtime setting, never stored in the interview row
+    turn_deadline: float | None = None     # runtime event-loop clock, never stored
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -506,6 +521,11 @@ class Interview:
             self.answers.refunds = "ask"
 
 
+def _start_finished(row) -> bool:
+    """Old unkeyed interviews are readable; a keyed start finishes when its transcript is stored."""
+    return row["idempotency_key"] is None or bool(row["transcript"])
+
+
 async def _load(conn: AsyncConnection, copy_id: str, interview_id: str, *, lock: bool = False) -> Interview:
     """The copy's interview, locked for the transaction when `lock` (waiting at most `LOCK_TIMEOUT` for another
     transaction's lock, then 409 `conflict`); 404 when the copy has none by that ID."""
@@ -519,7 +539,8 @@ async def _load(conn: AsyncConnection, copy_id: str, interview_id: str, *, lock:
         if isinstance(failed.orig, LockNotAvailable):
             raise ApiProblem(409, "conflict") from None
         raise
-    if row is None or row["desk_id"] is None:
+    if row is None or row["desk_id"] is None or not _start_finished(row):
+        # Linking the Desk is earlier than finishing the start; that alone exposes no readable interview.
         raise ApiProblem(404, "not_found")
     return Interview(interview_id=row["interview_id"], copy_id=row["copy_id"], desk_id=row["desk_id"],
                      business_type=row["business_type"], step=row["step"], consent=row["consent"],
@@ -637,7 +658,8 @@ def _errors(output: type[BaseModel], text: str) -> str | None:
 async def ask_model(model: ModelClient, record: Record, system: str, messages: list[dict], output: type[Output], *,
                     max_tokens: int, route: str = ROUTE, effort: Effort = "low",
                     check: Callable[[Output], str | None | Awaitable[str | None]] | None = None,
-                    timeout_s: float | None = None) -> Output | None:
+                    timeout_s: float | Callable[[], float] | None = None,
+                    retry_min_s: float = 0) -> Output | None:
     """A structured setup answer as `output` that `check` (if given, awaited when it answers an awaitable) finds
     nothing wrong with. A finished answer (`end_turn`) that doesn't fit, or that `check` lists problems with, gets one
     retry with them; None when the retry doesn't fit either. 503 `model_unavailable` when the model gives no answer at
@@ -645,8 +667,10 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
     within `timeout_s` (`SETUP_TIMEOUT_S` unless the caller gives another): each call's usage is recorded first, a
     timed-out one as failed."""
     messages = list(messages)
-    bound = SETUP_TIMEOUT_S if timeout_s is None else timeout_s
     for attempt in (1, 2):
+        bound = timeout_s() if callable(timeout_s) else SETUP_TIMEOUT_S if timeout_s is None else timeout_s
+        if bound <= 0 or (attempt == 2 and bound < retry_min_s):
+            return None
         request = ModelRequest(route=route, system=[{"type": "text", "text": system}], messages=list(messages),
                                model=CONVERSATION_MODEL, effort=effort, max_tokens=max_tokens, output_schema=output,
                                timeout_s=bound)
@@ -776,20 +800,16 @@ async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> E
 
 
 async def _answering_off(owner: OwnerCtx, desk_id: str) -> None:
-    """Turn the new Desk's Answering off, trying twice. When it stays on, the Desk is deleted (best effort: a failed
-    delete is logged) and the last failure raised, so no Desk the owner never got answers the public."""
+    """Turn the new Desk's Answering off, trying twice. Raise the last failure when it stays on; `start` deletes
+    the Desk best effort, as it does for any failure after the Desk is made."""
     for attempt in (1, 2):
         try:
             await owner.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False), path={"id": desk_id})
             return
-        except (KernelFailed, KernelUnavailable) as failure:
+        except (KernelFailed, KernelUnavailable):
             logger.warning("a new Desk's Answering couldn't be turned off (attempt %d)", attempt)
             if attempt == 2:
-                try:
-                    await owner.kernel.call("DELETE /desks/{id}", path={"id": desk_id})
-                except (KernelFailed, KernelUnavailable):
-                    logger.error("a new Desk that couldn't stop answering couldn't be deleted")
-                raise failure from None
+                raise
 
 
 async def _read_description(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
@@ -828,20 +848,25 @@ def memory_items(drafts: list[MemoryDraft]) -> list[MemoryItem]:
 
 
 async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart, desk: CreateDeskRequest,
-                     interview_id: str) -> tuple[Interview, str]:
+                     interview_id: str, link: Callable[[str], Awaitable[None]]) -> tuple[Interview, str]:
     """Ask the kernel for the Desk and turn its Answering off: the interview asking for consent, and the Desk's slug.
-    Nothing of the interview is stored here."""
+    Commit its link as soon as the kernel returns, before writing sample memory, turning Answering off and building
+    the interview."""
     created = await owner.kernel.call("POST /desks", desk)
-    await _answering_off(owner, created.desk_id)
-    if described.memory:
-        try:
-            memory = DeskMemoryRequest(about=described.summary[:500], items=memory_items(described.memory))
-            await owner.kernel.call("PUT /desks/{id}/memory", memory,
-                                    path={"id": created.desk_id})
-        except ValidationError as failure:
-            logger.warning("the sample memory couldn't be written (%s)", type(failure).__name__)
-        except (KernelFailed, KernelUnavailable) as failure:
-            logger.warning("the sample memory couldn't be written (%s %s)", type(failure).__name__, failure.code)
+    try:
+        await link(created.desk_id)
+        if described.memory:
+            try:
+                memory = DeskMemoryRequest(about=described.summary[:500], items=memory_items(described.memory))
+                await owner.kernel.call("PUT /desks/{id}/memory", memory,
+                                        path={"id": created.desk_id})
+            except ValidationError as failure:
+                logger.warning("the sample memory couldn't be written (%s)", type(failure).__name__)
+            except (KernelFailed, KernelUnavailable) as failure:
+                logger.warning("the sample memory couldn't be written (%s %s)", type(failure).__name__, failure.code)
+    finally:
+        # A failed link write must still try to stop answering before start deletes the Desk.
+        await _answering_off(owner, created.desk_id)
     site = website_url(described.website)
     interview = Interview(
         interview_id=interview_id, copy_id=owner.copy_id, desk_id=created.desk_id,
@@ -876,8 +901,9 @@ async def _claim(engine: AsyncEngine, copy_id: str, key: str, request_sha256: st
 
 def _failure_record(error: BaseException) -> dict:
     """What a start that failed once its Desk was asked for answered, kept on its row: the row is settled and its key
-    spent. The record is kept for diagnosis only: a repeat answers 409 `key_spent` from its presence, never from its
-    content."""
+    spent. A repeat answers 409 `key_spent` from its presence. The Desk-list guard also distinguishes a definite
+    kernel refusal (`kernel: failed`, no Desk made only when the row keeps no Desk ID) from an uncertain outcome
+    (`kernel: unavailable`)."""
     if isinstance(error, ApiProblem):
         return {"status": error.status, "error": error.error, "code": error.code}
     if isinstance(error, KernelFailed):
@@ -904,10 +930,14 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
     again in `START_RETRY_S`. A row still starting after `START_ABANDONED_S` has stopped. One that never recorded
     asking the kernel for its Desk is abandoned (its request stopped before anything was made): it is deleted, if it
     still is one, and the key is free. One that did record it is kept, since its Desk may exist, and its key is spent
-    (409 `key_spent`)."""
+    (409 `key_spent`). The Desk ID is committed as soon as the kernel returns it and retained on failure. A keyed
+    row is readable only after its transcript is stored (`_start_finished`): linked-but-unfinished rows, like
+    uncertain rows with no ID kept, answer `in_progress` until abandonment, then `key_spent`."""
     key, sha = body.idempotency_key, start_sha256(body)
     found = select(INTERVIEWS.c.interview_id, INTERVIEWS.c.desk_id, INTERVIEWS.c.request_sha256,
-                   INTERVIEWS.c.start_error, INTERVIEWS.c.desk_requested_at, _STALE.label("stale")).where(
+                   INTERVIEWS.c.start_error, INTERVIEWS.c.desk_requested_at, INTERVIEWS.c.transcript,
+                   INTERVIEWS.c.idempotency_key,
+                   _STALE.label("stale")).where(
         INTERVIEWS.c.copy_id == owner.copy_id, INTERVIEWS.c.idempotency_key == key)
     async with engine.connect() as conn:
         row = (await conn.execute(found)).mappings().one_or_none()
@@ -917,7 +947,7 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
         raise ApiProblem(409, "conflict")
     if row["start_error"] is not None:
         raise ApiProblem(409, "key_spent")
-    if row["desk_id"] is None:
+    if row["desk_id"] is None or not _start_finished(row):
         if row["stale"] and row["desk_requested_at"] is not None:
             raise ApiProblem(409, "key_spent")
         if row["stale"] and await _drop_abandoned(engine, owner.copy_id, row["interview_id"]):
@@ -963,31 +993,49 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
     keyed = (INTERVIEWS.c.interview_id == interview_id, INTERVIEWS.c.copy_id == owner.copy_id)
     try:
         described, desk = await _read_description(owner, engine, model, body)
-        await _asking_for_desk(engine, keyed)
+        await _asking_for_desk(owner, engine, keyed)
     except BaseException:                           # nothing was made: the key is free for the same request again
         await _settle(engine, delete(INTERVIEWS).where(*keyed))
         raise
+    created_desk_id = None
+
+    async def link(desk_id: str) -> None:
+        nonlocal created_desk_id
+        created_desk_id = desk_id          # the failure write also knows it if this first write fails
+        async with engine.connect() as conn:
+            await conn.execute(update(INTERVIEWS).where(*keyed).values(desk_id=desk_id, updated_at=func.now()))
+            await conn.commit()
+
     try:
-        interview, slug = await _make_desk(owner, body, described, desk, interview_id)
+        interview, slug = await _make_desk(owner, body, described, desk, interview_id, link)
         async with engine.connect() as conn:
             await conn.execute(update(INTERVIEWS).where(*keyed).values(
                 desk_id=interview.desk_id, business_type=interview.business_type, **_stored(interview),
                 updated_at=func.now()))
             await conn.commit()
     except BaseException as error:                  # the Desk was asked for: the key keeps the outcome
-        await _settle(engine, update(INTERVIEWS).where(*keyed).values(start_error=_failure_record(error),
-                                                                      updated_at=func.now()))
+        if created_desk_id is not None:
+            try:
+                await owner.kernel.call("DELETE /desks/{id}", path={"id": created_desk_id})
+            except Exception as failed:
+                logger.error("a failed setup start's Desk couldn't be deleted (%s)", type(failed).__name__)
+        await _settle(engine, update(INTERVIEWS).where(*keyed).values(
+            desk_id=created_desk_id, start_error=_failure_record(error), updated_at=func.now()))
         raise
     return setup_state(interview, slug, cards=cards)
 
 
-async def _asking_for_desk(engine: AsyncEngine, keyed: tuple) -> None:
+async def _asking_for_desk(owner: OwnerCtx, engine: AsyncEngine, keyed: tuple) -> None:
     """Record on the keyed row, committed, that the start is about to ask the kernel for its Desk: from then on the
     Desk may exist, so the row is never taken over as abandoned. 409 `in_progress`, with no Desk asked for, when the
     row isn't there to record it on (a repeat took it over)."""
+    # This boundary is in the kernel's clock domain, not Postgres's: only a Desk newer than every Desk
+    # already in this copy can belong to this start, even when the two processes' clocks disagree.
     async with engine.connect() as conn:
+        desks = await KernelRO(conn, owner.copy_id, owner.ro.schema).desks()
+        boundary = max((desk["created_at"] for desk in desks), default=datetime(1970, 1, 1, tzinfo=UTC))
         recorded = await conn.execute(update(INTERVIEWS).where(*keyed, INTERVIEWS.c.desk_requested_at.is_(None))
-                                      .values(desk_requested_at=func.now(), updated_at=func.now()))
+                                      .values(desk_requested_at=boundary, updated_at=func.now()))
         await conn.commit()
     if recorded.rowcount != 1:
         raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
@@ -1048,6 +1096,8 @@ def _understanding_message(interview: Interview, entries: list[Entry]) -> dict:
     parts = [SETUP_UNDERSTAND_HEAD.format(business_type=interview.business_type),
              SETUP_CLIENT_CARDS[interview.shows_cards],
              wrap(OWNER_DESCRIPTION_TAG, _history(interview)[0].text)]
+    if not interview.business_tools_enabled:
+        parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
     for entry in entries:
         if entry.pending is not None and entry.pending == _run_id(interview):
             continue
@@ -1074,10 +1124,16 @@ def _normalize_choices(choices: list[Choice]) -> list[Choice]:
 async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
                          entries: list[Entry]) -> None:
     """Append the consultant opening and its first fact question; the caller owns persistence."""
+    def time_left() -> float:
+        if interview.turn_deadline is None:
+            return UNDERSTAND_TIMEOUT_S
+        return min(UNDERSTAND_TIMEOUT_S, interview.turn_deadline - asyncio.get_running_loop().time() - 10)
+
     try:
         answer = await _ask_drafts(model, recorder(engine, owner), SETUP_UNDERSTAND_SYSTEM,
                                  [_understanding_message(interview, entries)], SetupUnderstanding,
-                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=UNDERSTAND_TIMEOUT_S)
+                                 # Fifteen seconds left on the turn: ten to finish, five for a retry.
+                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=time_left, retry_min_s=5)
     except ApiProblem as failed:
         if failed.status != 503 or failed.error != "model_unavailable":
             raise
@@ -1088,14 +1144,14 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
         return
     opening = Entry(role="claude", text=answer.reply.strip(), suggested=answer.suggested)
     interview.transcript.append(opening)
-    opening.planned = [_planned_job(interview, draft) for draft in answer.jobs]
+    opening.planned = [card for draft in answer.jobs if (card := _planned_job(interview, draft)) is not None]
     seen = set()
     for draft in answer.connectors:
         if draft.app in seen:
             continue
         seen.add(draft.app)
         connector = ConnectorProposal(app=draft.app, label=CONNECTOR_LABELS[draft.app], why=draft.why,
-                                      connectable=draft.app == "stripe")
+                                      connectable=True)
         opening.planned.append(ProposalCard(
             proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None, connector=connector))
     interview.transcript.append(Entry(role="claude", text=answer.question.strip() or
@@ -1284,10 +1340,11 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
     even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
-    turn includes earlier owner answers and Claude replies only after this question's last ask, never tool labels
-    or their content. On a limit question these replies were made under the same isolation; earlier questions'
-    replies, which may repeat memory or website text, never enter the exchange. The run's staged entries never
-    enter history: its current answer appears only in `owner_answer`."""
+    turn includes earlier owner answers and Claude replies since this topic began, including its follow-up asks.
+    With more than one ask, the exchange includes the first ask too. It never includes tool labels or their content.
+    On a limit question these replies were made under the same isolation;
+    earlier questions' replies, which may repeat memory or website text, never enter the exchange. The run's staged
+    entries never enter history: its current answer appears only in `owner_answer`."""
     transcript = _history(interview, run_id)
     limit_turn = key in LIMIT_QUESTIONS.values()
     so_far = interview.answers.model_dump_json(exclude_defaults=True)
@@ -1299,6 +1356,8 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
                                      covered=", ".join(key for key in QUESTION_KEYS if key in interview.covered),
                                      uncovered=", ".join(key for key in QUESTION_KEYS if key not in interview.covered)),
               wrap(QUESTION_ASKED_TAG, asked)])
+    if not limit_turn and not interview.business_tools_enabled:
+        parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
     parts.append(wrap(ANSWERS_SO_FAR_TAG, so_far))
     reads = [] if limit_turn else transcript
     for entry in reads:
@@ -1309,8 +1368,17 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     if not limit_turn:
         parts.append(SETUP_CLIENT_CARDS[interview.shows_cards])
         parts.append(wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview, run_id=run_id), ensure_ascii=False)))
-    start = next((index + 1 for index in range(len(transcript) - 1, -1, -1)
-                  if transcript[index].question == key), len(transcript))
+    start = len(transcript)
+    asks = 0
+    for index in range(len(transcript) - 1, -1, -1):
+        entry = transcript[index]
+        if entry.card is not None or (entry.question is not None and entry.question != key):
+            break
+        if entry.question == key:
+            asks += 1
+            start = index + 1
+    if asks > 1:
+        start -= 1
     lines = [summary_line(SETUP_EXCHANGE_LABELS[entry.role], entry.text)
              for entry in transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS and entry.card is None]
     if lines:
@@ -1388,7 +1456,10 @@ async def _rename(owner: OwnerCtx, desk_id: str, patch: SetupPatch) -> None:
         path={"id": desk_id})
 
 
-def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard:
+def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
+    if draft.job == "payment" and not interview.business_tools_enabled:
+        logger.warning("setup dropped an unavailable job of kind %s", draft.job)
+        return None
     fields = draft.model_dump(mode="json")
     if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
         fields["config"]["amount_cents"] = None
@@ -1432,6 +1503,8 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json()),
         wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)),
     ]
+    if not interview.business_tools_enabled:
+        parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
     parts.append(SETUP_CLIENT_CARDS[interview.shows_cards])
     if closing:
         parts.append(SETUP_CLOSING_LINE)
@@ -1460,6 +1533,15 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     return answer
 
 
+# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. One inside a
+# link or mid-word ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
+_ENDS_A_QUESTION = re.compile(r"\?(?=\s|$|[\"'\u201d\u2019)\]])")
+
+
+def _asks(text: str) -> bool:
+    return _ENDS_A_QUESTION.search(text) is not None
+
+
 @dataclass
 class _TurnReplies:
     """Keep reply provenance for the whole answer, including any recursive planning calls."""
@@ -1475,6 +1557,54 @@ class _TurnReplies:
                 if reads_untrusted:
                     # Keep coverage and hidden plan metadata; empty messages are omitted from the view.
                     reply.text = ""
+
+
+async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview, *,
+                             since: int, replies: _TurnReplies, key: QuestionKey | None = None,
+                             follow_up=None) -> None:
+    """Before saving, leave a fresh question, a waiting card, or a closed interview."""
+    if interview.step != "questions" or interview.pending_card is not None:
+        return
+    if any(entry.role == "claude" and entry.question in QUESTION_KEYS and entry.text.strip()
+           for entry in interview.transcript[since:]):
+        return
+    if follow_up is not None:
+        reason = "topic_again"
+        reply = next((entry for entry, _ in reversed(replies.entries) if entry.text.strip()), None)
+        asked = _ask(interview, key)
+        if key in LIMIT_CHOICES and reply is not None and _asks(reply.text):
+            reply.question = key
+            reply.choices = asked.choices
+            return
+        if key not in LIMIT_CHOICES:
+            if reply is not None and _asks(reply.text):
+                reply.question = key
+                return
+            question = follow_up.question.strip()
+            fitting = follow_up.next.kind == "done" or (follow_up.next.kind == "topic"
+                                                        and follow_up.next.topic not in LIMIT_CHOICES)
+            if question and fitting and (reply is None or question != reply.text.strip()):
+                asked.text = question
+                asked.choices = _normalize_choices(follow_up.choices)
+                reason = "turn_question"
+    else:
+        added = {card.proposal_id for entry in interview.transcript[since:] for card in entry.planned}
+        available = [card for card in interview.unshown if card.proposal_id not in added]
+        following = _next_ask(interview, None, available)
+        if isinstance(following, str):
+            asked = _ask(interview, following)
+        elif isinstance(following, ProposalCard):
+            asked = Entry(role="claude", text="", card=following.model_copy(deep=True))
+        else:
+            asked = None
+        reason = "next_topic" if asked is not None else "close"
+    topic = (asked.question or "card") if asked is not None else "done"
+    logger.warning("setup answer gap filled (%s, %s)", topic, reason)
+    if asked is not None:
+        replies.before(asked.question)
+        interview.transcript.append(asked)
+    else:
+        await close_setup(owner, engine, model, interview)
 
 
 async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
@@ -1500,7 +1630,7 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             card = ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None,
                                 connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app],
                                                             why=source.question.strip()[:200],
-                                                            connectable=app == "stripe"))
+                                                            connectable=True))
             reply.planned.append(card)
             available.append(card)
     asked = _next_ask(interview, source, available)
@@ -1514,7 +1644,7 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         fitting = _names_card(source, asked)
         if fitting and source.question.strip():
             interview.transcript.append(Entry(role="claude", text=source.question.strip()))
-        interview.transcript.append(Entry(role="claude", text="", card=asked.model_copy(deep=True)))
+        _show_card(interview, asked)
     else:
         # An added job becomes eligible only on a later planning call, never on the turn that minted it.
         if interview.shows_cards and interview.unshown:
@@ -1527,13 +1657,22 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         await close_setup(owner, engine, model, interview)
 
 
+def _show_card(interview: Interview, card: ProposalCard) -> None:
+    interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
+    payment = bool((card.job and card.job.job == "payment") or
+                   (card.connector and card.connector.app == "stripe"))
+    if payment and not interview.answers.auto_money_cap_cents and not any(
+            entry.role == "claude" and entry.text == PAYMENT_LINE for entry in interview.transcript):
+        interview.transcript.append(Entry(role="claude", text=PAYMENT_LINE))
+
+
 def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCard]:
     """Record additions and valid drops even on a follow-up; return only items available before this turn."""
     available = interview.unshown
     if source is not None:
         available_ids = {card.proposal_id for card in available}
         reply.dropped = list(dict.fromkeys(proposal_id for proposal_id in source.drop if proposal_id in available_ids))
-        reply.planned = [_planned_job(interview, draft) for draft in source.add_jobs]
+        reply.planned = [card for draft in source.add_jobs if (card := _planned_job(interview, draft)) is not None]
     return available
 
 
@@ -1552,6 +1691,17 @@ def _decide_typed(interview: Interview, proposal_id: str, accept: bool) -> bool:
 async def card_turn(owner, engine, model, interview: Interview, proposal_id: str,
                     text: str | None = None) -> None:
     """Continue an in-place or typed card decision. The guarded route owns saving and after_finish."""
+    since = len(interview.transcript)
+    await _card_turn(owner, engine, model, interview, proposal_id, text)
+    if len(interview.transcript) == since:
+        return
+    replies = _TurnReplies(entries=[(entry, True) for entry in interview.transcript[since:]
+                                    if entry.role == "claude"])
+    await _ensure_answerable(owner, engine, model, interview, since=since, replies=replies)
+
+
+async def _card_turn(owner, engine, model, interview: Interview, proposal_id: str,
+                     text: str | None = None) -> None:
     card = next((entry.card for entry in reversed(interview.transcript)
                  if entry.card and entry.card.proposal_id == proposal_id), None)
     if card is None or (text is None and card.state == "proposed"):
@@ -1571,6 +1721,8 @@ async def card_turn(owner, engine, model, interview: Interview, proposal_id: str
             if card.job is None or not following.revised:
                 return
             replacement = _planned_job(interview, following.revised[0])
+            if replacement is None:
+                return
             # Keep the stored plan and its shown copy settled together; only the replacement waits.
             for entry in interview.transcript:
                 for planned in entry.planned:
@@ -1582,7 +1734,7 @@ async def card_turn(owner, engine, model, interview: Interview, proposal_id: str
             reply.planned = [replacement]
             if following.question.strip():
                 interview.transcript.append(Entry(role="claude", text=following.question.strip()))
-            interview.transcript.append(Entry(role="claude", text="", card=replacement.model_copy(deep=True)))
+            _show_card(interview, replacement)
             return
         if following.decision == "none" or not _decide_typed(interview, proposal_id,
                                                             following.decision == "accept"):
@@ -1612,6 +1764,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         if card is not None:
             await card_turn(ctx, engine, model, interview, card, text=text)
             return
+        since = len(interview.transcript)
         key = question
         desk_id = interview.desk_id
         said, = staged
@@ -1625,9 +1778,10 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                 patch = SetupPatch.model_validate({**patch.model_dump(), **choice.values})
                 turn.step_done = True
         entries = []
-        reply = Entry(role="claude", text=turn.reply.strip(),
-                      choices=_limit_choices(interview, key) if not turn.step_done else [])
-        if reply.text or reply.choices:
+        reply = Entry(role="claude", text=turn.reply.strip())
+        replies = _TurnReplies()
+        replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
+        if reply.text:
             entries.append(reply)
         site = website_url(turn.website)
         if site is not None and site[0] not in interview.tried_websites():
@@ -1640,8 +1794,6 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         interview.transcript += entries
         if turn.step_done:
             interview.cover([key])
-            replies = _TurnReplies()
-            replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
             following = await _next_step(ctx, engine, model, interview) if key in LIMIT_CHOICES else turn
             next_reply = reply
             if key in LIMIT_CHOICES:
@@ -1655,6 +1807,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             if not any(entry is reply for entry in interview.transcript):
                 interview.transcript.append(reply)
             _record_plan(interview, turn, reply)
+        await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
+                                 follow_up=turn if not turn.step_done else None)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if interview.step == "tools":

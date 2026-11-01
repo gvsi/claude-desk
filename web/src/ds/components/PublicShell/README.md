@@ -20,10 +20,23 @@
   - "Chat with {name}" and, under it, the AI disclosure. It can't be turned off:
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {ownerName} cuando quieras."
+
+    When `{name}` already ends in '.', '!' or '?', the period after it is left out (`afterName`), so 'Chen & Co.' reads 'Chen & Co. Ask for …'.
+
   - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
+  - **When the owner gave no name** (`ownerName` is null), the disclosure and the button ask for a person instead, and name no one:
+    - "You're chatting with Claude, an AI answering for {name}. Ask for a person anytime."
+    - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con una persona cuando quieras."
+    - "Ask for a person" / "Pedir hablar con una persona".
+
+    "a person" is the shell's own copy, so only the business's name is marked as written by someone.
   - **While the owner is in the chat** (`ownerInChat`, take-over option A, N-R2-TakeOver-A-1512-EN and N-R2-TakeOver-A-390-EN), the disclosure's line says so instead, in the same element, type and place, and "Ask for {ownerName}" isn't shown:
     - "{ownerName} is in this chat. Claude, an AI, is paused until {ownerName} hands it back."
     - "{ownerName} está en este chat. Claude, una IA, está en pausa hasta que {ownerName} le devuelva el chat."
+
+    With no owner name, the line names no one:
+    - "The business owner is in this chat. Claude, an AI, is paused until they hand it back."
+    - "El dueño del negocio está en este chat. Claude, una IA, está en pausa hasta que le devuelva el chat."
 
     The line still names Claude as an AI and says it is paused, so the AI disclosure is never off; it is the shell's own copy, and the consumer can't empty it or pass other words. Each `{ownerName}` is marked as written by someone (`data-copy="user"`), as the other names are. When the owner hands back, the usual disclosure and the button come back. The shell draws only its head: the chat's own lines ("Maria Rivera joined the chat", "Claude is helping again.") are the page's `SystemLine`s in the conversation.
   - **Focus.** If "Ask for {ownerName}" has focus as the owner joins, focus goes on to the composer's text box (or, while that is disabled, to the conversation's scroll region, the stop after Ask), without scrolling, so it doesn't drop to the page and the visitor stays where they were reading. Focus anywhere else, or nowhere, stays where it is.
@@ -85,7 +98,9 @@ On a short shell:
 
 When the shell turns short or tall, the element that scrolls the conversation changes: the scroll region while tall, the shell itself while short. The shell then:
 
-1. keeps the visitor's place: the first message under the chat's head stays where it was under it, on the new scroller;
+1. keeps the visitor's place on the new scroller, even when the width changes too, as when a phone turns. The place is what is first under the chat's head: the about column while it opens the scroll region and still reaches under the head (the chat's start on a narrow shell), and the first message otherwise. It stays where it was under the head; when part of it is above the head's edge, the same share of it stays above, however it has wrapped, so the same part of it is at the edge and it is still what is first under the head. If the about column was the place and has since moved beside the chat, nothing is put back.
+
+   The shell hears of a new size only once the browser has laid the page out at it. At the same width nothing under the chat's head has moved by then, and the shell reads the place there. At a new width the about column, the messages and the chat's head have already wrapped onto other lines, and the browser's scroll anchoring may have moved the conversation to keep some other element still, so the shell puts back the place it read after the last scroll of the conversation, or the last time it laid itself out, at the old width. A scroll at the new width before the shell hears of it isn't taken for the visitor's, so a visitor's own scroll in that very frame is lost with it;
 2. sends one event from its root, once per switch, after the place is kept:
 
 ```ts
@@ -132,7 +147,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
   - `field` and `accent` are the brand's colors.
   - `ink` and `inkSecondary` are `var(--text-primary)` and `var(--text-secondary)`.
   - The mapping keeps both inks at 4.5:1 over the field, falling back to `bg-panel` when they can't.
-- `ownerName` (`owner_display_name`), `language`, `onAskForOwner`.
+- `ownerName` (`owner_display_name`), or null when the owner gave no name, `language`, `onAskForOwner`. The kernel has no field that says no name was given: the public page's mapping (`brandFrom`) reads setup's fallback name, "Owner", as null, so the page never asks for "Owner". The charter's cards never name the owner, so a null name leaves them as they are.
 - `ownerInChat`, whether the owner is in the chat. Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens or reloads, kept current by the stream's `owner_joined` and `owner_left` (the events the page also draws as the joined and "Claude is helping again." lines). The line tells the visitor a person is in the chat, so it is never set from anything else. `PublicChat` passes `chat.ownerInChat` from `PublicChatProvider`, which derives it through `ownerInChatNow`. The flag is false while the stream is disconnected or catching up, or the session mode is not confirmed. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
@@ -145,7 +160,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `brand` | `PublicBrand` | Required. `{ name; tagline; monogram; field; ink; inkSecondary; accent }`. |
-| `ownerName` | `string` | Required. |
+| `ownerName` | `string \| null` | Required. `owner_display_name`, or null when the owner gave no name: the head then asks for a person. |
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |

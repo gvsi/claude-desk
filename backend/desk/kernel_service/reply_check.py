@@ -19,7 +19,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
    the language, with each letter that looks like a Latin one read as it, from
    `lexicon/lookalikes.txt`, every dash as "-" and every apostrophe as "’"; booking claims such
-   as "you're booked" among them, unless the reply carries a booking card that step 4 passed), and
+   as "you're booked" among them, unless the reply carries a booking card that step 4 passed;
+   call claims instead need a callback card that passed those same clause checks), and
    the copy's document canaries, even split by spaces or accented letters, in another case or
    width, accented, or with letters or digits of other scripts drawn like its own, or all of these
    at once (`labels.canary_spans`, which reads the same lookalike table, its letters and its
@@ -32,21 +33,25 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
    no card. The clauses are checked before the prose is scanned, so the scan knows which cards
    pass; their refusals follow the scan's.
-5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
+5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Sonnet 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
-   (`soft.denies_ai`). Timeout, error or unparsable output gets one unchanged-input recheck,
-   both tries within one 4 s deadline (at most 2 s each; no recheck below 0.5 s remaining).
-   A refusal gets no recheck. No verdict is `check_unavailable` (`soft.unavailable`), final.
-   While the session has an open handoff the handoff card opened
+   (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (6 s), with no recheck and no
+   fallback (the owner's decision of 2026-10-31), inside the API's 10 s for the route: no
+   verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
+   (`soft.unavailable`), final. While the session has an open handoff the handoff card opened
    (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
    doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
    here" is backed, as the card that opened it said. A call-back request backs nothing (the
    owner's decision of 2026-10-31): its own card names a time and never says the owner will
    reply here, and once its window has passed nothing promises a call. That handoff is read
    without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
-   each check one pooled connection, across both tries. A reply that passes with the handoff's
-   card is checked again in step 7.
+   each check one pooled connection, across the try. A reply that passes with the handoff's
+   card is checked again in step 7. When configured, TypeSafe Jev evaluates the same prose, card
+   texts and fixed next steps concurrently, within three seconds of Sonnet's six-second window.
+   Its top score at or above 0.95 adds `soft.jev`; its failure leaves Sonnet's verdict standing.
+   No key means no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not
+   ledger floats.
 6. `ok` when nothing was found: the prose (when not empty) and the cards. A prose-only failure
    keeps checked cards alone, without a cited handoff; any other failure, or no card to keep,
    shows only the handoff clause. A first attempt the API rewrites (`final` false, every
@@ -75,11 +80,11 @@ IDs and the cited fact IDs (through `ledger.safe_ref`; one holding a canary only
 never prose.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
 import re
-import time
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -95,12 +100,13 @@ from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Ledge
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import agents, auth, context, decisions, demo_inbox, labels, lang, ledger, render, sessions
+from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseUsage
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
-from desk.kernel_service.sessions import verified
+from desk.kernel_service.sessions import principal_for, verified
+from desk.next_steps import next_steps
 from desk.rewrites import REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
@@ -117,16 +123,18 @@ PROSE_ONLY = frozenset({"number_in_prose", "promise_word", "soft_promise", "unce
 
 LEXICON_DIR = Path(__file__).resolve().parent / "lexicon"
 CATEGORIES = {"number": "number_in_prose", "money": "number_in_prose", "percent": "number_in_prose",
-              "date": "number_in_prose", "promise": "promise_word", "booking": "promise_word"}
+              "date": "number_in_prose", "promise": "promise_word", "booking": "promise_word",
+              "callback": "promise_word"}
 # A condition straight before a booking claim, on folded text in either language: "once you're
 # booked", "cuando tu cita está confirmada" say what happens once a booking exists and claim none.
 # Each i may be an l, as the capital-I reading writes it ("IF" is read as "lF" too). The folded
 # text has no accents, so "si" (if) counts only where the prose writes no mark on it (`_conditioned`).
 BOOKING_CONDITION = re.compile(
     r"(?<!\w)(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as soon as"
-    r"|cuando|(?P<si>s[il])|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) \Z",
+    r"|cuando|(?P<si>s[il])|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) "
+    r"(?:(?:ya|me|te|le|lo|la|nos|os|les|los|las|se) ){0,3}\Z",
     re.IGNORECASE)
-CONDITION_REACH = 32               # more characters than the longest condition and its space ("tan pronto como ")
+CONDITION_REACH = 48               # longest condition plus bounded Spanish clitics and ya before he/hemos
 
 
 # Default-ignorable code points beyond category Cf (Unicode's DerivedCoreProperties): the combining
@@ -273,6 +281,8 @@ LEXICONS: dict[str, list[tuple[str, re.Pattern[str]]]] = {
     language: _load_lexicon(language) for language in ("en", "es")}
 BOOKING_LINES = [(f"lex.{language}.booking", pattern) for language, entries in LEXICONS.items()
                  for category, pattern in entries if category == "booking"]
+CALLBACK_LINES = [(f"lex.{language}.callback", pattern) for language, entries in LEXICONS.items()
+                  for category, pattern in entries if category == "callback"]
 
 
 def _named_reach(text: str, names: Iterable[str]) -> list[int]:
@@ -333,27 +343,43 @@ def _conditioned(text: str, reading: str, origin: Sequence[int], start: int) -> 
     return condition.group("si") is None or not _marked(text[origin[condition.start("si")]:origin[start]])
 
 
+def _claim_spans(pattern: re.Pattern[str], reading: str) -> Iterable[tuple[int, int]]:
+    """A lexicon's claim spans. An optional `claim` group distinguishes a claim from lexical
+    context consumed by another alternative, such as a Spanish call's subject and verb."""
+    group = "claim" if "claim" in pattern.groupindex else 0
+    for match in pattern.finditer(reading):
+        start, end = match.span(group)
+        if end > start:
+            yield start, end
+
+
 def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
-    """A `promise_word` (`lex.<lang>.booking`) for each booking claim in `text`, in any reading, but
+    """A `promise_word` (`lex.<lang>.booking` or `lex.<lang>.callback`) for each claim in any reading, but
     for one with a condition straight before it (`_conditioned`: "once you're booked") or inside
-    such a claim in the same reading ("cuando tu cita está confirmada" holds "está confirmada"). A
-    claim inside a longer one found is that claim, so one claim is one violation."""
+    such a claim in the same category and reading ("cuando tu cita está confirmada" holds
+    "está confirmada"). Containment is reduced within each category; booking and callback
+    matches never suppress each other."""
     found: set[tuple[int, int, str]] = set()
     for reading, origin in readings.items():
-        reach = -1       # the furthest end of a conditioned claim starting at or before this one
-        for start, end, rule_id in sorted((match.start(), match.end(), rule_id) for rule_id, pattern in BOOKING_LINES
-                                          for match in pattern.finditer(reading) if match.end() > match.start()):
-            if _conditioned(text, reading, origin, start):     # the same for every claim starting here
-                reach = max(reach, end)
-            if reach < end:
+        reach: dict[str, int] = {}  # conditioned reach within each category
+        for start, end, rule_id in sorted((start, end, rule_id)
+                                          for rule_id, pattern in (*BOOKING_LINES, *CALLBACK_LINES)
+                                          for start, end in _claim_spans(pattern, reading)):
+            category = rule_id.rsplit(".", 1)[1]
+            if _conditioned(text, reading, origin, start):
+                reach[category] = max(reach.get(category, -1), end)
+            if reach.get(category, -1) < end:
                 found.add((origin[start], origin[end - 1] + 1, rule_id))
     hits: list[tuple[int, str, Violation]] = []
-    reach, previous = -1, None       # the furthest end of the claims found before this one, and the last one
+    reaches: dict[str, int] = {}
+    previous: dict[str, tuple[int, int]] = {}
     for start, end, rule_id in sorted(found, key=lambda claim: (claim[0], -claim[1], claim[2])):
-        if previous is not None and previous != (start, end):
-            reach = max(reach, previous[1])
-        previous = (start, end)
-        if reach < end:
+        category = rule_id.rsplit(".", 1)[1]
+        prior = previous.get(category)
+        if prior is not None and prior != (start, end):
+            reaches[category] = max(reaches.get(category, -1), prior[1])
+        previous[category] = (start, end)
+        if reaches.get(category, -1) < end:
             hits.append((start, rule_id, Violation(kind="promise_word", span=_span(text[start:end]), rule_id=rule_id)))
     return hits
 
@@ -366,17 +392,20 @@ def canary_violation(document_ids: Sequence[str]) -> Violation:
 
 
 def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iterable[str] = (), *,
-               booking_card: bool = False) -> list[Violation]:
+               booking_card: bool = False, callback_card: bool = False) -> list[Violation]:
     """Every number, currency sign, lexicon word and canary in `text`, after
     `shown`: any Unicode numeral or character drawn as a digit (`digit`, with the separators inside
     one number and the letters shaped like 0 or 1 next to it in the same span, and a word made only
     of such letters unless it is plain ASCII), currency sign (`currency`) or percent sign
     (`percent_sign`) and every match of both lexicons (`lex.<lang>.<category>`) is
-    `number_in_prose`, or `promise_word` for the promise and booking categories, but for a booking
+    `number_in_prose`, or `promise_word` for the promise, booking and callback categories, but for a
     claim with a condition straight before it (`BOOKING_CONDITION`: "once you're booked", "si" but
     not "sí") or inside such a claim, a claim inside another being one (`_booking_claims`), and
     for every booking claim with `booking_card` (the reply carries a `booking_confirmed` card the
-    clause checks passed, which says the same: the owner's decision of 2026-10-30); a word mixing
+    clause checks passed, which says the same: the owner's decision of 2026-10-30). Call claims
+    instead pass with `callback_card`, a `callback_confirmed` card those checks passed. Neither
+    card exempts the other category. Overlapping claims are reduced only within their own
+    category before either exemption. A word mixing
     Latin letters with another script is `unsupported_language` (`mixed_script`), unless it lies
     inside one of `names` (the Desk's own names) as it is written there; the canaries of
     `canaries` (document ID → canary), even split or disguised, are one `canary` violation naming
@@ -408,13 +437,14 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     readings = _readings(text)
-    if not booking_card:
-        hits += _booking_claims(text, readings)
+    hits += [hit for hit in _booking_claims(text, readings)
+             if not (booking_card and hit[1].endswith(".booking")
+                     or callback_card and hit[1].endswith(".callback"))]
     seen: set[tuple[str, int, int]] = set()
     for language, entries in LEXICONS.items():
         for category, pattern in entries:
             rule_id = f"lex.{language}.{category}"
-            if category == "booking":
+            if category in ("booking", "callback"):
                 continue
             for reading, origin, match in ((reading, origin, match) for reading, origin in readings.items()
                                            for match in pattern.finditer(reading)):
@@ -643,17 +673,19 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         violations.append(Violation(
             kind="uncertain_language" if detected == "unmarked" else "unsupported_language",
             span=_span(language_prose), rule_id="language_uncertain" if detected == "unmarked" else "language"))
-    # the clauses first, so the scan knows whether a booking card is shown; their refusals follow the prose's
+    # Clauses first: the scan exempts only booking or callback cards that passed; refusals follow the prose's.
     cards, refused, rendered_claims = await check_clauses(
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
-                             booking_card=any(card.template == "booking_confirmed" for card in cards))
+                             booking_card=any(card.template == "booking_confirmed" for card in cards),
+                             callback_card=any(card.template == "callback_confirmed" for card in cards))
     violations += refused
     detected_language = detected if detected in ("en", "es") else None
     if any(violation.kind == "unsupported_language" for violation in violations):
         # The scan can reject mixed-script prose even when ordinary markers detected English.
         language, detected_language = fallback, None
     usage = None
+    soft_checks = None
     handoff_backed = False                  # the soft-promise check was shown an open handoff's card
     if not violations and prose.strip():
         backing = list(cards)
@@ -661,46 +693,55 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                                                                                              cards_only=True):
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
-        found, usage = await soft_promises(ctx, language, prose, backing)
+        found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing)
         violations += found
     if violations:
         blocks = blocked_blocks(cards, violations, language, desk)
     else:
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
-                          author="claude", fact_ids=fact_ids, soft_promise=usage, seen=True,
+                          author="claude", fact_ids=fact_ids, soft_promise=usage, soft_checks=soft_checks, seen=True,
                           detected=detected_language, canaries=canaries,
                           handoff_backed=handoff_backed, final=final, rendered_claims=rendered_claims)
 
 
-async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
-                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], SoftPromiseUsage | None]:
-    """Step 5: one unchanged-input recheck after timeout, error or invalid output, within one
-    deadline of twice the per-try timeout. Under 0.5 s left skips the recheck; a refusal never
-    retries. Only a verdict can pass. Usage is summed once for the reply ledger, with the first
-    status and the deciding try's status. `finalize` still checks handoff backing under lock."""
-    data = SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards])
-    timeout = decisions.SOFT_PROMISE_TIMEOUT_S
-    deadline = time.monotonic() + 2 * timeout
-    verdict, first = await ctx.decisions.soft_promise(data, timeout_s=timeout)
-    deciding, tries = first, 1
-    remaining = deadline - time.monotonic()
-    if verdict is None and (first is None or first.status != "refusal") and remaining >= 0.5:
-        verdict, deciding = await ctx.decisions.soft_promise(data, timeout_s=min(timeout, remaining))
-        tries = 2
-    calls = [call for call in (first, deciding if tries == 2 else None) if call is not None]
-    usage = None
-    if calls:
-        usage = SoftPromiseUsage(
-            model=calls[-1].model, status=deciding.status if deciding is not None else "error",
-            first_status=first.status if first is not None else "error", tries=tries,
-            **{key: sum(getattr(call, key) for call in calls) for key in
-               ("input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens", "latency_ms")})
+async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
+                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], SoftPromiseUsage | None, dict]:
+    """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
+    rendered for it, and an open handoff's card), with the session's fixed next steps from its
+    resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
+    no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
+    (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
+    error, a refusal, an unparsable answer) is `check_unavailable` (`soft.unavailable`). Optional
+    Jev runs beside it, bounded on its own, and adds `soft.jev` (a `soft_promise`), also spanning
+    the prose's start. Returns the violations, Sonnet's usage as one try (its first status its
+    status) and both verdicts for the ledger. (`finalize` adds
+    `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
+        Desk.desk_id == session_row.desk_id)))).one()
+    tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
+    data = SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards],
+                            next_steps=next_steps(tools))
+    if ctx.settings.typesafe_api_key:
+        # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
+        (verdict, call), jev_result = await asyncio.gather(
+            ctx.decisions.soft_promise(data),
+            jev.evaluate(data.prose, data.cards, data.next_steps, api_key=ctx.settings.typesafe_api_key))
+    else:
+        verdict, call = await ctx.decisions.soft_promise(data)
+        jev_result = jev.Result(status="off")
+    usage = None if call is None else SoftPromiseUsage(**call.model_dump(), first_status=call.status, tries=1)
     if verdict is None:
-        return [Violation(kind="check_unavailable", span=_span(prose), rule_id="soft.unavailable")], usage
-    rule_ids = (["soft.promise"] if verdict.promises_beyond_cards else []) + (
-        ["soft.denies_ai"] if verdict.denies_being_ai else [])
-    return [Violation(kind="soft_promise", span=_span(prose), rule_id=rule_id) for rule_id in rule_ids], usage
+        violations = [Violation(kind="check_unavailable", span=_span(prose), rule_id="soft.unavailable")]
+    else:
+        rule_ids = (["soft.promise"] if verdict.promises_beyond_cards else []) + (
+            ["soft.denies_ai"] if verdict.denies_being_ai else [])
+        violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=rule_id) for rule_id in rule_ids]
+    record = {"sonnet": {"flags": verdict.model_dump(mode="json") if verdict is not None else None,
+                         "blocked": bool(violations)}, "jev": jev_result.ledger_summary()}
+    if jev_result.blocked:
+        violations.append(Violation(kind="soft_promise", span=_span(prose), rule_id="soft.jev"))
+    return violations, usage, record
 
 
 def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int, message_id: str,
@@ -718,13 +759,14 @@ def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int
 
 async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[RenderedBlock],
                    violations: Sequence[Violation], language: render.Language, author: str,
-                   fact_ids: Sequence[str] = (), soft_promise: SoftPromiseUsage | None = None, seen: bool = False,
+                   fact_ids: Sequence[str] = (), soft_promise: SoftPromiseUsage | None = None,
+                   soft_checks: dict | None = None, seen: bool = False,
                    detected: render.Language | None = None, visitor_plain_key: str | None = None,
                    message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES,
                    handoff_backed: bool = False, final: bool = True,
                    rendered_claims: Mapping[str, list[Claim]] | None = None) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
-    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, final}`, the reply
+    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, soft_checks, final}`, the reply
     receipt and the signature, at the session's generation as the request read it. `ok` is no
     violations. The receipt is the status line `visitor_plain_key`, or for a shown reply
     `reply_handed_off` exactly when its blocks include the handoff clause (template `handoff`),
@@ -803,6 +845,7 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                "fact_ids": [ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries)
                             else ledger.safe_ref(fact_id) for fact_id in fact_ids],
                "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None,
+               "soft_checks": soft_checks,
                "final": final}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))

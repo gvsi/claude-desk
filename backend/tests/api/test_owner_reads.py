@@ -1383,6 +1383,7 @@ def test_the_booking_line_goes_by_the_kernels_booking_rules():
 @pytest.mark.parametrize(("rule_id", "why"), [
     ("soft.unavailable", "the checkpoint wasn't available"),
     ("soft.denies_ai", "it said it wasn't an AI"),
+    ("soft.jev", "a second check flagged a promise the business's records don't back"),
 ])
 async def test_a_stopped_soft_check_gives_its_actual_cause(scene, clock, rule_id, why):
     clock.now = local(2026, 10, 30, 9)
@@ -1441,7 +1442,7 @@ async def test_owner_transcript_adds_whispers_and_translations(app, browser, fak
         await conn.commit()
         await deliver(conn, ids, Reply(verdict, "claude", "api"), ro_schema=ro_schema)
         await deliver(conn, ids, Status(held, "held"), ro_schema=ro_schema)
-        pushed = Triage(summary="Pushed for a discount.", category="discount_push")
+        pushed = Triage(summary="Pushed for a discount.", category="prices")
         await append_message(conn, ids, "triage", ref_id=held.decision_id, text=pushed.model_dump_json())
         await append_message(conn, ids, "whisper", text="Offer a callback instead.")
         await append_message(conn, ids, "note", text="The visitor verified.")

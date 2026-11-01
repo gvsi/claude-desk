@@ -3,7 +3,7 @@
 `measure_local` drives visitor turns of each kind through the API over the real kernel and reads the
 API's and the kernel's records after them. With the soft-promise check answering after 0.3 s, every
 reply's reveal delay (Plan 02a's `RevealMetric`, from the model's finish to the reply on the stream)
-holds that wait and stays inside the check's 2 s budget. It waits for `02` in `landed.toml`, since the
+holds that wait and stays within 2 s. It waits for `02` in `landed.toml`, since the
 API's chat routes and records come with Plan 02.
 """
 
@@ -20,7 +20,7 @@ TURNS = 2
 
 @pytest.mark.requires("01a", "02")
 async def test_latency_run_against_the_api_target(k, fake, api):
-    fake.default(SOFT_PROMISE_MODEL, Sleep(0.3, Json(SOFT_PROMISE_PASS)))
+    fake.default(SOFT_PROMISE_MODEL, Sleep(0.3, Json(SOFT_PROMISE_PASS)), schema="SoftPromiseVerdict")
     fake.default(OPUS, ToolUse("send_reply", {"prose": "Thanks for asking. Maria can help with that.", "clauses": []}))
     fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
 

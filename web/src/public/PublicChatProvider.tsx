@@ -26,6 +26,7 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
+import { paymentLinkMemory, type PaymentLinkMemory } from './paymentLinks.ts';
 import {
   chatReducer,
   closesHold,
@@ -76,6 +77,7 @@ const EVENT_TYPES = Object.keys({
 } satisfies Record<SseEvent['type'], true>) as SseEvent['type'][];
 
 export interface VisitorChatSnapshot {
+  paymentLinks: PaymentLinkMemory;
   /** The public Desk the chat loaded, or null until it has. */
   desk: PublicDesk | null;
   state: ChatState;
@@ -185,6 +187,7 @@ const LOCAL_ID = 'local-';
 
 class VisitorChat {
   private snapshot: VisitorChatSnapshot = {
+    paymentLinks: paymentLinkMemory(),
     desk: null,
     state: initialChatState(),
     session: null,
@@ -614,7 +617,7 @@ class VisitorChat {
     // The old session goes before the chat empties, so no state holds its mode beside an empty chat.
     this.loseTrack();
     this.modeAt = 0;
-    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null, verifyStatus: 'idle' });
+    this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null, verifyStatus: 'idle', paymentLinks: paymentLinkMemory() });
     this.dispatch({ type: 'reset' });
     this.loading = true;
     this.open(epoch)

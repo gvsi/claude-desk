@@ -1,7 +1,11 @@
 """Repository files the deploy relies on: what the app image's build context leaves out, and how
 the image is layered on the kernel image."""
 
+import json
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -69,3 +73,34 @@ def test_app_image_builds_on_the_kernel_image():
     assert [line for line in instructions if line.startswith("USER ")][-1] == "USER desk"
     assert re.search(r"^ENV\b.*\bPYTHONPATH=/app/backend\b", text, re.MULTILINE)
     assert 'ENTRYPOINT ["python", "-m", "desk.ops.entrypoint"]' in instructions
+
+
+def test_local_api_excludes_kernel_credentials_after_loading_dotenv(tmp_path):
+    (tmp_path / "Makefile").write_text((REPO / "Makefile").read_text())
+    (tmp_path / "backend").mkdir()
+    (tmp_path / ".env").write_text(
+        "TYPESAFE_API_KEY=fake-typesafe\nMOCKPAY_KEY=fake-mockpay\nANTHROPIC_API_KEY=fake-anthropic\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text(f"#!{sys.executable}\n" + """import os, sys
+from pathlib import Path
+assert sys.argv[1:4] == ['run', '--env-file', '../.env']
+for line in Path('../.env').read_text().splitlines():
+    name, value = line.split('=', 1)
+    os.environ[name] = value
+os.execvp(sys.argv[4], sys.argv[4:])
+""")
+    uv.chmod(0o755)
+    server = bin_dir / "uvicorn"
+    server.write_text(f"#!{sys.executable}\n" + """import json, os
+print(json.dumps({name: bool(os.environ.get(name)) for name in
+                 ('TYPESAFE_API_KEY', 'MOCKPAY_KEY', 'ANTHROPIC_API_KEY')}))
+""")
+    server.chmod(0o755)
+    env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
+               TYPESAFE_API_KEY="fake-ambient-typesafe", MOCKPAY_KEY="fake-ambient-mockpay")
+    result = subprocess.run(["make", "--no-print-directory", "api-serve"], cwd=tmp_path, env=env,
+                            capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout.splitlines()[-1]) == {
+        "TYPESAFE_API_KEY": False, "MOCKPAY_KEY": False, "ANTHROPIC_API_KEY": True}

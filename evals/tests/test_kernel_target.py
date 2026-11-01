@@ -28,7 +28,7 @@ from evals.tier1 import targets
 from evals.tier1.harness import Auth, ContractError, Expect, KernelHarness, load_landed
 from evals.tier1.targets import DUMMY_KEY, SYMCC_REQUIRED, KernelTarget, MockpayClient, TargetError
 
-WATCHED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "DESK_ENV", "DESK_DECISIONS", "DESK_SIGNING_SEED")
+WATCHED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "DESK_ENV", "DESK_DECISIONS", "DESK_SIGNING_SEED", "TYPESAFE_API_KEY")
 LEAKED_CODE = "482913"   # the code the stand-in leaks: in a field, as a key, or in a preview
 BROKEN_CONTACT = "broken@example.com"   # the stand-in's /verify/start breaks VerifyStarted for this contact
 SENT_CONTACT = "sent@example.com"   # the stand-in's /verify/start sends this contact, unmasked, a code
@@ -46,7 +46,8 @@ class StandInKernel:
 
     def __init__(self) -> None:
         self.proof_mode = "symcc"
-        self.model = "claude-haiku-5-5"   # the model `GET /whoami` calls, as a reply check would
+        self.model = "claude-sonnet-5-5"   # the model `GET /whoami` calls, as a reply check would
+        self.schema = "SoftPromiseVerdict"
         self.apps: list[tuple[object, dict[str, str | None]]] = []   # each app's clock and environment
         self.lifespan: list[str] = []
         self.requests = 0
@@ -69,7 +70,9 @@ class StandInKernel:
             client = anthropic.AsyncAnthropic(max_retries=0)   # reads ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL
             try:
                 await client.messages.create(
-                    model=self.model, max_tokens=16, messages=[{"role": "user", "content": "Hi"}]
+                    model=self.model, max_tokens=16, messages=[{"role": "user", "content": "Hi"}],
+                    output_config={"format": {"type": "json_schema", "schema": {
+                        "title": self.schema, "type": "object"}}}
                 )
             except anthropic.APIStatusError:
                 pass   # an unscripted call: the kernel fails closed, and the target's stop() fails the case
@@ -143,6 +146,7 @@ def kernel(monkeypatch: pytest.MonkeyPatch) -> StandInKernel:
     monkeypatch.setenv("KERNEL_DATABASE_URL", "postgresql+psycopg://desk_kernel:unused@127.0.0.1:1/desk")
     # What a developer's shell might hold; the target replaces it for the kernel, then puts it back.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-shell")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "fake-typesafe-from-the-shell")
     monkeypatch.setenv("DESK_SIGNING_SEED", "5" * 64)
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
     return stand_in
@@ -167,19 +171,20 @@ async def test_target_runs_the_kernel_app_on_its_clock_and_fake(
         [(clock, env)] = kernel.apps
         assert clock is target.clock
         assert env == {"ANTHROPIC_BASE_URL": target.fake.url, "ANTHROPIC_API_KEY": DUMMY_KEY, "DESK_ENV": "test",
-                       "DESK_DECISIONS": "anthropic", "DESK_SIGNING_SEED": None}
+                       "DESK_DECISIONS": "anthropic", "DESK_SIGNING_SEED": None, "TYPESAFE_API_KEY": None}
 
-        # The kernel's model call reaches the fake, whose Haiku default passes the soft-promise check.
+        # The kernel's model call reaches the fake's Sonnet default for the verdict schema.
         whoami = await target.call("GET /whoami", auth=Auth.raw({"X-Session-Token": "secret-token"}),
                                    expect=Expect(fields={"kind": "visitor"}))
         assert isinstance(whoami, WhoAmI)
-        assert len(target.fake.calls("claude-haiku-5-5")) == 1
+        assert len(target.fake.calls("claude-sonnet-5-5", schema="SoftPromiseVerdict")) == 1
         assert [(called.route, called.status) for called in target.responses] == [("GET /whoami", 200)]
         assert "secret-token" not in repr(target.responses)
     finally:
         await target.stop()
     assert kernel.lifespan == ["startup", "shutdown"]
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-from-the-shell"
+    assert os.environ["TYPESAFE_API_KEY"] == "fake-typesafe-from-the-shell"
     assert os.environ["DESK_SIGNING_SEED"] == "5" * 64
     assert "ANTHROPIC_BASE_URL" not in os.environ and "DESK_DECISIONS" not in os.environ
 
@@ -395,7 +400,7 @@ async def test_proving_routes_get_the_longer_client_timeout(kernel: StandInKerne
 
 
 async def test_stop_fails_on_an_unscripted_model_call(kernel: StandInKernel):
-    kernel.model = "claude-sonnet-5-5"   # a reviewer call no case scripted
+    kernel.schema = "Review"   # the same Sonnet model, but a reviewer call no case scripted
     target = await KernelTarget(models="fake").start()
     await target.call("GET /whoami", auth=Auth.none(), expect=Expect(fields={"kind": "visitor"}))
     with pytest.raises(AssertionError, match="1 unscripted model calls.*claude-sonnet-5-5"):

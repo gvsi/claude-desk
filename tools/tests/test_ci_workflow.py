@@ -1,6 +1,7 @@
 """The CI workflow and its setup action, read as data: what runs, when, with which pins and rights."""
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -36,6 +37,12 @@ REQUIRED_CHECKS = [
 SUITES = {"backend": "backend tests", "tier1": "tier 1 evals"}
 SHARD_JOBS = {f"{suite}-{shard}": f"{name} {shard}/4" for suite, name in SUITES.items() for shard in range(1, 5)}
 CHECK_JOBS = {suite: [f"{suite}-{shard}" for shard in range(1, 5)] for suite in SUITES}
+SCOPED_JOBS = {**dict.fromkeys([*SHARD_JOBS, "kernel", "proofs", "tier2", "infra"], "backend"), "web": "web"}
+SCOPE_COMMAND = "PYTHONPATH=tools python3 -m desk_tools.changed_paths"
+SHARD_CHECK = '''if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped; then
+  exit 0
+fi
+test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success'''
 SHARD_TEST_STEPS = {
     f"{suite}-{shard}": steps
     for suite, steps in {
@@ -69,7 +76,7 @@ def test_suites_run_as_four_shards_with_options_only_on_test_steps(job_id, name)
     job = workflow["jobs"][job_id]
     assert job["name"] == name
     assert "strategy" not in job
-    assert "if" not in job and "needs" not in job
+    assert job["if"] == "${{ !cancelled() && needs.changes.outputs.backend != 'false' }}" and job["needs"] == ["changes"]
     assert "PYTEST_ADDOPTS" not in workflow["env"]
     for other_id, other in workflow["jobs"].items():
         assert "PYTEST_ADDOPTS" not in other.get("env", {})
@@ -82,24 +89,81 @@ def test_suites_run_as_four_shards_with_options_only_on_test_steps(job_id, name)
 
 
 @pytest.mark.parametrize("job_id, shard_ids", CHECK_JOBS.items())
+@pytest.mark.parametrize("needed", ["true", "", "false"])
 @pytest.mark.parametrize("shard", range(1, 5))
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
-def test_required_suite_checks_fail_unless_all_shards_succeeded(tmp_path, job_id, shard_ids, shard, result):
+def test_required_suite_checks_fail_unless_all_shards_succeeded(tmp_path, job_id, shard_ids, needed, shard, result):
     job = load(WORKFLOW)["jobs"][job_id]
-    assert job["needs"] == shard_ids
+    assert job["needs"] == ["changes", *shard_ids]
     assert job["if"] == "always()"
     assert set(job) == {"name", "runs-on", "timeout-minutes", "needs", "if", "steps"}
     [step] = job["steps"]
     assert set(step) == {"name", "env", "run"}
     assert step["env"] == {
-        f"SHARD_{number}": "${{ needs." + shard_id + ".result }}"
-        for number, shard_id in enumerate(shard_ids, 1)
+        "NEEDED": "${{ needs.changes.outputs.backend }}",
+        **{
+            f"SHARD_{number}": "${{ needs." + shard_id + ".result }}"
+            for number, shard_id in enumerate(shard_ids, 1)
+        },
     }
     assert "||" not in step["run"]
-    results = {f"SHARD_{number}": "success" for number in range(1, 5)}
+    expected = "skipped" if needed == "false" else "success"
+    results = {f"SHARD_{number}": expected for number in range(1, 5)}
     results[f"SHARD_{shard}"] = result
-    executed, _ = Runner(tmp_path).run(step, "ARM64", **results)
-    assert executed.returncode == (0 if result == "success" else 1), executed.stderr
+    executed, _ = Runner(tmp_path).run(step, "ARM64", NEEDED=needed, **results)
+    assert executed.returncode == (0 if result == expected else 1), executed.stderr
+
+
+@pytest.mark.parametrize("job_id", CHECK_JOBS)
+def test_required_suite_checks_accept_four_successes_even_if_the_suite_was_ruled_out(tmp_path, job_id):
+    [step] = load(WORKFLOW)["jobs"][job_id]["steps"]
+    results = {f"SHARD_{number}": "success" for number in range(1, 5)}
+    executed, _ = Runner(tmp_path).run(step, "ARM64", NEEDED="false", **results)
+    assert executed.returncode == 0, executed.stderr
+
+
+@pytest.mark.parametrize("job_id, flag", SCOPED_JOBS.items())
+def test_scoped_jobs_run_unless_explicitly_ruled_out_even_if_classification_failed(job_id, flag):
+    job = load(WORKFLOW)["jobs"][job_id]
+    assert job["needs"] == ["changes"]
+    assert job["if"] == "${{ !cancelled() && needs.changes.outputs." + flag + " != 'false' }}"
+
+
+def test_backend_scoped_job_gates_do_not_depend_on_web():
+    for job_id, job in load(WORKFLOW)["jobs"].items():
+        if "needs.changes.outputs.backend" not in job.get("if", ""):
+            continue
+        for step in job["steps"]:
+            words = shlex.split(step.get("run", ""))
+            for index, word in enumerate(words):
+                option, separator, value = word.partition("=")
+                if option in {"--run-if", "--required-if"}:
+                    path = value if separator else words[index + 1]
+                    path = path.removeprefix("./").rstrip("/")
+                    assert path != "web" and not path.startswith("web/"), (job_id, step["name"], path)
+
+
+def test_secret_scan_and_repo_checks_start_without_classification():
+    for job_id in ["secret-scan", "repo"]:
+        job = load(WORKFLOW)["jobs"][job_id]
+        assert "needs" not in job and "if" not in job
+
+
+def test_changed_paths_job_only_classifies_pull_requests_and_writes_both_outputs():
+    job = load(WORKFLOW)["jobs"]["changes"]
+    assert job["name"] == "changed paths"
+    assert "needs" not in job
+    assert job["if"] == "github.event_name == 'pull_request'"
+    checkout, classify = job["steps"]
+    assert is_checkout(checkout)
+    assert checkout["with"] == {"persist-credentials": False, "fetch-depth": 2}
+    assert classify["id"] == "classify"
+    assert classify["env"] == {
+        "GITHUB_EVENT_NAME": "${{ github.event_name }}",
+        "PR_HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+    }
+    assert classify["run"] == SCOPE_COMMAND
+    assert job["outputs"] == {flag: "${{ steps.classify.outputs." + flag + " }}" for flag in ["backend", "web"]}
 
 
 # The plan's pinned actions: the commit each version tag pointed to when it was pinned.
@@ -300,15 +364,15 @@ def documented_checks() -> list[str]:
 def test_job_names_are_the_required_checks():
     workflow_jobs = jobs(load(WORKFLOW))
 
-    assert [job["name"] for job in workflow_jobs if job["name"] not in SHARD_JOBS.values()] == REQUIRED_CHECKS
-    assert len(workflow_jobs) == len(REQUIRED_CHECKS) + len(SHARD_JOBS)
+    assert [job["name"] for job in workflow_jobs if job["name"] not in [*SHARD_JOBS.values(), "changed paths"]] == REQUIRED_CHECKS
+    assert len(workflow_jobs) == len(REQUIRED_CHECKS) + len(SHARD_JOBS) + 1
     assert documented_checks() == REQUIRED_CHECKS
     for job in workflow_jobs:
         assert job["timeout-minutes"] == JOB_TIMEOUTS.get(job["name"], 25), job["name"]
 
 
 # Suite shards retain their time limit; their required checks inspect each shard's own result.
-JOB_TIMEOUTS = {**dict.fromkeys(SHARD_JOBS.values(), 40), "backend tests": 5, "tier 1 evals": 5}
+JOB_TIMEOUTS = {**dict.fromkeys(SHARD_JOBS.values(), 40), "backend tests": 5, "tier 1 evals": 5, "changed paths": 5}
 
 
 # The runner switch: on when the repository variable CI_RUNNER_MODE is "ec2", except for a pull
@@ -327,7 +391,7 @@ RUNS_ON = (
     "|| 'ubuntu-24.04' }}"
 )
 # The runner launcher's suffixes, one per job.
-RUNNER_SUFFIXES = {"backend", "kernel", "proofs", "tier1", "tier2", "web", "infra", "secret-scan", "repo"}
+RUNNER_SUFFIXES = {"backend", "kernel", "proofs", "tier1", "tier2", "web", "infra", "secret-scan", "repo", "changes"}
 
 
 def test_jobs_run_on_hosted_runners_unless_switched_to_ec2():
@@ -341,7 +405,7 @@ def test_jobs_run_on_hosted_runners_unless_switched_to_ec2():
         assert "strategy" not in job, job["name"]
         assert "container" not in job, job["name"]
     # Each label is unique within the run and in the launcher's form.
-    assert len(suffixes) == len(set(suffixes)) == len(REQUIRED_CHECKS) + 8
+    assert len(suffixes) == len(set(suffixes)) == len(REQUIRED_CHECKS) + 8 + 1
     assert set(suffixes) == RUNNER_SUFFIXES | {f"{suite}-{shard}" for suite in CHECK_JOBS for shard in range(1, 5)}
     for suffix in suffixes:
         assert re.fullmatch(r"[a-z][a-z0-9-]{0,31}", suffix), suffix
@@ -429,19 +493,26 @@ MIGRATIONS = [SETTINGS, ONE_HEAD, MIGRATE, "make db-roles"]
 # The job's database is thrown away with its runner, so it skips durable commits.
 THROWAWAY = "make db-throwaway"
 TIER2_BASE_SETUP = (
+    'if [ "$FORCED" = "true" ]; then\n'
+    '  echo "::error::a force-push to main replaced history that CI can\'t check for rewritten rates or waivers"\n'
+    '  exit 1\n'
+    'fi\n'
+    'HISTORY_SINCE=""\n'
     'if [ -z "$RESULTS_BASE" ]; then\n'
     '  RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"\n'
+    '  HISTORY_SINCE="$RESULTS_BASE"\n'
     'fi'
 )
 
 # What each check runs after its setup, as Plan 06a Task 2's job table says: a string is a plain
 # command, a list is the gate's arguments.
 CHECKS = {
+    "changed paths": [SCOPE_COMMAND],
     **dict.fromkeys(
         (SHARD_JOBS[shard_id] for shard_id in CHECK_JOBS["backend"]),
         [*MIGRATIONS, THROWAWAY, "cd backend && uv run pytest -q"],
     ),
-    **dict.fromkeys(SUITES.values(), [' && '.join(f'test "$SHARD_{shard}" = success' for shard in range(1, 5))]),
+    **dict.fromkeys(SUITES.values(), [SHARD_CHECK]),
     "kernel tests": ["cd kernel && cargo test --locked"],
     # Exactly the arguments test_gate's proofs regression exercises.
     "proofs": ["desk-prove --selftest", PROOFS_GATE],
@@ -462,7 +533,7 @@ CHECKS = {
         ],
     ]),
     # The same gate arguments as test_gate, with a base selected for the workflow event.
-    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE"]],
+    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE", "HISTORY_SINCE=$HISTORY_SINCE"]],
     "web tests": [
         ["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"],
         [
@@ -510,18 +581,22 @@ def test_gated_jobs_go_through_the_gate():
 
     assert {job["name"]: checks(job) for job in jobs(workflow)} == CHECKS
     tier2_gate = CHECKS["tier 2 results"][0]
-    assert tier2_gate[tier2_gate.index("--") + 1 :] == ["make", "evals-results-check", "BASE=$RESULTS_BASE"]
+    assert tier2_gate[tier2_gate.index("--") + 1 :] == [
+        "make", "evals-results-check", "BASE=$RESULTS_BASE", "HISTORY_SINCE=$HISTORY_SINCE",
+    ]
     assert PROOFS_GATE[PROOFS_GATE.index("--") + 1 :] == ["make", "check-presets"]
     # Tier 2 checks pull requests against their event's base commit, including stacked PRs;
     # pushes and manual runs check the head against the root commit, even after cancelled runs.
     tier2 = job_named("tier 2 results")
-    assert "if" not in tier2
+    assert tier2["if"] == "${{ !cancelled() && needs.changes.outputs.backend != 'false' }}"
     assert tier2["steps"][0]["with"]["fetch-depth"] == 0
     [results] = [step for step in tier2["steps"] if step.get("name") == "Check the tier 2 results"]
     assert results["env"] == {
         "RESULTS_BASE": "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}",
+        "FORCED": "${{ github.event_name == 'push' && github.event.forced || false }}",
     }
-    assert results["run"].rstrip().endswith('make evals-results-check BASE="$RESULTS_BASE"')
+    assert results["run"].rstrip().endswith(
+        'make evals-results-check BASE="$RESULTS_BASE" HISTORY_SINCE="$HISTORY_SINCE"')
     # The secret scan reads the whole history.
     assert job_named("secret scan")["steps"][0]["with"]["fetch-depth"] == 0
 
@@ -557,6 +632,76 @@ def test_gated_jobs_go_through_the_gate():
             "cache-suffix": "${{ github.job }}",
             "ignore-nothing-to-cache": True,
         }, step
+
+
+def test_tier2_rejects_force_push_before_running_the_gate(tmp_path):
+    [step] = [step for step in job_named("tier 2 results")["steps"]
+              if step.get("name") == "Check the tier 2 results"]
+    script = tmp_path / "check.sh"
+    script.write_text(step["run"])
+    result = subprocess.run(["bash", "-eo", "pipefail", str(script)], text=True, capture_output=True,
+                            cwd=tmp_path, env={**os.environ, "FORCED": "true", "RESULTS_BASE": "unused"})
+    assert result.returncode == 1
+    assert result.stdout == ("::error::a force-push to main replaced history that CI can't check "
+                             "for rewritten rates or waivers\n")
+    assert not result.stderr
+
+
+@pytest.mark.parametrize("event, gate_exit", [
+    ("pull_request", 0), ("push", 0), ("workflow_dispatch", 0),
+    ("pull_request", 7), ("push", 7), ("workflow_dispatch", 7),
+])
+def test_tier2_preserves_push_histories_without_changing_the_results_base(tmp_path, event, gate_exit):
+    [step] = [step for step in job_named("tier 2 results")["steps"]
+              if step.get("name") == "Check the tier 2 results"]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "commands.jsonl"
+    # Exercise the workflow's actual shell, with no network or model calls.
+    stub = f"#!{sys.executable}\n" + '''import json, os, sys
+from pathlib import Path
+name = Path(sys.argv[0]).name
+with open(os.environ["COMMAND_LOG"], "a") as log:
+    log.write(json.dumps([name, *sys.argv[1:]]) + "\\n")
+if name == "git":
+    if sys.argv[1:] == ["rev-list", "--max-parents=0", "HEAD"]:
+        print("a" * 40)
+    else:
+        sys.exit(99)
+else:
+    sys.exit(int(os.environ["GATE_EXIT"]))
+'''
+    for name in ("git", "uv"):
+        path = bin_dir / name
+        path.write_text(stub)
+        path.chmod(0o755)
+    script = tmp_path / "check.sh"
+    script.write_text(step["run"])
+    result = subprocess.run(["bash", "-eo", "pipefail", str(script)], text=True, capture_output=True,
+                            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                                 "RESULTS_BASE": "pr-base" if event == "pull_request" else "",
+                                 "FORCED": "false", "COMMAND_LOG": str(log),
+                                 "GATE_EXIT": str(gate_exit)})
+    assert result.returncode == gate_exit, result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    [gate_call] = [call for call in calls if call[0] == "uv"]
+    assert gate_call[gate_call.index("--") + 1:] == [
+        "make", "evals-results-check", f"BASE={'pr-base' if event == 'pull_request' else 'a' * 40}",
+        f"HISTORY_SINCE={'' if event == 'pull_request' else 'a' * 40}",
+    ]
+    git_calls = [call for call in calls if call[0] == "git"]
+    assert git_calls == ([] if event == "pull_request" else [["git", "rev-list", "--max-parents=0", "HEAD"]])
+
+
+@pytest.mark.parametrize("history", ["", "b" * 40])
+def test_results_make_target_forwards_only_a_supplied_history_since(history):
+    result = subprocess.run(["make", "-n", "evals-results-check", "BASE=root-commit", f"HISTORY_SINCE={history}"],
+                            cwd=ROOT, capture_output=True, text=True, check=True)
+    command = shlex.split(result.stdout.strip())
+    expected = ["results-check", "--base", "root-commit"]
+    if history:
+        expected.extend(["--history-since", history])
+    assert command[command.index("results-check"):] == expected
 
 
 def test_secret_scan_has_no_exceptions():
@@ -947,7 +1092,7 @@ def runner_label_problems(file: str, workflow: dict) -> list[str]:
         if allowed and runs_on == own_desk(key):
             continue
         if not allowed and re.search(r"desk-ci-", runs_on_text(runs_on), flags=re.IGNORECASE):
-            problems.append(f"{key}: only ci.yml's checks and suite shards may ask for desk labels")
+            problems.append(f"{key}: only ci.yml's checks, suite shards and path classifier may ask for desk labels")
         else:
             problems.append(f"{key}: runs-on is neither a GitHub-hosted image nor this job's own desk expression")
     return problems
@@ -960,7 +1105,7 @@ def test_no_job_can_take_another_jobs_desk_runner():
 
 
 NOT_ALLOWED = "runs-on is neither a GitHub-hosted image nor this job's own desk expression"
-ONLY_CI_JOBS = "only ci.yml's checks and suite shards may ask for desk labels"
+ONLY_CI_JOBS = "only ci.yml's checks, suite shards and path classifier may ask for desk labels"
 
 
 def own_desk(key: str) -> str:
