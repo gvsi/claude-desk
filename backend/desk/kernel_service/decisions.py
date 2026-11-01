@@ -21,9 +21,9 @@ API error and a timeout each return `review=None` with that `status`, logged by 
 with what came back. There is one try and no fallback model.
 
 The soft-promise check reads one reply from Claude that the prose scan passed: its prose and the
-texts of the cards rendered for it, never the visitor's words. It answers whether the prose
-commits the business to more than the cards hold and whether it says or suggests the writer is a
-human. Every failure is the same answer as for the reviewer, `None`, which the reply check counts
+cards rendered for it, each as its kind and text, never the visitor's words. It answers whether
+the prose commits the business to more than the cards hold and whether it says or suggests the
+writer is a human. Every failure is the same answer as for the reviewer, `None`, which the reply check counts
 as a violation: a reply the check couldn't read isn't shown.
 
 The reviewer, soft-promise check and owner-only web search run on one SDK client (`make_client`),
@@ -256,7 +256,8 @@ class Reviewed(BaseModel):
 
 class SoftPromiseInput(BaseModel):
     """What the soft-promise check is shown, sent as one JSON object: the reply's language, Claude's
-    prose as the visitor would see it, each card's text and the session's fixed next steps.
+    prose as the visitor would see it, each card's kind and text ("Quote card: ...",
+    `render.check_text`) and the session's fixed next steps.
     Never anything the visitor wrote."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")

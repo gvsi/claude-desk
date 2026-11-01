@@ -1154,6 +1154,7 @@ describe('OwnerLayout', () => {
     await expectTodayHoldsForItsInbox();
 
     // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
+    const newInbox = holdReads(ROUTES.ownerInbox.path);
     const newDesks = holdReads(ROUTES.desks.path);
     await screen.getByRole('button', { name: 'Start over' }).click();
     await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
@@ -1161,14 +1162,16 @@ describe('OwnerLayout', () => {
     const fresh = `/app/${mockStore.world.ids.deskId}/today`;
     expect(router.state.location.pathname).toBe(fresh);
     await vi.waitFor(() => expect(newDesks.held()).toBeGreaterThan(0));
-    // The old copy's Today is gone (still on its skeleton, its inbox still out), and the new copy's loading page is up.
-    expect(pageNow()).toBe('loading');
+    // Navigation and the held read can precede React's commit, leaving the old Today's skeleton
+    // mounted briefly. Wait for the new copy's loading page before either held answer is released.
+    await vi.waitFor(() => expect(pageNow()).toBe('loading'));
     const sawItOpening = watchFor('Opening your Demo inbox');
 
     // The old copy's inbox answers late, before the new copy's Desks do.
     const late = nextAnswerTo('ownerInbox');
     oldInbox.release();
     await late.settled;
+    newInbox.release();
     newDesks.release();
 
     // The new copy's Today reads its own inbox ahead with the rest of it, so it opens with its one

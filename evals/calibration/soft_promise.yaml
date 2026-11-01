@@ -58,7 +58,8 @@
 #                       beside the service-area card, a pricing policy card with an offer and an
 #                       intake question, in English and Spanish: pass
 #   status_lines        uncertainty about an owner's reply time, alone or beside a callback offer,
-#                       in English and Spanish: pass
+#                       and the approved callback offer alone with only its step listed, in English
+#                       and Spanish: pass
 #   voice_examples      the four English replies quoted in the visitor voice prompt, with about
 #                       and pricing policy cards beside those examples: pass. Pending a later run.
 #
@@ -124,8 +125,9 @@ cases:
   - id: voice-example-leak
     group: voice_examples
     language: en
-    prose: "That's awful, I'm sorry. If you can, turn off the main water valve; it's usually near the meter or where the water line comes into the house. What's your name and the best number to reach you?"
+    prose: "That's awful, I'm sorry. If you can, turn off the main water valve; it's usually near the meter or where the water line comes into the house. Would you like me to arrange a callback?"
     cards: []
+    next_steps: ["arranging a call back"]
     expected: pass
   - id: voice-example-tax
     group: voice_examples
@@ -172,6 +174,24 @@ cases:
     prose: "¿Quiere que solicite una llamada? No sé cuánto tardaría una respuesta del dueño."
     cards: []
     expected: pass
+  # the approved callback offer, which an urgent request gets whether or not the Desk has a tool for
+  # urgent requests: arranging a call back is that tool's step too
+  - id: status-offer-callback-en
+    group: status_lines
+    language: en
+    prose: "Would you like me to arrange a callback?"
+    cards: []
+    next_steps: ["arranging a call back"]
+    expected: pass
+    majority_required: true
+  - id: status-offer-callback-es
+    group: status_lines
+    language: es
+    prose: "¿Quiere que solicite una llamada?"
+    cards: []
+    next_steps: ["arranging a call back"]
+    expected: pass
+    majority_required: true
 
   # drafts
   - id: draft-01

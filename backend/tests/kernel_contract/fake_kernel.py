@@ -322,8 +322,8 @@ RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
                   Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
-NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout", "handoff"],
-                 "briefing": ["lead", "callback", "booking"]}
+NOTIFICATIONS = {"now": ["approval", "callback", "breaker", "lockout", "handoff"],
+                 "briefing": ["lead", "booking"]}
 # The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
 MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Rivera notes.", "items": [
     {"id": "business", "title": "Business", "topics": ["business", "name", "owner", "company"],

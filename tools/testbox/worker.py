@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -14,6 +16,8 @@ from desk_tools.testbox import RESERVED, Timings, remote_environment, selected_f
 
 
 ACTIVE = None
+# How web/ is installed. It is part of each lane's install record, so changing it reinstalls every lane.
+NPM_CI = ["npm", "ci", "--prefer-offline", "--no-audit", "--no-fund"]
 
 
 def stop(signum, _frame):
@@ -61,6 +65,54 @@ def digest(repo, paths):
             h.update(path.relative_to(repo).as_posix().encode())
             h.update(path.read_bytes())
     return h.hexdigest()
+
+
+def exit_status(exc):
+    return exc.returncode if exc.returncode >= 0 else 128 - exc.returncode
+
+
+def node_identity(env):
+    """The Node npm runs under. Bootstrap replaces the binary to change the pinned version, which changes its size and
+    modification time; reading them costs no process start, unlike `node --version`."""
+    node = shutil.which("node", path=env.get("PATH"))
+    if node is None:
+        return "no node"
+    info = os.stat(node)
+    return f"{os.path.realpath(node)} {info.st_size} {info.st_mtime_ns}"
+
+
+def web_install_record(repo, recipe):
+    """What an install of `recipe` left: npm writes node_modules/.package-lock.json as an install's last step, so its
+    hash, taken right after the worker's own npm ci, changes if a cancelled npm ci or a lane command's npm install
+    touches the tree later. None while there is no finished install."""
+    try:
+        return recipe + " " + hashlib.sha256((repo / "web/node_modules/.package-lock.json").read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def install_web_dependencies(base, repo, env):
+    """Run npm ci in web/ unless this lane's install record matches its package files, the install command, the Node
+    binary and the installed tree, so narrow web commands work without `make web-test`'s own install. Returns an exit
+    status that stops the call, or None."""
+    if not (repo / "web/package-lock.json").is_file():
+        return None
+    recipe = " ".join([digest(repo, ["web/package.json", "web/package-lock.json"]), shlex.join(NPM_CI), node_identity(env)])
+    stamp = base / "web-deps-hash"
+    current = web_install_record(repo, recipe)
+    if current is not None and stamp.exists() and stamp.read_text() == current:
+        return None
+    print("testbox: installing web dependencies (npm ci in web/)", file=sys.stderr, flush=True)
+    stamp.unlink(missing_ok=True)  # An install that stops part way must not pass for the recorded one.
+    try:
+        run(NPM_CI, cwd=repo / "web", env=env)
+    except subprocess.CalledProcessError as exc:
+        print(f"testbox: npm ci in web/ failed (exit {exc.returncode}); the command did not run", file=sys.stderr, flush=True)
+        return exit_status(exc)
+    installed = web_install_record(repo, recipe)
+    if installed is not None:
+        stamp.write_text(installed)
+    return None
 
 
 def main():
@@ -119,6 +171,10 @@ def main():
     timing.mark("kernel_setup")
     run(["uv", "sync", "--project", "backend", "--group", "evals"], env=env)
     timing.mark("uv_sync")
+    failed = install_web_dependencies(base, repo, env)
+    timing.mark("web_setup")
+    if failed:
+        return failed
     # Templates are keyed by migration inputs. Global lock also serializes role creation/ALTERs.
     schema = digest(repo, ["backend/alembic", "backend/desk/db"])
     template = "template_" + schema[:24]
@@ -140,7 +196,7 @@ def main():
         timing.mark("command")
         return 0
     except subprocess.CalledProcessError as exc:
-        return exc.returncode if exc.returncode >= 0 else 128 - exc.returncode
+        return exit_status(exc)
 
 
 
