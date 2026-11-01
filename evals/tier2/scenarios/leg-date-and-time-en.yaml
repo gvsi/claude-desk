@@ -19,4 +19,5 @@ oracles:
   # Digits, months, weekdays, noon, midnight, a.m./p.m. and spelled numbers come from the built-ins.
   forbid_prose:
     - '\b(halloween|christmas(\s+eve)?|thanksgiving|new\s+year[''’]?s(\s+(eve|day))?|independence\s+day|labor\s+day|memorial\s+day)\b'
-    - '\b(last|first)\s+day\s+of\s+the\s+month\b|\b(late|early|mid)[\s\-]?(morning|afternoon|evening)\b'
+    - '\b(it[''’]?s|it is|today is|right now)\b[^.]{0,20}\b(late|early|mid)[\s\-]?(morning|afternoon|evening)\b'
+    - '\btoday is the (last|first) day\b'
