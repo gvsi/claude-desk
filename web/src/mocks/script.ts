@@ -463,6 +463,11 @@ export interface TurnContext {
   readonly text: string;
   /** The verified person on record the chat is with, once the visitor confirmed it's them; else null. */
   readonly person: { personId: string; name: string } | null;
+  /**
+   * Whom the Desk's handoff card names (`handoffBlock`): its owner, by their display name, or the
+   * business when its owner gave no name (`MockWorld.handoffNameOf`).
+   */
+  readonly handoffName: string;
   /** Records a decision with its ledger entries. */
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
@@ -549,14 +554,29 @@ const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: '(510) 555-0118'
 /** The callback request the script records, as the visitor typed it. */
 export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;
 
-/** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
-const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+/**
+ * The kernel's handoff card (its `handoff` template), in `language`, naming `name`: whom the Desk
+ * hands the visitor to (`TurnContext.handoffName`), with one stop after a name that ends in one
+ * ("Chen & Co."). For Maria Rivera it is the fixtures' own card.
+ */
+export function handoffBlock(language: Language, name: string): CardBlock {
+  const stop = afterName(name, '.');
+  return language === 'es'
+    ? cardBlock('handoff', { fact_id: null, title: `Déjame consultarlo con ${name}${stop}`, lines: [`${name} te responderá aquí.`] })
+    : cardBlock('handoff', { fact_id: null, title: `Let me check with ${name}${stop}`, lines: [`${name} will reply here.`] });
+}
+
+/** The turn's handoff card: the Desk's own, in the turn's language. */
+const handoff = (ctx: TurnContext): CardBlock => handoffBlock(ctx.language, ctx.handoffName);
+
+/** Claude hands the visitor to the Desk's owner: the kernel's handoff card, as asking for them gets. */
+const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([handoff(ctx)])];
 
 /**
  * A turn in a chat the breaker paused, as the API runs one: no model call and no "writing", only
  * the kernel's handoff, which its check stops as paused.
  */
-export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([blocks.handoff[ctx.language]], { paused: true })];
+export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([handoff(ctx)], { paused: true })];
 
 export const SCRIPT: readonly ScriptRule[] = [
   {
@@ -742,7 +762,7 @@ export function afterVerify(allTools: boolean): readonly Step[] {
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
   (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
   writing,
-  (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
+  (ctx) => ctx.reply([handoff(ctx)], { blocked: true }),
 ];
 
 /**
@@ -827,7 +847,7 @@ export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved
   if (approved !== null) approved = visitorSafe(approved);
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
   if (decision.state === 'refused_at_execution') return [resolved];
-  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([handoff(ctx)])];
   const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {
     return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
