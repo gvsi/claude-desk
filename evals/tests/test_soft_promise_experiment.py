@@ -29,7 +29,28 @@ def test_sonnet_request_and_identity_are_distinct_from_new(deps, tmp_path):
         name: exp.wire_request(request["system"], data, name) for name in ("new", "sonnet")}}
     assert exp.arm_identity(identity, "new") != exp.arm_identity(identity, "sonnet")
     assert outcome.model == "claude-sonnet-5-5"
-    assert exp.sp.decisions.SOFT_PROMISE_MODEL == "claude-haiku-5-5"
+    assert exp.sp.decisions.SOFT_PROMISE_MODEL == "claude-sonnet-5-5"
+    production = FakeClient(model="claude-sonnet-5-5")
+    asyncio.run(exp.sp.AnthropicDecisions(production).soft_promise(data))
+    assert production.requests == [exp.wire_request(request["system"], data, "sonnet")]
+
+
+def test_haiku_arm_request_stays_frozen_after_production_switch(deps, monkeypatch):
+    from evals.calibration import soft_promise_experiment as exp
+    from evals.tests.test_soft_promise_calibration import FakeClient, Factory
+
+    deps.client = Factory(FakeClient(model="claude-haiku-5-5"))
+    # The historical experiment request must not follow production's model or deadline.
+    monkeypatch.setattr(exp.sp.decisions, "SOFT_PROMISE_TIMEOUT_S", 9.0)
+    outcome, _ = asyncio.run(exp.sp.run(exp.sp.Config(
+        samples=1, max_usd=1, candidate="haiku"), deps))
+    request = deps.client.client.requests[0]
+    assert request["model"] == outcome.model == "claude-haiku-5-5"
+    assert request["timeout"] == 2.0
+    assert request["thinking"] == {"type": "disabled"}
+    assert request == exp.wire_request(request["system"], exp.sp.call_input(
+        exp.sp.load_cases(deps.cases)[0]), "new")
+    assert exp.sp.per_call_usd("haiku") == 0.0005
 
 
 def test_per_arm_samples_and_later_diagnostic_selection(deps, tmp_path):

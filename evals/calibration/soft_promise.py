@@ -13,8 +13,9 @@ this tree) and prints the table; a case the run never asked about is not run, an
 (its language, prose and cards) isn't the one the run recorded is stale, its answers never scored.
 `python -m evals.calibration.soft_promise_experiment` runs a frozen old/new experiment
 with one shared allowance and records both input shapes; `not_ai` measures only the AI flag.
-It spends money: each call is one Haiku 5.5 call on the Claude API, estimated at $0.0005
-(`PER_CALL_USD`, over four times the master plan's $0.00011 for one check, so an estimate errs high).
+It spends money: the default is production Sonnet 5.5 on the Claude API, estimated at $0.0026
+(`SONNET_PER_CALL_USD`, 1.5 times the measured $0.0017 mean). Historical Haiku arms keep their
+$0.0005 allowance (`PER_CALL_USD`).
 
 The call. Each is the kernel's own `AnthropicDecisions.soft_promise` (backend/desk/kernel_service/
 decisions.py), the call the reply check makes, over the SDK client: the same model, schema, effort,
@@ -25,7 +26,7 @@ run), or the text of `--prompt-file` without its surrounding whitespace.
 
 Before any call it refuses, saying why:
 1. without `--max-usd` (and `make evals-soft-promise` without MAX_USD);
-2. when its estimate, cases × samples × `PER_CALL_USD`, is over `--max-usd`;
+2. when its estimate, cases × samples × the selected model's allowance, is over `--max-usd`;
 3. when this month's Claude API spend in the shared eval spend file plus the estimate would pass the
    monthly limit less the demo reserve (`evals/budget.toml`), as a tier 2 pass does;
 4. without `ANTHROPIC_API_KEY` in the environment, with one that isn't one key (printable ASCII with
@@ -42,7 +43,7 @@ while the spend so far and the bounds of the calls in flight leave room under `-
 bound: at the cap no call starts, and the run says so and exits 1. Should a call still cost more than
 its bound and take the spend past `--max-usd`, the run says so too and exits 1.
 
-Spend. A call is charged its usage at its model's list prices (`PRICES`, Haiku 5.5's from the master
+Spend. A call is charged its usage at its model's list prices (`PRICES`, from the master
 plan's "Model cost and latency budget"), or its bound when its usage can't be priced: it left none
 (a timeout or an error) or another model answered. The run appends one row to the shared eval spend
 file, with tier 2's columns and `append_spend`: pass_id `calibration-soft-promise-<label>-<time>`,
@@ -129,11 +130,13 @@ PRICES = {model: {kind: float(getattr(price, kind))
                   for kind in ("input", "cache_read", "cache_write", "output")}
           for model, price in MODEL_PRICES["anthropic"].items()}
 SONNET_MODEL = "claude-sonnet-5-5"
+HAIKU_MODEL = "claude-haiku-5-5"
+HAIKU_TIMEOUT_S = 2.0  # frozen historical experiment arms, independent of production
 Candidate = Literal["haiku", "sonnet"]
 
 
 def candidate_model(candidate: Candidate) -> str:
-    return SONNET_MODEL if candidate == "sonnet" else decisions.SOFT_PROMISE_MODEL
+    return SONNET_MODEL if candidate == "sonnet" else HAIKU_MODEL
 
 
 SONNET_PER_CALL_USD = 0.0026     # 1.5x the measured mean of the first Sonnet run (220 checks, $0.00171 each)
@@ -143,7 +146,7 @@ def per_call_usd(candidate: Candidate) -> float:
     if candidate == "sonnet":
         return SONNET_PER_CALL_USD
     # Keep the existing Haiku token allowance, scaled by the candidate's list prices.
-    base = price_of(decisions.SOFT_PROMISE_MODEL, "anthropic")
+    base = price_of(HAIKU_MODEL, "anthropic")
     price = price_of(candidate_model(candidate), "anthropic")
     return PER_CALL_USD * float(max(price.input / base.input, price.output / base.output))
 VERDICTS = ("pass", "flag", "flag_ai", "flag_both", "error")
@@ -338,14 +341,14 @@ def priced(usage: CallUsage | None) -> float | None:
         return None
 
 
-class SonnetSoftPromise(AnthropicDecisions):
-    """Experiment-only candidate; production's soft check continues to use Haiku."""
+class HistoricalHaikuSoftPromise(AnthropicDecisions):
+    """Keep the measured Haiku arms reproducible after production moves to Sonnet."""
 
     async def soft_promise(self, data: BaseModel) -> tuple[SoftPromiseVerdict | None, CallUsage]:
         return await self._ask(
-            SoftPromiseVerdict, data, model=SONNET_MODEL, max_tokens=decisions.SOFT_PROMISE_MAX_TOKENS,
+            SoftPromiseVerdict, data, model=HAIKU_MODEL, max_tokens=decisions.SOFT_PROMISE_MAX_TOKENS,
             system=decisions.SOFT_PROMISE_SYSTEM, schema=decisions.SOFT_PROMISE_SCHEMA,
-            thinking={"type": "adaptive"}, timeout_s=6.0, failed="soft_promise_failed")
+            thinking={"type": "disabled"}, timeout_s=HAIKU_TIMEOUT_S, failed="soft_promise_failed")
 
 
 class OldSoftPromiseInput(BaseModel):
@@ -374,7 +377,7 @@ def input_sha256(data: SoftPromiseInput | OldSoftPromiseInput) -> str:
     return hashlib.sha256(request_message(data).encode()).hexdigest()
 
 
-def call_bound(system: str, data: SoftPromiseInput | OldSoftPromiseInput, candidate: Candidate = "haiku") -> float:
+def call_bound(system: str, data: SoftPromiseInput | OldSoftPromiseInput, candidate: Candidate = "sonnet") -> float:
     """An upper bound on one call's cost, in dollars: at most one input token for every
     `CHARS_PER_TOKEN` characters of the system prompt and of the request's one message (`data` as
     the kernel sends it), plus `REQUEST_TOKENS`, all at the higher of the input and cache-write
@@ -520,7 +523,7 @@ class Config(BaseModel):
     label: str | None = None
     concurrency: int = Field(4, ge=1)
     input_shape: Literal["old", "new"] = "new"
-    candidate: Candidate = "haiku"
+    candidate: Candidate = "sonnet"
 
 
 @dataclass
@@ -604,7 +607,7 @@ async def run(config: Config, deps: Deps, *, cases: tuple[Case, ...] | None = No
                                    code_blocked=code_blocked(case), majority_required=case.majority_required,
                                    requested=config.samples) for case in cases}
     wire_client = _WithSystem(deps.client(key), prompt.text, request_hashes)
-    checker = (SonnetSoftPromise if config.candidate == "sonnet" else AnthropicDecisions)(wire_client)
+    checker = (AnthropicDecisions if config.candidate == "sonnet" else HistoricalHaikuSoftPromise)(wire_client)
     meter = _Meter(config.max_usd)
     bounds = {case.id: call_bound(prompt.text, inputs[case.id], config.candidate) for case in cases}
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next

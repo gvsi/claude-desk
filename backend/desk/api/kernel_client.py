@@ -34,6 +34,7 @@ from desk.kernel_api import KERNEL_ROUTES, KernelError, WhoAmI
 
 DEFAULT_TIMEOUT_S = 6.0      # above the reviewer's 4 s
 PROVING_TIMEOUT_S = 60.0     # compiling and proving a policy version
+REPLY_CHECK_TIMEOUT_S = 10.0  # one 6 s soft check, plus rendering, database reads and signing
 PROVING_ROUTES = frozenset({"POST /policy/draft", "POST /tools/confirm", "POST /policy/{version}/probe"})
 # Routes whose answer is bytes, not JSON: fetched only with stream(), since a document link is single use.
 STREAM_ROUTES = frozenset({"GET /document_links/{token}"})
@@ -219,6 +220,8 @@ class KernelHttp:
                                           timeout=self._timeout(route))
 
     def _timeout(self, route: str) -> float:
+        if route == "POST /check_reply":
+            return REPLY_CHECK_TIMEOUT_S
         return PROVING_TIMEOUT_S if route in PROVING_ROUTES else self._timeout_s
 
     async def _send(self, route: str, request: httpx.Request, *, stream: bool = False) -> httpx.Response:

@@ -74,8 +74,8 @@ NO_API_KEY = "no-key"
 # A key is one run of printable ASCII, so a malformed one never reaches a header, an error or a log.
 _KEY = re.compile(r"[!-~]+")
 
-SOFT_PROMISE_MODEL = "claude-haiku-5-5"
-SOFT_PROMISE_TIMEOUT_S = 2.0
+SOFT_PROMISE_MODEL = "claude-sonnet-5-5"
+SOFT_PROMISE_TIMEOUT_S = 6.0
 SOFT_PROMISE_MAX_TOKENS = 1024
 # The owner's decision of 2026-10-30: the check flags promises the cards don't back and prose that
 # denies being an AI, not prose restating what a card beside it shows, which the card carries.
@@ -87,8 +87,8 @@ SOFT_PROMISE_MAX_TOKENS = 1024
 # a card, such as the handoff card, says so. Saying so with no such card, a claim that such a step
 # already happened, or anything an offer adds, is still a promise. Its question on denying being an
 # AI is unchanged. Sympathy and general trade advice committing the business to nothing are
-# exempt too. The revised text awaits calibration against the baseline and a steps-only
-# diagnostic before shipping.
+# exempt too. The owner's decision of 2026-10-31 selects Sonnet at low effort with adaptive
+# thinking after calibration on 220 cases.
 SOFT_PROMISE_SYSTEM = (
     "You check one reply from a business's AI assistant before a customer sees it. The cards were rendered from "
     "the business's own records and are correct. Set promises_beyond_cards to true if the prose commits the "
@@ -325,7 +325,7 @@ class AnthropicDecisions:
         return await self._ask(
             SoftPromiseVerdict, data, model=SOFT_PROMISE_MODEL, max_tokens=SOFT_PROMISE_MAX_TOKENS,
             system=SOFT_PROMISE_SYSTEM, schema=SOFT_PROMISE_SCHEMA,
-            thinking={"type": "disabled"},                              # Haiku 5.5 takes it at effort low
+            thinking={"type": "adaptive"},
             timeout_s=SOFT_PROMISE_TIMEOUT_S, failed="soft_promise_failed")
 
     async def _ask(self, answer: type[Answer], data: BaseModel, *, model: str, max_tokens: int, system: str,

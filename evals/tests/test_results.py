@@ -1362,7 +1362,7 @@ async def test_results_record_the_provider_and_model_ids(repo):
     assert bedrock.model_ids == {
         "conversation": BEDROCK_MODEL_IDS["claude-opus-5-5"], "triage": BEDROCK_MODEL_IDS["claude-haiku-5-5"],
         "translation": BEDROCK_MODEL_IDS["claude-haiku-5-5"], "reviewer": "claude-sonnet-5-5",
-        "soft_promise": "claude-haiku-5-5", "attacker": BEDROCK_MODEL_IDS["claude-opus-5-5"],
+        "soft_promise": "claude-sonnet-5-5", "attacker": BEDROCK_MODEL_IDS["claude-opus-5-5"],
         "visitor": BEDROCK_MODEL_IDS["claude-sonnet-5-5"]}
     with pytest.raises(ResultsRefused, match="needs a pass on the Claude API"):
         write_results(bedrock, EMPTY, root=repo)
@@ -1394,7 +1394,7 @@ async def test_results_export_needs_a_claude_api_pass_on_the_production_models(r
     full = await run_pass(config(results=True), deps(repo))
     assert full.model_ids == {"conversation": "claude-opus-5-5", "triage": "claude-haiku-5-5",
                               "translation": "claude-haiku-5-5", "reviewer": "claude-sonnet-5-5",
-                              "soft_promise": "claude-haiku-5-5", "attacker": "claude-opus-5-5",
+                              "soft_promise": "claude-sonnet-5-5", "attacker": "claude-opus-5-5",
                               "visitor": "claude-sonnet-5-5"}
     assert PRODUCTION_MODELS == {"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}
     # What the pass recorded is checked, not only what it was asked for.

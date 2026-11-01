@@ -1,4 +1,4 @@
-"""The soft-promise check: one structured call to Haiku 5.5 on prose the lexicons passed.
+"""The soft-promise check: one structured call to Sonnet 5.5 on prose the lexicons passed.
 
 The check sees Claude's draft prose and the texts of the cards rendered for it, never what the
 visitor wrote. It flags prose that commits the business to more than the cards hold and prose
@@ -32,7 +32,7 @@ VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
     "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
     "native.quote", "native.request_callback", "native.start_verification")]
 
-HAIKU = "claude-haiku-5-5"
+SONNET = "claude-sonnet-5-5"
 PASSES = '{"promises_beyond_cards": false, "denies_being_ai": false}'
 # the visitor's quote (drain clearing at list price), as its card reads
 QUOTE_CARD = "$180.00\nDrain clearing\nGood until Monday, November 2, 9:04 am"
@@ -40,18 +40,18 @@ QUOTE_CARD = "$180.00\nDrain clearing\nGood until Monday, November 2, 9:04 am"
 
 async def test_soft_promise_request_shape():
     data = SoftPromiseInput(language="en", prose="Here is your quote.", cards=["$180.00\nDrain clearing"], next_steps=VISITOR_NEXT_STEPS)
-    client = FakeAnthropicClient(model_message(PASSES, model=HAIKU, input_tokens=900, cached_tokens=0,
+    client = FakeAnthropicClient(model_message(PASSES, model=SONNET, input_tokens=900, cached_tokens=0,
                                                output_tokens=12))
     verdict, usage = await AnthropicDecisions(client).soft_promise(data)
 
     assert verdict == SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
-    assert (usage.model, usage.status, usage.input_tokens, usage.output_tokens) == (HAIKU, "ok", 900, 12)
+    assert (usage.model, usage.status, usage.input_tokens, usage.output_tokens) == (SONNET, "ok", 900, 12)
     [request] = client.requests
-    assert request["timeout"] == 2.0                                           # one try, inside the 2 s budget
-    assert request["model"] == HAIKU
+    assert request["timeout"] == 6.0                                           # one try, inside the 6 s budget
+    assert request["model"] == SONNET
     assert request["max_tokens"] == 1024
     assert request["system"] == SOFT_PROMISE_SYSTEM
-    assert request["thinking"] == {"type": "disabled"}                         # Haiku 5.5 takes it at effort low
+    assert request["thinking"] == {"type": "adaptive"}                         # adaptive thinking at low effort
     assert request["output_config"] == {"effort": "low",
                                         "format": {"type": "json_schema", "schema": SOFT_PROMISE_SCHEMA}}
     assert not {"tools", "tool_choice", "fallbacks", "betas", "stream"} & request.keys()
@@ -73,10 +73,10 @@ def test_the_check_asks_only_about_promises_the_cards_dont_hold():
     card beside it shows isn't asked about, since the card carries it, and since that evening
     neither is Claude offering, in the future or as a question, its own next step, nor saying the
     owner will follow up here when a card says so; saying so without such a card, a claim the step
-    already happened, or anything an offer adds, still is. The revision awaits fresh measurement
-    against the unchanged baseline and the steps-only diagnostic."""
+    already happened, or anything an offer adds, still is. The owner selected Sonnet on
+    2026-10-31 after the 220-case calibration."""
     # Results: evals/out/soft-promise/next-steps-experiment.json
-    # Revised new and diagnostic steps_only await paid measurement.
+    # The measured sonnet request is now the production request.
     assert SOFT_PROMISE_SYSTEM == (
         "You check one reply from a business's AI assistant before a customer sees it. The cards were rendered "
         "from the business's own records and are correct. Set promises_beyond_cards to true if the prose "
@@ -100,7 +100,7 @@ async def test_prose_restating_its_own_card_is_shown_with_it_by_the_owners_decis
     is shown with the card."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
-    model = FakeAnthropicClient(model_message(PASSES, model=HAIKU))
+    model = FakeAnthropicClient(model_message(PASSES, model=SONNET))
     reviewer.soft_backend = AnthropicDecisions(model)                     # the real call path, over a fake client
     prose = "That is the drain clearing at its full list price, with nothing taken off."
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
@@ -123,7 +123,7 @@ async def test_prose_pointing_at_its_card_passes(app, client, reviewer, prose, l
     prose is shown with the card."""
     copy, visitor = await visitor_of(app, client)
     booking = await own_booking(client, reviewer, visitor)
-    model = FakeAnthropicClient(model_message(PASSES, model=HAIKU))
+    model = FakeAnthropicClient(model_message(PASSES, model=SONNET))
     reviewer.soft_backend = AnthropicDecisions(model)
     verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
 
@@ -189,14 +189,14 @@ async def test_both_flags_block_with_both_rules(app, client, reviewer):
 MARKER = "sink-7731"   # in every failing reply: a failure is logged by kind, never with what came back
 REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
 FAILURES = {   # each reply, and the status the ledger records for it
-    "timeout": ([model_message(PASSES, model=HAIKU)], "timeout"),       # answers too late
+    "timeout": ([model_message(PASSES, model=SONNET)], "timeout"),       # answers too late
     "api_error": ([anthropic.APIStatusError(f"overloaded {MARKER}", body=None,
                                             response=httpx.Response(529, request=REQUEST))], "error"),
-    "refusal": ([model_message(PASSES, model=HAIKU, stop_reason="refusal")], "refusal"),   # never parsed
-    "unparsable": ([model_message(f"maybe ({MARKER})", model=HAIKU),
+    "refusal": ([model_message(PASSES, model=SONNET, stop_reason="refusal")], "refusal"),   # never parsed
+    "unparsable": ([model_message(f"maybe ({MARKER})", model=SONNET),
                     model_message('{"promises_beyond_cards": "false", "denies_being_ai": false}',
-                                  model=HAIKU),                         # a string where a boolean belongs
-                    model_message('{"promises_beyond_cards": false}', model=HAIKU)], "invalid"),   # a flag missing
+                                  model=SONNET),                         # a string where a boolean belongs
+                    model_message('{"promises_beyond_cards": false}', model=SONNET)], "invalid"),   # a flag missing
 }
 
 
@@ -220,7 +220,7 @@ async def test_soft_promise_failures_block(app, client, reviewer, case, monkeypa
     entries = await reply_entries(app, copy)
     assert [entry.event.summary["rule_ids"] for entry in entries] == [["soft.unavailable"]] * len(replies)
     assert {(entry.event.summary["soft_promise"]["model"], entry.event.summary["soft_promise"]["status"])
-            for entry in entries} == {(HAIKU, status)}
+            for entry in entries} == {(SONNET, status)}
     failures = [record.getMessage() for record in caplog.records if record.name == "desk.kernel_service.decisions"]
     assert [message.split()[0] for message in failures] == ["soft_promise_failed"] * len(replies)
     assert all(f"status={status}" in message for message in failures) and MARKER not in caplog.text

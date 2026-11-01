@@ -29,7 +29,7 @@ from desk.kernel_service.render.cards import DeskInfo
 from evals.calibration.soft_promise import (
     CASES_FILE,
     DECISIONS_PATH,
-    PER_CALL_USD,
+    SONNET_PER_CALL_USD as PER_CALL_USD,
     PRICES,
     CHARS_PER_TOKEN,
     REQUEST_TOKENS,
@@ -53,7 +53,7 @@ from evals.tier2.passes import SPEND_COLUMNS, append_spend, measured_per_run, re
 
 NOW = datetime(2026, 10, 30, 21, 0, tzinfo=UTC)
 KEY = "sk-ant-made-up-7731"
-HAIKU = decisions.SOFT_PROMISE_MODEL
+SONNET = decisions.SOFT_PROMISE_MODEL
 REPLIES = {   # what the fake model answers for each verdict
     "pass": '{"promises_beyond_cards": false, "denies_being_ai": false}',
     "flag": '{"promises_beyond_cards": true, "denies_being_ai": false}',
@@ -70,7 +70,7 @@ class FakeClient:
     when it is None."""
 
     def __init__(self, answer: Any = lambda prose: "pass", *, usage: tuple[int, int] | None = (900, 12),
-                 model: str = HAIKU):
+                 model: str | None = None):
         self.answer, self.usage, self.model = answer, usage, model
         self.requests: list[dict[str, Any]] = []
         self.messages = self
@@ -83,7 +83,7 @@ class FakeClient:
         usage = None if self.usage is None else SimpleNamespace(
             input_tokens=self.usage[0], output_tokens=self.usage[1], cache_read_input_tokens=0,
             cache_creation_input_tokens=0)
-        return SimpleNamespace(stop_reason="end_turn", model=self.model, usage=usage,
+        return SimpleNamespace(stop_reason="end_turn", model=self.model or request["model"], usage=usage,
                                content=[SimpleNamespace(type="text", text=REPLIES.get(reply, reply))])
 
 
@@ -134,6 +134,17 @@ def results_file(deps: Deps) -> dict[str, Any]:
 
 
 # The case file
+
+def test_default_candidate_is_the_production_sonnet_request(deps):
+    from evals.calibration.soft_promise import Config, run
+
+    config = Config(samples=1, max_usd=1)
+    assert config.candidate == "sonnet"
+    outcome, _ = asyncio.run(run(config, deps))
+    assert outcome.model == decisions.SOFT_PROMISE_MODEL == "claude-sonnet-5-5"
+    assert deps.client.client.requests[0]["thinking"] == {"type": "adaptive"}
+    assert outcome.per_call_usd == 0.0026
+
 
 def test_old_and_new_arms_send_and_rescore_their_own_input_shapes(deps, tmp_path, capsys):
     from evals.calibration.soft_promise import Config, input_sha256, run
@@ -316,14 +327,14 @@ def test_it_refuses_an_estimate_over_max_usd(deps: Deps, capsys: pytest.CaptureF
 
 
 def test_it_refuses_a_run_past_the_months_eval_limit(deps: Deps, capsys: pytest.CaptureFixture[str]):
-    # $599.997 of the $600 the demo reserve leaves this month; last month's spend doesn't count
-    for date, usd in (("2026-10-02", 599.997), ("2026-09-30", 500.0)):
+    # $599.988 of the $600 the demo reserve leaves this month; last month's spend doesn't count
+    for date, usd in (("2026-10-02", 599.988), ("2026-09-30", 500.0)):
         append_spend(deps.spend_file, {"pass_id": f"earlier-{date}", "date": date, "provider": "anthropic",
                                        "runs": 1000, "desk_usd": usd, "simulator_usd": 0, "claude_api_usd": usd,
                                        "total_usd": usd, "estimated_usd": 0})
-    assert main(["--samples", "5", "--max-usd", "1"], deps) == 1       # ten calls, $0.0050
+    assert main(["--samples", "5", "--max-usd", "1"], deps) == 1       # ten calls, $0.0260
     assert "remains" in capsys.readouterr().err and deps.client.keys == []
-    assert main(["--samples", "2", "--max-usd", "1"], deps) == 0       # four calls, $0.0020, fit
+    assert main(["--samples", "2", "--max-usd", "1"], deps) == 0       # four calls, $0.0104, fit
 
 
 def test_it_needs_one_key_from_the_environment_and_never_prints_it(deps: Deps, monkeypatch: pytest.MonkeyPatch,
@@ -354,14 +365,14 @@ def test_it_needs_one_key_from_the_environment_and_never_prints_it(deps: Deps, m
 def test_it_stops_starting_calls_at_the_cap(deps: Deps, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     deps.cases = write_cases(tmp_path / "three.yaml", *(
         case(f"offer-{name.lower()}", f"Want me to take a message, {name}?") for name in ("Ana", "Ben", "Cy")))
-    deps.client = Factory(FakeClient(usage=(10_000, 0)))               # $0.0010 a call, twice its estimate
-    # six calls estimated at $0.0030 fit the cap; after three, $0.0030 is spent and a fourth can't start
-    assert main(["--samples", "2", "--max-usd", "0.003", "--concurrency", "1"], deps) == 1
+    deps.client = Factory(FakeClient(usage=(10_000, 0)))               # $0.0200 a call, above its estimate
+    # six calls estimated at $0.0156 fit; three cost $0.0600 and a fourth cannot start
+    assert main(["--samples", "2", "--max-usd", "0.06", "--concurrency", "1"], deps) == 1
     assert len(deps.client.client.requests) == 3
     assert [json.loads(r["messages"][0]["content"])["prose"] for r in deps.client.client.requests] == [
         "Want me to take a message, Ana?", "Want me to take a message, Ben?", "Want me to take a message, Cy?"]
     data = results_file(deps)
-    assert data["stopped_by_cap"] and data["calls"] == 3 and data["spend_usd"] == pytest.approx(0.003)
+    assert data["stopped_by_cap"] and data["calls"] == 3 and data["spend_usd"] == pytest.approx(0.06)
     # each case met its expectation in the one sample it got of the two asked for: incomplete, never all
     assert [(c["requested"], c["samples"], c["verdicts"]["pass"], c["outcome"]) for c in data["cases"]] == [
         (2, 1, 1, "incomplete")] * 3
@@ -375,14 +386,14 @@ def test_it_stops_starting_calls_at_the_cap(deps: Deps, tmp_path: Path, capsys: 
 def test_a_call_that_costs_more_than_the_cap_fails_the_run(deps: Deps, tmp_path: Path,
                                                            capsys: pytest.CaptureFixture[str]):
     deps.cases = write_cases(tmp_path / "one.yaml", case("offer-one", "Want me to take a message?"))
-    deps.client = Factory(FakeClient(usage=(100_000, 0)))               # $0.0100, past any bound
+    deps.client = Factory(FakeClient(usage=(100_000, 0)))               # $0.2000, past any bound
     # its bound fits the cap, so the call starts; its usage then takes the spend past the cap
-    assert main(["--samples", "1", "--max-usd", "0.002"], deps) == 1
+    assert main(["--samples", "1", "--max-usd", "0.04"], deps) == 1
     data = results_file(deps)
     assert (data["calls"], data["stopped_by_cap"], data["over_cap"]) == (1, False, True)
-    assert data["spend_usd"] == pytest.approx(0.01)
-    assert "over the cap: spent $0.0100, past --max-usd $0.0020" in capsys.readouterr().out
-    assert float(spend_row(deps)["claude_api_usd"]) == pytest.approx(0.01)
+    assert data["spend_usd"] == pytest.approx(0.2)
+    assert "over the cap: spent $0.2000, past --max-usd $0.0400" in capsys.readouterr().out
+    assert float(spend_row(deps)["claude_api_usd"]) == pytest.approx(0.2)
 
 
 def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_for_its_bound():
@@ -392,7 +403,7 @@ def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_f
     meter.end(0.001, None)                               # no usage to price: charged its whole bound
     assert meter.spent == pytest.approx(0.001) and not meter.start(0.0001)
     # one priced at $0.0002 frees the rest of its bound for the next call, and no more
-    meter.end(0.001, CallUsage(model=HAIKU, status="ok", input_tokens=2_000, latency_ms=1))
+    meter.end(0.001, CallUsage(model=SONNET, status="ok", input_tokens=100, latency_ms=1))
     assert meter.spent == pytest.approx(0.0012) and not meter.start(0.00081) and meter.start(0.0008)
     assert (meter.calls, meter.estimated, meter.over) == (4, 1, False)
     assert meter.estimated_usd == pytest.approx(0.001)  # only the bound charged for want of usage
@@ -401,7 +412,7 @@ def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_f
 def test_a_calls_bound_counts_its_prompt_its_request_and_the_longest_answer():
     data = SoftPromiseInput(language="es", prose="Elija el horario y se lo reservo.", cards=[OPEN_TIMES])
     message = json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
-    rates = PRICES[HAIKU]
+    rates = PRICES[SONNET]
     tokens = -(-(len("Check one reply.") + len(message)) // CHARS_PER_TOKEN) + REQUEST_TOKENS
     assert call_bound("Check one reply.", data) == pytest.approx(
         (tokens * rates["cache_write"] + decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"]) / 1_000_000)
@@ -537,7 +548,7 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
     assert list(row) == list(SPEND_COLUMNS)
     assert re.fullmatch(r"calibration-soft-promise-trial-20261030-210000-estimated", row["pass_id"])
     assert (row["date"], row["provider"], row["runs"]) == ("2026-10-30", "anthropic", "4")
-    rates = PRICES[HAIKU]
+    rates = PRICES[SONNET]
     priced = 3 * (900 * rates["input"] + 12 * rates["output"]) / 1_000_000
     [promise] = [c for c in load_cases(deps.cases) if c.id == "promise-sort"]
     total = pytest.approx(priced + call_bound(decisions.SOFT_PROMISE_SYSTEM, call_input(promise)),
@@ -567,7 +578,7 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
     assert (data["label"], data["samples"], data["calls"], data["estimated_calls"]) == ("trial", 2, 4, 1)
     assert data["spend_usd"] == total and not data["stopped_by_cap"] and not data["over_cap"]
     assert (data["prompt"]["source"], data["prompt"]["text"]) == ("this tree", decisions.SOFT_PROMISE_SYSTEM)
-    assert data["model"] == HAIKU and data["per_call_usd"] == PER_CALL_USD
+    assert data["model"] == SONNET and data["per_call_usd"] == PER_CALL_USD
     assert [(c["id"], c["expected"], c["code_blocked"], c["verdicts"], c["errors"], c["outcome"])
             for c in data["cases"]] == [
         ("offer-book", "pass", False, {"pass": 2, "flag": 0, "flag_ai": 0, "flag_both": 0, "error": 0}, {}, "all"),
@@ -590,11 +601,11 @@ def test_a_run_appends_to_a_spend_file_from_before_the_estimated_column(deps: De
     """A spend file whose header predates `estimated_usd` gains the column, and the run's row lines up
     with it; the earlier row's dollars still count against the month."""
     deps.spend_file.write_text("pass_id,date,provider,runs,desk_usd,simulator_usd,claude_api_usd,total_usd\n"
-                               "earlier,2026-10-02,anthropic,1000,599.997,0,599.997,599.997\n")
-    assert main(["--samples", "5", "--max-usd", "1", "--label", "trial"], deps) == 1   # $0.0050 does not fit
-    assert main(["--samples", "1", "--max-usd", "1", "--label", "trial"], deps) == 0   # $0.0010 fits
+                               "earlier,2026-10-02,anthropic,1000,599.988,0,599.988,599.988\n")
+    assert main(["--samples", "5", "--max-usd", "1", "--label", "trial"], deps) == 1   # $0.0260 does not fit
+    assert main(["--samples", "1", "--max-usd", "1", "--label", "trial"], deps) == 0   # $0.0052 fits
     earlier, row = list(csv.DictReader(deps.spend_file.open()))
-    assert list(row) == list(SPEND_COLUMNS) and earlier["total_usd"] == "599.997"
+    assert list(row) == list(SPEND_COLUMNS) and earlier["total_usd"] == "599.988"
     assert row["pass_id"] == "calibration-soft-promise-trial-20261030-210000" and float(row["estimated_usd"]) == 0
 
 

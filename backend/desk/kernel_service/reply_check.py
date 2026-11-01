@@ -31,7 +31,7 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
    no card. The clauses are checked before the prose is scanned, so the scan knows which cards
    pass; their refusals follow the scan's.
-5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
+5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Sonnet 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
    (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks

@@ -75,12 +75,12 @@ def digest(data: object) -> str:
 def wire_request(prompt: str, data: BaseModel, arm: str = "new") -> dict:
     """The exact SDK request, checked against captured fake requests by the offline test."""
     d = sp.decisions
-    return {"model": sp.SONNET_MODEL if arm == "sonnet" else d.SOFT_PROMISE_MODEL,
+    return {"model": sp.SONNET_MODEL if arm == "sonnet" else sp.HAIKU_MODEL,
             "max_tokens": d.SOFT_PROMISE_MAX_TOKENS, "system": prompt,
             "messages": [{"role": "user", "content": sp.request_message(data)}],
             "thinking": {"type": "adaptive" if arm == "sonnet" else "disabled"},
             "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": d.SOFT_PROMISE_SCHEMA}},
-            "timeout": 6.0 if arm == "sonnet" else d.SOFT_PROMISE_TIMEOUT_S}
+            "timeout": 6.0 if arm == "sonnet" else sp.HAIKU_TIMEOUT_S}
 
 
 def acceptance(new: sp.RunResult) -> dict:
