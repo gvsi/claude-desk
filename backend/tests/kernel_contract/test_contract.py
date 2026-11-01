@@ -26,6 +26,7 @@ from desk.contracts import (
     AgentAuth,
     ApprovalResult,
     BusinessSeed,
+    BusinessTool,
     CalendarSlot,
     Claim,
     Clause,
@@ -59,6 +60,7 @@ from desk.contracts import (
 from desk.kernel_api import (
     KERNEL_ROUTES,
     AnswerRequest,
+    BusinessToolsRequest,
     CancelRequest,
     CheckReplyRequest,
     CreateCopyRequest,
@@ -1653,6 +1655,61 @@ async def test_a_call_back_request_closes_the_card_handoff_and_opens_its_own(ker
         "POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor", preview=True))
     assert not (await checked(http, previewing, OTHER_LANGUAGE, final=True)).ok        # shows the handoff card
     assert session_handoffs(ro_read, ro_schema, copy, previewing.state.session_id) == []
+
+
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize("booking", ["native", "typed"])
+async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booking):
+    """A booking in a conversation the handoff card handed to the owner closes the card's handoff, as the owner's mark
+    of done closes one, so the owner's Needs you stops listing the conversation. The closing is ledgered `desk_data`
+    naming the card's handoff with `closed_by: "booking"`. Another session's card handoff stays open. A typed booking
+    books through the native booking's execution, so it closes the card's handoff the same way. Both bookings are
+    allowed outright by an owner card for the slot's window, with no review."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    tool = "native.book"
+    if booking == "typed":
+        tool = "desk.consult"
+        consult = BusinessTool(tool=tool, title="Book a consult", description="Book an introduction.",
+                               config={"block": "typed_booking", "appointment_type": "Consult", "minutes": 20})
+        await owner.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[consult]), path={"id": desk_id})
+        (row,) = ro_read(ro_schema, copy.copy_id, "SELECT definition_sha256 FROM {ro}.tools WHERE desk_id = %s"
+                                                  " AND tool = %s", (desk_id, tool))
+        confirmed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+            desk_id=desk_id, tools=[ToolPin(tool=tool, definition_sha256=row["definition_sha256"])], enable=True))
+        proved_or_skip(confirmed.draft)
+        await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=confirmed.draft.version))
+    (slot, *_) = ro_read(ro_schema, copy.copy_id, "SELECT slot_id, starts_at, minutes FROM {ro}.calendar_slots"
+                                                  " WHERE desk_id = %s ORDER BY starts_at", (desk_id,))
+    local = slot["starts_at"].astimezone(ZoneInfo("America/Los_Angeles"))
+    window = HoursWindow(days=[local.strftime("%a").lower()], start=local.time().replace(tzinfo=None),
+                         end=(local + timedelta(minutes=slot["minutes"])).time().replace(tzinfo=None))
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    cards = [card for card in owner_cards(active) if card.applies_to != tool] + [RuleCard(
+        card_id="booking-auto", applies_to=tool, mode="auto", who="anyone", hours=window,
+        reason="Book visits in this window.")]
+    draft = await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
+                                                                      expected_parent=active["version"]))
+    proved_or_skip(draft)
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+
+    visitor, other = await new_visitor(http, slug), await new_visitor(http, slug)
+    for created in (visitor, other):
+        assert not (await checked(http, created, BLOCKED_PROSE, final=True)).ok
+    ((card_id, kind, status),) = session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)
+    assert (kind, status) == ("card", "open")
+    view = http.session(visitor.session_token)
+    allowed = await decide(view, visitor.state.session_id, 0, "book-1", tool, {"slot_id": slot["slot_id"]})
+    assert allowed.outcome == "allow", allowed.reason_plain
+    assert (await execute(view, allowed, 0)).state == "succeeded"
+    assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == [(card_id, "card", "done")]
+    others = session_handoffs(ro_read, ro_schema, copy, other.state.session_id)
+    assert [(kind, status) for _, kind, status in others] == [("card", "open")]
+    closed = [entry.event.summary for entry in (await ledger_page(owner, desk_id)).entries
+              if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "handoffs"
+              and "kind" not in entry.event.summary]
+    assert closed == [{"part": "handoffs", "refs": [card_id], "closed_by": "booking"}]
 
 
 @pytest.mark.kernel_plan("01b")

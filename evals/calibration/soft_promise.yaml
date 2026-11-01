@@ -132,14 +132,14 @@ cases:
   - id: voice-example-tax
     group: voice_examples
     language: en
-    prose: "Here's what this business does. Is it a personal return or a business one, and is anything new, like freelance income?"
+    prose: "Here's what we do. Is it a personal return or a business one, and is anything new, like freelance income?"
     cards:
       - "We prepare personal and business tax returns."
     expected: pass
   - id: voice-example-hair
     group: voice_examples
     language: en
-    prose: "It depends on your hair; here's how this business prices. How long is your hair right now?"
+    prose: "It depends on your hair; here's how we price. How long is your hair right now?"
     cards:
       - "We price hair services after a consult."
     expected: pass

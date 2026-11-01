@@ -272,25 +272,30 @@ function Body() {
       <div className="cd-rules__all cd-type-meta" data-skeleton-anchor="rules-all">
         <Skeleton shape="line" text="meta" width={90} />
       </div>
-      <div className="cd-always-on">
-        <div className="cd-section-header">
-          <div className="cd-section-header__title">
-            <Skeleton shape="line" text="section" width={90} anchor="rules-always" />
-          </div>
-          <Lines
-            fitted
-            words="On every Desk, whatever is connected. They can't be turned off."
-            className="cd-section-header__caption cd-type-meta"
-            text="meta"
-          />
-        </div>
-        <div className="cd-always-on__list">
-          {ALWAYS_ON.map((words) => (
-            <div key={words} className="cd-always-on__item cd-type-body">
-              <Skeleton shape="block" width={14} height="1lh" className="cd-always-on__lock" />
-              <Lines words={words} className="cd-type-body cd-rules-skeleton__rule" />
+      <div className="cd-rules__always-on">
+        <div className="cd-always-on">
+          <div className="cd-section-header">
+            <div className="cd-section-header__title">
+              <Skeleton shape="line" text="section" width={90} anchor="rules-always" />
             </div>
-          ))}
+            <Lines
+              fitted
+              words="On every Desk, whatever is connected. They can't be turned off."
+              className="cd-section-header__caption cd-type-meta"
+              text="meta"
+            />
+          </div>
+          <div className="cd-always-on__list">
+            {ALWAYS_ON.map((words) => (
+              <div key={words} className="cd-always-on__item cd-type-body">
+                <Skeleton shape="block" width={14} height="1lh" className="cd-always-on__lock" />
+                <Lines words={words} className="cd-type-body cd-rules-skeleton__rule" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="cd-rules__safety cd-type-meta">
+          <Skeleton shape="line" text="meta" width={80} />
         </div>
       </div>
     </>

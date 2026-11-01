@@ -34,6 +34,7 @@ from desk.api.prompts import (
     ProposalCard,
     PlannedOutcome,
     DemoTask,
+    DemoTaskSet,
     QuestionKey,
     SituationWho,
     Triage,
@@ -255,13 +256,21 @@ class AgentRunStarted(BaseModel):
     run_id: str
 
 
+class AgentTasks(BaseModel):
+    """Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
+    the business type setup stored for it (`other` without one). A key, never words: the page holds every word."""
+
+    task_set: DemoTaskSet
+
+
 class AgentTurn(BaseModel):
     """One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
     with the blocks and signed statuses the kernel checked and the Desk showed the agent.
 
     An agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most
     2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is
-    (owner decision, 2026-11-01). The agent's model writes it from a fixed `DemoTask` and the Desk's kernel-checked
+    (owner decision, 2026-11-01). The agent's model writes it from a fixed task line that code picks from signed
+    templates, keyed by the Desk's setup business type, with no owner or visitor text, and the Desk's kernel-checked
     replies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the
     Desk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked
     blocks and statuses."""
@@ -376,8 +385,9 @@ class NeedsYouItem(BaseModel):
     wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
     characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
     AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
-    labelled as Claude's and never quoted as the visitor's), else None. A held request asks the owner for a decision, so
-    it never carries AI-written text: a visitor could steer a summary to sway an approval."""
+    shown as "Claude's note on a stopped reply: {summary}" and never quoted as the visitor's), else None. A held
+    request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
+    AI-written text: a visitor could steer a summary to sway an approval."""
 
     decision: Decision | None
     held_by: str | None
@@ -600,6 +610,11 @@ class PaymentConflict(BaseModel):
 # Plan 01a's owner name pattern, which the kernel checks every owner name against: ^[A-Za-zÀ-ÿ' -]{1,40}$
 OWNER_NAME_CHARS = "A-Za-zÀ-ÿ' -"
 OWNER_NAME_PATTERN = rf"^[{OWNER_NAME_CHARS}]{{1,40}}$"
+# What setup can wait on: a topic (`QuestionKey`), then, once the plan is closed, whether to add the owner as a test
+# client (`setup.TEST_CLIENT_OFFER`). Code asks that one and reads its answer with no model turn, so it is no topic and
+# no structured output names it.
+TestClientQuestion = Literal["test_client"]
+SetupQuestion = Literal[QuestionKey, TestClientQuestion]
 
 
 @cache
@@ -644,7 +659,7 @@ class SetupAnswerIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    question: QuestionKey | None = None
+    question: SetupQuestion | None = None
     card: str | None = None
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 
@@ -756,16 +771,16 @@ class SetupPublicLinesConfirmIn(BaseModel):
 class SetupState(BaseModel):
     """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
     owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
-    before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
-    conversation so far. Its messages start at Claude's consent
-    question: the owner's opening description isn't shown back to them."""
+    before consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end
+    waits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's
+    consent question: the owner's opening description isn't shown back to them."""
 
     interview_id: str
     desk_id: str
     slug: str
     step: SetupStep
     consent: bool | None
-    question: QuestionKey | None
+    question: SetupQuestion | None
     pending_card: str | None = None
     busy: bool = False
     held_policy_keys: list[str] = Field(description="Charter claim keys, such as a policy line or the public contact, "

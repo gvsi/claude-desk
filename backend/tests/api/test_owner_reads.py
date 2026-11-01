@@ -21,9 +21,11 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
+from psycopg.types.json import Jsonb
 from sqlalchemy import text as sql
 
 from desk.api import loop, owner_reads
+from desk.api.deps import owner_context
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelUnavailable
 from desk.api.main import create_app
 from desk.api.owner_reads import (
@@ -49,18 +51,27 @@ from desk.api.store import (
     start_fresh_context,
 )
 from desk.api.tools import Caller
-from desk.contracts import Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, ToolCall
+from desk.contracts import (
+    BusinessTool, BusinessToolDef, Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, RuleCard,
+    ToolCall,
+)
 from desk.kernel_api import (
     AnswerRequest,
+    BusinessToolsRequest,
     CancelRequest,
     CheckReplyRequest,
     CreateCopyRequest,
     CreateSessionRequest,
     DecideRequest,
     ExecuteRequest,
+    PolicyConfirmRequest,
+    PolicyDraftRequest,
+    ToolPin,
+    ToolsConfirmRequest,
 )
 from desk.kernel_service import reply_check
 from tests.api.fakes import ScriptedModel, response, tool_use, unavailable
+from tests.api.test_owner_desks import new_desk
 from tests.api.test_store import SYSTEM
 from tests.kernel_contract.fake_kernel import fake_kernel_app, signed_time
 
@@ -650,7 +661,8 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     """A handoff's context for the owner: the visitor's previous and last lines, each a one-line glimpse joined with
     " · ", and the conversation's newest AI-written triage summary, labelled as Claude's on the owner's screen. A
     triage row that doesn't parse is skipped rather than shown. A held request, which asks the owner for a decision,
-    never carries the summary (master plan: AI-written triage is never in approval cards)."""
+    never carries the summary, nor does a handoff in a chat whose request still awaits the owner (master plan:
+    AI-written triage is never in approval cards)."""
     owner = await new_owner(app, browser, fake, kernel_http)
     handed = await guest(kernel_http, fake, owner)
     await write(engine, db, handed.ids, "visitor_text", text="Personal. I started freelancing and I'm not sure what I need.")
@@ -669,17 +681,22 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     held = await guest(kernel_http, fake, owner)
     await write(engine, db, held.ids, "triage", text=json.dumps({"summary": "Asked for a discount.", "category": "prices"}))
     await held.decide("native.quote", discounted_quote(fake, owner))
+    # the same chat asks for a call back while its request waits: that handoff waits for its note too
+    await held.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                               "reason": "About the discount"})
 
     listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
 
     assert listed.status_code == 200, listed.text
-    items = {item["session"]["session_id"]: item for item in listed.json()}
+    items = {item["session"]["session_id"]: item for item in listed.json() if item["decision"] is None}
+    held_items = {item["session"]["session_id"]: item for item in listed.json() if item["decision"] is not None}
     assert items[handed.session_id]["from_the_visitor"] == (
         "Personal. I started freelancing and I'm not sure what I need. · Monday, November 2, 9:00 am")
     assert items[handed.session_id]["claude_summary"] == "Freelancer asked what to file; a booking reply was stopped."
     assert items[garbled.session_id]["from_the_visitor"] == "x" * 199 + "…"
     assert items[garbled.session_id]["claude_summary"] is None
-    assert items[held.session_id]["decision"] is not None and items[held.session_id]["claude_summary"] is None
+    assert held_items[held.session_id]["claude_summary"] is None
+    assert items[held.session_id]["handoff"]["kind"] == "callback" and items[held.session_id]["claude_summary"] is None
 
 
 async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
@@ -955,6 +972,263 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"] == brief
 
 
+def block_execution(scene: Scene, who: Guest, when: datetime, tool: str, config: dict, *,
+                    decided_at: datetime | None = None) -> str:
+    """Seed a block tool and its executed decision/ledger entry in FakeKernel's read-only mirror."""
+    fake = scene.fake
+    fake.now = when
+    desk = fake.desks[scene.owner.desk_id]
+    definition = BusinessToolDef(title="Business service", description="Help with a service.", config=config)
+    fake._put_tool(desk, desk.tools["native.request_callback"].model_copy(update={
+        "tool": tool, "source": "business", "business": definition}))
+    decision_id = f"decision-{next(_CALL_IDS)}"
+    entry = fake.append(desk, "execute", {"decision_id": decision_id, "state": "executed"},
+                        session_id=who.session_id, ref_id=decision_id)
+    fake._put("decisions", (decision_id,), {
+        "decision_id": decision_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id,
+        "session_id": who.session_id, "tool": tool, "effects": ["change"], "outcome": "allow",
+        "state": "executed", "answers": [], "policy_version": desk.policy_version, "card_ids": [],
+        "review": None, "reason_plain": "The owner's rule allows this.", "visitor_plain": "Done",
+        "expires_at": None, "ledger_seq": entry.seq, "created_at": decided_at or when, "policy_ids": []})
+    fake.flush()
+    return decision_id
+
+
+async def test_a_block_built_urgent_call_counts_as_a_callback_not_answered_alone(scene, clock, app):
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when)
+    decision_id = block_execution(scene, caller, when, "desk.fast-help",
+                                  {"block": "urgent", "urgent_when": "A pipe burst."})
+    await scene.reply(caller, when + timedelta(minutes=1))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    brief = read.json()["briefing"]
+    assert brief["conversations"] == 1
+    assert brief["bookings"] == brief["total"] == 0
+    assert brief["newest"]["lead_or_answer"] is None
+    assert (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"] == []
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert [(call.ref_id, call.session_id, call.at, call.replayed) for call in done.callbacks] == [
+        (decision_id, caller.session_id, when, False)]
+
+
+async def test_an_urgent_business_tool_run_on_the_kernel_counts_as_a_callback(scene, clock, app):
+    """The owner adds, reviews and allows an urgent business tool, and a visitor's call through it runs on the
+    kernel, which writes the tool's row, its decision and its ledger entries as it writes any business tool's. The
+    owner then removes the tool, which the kernel keeps as a disabled row, so its past run still counts."""
+    owner = scene.owner
+    kernel = scene.kernel_http.owner(owner.token)
+    tool = BusinessTool(tool="desk.urgent-help", title="Urgent help", description="Report an urgent problem.",
+                        config={"block": "urgent", "urgent_when": "A burst pipe or no heating."})
+    await kernel.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[tool]), path={"id": owner.desk_id})
+    pin = ToolPin(tool=tool.tool, definition_sha256=scene.fake.desks[owner.desk_id].tools[tool.tool].definition_sha256)
+    confirmed = await kernel.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=owner.desk_id, tools=[pin],
+                                                                              enable=True))
+    active = await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=owner.desk_id,
+                                                                             version=confirmed.draft.version))
+    draft = await kernel.call("POST /policy/draft", PolicyDraftRequest(
+        desk_id=owner.desk_id, expected_parent=active.version, cards=[RuleCard(
+            card_id="urgent-auto", applies_to=tool.tool, mode="auto", who="anyone", reason="Report urgent problems.")]))
+    await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=owner.desk_id, version=draft.version))
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when, "A pipe burst under the sink")
+    decision, result = await caller.run(tool.tool, {"name": "Sam Lee", "contact": "(510) 555-0100",
+                                                    "reason": "A pipe burst under the sink"})
+    assert result.state == "succeeded"
+    await scene.reply(caller, when + timedelta(minutes=1))
+    scene.fake.now = when + timedelta(minutes=2)       # the owner then removes the tool: its past run still counts
+    await kernel.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[]), path={"id": owner.desk_id})
+    assert scene.fake.desks[owner.desk_id].tools[tool.tool].status == "disabled"
+    clock.now = local(2026, 10, 30, 9)
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    brief = read.json()["briefing"]
+    assert brief["conversations"] == 1
+    assert brief["total"] == 0 and brief["newest"]["lead_or_answer"] is None
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert [call.ref_id for call in done.callbacks] == [decision.decision_id]
+
+
+@pytest.mark.parametrize(("hour", "count"), [(17, 0), (18, 1), (19, 1)])
+async def test_a_typed_booking_counts_as_a_booking(scene, clock, hour, count):
+    when = local(2026, 10, 29, hour)
+    caller = await scene.visitor(when - timedelta(minutes=2))
+    await scene.text(caller, when - timedelta(minutes=2))
+    amount = await scene.quote(caller, when - timedelta(minutes=1))
+    decision_id = block_execution(scene, caller, when, "desk.drain-visit", {
+        "block": "typed_booking", "appointment_type": "Drain clearing", "minutes": 30},
+        decided_at=when - timedelta(days=1))
+    await scene.reply(caller, when + timedelta(minutes=1))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    today = read.json()
+    assert today["this_week"]["bookings"] == 1
+    assert today["this_week"]["booked_cents"] == amount
+    assert today["briefing"]["bookings"] == today["briefing"]["total"] == count
+    items = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+    assert [(item["kind"], item["ref_id"], item["session_id"], item["at"]) for item in items] == (
+        [("booking", decision_id, caller.session_id, stamp(when))] if count else [])
+
+
+async def test_an_intake_block_counts_as_neither_a_callback_nor_a_booking(scene, clock, app):
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when)
+    block_execution(scene, caller, when, "desk.urgent-booking", {
+        "block": "intake", "questions": ["Do you need an urgent booking?"]})
+    await scene.reply(caller, when + timedelta(minutes=1))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    brief = read.json()["briefing"]
+    assert brief["bookings"] == 0
+    assert brief["total"] == 1
+    assert brief["newest"]["lead_or_answer"]["kind"] == "answer"
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert done.callbacks == done.bookings == []
+
+
+@pytest.mark.parametrize("business", [
+    None, [], "malformed", {}, {"config": None}, {"config": []}, {"config": "malformed"},
+    {"config": {"block": None}}, {"config": {"block": []}}, {"config": {"block": {}}},
+])
+async def test_a_malformed_business_tool_counts_as_neither_a_callback_nor_a_booking(scene, clock, app, business):
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when)
+    block_execution(scene, caller, when, "desk.x", {"block": "urgent", "urgent_when": "A pipe burst."})
+    await scene.reply(caller, when + timedelta(minutes=1))
+    owner = scene.owner
+    scene.admin.execute(
+        "UPDATE fake_kernel_ro.tools SET business = %s WHERE desk_id = %s AND tool = %s",
+        (Jsonb(business), owner.desk_id, "desk.x"))
+    clock.now = local(2026, 10, 30, 9)
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    brief = read.json()["briefing"]
+    assert brief["bookings"] == 0
+    assert brief["total"] == 1
+    assert brief["newest"]["lead_or_answer"]["kind"] == "answer"
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert done.callbacks == done.bookings == []
+
+
+async def test_block_counts_use_only_the_current_desks_tool_definition(scene, clock, app):
+    owner = scene.owner
+    created = await owner.browser.post("/api/owner/desks", json=new_desk())
+    assert created.status_code == 201, created.text
+    other = scene.fake.desks[created.json()["desk_id"]]
+    assert other.copy_id == owner.copy_id
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when)
+    block_execution(scene, caller, when, "desk.x", {"block": "intake", "questions": ["How can we help?"]})
+    await scene.reply(caller, when + timedelta(minutes=1))
+    template = scene.fake.desks[owner.desk_id].tools["native.request_callback"]
+    scene.fake._put_tool(other, template.model_copy(update={
+        "tool": "desk.x", "source": "business", "business": BusinessToolDef(
+            title="Urgent help", description="Help with an urgent service.",
+            config={"block": "urgent", "urgent_when": "A pipe burst."})}))
+    scene.fake.flush()
+    clock.now = local(2026, 10, 30, 9)
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    brief = read.json()["briefing"]
+    assert brief["bookings"] == 0
+    assert brief["total"] == 1
+    assert brief["newest"]["lead_or_answer"]["kind"] == "answer"
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert done.callbacks == done.bookings == []
+
+
+async def test_native_callbacks_and_bookings_still_count_exactly_once_each(scene, clock, app):
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when)
+    scene.fake.now = when
+    callback, result = await caller.run("native.request_callback", {
+        "name": "Sam Ortiz", "contact": "(510) 555-0199", "reason": "A pipe burst."})
+    assert result.state == "succeeded"
+    await scene.reply(caller, when + timedelta(minutes=1))
+    visitor = await scene.visitor(when + timedelta(minutes=2))
+    await scene.text(visitor, when + timedelta(minutes=2))
+    booking = await scene.booking(visitor, when + timedelta(minutes=2))
+    await scene.reply(visitor, when + timedelta(minutes=3))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    today = read.json()
+    assert today["briefing"]["bookings"] == today["briefing"]["total"] == today["this_week"]["bookings"] == 1
+    assert today["briefing"]["newest"]["lead_or_answer"] is None
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert [call.ref_id for call in done.callbacks] == [callback.decision_id]
+    assert [call.ref_id for call in done.bookings] == [booking.decision_id]
+
+
+async def test_typed_booking_and_its_note_reach_today_with_default_notifications(scene, clock, api_conn, ro_schema):
+    owner = scene.owner
+    desk = scene.fake.desks[owner.desk_id]
+    prefs = await KernelRO(api_conn, owner.copy_id, ro_schema).one('notification_prefs', desk_id=owner.desk_id)
+    assert prefs['now'] == ['approval', 'callback', 'breaker', 'lockout', 'handoff']
+    assert prefs['briefing'] == ['lead', 'booking']
+    kernel = scene.kernel_http.owner(owner.token)
+    tool = BusinessTool(tool='desk.consult', title='Book a consult', description='Book an introduction.',
+                        config={'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 20})
+    await kernel.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': owner.desk_id})
+    profile = desk.tools[tool.tool]
+    confirmed = await kernel.call('POST /tools/confirm', ToolsConfirmRequest(desk_id=owner.desk_id,
+        tools=[ToolPin(tool=tool.tool, definition_sha256=profile.definition_sha256)], enable=True))
+    active = await kernel.call('POST /policy/confirm', PolicyConfirmRequest(
+        desk_id=owner.desk_id, version=confirmed.draft.version))
+    draft = await kernel.call('POST /policy/draft', PolicyDraftRequest(desk_id=owner.desk_id,
+        expected_parent=active.version, cards=[RuleCard(card_id='consult-auto', applies_to=tool.tool,
+            mode='auto', who='anyone', reason='Book consultations.')]))
+    await kernel.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=owner.desk_id, version=draft.version))
+    when = local(2026, 10, 29, 20)
+    visitor = await scene.visitor(when)
+    await scene.text(visitor, when, 'Book a consult, using the side entrance.')
+    slot = max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)
+    decision, result = await visitor.run(tool.tool, {'slot_id': slot, 'note': 'Use the side entrance.'})
+    assert result.state == 'succeeded'
+    await scene.reply(visitor, when + timedelta(seconds=30))
+    clock.now = local(2026, 10, 30, 9)
+    today = (await owner.get(f'desks/{owner.desk_id}/today')).json()
+    assert today['briefing']['bookings'] == today['this_week']['bookings'] == 1
+    assert today['briefing']['total'] == 1
+    assert today['briefing']['newest']['lead_or_answer'] is None
+    [item] = (await owner.get(f'desks/{owner.desk_id}/briefing')).json()['items']
+    assert (item['kind'], item['ref_id']) == ('booking', decision.decision_id)
+    assert 'Claude\'s note: “Use the side entrance.”' in item['line']
+
+
 
 async def test_briefing_list_is_the_window_newest_first(scene, clock):
     early = await scene.visitor(local(2026, 10, 29, 17))
@@ -1184,6 +1458,55 @@ async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
         1, held.decision_id, stamp(local(2026, 10, 29, 19)))
     listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
     assert [(item["kind"], item["ref_id"]) for item in listed] == [("booking", held.decision_id)]
+
+
+async def allowed_deposit(scene: Scene, amount_cents: int = 5_000) -> str:
+    """A deposit the owner takes through a purpose payment business tool, added, reviewed and allowed up to its
+    amount through the owner's kernel calls; returns the tool's name."""
+    owner = scene.owner
+    kernel = scene.kernel_http.owner(owner.token)
+    tool = BusinessTool(tool="desk.deposit", title="Deposit", description="Take the service call deposit.",
+                        config={"block": "purpose_payment", "purpose": "Service call deposit",
+                                "amount_cents": amount_cents})
+    await kernel.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[tool]), path={"id": owner.desk_id})
+    pin = ToolPin(tool=tool.tool, definition_sha256=scene.fake.desks[owner.desk_id].tools[tool.tool].definition_sha256)
+    confirmed = await kernel.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=owner.desk_id, tools=[pin],
+                                                                              enable=True))
+    active = await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=owner.desk_id,
+                                                                             version=confirmed.draft.version))
+    draft = await kernel.call("POST /policy/draft", PolicyDraftRequest(
+        desk_id=owner.desk_id, expected_parent=active.version, auto_money_cap_cents=amount_cents, cards=[RuleCard(
+            card_id="deposit-auto", applies_to=tool.tool, mode="auto", who="anyone", max_amount_cents=amount_cents,
+            reason="Take the service call deposit.")]))
+    await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=owner.desk_id, version=draft.version))
+    return tool.tool
+
+
+async def take_deposit(scene: Scene, who: Guest, when: datetime, tool: str) -> None:
+    """The visitor's deposit through the tool, run on the kernel, which writes its quote record and payment link."""
+    scene.fake.now = when
+    _, result = await who.run(tool, {})
+    assert result.state == "succeeded"
+    assert {fact.kind for fact in result.facts} == {"quote", "payment_link"}
+
+
+async def test_a_deposit_is_never_a_bookings_amount_in_the_last_7_days(scene, clock):
+    deposit = await allowed_deposit(scene)
+    # A deposit, then a booking: the booking has no quote behind it.
+    deposit_only = await scene.visitor(local(2026, 10, 29, 10))
+    await take_deposit(scene, deposit_only, local(2026, 10, 29, 10), deposit)
+    await scene.booking(deposit_only, local(2026, 10, 29, 10, 5))
+    # A quote, a deposit, then a booking: the quote backs it.
+    quoted = await scene.visitor(local(2026, 10, 29, 11))
+    amount = await scene.quote(quoted, local(2026, 10, 29, 11))
+    await take_deposit(scene, quoted, local(2026, 10, 29, 11, 1), deposit)
+    await scene.booking(quoted, local(2026, 10, 29, 11, 5))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    this_week = (await owner.get(f"desks/{owner.desk_id}/today")).json()["this_week"]
+
+    assert (this_week["bookings"], this_week["booked_cents"]) == (2, amount)
 
 
 async def test_stopped_counts_only_attempts(scene, clock):

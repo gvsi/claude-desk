@@ -16,18 +16,29 @@ from desk.kernel_service import demo_inbox, labels, render
 from desk.kernel_service.adapters import payment_link, profile_sha256, quote, request_callback
 from desk.kernel_service.adapters.base import (Adapter, AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown,
                                                ExecCtx, Normalized, NormalizeCtx, quoted)
-from desk.kernel_service.adapters.book import BookArgs
+from desk.kernel_service.adapters.book import BookAdapter, BookArgs
 from desk.kernel_service.adapters.capture_lead import ADAPTER as CAPTURE_LEAD, CaptureLeadArgs
 from desk.kernel_service.adapters.request_callback import RequestCallbackArgs
 
 Block = Literal["intake", "typed_booking", "purpose_payment", "urgent"]
-SUPPORTED_BLOCKS: frozenset[Block] = frozenset({"intake", "purpose_payment", "urgent"})
+SUPPORTED_BLOCKS: frozenset[Block] = frozenset({"intake", "purpose_payment", "typed_booking", "urgent"})
 CARD_FIELDS: dict[Block, tuple[str, ...]] = {
     "intake": ("title",),
     "typed_booking": ("title", "appointment_type"),
     "purpose_payment": ("title", "purpose"),
     "urgent": ("title",),
 }
+
+
+def free_name_fields(block: Block) -> tuple[str, ...]:
+    """The card fields of `block` that may hold a free word (`reply_check.FREE_WORDS`), in render
+    order: its title or appointment type, never on a payment's card (the owner's decisions of
+    2026-10-31). The business tools write allows the words there (`business_tools.free_allow_words`),
+    and the reply check lets Claude's prose repeat these fields of the Desk's enabled tools that
+    resolve (`context.business_free_names`), so the two allowances stay one."""
+    if block == "purpose_payment":
+        return ()
+    return tuple(field for field in CARD_FIELDS[block] if field in ("title", "appointment_type"))
 
 
 class IntakeArgs(BaseModel):
@@ -228,8 +239,21 @@ class PurposePaymentAdapter(payment_link.PaymentLinkAdapter):
         return await self._with_quote(xctx, action, result) if result is not None else None
 
 
+class TypedBookingAdapter(BookAdapter):
+    """Native booking's normalization, commit, lock and reconciliation, with row-owned metadata."""
+
+    def __init__(self, profile: ToolProfile):
+        if profile.business is None or profile.business.config.block != "typed_booking":
+            raise ValueError("unsupported_block")
+        self.profile = profile.model_copy(update={"status": "enabled", "review_reason": None})
+
+    def appointment(self) -> tuple[str, int]:
+        config = self.profile.business.config
+        return config.appointment_type, config.minutes
+
 
 BLOCK_ADAPTERS: dict[Block, type] = {"intake": BlockAdapter, "purpose_payment": PurposePaymentAdapter,
+                                     "typed_booking": TypedBookingAdapter,
                                      "urgent": UrgentAdapter}
 
 

@@ -742,7 +742,7 @@ export const RecommendedRules: Story = {
   parameters: {
     canvas: 'N-Conn-18-Preset-Review',
     canvasNote:
-      "The review of Recommended rules on Rivera's Desk, which no board draws; the nearest is the Ask me first review. A rule goes to the preset's rule that covers its whole scope, or to the default ask; a preset rule nothing goes to is added; a rule the preset keeps as it is doesn't show.",
+      "The review of Recommended rules on Rivera's Desk, drafted in her own weekday hours, which no board draws; the nearest is the Ask me first review. A rule goes to the preset's rule that covers its whole scope, or to the default ask; a preset rule nothing goes to is added; a rule the preset keeps as it is doesn't show.",
   },
   play: async ({ canvas }) => {
     const rows = within(canvas.getByRole('region', { name: 'Changes' })).getAllByRole('listitem');
@@ -750,26 +750,26 @@ export const RecommendedRules: Story = {
     const kind = (item: HTMLElement) => item.querySelector('.cd-change-review__tag')?.textContent;
     const side = (item: HTMLElement, name: 'Before' | 'After') => within(item).queryByRole('group', { name });
     const outcome = (item: HTMLElement) => side(item, 'After')?.querySelector('.cd-change-review__side-outcome');
-    // The rows, in Rivera's order, then what the preset adds.
+    // The rows, in Rivera's order; the preset adds none.
     await expect(rows.map((item) => [kind(item), title(item)])).toEqual([
-      ['Changed', 'Book a visit'],
       ['Changed', 'Book a visit'],
       ['Changed', 'Book a visit'],
       ['Changed', 'Payment link'],
       ['Changed', 'Charge within a signed limit'],
       ['Changed', 'See charges'],
       ['Changed', 'Refund'],
-      ['Added', 'Book a visit'],
     ]);
-    // unchanged_rules_are_left_out: the preset quotes at list price and shares documents with
-    // verified customers, as Rivera's rules already do, so neither shows.
+    // unchanged_rules_are_left_out: the preset quotes at list price, books weekdays in Rivera's own
+    // hours and words, and shares documents with verified customers, as her rules already do, so none
+    // shows: the two booking rows are Saturday's and Dana's.
     await expect(rows.map(title)).not.toContain('Quote');
     await expect(rows.map(title)).not.toContain('Share a document');
-    // uncovered_scopes_ask: no card of the preset covers weekday bookings from 8 to 6, Saturday
-    // mornings, Dana's any-time rule or seeing charges, so each falls to the default ask, its new
-    // outcome tagged; none of them reads "Automatic" after.
-    const [weekday, saturday, dana, link, mandate, charges, refund, added] = rows as HTMLElement[];
-    for (const item of [weekday, saturday, dana, charges] as HTMLElement[]) {
+    const [saturday, dana, link, mandate, charges, refund] = rows as HTMLElement[];
+    for (const item of [saturday, dana] as HTMLElement[]) await expect(side(item, 'Before')).not.toHaveTextContent('Weekdays, 8:00 am to 6:00 pm');
+    // uncovered_scopes_ask: no card of the preset covers Saturday mornings, Dana's any-time rule or
+    // seeing charges, so each falls to the default ask, its new outcome tagged; none of them reads
+    // "Automatic" after.
+    for (const item of [saturday, dana, charges] as HTMLElement[]) {
       await expect(side(item, 'After')).toHaveTextContent(DEFAULT_ASK);
       await expect(outcome(item)).toHaveTextContent('Ask me firstChanged');
       await expect(side(item, 'After')).not.toHaveTextContent('Automatic');
@@ -784,10 +784,6 @@ export const RecommendedRules: Story = {
     await expect(side(refund as HTMLElement, 'After')).toHaveTextContent('Every tool that sends money out');
     // Refund already asked, so its outcome isn't tagged.
     await expect(outcome(refund as HTMLElement)).toHaveTextContent(/^Ask me first$/);
-    // preset_rules_nothing_goes_to_are_added: the weekday 9-to-5 rule, alone, with no Before.
-    await expect(side(added as HTMLElement, 'Before')).toBeNull();
-    await expect(side(added as HTMLElement, 'After')).toHaveTextContent('Weekdays, 9:00 am to 5:00 pm');
-    await expect(side(added as HTMLElement, 'After')).toHaveTextContent('Automatic');
   },
 };
 

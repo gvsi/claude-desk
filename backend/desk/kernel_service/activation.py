@@ -111,7 +111,7 @@ from desk.kernel_service.baseline_reasons import BASELINE_RULE_PLAIN as BASELINE
 from desk.kernel_service.decisions import Reviewed
 from desk.kernel_service.reference import RefSets
 from desk.kernel_service.repo import (KernelCtx, KernelFailure, KernelRuntime, copy_ids, desks_to_bring_up,
-                                     kernel_transaction, log_error)
+                                     kernel_transaction, limit_lock_waits, log_error)
 from desk.presets import PRESETS
 
 log = logging.getLogger(__name__)
@@ -1035,12 +1035,6 @@ async def _alert_all(runtime: KernelRuntime, desks: list[tuple[str, str]],
     return busy
 
 
-async def _limit_lock_waits(ctx: KernelCtx, seconds: float) -> None:
-    """Holds the transaction's waits for a lock to `seconds` (Postgres `lock_timeout`), so a row an
-    owner's write holds makes the rebuild try that Desk again later rather than stall the others."""
-    await ctx.db.execute(select(func.set_config("lock_timeout", f"{max(1, int(seconds * 1000))}ms", True)))
-
-
 def _lock_busy(exc: BaseException) -> bool:
     """Whether `exc` is Postgres giving up on a lock wait (`lock_not_available`, 55P03)."""
     return getattr(getattr(exc, "orig", None), "sqlstate", None) == "55P03"
@@ -1071,7 +1065,7 @@ async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str, *, 
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
-            await _limit_lock_waits(ctx, lock_s)
+            await limit_lock_waits(ctx, lock_s)
             await _lock(ctx, "waiting-alert", desk_id)
             # the Desk row held to the commit, so a deletion comes before the check or waits for the alert
             deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)
@@ -1112,7 +1106,7 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
-            await _limit_lock_waits(ctx, lock_s)
+            await limit_lock_waits(ctx, lock_s)
             await desks.update_native_tools(ctx, desk_id)
     except Exception as exc:
         log_error(log, exc, "native_tools_failed copy_id=%s desk_id=%s", copy_id, desk_id)
@@ -1121,7 +1115,7 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
-            await _limit_lock_waits(ctx, lock_s)
+            await limit_lock_waits(ctx, lock_s)
             deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)))
             row = await active_version(ctx, desk_id)
             if deleted is not None or row is None or not rebuild_due(row, await desks.enabled_profiles(ctx, desk_id)):

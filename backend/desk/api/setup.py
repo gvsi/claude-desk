@@ -40,7 +40,9 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   both phases share `HOMEWORK_BUDGET_S`. On no it skips every
   read. `_after_consent` appends the consultant
   opening and first fact question; the labels and reply are saved together. Web search content reaches only that
-  opening's understanding call. A website the owner names later after no is kept as text.
+  opening's understanding call. A website the owner names later after no is kept as text. The owner's display
+  stream gets each read's start, then each read's label in the same order, then the opening's text; none of it is
+  state.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
   answered in that question's own model (`SETUP_TURNS`). With one ask, the exchange starts after it; with follow-ups,
@@ -58,13 +60,16 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
-  after its retry gets the fixed transition line instead.
+  after its retry gets the fixed transition line instead. When the owner typed their own contact on the contact
+  question, setup first asks once, with code's two choices, whether to add them as a test client
+  (`TEST_CLIENT_OFFER`), and code alone reads the answer, with no model turn: only a yes puts them on record as a
+  client with that contact (`PUT /desks/{id}/people`), and any answer moves on to step `tools`.
 
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
 request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
-fails in time, or 202 with the stored busy state. Cancelling the request leaves the task working on its own
-connections. Any turn while busy returns that state without running or counting on the limits.
+fails in time, or 202 with the stored busy state. Consent doesn't wait: it answers 202 with the busy state once it is
+stored. Cancelling the request leaves the task working on its own connections. Any turn while busy returns that state without running or counting on the limits.
 The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (100
 seconds). An optional `after` hook runs outside that deadline, with no transaction open and its own
 `TURN_AFTER_TIMEOUT_S` bound (30 seconds); its failures are logged by type only and return the landed state.
@@ -132,9 +137,10 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import Executable
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.turn_runs import TurnRuns
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.idempotency import Admissions, body_sha256
+from desk.api.owner_streaming import current as current_display, failure as display_failure
+from desk.api.turn_runs import TurnRuns
 from desk.api.kernel_client import DEFAULT_TIMEOUT_S, KernelFailed, KernelUnavailable
 from desk.api.link_notices import tell_cancelled_links
 from desk.api.metrics import record_model_call
@@ -244,12 +250,14 @@ from desk.api.schemas import (
     SetupPublicLineError,
     SetupPublicLines,
     SetupPublicPrices,
+    SetupQuestion,
     SetupStartIn,
     SetupState,
     SetupStep,
     SetupTools,
     Situation,
     SituationResult,
+    TestClientQuestion,
     ToolRow,
     WentLive,
 )
@@ -265,6 +273,8 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
+from desk import contracts
+from desk.calendar import WEEK, calendar_slots, minute_of_day
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     MCP_TOOLS,
@@ -284,9 +294,11 @@ from desk.contracts import (
     ProbeResult,
     RuleCard,
     ToolCall,
+    money_tool,
 )
 from desk.db.models import SetupInterview
 from desk.kernel_api import (
+    BusinessToolsRequest,
     CreateDeskRequest,
     DecideRequest,
     DeskAnsweringRequest,
@@ -296,9 +308,11 @@ from desk.kernel_api import (
     DeskHoursRequest,
     DeskMemoryRequest,
     DeskNotificationsRequest,
+    DeskPeopleRequest,
     DeskPricesRequest,
     ExecuteRequest,
     MemoryItem,
+    PersonUpsert,
     PolicyConfirmRequest,
     PolicyProbeRequest,
     SessionContext,
@@ -358,6 +372,26 @@ QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
 AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
+# The test-client offer, asked once at the plan's end (`_offer_test_client`), its two choices, and Claude's line after
+# a yes. Owner-facing words, kept together for copy review.
+TEST_CLIENT_OFFER = ("Want to try your Desk the way a client would? I can add you as a test client, with your own "
+                     "contact, so you can check verification and private answers yourself.")
+TEST_CLIENT_YES = "Add me as a test client"
+TEST_CLIENT_NO = "Not now"
+TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me."
+TEST_CLIENT: TestClientQuestion = "test_client"   # the offer's question, which code alone asks and reads
+TEST_CLIENT_REF = "test-client"                   # the owner's ref among the Desk's people, as a test client
+# The words and phrases code reads in a typed answer to the test-client offer (`_reads_yes`), in English and Spanish:
+# a "no" one wins over any "yes" one, and an answer with neither gets the same offer again.
+TEST_CLIENT_TYPED_YES = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead", "please do", "do it", "add me",
+                         "sounds good", "sí", "si", "vale", "claro", "dale", "añádeme", "agrégame")
+TEST_CLIENT_TYPED_NO = ("no", "not", "don't", "dont", "nope", "not now", "later", "skip", "no gracias")
+# A typed answer that asks something, or gives a yes only on a condition, which is never a yes or a no: a question mark,
+# a question's opening word, or "if" ("si" in Spanish, unless it stands alone as a yes, "Si" or "Si, …").
+TEST_CLIENT_UNCLEAR = re.compile(r"[?¿]|^\W*(?:what|how|why|does|can|is|will|qué|cómo|por qué)\b"
+                                 r"|^\W*do\s+(?:you|i|we|they|he|she|this|that)\b|\bif\b", re.IGNORECASE)
+TEST_CLIENT_SI = re.compile(r"\bsi\b", re.IGNORECASE)
+TEST_CLIENT_SI_ALONE = re.compile(r"^\W*si\s*(?:$|[,.!])", re.IGNORECASE)
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -436,7 +470,7 @@ class Entry(BaseModel):
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
-    question: Literal["consent"] | QuestionKey | None = None
+    question: Literal["consent"] | SetupQuestion | None = None
     read: Literal["memory", "website", "web_search"] | None = None
     content: str | None = None
     website: str | None = None
@@ -454,6 +488,8 @@ class Entry(BaseModel):
     owner_fields: list[str] = []  # Fact fields this owner turn set or explicitly cleared.
     owner_decided: bool = False
     connector_connect_attempted: bool = False
+    # On the owner's answer to the test-client offer: "yes" once their yes is saved, "added" once they're on record.
+    test_client: Literal["yes", "added"] | None = None
 
 
 class ConnectedApp(BaseModel):
@@ -514,12 +550,19 @@ class Interview:
         return self.transcript[0].connected_apps or []
 
     @property
-    def question(self) -> QuestionKey | None:
-        """The question waiting for an answer: the last one asked, from consent until the questions step ends."""
+    def question(self) -> SetupQuestion | None:
+        """The question waiting for an answer: the last one asked, from consent until the questions step ends. The
+        test-client offer (`TEST_CLIENT`) is the last, once the plan is closed."""
         if self.step != "questions" or self.consent is None or self.busy:
             return None
         asked = self.latest_ask
-        return asked.question if asked is not None and asked.question in QUESTION_KEYS else None
+        return asked.question if asked is not None and asked.question in (*QUESTION_KEYS, TEST_CLIENT) else None
+
+    @property
+    def offering(self) -> bool:
+        """Whether the plan is closed and only the test-client offer waits (`_offer_test_client`)."""
+        asked = self.latest_ask
+        return self.step == "questions" and asked is not None and asked.question == TEST_CLIENT
 
     @property
     def latest_ask(self) -> Entry | None:
@@ -760,13 +803,18 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
     within `timeout_s` (`SETUP_TIMEOUT_S` unless the caller gives another): each call's usage is recorded first, a
     timed-out one as failed."""
     messages = list(messages)
+    # An owner display shows the reply (or Rules' answer) of only the run's first call; its retry resets it.
+    display = current_display.get()
+    field = "reply" if "reply" in output.model_fields else "answer" if "answer" in output.model_fields else None
+    shows = display is not None and field is not None and display.take()
     for attempt in (1, 2):
         bound = timeout_s() if callable(timeout_s) else SETUP_TIMEOUT_S if timeout_s is None else timeout_s
         if bound <= 0 or (attempt == 2 and bound < retry_min_s):
             return None
+        on_text = display.begin(field) if shows else None
         request = ModelRequest(route=route, system=[{"type": "text", "text": system}], messages=list(messages),
                                model=CONVERSATION_MODEL, effort=effort, max_tokens=max_tokens, output_schema=output,
-                               timeout_s=bound)
+                               timeout_s=bound, on_text=on_text)
         started = monotonic()
         try:
             async with asyncio.timeout(bound):
@@ -932,19 +980,54 @@ def _web_search_entry(result: ExecResult | None, *, query: str) -> Entry:
 
 
 async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
-    """Decide all reads before executing together; both phases share one budget and keep display order."""
+    """Decide all reads before executing together; both phases share one budget and keep display order.
+
+    The owner's display, when one is open, gets a `reading` for each read once the reads start (memory, the website,
+    then each search given on this Desk, in saved order), then each read's `label` in that same order, as soon as it
+    and every read before it are in. A label is the text its saved entry holds; a failed search whose label the
+    transcript keeps only once repeats that text. None of it is state."""
+    display = current_display.get()
     desk_id = interview.desk_id
     reads: list[tuple[str, dict, Callable[[ExecResult | None], Entry], float | None]] = [
         ("native.read_memory", {"query": MEMORY_QUERY}, _memory_entry, None)]
+    shown_as: list[tuple[str, str | None]] = [("memory", None)]           # each read as the display names it
     site = website_url(interview.transcript[0].website)
     if site is not None:
         url, host = site
         reads.append(("native.fetch_website", {"url": url}, partial(_website_entry, url=url, host=host), None))
+        shown_as.append(("website", host))
+    queries = (interview.transcript[0].search_queries or [])[:3]
     reads.extend(("native.web_search", {"query": query}, partial(_web_search_entry, query=query),
                   WEB_SEARCH_EXECUTE_TIMEOUT_S)
-                 for query in (interview.transcript[0].search_queries or [])[:3])
+                 for query in queries)
+    shown_as.extend(("web_search", None) for _ in queries)
     tasks: dict[int, asyncio.Task[ExecResult | None]] = {}
     not_given: set[int] = set()
+    shown: list[int] | None = None                     # the reads the display shows, once they have started
+    labelled = 0
+
+    def outcome(index: int) -> ExecResult | None:
+        return tasks[index].result() if index in tasks and not tasks[index].cancelled() else None
+
+    def show_reading() -> None:
+        nonlocal shown
+        if shown is not None:
+            return
+        shown = [index for index, (tool, _, _, _) in enumerate(reads)
+                 if not (tool == "native.web_search" and index in not_given)]
+        if display is not None:
+            for index in shown:
+                display.reading(*shown_as[index])
+
+    def show_labels() -> None:
+        nonlocal labelled
+        while display is not None and shown is not None and labelled < len(shown):
+            index = shown[labelled]
+            if index in tasks and not tasks[index].done():
+                return
+            display.label(shown_as[index][0], reads[index][2](outcome(index)).text)
+            labelled += 1
+
     try:
         async with asyncio.timeout(HOMEWORK_BUDGET_S):
             context = await owner.kernel.call("GET /context/{session_id}?desk_id=",
@@ -962,6 +1045,11 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
             # Finish every decision first so a long search cannot block a later decision's short timeout.
             for index, tool, decision, timeout_s in allowed:
                 tasks[index] = asyncio.create_task(execute_setup_tool(owner, tool, decision, timeout_s=timeout_s))
+            show_reading()
+            show_labels()
+            for task in tasks.values():                # in saved order: each label once it and those before are in
+                await asyncio.wait({task})
+                show_labels()
             if tasks:
                 await asyncio.gather(*tasks.values())
     except TimeoutError:
@@ -973,6 +1061,8 @@ async def _homework(owner: OwnerCtx, interview: Interview) -> list[Entry]:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks.values(), return_exceptions=True)
+    show_reading()                                     # reads cut short before they started still show, then fail
+    show_labels()
     entries = []
     search_failed = False
     for index, (tool, _, entry, _) in enumerate(reads):
@@ -1533,7 +1623,7 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                    runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                    check: Callable[[Interview], None], stage: Callable[[Interview], list[Entry]],
                    turn: Callable[[OwnerCtx, Interview, list[Entry]], Awaitable[None]],
-                   keep_staged: bool = True,
+                   keep_staged: bool = True, wait: bool = True,
                    after: Callable[[OwnerCtx, Interview], Awaitable[None]] | None = None,
                    render: Callable[[Interview, str], SetupState] = setup_state) -> SetupState:
     """Store staged entries, run a detached owner turn, and return its landed or busy state.
@@ -1541,12 +1631,14 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     `stage` only produces entries; consent alone may also set `interview.consent`. Every other change (answers,
     card state, step) belongs in `turn`, so rollback needs no in-memory undo and works after a process dies.
     Hand the guard to the task immediately after admission, without an await in between. Request cancellation
-    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state.
+    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state (`wait=False`
+    answers the busy state as soon as it is stored).
     `keep_staged=False` removes temporary markers on success. The run deadline covers detached connection
     acquisition through the final commit.
     `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
     is logged by type only and returns the landed state. Shutdown cancellation after commit propagates without
-    rolling back the turn.
+    rolling back the turn. The owner's display gets `done` once a committed turn has also run `after`, closed its
+    connections and released the guard; an error is sent after the rollback.
     """
     interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
@@ -1562,7 +1654,9 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     async def run() -> SetupState:
         nonlocal pending
         interview.turn_deadline = asyncio.get_running_loop().time() + TURN_RUN_TIMEOUT_S
-        run_id = secrets.token_hex(8)
+        display = current_display.get()
+        assert display is not None and display.run is not None
+        run_id = display.run
         busy = None
         committed = False
         try:
@@ -1611,12 +1705,18 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                         await _rollback_turn(owner, engine, interview_id, run_id)
                 except Exception as rollback_failed:
                     logger.warning("setup turn couldn't be reopened (%s)", type(rollback_failed).__name__)
-            if isinstance(failed, TimeoutError):
-                raise ApiProblem(503, "model_unavailable") from None
+            answered = ApiProblem(503, "model_unavailable") if isinstance(failed, TimeoutError) else failed
+            display.finish("error", {"run": run_id, "error": display_failure(answered)["error"]})
+            if answered is not failed:
+                raise answered from None
             raise
         finally:
             guard.close()
             busy_stored.set()                 # a failed busy commit wakes the request to receive its error
+            if committed:
+                # Only now is the turn's work done and the interview free: a refetch reads the final state, and
+                # the next answer is taken.
+                display.finish("done", {"run": run_id})
 
     try:
         await admit()
@@ -1634,6 +1734,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     await asyncio.shield(busy_stored.wait())
     if pending is None:
         return await asyncio.shield(task)
+    if not wait:
+        return pending
     done, _ = await asyncio.wait({task}, timeout=TURN_WAIT_S)
     if done:
         return task.result()
@@ -1643,7 +1745,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
 async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
                   runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                   cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
-    """Run consent and its reads through the shared turn runner; no reads run after no."""
+    """Run consent and its reads through the shared turn runner, answering the busy state once it is stored; no
+    reads run after no."""
     def check(interview: Interview) -> None:
         interview.business_tools_enabled = business_tools_enabled
         if interview.consent is not None or interview.step != "questions":
@@ -1660,7 +1763,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         await _after_consent(ctx, engine, model, interview, entries)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
-                          check=check, stage=stage, turn=turn,
+                          check=check, stage=stage, turn=turn, wait=False,
                           render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
@@ -2138,6 +2241,27 @@ def _asks(text: str) -> bool:
     return _ENDS_A_QUESTION.search(text) is not None
 
 
+def _code_next(interview: Interview, answering: QuestionKey | None = None) -> QuestionKey | None:
+    """The topic code asks next by default (`_next_ask` without the model's proposal), taking `answering` as covered."""
+    return next((key for key in QUESTION_KEYS
+                 if key not in interview.covered and key != answering and key not in OPT_IN_TOPICS), None)
+
+
+def _hold_unless_kept(interview: Interview, answering: QuestionKey | None = None) -> None:
+    """Show none of this turn's first reply on the owner's display when it could be hidden before it is saved: it
+    reads untrusted text, and the topic code asks next by default is a limit question (`_TurnReplies.before`)."""
+    display = current_display.get()
+    if display is not None and answering not in LIMIT_CHOICES and _code_next(interview, answering) in LIMIT_CHOICES:
+        display.hold()
+
+
+def _unshow(text: str) -> None:
+    """Take a reply that won't be saved as it is off the owner's display, if it is the one showing."""
+    display = current_display.get()
+    if display is not None:
+        display.withdraw(text)
+
+
 @dataclass
 class _TurnReplies:
     """Keep reply provenance for the whole answer, including any recursive planning calls."""
@@ -2151,6 +2275,7 @@ class _TurnReplies:
         if question in LIMIT_CHOICES:
             for reply, reads_untrusted in self.entries:
                 if reads_untrusted:
+                    _unshow(reply.text)        # text already streamed clears at once (a reset), before anything else
                     # Keep coverage and hidden plan metadata; empty messages are omitted from the view.
                     reply.text = ""
 
@@ -2158,8 +2283,8 @@ class _TurnReplies:
 async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview, *,
                              since: int, replies: _TurnReplies, key: QuestionKey | None = None,
                              follow_up=None) -> None:
-    """Before saving, leave a fresh question, a waiting card, or a closed interview."""
-    if interview.step != "questions" or interview.pending_card is not None:
+    """Before saving, leave a fresh question, a waiting card, or a closed interview (the test-client offer may wait)."""
+    if interview.step != "questions" or interview.pending_card is not None or interview.offering:
         return
     if any(entry.role == "claude" and entry.question in QUESTION_KEYS and entry.text.strip()
            for entry in interview.transcript[since:]):
@@ -2310,6 +2435,7 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
     payload = card.job.model_dump(mode="json") if card.job else card.connector.model_dump(mode="json")
     decision = json.dumps({"proposal_id": proposal_id,
                            "decision": "waiting" if text is not None else card.state, **payload}, ensure_ascii=False)
+    _hold_unless_kept(interview)
     following = await _next_step(owner, engine, model, interview, decision, text=text)
     if text is not None and following is None:
         raise ApiProblem(503, "model_unavailable")
@@ -2338,13 +2464,13 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
         if following.decision == "none":
             return
         if not _decide_typed(interview, proposal_id, following.decision == "accept"):
-            interview.transcript.pop()
+            _unshow(interview.transcript.pop().text)
             interview.transcript.append(Entry(role="claude", text=AMOUNT_FIRST_LINE))
             return
     await _advance(owner, engine, model, interview, following, reply)
 
 
-async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: QuestionKey | None,
+async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: SetupQuestion | None,
                  text: str, *, runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                  card: str | None = None, cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
     """Run a question or typed card answer through the shared turn runner; busy repeats do no work."""
@@ -2373,10 +2499,16 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             await card_turn(ctx, engine, model, interview, card, text=text)
             connect = _claim_connector_connect(interview, None if interview.step == "tools" else card)
             return
+        if question == TEST_CLIENT:
+            _answer_test_client(interview, staged[0])
+            if interview.step == "tools":
+                connect = _claim_connector_connect(interview)
+            return
         since = len(interview.transcript)
         key = question
         desk_id = interview.desk_id
         said, = staged
+        _hold_unless_kept(interview, key)
         turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
                                 [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
         patch = turn.patch()
@@ -2436,6 +2568,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             connect = _claim_connector_connect(interview)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if question == TEST_CLIENT:
+            await _put_test_client(ctx, engine, interview)
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
@@ -2474,10 +2608,15 @@ def settle_plan(interview: Interview) -> None:
 
 
 async def close_setup(owner, engine, model, interview: Interview) -> None:
-    """Settle cards, end with the closing plan (or a fixed line without one), then finish.
+    """Settle cards, end with the closing plan (or a fixed line without one), then finish, and offer to add the owner as
+    a test client when they typed their own contact (`_offer_test_client`): setup then waits on that answer.
 
-    The caller owns persistence and after_finish.
+    While the offer waits, the plan is closed already: closing again ("Use your suggestions") moves on to the Tools
+    step without another plan and writes nothing. The caller owns persistence and after_finish.
     """
+    if interview.offering:
+        interview.step = "tools"
+        return
     settle_plan(interview)
     plan = ""
     for attempt in range(2):
@@ -2491,9 +2630,11 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
             if plan:
                 interview.transcript.append(Entry(role="claude", text=plan))
             break
+        _unshow(closing.reply)                # asked again for a plan: this reply isn't kept
     if not plan:
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
     finish(interview)
+    _offer_test_client(interview)
 
 
 def accepted_jobs(interview: Interview) -> list[JobProposal]:
@@ -2556,8 +2697,287 @@ def finish(interview: Interview) -> None:
     interview.step = "tools"
 
 
+# The test client -------------------------------------------------------------------------------------------------
+
+# A phone number as the kernel keeps one on record: digits, brackets, dots, dashes and a leading "+", with single spaces
+# only before a digit or a bracket, so a number never runs on into the words or hours after it.
+_TYPED_PHONE = re.compile(r"(?<![\w+(])\+?\(?\d(?:[\d().-]|\s(?=[\d(]))*\d(?!\w)")
+# A phone's last group of one or two digits after a longer group, which is the start of something else ("… 0142 9").
+_TRAILING_GROUP = re.compile(r"(.*\d{3})[\s(]+\d{1,2}")
+# Hours and times, which are never part of a phone: a range ("9-5", "9 to 5", "8.00-17.00", "9am-5pm", "9 a 5"), a
+# time ("9am", "17:00") and "24/7".
+_HOUR = r"(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?(?:\s*[ap]\.?m\b\.?)?"
+_TIMES = re.compile(rf"(?<![\w.+-])(?:{_HOUR}\s*(?:-|–|—|\bto\b|\buntil\b|\btill\b|\ba\b|\bhasta\b)\s*{_HOUR}"
+                    r"|24\s*/\s*7|(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?\s*[ap]\.?m\b\.?|(?:[01]?\d|2[0-4]):[0-5]\d)"
+                    r"(?![\w-]|[.:]\d)", re.IGNORECASE)
+CONTACT_ON_RECORD_MAX = 120        # the most characters the kernel keeps for a contact on record
+# A contact answer's sentences end at ".", ";", "!", "?" or a new line (a dot inside an address doesn't end one).
+_SENTENCE_END = re.compile(r"[;!?\n]|\.(?=\s|$)")
+# The words just before a contact, in its clause, that tell whose it is: one the owner rejects, one they mark as their
+# own, and one of another person's (by role; a name is checked against the owner's own, `_contact_names`).
+_REJECTED = re.compile(r"\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b")
+_OWNERS = re.compile(r"\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|"
+                     r"mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|"
+                     r"mi celular|el mío|el mio)\b")
+_SOMEONE_ELSE = re.compile(r"\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|"
+                           r"daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|"
+                           r"recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b")
+# A name just before a contact ("Ana at …", "Maria: …"), a possessive name ("Ana's email is …"), and the capitalized
+# words that are never a person's name.
+_NAMED = re.compile(r"([^\W\d_][^\W\d_'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$")
+_POSSESSIVE = re.compile(r"([^\W\d_][^\W\d_-]*)'s\b")
+_NOT_NAMES = _CONTACT_LABEL_WORDS | frozenset({
+    "my", "me", "contact", "contacts", "customers", "clients", "reach", "use", "write", "message", "us", "our", "the",
+    "for", "please", "bookings", "booking", "sales", "orders", "support", "info", "hello", "emergencies", "emergency",
+    "urgent", "after", "hours", "business", "ask", "just", "then", "otherwise", "also", "contacto", "clientes",
+    "cliente", "escríbeme", "llámame", "llama", "escribe", "reservas", "urgencias", "para", "por", "favor", "mi",
+})
+
+
+@dataclass
+class _Contact:
+    """A contact the owner typed, with what its clauses said about it across their answers."""
+
+    value: str
+    email: bool
+    rejected: bool = False
+    someone_elses: bool = False
+    marked: bool = False
+
+
+def _contact_names(interview: Interview) -> tuple[frozenset[str], frozenset[str]]:
+    """The owner's name's words, and the words that are no other person's name: labels and the business's name."""
+    def words(text: str | None) -> frozenset[str]:
+        return frozenset(re.findall(r"[^\W\d_]+", (text or "").casefold()))
+    return words(interview.answers.owner_display_name), _NOT_NAMES | words(interview.answers.business_name)
+
+
+def _contacts_in(text: str) -> list[tuple[int, int, str, bool]]:
+    """Each email address and phone number in `text`, in order: (start, end, as written, whether an email). A phone is
+    one number of 7 to 15 digits, outside any web address and without the hours or times beside it."""
+    found = []
+    for match in _CONTACT_ADDRESS.finditer(text):
+        address = match.group().rstrip(".,;:!?)]}")
+        if "@" in address and "/" not in address and len(address) <= CONTACT_ON_RECORD_MAX:
+            found.append((match.start(), match.start() + len(address), address, True))
+
+    def blank(match: re.Match[str]) -> str:
+        return " " * len(match.group())
+
+    rest = _TIMES.sub(blank, _CONTACT_DOMAIN.sub(blank, _CONTACT_ADDRESS.sub(blank, text)))
+    for match in _TYPED_PHONE.finditer(rest):
+        phone = match.group()
+        if (shorter := _TRAILING_GROUP.fullmatch(phone)) is not None:
+            phone = shorter.group(1)
+        phone = phone.rstrip(" (.-")
+        if 7 <= len(re.sub(r"\D", "", phone)) <= 15:
+            found.append((match.start(), match.start() + len(phone), phone, False))
+    return sorted(found)
+
+
+def _whose(words: str, owner_words: frozenset[str], not_names: frozenset[str]) -> str | None:
+    """What the words before a contact say about whose it is, by the marker closest to it: "owner" for the owner's own
+    ("my email", "reach me", "mi correo", their own name in front or as a possessive …), "rejected" for one they reject
+    ("not", "no longer", "old", "instead of", "ya no" …), "other" for another person's (a role such as "my assistant",
+    or another name in front, "Ana at …", "Ana: …", or as a possessive, "Ana's email is …"); None when they say
+    nothing of it."""
+    folded = words.casefold()
+    closest: dict[str, int] = {}
+
+    def note(kind: str, at: int) -> None:
+        closest[kind] = max(closest.get(kind, -1), at)
+
+    for pattern, kind in ((_REJECTED, "rejected"), (_OWNERS, "owner"), (_SOMEONE_ELSE, "other")):
+        for match in pattern.finditer(folded):
+            note(kind, match.end())
+    names = [(match.group(1), match.end()) for match in _POSSESSIVE.finditer(words)]
+    if (named := _NAMED.search(words)) is not None:
+        names.append((named.group(1), named.end()))
+    for name, at in names:
+        if not name[0].isupper():
+            continue
+        if name.casefold() in owner_words:
+            note("owner", at)
+        elif name.casefold() not in not_names:
+            note("other", at)
+    return max(closest, key=lambda kind: closest[kind]) if closest else None
+
+
+def _owner_contact(interview: Interview) -> str | None:
+    """The contact the owner gave as theirs, from their own answers to the contact question
+    (`contact_and_after_hours`): never the public contact the turn's model wrote, which the website or memory may have
+    suggested, and never one typed on another question. Of every email and phone they typed there (`_contacts_in`),
+    one they reject or give as another person's (`_whose`) never counts, and that carries on to every contact after it
+    in its sentence ("Do not use a@… or b@…", "my assistant Ana at 510-… or ana@…") until the owner marks one as their
+    own. Of the rest, those they mark as their own come first: the one email among them, else the one phone. Two
+    emails, or two phones with no email, that nothing tells apart make no contact, so no offer."""
+    owner_words, not_names = _contact_names(interview)
+    contacts: dict[str, _Contact] = {}
+    asked: str | None = None
+    for entry in interview.transcript:
+        if entry.role == "claude" and (entry.question is not None or entry.card is not None):
+            asked = entry.question
+            continue
+        if entry.role != "owner" or asked != "contact_and_after_hours":
+            continue
+        text = entry.text.replace("\u2019", "'")
+        sentence_ends = [match.end() for match in _SENTENCE_END.finditer(text)]
+        sentence, carried, previous = -1, None, 0
+        for start, end, value, email in _contacts_in(text):
+            begins = max([0, *(stop for stop in sentence_ends if stop <= start)])
+            if begins != sentence:
+                sentence, carried, previous = begins, None, begins
+            said = _whose(text[previous:start], owner_words, not_names)
+            previous = end
+            if said is not None:
+                carried = None if said == "owner" else said
+            key = value.casefold() if email else re.sub(r"\D", "", value)
+            contact = contacts.setdefault(key, _Contact(value=value, email=email))
+            contact.value = value
+            if carried == "rejected":
+                contact.rejected = True
+            elif carried == "other":
+                contact.someone_elses = True
+            elif said == "owner":
+                contact.marked = True
+    kept = [contact for contact in contacts.values() if not contact.rejected and not contact.someone_elses]
+    pool = [contact for contact in kept if contact.marked] or kept
+    emails = [contact.value for contact in pool if contact.email]
+    phones = [contact.value for contact in pool if not contact.email]
+    if emails:
+        return emails[0] if len(emails) == 1 else None
+    return phones[0] if len(phones) == 1 else None
+
+
+def _ask_test_client(interview: Interview) -> None:
+    """The test-client offer, with code's two choices, as the question setup waits on."""
+    interview.transcript.append(Entry(role="claude", text=TEST_CLIENT_OFFER, question=TEST_CLIENT, choices=[
+        Choice(text=TEST_CLIENT_YES, recommended=True), Choice(text=TEST_CLIENT_NO, recommended=False)]))
+    interview.step = "questions"
+
+
+def _offer_test_client(interview: Interview) -> None:
+    """Once the plan is closed, offer once to put the owner on record as a test client, only when they typed their own
+    contact (`_owner_contact`). Setup then waits on the answer (`_answer_test_client`) before its Tools step."""
+    if _owner_contact(interview) is None or any(entry.question == TEST_CLIENT for entry in interview.transcript):
+        return
+    _ask_test_client(interview)
+
+
+def _reads_yes(text: str) -> bool | None:
+    """The owner's answer to the test-client offer, read word by word by code alone: None when it asks something or
+    says yes only on a condition (`TEST_CLIENT_UNCLEAR`, so "What does add me as a test client mean?" and "What happens
+    if I say yes?" are neither); else False when it has a "no" word or phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and
+    "don't add me" are no); else True when it has a "yes" one (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client"
+    and "Sure, go ahead" are yes); else None."""
+    if TEST_CLIENT_UNCLEAR.search(text) or (TEST_CLIENT_SI.search(text) and not TEST_CLIENT_SI_ALONE.match(text)):
+        return None
+    said = " {} ".format(" ".join(re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.casefold().replace("\u2019", "'"))))
+    if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_NO):
+        return False
+    if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_YES):
+        return True
+    return None
+
+
+def _answer_test_client(interview: Interview, said: Entry) -> None:
+    """The owner's answer to the test-client offer (`said`), read by code with no model call (`_reads_yes`). An answer
+    that is neither a yes nor a no gets the same offer again; a yes or a no moves setup on to its Tools step. A yes,
+    with a contact the owner typed (`_owner_contact`), is marked on their answer, which the turn saves before anyone
+    is put on record (`_put_test_client`, after the save); a no writes nothing and adds no line."""
+    answer = _reads_yes(said.text)
+    if answer is None:
+        _ask_test_client(interview)
+        return
+    if answer and _owner_contact(interview) is not None:
+        said.test_client = "yes"
+    interview.step = "tools"
+
+
+def _record_test_client(interview: Interview) -> bool:
+    """Mark the owner's saved yes as done, with `TEST_CLIENT_ADDED` right after it; False when no yes waits on it."""
+    entries = interview.transcript
+    index = next((index for index in range(len(entries) - 1, -1, -1) if entries[index].test_client == "yes"), None)
+    if index is None:
+        return False
+    entries[index].test_client = "added"
+    entries.insert(index + 1, Entry(role="claude", text=TEST_CLIENT_ADDED))
+    return True
+
+
+async def _put_test_client(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
+    """After the owner's yes to the test-client offer is saved, put them on record as a client
+    (`PUT /desks/{id}/people`, ref `TEST_CLIENT_REF`, which makes a repeat the same person), in their display name and
+    with the contact they typed (`_owner_contact`), then save `TEST_CLIENT_ADDED` (`_record_test_client`), retrying
+    once on a conflict. It is a person on record and nothing else: no limit, rule, fact, document or public line.
+    Nothing runs once the yes is marked done, and a failure never stops setup: it is logged by type, never with the
+    contact, and Claude says nothing."""
+    contact = _owner_contact(interview)
+    if contact is None or not any(entry.test_client == "yes" for entry in interview.transcript):
+        return
+    try:
+        desk_id = owner.desk(interview.desk_id)
+        business = await _business(owner, desk_id)
+        await owner.kernel.call("PUT /desks/{id}/people", DeskPeopleRequest(upsert=[PersonUpsert(
+            ref=TEST_CLIENT_REF, display_name=business["owner_display_name"], contact=contact)]),
+            path={"id": desk_id})
+    except Exception as failed:
+        logger.warning("setup couldn't add the owner as a test client (%s)", type(failed).__name__)
+        return
+    for attempt in range(2):
+        try:
+            current = await _read(engine, owner, interview.interview_id)
+            seen = _stored(current)
+            current.business_tools_enabled = interview.business_tools_enabled
+            if not _record_test_client(current):
+                return
+            await _commit(engine, owner, current, seen)
+        except Exception as failed:
+            if isinstance(failed, ApiProblem) and failed.status == 409 and failed.error == "conflict" and attempt == 0:
+                continue
+            logger.warning("setup couldn't save that the owner is a test client (%s)", type(failed).__name__)
+            return
+        _record_test_client(interview)
+        return
+
+
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
-    """A5 (19) supplies the kernel business-tool write after the blocks are deployed."""
+    """Publish accepted configurations as one batch for the owner's tool review. When the kernel refuses the batch
+    and names some of its tools, publish it once more without them; any other refusal is raised."""
+    tools = []
+    used = set()
+    configured = [job for job in accepted_jobs if job.config is not None]
+    if len(configured) > 8:
+        logger.warning("%s accepted setup jobs with configurations were left out of the business tools batch",
+                       len(configured) - 8)
+    for job in configured[:8]:
+        slug = item_slug(job.title)
+        slug = re.sub(r"^[^a-z]+", "", slug) or job.config.block.replace("_", "-")
+        slug = slug[:40].rstrip("-")
+        name, number = slug, 2
+        while name in used:
+            suffix = f"-{number}"
+            name = slug[:40 - len(suffix)].rstrip("-") + suffix
+            number += 1
+        used.add(name)
+        tools.append({"tool": f"desk.{name}", "title": job.title[:60],
+                      "description": " ".join(job.how.split())[:300],
+                      "config": job.config.model_dump(mode="json")})
+    if not tools:
+        return
+    try:
+        await owner.kernel.call("PUT /desks/{id}/business_tools",
+                                BusinessToolsRequest.model_validate({"tools": tools}), path={"id": desk_id})
+    except KernelFailed as failed:
+        # A refusal's detail is keyed "<tool>.<field>", and a tool's name has dots of its own.
+        refused = {tool["tool"] for tool in tools if failed.status == 422
+                   and any(key.startswith(tool["tool"] + ".") for key in failed.detail or {})}
+        if not refused or len(refused) == len(tools):
+            raise
+        logger.warning("%s setup business tools were refused; retrying without them", len(refused))
+        kept = [tool for tool in tools if tool["tool"] not in refused]
+        await owner.kernel.call("PUT /desks/{id}/business_tools",
+                                BusinessToolsRequest.model_validate({"tools": kept}), path={"id": desk_id})
 
 
 def _claim_connector_connect(interview: Interview, proposal_id: str | None = None) -> bool:
@@ -2619,9 +3039,16 @@ async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
     """Apply enabled business tools after the setup commit, without a database lock."""
     if not interview.business_tools_enabled:
         return
-    desk_id = owner.desk(interview.desk_id)
     try:
+        desk_id = owner.desk(interview.desk_id)
         await _put_business_tools(owner, desk_id, accepted_jobs(interview))
+    except KernelFailed as failed:
+        if failed.status == 404:
+            logger.warning("setup business tools aren't available (404); keeping words only")
+        elif failed.status == 422:
+            logger.warning("the setup business tools batch was refused (%s); keeping words only", failed.code)
+        else:
+            logger.warning("a setup business tools write failed (%s %s)", failed.status, failed.code)
     except Exception as failed:
         logger.warning("a setup business tools write failed (%s)", type(failed).__name__)
 
@@ -2643,12 +3070,15 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
         if not business_tools_enabled:
             _clear_configs(interview)
         await close_setup(ctx, engine, model, interview)
-        connect = _claim_connector_connect(interview)
+        # With the test-client offer waiting, the Tools step and its post-finish work wait for its answer (`answer`).
+        if interview.step == "tools":
+            connect = _claim_connector_connect(interview)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
-        await after_finish(ctx, interview)
+        if interview.step == "tools":
+            await after_finish(ctx, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=lambda interview: [Entry(role="owner", text="Use your suggestions")],
@@ -2663,16 +3093,13 @@ STEP_ORDER: tuple[SetupStep, ...] = ("questions", "tools", "rules", "situations"
 CARD_DRAFT_ROUTE, SITUATIONS_ROUTE = "card_draft", "situations"
 CARD_DRAFT_MAX_TOKENS = 4096
 SITUATIONS_MAX_TOKENS = 4096
-CALENDAR_DAYS = 14
-SLOT_MINUTES = 60
 ITEM_ID_MAX = 40
-WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 # The Ask me first preset's utility cards: in every setup draft, so slots, leads, callbacks, verification and the
 # setup reads never fall to a default ask. Setup drafts no card of its own on these tools.
 UTILITY_CARDS: tuple[RuleCard, ...] = tuple(PRESETS["ask_first"])
 UTILITY_TOOLS = frozenset(card.applies_to for card in UTILITY_CARDS)
 EFFECT_TARGETS = tuple(f"effect:{effect}" for effect in get_args(Effect))
-MONEY_TARGETS = MONEY_TOOLS | {"effect:charge", "effect:pay_out"}
+MONEY_TARGETS = MONEY_TOOLS | {f"effect:{effect}" for effect in contracts.MONEY_EFFECTS}
 # Where each tool a situation can call acts (as its profile says), for the probe's stand-in resource.
 RESOURCE_KINDS: dict[str, str] = {
     "native.quote": "desk", "native.find_slots": "desk", "native.book": "slot", "native.release_document": "document",
@@ -2764,29 +3191,6 @@ def price_items(prices: list[PriceAnswer]) -> list[PriceItem]:
         taken.add(item_id)
         items.append(PriceItem(item_id=item_id, title=price.title, unit_cents=price.unit_cents))
     return items
-
-
-def _minute(moment: time) -> int:
-    return moment.hour * 60 + moment.minute
-
-
-def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list[CalendarSlot]:
-    """60-minute slots inside the opening hours on the 14 days after `today`, each named `S-<yyyymmdd>-<hhmm>` by its
-    start in the business's time zone (a window's end is exclusive; 00:00 is midnight)."""
-    zone = ZoneInfo(timezone)
-    slots: dict[str, CalendarSlot] = {}
-    for offset in range(1, CALENDAR_DAYS + 1):
-        day = today + timedelta(days=offset)
-        for window in hours:
-            if WEEK[day.weekday()] not in window.days:
-                continue
-            end = _minute(window.end) or 24 * 60
-            for start in range(_minute(window.start), end - SLOT_MINUTES + 1, SLOT_MINUTES):
-                local = time(start // 60, start % 60)
-                slot_id = f"S-{day:%Y%m%d}-{local:%H%M}"
-                slots.setdefault(slot_id, CalendarSlot(slot_id=slot_id, starts_at=datetime.combine(day, local, zone),
-                                                       minutes=SLOT_MINUTES))
-    return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
 PUBLIC_LINE_KEYS = {
@@ -3190,10 +3594,16 @@ def _covering(tool: str, tools: list[dict], effects: frozenset[str] | None = Non
     return frozenset({tool, *(f"effect:{effect}" for effect in offered if effects is None or effect in effects)})
 
 
+def _money_targets(tools: list[dict]) -> frozenset[str]:
+    """Money tools offered by this Desk, and effect targets that cover them."""
+    return MONEY_TARGETS | frozenset(target for tool in tools if money_tool(tool["tool"], tool["effects"])
+                                     for target in _covering(tool["tool"], tools))
+
+
 def _past_a_limit(card: RuleCard, tools: list[dict], answers: SetupAnswers) -> str | None:
     """The answered limit an auto card goes past, by the tool it names or an effect the tool has, or None: a quote's
     amount (which it must set) and discount past the answered quote and discount limits, a document going out unless
-    verified owners get their own, or a payment link's amount past the lower of the answered link limit and the money
+    verified owners get their own, or a money tool's amount past the lower of the answered link limit and the money
     cap. An unanswered limit is 0."""
     if card.applies_to in _covering("native.quote", tools):
         if card.max_amount_cents is None or card.max_amount_cents > (answers.quote_auto_max_cents or 0):
@@ -3204,7 +3614,8 @@ def _past_a_limit(card: RuleCard, tools: list[dict], answers: SetupAnswers) -> s
             and answers.documents != "verified_owner"):
         return "documents"
     link_limit = min(answers.payment_link_auto_max_cents or 0, answers.auto_money_cap_cents)
-    if card.applies_to in _covering("native.payment_link", tools) and (card.max_amount_cents or 0) > link_limit:
+    if card.applies_to in _money_targets(tools) and (
+            card.max_amount_cents is None or card.max_amount_cents > link_limit):
         return "link_limit"
     return None
 
@@ -3251,7 +3662,7 @@ def _card_problems(drafted: DraftedRules, tools: list[dict], answers: SetupAnswe
             continue
         if _pays_out(card.applies_to, tools):
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS["pay_out"]))
-        elif card.applies_to in MONEY_TARGETS and (card.max_amount_cents or 0) > cap:
+        elif card.applies_to in _money_targets(tools) and (card.max_amount_cents or 0) > cap:
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS["above_cap"]))
         elif (past := _past_a_limit(card, tools, answers)) is not None:
             problems.append(CARD_ERROR_LINE.format(index=index, problem=CARD_ERRORS[past]))
@@ -3414,9 +3825,10 @@ def _local(moment: datetime, zone: ZoneInfo) -> datetime:
 
 def _open_at(moment: datetime, hours: list[HoursWindow]) -> HoursWindow | None:
     """The window `moment` (local) falls in, if any (a window's end is exclusive; 00:00 is midnight)."""
-    minute = _minute(moment.time())
+    minute = minute_of_day(moment.time())
     for window in hours:
-        if WEEK[moment.weekday()] in window.days and _minute(window.start) <= minute < (_minute(window.end) or 1440):
+        if (WEEK[moment.weekday()] in window.days
+                and minute_of_day(window.start) <= minute < (minute_of_day(window.end) or 1440)):
             return window
     return None
 
@@ -3439,13 +3851,13 @@ def after_hours_start(hours: list[HoursWindow], timezone: str, now: datetime) ->
     if day is None:
         sunday = today + timedelta(days=(6 - today.weekday()) % 7 or 7)
         return datetime.combine(sunday, time(22), zone)
-    ends = [_minute(window.end) or 1440 for window in hours if WEEK[day.weekday()] in window.days]
+    ends = [minute_of_day(window.end) or 1440 for window in hours if WEEK[day.weekday()] in window.days]
     moment = datetime.combine(day, time(0), zone) + timedelta(minutes=max(ends))
     for _ in range(len(hours) * 7):                      # a window that continues past it moves it on
         window = _open_at(moment, hours)
         if window is None:
             break
-        moment = datetime.combine(moment.date(), time(0), zone) + timedelta(minutes=_minute(window.end) or 1440)
+        moment = datetime.combine(moment.date(), time(0), zone) + timedelta(minutes=minute_of_day(window.end) or 1440)
     return moment
 
 
@@ -3456,7 +3868,7 @@ def next_opening(hours: list[HoursWindow], timezone: str, now: datetime) -> date
     day = _next_day_with_hours(hours, _local(now, zone).date())
     if day is None:
         return None
-    start = min(_minute(window.start) for window in hours if WEEK[day.weekday()] in window.days)
+    start = min(minute_of_day(window.start) for window in hours if WEEK[day.weekday()] in window.days)
     return datetime.combine(day, time(start // 60, start % 60), zone)
 
 
@@ -3699,10 +4111,21 @@ async def go_live(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, publi
 # Tools -------------------------------------------------------------------------------------------------------------
 
 
-async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupTools:
+async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
+                      business_tools_enabled: bool = False) -> SetupTools:
     """The new Desk's tools as the kernel lists them, each with the active rules' cards that cover it, and the mock
     payments server while it isn't connected."""
-    desk_id = await interview_desk(owner, engine, interview_id)
+    async with engine.connect() as conn:
+        interview = await _load(conn, owner.copy_id, interview_id)
+    desk_id = owner.desk(interview.desk_id)
+    if (business_tools_enabled and interview.step != "questions"
+            and any(job.config is not None for job in accepted_jobs(interview))
+            and not await owner.ro.rows("tools", desk_id=desk_id, source="business")):
+        interview.business_tools_enabled = business_tools_enabled
+        # End the read's transaction before waiting on the kernel; the reads below set the copy again on their own.
+        if owner.ro.conn.in_transaction():
+            await owner.ro.conn.rollback()
+        await after_finish(owner, interview)
     rows = await tool_rows(owner, desk_id, version_from_row(await active_row(owner, desk_id)).cards)
     connected = any(row.tool in MCP_TOOLS for row in rows)
     return SetupTools(tools=rows, connectable=[] if connected else ["mock_payments"])

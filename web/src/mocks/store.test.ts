@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Decision, DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { Decision, DecisionState, EvMessage, HoursWindow, KnowledgeItem, LedgerPage, PublicDesk, RuleCard, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -36,6 +36,7 @@ import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
+import type { DocumentAnswer } from './documents.ts';
 import {
   CALLBACK_WINDOW,
   DECISIONS,
@@ -51,7 +52,7 @@ import {
   turnLanguage,
   type RuleName,
 } from './script.ts';
-import { RIVERA } from './seed.ts';
+import { PRESETS, RIVERA, RIVERA_HOURS, presetCards } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 import { validateContract } from './validate.ts';
@@ -254,6 +255,27 @@ describe('the scripted Desk', () => {
       `Your Rivera Plumbing code is ${DEMO_CODE}. It expires in ten minutes. If you didn't ask for it, ignore this message.`,
       `Tu código de Rivera Plumbing es ${DEMO_CODE}. Vence en diez minutos. Si no lo pediste, ignora este mensaje.`,
     ]);
+  });
+
+  it('invoice_asks_to_confirm_first_in_a_chat_not_verified_as_its_owner', async () => {
+    // Only the invoice's own verified owner skips the code. A chat with a code sent but not yet
+    // entered, and a chat verified as someone else, each start verification as before: the
+    // checked line, the verify card and a code to Dana's contact on record, with no invoice.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    await send('Could you send my last invoice again, please?');
+    await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the chat is on record');
+    mockStore.world.verify(record, rivera.people.bob);
+    await send('Please send my last invoice.');
+    await drain();
+    const replies = events.flatMap(([, ev]) => (ev.type === 'message' ? [ev.blocks.map((b) => [b.kind, b.template])] : []));
+    const confirmFirst = [['prose', null], ['card', 'verify_prompt']];
+    expect(replies).toEqual([confirmFirst, confirmFirst, confirmFirst]);
+    const codes = mockStore.world.inbox.filter((r) => r.sessionId === session.session_id && r.entry.kind === 'verification_code');
+    expect(codes.map((r) => r.entry.to)).toEqual(Array(3).fill(rivera.people.dana.maskedContact));
   });
 
   it('script_matches_whole_words', async () => {
@@ -699,14 +721,14 @@ describe('the scripted Desk', () => {
         'en',
         [
           ['prose', null, []],
-          ['card', 'Tuesday, November 3', ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera']],
+          ['card', 'Tuesday, November 3', ['2:00 pm to 4:00 pm', 'With Maria Rivera']],
         ],
       ],
       [
         'es',
         [
           ['prose', null, []],
-          ['card', 'martes 3 de noviembre', ['Llegada de 14:00 a 16:00', 'Con Maria Rivera']],
+          ['card', 'martes 3 de noviembre', ['De 14:00 a 16:00', 'Con Maria Rivera']],
         ],
       ],
     ]);
@@ -1117,8 +1139,9 @@ describe('the scripted Desk', () => {
   });
 
   it('open_handoff_quotes_its_visitors_latest_words', async () => {
-    // As the API reads Needs you (`last_texts`): an open handoff quotes what its visitor wrote last,
-    // on every read, not what they had written when it opened.
+    // As the API reads Needs you (`recent_texts`): an open handoff quotes what its visitor wrote
+    // most recently, their previous and last messages joined with " · ", on every read, not what
+    // they had written when it opened.
     const { session } = await openChat();
     const quoted = async () =>
       ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
@@ -1129,7 +1152,55 @@ describe('the scripted Desk', () => {
     expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
     await send('It is about the leak under my sink.');
     await drain();
-    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink.']]);
+    expect(await quoted()).toEqual([['card', 'Can I talk to Maria? · It is about the leak under my sink.']]);
+    await send('Is   Tuesday\n\nfine?');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink. · Is Tuesday fine?']]);
+  });
+
+  it('held_request_quotes_two_lines_each_cut_to_its_glimpse', async () => {
+    // A held request quotes the same two lines as a handoff (the API's `visitor_lines`): each with
+    // whitespace collapsed, and past 200 characters cut to 199, trimmed, and "…".
+    const { session } = await openChat();
+    const long = `${'x'.repeat(198)}   ${'y'.repeat(10)}`;
+    await send(long);
+    await drain();
+    await send('Can I get 50%   off if I pay cash?');
+    await drain();
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+      (item) => item.decision?.session_id === session.session_id,
+    );
+    expect(held?.from_the_visitor).toBe(`${'x'.repeat(198)}… · Can I get 50% off if I pay cash?`);
+    expect(Array.from(held?.from_the_visitor?.split(' · ')[0] ?? '')).toHaveLength(199);
+  });
+
+  it('needs_you_summarises_a_handoff_never_a_hold', async () => {
+    // As the API's Needs you sends `claude_summary`: on a handoff, the newest AI-written triage of
+    // its chat's stopped attempts, the summary Safety shows for it; on a held request, never, since
+    // a visitor could steer a summary to sway an approval.
+    const read = async () => (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const [seeded] = await read();
+    if (!seeded?.decision) throw new Error('a fresh copy holds the seeded request');
+    // The seeded chat has the stopped draft Safety lists, and its request still carries no summary.
+    expect(seeded.claude_summary).toBeNull();
+    const triage = ((await call('safety', { params: { desk_id: deskId } })).body as Attempt[]).find((a) => a.kind === 'reply_blocked')?.triage;
+    if (!triage) throw new Error("Safety triages the seeded chat's stopped draft");
+
+    // Denied, the request's follow-up shows the handoff card, which hands the chat to Maria.
+    expect((await call('answer', { params: { decision_id: seeded.decision.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    const handed = (await read()).find((item) => item.handoff?.session_id === seeded.session.session_id);
+    expect(handed?.handoff?.kind).toBe('card');
+    expect(handed?.claude_summary).toBe(triage.summary);
+    expect(handed?.from_the_visitor).toBe(seeded.from_the_visitor);
+
+    // A chat with nothing stopped has no triage to summarise it.
+    const { session } = await openChat();
+    await send('Can I talk to Maria?');
+    await drain();
+    const asked = (await read()).find((item) => item.handoff?.session_id === session.session_id);
+    expect(asked?.handoff?.kind).toBe('card');
+    expect(asked?.claude_summary).toBeNull();
   });
 
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
@@ -1356,6 +1427,124 @@ describe('the scripted Desk', () => {
     await send('Do you work weekends?');
     await drain();
     expect(await latest(preview.state.session_id)).toBeNull();
+  });
+});
+
+describe("a verified visitor's document link", () => {
+  /** The headers the API sends with a document and with a refusal on its link, so it is never cached, sniffed, sent on or indexed. */
+  const PRIVATE = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow' };
+  const USED_OR_EXPIRED = 'This link was already opened or has expired. Ask in the chat for a new one.';
+
+  /** A document link's answer, which must be one with a status (not a dropped connection). */
+  function open(method: 'GET' | 'HEAD', token: string, headers: Record<string, string> = {}): DocumentAnswer {
+    const answer = mockStore.document(method, token, { headers });
+    if ('network' in answer) throw new Error(`${method} ${token} dropped the connection`);
+    return answer;
+  }
+
+  /** Dana confirms it's her with the code and gets her last invoice: her chat, with every event its stream got. */
+  async function danaVerified() {
+    const chat = await openChat();
+    await send("I'm Dana Whitfield. Please send my last invoice.");
+    await drain();
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    return chat;
+  }
+
+  /** The token of the link the newest invoice card in `events` hands out. */
+  function newestToken(events: [number, SseEvent][]): string {
+    const card = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks : [])).filter((block) => block.template === 'document_link').at(-1);
+    expect(card?.title).toBe(rivera.blocks.document_link.en.title);
+    const token = /^\/api\/d\/([A-Za-z0-9_-]+)$/.exec(card?.href ?? '')?.[1];
+    if (token === undefined) throw new Error('the invoice card links to its document');
+    return token;
+  }
+
+  /** Dana confirms it's her and gets her last invoice: the token of the link the newest card hands out. */
+  async function invoiceToken(): Promise<string> {
+    return newestToken((await danaVerified()).events);
+  }
+
+  it('the_first_open_gets_the_document', async () => {
+    // As the API sends the kernel's document: plain text, shown in the tab under its title's file name.
+    const opened = open('GET', await invoiceToken());
+    expect(opened).toEqual({
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'inline; filename="Invoice-drain-clearing.txt"', ...PRIVATE },
+      body: 'Rivera Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
+    });
+  });
+
+  it('a_second_open_is_404', async () => {
+    const token = await invoiceToken();
+    expect(open('GET', token).status).toBe(200);
+    // The API's short static copy, in the browser's language, or its error when JSON is asked for.
+    const refused = { 'content-type': 'text/plain; charset=utf-8', ...PRIVATE, vary: 'accept, accept-language' };
+    expect(open('GET', token)).toEqual({ status: 404, headers: { ...refused, 'content-language': 'en' }, body: USED_OR_EXPIRED });
+    expect(open('GET', token, { 'accept-language': 'es-MX,es;q=0.9,en;q=0.8' })).toEqual({
+      status: 404,
+      headers: { ...refused, 'content-language': 'es' },
+      body: 'Este enlace ya se abrió o caducó. Pide uno nuevo en el chat.',
+    });
+    expect(open('GET', token, { accept: 'application/json' })).toEqual({
+      status: 404,
+      headers: { 'content-type': 'application/json', ...PRIVATE, vary: 'accept, accept-language' },
+      body: '{"error":"link_used_or_expired"}',
+    });
+  });
+
+  it('an_unknown_link_is_404', async () => {
+    // Before any card hands it out, the invoice's link names nothing, as a made-up one doesn't.
+    for (const token of [rivera.blocks.document_link.en.href?.slice('/api/d/'.length) ?? '', 'nothing-here']) {
+      expect([open('GET', token).status, open('GET', token).body], token).toEqual([404, USED_OR_EXPIRED]);
+    }
+    expect(open('GET', 'nothing-here').status).toBe(404);
+    const token = await invoiceToken();
+    expect(open('GET', `${token}x`).status).toBe(404);
+    expect(open('GET', token).status).toBe(200);
+  });
+
+  it('asking_again_in_the_verified_chat_hands_out_a_new_card_with_no_new_code', async () => {
+    // Verification lasts for the chat, as the API's does: verified Dana asks again and Claude's
+    // turn after a confirmed code runs at once, with no code to her contact and no card asking her
+    // to confirm. The invoice is released to her as its verified owner, and the new card's link is
+    // a new one, which opens once; the link she already opened stays used.
+    const { session, events } = await danaVerified();
+    const first = newestToken(events);
+    expect(open('GET', first).status).toBe(200);
+    const before = events.length;
+    await send('Could you send my last invoice again, please?');
+    await drain();
+    const again = events.slice(before);
+    expect(typesOf(again)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(again.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks.map((b) => [b.kind, b.template, b.text ?? b.title]) : []))).toEqual([
+      ['prose', null, "Thanks, Dana. Here's your invoice."],
+      ['card', 'document_link', rivera.blocks.document_link.en.title],
+    ]);
+    const decided = [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === session.session_id);
+    expect(decided.map(({ decision }) => [decision.action?.tool, decision.outcome, decision.reason_plain])).toEqual([
+      [DECISIONS.startVerification.tool, 'allow', DECISIONS.startVerification.reasonPlain],
+      [DECISIONS.releaseInvoice.tool, 'allow', DECISIONS.releaseInvoice.reasonPlain],
+      [DECISIONS.releaseInvoice.tool, 'allow', DECISIONS.releaseInvoice.reasonPlain],
+    ]);
+    const codes = mockStore.world.inbox.filter((record) => record.sessionId === session.session_id && record.entry.kind === 'verification_code');
+    expect(codes).toHaveLength(1);
+    const second = newestToken(again);
+    expect(second).not.toBe(first);
+    expect(open('GET', first).status).toBe(404);
+    expect(open('GET', second).status).toBe(200);
+    expect([open('GET', first).status, open('GET', second).status]).toEqual([404, 404]);
+  });
+
+  it('a_look_before_opening_never_uses_the_link', async () => {
+    // A link checker's HEAD answers 200 with the document's privacy headers and no body, whatever
+    // the token names, and the link still opens once after it.
+    const token = await invoiceToken();
+    for (const named of [token, token, 'nothing-here']) expect(open('HEAD', named)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(200);
+    expect(open('HEAD', token)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(404);
   });
 });
 
@@ -1614,6 +1803,62 @@ describe('rules and tools', () => {
     for (const key of ['rules', 'people'] as const) expect((await call(key, { params: { desk_id: deskId } })).status).toBe(401);
     expect((await draftOf(8)).status).toBe(401);
     expect((await confirm(8)).status).toBe(401);
+  });
+
+  it('preset_drafts_recommended_rules_in_the_desks_own_hours', async () => {
+    // Rivera's Desk keeps 8:00 to 18:00 on weekdays and 9:00 to 13:00 on Saturdays: its "Recommended
+    // rules" book weekdays 8 to 6, as the API drafts them, and Saturday bookings ask first.
+    const preset = async () => (await call('draftPreset', { params: { desk_id: deskId }, body: { preset: 'auto' } })).body as RulesDraft;
+    const bookings = (cards: readonly RuleCard[]) => cards.filter((card) => card.applies_to === 'native.book');
+    const [shipped] = bookings(PRESETS.auto);
+    if (shipped === undefined) throw new Error('"Recommended rules" books weekdays');
+    const draft = await preset();
+    // Its weekday card is Rivera's own weekday rule, words included, in all but its id.
+    const reason = 'Weekday bookings in opening hours, checked by the reviewer.';
+    expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' }, reason }]);
+    expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)));
+    expect(bookings(draft.cards)).toEqual([{ ...rivera.ruleCards['rv-book-wk'], card_id: 'preset-book-weekday' }]);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe('auto');
+
+    // A Desk with no hours books weekdays 9 to 5: the preset's cards as they are.
+    mockStore.reset('rivera');
+    const desk = mockStore.world.desk(deskId);
+    if (desk === undefined) throw new Error("Rivera's Desk is in the copy");
+    desk.summary.hours = [];
+    expect((await rules()).preset).toBeNull();
+    const fallback = await preset();
+    expect(fallback.cards).toEqual(PRESETS.auto);
+    expect((await confirm(fallback.version)).status).toBe(200);
+    expect((await rules()).preset).toBe('auto');
+  });
+
+  it('preset_cards_match_the_apis', () => {
+    // The mock drafts a preset as the API does (`desk.api.rules.preset_cards`): a booking card per
+    // weekday window, numbered by first day and then hours, none for hours only at weekends, and the
+    // presets' cards as they are for no hours at all or exactly 9 to 5.
+    const window = (days: HoursWindow['days'], start: string, end: string): HoursWindow => ({ days, start, end });
+    const bookings = (hours: HoursWindow[]) => presetCards('auto', hours).filter((card) => card.applies_to === 'native.book').map((card) => [card.card_id, card.hours]);
+    const monToThu = window(['mon', 'tue', 'wed', 'thu'], '08:00:00', '18:00:00');
+    const friday = window(['fri'], '08:00:00', '16:00:00');
+    expect(bookings([friday, window(['sat'], '09:00:00', '13:00:00'), monToThu])).toEqual([
+      ['preset-book-weekday-1', monToThu],
+      ['preset-book-weekday-2', friday],
+    ]);
+    expect(bookings([window(['thu', 'fri'], '08:00:00', '18:00:00'), window(['sun', 'wed', 'tue', 'mon'], '08:00:00', '18:00:00')])).toEqual([
+      ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '08:00:00', '18:00:00')],
+    ]);
+    expect(bookings([window(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')])).toEqual([
+      ['preset-book-weekday', window(['mon', 'tue', 'wed', 'thu', 'fri'], '00:00:00', '00:00:00')],
+    ]);
+    for (const hours of [[], [window(['mon', 'tue'], '09:00:00', '17:00:00'), window(['wed', 'thu', 'fri', 'sat'], '09:00:00', '17:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto);
+    }
+    // Hours at weekends alone: no booking card, so weekday bookings ask first.
+    for (const hours of [[window(['sat'], '09:00:00', '13:00:00')], [window(['sat', 'sun'], '10:00:00', '16:00:00')]]) {
+      expect(presetCards('auto', hours)).toEqual(PRESETS.auto.filter((card) => card.applies_to !== 'native.book'));
+    }
+    expect(presetCards('ask_first', RIVERA_HOURS)).toEqual(PRESETS.ask_first);
   });
 
   it('rule_chat_answers_about_the_hold_a_question_names', async () => {

@@ -382,6 +382,18 @@
   clauses: [{template: booking_confirmed, fact: own-booking}]
   expect: {ok: true, language: en, blocks: [prose, booking_confirmed]}
 
+# The built-in agent asks an office Desk for a consult and any other Desk for an appointment (plan 09, C2): the
+# Desk's claim that either is booked needs the booking card too.
+- id: r-consult-claim-without-a-card
+  requires: [01a]
+  prose: "Your consult is booked."
+  expect: {ok: false, violations: [promise_word]}
+
+- id: r-appointment-claim-without-a-card
+  requires: [01a]
+  prose: "Your appointment is confirmed."
+  expect: {ok: false, violations: [promise_word]}
+
 - id: c-booking-claim-beside-its-card-es
   requires: [01a]
   prose: "Tu cita está confirmada."

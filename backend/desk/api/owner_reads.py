@@ -60,7 +60,7 @@ from desk.api.schemas import (
 from desk.api.setup import INTERVIEWS
 from desk.api.sse import RUN_EVENTS
 from desk.api.store import MESSAGES, WITH_EVENTS, newest_triage, triaged
-from desk.contracts import Decision, DecisionState
+from desk.contracts import Decision, DecisionState, is_business_tool
 
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
@@ -261,8 +261,10 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
                 if row["session_id"] in who.sessions]
     asked = [decision.session_id for _, decision in held] + [row["session_id"] for row in handoffs]
     texts = {session_id: visitor_lines(said) for session_id, said in (await recent_texts(ctx, desk_id, asked)).items()}
-    # AI-written triage never sits on an approval card: only a handoff, which asks the owner for no decision, gets one.
-    handed = [row["session_id"] for row in handoffs]
+    # AI-written triage never sits beside an approval it could sway: only a handoff gets one, which asks the owner
+    # for no decision, and not while the same session has a held request awaiting them.
+    waiting = {decision.session_id for _, decision in held}
+    handed = [row["session_id"] for row in handoffs if row["session_id"] not in waiting]
     summaries = {session_id: triage.summary
                  for session_id, triage in (await newest_triage(ctx.ro.conn, ctx.copy_id, desk_id, handed)).items()}
     held_by = await _held_by(ctx, desk_id, [decision for _, decision in held])
@@ -358,6 +360,7 @@ REFUSAL_REASONS: dict[str, RefusalCause] = {
 }
 REFUSAL_CHECKS: dict[str, RefusalCause] = {
     "answer_count": "incomplete_request",  # Intake needs one answer per configured question at normalization.
+    "note_canary": "incomplete_request",  # A booking note holding private document text is refused at normalization.
     "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
     "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
     "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
@@ -396,7 +399,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       no_such_charge                                 no_such_charge        Couldn't find that payment
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
-      answer_count                                   incomplete_request    The request wasn't in a form I can use
+      answer_count, note_canary                      incomplete_request    The request wasn't in a form I can use
       not_verified, no_mandate, mandate_exhausted,
       not_an_agent_with_a_mandate (unreachable),
       search_limit (execution only)                   null                  (no label)
@@ -475,12 +478,12 @@ class Activity:
     entries at `entry_time`, the API's transcript rows at their `created_at`."""
 
     people: People
-    bookings: list[Timed]                      # native.book executed, at its ledger entry
+    bookings: list[Timed]                      # native.book or a typed_booking block executed, at its ledger entry
     booked: dict[str, int]                     # each booking's amount, by its decision ID (`booked_amounts`)
     leads: list[Timed]
     stopped: list[Stopped]
     holds: list[Timed]                         # decisions with outcome hold
-    callbacks: list[Timed]                     # native.request_callback executed, at its ledger entry
+    callbacks: list[Timed]                     # native.request_callback or an urgent block executed, at its ledger entry
     stepped: list[Timed]                       # the owner stepping into a session
     texts: list[Timed]                         # visitor and agent text rows
     replies: list[Timed]                       # Claude's delivered events whose handoff flag is false
@@ -522,14 +525,22 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
     return found
 
 
+def from_price_list(quote: dict) -> bool:
+    """Whether a quote was priced from the Desk's price list, not written by a business tool: a purpose payment's
+    quote record names its tool (`desk.<name>`) as its line's item, which no price list item can (`ITEM_ID_PATTERN`
+    has no dot)."""
+    return not any(is_business_tool(line["item_id"]) for line in quote["items"])
+
+
 def booked_amounts(bookings: Iterable[Timed], quotes: Iterable[dict]) -> dict[str, int]:
     """What each booking was booked for, by its decision ID. Taking the bookings in time order, each takes the newest
     quote of its session made at or before it (the latest `created_at`, then the greatest `quote_id`) that no earlier
     booking took, and is booked for its `amount_cents`; with none it is booked for 0, so a quote backs at most one
-    booking. A quote with no `created_at` can't be placed before a booking and backs none."""
+    booking. A quote with no `created_at` can't be placed before a booking and backs none, nor does a purpose
+    payment's quote record, such as a deposit's (`from_price_list`)."""
     by_session: dict[str, list[dict]] = {}
     for quote in quotes:
-        if quote["created_at"] is not None and quote["session_id"] is not None:
+        if quote["created_at"] is not None and quote["session_id"] is not None and from_price_list(quote):
             by_session.setdefault(quote["session_id"], []).append(quote)
     taken: set[str] = set()
     amounts: dict[str, int] = {}
@@ -571,7 +582,8 @@ def _stepped_in(decisions: list[dict], ledger: list[dict]) -> list[Timed]:
 
 async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     """The Desk's activity in its visitor and agent sessions, their transcript rows from `start` on. Decisions are read
-    before the ledger, so every decision's entry is there."""
+    before the ledger, so every decision's entry is there. A business tool's run counts under its tool's current block
+    (wish #465 tracks recording the block each run used)."""
     who = await people(ctx, desk_id)
     leads = [row for row in await ctx.ro.rows("leads", desk_id=desk_id)
              if row["session_id"] is None or row["session_id"] in who.sessions]
@@ -579,11 +591,18 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     entries = {entry["seq"]: entry for entry in ledger}
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
+    tools_by_block = {"urgent": {"native.request_callback"}, "typed_booking": {"native.book"}}
+    for row in await ctx.ro.rows("tools", desk_id=desk_id, source="business"):
+        business = row["business"]
+        config = business.get("config") if isinstance(business, dict) else None
+        block = config.get("block") if isinstance(config, dict) else None
+        if isinstance(block, str) and block in tools_by_block:
+            tools_by_block[block].add(row["tool"])
 
-    def executed(tool: str) -> list[Timed]:
+    def executed(tools: set[str]) -> list[Timed]:
         return [Timed(at=entry_time(entry), session_id=row["session_id"], ref_id=row["decision_id"],
                       line=row["reason_plain"], replayed=decision_replayed(row, entry))
-                for row in decisions if row["tool"] == tool and row["state"] == "executed"
+                for row in decisions if row["tool"] in tools and row["state"] == "executed"
                 and (entry := entries.get(row["ledger_seq"])) is not None]
 
     rows = await ctx.ro.conn.execute(
@@ -609,10 +628,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
                 handoffs.append(at)
             else:
                 replies.append(at)
-    bookings = executed("native.book")
+    bookings = executed(tools_by_block["typed_booking"])
     return Activity(
         people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
-        callbacks=executed("native.request_callback"),
+        callbacks=executed(tools_by_block["urgent"]),
         leads=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["lead_id"], line=row["note"])
                for row in leads],
         stopped=_stopped_attempts(decisions, ledger, who.sessions),

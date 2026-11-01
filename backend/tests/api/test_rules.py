@@ -17,7 +17,8 @@ import html
 import json
 import re
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import time, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -40,7 +41,7 @@ from desk.api.prompts import (
     RuleChat,
 )
 from desk.api.ratelimit import LIMITS, Limit
-from desk.api.rules import card_diff, chat_view, rule_card
+from desk.api.rules import card_diff, chat_view, desk_hours, preset_of, rule_card
 from desk.api.schemas import (
     CardDiff,
     CoveringCard,
@@ -66,13 +67,14 @@ from desk.kernel_api import (
     AnswerRequest,
     CreateSessionRequest,
     DecideRequest,
+    DeskHoursRequest,
     DocumentCreated,
     ExecuteRequest,
     PolicyConfirmRequest,
     PolicyDraftRequest,
     ToolsSimulateChangeRequest,
 )
-from desk.presets import PRESETS
+from desk.presets import PRESETS, preset_cards
 from tests.api.fakes import ScriptedModel, gated
 from tests.api.test_copies import production_settings, usage_row
 from tests.api.test_owner_desks import Owner, new_desk, new_owner
@@ -890,6 +892,205 @@ async def test_preset_drafts_the_shared_preset_cards(app, browser, fake, kernel_
         each for each in [*rivera, person, never] if each not in PRESETS["ask_first"]]
     reply = await owner.browser.post(rules_path(owner, "preset"), json={"preset": "custom"})
     assert (reply.status_code, reply.json()) == (422, {"error": "invalid"})
+
+
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
+EIGHT_TO_SIX = HoursWindow(days=WEEKDAYS, start=time(8), end=time(18))
+NINE_TO_FIVE = HoursWindow(days=WEEKDAYS, start=time(9), end=time(17))
+SATURDAY = HoursWindow(days=["sat"], start=time(9), end=time(13))
+PRESET_BOOKING_REASON = "Weekday bookings in working hours, checked by the reviewer."
+# The reason of a booking card in the Desk's own hours: the example Desk's own weekday rule's wording.
+OPENING_HOURS_REASON = "Weekday bookings in opening hours, checked by the reviewer."
+
+
+def booking_cards(cards: list[RuleCard]) -> list[RuleCard]:
+    return [each for each in cards if each.applies_to == "native.book"]
+
+
+def with_bookings(*bookings: RuleCard) -> list[RuleCard]:
+    """"Recommended rules" with `bookings` in place of its weekday booking card, every other card as it is."""
+    (shipped,) = booking_cards(PRESETS["auto"])
+    at = PRESETS["auto"].index(shipped)
+    return [*PRESETS["auto"][:at], *bookings, *PRESETS["auto"][at + 1:]]
+
+
+def test_recommended_rules_book_weekdays_in_the_desks_own_hours():
+    # An 8 to 6 weekday Desk's "Recommended rules" book weekdays 8 to 6: one booking card, the preset's own in all
+    # but its hours and its reason (which names no hours, in the example Desk's own words), in its place; every other
+    # card is the preset's.
+    (shipped,) = booking_cards(PRESETS["auto"])
+    cards = preset_cards("auto", [EIGHT_TO_SIX])
+    assert cards == with_bookings(shipped.model_copy(update={"hours": EIGHT_TO_SIX, "reason": OPENING_HOURS_REASON}))
+    (booking,) = booking_cards(cards)
+    assert (booking.card_id, booking.applies_to, booking.mode, booking.who, booking.hours, booking.review,
+            booking.reason) == ("preset-book-weekday", "native.book", "auto", "anyone", EIGHT_TO_SIX, True,
+                                OPENING_HOURS_REASON)
+    # Saturday hours drop out ("weekday bookings"), so Saturday bookings ask first.
+    assert preset_cards("auto", [EIGHT_TO_SIX, SATURDAY]) == cards
+    # A window over the whole week keeps its weekdays; windows with the same hours merge, their days in week order.
+    week = HoursWindow(days=["sun", "mon", "tue", "wed", "thu", "fri", "sat"], start=time(8), end=time(18))
+    assert preset_cards("auto", [week]) == cards
+    assert preset_cards("auto", [HoursWindow(days=["thu", "fri"], start=time(8), end=time(18)),
+                                 HoursWindow(days=["wed", "tue", "mon"], start=time(8), end=time(18))]) == cards
+    # A window that ends at midnight (00:00) keeps that end.
+    all_day = HoursWindow(days=["mon", "tue", "wed", "thu", "fri", "sat", "sun"], start=time(0), end=time(0))
+    (midnight,) = booking_cards(preset_cards("auto", [all_day]))
+    assert midnight.hours == HoursWindow(days=WEEKDAYS, start=time(0), end=time(0))
+
+
+def test_recommended_rules_take_a_card_per_weekday_window():
+    # Split weekday hours make a booking card per window, numbered by their first day, then their hours, however the
+    # Desk keeps them, each the preset's card in all but its ID and hours.
+    (shipped,) = booking_cards(PRESETS["auto"])
+    mon_to_thu = HoursWindow(days=["mon", "tue", "wed", "thu"], start=time(8), end=time(18))
+    friday = HoursWindow(days=["fri"], start=time(8), end=time(16))
+    cards = preset_cards("auto", [friday, SATURDAY, mon_to_thu])
+    assert cards == with_bookings(
+        shipped.model_copy(update={"card_id": "preset-book-weekday-1", "hours": mon_to_thu,
+                                   "reason": OPENING_HOURS_REASON}),
+        shipped.model_copy(update={"card_id": "preset-book-weekday-2", "hours": friday, "reason": OPENING_HOURS_REASON}))
+    assert preset_cards("auto", [mon_to_thu, friday]) == cards
+    # Two windows on one day (a lunch break) are two cards, the morning's first.
+    morning = HoursWindow(days=WEEKDAYS, start=time(8), end=time(12))
+    afternoon = HoursWindow(days=WEEKDAYS, start=time(13), end=time(18))
+    assert [(each.card_id, each.hours) for each in booking_cards(preset_cards("auto", [afternoon, morning]))] == [
+        ("preset-book-weekday-1", morning), ("preset-book-weekday-2", afternoon)]
+
+
+def test_recommended_rules_fall_back_to_the_shipped_cards():
+    # No hours at all, or weekday hours of exactly 9 to 5: the shipped cards byte for byte, so the draft hits the
+    # proofs shipped for them.
+    shipped = [each.model_dump_json() for each in PRESETS["auto"]]
+    for hours in ([], [NINE_TO_FIVE], [NINE_TO_FIVE, SATURDAY],
+                  [HoursWindow(days=["mon", "tue"], start=time(9), end=time(17)),
+                   HoursWindow(days=["wed", "thu", "fri", "sat"], start=time(9), end=time(17))]):
+        assert [each.model_dump_json() for each in preset_cards("auto", hours)] == shipped, hours
+    # Fewer weekdays at 9 to 5 aren't the shipped card's hours.
+    (fewer,) = booking_cards(preset_cards("auto", [HoursWindow(days=["mon", "tue", "wed", "thu"], start=time(9),
+                                                                end=time(17))]))
+    assert (fewer.card_id, fewer.hours.days) == ("preset-book-weekday", ["mon", "tue", "wed", "thu"])
+    # "Ask me first" books nothing: its cards whatever the hours.
+    assert preset_cards("ask_first", [EIGHT_TO_SIX]) == PRESETS["ask_first"]
+
+
+def test_recommended_rules_leave_weekday_bookings_to_ask_without_weekday_hours():
+    # A Desk open only at weekends has no weekday hours to book in: the booking card is left out, so a weekday
+    # booking falls to the compiler's default ask, and every other card is the preset's.
+    (shipped,) = booking_cards(PRESETS["auto"])
+    weekend = HoursWindow(days=["sat", "sun"], start=time(10), end=time(16))
+    without = [each for each in PRESETS["auto"] if each != shipped]
+    for hours in ([SATURDAY], [weekend], [SATURDAY, weekend]):
+        assert preset_cards("auto", hours) == without, hours
+        assert preset_of(without, hours) == "auto"
+    assert preset_of(PRESETS["auto"], [SATURDAY]) is None
+
+
+def test_preset_of_reads_the_desks_own_recommended_rules():
+    hours = [EIGHT_TO_SIX, SATURDAY]
+    cards = preset_cards("auto", hours)
+    assert preset_of([*reversed(cards), default("native.payment_link")], hours) == "auto"
+    assert preset_of(PRESETS["ask_first"], hours) == "ask_first"
+    # The shipped 9 to 5 cards aren't an 8 to 6 Desk's "Recommended rules", nor its own those of another Desk.
+    assert preset_of(PRESETS["auto"], hours) is None
+    assert preset_of(cards, []) is None
+    assert preset_of(PRESETS["auto"], []) == "auto"
+
+
+# Hours a Desk's row could hold that don't read as its windows: none at all, JSON that isn't a list, a window with no
+# days, a window with a time that isn't one, and a good window beside a bad one.
+MALFORMED_HOURS = [None, {"days": ["mon"], "start": "08:00:00", "end": "18:00:00"}, "8 to 6",
+                   [{"days": [], "start": "08:00:00", "end": "18:00:00"}],
+                   [{"days": ["mon"], "start": "25:00:00", "end": "18:00:00"}],
+                   [EIGHT_TO_SIX.model_dump(mode="json"), {"days": ["tue"], "start": "8am", "end": "18:00:00"}]]
+
+
+async def test_desk_hours_that_dont_read_are_none():
+    # The Desk's row is the kernel's, so its hours are its windows; any that don't read are none, never an error, so
+    # the Rules page and a preset's draft still work (a draft then takes the shipped cards).
+    async def owner_of(row: dict | None) -> list[HoursWindow]:
+        async def one(view: str, **equals: object) -> dict | None:
+            assert (view, equals) == ("desks", {"desk_id": "desk-1"})
+            return row
+
+        return await desk_hours(SimpleNamespace(ro=SimpleNamespace(one=one)), "desk-1")
+
+    assert await owner_of({"desk_id": "desk-1", "hours": [EIGHT_TO_SIX.model_dump(mode="json")]}) == [EIGHT_TO_SIX]
+    assert await owner_of(None) == []
+    assert await owner_of({"desk_id": "desk-1"}) == []                      # no hours key
+    for hours in MALFORMED_HOURS:
+        assert await owner_of({"desk_id": "desk-1", "hours": hours}) == [], hours
+
+    # A read that fails still fails.
+    async def failing(view: str, **equals: object) -> dict | None:
+        raise ConnectionError("the database is down")
+
+    with pytest.raises(ConnectionError):
+        await desk_hours(SimpleNamespace(ro=SimpleNamespace(one=failing)), "desk-1")
+
+
+async def test_preset_drafts_the_shipped_cards_when_a_desks_hours_dont_read(app, browser, fake, kernel_http):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    shipped = [each.model_dump_json() for each in PRESETS["auto"]]
+    for hours in MALFORMED_HOURS:
+        fake._put("desks", (desk.desk_id,), {
+            "desk_id": desk.desk_id, "copy_id": desk.copy_id, "business_id": desk.business_id, "name": desk.name,
+            "slug": desk.slug, "hours": hours, "answering": desk.answering, "created_at": desk.created_at})
+        fake.flush()
+        reply = await owner.browser.get(rules_url(owner))
+        assert reply.status_code == 200, (hours, reply.text)
+        assert RulesView.model_validate(reply.json()).preset is None
+        draft = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
+        posted = fake.called("POST /policy/draft")[-1]
+        assert [each.model_dump_json() for each in PolicyDraftRequest.model_validate(posted.body).cards] == shipped
+        assert [each.model_dump_json() for each in draft.cards] == shipped, hours
+
+
+async def test_preset_drafts_recommended_rules_in_the_desks_own_hours(app, browser, fake, kernel_http):
+    # Rivera's Desk keeps 8 to 6 on weekdays and 9 to 1 on Saturdays: its "Recommended rules" book weekdays 8 to 6,
+    # and Saturday bookings ask first.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    assert fake.desks[owner.desk_id].hours == [EIGHT_TO_SIX, SATURDAY]
+
+    async def preset() -> str | None:
+        return RulesView.model_validate((await owner.browser.get(rules_url(owner))).json()).preset
+
+    draft = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
+    (posted,) = fake.called("POST /policy/draft")
+    sent = PolicyDraftRequest.model_validate(posted.body).cards
+    assert sent == draft.cards == with_bookings(booking_cards(PRESETS["auto"])[0].model_copy(
+        update={"hours": EIGHT_TO_SIX, "reason": OPENING_HOURS_REASON}))
+    (booking,) = booking_cards(sent)
+    assert (booking.card_id, booking.hours, booking.review, booking.reason) == (
+        "preset-book-weekday", EIGHT_TO_SIX, True, OPENING_HOURS_REASON)
+    # It is Rivera's own weekday rule in everything but its ID.
+    (rivera_weekday,) = [each for each in owner_cards(fake, owner.desk_id) if each.card_id == "rv-book-wk"]
+    assert booking == rivera_weekday.model_copy(update={"card_id": "preset-book-weekday"})
+    # Rivera's own 8 to 6 weekday rule goes to the preset's, and her Saturday rule goes, to ask first.
+    assert {each.card_id for each in draft.diff.removed} >= {"rv-book-wk", "rv-book-sat"}
+    assert booking in draft.diff.added
+    assert await preset() is None
+    assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": draft.version})).status_code == 200
+    assert await preset() == "auto"
+
+    # Hours of 9 to 5 on weekdays draft the shipped cards as they are; the 8 to 6 cards aren't this Desk's preset now.
+    await kernel_http.owner(owner.token).call("PUT /desks/{id}/hours", DeskHoursRequest(hours=[NINE_TO_FIVE]),
+                                              path={"id": owner.desk_id})
+    assert await preset() is None
+    again = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
+    assert PolicyDraftRequest.model_validate(fake.called("POST /policy/draft")[-1].body).cards == PRESETS["auto"]
+    assert again.diff == CardDiff(added=[], removed=[], changed=[(booking, booking_cards(PRESETS["auto"])[0])])
+
+    assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": again.version})).status_code == 200
+    assert await preset() == "auto"
+
+    # Hours at weekends alone draft no booking card: weekday bookings ask first.
+    await kernel_http.owner(owner.token).call("PUT /desks/{id}/hours", DeskHoursRequest(hours=[SATURDAY]),
+                                              path={"id": owner.desk_id})
+    assert await preset() is None
+    weekend = await drafted(owner, rules_path(owner, "preset"), {"preset": "auto"})
+    assert booking_cards(PolicyDraftRequest.model_validate(fake.called("POST /policy/draft")[-1].body).cards) == []
+    assert booking_cards(weekend.cards) == [] and weekend.diff.removed == booking_cards(PRESETS["auto"])
 
 
 async def approved_link(kernel_http, owner: Owner, items: list[dict], n: int) -> None:
