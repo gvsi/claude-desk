@@ -97,7 +97,8 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   const hours = lines.data?.hours?.source === 'suggested' ? lines.data.hours.windows : [];
   const prices = lines.data?.prices?.source === 'suggested' ? lines.data.prices.items : [];
   const hasSuggestions = suggested.length > 0 || hours.length > 0 || prices.length > 0;
-  const empty = lines.data !== undefined && !lines.isError && lines.data.lines.length === 0 && !hasSuggestions;
+  const confirmKeys = [...confirmable.map((line) => line.key), ...(hours.length > 0 ? ['hours'] : []), ...(prices.length > 0 ? ['prices'] : [])];
+  const empty = lines.data !== undefined && !lines.isError && shown.length === 0 && !hasSuggestions && !unknown;
   useEffect(() => {
     const current = lines.data;
     if (!current || openedHeldOnLoad.current) return;
@@ -180,17 +181,19 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
   };
   const confirm = async () => {
     if (editingKey !== null || busy !== null || lines.data === undefined || unknown) return;
-    if (confirmable.length === 0) {
+    if (confirmKeys.length === 0) {
       onNext('safety_check');
       return;
     }
     setBusy('confirm');
     setError(null);
     try {
-      const confirmed = checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: { keys: confirmable.map((line) => line.key), revision: lines.data.revision } }));
+      const confirmed = checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: { keys: confirmKeys, revision: lines.data.revision } }));
       queryClient.setQueryData(queryKey, confirmed);
       if (confirmed.lines.some((line) => !knownKey(line.key))) throw new Error('unknown public line');
-      if (confirmed.lines.some((line) => line.source !== 'owner') || confirmed.hours?.source === 'suggested' || confirmed.prices?.source === 'suggested') throw new Error('unconfirmed suggestions');
+      if (confirmable.some((line) => !confirmed.lines.some((saved) => saved.key === line.key && saved.source === 'owner' && !saved.held))
+        || (hours.length > 0 && confirmed.hours?.source !== 'owner')
+        || (prices.length > 0 && confirmed.prices?.source !== 'owner')) throw new Error('unconfirmed suggestions');
       onNext('safety_check');
     } catch (err) {
       if (err instanceof ApiError && (err.status === 409 || (err.status === 422 && err.code === 'invalid'))) {
@@ -315,7 +318,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
       {error !== null || unknown ? (
         <div ref={notice}><Notice tone="error">{error ?? ownerErrorCopy(null)}</Notice></div>
       ) : null}
-      {lines.data === undefined ? (
+      {lines.data === undefined || lines.isError ? (
         lines.isError ? (
           <Notice tone="error" action={<Button variant="secondary" onClick={() => void lines.refetch()}>{SETUP_COPY.questions.tryAgain}</Button>}>
             {ownerErrorCopy(lines.error)}

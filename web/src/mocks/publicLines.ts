@@ -117,7 +117,7 @@ export const PUBLIC_LINES_ROUTES = {
     }
     const items = found.prices.items.filter((_, position) => position !== index);
     found.prices = items.length ? { source: 'suggested', items: priceItems(items) } : null;
-    return { status: 200, body: structuredClone(found) };
+    return { status: 200, body: structuredClone(storePublicState(sv.world, req.params.id!, found)) };
   },
   removePublicLine(sv, req) {
     const found = read(sv, req);
@@ -127,7 +127,7 @@ export const PUBLIC_LINES_ROUTES = {
     if (!item || item.source !== 'suggested') return { status: 422, body: { error: 'not_suggested', key } };
     if (key === 'hours' || key === 'prices') found[key] = null;
     else found.lines = found.lines.filter((line) => line.key !== key);
-    return { status: 200, body: structuredClone(found) };
+    return { status: 200, body: structuredClone(storePublicState(sv.world, req.params.id!, found)) };
   },
   setupPublicLines(sv, req) {
     const found = read(sv, req);

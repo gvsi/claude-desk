@@ -44,6 +44,23 @@ async function openLines(viewport: Viewport = 'desktop') {
   return { screen, state };
 }
 
+it('confirms rendered group keys with the latest revision after removing Hours', async () => {
+  const { screen, state } = await openLines('phone');
+  await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).toBeVisible();
+  await screen.getByRole('button', { name: 'Remove', exact: true }).nth(1).click();
+  await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).not.toBeInTheDocument();
+  const current = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.poll(() => mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')).toBeDefined();
+  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({
+    keys: [...current.lines.map((line) => line.key), 'prices'], revision: current.revision,
+  });
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  const confirmed = storedPublicState(mockStore.world, state.interview_id)!;
+  expect(confirmed.hours).toBeNull();
+  expect(confirmed.prices?.source).toBe('owner');
+});
+
 it('opens a held line with the owner’s words and signed refusal, and publishes an accepted rewrite', async () => {
   const state = await atSituations();
   const text = 'We always charge $250.';
@@ -65,12 +82,10 @@ it('opens a held line with the owner’s words and signed refusal, and publishes
   expect(screen.getByText(REFUSED_COPY, { exact: true }).elements()).toHaveLength(0);
   const saved = storedPublicState(mockStore.world, state.interview_id)!;
   expect(saved.lines.find((line) => line.key === 'policy:about')).toMatchObject({ text: 'We help local businesses.', source: 'owner', held: false });
-  expect(await mockStore.dispatch('publicDesk', { params: { slug: state.slug } })).toMatchObject({ status: 200, body: { charter: [
-    expect.objectContaining({ fact_id: 'charter:policy:about', title: 'We help local businesses.' }),
-  ] } });
+  expect(await mockStore.dispatch('publicDesk', { params: { slug: state.slug } })).toMatchObject({ status: 200, body: { charter: saved.lines.filter((line) => line.source === 'owner' && !line.held).map((line) => expect.objectContaining({ fact_id: `charter:${line.key}`, title: line.text })) } });
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
-  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: saved.lines.map((line) => line.key), revision: saved.revision });
+  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: [...saved.lines.filter((line) => !line.held).map((line) => line.key), 'hours', 'prices'], revision: saved.revision });
 });
 
 it('keeps a successful save open in the refused state when its returned line is still held', async () => {
@@ -101,7 +116,7 @@ it('keeps a successful save open in the refused state when its returned line is 
 it('opens the first held row in display order, preserves canceled holds and confirms only other lines', async () => {
   const state = await atSituations();
   const held = [
-    { key: 'policy:pricing', text: 'We always charge $250.' },
+    { key: 'policy:intake', text: 'We always charge $250.' },
     { key: 'policy:about', text: 'We always reply within 20 minutes.' },
   ];
   for (const line of held) holdPublicLineOnSeed(mockStore.world, state.interview_id, line.key, line.text);
@@ -113,9 +128,9 @@ it('opens the first held row in display order, preserves canceled holds and conf
   await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect.element(about).not.toBeInTheDocument();
   await screen.getByRole('button', { name: 'Edit', exact: true }).nth(2).click();
-  const pricing = screen.getByRole('textbox', { name: 'Pricing', exact: true });
-  await expect.element(pricing).toHaveValue(held[0]!.text);
-  await expect.element(pricing).toHaveAttribute('aria-invalid', 'true');
+  const intake = screen.getByRole('textbox', { name: 'Getting started', exact: true });
+  await expect.element(intake).toHaveValue(held[0]!.text);
+  await expect.element(intake).toHaveAttribute('aria-invalid', 'true');
   await expect.element(screen.getByText(REFUSED_COPY, { exact: true })).toBeVisible();
   expect(screen.getByRole('textbox').elements()).toHaveLength(1);
   await screen.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -123,14 +138,14 @@ it('opens the first held row in display order, preserves canceled holds and conf
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.poll(() => mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')).toBeDefined();
   const selected = before.lines.filter((line) => !line.held);
-  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: selected.map((line) => line.key), revision: before.revision });
+  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: [...selected.map((line) => line.key), 'hours', 'prices'], revision: before.revision });
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
   const after = storedPublicState(mockStore.world, state.interview_id)!;
   for (const line of held) expect(after.lines.find((candidate) => candidate.key === line.key)).toEqual(before.lines.find((candidate) => candidate.key === line.key));
-  expect(after.hours).toEqual(before.hours);
-  expect(after.prices).toEqual(before.prices);
+  expect(after.hours).toEqual({ ...before.hours, source: 'owner' });
+  expect(after.prices).toEqual({ ...before.prices, source: 'owner' });
   expect(await mockStore.dispatch('publicDesk', { params: { slug: state.slug } })).toMatchObject({ status: 200, body: {
-    charter: selected.map((line) => expect.objectContaining({ fact_id: `charter:${line.key}`, title: line.text })),
+    charter: [...selected.map((line) => expect.objectContaining({ fact_id: `charter:${line.key}`, title: line.text })), expect.objectContaining({ fact_id: 'charter:hours' })],
   } });
 });
 
@@ -171,7 +186,7 @@ it('holds a malformed held flag instead of confirming the line', async () => {
 it('continues after canceling when every displayed line is held without confirming or publishing it', async () => {
   const state = await atSituations();
   await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
-  storePublicLines(mockStore.world, state.interview_id, [{ key: 'policy:about', text: 'The owner’s stored words.', source: 'owner', editable: true, held: true }]);
+  storePublicState(mockStore.world, state.interview_id, { lines: [{ key: 'policy:about', text: 'The owner’s stored words.', source: 'owner', editable: true, held: true }], hours: null, prices: null });
   const before = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('button', { name: 'Looks right' }).click();
@@ -283,7 +298,7 @@ it('confirms displayed keys and revision and advances to Safety check only after
   }
   release();
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
-  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({ keys: before.lines.map((line) => line.key), revision: before.revision });
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({ keys: [...before.lines.map((line) => line.key), 'hours', 'prices'], revision: before.revision });
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(1);
 });
 
@@ -413,7 +428,7 @@ it.each(['policy:how_we_help', 'policy:unknown', null])('shows the signed Notice
 });
 
 it.each([
-  ['policy:about', 'About us', 1500], ['policy:pricing', 'Pricing', 500],
+  ['policy:about', 'About us', 1500], ['policy:intake', 'Getting started', 500],
 ] as const)('keeps an over-limit %s draft intact when one character is deleted', async (key, label, limit) => {
   const state = await atSituations();
   const text = '😀' + 'x'.repeat(limit);
@@ -499,8 +514,8 @@ it('reviews Contact after About, saves within its 200-character limit and confir
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('button', { name: 'Edit', exact: true }).first()).toBeVisible();
-  const labels = [...screen.container.querySelectorAll('.cd-public-lines__label')].map((label) => label.textContent);
-  expect(labels).toEqual(['About us', 'Contact', 'Pricing', 'Getting started', 'After hours', 'Urgent help', 'Service area', 'How we help']);
+  const labels = [...screen.container.querySelectorAll('.cd-public-lines--owned .cd-public-lines__label')].map((label) => label.textContent);
+  expect(labels).toEqual(['About us', 'Contact', 'Getting started', 'After hours', 'Urgent help', 'Service area', 'How we help']);
   expect(screen.getByRole('alert').elements()).toHaveLength(0);
   await screen.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
   const field = screen.getByRole('textbox', { name: 'Contact', exact: true });
@@ -528,11 +543,11 @@ it('scrolls a cross-line refusal Notice into view from a low open row on a phone
   ));
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
   await screen.getByRole('button', { name: 'Looks right' }).click();
-  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(6).click();
+  await screen.getByRole('button', { name: 'Edit', exact: true }).nth(5).click();
   const field = screen.getByRole('textbox', { name: 'Service area', exact: true });
   await field.fill('Clients can reach our team.');
   const save = screen.getByRole('button', { name: 'Save', exact: true });
-  const refuse = () => mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', key: 'policy:pricing', reason: ['INTERNAL refusal'] } });
+  const refuse = () => mockStore.inject({ route: 'setupPublicLine', status: 422, body: { error: 'line_refused', key: 'policy:about', reason: ['INTERNAL refusal'] } });
   refuse();
   await save.click();
   const notice = screen.getByRole('alert');
@@ -553,33 +568,23 @@ it('scrolls a cross-line refusal Notice into view from a low open row on a phone
 });
 
 
-it.each([true, false])('confirms only rendered line keys or skips, with suggested hours/prices and a shown line: %s', async (withLine) => {
+it('shows and confirms suggested hours and prices when no lines are returned', async () => {
   const state = await atSituations();
   const params = { id: state.interview_id };
   await mockStore.dispatch('setupPublicLines', { params });
-  storePublicLines(mockStore.world, state.interview_id, withLine ? [{ key: 'contact', text: 'office@example.com', source: 'suggested', editable: true }] : []);
+  storePublicLines(mockStore.world, state.interview_id, []);
   const before = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
-  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
   await screen.getByRole('button', { name: 'Looks right' }).click();
-  if (withLine) {
-    await expect.element(screen.getByText('office@example.com', { exact: true })).toBeVisible();
-    expect(screen.getByText('Tax return review', { exact: true }).elements()).toHaveLength(0);
-    expect(screen.getByText('Hours', { exact: true }).elements()).toHaveLength(0);
-    await screen.getByRole('button', { name: 'Looks right' }).click();
-    await expect.poll(() => mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')).toBeDefined();
-    expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: ['contact'], revision: before.revision });
-  }
+  await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Mon–Fri, 9 am – 6 pm', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Tax return review, $250', { exact: true })).toBeVisible();
+  expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.poll(() => mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')).toBeDefined();
+  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: ['hours', 'prices'], revision: before.revision });
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
-  const after = storedPublicState(mockStore.world, state.interview_id)!;
-  expect(after.hours).toEqual(before.hours);
-  expect(after.prices).toEqual(before.prices);
-  expect(after.hours?.source).toBe('suggested');
-  expect(after.prices?.source).toBe('suggested');
-  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(withLine ? 1 : 0);
-  expect(await mockStore.dispatch('publicDesk', { params: { slug: state.slug } })).toMatchObject({
-    status: 200, body: { charter: withLine ? [expect.objectContaining({ fact_id: 'charter:contact', title: 'office@example.com' })] : [] },
-  });
-  if (!withLine) expect(after.revision).toBe(before.revision);
+  expect(storedPublicState(mockStore.world, state.interview_id)).toMatchObject({ hours: { source: 'owner' }, prices: { source: 'owner' } });
 });
 
 
@@ -615,15 +620,15 @@ it.each(['stale revision', 'removed key'] as const)('redraws public lines after 
   if (change === 'removed key') expect(screen.getByText('(408) 555-0199, linda@chenandco.com', { exact: true }).elements()).toHaveLength(0);
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLines')).toHaveLength(2);
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(1);
-  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: before.lines.map((line) => line.key), revision: before.revision });
-  expect(storedPublicState(mockStore.world, state.interview_id)!.lines.slice(1).every((line) => line.source === 'suggested')).toBe(true);
+  expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: [...before.lines.map((line) => line.key), 'hours', 'prices'], revision: before.revision });
+  expect(storedPublicState(mockStore.world, state.interview_id)!.lines).toEqual(latest.lines);
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(2);
-  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({ keys: latest.lines.map((line) => line.key), revision: latest.revision });
-  expect(storedPublicState(mockStore.world, state.interview_id)!.hours).toEqual(before.hours);
-  expect(storedPublicState(mockStore.world, state.interview_id)!.prices).toEqual(before.prices);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({ keys: [...latest.lines.map((line) => line.key), 'hours', 'prices'], revision: latest.revision });
+  expect(storedPublicState(mockStore.world, state.interview_id)!.hours).toEqual({ ...before.hours, source: 'owner' });
+  expect(storedPublicState(mockStore.world, state.interview_id)!.prices).toEqual({ ...before.prices, source: 'owner' });
 
 });
 
@@ -736,7 +741,7 @@ it('rereads not_suggested and holds on a failed refresh before showing the curre
 it('renders multiple hours windows and exact price amounts without text lines or repeated labels', async () => {
   const state = await atSituations();
   mockStore.inject({ route: 'setupPublicLines', status: 200, body: {
-    lines: [],
+    revision: 'fixture-revision', lines: [],
     hours: { source: 'suggested', windows: [
       { days: ['mon', 'wed', 'fri'], start: '09:30', end: '12:00' },
       { days: ['sat'], start: '18:00', end: '00:00' },
