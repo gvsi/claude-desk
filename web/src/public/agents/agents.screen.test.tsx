@@ -33,7 +33,6 @@ import { AGENT_CARD_BLOCKS, agentCardOut } from '../../mocks/agents.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
-import { START_EXAMPLES } from '../../setup/copy.ts';
 import { liveSetupDesk } from '../../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute, type Viewport } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
@@ -260,10 +259,12 @@ describe('agents page', () => {
   });
 
   it('a_desk_setup_made_offers_its_own_tasks', async () => {
-    // A CPA firm's Desk, which setup made as an office: its chips ask for a consult and say "up front",
+    // A dentist's Desk, which setup made as an office: its chips ask for a consult and say "up front",
     // in English and Spanish, never Rivera's visit or service call deposit; the run's first request
-    // is titled with the chip picked. The Desk's set is read once, with the visitor's chat.
-    const slug = await liveSetupDesk(START_EXAMPLES.en.examples[3]?.description ?? '');
+    // is titled with the chip picked. The Desk's set is read once, with the visitor's chat. (The CPA
+    // starter is an office too, but the mock's setup runs it as its consultant interview, which this
+    // helper doesn't answer; the mock's unit test types every starter.)
+    const slug = await liveSetupDesk("I'm Dana Park. Park Dental is a family dentist in Fremont, and new patients start with a checkup.");
     const office = ['Book the earliest consult', 'Pay up front, within its limit', 'Try to pay more than its limit'];
     const { screen } = await renderRoute(`/d/${slug}/agents`);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
