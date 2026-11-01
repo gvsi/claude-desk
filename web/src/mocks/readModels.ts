@@ -79,6 +79,22 @@ function decisionsOf(world: MockWorld, deskId: string): DecisionRecord[] {
   return [...world.decisions.values()].filter((d) => d.deskId === deskId);
 }
 
+/** The most of a visitor's newest message a conversation summary carries, "…" included. */
+const LATEST_VISITOR_TEXT_MAX = 200;
+
+/**
+ * What the visitor typed last in `session`, as the API's summary carries it: whitespace collapsed
+ * to single spaces, and cut to 199 characters and "…" past 200. Null for an agent's or the owner's
+ * chat, the owner's preview, and before the visitor writes.
+ */
+function latestVisitorText(session: SessionRecord): string | null {
+  if (session.state.kind !== 'visitor' || session.ownerPreview) return null;
+  const newest = session.items.findLast((item) => item.kind === 'visitor_text');
+  if (newest?.text == null) return null;
+  const chars = Array.from(newest.text.split(/\s+/).filter(Boolean).join(' '));
+  return chars.length > LATEST_VISITOR_TEXT_MAX ? `${chars.slice(0, LATEST_VISITOR_TEXT_MAX - 1).join('')}…` : chars.join('');
+}
+
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {
   const counts: Partial<Record<DecisionState, number>> = {};
   for (const { decision } of world.decisions.values()) {
@@ -93,6 +109,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     last_activity: isoTime(session.lastActivity),
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
+    latest_visitor_text: latestVisitorText(session),
   };
 }
 

@@ -1313,14 +1313,51 @@ describe('Today', () => {
 
   it('unnamed_visitor_reads_visitor_once', async () => {
     // Dana's chat is live, and she hasn't given her name: the row's name line says "Visitor", and
-    // its status line doesn't say it again, nor shows its dot alone.
+    // no status line says it again, nor shows its dot alone. What she wrote last takes that line.
     const { screen } = await renderRoute(TODAY);
     const row = region(screen, 'Live now').getByRole('link');
     await expect.element(row).toBeVisible();
     expect(row.elements()).toHaveLength(1);
-    await expect.element(row).toHaveAccessibleName(/^Visitor \d{1,2}:\d{2} [ap]m$/);
+    await expect.element(row).toHaveAccessibleName(/^Visitor \d{1,2}:\d{2} [ap]m “Tuesday at 2 works\.”$/);
     expect(row.getByText('Visitor', { exact: true }).elements()).toHaveLength(1);
     expect(row.element().querySelector('.cd-status-dot')).toBeNull();
+  });
+
+  it('live_now_quotes_what_each_person_is_asking', async () => {
+    // Dana hasn't given her name: under "Visitor", what she wrote last, in her own words, quoted.
+    const { screen } = await renderRoute(TODAY);
+    const live = region(screen, 'Live now');
+    const danaRow = () => live.element().querySelector(`a[href="${DESK}/conversations/ses-dana-web"]`);
+    const quoteIn = (row: Element | null | undefined) => row?.querySelector('.cd-conversation-item__quote') ?? null;
+    await expect.element(live.getByText('“Tuesday at 2 works.”', { exact: true })).toBeVisible();
+    const quote = quoteIn(danaRow());
+    expect(quote?.textContent).toBe('“Tuesday at 2 works.”');
+    expect(quote?.getAttribute('data-copy')).toBe('user');
+    expect(quote).toHaveClass('cd-type-meta');
+    // Under who it is: one line, 2 px down, ellipsized when it doesn't fit.
+    expectComputed(quote!, { marginTop: '2px', whiteSpace: 'nowrap', overflowX: 'hidden', textOverflow: 'ellipsis' });
+    const top = danaRow()?.querySelector('.cd-conversation-item__top')?.getBoundingClientRect();
+    expect(Math.round(quote!.getBoundingClientRect().top - (top?.bottom ?? 0))).toBe(2);
+
+    // Someone new asks for a discount Maria's rule holds: their row keeps "Needs you" in its place,
+    // and their words don't show there.
+    await visitorSays('Can I get 50% off if I pay cash?');
+    const held = live.getByRole('link', { name: /Needs you$/ });
+    await expect.element(held, { timeout: 5_000 }).toBeVisible();
+    expect(held.element().textContent).not.toContain('50% off');
+    expect(quoteIn(held.element())).toBeNull();
+
+    // Dana writes again: Live now's next read brings her newest words, as the API collapses them.
+    const dana = mockStore.world.sessions.get('ses-dana-web');
+    if (!dana) throw new Error("the seed has Dana's chat");
+    mockStore.world.visitorText(dana, 'Actually,   could it be\n3 pm instead?');
+    await expect.poll(() => quoteIn(danaRow())?.textContent, { timeout: 5_000 }).toBe('“Actually, could it be 3 pm instead?”');
+    expect(live.getByText('“Tuesday at 2 works.”', { exact: true }).elements()).toHaveLength(0);
+
+    // The Conversations list doesn't quote anyone.
+    const list = await renderRoute(CONVERSATIONS);
+    await expect.element(list.screen.getByRole('link', { name: /Needs you/ }).first()).toBeVisible();
+    expect(document.querySelectorAll('.cd-conversation-item__quote')).toHaveLength(0);
   });
 
   it('live_now_says_when_it_shows', async () => {

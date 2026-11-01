@@ -15,7 +15,8 @@ export interface LiveNowProps {
 
 /**
  * Today's "Live now": each conversation with activity in the last five minutes, a link to watch
- * it. The owner's own chat as a customer is among them, as "Your preview".
+ * it, quoting what its visitor wrote last when the row has no status to show. Today's poll brings
+ * their newest words. The owner's own chat as a customer is among them, as "Your preview".
  */
 export function LiveNow({ live, sectionRef }: LiveNowProps) {
   const { business, desk } = useOwnerDesk();
@@ -37,6 +38,7 @@ export function LiveNow({ live, sectionRef }: LiveNowProps) {
               time={formatClock(s.last_activity, business.timezone)}
               status={conversationStatus(s, s.outcome_counts.held ?? 0) ?? undefined}
               href={conversationPath(desk.desk_id, s.session_id)}
+              quote={s.latest_visitor_text ?? undefined}
             />
           </li>
         ))}

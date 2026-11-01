@@ -78,6 +78,12 @@ export interface ConversationSummary {
   owner_preview: boolean;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+  /**
+   * The newest message the visitor typed in this chat, its whitespace collapsed to single spaces
+   * and cut to 199 characters and "…" past 200; null for an agent's or the owner's chat, the
+   * owner's preview, and before the visitor writes. Untrusted. Optional until the API sends it.
+   */
+  latest_visitor_text?: string | null;
 }
 
 export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';

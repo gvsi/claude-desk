@@ -1319,6 +1319,36 @@ describe('the scripted Desk', () => {
       [preview.state.session_id, again.state.session_id].sort(),
     );
   });
+
+  it('summary_carries_the_visitors_newest_words', async () => {
+    const latest = async (sessionId: string) =>
+      ((await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[]).find((c) => c.session_id === sessionId)
+        ?.latest_visitor_text;
+    // Dana's seeded chat, by her newest message; the visiting agent's chat has none.
+    expect(await latest('ses-dana-web')).toBe('Tuesday at 2 works.');
+    expect(await latest('ses-alex-agent')).toBeNull();
+
+    // A new chat has none until the visitor writes, then their newest message, its whitespace
+    // collapsed to single spaces, and cut to 199 characters and "…" past 200.
+    const { session } = await openChat();
+    expect(await latest(session.session_id)).toBeNull();
+    await send('  Do you   work\n\nweekends?  ');
+    await drain();
+    expect(await latest(session.session_id)).toBe('Do you work weekends?');
+    const whole = 'w'.repeat(200);
+    await send(whole);
+    await drain();
+    expect(await latest(session.session_id)).toBe(whole);
+    await send(`${'a'.repeat(150)} ${'b'.repeat(100)}`);
+    await drain();
+    expect(await latest(session.session_id)).toBe(`${'a'.repeat(150)} ${'b'.repeat(48)}…`);
+
+    // The owner's own preview has none, whatever she writes there.
+    const preview = (await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession;
+    await send('Do you work weekends?');
+    await drain();
+    expect(await latest(preview.state.session_id)).toBeNull();
+  });
 });
 
 describe('taking over', () => {

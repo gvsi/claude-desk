@@ -260,6 +260,10 @@ export function TodaySkeleton() {
                 <Skeleton shape="line" text="control" width="55%" />
                 <Skeleton shape="line" text="caption" width="20%" />
               </div>
+              {/* Decision 15: the fresh copy's live visitor, Dana, has written, so her row quotes her. */}
+              <div className="cd-conversation-item__quote">
+                <Skeleton shape="line" text="meta" width="30%" />
+              </div>
             </div>
           </div>
         </div>
