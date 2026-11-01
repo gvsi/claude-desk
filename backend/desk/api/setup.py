@@ -1428,8 +1428,12 @@ def _owner_sourced_suggestions(suggested: SuggestedFacts, text: str) -> Suggeste
         period = "am" if hour < 12 else "pm"
         # Whole-hour values also commonly appear without minutes or a meridiem, e.g. "7 to 9".
         minutes = r"(?::00)?" if minute == 0 else f":{minute:02d}"
-        twelve_hour = rf"{hour % 12 or 12}{minutes}\s*(?:{period})?"
-        return re.search(rf"(?<![\w:])(?:{re.escape(clock)}|{twelve_hour})(?![\w:]|\.\d)", folded) is not None
+        clock_forms = rf"(?:{re.escape(clock)}|{hour % 12 or 12}{minutes})"
+        matching_period = rf"{period[0]}\.?m\.?"
+        # An unqualified time must not match the prefix of a contradictory meridiem.
+        no_period = r"(?!\s*[ap]\.?m\.?(?!\w))"
+        return re.search(rf"(?<![\w:]){clock_forms}(?:\s*{matching_period}|{no_period})"
+                         rf"(?![\w:]|\.\d)", folded) is not None
 
     area_words = [word for word in re.findall(r"[^\W\d_]+", suggested.service_area.casefold()) if len(word) >= 4]
     contact = suggested.public_contact

@@ -1732,6 +1732,30 @@ def test_suggestion_provenance_matches_owner_values(field, value, owner_text, ex
     assert filtered.model_dump()[field] == (value if expected else [] if isinstance(value, list) else "")
 
 
+@pytest.mark.parametrize(("owner_text", "start", "end", "expected"), [
+    ("Open 7 pm to 9 am", "07:00", "21:00", False),
+    ("Open 7 pm to 9 pm", "07:00", "21:00", False),
+    ("Open 7 am to 9 am", "07:00", "21:00", False),
+    ("Open 7pm-9am", "07:00", "21:00", False),
+    ("Open 7 p.m. to 9 a.m.", "07:00", "21:00", False),
+    ("Open 7:00 pm to 9:00 am", "07:00", "21:00", False),
+    ("Open 07:00 pm to 21:00 am", "07:00", "21:00", False),
+    ("Open 7 am to 9 pm", "07:00", "21:00", True),
+    ("Open 7am-9pm", "07:00", "21:00", True),
+    ("Open 7:00 am to 9:00 pm", "07:00", "21:00", True),
+    ("Open 7 a.m. to 9 p.m.", "07:00", "21:00", True),
+    ("open 7 to 9", "07:00", "21:00", True),
+    ("open 7:00 to 9:00", "07:00", "21:00", True),
+    ("07:00 to 21:00", "07:00", "21:00", True),
+    ("19:00 to 21:00", "19:00", "21:00", True),
+])
+def test_suggestion_hours_provenance_respects_meridiems(owner_text, start, end, expected):
+    hours = [{"days": ["mon"], "start": start, "end": end}]
+    suggested = desk_setup.SuggestedFacts(**{**understanding()["suggested"], "hours": hours})
+    filtered = desk_setup._owner_sourced_suggestions(suggested, owner_text)
+    assert filtered.model_dump()["hours"] == (hours if expected else [])
+
+
 def test_suggestion_provenance_checks_each_price_and_every_hours_window():
     suggested = desk_setup.SuggestedFacts(**{**understanding()["suggested"],
         "price_items": [{"title": "Deposit", "unit_cents": 4500}, {"title": "Visit", "unit_cents": 9900}],
