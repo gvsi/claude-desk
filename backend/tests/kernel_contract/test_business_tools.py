@@ -363,3 +363,58 @@ async def test_business_money_drafts_require_an_amount_within_the_cap(kernel, st
     request.cards = [card.model_copy(update={"max_amount_cents": 2000})]
     drafted = await owner.call("POST /policy/draft", request)
     assert drafted.auto_money_cap_cents == 2000
+
+
+@pytest.mark.kernel_plan('01c')
+@pytest.mark.parametrize('amount', [5000, 0])
+async def test_reviewed_purpose_payment_obeys_fixed_price_baseline_and_cap(kernel, ro_read, amount):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    tool = BusinessTool(tool='desk.deposit', title='Consultation deposit', description='Take the deposit.',
+                        config={'block': 'purpose_payment', 'purpose': 'Consultation deposit', 'amount_cents': amount})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
+    [row] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))
+    enabled = await owner.call('POST /tools/confirm', ToolsConfirmRequest(
+        desk_id=desk_id, tools=[ToolPin(tool=tool.tool, definition_sha256=row['definition_sha256'])], enable=True))
+    assert enabled.draft.status == 'proved'
+    active = await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=enabled.draft.version))
+    card = RuleCard(card_id='deposit-auto', applies_to=tool.tool, mode='auto', who='anyone', max_amount_cents=5000,
+                    reason='Take the deposit.')
+    draft = await owner.call('POST /policy/draft', PolicyDraftRequest(
+        desk_id=desk_id, expected_parent=active.version, cards=[card], auto_money_cap_cents=5000))
+    assert draft.status == 'proved'
+    await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+    visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
+    caller = http.session(visitor.session_token)
+    for index, args in enumerate(({'amount_cents': 1}, {'purpose': 'Other'}, {'title': 'Other'}, {'quote_id': 'Other'})):
+        bad = await decide(caller, visitor.state.session_id, 0, f'bad-payment-{index}', tool.tool, args)
+        assert bad.outcome == 'refuse' and bad.action is None
+    allowed = await decide(caller, visitor.state.session_id, 0, 'purpose-payment', tool.tool, {})
+    assert allowed.action.amount_cents == amount and allowed.action.resource.kind == 'desk'
+    if amount == 0:
+        assert allowed.outcome == 'refuse' and any('money_has_amount' in p for p in allowed.policy_ids)
+        assert not ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.quotes')
+        assert not ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.payment_links')
+        return
+    assert allowed.outcome == 'allow', allowed.reason_plain
+    result = await execute(caller, allowed, 0)
+    assert result.state == 'succeeded' and result.model_view['amount_cents'] == amount
+    assert {fact.kind for fact in result.facts} == {'quote', 'payment_link'}
+    assert (await execute(caller, allowed, 0)) == result
+    assert (await read_decision(caller, allowed.decision_id)).visitor_plain == '“Consultation deposit”: payment link made'
+    [quote] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.quotes')
+    [link] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.payment_links')
+    assert quote['amount_cents'] == link['amount_cents'] == amount
+    assert quote['quote_id'] == link['quote_id']
+    ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
+    payments = [entry.event for entry in ledger.entries if entry.event.kind == 'payment']
+    assert len(payments) == 1 and payments[0].summary['link_id'] == link['link_id']
+    lower = card.model_copy(update={'max_amount_cents': 2000})
+    draft = await owner.call('POST /policy/draft', PolicyDraftRequest(
+        desk_id=desk_id, expected_parent=draft.version, cards=[lower], auto_money_cap_cents=2000))
+    await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+    held = await decide(caller, visitor.state.session_id, 0, 'above-new-cap', tool.tool, {})
+    assert held.outcome == 'hold' and held.action.amount_cents == 5000
+    assert len(ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.quotes')) == 1
