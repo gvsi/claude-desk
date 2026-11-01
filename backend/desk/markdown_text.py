@@ -6,8 +6,11 @@ as the text it is) and returns what a reader sees of it: the text of every block
 each, with entities and escapes decoded, emphasis joined to the letters around it, code as written,
 table cells, link and image text, link titles, and each ordered list item's number as its list
 renders it ("N. ", counted from its start), so formatting can hide no number or word from the reply
-check's scan. Every link, with its text and target (inline, reference and autolink forms; a target
-of any scheme, which the reply check judges), and whether there is an image. Pure, with no I/O.
+check's scan. Every link a reader can click, with its text and target, for the reply check to judge
+(the owner's decision of 2026-11-01: every clickable link goes to the business's contact): inline,
+reference and autolink forms, with a target of any scheme, and, since the chats autolink as GFM does,
+each URL with a scheme or "www." (read as https) and each email address in the visible reading,
+code included (`literal_links`). And whether there is an image. Pure, with no I/O.
 
 A numbered list of steps passes (the owner's decision of 2026-11-01): an ordered list that starts at
 1 and has at most nine items, as the parser reads it, shows only the numbers 1 to 9, so its numbers
@@ -32,6 +35,11 @@ MAX_NESTING = 20          # markdown-it's own default, named so a reading that r
 PASSING_ITEMS = 9         # a list from 1 with at most this many items shows only 1 to 9, which may pass
 LINE_BREAK = re.compile(r"\r\n?|\n")                # where markdown-it breaks lines
 MARKER_PREFIX = re.compile(r"[ \t>*+-]*")           # indentation, quote and bullet marks before an item's marker
+# What GFM links in text without any link syntax: a URL with a scheme or "www.", up to a blank or "<", and an
+# email address (its extended autolinks). Matched anywhere, so a stricter reading than GFM's own.
+URL_LITERAL = re.compile(r"(?:https?://|www\.)[^\s<]+", re.IGNORECASE)
+EMAIL_LITERAL = re.compile(r"[A-Za-z0-9.+_-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+")
+TRAILING = "?!.,:;*_~'\"()[]{}"                        # punctuation after a literal URL, which a sentence puts there
 INLINE_TEXT = frozenset({"text", "code_inline"})
 LINE_BREAKS = frozenset({"softbreak", "hardbreak"})
 
@@ -46,7 +54,6 @@ class Link:
 
     text: str
     href: str
-    auto: bool                     # an autolink ("<https://…>"), whose text is its own target
 
 
 @dataclass(frozen=True)
@@ -134,8 +141,7 @@ def _inline(children: list[Token], links: list[Link]) -> tuple[str, bool]:
             open_links.append((child, len(parts)))
         elif child.type == "link_close" and open_links:
             opened, first = open_links.pop()
-            links.append(Link(text="".join(parts[first:]), href=str(opened.attrGet("href") or ""),
-                              auto=opened.markup == "autolink"))
+            links.append(Link(text="".join(parts[first:]), href=str(opened.attrGet("href") or "")))
             if title := opened.attrGet("title"):
                 parts.append(f"\n{title}\n")
     return "".join(parts), images
@@ -161,8 +167,22 @@ def read(text: str) -> MarkdownText:
             images = images or has_image
         elif token.type in ("code_block", "fence"):
             parts.append(token.content if token.content.endswith("\n") else f"{token.content}\n")
-    return MarkdownText(visible="".join(parts), links=tuple(links), images=images,
+    visible = "".join(parts)
+    return MarkdownText(visible=visible, links=(*links, *literal_links(visible)), images=images,
                         list_markers=_marker_spans(text, tokens, items))
+
+
+def literal_links(visible: str) -> list[Link]:
+    """The links the chats make of `visible` text with no link syntax, as GFM does: each URL with a
+    scheme or "www." (read as https), without the punctuation a sentence puts after it, and each
+    email address (as mailto:) outside those URLs."""
+    found: list[Link] = []
+    for match in URL_LITERAL.finditer(visible):
+        url = match[0].rstrip(TRAILING)
+        found.append(Link(text=url, href=url if "://" in url else f"https://{url}"))
+    rest = URL_LITERAL.sub(lambda match: " " * len(match[0]), visible)
+    found += [Link(text=match[0], href=f"mailto:{match[0]}") for match in EMAIL_LITERAL.finditer(rest)]
+    return found
 
 
 def blank(text: str, spans: tuple[tuple[int, int], ...]) -> str:

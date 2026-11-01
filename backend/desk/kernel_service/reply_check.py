@@ -33,10 +33,12 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    an entity or a table can hide nothing; prose the parser can't read whole is refused
    (`markdown.parse`). A numbered list's markers pass: those of an ordered list that starts at 1
    and has at most nine items are blanked from the raw text and left out of the rendered one, and
-   every other number stays a violation (the owner's decision of 2026-11-01). A Markdown link whose
-   text isn't its own target must go to the business's public contact (`https` to a host, or
-   `mailto:` an email, that `charter:contact` names), else `markdown.link`; any image is
-   `markdown.image` (`markdown_violations`).
+   every other number stays a violation (the owner's decision of 2026-11-01). Every link a reader
+   can click, shown or hidden (a Markdown link or autolink, or a URL with a scheme or "www." or an
+   email address, which the chats autolink), must go to the business's public contact (`https` to
+   a host, or `mailto:` an email, that `charter:contact` names), else `markdown.link` (the owner's
+   decision of 2026-11-01, which replaces the 2026-10-30 one for clickable links); a domain alone
+   isn't a link. Any image is `markdown.image` (`markdown_violations`).
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
@@ -552,8 +554,8 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     `canaries` (document ID → canary), even split or disguised, are one `canary` violation naming
     their documents, and blanked out before the rest is scanned. Links and email addresses are
     none of these (the owner's decision of 2026-10-30: Claude may write them, and its prompt keeps
-    them to the business's own); a Markdown link that hides its target is `markdown_violations`'
-    to judge. This scan reads every digit: `check_draft` blanks the markers of a numbered list of
+    them to the business's own); every link a reader can click is `markdown_violations`' to judge.
+    This scan reads every digit: `check_draft` blanks the markers of a numbered list of
     up to nine steps from 1 before it (`markdown_text.list_markers`, the owner's decision of
     2026-11-01), and scans the rendered text too. The lexicons read lookalike letters as the Latin
     ones, a bare stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-"
@@ -655,9 +657,11 @@ async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str,
     """What the prose shows once rendered as Markdown (`reading`, the owner's decision of 2026-11-01)
     that the raw scan didn't report: `scan` (the prose scan, with the draft's canaries, names and
     passed cards) on the visible text, each violation whose kind, rule ID and span `raw` doesn't
-    hold, in order. Then a `promise_word` (`markdown.link`, spanning the link's text) for each
-    link whose text isn't its own target and whose target isn't the business's own contact
-    (`own_target`): payment and booking links come only from cards. Any image is one `promise_word`
+    hold, in order. Then a `promise_word` (`markdown.link`, spanning the link's text, once per
+    text) for each link a reader can click, shown or hidden (`markdown_text.read`'s links: Markdown
+    links and autolinks, and the URLs and email addresses the chats autolink), whose target isn't
+    the business's own contact (`own_target`, the owner's decision of 2026-11-01): payment and
+    booking links come only from cards. Any image is one `promise_word`
     (`markdown.image`, spanning "image"), since a picture could show anything. Prose the parser can't
     read whole (no `reading`) is one `promise_word` (`markdown.parse`), and nothing of it is trusted:
     the raw scan then blanks no list marker either."""
@@ -666,20 +670,13 @@ async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str,
     reported = {(violation.kind, violation.rule_id, violation.span) for violation in raw}
     found = [violation for violation in scan(reading.visible)
              if (violation.kind, violation.rule_id, violation.span) not in reported]
-    hidden = [link for link in reading.links if not _shows_target(link)]
-    if hidden:
+    if reading.links:
         hosts, emails = await contact_endpoints(ctx, desk_id)
-        found += [Violation(kind="promise_word", span=_span(link.text), rule_id="markdown.link")
-                  for link in hidden if not own_target(link.href, hosts, emails)]
+        spans = dict.fromkeys(_span(link.text) for link in reading.links if not own_target(link.href, hosts, emails))
+        found += [Violation(kind="promise_word", span=span, rule_id="markdown.link") for span in spans]
     if reading.images:
         found.append(Violation(kind="promise_word", span="image", rule_id="markdown.image"))
     return found
-
-
-def _shows_target(link: markdown_text.Link) -> bool:
-    """Whether a link's text is its own target, as an autolink's is, so a reader sees where it goes."""
-    text = link.text.strip()
-    return link.auto or text == link.href or f"mailto:{text}" == link.href
 
 
 def own_target(href: str, hosts: frozenset[str], emails: frozenset[str]) -> bool:

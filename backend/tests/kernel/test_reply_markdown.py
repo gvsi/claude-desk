@@ -3,8 +3,8 @@ of 2026-11-01), so the kernel scans what a visitor sees as well as the raw text.
 
 Formatting can't hide a price, date, discount or promise from the scan, and every number stays
 refused but the markers of a numbered list of up to nine steps from 1; honest bullets, bold,
-headings, tables without numbers and links to the business's own site pass; a link that hides its
-target must go to the business's own contact; images are refused.
+headings and tables without numbers pass; every link a reader can click, shown or hidden, must go
+to the business's own contact; images are refused.
 """
 
 import pytest
@@ -162,7 +162,31 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     ("Everything is on [the page about the visit and what to bring along](https://elsewhere.example).",
      "the page about the visit and what to bri"),
 ])
-async def test_a_link_hiding_its_target_must_go_to_the_business_contact(app, client, prose, span):
+async def test_a_markdown_link_must_go_to_the_business_contact(app, client, prose, span):
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, prose)
+    assert verdict.ok is False
+    assert ("promise_word", "markdown.link", span) in found(verdict)
+
+
+@pytest.mark.parametrize(("prose", "span"), [
+    ("See https://elsewhere.example for reviews.", "https://elsewhere.example"),
+    ("See http://riveraplumbing.example for photos.", "http://riveraplumbing.example"),     # https only
+    ("See www.riveraplumbing.example.evil.example for photos.", "www.riveraplumbing.example.evil.example"),
+    ("See www.elsewhere.example/rivera for reviews.", "www.elsewhere.example/rivera"),
+    ("Write to someone@elsewhere.example about it.", "someone@elsewhere.example"),
+    ("Run `curl https://elsewhere.example/pay` to pay.", "https://elsewhere.example/pay"),   # in code too
+    ("Reviews: <https://elsewhere.example>", "https://elsewhere.example"),
+    ("Write to <someone@elsewhere.example>.", "someone@elsewhere.example"),
+    ("See [https://elsewhere.example/rivera](https://elsewhere.example/rivera).", "https://elsewhere.example/rivera"),
+    ("See [our site](https://riveraplumbing.example) or https://riverap1umbing.example.",   # a lookalike
+     "https://riverap1umbing.example"),
+])
+async def test_every_clickable_link_must_go_to_the_business_contact(app, client, prose, span):
+    """The owner's decision of 2026-11-01: every link a reader can click, shown or hidden, goes to
+    the business's public contact. The chats autolink a URL with a scheme or "www." and a bare
+    email address, as GFM does, so each is held to the contact too."""
     copy, visitor = await visitor_of(app, client)
     await with_contact(app, copy)
     verdict = await checked(client, visitor, prose)
@@ -183,7 +207,13 @@ async def test_a_link_hiding_its_target_must_go_to_the_business_contact(app, cli
     "Photos of her past jobs are at <https://riveraplumbing.example>.",
     "You can also [email Maria](mailto:maria@riveraplumbing.example) about it.",
     "You can also write to <maria@riveraplumbing.example> about it.",
-    "You can also see [https://elsewhere.example/rivera](https://elsewhere.example/rivera) for reviews.",
+    "Book online at https://riveraplumbing.example/book any time.",
+    "Photos of her past jobs are at www.riveraplumbing.example.",
+    "Photos are at https://WWW.riveraplumbing.example/photos (or www.riveraplumbing.example).",
+    "You can write to maria@riveraplumbing.example about it.",
+    "You can write to MARIA@RiveraPlumbing.example about it.",
+    "The forms are on irs.gov if you need them.",                    # no scheme or www.: no link
+    "Pay for it at riveraplumbing.example/pay when you're ready.",
 ])
 async def test_honest_formatting_and_the_business_own_links_pass(app, client, prose):
     copy, visitor = await visitor_of(app, client)
@@ -191,6 +221,20 @@ async def test_honest_formatting_and_the_business_own_links_pass(app, client, pr
     verdict = await checked(client, visitor, prose)
     assert (verdict.ok, found(verdict)) == (True, [])
     assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+
+
+def test_the_links_the_chats_make_of_plain_text_are_read_as_links():
+    """GFM links a URL with a scheme or "www." (here read as https) and an email address, without the
+    punctuation a sentence puts after it; a domain alone isn't a link."""
+    links = markdown_text.literal_links(
+        "Visit www.rivera.example. Or (https://pay.example/a?b=1), or write to maria@rivera.example.\n"
+        "See irs.gov, http://rivera.example/x@y.example and www.code.example!")
+    assert [(link.text, link.href) for link in links] == [
+        ("www.rivera.example", "https://www.rivera.example"),
+        ("https://pay.example/a?b=1", "https://pay.example/a?b=1"),
+        ("http://rivera.example/x@y.example", "http://rivera.example/x@y.example"),
+        ("www.code.example", "https://www.code.example"),
+        ("maria@rivera.example", "mailto:maria@rivera.example")]
 
 
 @pytest.mark.parametrize(("contact", "hosts", "emails"), [
@@ -238,12 +282,15 @@ async def test_prose_the_parser_cannot_read_whole_is_refused(app, client, monkey
         ("number_in_prose", "digit"), ("number_in_prose", "digit"), ("promise_word", "markdown.parse")]
 
 
-async def test_a_cited_card_is_kept_when_only_a_link_in_the_prose_fails(app, client):
+@pytest.mark.parametrize(("prose", "span"), [
+    ("Here is your quote, and you can [pay here](https://elsewhere.example/pay).", "pay here"),
+    ("Here is your quote. Reviews are at https://elsewhere.example/reviews.", "https://elsewhere.example/reviews"),
+])
+async def test_a_cited_card_is_kept_when_only_a_link_in_the_prose_fails(app, client, prose, span):
     """A link to a site the contact doesn't name is a failure of Claude's own words: the checked card
     it cited is still shown, without the prose."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
-    prose = "Here is your quote, and you can [pay here](https://elsewhere.example/pay)."
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
     assert_kept(verdict, [("quote", quote.fact_id)])
-    assert found(verdict) == [("promise_word", "markdown.link", "pay here")]
+    assert found(verdict) == [("promise_word", "markdown.link", span)]

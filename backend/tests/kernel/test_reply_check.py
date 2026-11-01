@@ -2000,10 +2000,13 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     """The owner's decision of 2026-10-30: Claude may write links and email addresses in its own
     replies, and its prompt keeps them to the business's own. The prose scan finds nothing in one,
     so the reply reaches the soft-promise check beside the quote card's text and, with no promise
-    found beyond the card, is shown with it; a look-alike link rests on the prompt, since that
-    check doesn't look at links. The ledger still holds no prose, so neither the link nor the
-    address is on it."""
+    found beyond the card, is shown with it. Since the owner's decision of 2026-11-01 every link a
+    reader can click goes to the business's contact, so the address is one the contact lists (a
+    domain with no scheme or "www." isn't a link; test_reply_markdown.py has the refusals). The
+    ledger still holds no prose, so neither the link nor the address is on it."""
     copy, visitor = await visitor_of(app, client)
+    await change_fact(app, copy, "charter:contact", claims=[
+        {"key": "contact", "kind": "text", "value": "Call (510) 555-0142 · Email: maria@riverapl.example"}])
     quote = await own_quote(client, visitor)
     reviewer.soft_answer = NOTHING_BEYOND_THE_CARDS
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
