@@ -13,7 +13,7 @@ import '../today/Today.css';
 const ignore = () => undefined;
 
 /**
- * A still picture of Rivera Plumbing's Today behind the intro dialog, drawn by Today itself in the
+ * A still picture of Turner Plumbing's Today behind the intro dialog, drawn by Today itself in the
  * owner's frame (the reviewer bar, the sidebar), so the page the dialog leaves onto is the one it
  * showed: every part is where Today puts it. Today reads from a client of its own that holds a new
  * copy's reads and never asks the API (`StillQueryClient`): the picture is shown before any copy

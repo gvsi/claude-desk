@@ -15,7 +15,7 @@ const PUBLIC_LINK = `desk.example/d/${rivera.business.slug}`;
 const meta = {
   title: 'Layout/Greeting',
   component: Greeting,
-  args: { text: 'Good morning, Maria' },
+  args: { text: 'Good morning, Mike' },
   // Today's content column, as on the board.
   decorators: [
     (Story) => (
@@ -45,7 +45,7 @@ export const WithPresence: Story = {
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     // The greeting is Today's title, in Claude's serif voice.
-    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' });
+    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' });
     expectComputed(heading, { fontFamily: /Source Serif 4/, fontSize: '36px', lineHeight: '44px', fontWeight: '300', marginTop: '0px' });
 
     // The presence line says it in words; the glyphs beside it are decoration, hidden from readers.

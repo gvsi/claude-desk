@@ -58,7 +58,7 @@ async def new_owner(api, browser, fake, kernel_http) -> Owner:
 
 def new_desk(desk_name: str = "Emergency line", **business) -> dict:
     """A `POST /api/owner/desks` body: the business (or an existing one of the copy) and a Desk with empty parts."""
-    return {"business": {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": TIMEZONE,
+    return {"business": {"name": "Turner Plumbing", "owner_display_name": "Mike Turner", "timezone": TIMEZONE,
                          **business},
             "desk": {"name": desk_name, "charter": [], "hours": [], "price_items": [], "calendar_slots": [],
                      "people": [], "documents": [], "notifications": NOTIFICATIONS}}
@@ -318,7 +318,7 @@ async def test_reports_count_bookings_payments_and_who_handled(api, browser, fak
             assert (await checkout(kernel_http, "POST /payment_links/{token}/complete", token)).state == "paid"
             await issue_payment_link(who.kernel, who.session_id, "deposit", next(_CALL_IDS))   # issued, never paid
         if owner_steps_in:
-            await write(engine, db, owner, who.session_id, "owner_say", at, "Maria here, I'll call you.")
+            await write(engine, db, owner, who.session_id, "owner_say", at, "Mike here, I'll call you.")
         return who.session_id
 
     # Before the window (31 local dates back): a booked and paid conversation that doesn't count.

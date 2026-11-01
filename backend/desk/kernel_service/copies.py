@@ -1,10 +1,10 @@
-"""Copies: every visitor of the demo gets their own Rivera Plumbing.
+"""Copies: every visitor of the demo gets their own Turner Plumbing.
 
 `POST /copies` (the API checks the passcode first; the kernel is loopback only) writes a copy row,
-the Rivera seed through `desks.create_desk`, its seed-only public starter questions, the Desk's public knowledge of its website and price
+the Turner seed through `desks.create_desk`, its seed-only public starter questions, the Desk's public knowledge of its website and price
 list through the owner's own path (`seed.seed_knowledge`), the seed's MCP servers connected with their tools
 enabled at the hashes the seed is proved with (`mcp_pins.connect`), Dana's and Bob's past payments at
-the mock payments server with their facts (`seed.seed_charges`), Maria's urgent business tool through
+the mock payments server with their facts (`seed.seed_charges`), Mike's urgent business tool through
 the owner's own replacement (`seed.seed_business_tools`), its rule cards activated from their
 CI-proved report at the seed's money cap of $500, turning the urgent tool on as they activate
 (`activation.activate_shipped` with `enables`), the held request waiting on Today
@@ -30,7 +30,7 @@ router = APIRouter()
 
 
 async def create_copy(ctx: KernelCtx) -> CopyCreated:
-    """A new copy seeded with Rivera Plumbing, and its owner session, in the caller's transaction."""
+    """A new copy seeded with Turner Plumbing, and its owner session, in the caller's transaction."""
     copy_id = new_id("copy")
     ctx.bind(copy_id)
     now = ctx.clock.now()

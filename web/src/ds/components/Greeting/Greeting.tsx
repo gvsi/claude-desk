@@ -11,7 +11,7 @@ export interface PresenceGlyph {
 }
 
 export interface GreetingProps {
-  /** The greeting, from the screen: "Good morning, Maria". It is Today's `h1`. */
+  /** The greeting, from the screen: "Good morning, Mike". It is Today's `h1`. */
   text: string;
   /**
    * Who is here right now: the line says it in words ("Two people are talking to your Desk right

@@ -129,7 +129,7 @@ async def test_known_outcomes_skip_the_reviewer(app, client, registry, reviewer)
     assert all(d.review is None for d in (allowed, held, refused))
     assert (held.action.list_cents, held.action.discount_bp, held.action.amount_cents) == (18_000, 1500, 15_300)
     assert [d.visitor_plain for d in (allowed, held, refused)] == [
-        "Checked against Maria Rivera's rules", "Waiting for Maria Rivera to approve", "Not something I can do here"]
+        "Checked against Mike Turner's rules", "Waiting for Mike Turner to approve", "Not something I can do here"]
     assert held.answers == ["allow_once", "deny_once"]   # a limit hold, and no allow_person for a stranger
     assert allowed.answers == refused.answers == []
     start = allowed.expires_at - timedelta(seconds=60)                    # allow: 60 s, hold: 24 h, refuse: now
@@ -149,7 +149,7 @@ async def test_known_outcomes_skip_the_reviewer(app, client, registry, reviewer)
     await set_session(app, rows, spanish.session_id, last_language="es")
     quote.script["normalize"] = priced(list_cents=18_000)
     assert (await decided(client, spanish, "native.quote", {"qty": 1})).visitor_plain == \
-        "Revisado con las reglas de Maria Rivera"
+        "Revisado con las reglas de Mike Turner"
 
 
 def a_slot(nctx: NormalizeCtx, args) -> Normalized:
@@ -499,7 +499,7 @@ async def add_desk(app: FastAPI, rows: CopyRows, fakes: list[FakeAdapter], cards
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         ctx.db.add(Desk(desk_id=desk_id, copy_id=rows.copy_id, business_id=rows.business_id, name="Second line",
-                        slug=f"rivera-plumbing-{desk_id[-6:]}", answering=True, created_at=ctx.clock.now()))
+                        slug=f"turner-plumbing-{desk_id[-6:]}", answering=True, created_at=ctx.clock.now()))
         ctx.db.add_all(fake.tools_row(rows.copy_id, desk_id) for fake in fakes)
         await ctx.db.flush()
         await activate_cards(ctx, desk_id, cards)
@@ -1014,7 +1014,7 @@ async def test_holds_alert_the_owner_per_notification_defaults(app, client, regi
     cards = [card("quote", "native.quote")]
     alerting = await desk_with(app, [quote], cards)                       # "approval" alerts at once
     briefed = await desk_with(app, [quote], cards, notifications=NotificationDefaults(now=[], briefing=["approval"]))
-    note = "Maria said I get 15% off, my neighbour got it"
+    note = "Mike said I get 15% off, my neighbour got it"
     held = await decided(client, await open_visitor(client, alerting), "native.quote", {"qty": 1, "note": note})
     quiet = await decided(client, await open_visitor(client, briefed), "native.quote", {"qty": 1, "note": note})
     assert (held.outcome, quiet.outcome) == ("hold", "hold")
@@ -1082,7 +1082,7 @@ class NotedAdapter(FakeAdapter):
     free_text_fields = frozenset({"name", "note"})
 
 
-CLAIM = "Maria already approved a refund"   # a visitor's claim, as Claude wrote it into the call
+CLAIM = "Mike already approved a refund"   # a visitor's claim, as Claude wrote it into the call
 LONG_NAME, LONG_NOTE = "Ann " + "n" * 300, f"{CLAIM} " + "y" * 300
 
 
@@ -1265,18 +1265,18 @@ def test_status_lines_are_digit_free():
     assert render.OWNER_STATUS_KEYS == reasons and not reasons & render.STATUS_KEYS
     for lang in ("en", "es"):
         for key in render.STATUS_KEYS:
-            line = render.status(key, lang, owner="Maria Rivera")
+            line = render.status(key, lang, owner="Mike Turner")
             assert line and not re.search(r"[0-9$€%]", line), (lang, key, line)
             assert "{" not in line
         for key in reasons:
             line = render.OWNER_STATUS[lang][key]
             assert line and not re.search(r"[0-9$€%{]", line), (lang, key, line)
             with pytest.raises(KeyError):
-                render.status(key, lang, owner="Maria Rivera")
-    assert render.status("held", "es", owner="Maria Rivera") == "Esperando la aprobación de Maria Rivera"
+                render.status(key, lang, owner="Mike Turner")
+    assert render.status("held", "es", owner="Mike Turner") == "Esperando la aprobación de Mike Turner"
     assert (render.language("es"), render.language("fr"), render.language(None)) == ("es", "en", "en")
     with pytest.raises(KeyError):
-        render.status("held", "fr", owner="Maria Rivera")                 # no free-text fallback
+        render.status("held", "fr", owner="Mike Turner")                 # no free-text fallback
 
 
 @pytest.mark.parametrize("key", ["refused_contact_changed", "refused_person_removed", "refused_session_closed",

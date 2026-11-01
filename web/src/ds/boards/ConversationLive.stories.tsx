@@ -18,7 +18,7 @@ const DANA = rivera.people.dana.name;
 const WHISPER_NOTE = 'Dana never sees whispers. Your rules still apply to what Claude does with them.';
 const whisperAt = dana.turns.findIndex((turn) => turn.kind === 'whisper');
 
-/** Dana's live chat as Maria watches it: the list beside it, the checks under each message, and her controls. */
+/** Dana's live chat as Mike watches it: the list beside it, the checks under each message, and his controls. */
 function ConversationLive() {
   return (
     <RiveraFrame
@@ -67,7 +67,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Conv-Run1',
     canvasNote: [
-      "The conversation is the Rivera fixture's live chat with Dana: a drain, a quote, a whisper, open times and a booking, where the board has a water heater, a leak repair quote, a booking with a sooner time, and then a discount held for Maria's answer in the chat.",
+      "The conversation is the Turner fixture's live chat with Dana: a drain, a quote, a whisper, open times and a booking, where the board has a water heater, a leak repair quote, a booking with a sooner time, and then a discount held for Mike's answer in the chat.",
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
       '"Dana is typing" is the signed typing bubble (N-Typing-Bubble-Run1) where the board writes a line.',
       'The list column, the conversation head and its "Latest" line are page layout the web app (plan 04) owns, composed here from ConversationListItem, Pill and the tokens; the page fills the main area (AppShell fill), so the list starts where the sidebar ends.',
@@ -101,7 +101,7 @@ export const Board: Story = {
     await expect(within(log).getByText(WHISPER_NOTE)).toBeVisible();
     await expect(within(log).getByRole('status')).toHaveTextContent('Dana is typing');
 
-    // Maria's controls while Claude answers: Take over, then the whisper composer.
+    // Mike's controls while Claude answers: Take over, then the whisper composer.
     const takeOver = canvas.getByRole('button', { name: 'Take over' });
     const whisper = canvas.getByRole('textbox', { name: 'Whisper to Claude' });
     expectComputed(one(canvasElement, '.cd-composer__box'), SPEC.composer);

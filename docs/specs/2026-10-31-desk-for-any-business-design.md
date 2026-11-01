@@ -6,12 +6,12 @@
 
 Giovanni tested setup live with a CPA firm (Fenster & Fenster). His verdict: the setup agent felt "very mechanic and dumb", and "a lot of our current system and prototype generalizes very poorly to different vertical and business types". The question he put: how do we make sure people across verticals *want* to use it, and that it gives their business enough value that they badly want a Desk? He called it existential and the top priority. The Monday 2026-11-02 deadline holds **(Giovanni)**.
 
-Two independent maps of the code (GPT-6.1 Sol and Opus 5.5) agree on why. The spec designs for a trade, a CPA office and a landlord equally ("Owners"), but the build follows Rivera Plumbing:
-- Setup asks every business the same seven plumber-first questions, reads Maria Rivera's memory for every Desk (#303) and quotes her in every safety check (#305).
+Two independent maps of the code (GPT-6.1 Sol and Opus 5.5) agree on why. The spec designs for a trade, a CPA office and a landlord equally ("Owners"), but the build follows Turner Plumbing:
+- Setup asks every business the same seven plumber-first questions, reads Mike Turner's memory for every Desk (#303) and quotes him in every safety check (#305).
 - The visitor agent is never told what the business does: setup publishes only the contact and the service area (`setup.py` `seed_parts`); the owner's description and after-hours answer are dropped.
 - The tools follow a trade's flow: prices only from a fixed menu, money only against a quote made in the same chat, bookings as anonymous untyped slots, documents sent but never collected, no status, no urgent routing.
 - On a Desk made by setup nobody is on record, so verification and document release can't succeed.
-- The evals and demo data are Rivera-only.
+- The evals and demo data are Turner-only.
 
 ## The framing (Giovanni accepted it)
 
@@ -38,11 +38,11 @@ A plumber leans on 3, 4, 7 and 8; a CPA on 2, 5, 6 and 3; a landlord on 3, 8, 5 
 2. **Setup shapes the Desk to the business**: it builds the business's own tools from kernel-owned building blocks and drafts rules for them, and proposes the apps the owner already connected to Claude.
 3. **The visitor agent knows how this business works** and handles its customers' common asks well, saying plainly what it can't do yet and offering the right next step.
 4. **Any business a tester types in feels smart**, and four starter businesses are one click away for reviewers.
-5. Everything that works for Rivera keeps working; the safety invariants are untouched.
+5. Everything that works for Turner keeps working; the safety invariants are untouched.
 
 **Non-goals for Monday:** case or work-order status, client document upload, invoices or rent bound to a person, recurring payments, staff or unit on a booking, ranged or hourly pricing as a card, a vertical-specific eval world. For those jobs the Desk takes the details and promises a reply from a person, and setup's plan lists the job as coming later: no vision mocks **(Giovanni)**.
 
-**Anti-goals:** setup that feels like a longer form; a consultant that promises what the Desk can't do; anything that lets website, memory or connector text set a limit or a rule; a Desk that says something the reply check would block for Rivera.
+**Anti-goals:** setup that feels like a longer form; a consultant that promises what the Desk can't do; anything that lets website, memory or connector text set a limit or a rule; a Desk that says something the reply check would block for Turner.
 
 ## Part A: setup as a consultant
 
@@ -59,7 +59,7 @@ Length: as long as it's useful **(Giovanni)**, and the owner can accept Claude's
 
 **Flow (Giovanni: both):** the conversation proposes each tool, rule and connector inline as a card the owner accepts or changes; the Tools and Rules screens stay as the review of everything it built before the safety check. A redesign of setup's screens: canvas boards and Giovanni's sign-off before code.
 
-**Sample memory (#303) (Giovanni: presented as a real memory):** the start model call writes memory items from the owner's description (topics include setup's query words), the API writes them through the kernel's owner-only `PUT /desks/{id}/memory` route, then the consent read returns them. A failed write means an empty memory, never Rivera's. The memory also names the apps the owner "already connected" to Claude, picked from a fixed catalog that fits the business; setup keeps that list on its side.
+**Sample memory (#303) (Giovanni: presented as a real memory):** the start model call writes memory items from the owner's description (topics include setup's query words), the API writes them through the kernel's owner-only `PUT /desks/{id}/memory` route, then the consent read returns them. A failed write means an empty memory, never Turner's. The memory also names the apps the owner "already connected" to Claude, picked from a fixed catalog that fits the business; setup keeps that list on its side.
 
 **Connectors (Giovanni: propose, connect the mocks):** setup proposes the connected apps that fit the jobs. Ones with a working mock connect and run (payments today); the rest appear in the plan and the Tools step as coming later. First cut if time runs short: no new connector mocks **(Giovanni)**.
 
@@ -99,7 +99,7 @@ The exact kernel contract (how a configured tool is stored, pinned, reviewed and
 
 **(Giovanni: all four.)** The setup start screen offers four one-click descriptions; a tester can still type their own. Ranked by the strength of the use case:
 1. **A hair salon** (new name to choose): bookings, a fixed menu, deposits, no-shows. Fits today's tools best.
-2. **Rivera Plumbing**: urgent after-hours calls, quotes, deposits.
+2. **Turner Plumbing**: urgent after-hours calls, quotes, deposits.
 3. **Maple Street Rentals**: viewings, applications, after-hours maintenance.
 4. **Chen & Co. CPA**: consults, intake, retainers; status and document collection shown as coming later.
 

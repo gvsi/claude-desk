@@ -16,7 +16,7 @@ export type ComposerVariant = 'owner' | 'visitor' | 'whisper';
 
 export interface ComposerProps {
   variant: ComposerVariant;
-  /** The text box's name, read by screen readers: "Message Rivera Plumbing". */
+  /** The text box's name, read by screen readers: "Message Turner Plumbing". */
   label: string;
   /** Shown in the empty text box. */
   placeholder: string;

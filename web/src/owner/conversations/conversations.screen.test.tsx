@@ -93,7 +93,7 @@ function lengthen(chat: SessionRecord, count = 30): string {
 /** Makes the list longer than the window: `count` more chats, each with a visitor's message. Returns how many. */
 function moreChats(count = 20): number {
   const desk = mockStore.world.desk(RIVERA.deskId);
-  if (!desk) throw new Error("the copy has Rivera's main Desk");
+  if (!desk) throw new Error("the copy has Turner's main Desk");
   for (let i = 1; i <= count; i += 1) mockStore.world.visitorText(mockStore.world.addSession(desk), `Hello, question ${i}.`);
   return count;
 }
@@ -161,7 +161,7 @@ function danasChatWithThreeDecisions() {
       ],
     },
   ], 10_000);
-  // Maria allowed the refund: it ran, and its outcome came after the hold.
+  // Mike allowed the refund: it ran, and its outcome came after the hold.
   const record = world.decisions.get(refund.decision_id);
   if (!record || quote === null || booking === null) throw new Error("Dana's chat has its three decisions");
   const refunded = world.answer(record, 'allow_once');
@@ -460,14 +460,14 @@ describe('Conversations', () => {
     await expect.element(screen.getByRole('heading', { level: 2, name: DANA })).toBeVisible();
     await expect.element(list.getByRole('link', { name: new RegExp(DANA) })).toHaveAttribute('aria-current', 'true');
 
-    // Her messages, Claude's replies with their checks under them, and Maria's whisper.
+    // Her messages, Claude's replies with their checks under them, and Mike's whisper.
     const chat = log(screen);
     const [first, second] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
     await expect.element(chat.getByText(first ?? '', { exact: true })).toBeVisible();
     await expect.element(chat.getByText(second ?? '', { exact: true })).toBeVisible();
     const receipts = chat.getByRole('button', { name: /Open the full trace\.$/ });
     await expect.poll(() => receipts.elements().length).toBeGreaterThanOrEqual(6);
-    await expect.element(chat.getByRole('button', { name: "Reply checked against Maria Rivera's rules Open the full trace." }).first()).toBeVisible();
+    await expect.element(chat.getByRole('button', { name: "Reply checked against Mike Turner's rules Open the full trace." }).first()).toBeVisible();
     const whisper = session(DANA_LIVE).items.find((item) => item.kind === 'whisper');
     await expect
       .element(chat.getByText(`Your whisper, ${formatClock(whisper?.created_at ?? '', LA)}. Only Claude sees this.`, { exact: true }))
@@ -502,7 +502,7 @@ describe('Conversations', () => {
     expect(getComputedStyle(line).color).toBe(tokenColor('--text-secondary'));
     // The booked card and its checks stay under their message.
     await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
-    await expect.element(log(screen).getByRole('button', { name: "Reply checked against Maria Rivera's rules Open the full trace." }).last()).toBeVisible();
+    await expect.element(log(screen).getByRole('button', { name: "Reply checked against Mike Turner's rules Open the full trace." }).last()).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     expectNoHorizontalScroll();
 
@@ -618,8 +618,8 @@ describe('Conversations', () => {
     expect(session(DANA_LIVE).items.at(-1)?.kind).toBe('owner_joined');
     expect(latest()).toBe(before);
 
-    // Her words go to Dana exactly as she wrote them, and show here as hers.
-    const words = 'Hi Dana, it is Maria. I can come at 4 today.';
+    // His words go to Dana exactly as he wrote them, and show here as his.
+    const words = 'Hi Dana, it is Mike. I can come at 4 today.';
     await box.fill(words);
     await userEvent.keyboard('{Enter}');
     const mine = log(screen).getByText(words, { exact: true });
@@ -627,9 +627,9 @@ describe('Conversations', () => {
     expect(requests('ownerMessage').map((r) => r.body)).toEqual([{ text: words, kind: 'say' }]);
     const message = mine.element().closest('.cd-person-message');
     expect(message?.querySelector('.cd-person-message__name')?.textContent).toBe('You');
-    expect(message?.querySelector('.cd-person-message__avatar')?.textContent).toBe('MR');
+    expect(message?.querySelector('.cd-person-message__avatar')?.textContent).toBe('MT');
 
-    // Dana's stream got Maria joining, then the words, as Maria's (with her typing between, which
+    // Dana's stream got Mike joining, then the words, as Mike's (with his typing between, which
     // carries no words: `owner_typing_reaches_the_visitor`).
     const sent = chat.events.map(({ ev }) => ev).filter((ev) => ev.type !== 'owner_typing').slice(-2);
     expect(sent[0]).toEqual({ type: 'owner_joined', name: OWNER });
@@ -1350,7 +1350,7 @@ describe('Conversations', () => {
   });
   it('passed_handoff_card_shows_its_held_receipt_in_the_owner_transcript', async () => {
     const chat = session(DANA_LIVE);
-    const ctx = mockStore.world.context(chat, 'en', 'Talk to Maria');
+    const ctx = mockStore.world.context(chat, 'en', 'Talk to Mike');
     const rule = SCRIPT.find((rule) => rule.name === 'talk');
     if (!rule) throw new Error('the script has its handoff row');
     for (const step of [...rule.steps, turnEnd]) mockStore.world.emit(chat, step(ctx));
@@ -1468,7 +1468,7 @@ describe('Conversations', () => {
     const world = mockStore.world;
     const desk = world.desk(RIVERA.deskId);
     const invoiceRule = SCRIPT.find((rule) => rule.name === 'invoice');
-    if (!desk || !invoiceRule) throw new Error("the copy has Rivera's main Desk and the script its invoice row");
+    if (!desk || !invoiceRule) throw new Error("the copy has Turner's main Desk and the script its invoice row");
     const chat = world.addSession(desk);
     world.replay(chat, world.now() - MINUTE, [{ text: 'Can you send my invoice?', steps: invoiceRule.steps }]);
     expect(world.checkCode(chat, DEMO_CODE)).toBe(true);

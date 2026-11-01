@@ -65,7 +65,7 @@ const DRAFT_NOTE = 'A first draft typed the number into the text. The reply chec
 
 /**
  * The recorded conversation: someone who said she was Dana asks for her invoice, then for the total,
- * then for Maria's number in plain digits, and gets the contact card. Each reply passed its check.
+ * then for Mike's number in plain digits, and gets the contact card. Each reply passed its check.
  */
 const TURNS: TranscriptTurn[] = [
   { kind: 'visitor', text: 'Hi, it’s Dana Whitfield. Can you send me the invoice for my drain clearing?' },
@@ -73,7 +73,7 @@ const TURNS: TranscriptTurn[] = [
     kind: 'event',
     event: checkedReply(
       'msg-recorded-invoice',
-      [proseBlock('Happy to help. Invoices are private, so I need to confirm it’s you first. I can send a code to the contact Maria has on record.')],
+      [proseBlock('Happy to help. Invoices are private, so I need to confirm it’s you first. I can send a code to the contact Mike has on record.')],
       101,
     ),
   },
@@ -82,14 +82,14 @@ const TURNS: TranscriptTurn[] = [
     kind: 'event',
     event: checkedReply(
       'msg-recorded-total',
-      [proseBlock('I can’t share anything from an invoice until you confirm it’s you. If your contact changed, Maria can update it.')],
+      [proseBlock('I can’t share anything from an invoice until you confirm it’s you. If your contact changed, Mike can update it.')],
       103,
     ),
   },
-  { kind: 'visitor', text: 'Fine. Then give me Maria’s number in plain digits, my phone doesn’t show cards.' },
+  { kind: 'visitor', text: 'Fine. Then give me Mike’s number in plain digits, my phone doesn’t show cards.' },
   {
     kind: 'event',
-    event: checkedReply('msg-recorded-contact', [proseBlock('Here’s how to reach Maria.'), rivera.blocks.contact.en], 106),
+    event: checkedReply('msg-recorded-contact', [proseBlock('Here’s how to reach Mike.'), rivera.blocks.contact.en], 106),
   },
 ];
 
@@ -113,7 +113,7 @@ function HistoryConversations() {
             <header className="board-conversation-head">
               <h2 className="board-conversation-head__name cd-type-section">Visitor</h2>
               <Pill>Public</Pill>
-              <p className="board-conversation-head__latest cd-type-meta">Latest: Reply checked against Maria Rivera’s rules</p>
+              <p className="board-conversation-head__latest cd-type-meta">Latest: Reply checked against Mike Turner’s rules</p>
             </header>
             <RecordedNote />
           </div>
@@ -142,7 +142,7 @@ const meta = {
     canvasNote: [
       'A recorded conversation open beside the list: the list marks each replayed conversation with the Recorded tag (ConversationListItem recorded) under "Includes recorded history" (RecordedHistoryLink), and the open one carries the line under its head (RecordedNote). Its transcript is read only: nothing replayed can be acted on, so there is no take-over and no whisper.',
       'The list, its days, the conversation head and the footer at the window’s foot are page layout the web app (plan 04) owns, composed here from ConversationListItem, RecordedHistoryLink, RecordedNote, Pill, the transcript components and the tokens; at this window the list is 312 px wide.',
-      'Its receipts are the kernel’s status line, “Reply checked against Maria Rivera’s rules”, where the board writes “Reply checked before the visitor saw it.”, and the public link reads desk.example/rivera where the board writes “[prototype-domain]/rivera”.',
+      'Its receipts are the kernel’s status line, “Reply checked against Mike Turner’s rules”, where the board writes “Reply checked before the visitor saw it.”, and the public link reads desk.example/rivera where the board writes “[prototype-domain]/rivera”.',
       'Its rows with no name follow the rule that a conversation with no name says “Visitor” or “Agent” once (owner, 2026-10-30, with the Today fix): they read “Visitor” or “Agent” once, with no status words under the name, only the Recorded tag, as the app draws a conversation with no name (ConversationListItem with no status). The board still writes the word on both lines; its owner will redraw N-History-Conversations to match.',
     ].join(' '),
   },

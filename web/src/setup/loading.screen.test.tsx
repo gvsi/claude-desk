@@ -22,7 +22,7 @@ import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSk
 beforeAll(loadWebFonts);
 
 const DESCRIPTION =
-  "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
+  "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
 
 type Step = 'tools' | 'rules' | 'situations' | 'safety_check';
 

@@ -341,7 +341,7 @@ class KernelTarget:
 
     def _runs_mockpay(self) -> bool:
         """Whether the kernel calls a mock payments server: once Plan 01c's code is on the branch,
-        whether or not landed.toml lists 01c yet, since a copy of the Rivera seed connects its
+        whether or not landed.toml lists 01c yet, since a copy of the Turner seed connects its
         payment tools and fails closed without one. 01c's own cases still wait for its id."""
         return self.landed("01c") or "01c" in unlisted_landed(self._landed)
 

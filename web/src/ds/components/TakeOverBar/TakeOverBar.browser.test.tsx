@@ -14,7 +14,7 @@ it('the_visitor_hint_uses_the_available_width', () => {
     host.remove();
   });
   act(() => root.render(
-    <TakeOverBar mode="ai" visitorName="Visitor" ownerName="Maria Rivera"
+    <TakeOverBar mode="ai" visitorName="Visitor" ownerName="Mike Turner"
       onTakeOver={() => {}} onHandBack={() => {}} onResume={() => {}} />,
   ));
   const bar = host.querySelector('.cd-take-over') as HTMLElement;
@@ -25,7 +25,7 @@ it('the_visitor_hint_uses_the_available_width', () => {
     range.selectNodeContents(hint);
     return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
   };
-  expect(hint.textContent).toBe('Visitor sees “Maria Rivera joined the chat.”');
+  expect(hint.textContent).toBe('Visitor sees “Mike Turner joined the chat.”');
   expect(action.getBoundingClientRect().width).toBe(bar.getBoundingClientRect().width);
   expect(lines()).toBe(1);
   expect(getComputedStyle(hint).whiteSpace).toBe('normal');

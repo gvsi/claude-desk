@@ -119,7 +119,7 @@ export const Answering: Story = {
   render: (args) => <Screen {...args} failFirst />,
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     await expect(await expectWhisperLine(canvasElement, 'Dana Whitfield')).toBeVisible();
-    await expectSeesLine(canvasElement, 'Dana Whitfield', 'Maria Rivera joined the chat.');
+    await expectSeesLine(canvasElement, 'Dana Whitfield', 'Mike Turner joined the chat.');
     const takeOver = canvas.getByRole('button', { name: 'Take over' });
     await expect(canvas.getAllByRole('button')).toEqual([takeOver]);
     expectComputed(takeOver, { height: '40px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
@@ -151,7 +151,7 @@ export const AvailableWidth: Story = {
     canvasNote: 'The bar at the composer width: the controls wrap below the lead and the hint uses the whole row, wrapping only when its words no longer fit.',
   },
   play: async ({ canvasElement }) => {
-    const line = lineReading(canvasElement, 'Visitor sees “Maria Rivera joined the chat.”');
+    const line = lineReading(canvasElement, 'Visitor sees “Mike Turner joined the chat.”');
     const action = line.parentElement as HTMLElement;
     const bar = action.parentElement as HTMLElement;
     await expect(action.getBoundingClientRect().width).toBe(bar.getBoundingClientRect().width);

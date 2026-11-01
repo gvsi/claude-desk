@@ -1,7 +1,7 @@
 """Desks: the one path that turns a `DeskSeed` into kernel rows, the owner's writes to them, and
 contacts on record.
 
-`create_desk` serves `POST /copies` (the Rivera seed) and `POST /desks`. It runs in the caller's
+`create_desk` serves `POST /copies` (the Turner seed) and `POST /desks`. It runs in the caller's
 transaction and never commits, so a Desk and its `desk_data` ledger entry exist together or not at
 all. The owner then replaces a Desk's parts (`put_part`, `PUT /desks/{id}/{part}`), uploads
 documents (`upload_document`) and deletes it (`delete_desk`), each under the Desk row's lock and
@@ -221,7 +221,7 @@ def mask_contact(contact: str) -> str:
 
 
 def slugify(name: str) -> str:
-    """Lowercase ASCII words joined by hyphens ("Rivera Plumbing" → "rivera-plumbing")."""
+    """Lowercase ASCII words joined by hyphens ("Turner Plumbing" → "turner-plumbing")."""
     ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
     return slug[:SLUG_NAME_LENGTH].rstrip("-") or "desk"
@@ -324,7 +324,7 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     fact holding the title), notification preferences, an enabled `tools` row per registered
     native profile, a public `charter:<key>` fact per charter claim plus `charter:hours`, and a
     `desk_data` ledger entry. A new Desk starts with Answering off unless `answering` is set (the
-    Rivera seed is live at once). MCP tools come only through a pinned connect (Plan 01c).
+    Turner seed is live at once). MCP tools come only through a pinned connect (Plan 01c).
 
     What the public page and the Desk's public address (its slug, made from the business's name)
     would show is checked for the copy's document canaries first (`refuse_public_canaries`, part
@@ -677,7 +677,7 @@ CALENDAR_REFRESH_LOCK_S = 5.0             # how long a pass waits for a row anot
 CALENDAR_LOOKUP_S = 10.0                  # the pass's limit on listing the copies or one copy's Desks, as
                                           # the background rebuild's (`activation.BACKGROUND_LOOKUP_S`)
 # The shipped rule set `POST /desks`, the route setup makes a Desk through, activates as a new Desk's
-# version 1. Rivera's seed (`POST /copies`) starts from "rivera" instead and builds its own two-hour
+# version 1. Turner's seed (`POST /copies`) starts from "rivera" instead and builds its own two-hour
 # slots for each copy, so a Desk whose version 1 came from this preset is one setup made. Every
 # Desk has had a version 1 since it was created, and nothing writes a version's `preset` after
 # that: a confirm only changes `status`, and a rebuild only `_REBUILT_COLUMNS`
@@ -718,7 +718,7 @@ async def _made_in_setup(ctx: KernelCtx, desk_id: str) -> bool:
 async def extend_calendar(ctx: KernelCtx, desk_id: str) -> list[str]:
     """Adds to Desk `desk_id`'s calendar the slots its hours give for the days after its latest
     slot, up to 14 days ahead (`later_slots`), when it is a Desk whose calendar the kernel keeps
-    open: live, not deleted, with hours, and made in setup (`NEW_DESK_PRESET`), never Rivera's
+    open: live, not deleted, with hours, and made in setup (`NEW_DESK_PRESET`), never Turner's
     seed. Returns their IDs, in order; [] when it adds none, and then writes nothing.
 
     It only inserts: a booked slot, one a request still names, and every change the owner made

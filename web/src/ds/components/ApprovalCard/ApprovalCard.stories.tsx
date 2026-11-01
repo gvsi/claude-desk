@@ -523,7 +523,7 @@ const meta = {
     layout: 'padded',
     canvas: 'N-Today-Run1',
     canvasNote:
-      "The board's held request is the Rivera fixture's held quote, and its held-by line names the rule card's reason.",
+      "The board's held request is the Turner fixture's held quote, and its held-by line names the rule card's reason.",
   },
 } satisfies Meta<typeof ApprovalCard>;
 
@@ -1228,7 +1228,7 @@ export const AnswersChangeWhileOpen: Story = {
   args: refundArgs,
   render: (args) => <UpdatingScreen {...args} />,
   parameters: {
-    canvasNote: `${ANSWERS_BOARD} No board shows the answers changing under an open menu. Maria lowers her money cap below the refund in another tab, so a re-read drops Allow only for Dana, then raises it again; the menu stays closed until she opens it, and focus stays on Allow.`,
+    canvasNote: `${ANSWERS_BOARD} No board shows the answers changing under an open menu. Mike lowers his money cap below the refund in another tab, so a re-read drops Allow only for Dana, then raises it again; the menu stays closed until he opens it, and focus stays on Allow.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const labels = () => answerButtons(canvasElement).map((button) => button.textContent);

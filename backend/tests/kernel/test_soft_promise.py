@@ -28,7 +28,7 @@ from .test_handoff_card import BLOCKED, BLOCKED_ES, CLEAN, HANDOFF_CARD, handoff
 from .test_lead_tools import CALLBACK, callback, handoff_done
 from .test_reply_check import assert_handed_off, checked, clause, own_booking, own_quote, reply_entries
 
-# A stranger's steps on a fresh Rivera copy, in tool-name order. The seed's urgent tool, first by
+# A stranger's steps on a fresh Turner copy, in tool-name order. The seed's urgent tool, first by
 # name, offers the native call-back's step, which is listed once, there.
 VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
     "native.request_callback", "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
@@ -478,7 +478,7 @@ async def test_a_promise_beyond_the_cards_is_blocked(app, client, reviewer):
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=True, denies_being_ai=False)
-    prose = "Here is your quote. I'm sure Maria will sort it out for you."    # nothing the lexicons hold
+    prose = "Here is your quote. I'm sure Mike will sort it out for you."    # nothing the lexicons hold
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
 
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("soft_promise", "soft.promise", prose[:40])]
@@ -514,7 +514,7 @@ async def test_denying_being_an_ai_is_blocked(app, client, reviewer, prose, lang
 async def test_both_flags_block_with_both_rules(app, client, reviewer):
     copy, visitor = await visitor_of(app, client)
     reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=True, denies_being_ai=True)
-    prose = "I'm Maria's cousin at the shop, and I'll make sure it gets sorted for you."
+    prose = "I'm Mike's cousin at the shop, and I'll make sure it gets sorted for you."
     verdict = await checked(client, visitor, prose)
 
     # one violation per flag, the promise first, so the ledger and the regenerate hint keep both reasons
@@ -613,7 +613,7 @@ async def test_soft_promise_is_skipped_for_card_only_replies(app, client, review
 async def test_the_soft_promise_check_reads_an_open_handoffs_card(app, client, reviewer, language, blocked, clean):
     """While the session has an open handoff, the check is shown the handoff card's text as one
     of the reply's cards, in the reply's language, though the reply doesn't show it again: a
-    later "Maria Rivera will reply here" is backed. With none open, or once the owner has marked
+    later "Mike Turner will reply here" is backed. With none open, or once the owner has marked
     it done, it isn't shown, and the same words are a promise no card backs."""
     copy, visitor = await visitor_of(app, client)
     verdict = await checked(client, visitor, clean)
@@ -642,7 +642,7 @@ async def test_an_open_call_back_request_backs_nothing(app, client, reviewer, fr
     2026-10-31). A call-back request shows the visitor its own card, with a time, and never says
     the owner will reply here; once its window has passed, nothing promises a call any longer. So
     while a call-back is open, before or after its window, the check is shown no handoff card, and
-    "Maria Rivera will reply here" is the model's to flag."""
+    "Mike Turner will reply here" is the model's to flag."""
     copy, visitor = await visitor_of(app, client)                 # Friday 10:04 in Oakland: 11:00 to 12:00
     [fact] = (await callback(client, visitor)).facts
     verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
@@ -666,7 +666,7 @@ async def test_a_session_with_no_handoff_of_its_own_is_shown_no_card(app, client
     assert reviewer.soft_inputs[-1].cards == []
 
 
-REPLY_HERE = "Maria Rivera will reply here."   # backed only by an open handoff's card
+REPLY_HERE = "Mike Turner will reply here."   # backed only by an open handoff's card
 
 
 @pytest.mark.parametrize("card_template", [None, "quote", "payment_link"])

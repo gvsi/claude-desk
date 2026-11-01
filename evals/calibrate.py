@@ -10,7 +10,7 @@ and the search is exact. The row kept lets the fewest attack decisions through, 
 fewest legitimate ones; of rows tied on both it takes the higher minimum within-charter score, then
 the lower maximum manipulation score, so no tied row is stricter on both. An effect with fewer than
 `min_samples` attack or legitimate reviewed decisions keeps its row ("not enough data", expected
-for the effects the Rivera seed rarely reviews, since only its booking and link rules are
+for the effects the Turner seed rarely reviews, since only its booking and link rules are
 review-gated). Thresholds only narrow auto cards, so no row lets anything through that the owner's
 cards don't.
 

@@ -15,7 +15,7 @@ const DANA = rivera.people.dana.name;
 /** Dana's opening, as far as her second message: her question, the checked quote, her reply. */
 const opening: TranscriptTurn[] = rivera.conversations.danaLive.turns.slice(0, 4);
 
-/** Dana's chat on Maria's screen while Dana types her next message. */
+/** Dana's chat on Mike's screen while Dana types her next message. */
 function DanaTyping() {
   return (
     <Transcript label={`Conversation with ${DANA}`}>
@@ -37,7 +37,7 @@ function TypingBoard() {
         <DanaTyping />
       </Panel>
       <Panel label="Public page, unchanged: Claude writing stays a line on Claude’s side" width={520}>
-        <Transcript label="Conversation with Rivera Plumbing">
+        <Transcript label="Conversation with Turner Plumbing">
           <TranscriptRow>
             <VisitorMessage text="Can someone come Tuesday afternoon?" />
           </TranscriptRow>
@@ -57,7 +57,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Typing-Bubble-Run1',
     canvasNote: [
-      'The board’s panels from WritingIndicator and the Rivera fixture’s chat with Dana: a drain clearing quote where the board has a leak repair.',
+      'The board’s panels from WritingIndicator and the Turner fixture’s chat with Dana: a drain clearing quote where the board has a leak repair.',
       'The board’s title, description and “How it behaves” list are sign-off notes and stay in the canvas; its dashed outline marked the bubble before it was built.',
       'The reduced-motion panel isn’t repeated: Storybook shows the motion the system asks for, and the design system’s browser tests render every story under reduced motion, where the dots stay still.',
     ].join(' '),

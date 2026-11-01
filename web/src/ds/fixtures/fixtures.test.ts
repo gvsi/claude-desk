@@ -103,7 +103,7 @@ const LINK_PATHS: Partial<Record<ClauseTemplate, RegExp>> = {
 
 const SLOT_ID = /^S-[0-9]{8}-[0-9]{4}$/;
 
-// The master plan's slot_id is S-<yyyymmdd>-<hhmm>, the start in the business's time zone: Rivera's
+// The master plan's slot_id is S-<yyyymmdd>-<hhmm>, the start in the business's time zone: Turner's
 // is America/Los_Angeles in its seed.
 const BUSINESS_TIME_ZONE = 'America/Los_Angeles';
 const SLOT_IDS_IN_TEXT = /\bS-[0-9]{8}-[0-9]{4}\b/g;
@@ -572,20 +572,20 @@ describe('fixtures', () => {
     expect(claimProblems('La visita ya está pagada y el resto, reembolsado.')).toEqual(['payment claim']);
     expect(claimProblems("It's cheaper than a new tap.")).toEqual(['price claim']);
     expect(claimProblems('Cuesta menos que una llave nueva.')).toEqual(['price claim']);
-    expect(claimProblems('Maria waived the call-out fee.')).toEqual(['discount claim']);
+    expect(claimProblems('Mike waived the call-out fee.')).toEqual(['discount claim']);
     expect(claimProblems('Te hago una rebaja si pagas hoy.')).toEqual(['discount claim']);
-    expect(claimProblems("Of course. I've asked Maria to join.")).toEqual(['action claim']);
-    expect(claimProblems('Claro. Le pedí a Maria que se sume al chat.')).toEqual(['action claim']);
+    expect(claimProblems("Of course. I've asked Mike to join.")).toEqual(['action claim']);
+    expect(claimProblems('Claro. Le pedí a Mike que se sume al chat.')).toEqual(['action claim']);
     expect(claimProblems('We already told her.')).toEqual(['action claim']);
     // Plural and perfect past forms, passives, and passing a message on.
-    expect(claimProblems('Ya le avisamos a Maria.')).toEqual(['action claim']);
-    expect(claimProblems('Hemos avisado a Maria.')).toEqual(['action claim']);
-    expect(claimProblems('Le pasé tu mensaje a Maria.')).toEqual(['action claim']);
-    expect(claimProblems('Maria ya está avisada.')).toEqual(['action claim']);
-    expect(claimProblems("I've passed your message to Maria.")).toEqual(['action claim']);
-    expect(claimProblems('Maria has been notified.')).toEqual(['action claim']);
-    expect(claimProblems("I've forwarded this to Maria.")).toEqual(['action claim']);
-    expect(claimProblems('Le pedimos a Maria que se sume.')).toEqual(['action claim']);
+    expect(claimProblems('Ya le avisamos a Mike.')).toEqual(['action claim']);
+    expect(claimProblems('Hemos avisado a Mike.')).toEqual(['action claim']);
+    expect(claimProblems('Le pasé tu mensaje a Mike.')).toEqual(['action claim']);
+    expect(claimProblems('Mike ya está avisada.')).toEqual(['action claim']);
+    expect(claimProblems("I've passed your message to Mike.")).toEqual(['action claim']);
+    expect(claimProblems('Mike has been notified.')).toEqual(['action claim']);
+    expect(claimProblems("I've forwarded this to Mike.")).toEqual(['action claim']);
+    expect(claimProblems('Le pedimos a Mike que se sume.')).toEqual(['action claim']);
     expect(claimProblems('Te he enviado el enlace.')).toEqual(['action claim']);
     expect(claimProblems('Your visit is locked in.')).toEqual(['booking claim']);
     // Asking for something, or saying what someone is called, claims nothing.
@@ -684,7 +684,7 @@ describe('fixtures', () => {
     // them in their own message, before the request_callback receipt and its card.
     const PHONE = /\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/u;
     expect(PHONE.test('Lucía Herrera, (510) 555-0187')).toBe(true);
-    expect(PHONE.test('¿Puedo hablar con Maria?')).toBe(false);
+    expect(PHONE.test('¿Puedo hablar con Mike?')).toBe(false);
     const conversations = Object.values(FIXTURES).flatMap((fixture) => Object.entries(fixture.conversations));
     let callbacks = 0;
     for (const [name, conversation] of conversations) {
@@ -709,14 +709,14 @@ describe('fixtures', () => {
 
   test('fixture_prose_restates_no_card_statement', () => {
     // The oracle catches a charter policy repeated in prose, so a clean result means something.
-    expect(restatedStatements('Thanks. Maria texts before she arrives.')).toEqual(['maria texts before she arrives']);
+    expect(restatedStatements('Thanks. Mike texts before he arrives.')).toEqual(['mike texts before he arrives']);
     // It catches the kernel's cancelled-link line repeated in prose, in both languages, but not
     // prose naming the link, as a payment link's own title may be named.
-    expect(restatedStatements("Sorry. This payment link was cancelled because Maria Rivera's rules changed.")).toEqual([
-      "this payment link was cancelled because maria rivera's rules changed",
+    expect(restatedStatements("Sorry. This payment link was cancelled because Mike Turner's rules changed.")).toEqual([
+      "this payment link was cancelled because mike turner's rules changed",
     ]);
-    expect(restatedStatements('Lo siento. Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera.')).toEqual([
-      'este enlace de pago se canceló porque cambiaron las reglas de maria rivera',
+    expect(restatedStatements('Lo siento. Este enlace de pago se canceló porque cambiaron las reglas de Mike Turner.')).toEqual([
+      'este enlace de pago se canceló porque cambiaron las reglas de mike turner',
     ]);
     expect(restatedStatements("To hold the visit, here's a link for the service call deposit.")).toEqual([]);
     expect(statementSentences.length).toBeGreaterThan(10);
@@ -757,7 +757,7 @@ describe('fixtures', () => {
     const { moneyTools, hardCapCents } = backendMoneyRules();
     expect(moneyTools).toContain('payments.create_refund');
 
-    // Rivera's money cap is its rules version's, at or under the platform ceiling, and every auto
+    // Turner's money cap is its rules version's, at or under the platform ceiling, and every auto
     // card that moves money stays within it.
     expect(RIVERA_MONEY_CAP_CENTS).toBeLessThanOrEqual(hardCapCents);
     for (const card of Object.values(rivera.ruleCards)) {

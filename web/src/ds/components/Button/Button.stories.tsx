@@ -419,14 +419,14 @@ export const AsLink: Story = {
 };
 
 export const OpensInANewTab: Story = {
-  args: { href: '/d/rivera-plumbing-k3x9q2', external: true, children: 'Open your public page' },
+  args: { href: '/d/turner-plumbing-k3x9q2', external: true, children: 'Open your public page' },
   parameters: {
     canvasNote:
       "Today's \"Open your public page\" and \"Chat as a customer\" open the Desk's public page in a new tab, so Today stays where it was; they look like any secondary button.",
   },
   play: async ({ canvas }) => {
     const link = canvas.getByRole('link', { name: 'Open your public page' });
-    await expect(link).toHaveAttribute('href', '/d/rivera-plumbing-k3x9q2');
+    await expect(link).toHaveAttribute('href', '/d/turner-plumbing-k3x9q2');
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     // Nothing about its look changes: it is the secondary button.

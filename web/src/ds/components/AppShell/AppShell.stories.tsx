@@ -91,7 +91,7 @@ function pageNames(nav: HTMLElement): string[] {
 const today = (
   <>
     <Greeting
-      text="Good morning, Maria"
+      text="Good morning, Mike"
       presence={{ line: 'One person is talking to your Desk right now.', people: [{ kind: 'person' }] }}
       link={{ label: `desk.example/d/${rivera.business.slug}`, onCopy: fn() }}
     />
@@ -164,7 +164,7 @@ export const OwnerToday: Story = {
     const contentBox = content.getBoundingClientRect();
     await expect(contentBox.width).toBe(Math.min(960, mainBox.width - 80));
     await expect(Math.abs(contentBox.left - mainBox.left - (mainBox.right - contentBox.right))).toBeLessThanOrEqual(1);
-    await expect(canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' })).toBeVisible();
+    await expect(canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' })).toBeVisible();
 
     // At this width there is no top bar and no menu.
     await expect(canvas.queryByRole('button', { name: 'Menu' })).toBeNull();

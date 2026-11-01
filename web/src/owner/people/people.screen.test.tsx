@@ -140,7 +140,7 @@ function stubClipboard() {
 
 /** A setup interview made through the mock, its rules confirmed, at the owner's preview before going live. */
 async function setupAtPreview(): Promise<SetupState> {
-  const description = "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
+  const description = "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
   const started = await mockStore.dispatch('startSetup', { body: { description, timezone: LA, idempotency_key: newIdempotencyKey() } });
   // A new interview answers 201, as the API's does.
   if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');

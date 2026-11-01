@@ -1,12 +1,12 @@
 """Receipts that say what was done, and whether the business is open now.
 
 An executed action's receipt names what happened, one line per tool in the reader's language
-("Quoted from Maria Rivera's price list"), instead of a generic "Done"; a tool with no line fails
+("Quoted from Mike Turner's price list"), instead of a generic "Done"; a tool with no line fails
 before anything happens. The public page's header says whether the business is open now, computed
 by the kernel from the Desk's `charter:hours` windows in the business's time zone, on its own
 clock, with the text the web shows verbatim and the instant it should ask again.
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland; open
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland; open
 Monday to Friday 8:00 am to 6:00 pm and Saturday 9:00 am to 1:00 pm), and on the open-status
 helpers directly for the copy table, time zones and daylight-saving changes.
 """
@@ -39,17 +39,17 @@ VISITOR_OR_AGENT_TOOLS = frozenset({
     "native.charge_mandate", "native.capture_lead", "native.request_callback", "native.start_verification",
     "payments.list_charges", "payments.create_refund"})
 
-# The owner's signed-off lines for this plan's tools (English, Spanish), for an owner named Maria Rivera.
+# The owner's signed-off lines for this plan's tools (English, Spanish), for an owner named Mike Turner.
 RECEIPT_LINES = {
-    "native.quote": ("Quoted from Maria Rivera's price list", "Cotizado con la lista de precios de Maria Rivera"),
-    "native.find_slots": ("Times read from Maria Rivera's calendar", "Horarios tomados del calendario de Maria Rivera"),
-    "native.book": ("Booked on Maria Rivera's calendar", "Reservado en el calendario de Maria Rivera"),
-    "native.capture_lead": ("Details saved for Maria Rivera", "Datos guardados para Maria Rivera"),
-    "native.request_callback": ("Callback request saved for Maria Rivera",
-                                "Solicitud de llamada guardada para Maria Rivera"),
+    "native.quote": ("Quoted from Mike Turner's price list", "Cotizado con la lista de precios de Mike Turner"),
+    "native.find_slots": ("Times read from Mike Turner's calendar", "Horarios tomados del calendario de Mike Turner"),
+    "native.book": ("Booked on Mike Turner's calendar", "Reservado en el calendario de Mike Turner"),
+    "native.capture_lead": ("Details saved for Mike Turner", "Datos guardados para Mike Turner"),
+    "native.request_callback": ("Callback request saved for Mike Turner",
+                                "Solicitud de llamada guardada para Mike Turner"),
     "native.start_verification": ("Verification started", "Verificación iniciada"),
-    "native.release_document": ("Document shared from Maria Rivera's records",
-                                "Documento compartido desde los registros de Maria Rivera"),
+    "native.release_document": ("Document shared from Mike Turner's records",
+                                "Documento compartido desde los registros de Mike Turner"),
 }
 
 # What a receipt line may never hold: a number, an amount, a percentage or a date.
@@ -64,36 +64,36 @@ def test_every_visitor_tool_has_receipt_lines():
     assert set(RECEIPT_LINES) <= registered                 # this plan's tools are all registered
     for tool in sorted(registered):
         for lang in ("en", "es"):
-            line = render.executed_status(tool, lang, owner="Maria Rivera")
+            line = render.executed_status(tool, lang, owner="Mike Turner")
             hits = {violation.rule_id for violation in reply_check.scan_prose(line)} & NUMBERS_AND_DATES
             assert line and not hits, (tool, lang, line, hits)
     # the copy the owner signed off, word for word
-    assert {tool: (render.executed_status(tool, "en", owner="Maria Rivera"),
-                   render.executed_status(tool, "es", owner="Maria Rivera")) for tool in RECEIPT_LINES} == RECEIPT_LINES
+    assert {tool: (render.executed_status(tool, "en", owner="Mike Turner"),
+                   render.executed_status(tool, "es", owner="Mike Turner")) for tool in RECEIPT_LINES} == RECEIPT_LINES
 
 
 async def test_executed_receipt_says_what_was_done(app, client):
     copy, visitor = await visitor_of(app, client)
     key = await public_key(client)
     allowed = await decided(client, visitor, "native.quote", quote_args(("drain", 1)))
-    assert (allowed.outcome, allowed.visitor_plain) == ("allow", "Checked against Maria Rivera's rules")
+    assert (allowed.outcome, allowed.visitor_plain) == ("allow", "Checked against Mike Turner's rules")
     await executed(client, visitor, allowed)
     done = await read(client, visitor.headers, allowed)
-    assert (done.state, done.visitor_plain) == ("executed", "Quoted from Maria Rivera's price list")
+    assert (done.state, done.visitor_plain) == ("executed", "Quoted from Mike Turner's price list")
     verify_signature(key, done)
     # in Spanish for a session that reads Spanish
     spanish = await open_visitor(client, copy)
     await set_session(app, copy, spanish.session_id, last_language="es")
     allowed = await decided(client, spanish, "native.quote", quote_args(("drain", 1)))
-    assert allowed.visitor_plain == "Revisado con las reglas de Maria Rivera"      # other states keep their line
+    assert allowed.visitor_plain == "Revisado con las reglas de Mike Turner"      # other states keep their line
     await executed(client, spanish, allowed)
     done = await read(client, spanish.headers, allowed)
-    assert (done.state, done.visitor_plain) == ("executed", "Cotizado con la lista de precios de Maria Rivera")
+    assert (done.state, done.visitor_plain) == ("executed", "Cotizado con la lista de precios de Mike Turner")
     verify_signature(key, done)
     # a held quote the owner approves once ends on the same line
     copy, held = await seeded_hold(app, client)
     approved = (await answered(client, copy.owner, held.decision_id, "allow_once")).decision
-    assert (approved.state, approved.visitor_plain) == ("executed", "Quoted from Maria Rivera's price list")
+    assert (approved.state, approved.visitor_plain) == ("executed", "Quoted from Mike Turner's price list")
     verify_signature(key, approved)
 
 
@@ -141,7 +141,7 @@ async def test_a_tool_without_a_line_fails_before_its_side_effect(app, client, r
 
 # ---- Open now -----------------------------------------------------------------------------------
 
-LA = ZoneInfo("America/Los_Angeles")                                         # Rivera Plumbing's time zone
+LA = ZoneInfo("America/Los_Angeles")                                         # Turner Plumbing's time zone
 
 
 def at(wall: str, tz: ZoneInfo = LA, *, fold: int = 0) -> datetime:
@@ -391,7 +391,7 @@ def within(hours: list[HoursWindow], dow: int, minute: int) -> bool:
 
 
 def test_open_status_agrees_with_cedars_local_time():
-    # Rivera's hours and windows whose starts and ends the clock changes skip or repeat
+    # Turner's hours and windows whose starts and ends the clock changes skip or repeat
     hours = [*RIVERA_HOURS, window("sun", "01:30", "02:30"), window("sun", "22:00", "00:00"),
              window("mon", "00:00", "00:45")]
     minute = timedelta(minutes=1)
@@ -437,7 +437,7 @@ async def test_a_failing_open_status_is_none_and_logged(app, client, frozen_cloc
     copy = await rivera(app, client)
 
     def broken(hours, tz, now):
-        raise RuntimeError("Rivera Plumbing, Monday to Friday")
+        raise RuntimeError("Turner Plumbing, Monday to Friday")
 
     monkeypatch.setattr(desks, "open_window_status", broken)
     with caplog.at_level(logging.INFO):
@@ -448,7 +448,7 @@ async def test_a_failing_open_status_is_none_and_logged(app, client, frozen_cloc
     assert [record.getMessage() for record in caplog.records if "open_status" in record.getMessage()] == [
         "open_status_failed error=RuntimeError"]
     kernel_log = "\n".join(record.getMessage() for record in caplog.records if record.name.startswith("desk"))
-    for desk_data in ("Rivera", "Monday", copy.slug, copy.desk_id, copy.copy_id):
+    for desk_data in ("Turner", "Monday", copy.slug, copy.desk_id, copy.copy_id):
         assert desk_data not in kernel_log
     # a closed business that names no opening is a failure too: its only window is an hour the
     # clocks skip next Sunday, so nothing opens in the week ahead

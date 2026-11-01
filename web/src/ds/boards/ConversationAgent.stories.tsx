@@ -21,7 +21,7 @@ const firstRequest = alex.turns.findIndex((turn) => turn.kind === 'agent');
 /** The screen's words for the agent's signed limit and what it has used, as the board writes them. */
 const LIMIT = { perCharge: '$20', total: '$100', used: '$20', duration: 'One hour', source: 'Signed limit from Alex Kim’s demo wallet' } as const;
 
-/** Alex Kim's assistant's signed requests as Maria reads them: its limit on top, each request on the right. */
+/** Alex Kim's assistant's signed requests as Mike reads them: its limit on top, each request on the right. */
 function ConversationAgent() {
   return (
     <RiveraFrame
@@ -69,7 +69,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Conv-Agent-Run1',
     canvasNote: [
-      "The conversation is the Rivera fixture's agent chat: a quote for the deposit, then the charge to the signed limit, where the board adds a request for open times and a booking between them.",
+      "The conversation is the Turner fixture's agent chat: a quote for the deposit, then the charge to the signed limit, where the board adds a request for open times and a booking between them.",
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
       'The signed limit is SignedLimitPanel, as the board draws it: per charge, in total, what the agent has used and for how long, in the screen’s words from the mandate, with whose wallet signed it at the right.',
       'The list column and the conversation head are composed as on the live conversation board (AppShell fill).',

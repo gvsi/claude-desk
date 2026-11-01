@@ -286,7 +286,7 @@ it('a_state_this_build_does_not_know_can_not_be_paid', () => {
 it('the_paid_line_links_back_only_to_a_public_chat', () => {
   // Paid, with the visitor's chat known: the line's own words, with "Go back to the chat" a text
   // link in the sentence to that chat, in the same tab.
-  const CHAT = '/d/rivera-plumbing-abc123';
+  const CHAT = '/d/turner-plumbing-abc123';
   const { container, update } = render({ state: 'paid', chatHref: CHAT });
   const line = () => container.querySelector('.cd-checkout__state');
   const links = () => [...container.querySelectorAll('a')];
@@ -314,7 +314,7 @@ it('the_paid_line_links_back_only_to_a_public_chat', () => {
   expect(links()).toHaveLength(0);
 
   // Anything but a public chat's own path is ignored: the paid line as it was, with no link.
-  for (const chatHref of ['', 'https://evil.example/d/rivera', '//evil.example', '/d/rivera?preview=desk-1', '/d/rivera#about', '/d/rivera/agents', '/d/Rivera', 'javascript:alert(1)', '/pay/k7Hq2vX9']) {
+  for (const chatHref of ['', 'https://evil.example/d/rivera', '//evil.example', '/d/rivera?preview=desk-1', '/d/rivera#about', '/d/rivera/agents', '/d/Turner', 'javascript:alert(1)', '/pay/k7Hq2vX9']) {
     update({ state: 'paid', cancelReason: undefined, chatHref });
     expect(links(), chatHref).toHaveLength(0);
     expect(line()?.textContent, chatHref).toBe('Paid. Go back to the chat to see it there.');

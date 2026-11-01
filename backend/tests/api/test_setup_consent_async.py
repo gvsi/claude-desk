@@ -344,7 +344,7 @@ async def test_consent_answers_200_with_the_first_question_when_the_reads_finish
     landed = reply.json()
     assert landed["busy"] is False and landed["question"] == setup.QUESTION_KEYS[0]
     assert [message["text"] for message in landed["messages"][2:4]] == [
-        "Searched your Claude memory", "Read rivera-plumbing.example"]
+        "Searched your Claude memory", "Read turner-plumbing.example"]
     assert [message["role"] for message in landed["messages"]] == [
         "claude", "owner", "tool_label", "tool_label", "claude"]
     (transcript,) = db.execute("SELECT transcript FROM app.setup_interviews WHERE interview_id = %s",

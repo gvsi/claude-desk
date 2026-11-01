@@ -47,7 +47,7 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    of 2026-11-01); the final check makes its own try. While the session has an open handoff the
    handoff card opened
    (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
-   doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
+   doesn't show it again: the owner has the conversation, so a later "Mike Turner will reply
    here" is backed, as the card that opened it said. A call-back request backs nothing (the
    owner's decision of 2026-10-31): its own card names a time and never says the owner will
    reply here, and once its window has passed nothing promises a call. That handoff is read
@@ -965,7 +965,7 @@ async def desk_names(ctx: KernelCtx, desk_id: str) -> list[str]:
 
 
 def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
-    """The handoff clause: "Let me check with Maria Rivera." in the reply's language."""
+    """The handoff clause: "Let me check with Mike Turner." in the reply's language."""
     return render.render_clause(Clause(template="handoff"), None, language, desk)
 
 
@@ -1328,8 +1328,8 @@ async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | N
 
 
 async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | None:
-    """The owner's handoff for a verdict that shows the handoff card ("Let me check with Maria
-    Rivera. Maria Rivera will reply here."), in the verdict's transaction, so the card's promise
+    """The owner's handoff for a verdict that shows the handoff card ("Let me check with Mike
+    Turner. Mike Turner will reply here."), in the verdict's transaction, so the card's promise
     has something behind it (the owner's decision of 2026-10-30). Returns its ID, or None when it
     opens none.
 

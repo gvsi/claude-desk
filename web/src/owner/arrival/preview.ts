@@ -1,11 +1,11 @@
 /**
- * A still copy of what a new copy of Rivera Plumbing's Today reads, for the preview behind the
- * intro dialog, which draws Today itself from it. It holds the Rivera seed as a new copy opens on
+ * A still copy of what a new copy of Turner Plumbing's Today reads, for the preview behind the
+ * intro dialog, which draws Today itself from it. It holds the Turner seed as a new copy opens on
  * it: the business and its Main line Desk, Alex Kim's assistant's chat (a visiting agent's quote and
  * deposit, about 40 minutes before), the seeded hold (a visitor not on record asking for 15% off, 12
  * minutes before) with the reply the check stopped (on Safety, so in no read here), Dana's chat
- * (live, booked, with Maria's whisper), the briefing and the last 7 days they make, and the hold's
- * alert in the Demo inbox. The held request and the names come from the design system's Rivera
+ * (live, booked, with Mike's whisper), the briefing and the last 7 days they make, and the hold's
+ * alert in the Demo inbox. The held request and the names come from the design system's Turner
  * fixtures. Each part of the seed is dated back from `now` as the seed dates it, and counted on its
  * own day on the business's clock, so just after midnight what happened before it is yesterday's.
  * Nothing here is read from the API: no copy exists yet.
@@ -73,7 +73,7 @@ function addDays(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }
 
-/** Rivera's Today, Needs you and Demo inbox as Today reads them at `now`, a moment after a new copy opened. */
+/** Turner's Today, Needs you and Demo inbox as Today reads them at `now`, a moment after a new copy opened. */
 export function stillToday(now: Date): StillToday {
   const at = now.getTime();
   // The seed is dated back from when the copy opened, a moment before Today reads it at `now`.
@@ -158,7 +158,7 @@ export function stillToday(now: Date): StillToday {
       bookings: 1,
       booked_cents: 18_000,
       conversations: 3,
-      // Maria whispered in Dana's chat; Claude handled the agent's and the held visitor's alone.
+      // Mike whispered in Dana's chat; Claude handled the agent's and the held visitor's alone.
       handled: 2,
       stepped_in: 1,
       // Only a refused request counts as stopped here, and the seed has none: the reply the check

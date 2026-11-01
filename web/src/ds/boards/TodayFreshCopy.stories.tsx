@@ -17,7 +17,7 @@ function TodayFreshCopy() {
     <RiveraFrame current="today" reviewer counts={{}}>
       <div className="board-today">
         <div className="board-today__main">
-          <Greeting text="Good morning, Maria" presence={{ line: 'Quiet right now.', people: [] }} link={{ label: PUBLIC_LINK, onCopy: fn() }} />
+          <Greeting text="Good morning, Mike" presence={{ line: 'Quiet right now.', people: [] }} link={{ label: PUBLIC_LINK, onCopy: fn() }} />
           <ThingsToTry things={[THINGS_TO_TRY.chat, THINGS_TO_TRY.breakIt, THINGS_TO_TRY.ownDesk]} />
           <section className="board-section" aria-labelledby="board-since-last-night">
             <SectionHeader id="board-since-last-night" title="Since last night" />
@@ -55,7 +55,7 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expectOwnerFrame(canvasElement, 'Today');
     await expect(canvas.getByText('Your public page opens in a new tab. Ask about a price or a time.')).toBeVisible();
-    expectComputed(canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' }), SPEC.greeting);
+    expectComputed(canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' }), SPEC.greeting);
 
     // Nothing is held, so neither the held row nor Needs you shows; nothing counts in the sidebar.
     await expect(canvas.queryByText('Answer a held request')).toBeNull();

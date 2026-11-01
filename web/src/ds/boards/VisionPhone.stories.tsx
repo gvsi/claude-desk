@@ -17,7 +17,7 @@ const meta = {
       'Signed on 2026-10-30. The owner’s Today and a visitor’s chat as phone apps, each in a PhoneFrame; the owner’s with the five-tab PhoneTabBar.',
       'The held quote is Today’s ApprovalCard: a limit hold for a visitor not on record, so its answers are the two plain buttons of the signed answer board (N-Answers-TwoButtons), and it says where and when it was held, with the card’s own spacing between its lines; the board draws two menu buttons, no waiting line and tighter lines.',
       'The visitor’s composer is the real Composer with its send button, where the board draws a plain field. Nothing on a vision page is sent: once Send is pressed, “This is a vision page, so nothing is sent.” shows 8 px under the composer (owner’s ruling, 2026-10-30), and the held quote’s answers say the same under them when pressed.',
-      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Maria will text you when she’s on her way.” promised what no card backs, and its booking was drawn as a plain fact card. Claude now says “You’re all set. Here’s your visit.” beside the kernel’s booking card (booking_confirmed) in its rendered shape: “Tuesday, November 3”, “Arriving 2:00 pm to 4:00 pm”, “With Maria Rivera”, with no booking number; the board is to be redrawn to match.',
+      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Mike will text you when he’s on his way.” promised what no card backs, and its booking was drawn as a plain fact card. Claude now says “You’re all set. Here’s your visit.” beside the kernel’s booking card (booking_confirmed) in its rendered shape: “Tuesday, November 3”, “Arriving 2:00 pm to 4:00 pm”, “With Mike Turner”, with no booking number; the board is to be redrawn to match.',
       'The board is cut at the window’s foot; the page runs on to the footer under the phones.',
     ].join(' '),
   },
@@ -50,7 +50,7 @@ export const Board: Story = {
     await expect(Math.round(ownerScreen.getBoundingClientRect().top - bar.getBoundingClientRect().bottom)).toBe(106);
 
     // The owner's phone: the greeting, the held quote and Live now, over the five tabs, Today current.
-    await expect(within(owner).getByRole('heading', { level: 2, name: 'Good morning, Maria' })).toBeVisible();
+    await expect(within(owner).getByRole('heading', { level: 2, name: 'Good morning, Mike' })).toBeVisible();
     const held = within(owner).getByRole('article', { name: /^Held for you:/ });
     await expect(within(held).getByRole('button', { name: 'Allow this time' })).toBeVisible();
     await expect(within(held).getByRole('button', { name: 'Deny this time' })).toBeVisible();
@@ -64,8 +64,8 @@ export const Board: Story = {
     await expect(tabs[0]).toHaveAttribute('aria-current', 'page');
 
     // The visitor's phone: the business's header with the disclosure, the booking next to its card, the composer.
-    await expect(within(visitor).getByText('Claude, an AI, answers for Maria Rivera')).toBeVisible();
-    const log = within(visitor).getByRole('log', { name: 'Conversation with Rivera Plumbing' });
+    await expect(within(visitor).getByText('Claude, an AI, answers for Mike Turner')).toBeVisible();
+    const log = within(visitor).getByRole('log', { name: 'Conversation with Turner Plumbing' });
     expectConversationType(log);
     // The booking is confirmed only by its card: Claude's words state no date, time or booking, and
     // promise nothing the card doesn't back.
@@ -73,17 +73,17 @@ export const Board: Story = {
     await expect(await expectReceiptsUnderMessages(log)).toBe(1);
     // The booking is the kernel's booking card, in the same message as Claude's words.
     const booked = within(log).getByRole('article', { name: 'Booked' });
-    // The kernel's booking card, as it renders one: the day, when Maria arrives, and who.
-    await expect(booked.textContent).toBe('BookedTuesday, November 3Arriving 2:00 pm to 4:00 pmWith Maria Rivera');
+    // The kernel's booking card, as it renders one: the day, when Mike arrives, and who.
+    await expect(booked.textContent).toBe('BookedTuesday, November 3Arriving 2:00 pm to 4:00 pmWith Mike Turner');
     const reply = one(log, '.cd-claude-message__prose');
     await expect(reply.textContent).toBe(PHONE_REPLY);
     await expect(booked.closest('.cd-claude-message')).toBe(reply.closest('.cd-claude-message'));
-    await expect(within(visitor).getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    await expect(within(visitor).getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeVisible();
     await expect(within(visitor).getByText('This chat is with Claude, an AI.')).toBeVisible();
 
     // focus_order_is_logical: the bar's link, the held quote's answers, the five tabs, then the
     // visitor's composer and Send. Send is disabled while the box is empty, so a message is typed first.
-    const composer = within(visitor).getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const composer = within(visitor).getByRole('textbox', { name: 'Message Turner Plumbing' });
     await userEvent.type(composer, 'Thanks');
     await expectTabOrder(userEvent, [
       within(bar).getByRole('link', { name: 'Back to Vision' }),

@@ -365,7 +365,7 @@ def turn(agent: Agent, slug: str, session_id: str, frozen_clock, message: str = 
 
 
 async def agent_on_rivera(app, client, frozen_clock) -> tuple[Rivera, Agent, SessionCreated]:
-    """A Rivera Plumbing copy and a demo agent its owner minted, in a session with its mandate."""
+    """A Turner Plumbing copy and a demo agent its owner minted, in a session with its mandate."""
     copy = await rivera(app, client)
     agent = await mint(client, copy.owner, copy.desk_id)
     return copy, agent, await open_agent(client, copy.slug, agent, frozen_clock)
@@ -724,7 +724,7 @@ async def test_verify_routes_accept_agent_sessions(app, client, frozen_clock, mo
         ("agent_auth", route, "replayed") for route in routes]
 
 
-AGENT_TOOL_LABELS = {   # Rivera Plumbing's agent tools today, by the plain label the card gives each
+AGENT_TOOL_LABELS = {   # Turner Plumbing's agent tools today, by the plain label the card gives each
     "en": ["get a quote from the price list", "find open times", "book a visit"],
     "es": ["pedir una cotización de la lista de precios", "buscar horarios libres", "reservar una visita"],
 }
@@ -745,7 +745,7 @@ async def test_public_agent_card_is_kernel_rendered(app, client, frozen_clock):
         text = "\n".join(block.text for block in card)
         for expected in (*AGENT_TOOL_LABELS[lang], copy.slug, f"/api/a2a/{copy.slug}", "X-Agent-Key-Id",
                          "X-Agent-Ts", "X-Agent-Nonce", "X-Agent-Sig", "desk_slug, ts, nonce", "body_sha256",
-                         "Ed25519", "RFC 8785", "5 minut", disclosure, "Claude", "Maria Rivera"):
+                         "Ed25519", "RFC 8785", "5 minut", disclosure, "Claude", "Mike Turner"):
             assert expected in text, (lang, expected)
         assert ("not business credentials" if lang == "en" else "No son credenciales del negocio") in text
         # no amount, key, mandate or private field

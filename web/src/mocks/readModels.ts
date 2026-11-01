@@ -656,7 +656,7 @@ export const HEALTH: HealthOut = {
 
 /**
  * The preset the owner cards came from: the one whose cards they are, exactly, as a Desk with these
- * opening hours drafts it (`presetCards`), else null. It is provenance only, and Rivera's own rules
+ * opening hours drafts it (`presetCards`), else null. It is provenance only, and Turner's own rules
  * match neither.
  */
 function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[]): RulesPreset | null {

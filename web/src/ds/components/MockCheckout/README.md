@@ -36,7 +36,7 @@
 - `merchant`: the business's name, `PaymentLinkView.business_name`.
 - `title`, `state`, `language` and `cancelReason`: the link's `PaymentLinkView.title`, `state`, `language` and `cancel_reason`.
 - `amount`: the page's amount string, made from `PaymentLinkView.amount_cents`. It shows exactly as given, large and in "Pay {amount}".
-- `chatHref`: the visitor's chat as its own path (`/d/rivera-plumbing`), when the page knows it. The checkout page knows it from this browser's record of the chat that showed the link's card; the API's link view doesn't carry it.
+- `chatHref`: the visitor's chat as its own path (`/d/turner-plumbing`), when the page knows it. The checkout page knows it from this browser's record of the chat that showed the link's card; the API's link view doesn't carry it.
 - `customerName`: `PaymentLinkView.customer_name`, the kernel's first name and last initial ("Dana W.") for a link from a verified session, present only while the link is open. The component shows it as given and formats nothing. Without it, or with a blank one, the name is the empty field above.
 - `onPay` and `onCancel`: complete or cancel the link through the API's payment routes. Neither gets any argument. Set `error` back to false when a request starts, so a retry that fails again is a new error and brings the buttons back.
 - `busy` while a request is in flight, `error` when it fails with anything but an answer that says the link's state.

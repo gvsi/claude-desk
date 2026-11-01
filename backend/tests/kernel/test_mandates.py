@@ -10,11 +10,11 @@ and keeps it while nobody knows. An agent's payment link holds its reservation f
 link is paid (committed) or leaves `issued` another way (released); an unknown link keeps it until
 it is reconciled.
 
-Tests run on a test Desk made with `POST /desks` (a $20 deposit and a $25 site visit) in a Rivera
+Tests run on a test Desk made with `POST /desks` (a $20 deposit and a $25 site visit) in a Turner
 Plumbing copy (Friday 10:04 in Oakland), with Answering on and, through `draft_and_confirm`, its
 money cap set to $500 and these cards: the seed's `rv-mandate` (agent charges up to $20, for
 anyone), quotes for anyone and payment links up to $500 for anyone. Drafts are proved, so those
-tests need the solver (`solver`); the two on a Rivera copy run on the seed's own cards, `rv-mandate`
+tests need the solver (`solver`); the two on a Turner copy run on the seed's own cards, `rv-mandate`
 among them. Agents sign each turn as `test_agent_auth` does.
 """
 
@@ -291,7 +291,7 @@ async def test_other_mandate_refusals_keep_the_generic_line(desk_prove, app, cli
 
 
 async def rivera_agent(app: FastAPI, client: httpx.AsyncClient, frozen_clock: FrozenClock) -> AgentDesk:
-    """A Rivera Plumbing copy as `POST /copies` seeds it (its cards include `rv-mandate`), and a demo
+    """A Turner Plumbing copy as `POST /copies` seeds it (its cards include `rv-mandate`), and a demo
     agent its owner minted, in a session with its mandate."""
     copy = await rivera(app, client)
     agent = await mint(client, copy.owner, copy.desk_id)

@@ -67,7 +67,7 @@ def test_recovered_reply_reads_the_delivered_handoff_flag_and_whether_its_prose_
     # The delivered row's blocks, as stored: the prose Claude drafted shows as a prose block only when it passed.
     blocks = [*([RenderedBlock(kind="prose", text="Here is the quote.")] if prose_shown else []),
               RenderedBlock(kind="card", template="quote", text="Drain clearing"),
-              RenderedBlock(kind="card", template="handoff", text="Let me check with Maria Rivera.")]
+              RenderedBlock(kind="card", template="handoff", text="Let me check with Mike Turner.")]
     shown = SimpleNamespace(ref_id="msg-recovered", handoff=handoff, blocks=blocks)
     outcome = loop._recovered_reply(shown, tool_use("send_reply", {"prose": "Here is the quote.", "clauses": []}))
     assert outcome.delivered == ("handoff" if handoff else "reply")
@@ -1452,7 +1452,7 @@ async def test_a_take_over_after_the_turn_read_the_session_shows_no_writing_afte
         async with engine.connect() as conn:
             await run_lock(conn, caller.session_id)
             fake.set_mode(caller.session_id, "owner")
-            await emit(conn, caller.ids, EvOwnerJoined(type="owner_joined", name="Maria Rivera"))
+            await emit(conn, caller.ids, EvOwnerJoined(type="owner_joined", name="Mike Turner"))
             await conn.commit()
 
     await said(api_conn, caller, "Can someone come tomorrow?")

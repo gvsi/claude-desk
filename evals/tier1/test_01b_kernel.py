@@ -277,7 +277,7 @@ async def test_a_deleted_desks_held_request_runs_nothing(k: KernelHarness, recor
 
 
 ASK_FOR_DOCUMENTS = RuleCard(card_id="t1-ask-docs", applies_to="native.release_document", mode="ask",
-                             who="record_owner", reason="Maria checks each document before it goes out.")
+                             who="record_owner", reason="Mike checks each document before it goes out.")
 
 
 @pytest.mark.requires("01b")
@@ -702,7 +702,7 @@ async def test_a_preview_session_needs_the_owner_of_its_copy(k: KernelHarness, r
 # The money cap on each rules version
 
 LINK = "native.payment_link"
-SEED_CAP = 50_000   # the Rivera seed's money cap: $500
+SEED_CAP = 50_000   # the Turner seed's money cap: $500
 CAP_80, CAP_20 = 8_000, 2_000
 FIND_SLOTS_CARD = RuleCard(card_id="m-auto-find-slots", applies_to="native.find_slots", mode="auto", who="anyone",
                            reason="Anyone can see open times.")

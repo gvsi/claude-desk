@@ -29,7 +29,7 @@ function QrPlaceholder({ url = 'desk.example/rivera' }: { url?: string }) {
 const meta = {
   title: 'Share/ShareCard',
   component: ShareCard,
-  args: { name: 'Rivera Plumbing', url: 'desk.example/rivera', ownerName: 'Maria Rivera', language: 'en', qr: <QrPlaceholder />, onPrint: fn() },
+  args: { name: 'Turner Plumbing', url: 'desk.example/rivera', ownerName: 'Mike Turner', language: 'en', qr: <QrPlaceholder />, onPrint: fn() },
   render: (args) => (
     <div style={{ maxWidth: 300 }}>
       <ShareCard {...args} />
@@ -46,12 +46,12 @@ export const Printable: Story = {
   parameters: { canvasNote: 'The printable card on Share: the business, the QR code the web app draws, the link and who answers, then Print card. The QR here is a placeholder.' },
   play: async ({ args, canvas, userEvent }) => {
     // share_card_says_who_answers: the business, the link, and the AI disclosure, which can't be left off.
-    const card = canvas.getByRole('figure', { name: 'Rivera Plumbing' });
+    const card = canvas.getByRole('figure', { name: 'Turner Plumbing' });
     await expect(within(card).getByText('desk.example/rivera')).toBeVisible();
     const disclosure = card.querySelector('figcaption')!;
-    await expect(disclosure).toHaveTextContent(/^Answered by Claude, an AI\. Ask for Maria Rivera any time\.$/);
+    await expect(disclosure).toHaveTextContent(/^Answered by Claude, an AI\. Ask for Mike Turner any time\.$/);
     expectComputed(disclosure, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', textAlign: 'center' });
-    expectComputed(within(card).getByText('Rivera Plumbing'), { fontSize: '15px', lineHeight: '20px', fontWeight: '520', textAlign: 'center' });
+    expectComputed(within(card).getByText('Turner Plumbing'), { fontSize: '15px', lineHeight: '20px', fontWeight: '520', textAlign: 'center' });
     expectComputed(card, { paddingTop: '20px', paddingLeft: '20px', borderTopLeftRadius: '12px', backgroundColor: 'rgba(250, 249, 245, 0.03)' });
     // The QR code is the screen's, in a 152 px square slot, 12 px under the name, centered.
     const qr = within(card).getByRole('img', { name: 'QR code for desk.example/rivera' });
@@ -73,9 +73,9 @@ export const Spanish: Story = {
   args: { language: 'es', onPrint: undefined },
   parameters: { canvas: 'none', canvasNote: 'N-Run2-Share’s card printed in Spanish: who answers in Spanish, the name and link as they are, and no Print card button when the screen gives none.' },
   play: async ({ canvas }) => {
-    const card = canvas.getByRole('figure', { name: 'Rivera Plumbing' });
+    const card = canvas.getByRole('figure', { name: 'Turner Plumbing' });
     await expect(card).toHaveAttribute('lang', 'es');
-    await expect(card.querySelector('figcaption')).toHaveTextContent(/^Responde Claude, una IA\. Puedes pedir hablar con Maria Rivera cuando quieras\.$/);
+    await expect(card.querySelector('figcaption')).toHaveTextContent(/^Responde Claude, una IA\. Puedes pedir hablar con Mike Turner cuando quieras\.$/);
     await expect(canvas.queryByRole('button')).toBeNull();
   },
 };
@@ -93,7 +93,7 @@ export const Phone: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     // share_card_spans_a_phones_column: the card fills the column; Print card is centered under it.
-    const card = canvas.getByRole('figure', { name: 'Rivera Plumbing' });
+    const card = canvas.getByRole('figure', { name: 'Turner Plumbing' });
     const column = canvasElement.querySelector<HTMLElement>('.cd-share-card')!.parentElement!.getBoundingClientRect();
     const box = card.getBoundingClientRect();
     await expect([Math.round(box.left), Math.round(box.width)]).toEqual([Math.round(column.left), 358]);
@@ -126,14 +126,14 @@ export const MarkedName: Story = {
 
 export const OwnerNameWithDirectionOverride: Story = {
   name: 'An owner name with a direction override',
-  args: { ownerName: 'Maria \u202ERivera', onPrint: undefined },
+  args: { ownerName: 'Mike \u202ETurner', onPrint: undefined },
   parameters: {
     canvas: 'none',
     canvasNote: 'N-Run2-Share’s card for an owner whose name holds a right-to-left override (U+202E): the name is isolated in its sentence, so it can’t reorder the words after it.',
   },
   play: async ({ canvas }) => {
     // share_card_owner_name_is_isolated: "any time." stays after the owner's name, at its right.
-    const caption = canvas.getByRole('figure', { name: 'Rivera Plumbing' }).querySelector('figcaption');
+    const caption = canvas.getByRole('figure', { name: 'Turner Plumbing' }).querySelector('figcaption');
     const owner = caption?.querySelector<HTMLElement>('[data-copy="user"]');
     const after = caption?.lastChild;
     if (!caption || !owner || !after || after.textContent !== ' any time.') throw new Error('No owner name and the words after it');

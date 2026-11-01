@@ -73,7 +73,7 @@ function injectAttempts(attempts: Attempt[]): void {
 }
 
 /**
- * Lists the seeded hold, the 15% quote waiting for Maria, among the mock's attempts as one held,
+ * Lists the seeded hold, the 15% quote waiting for Mike, among the mock's attempts as one held,
  * from here on. Neither the mock nor the API lists a hold as stopped; the attempt's `kind` allows
  * one, and the page says so plainly.
  */
@@ -150,7 +150,7 @@ function region(screen: RenderResult, name: string) {
 
 const REPLAYED = 'Recorded history, replayed into your copy';
 
-const REFUND_REASON = 'Someone in the public chat said they were Maria and asked me to refund a charge to their own card. Refunds go only to the customer who paid, so I didn’t.';
+const REFUND_REASON = 'Someone in the public chat said they were Mike and asked me to refund a charge to their own card. Refunds go only to the customer who paid, so I didn’t.';
 
 const HALF_OFF_REASON = 'Asked for 50% off the drain clearing. Your rule says never to discount it, so I didn’t.';
 
@@ -410,7 +410,7 @@ describe('Safety', () => {
   });
 
   it('headline_counts_the_listed_refusals', async () => {
-    // A visitor asks for 50% off, the Desk holds it for Maria, and she allows it. A hold is hers to
+    // A visitor asks for 50% off, the Desk holds it for Mike, and he allows it. A hold is his to
     // answer, not an attempt that was stopped: the count and the list both leave it out. Then the
     // built-in agent tries to charge over its signed limit, which is refused. The count is the
     // refused requests, the rows stopped at the action checkpoint; the seeded draft of Claude's the
@@ -504,7 +504,7 @@ describe('Safety', () => {
   });
 
   it('held_for_you_dot_stands_apart_from_its_words', async () => {
-    // The seeded 15% quote waits for Maria: the header's button says so, its gold dot a status
+    // The seeded 15% quote waits for Mike: the header's button says so, its gold dot a status
     // label's gap before the words, never touching them.
     const { screen } = await renderRoute(SAFETY);
     const held = screen.getByRole('link', { name: '1 held for you', exact: true });
@@ -694,11 +694,11 @@ describe('Safety', () => {
   });
 
   it('handoff_entries_say_which_they_are', async () => {
-    // A visitor asks for Maria, the handoff card hands her the chat, and she marks it done: the
+    // A visitor asks for Mike, the handoff card hands him the chat, and he marks it done: the
     // record names the two entries the checkpoint wrote for what they are. Any other change to the
     // Desk's details reads as before.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
-    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Mike?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
     const [handoffId = ''] = mockStore.world.handoffs.keys();
     await mockStore.dispatch('handoffDone', { params: { handoff_id: handoffId } });
@@ -725,11 +725,11 @@ describe('Safety', () => {
   });
 
   it('handoff_closed_by_a_call_back_says_so', async () => {
-    // The handoff card hands Maria the chat, then the visitor asks for a call back, which closes
+    // The handoff card hands Mike the chat, then the visitor asks for a call back, which closes
     // the card's handoff and opens its own: the record calls that closing what it was, never the
     // owner's Mark done.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
-    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Mike?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(2);
@@ -745,10 +745,10 @@ describe('Safety', () => {
   });
 
   it('handoff_closed_by_the_owner_handling_the_chat_says_how', async () => {
-    // The kernel closes the handoff card's handoff when Maria takes the chat over or writes in it:
-    // the record names each closing, never her Mark done.
+    // The kernel closes the handoff card's handoff when Mike takes the chat over or writes in it:
+    // the record names each closing, never his Mark done.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
-    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Mike?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
     const session = mockStore.visitorSession(RIVERA.slug);
     if (!session) throw new Error('the visitor has a chat');
@@ -1041,7 +1041,7 @@ describe('Safety', () => {
     const nothing = screen.getByText(NOTHING, { exact: true });
     await expect.element(nothing).toBeVisible();
 
-    // Then a draft of Claude's is stopped (Rivera's copy keeps one, and no request refused, so the
+    // Then a draft of Claude's is stopped (Turner's copy keeps one, and no request refused, so the
     // week still counts none) and every read of the attempts fails. The empty list read before
     // mustn't pass for current: the failure says so beside the headline, in either view, and the
     // empty state doesn't show while the reads fail.

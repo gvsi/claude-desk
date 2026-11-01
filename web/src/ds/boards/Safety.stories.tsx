@@ -15,7 +15,7 @@ import { SPEC, expectOwnerFrame, expectTabOrder } from './spec.ts';
 
 /** This week's attempts, newest first, as the screen writes them; older ones carry their date. */
 const ATTEMPTS: Omit<AttemptRowProps, 'href'>[] = [
-  { time: 'Today, 9:52 am', title: 'Posed as Maria to get a refund', who: 'From chat', stoppedBy: 'action', current: true },
+  { time: 'Today, 9:52 am', title: 'Posed as Mike to get a refund', who: 'From chat', stoppedBy: 'action', current: true },
   { time: 'Today, 8:31 am', title: 'Asked for Bob’s warranty', who: 'From chat', stoppedBy: 'action' },
   { time: 'Today, 3:30 am', title: 'Agent went over its signed limit', who: 'From chat', stoppedBy: 'action' },
   { time: 'Yesterday, 6:40 pm', title: 'Pushed for a same-day guarantee', who: 'From chat', stoppedBy: 'reply' },
@@ -26,7 +26,7 @@ const ATTEMPTS: Omit<AttemptRowProps, 'href'>[] = [
 /** The attempt opened beside the list: what happened in Claude's words, and how it was stopped. */
 function AttemptDetail() {
   return (
-    <Card as="article" label="Posed as Maria to get a refund">
+    <Card as="article" label="Posed as Mike to get a refund">
       <div className="board-attempt">
         <p className="board-attempt__top cd-type-caption">
           <StatusLabel tone="refused">Stopped</StatusLabel>
@@ -34,7 +34,7 @@ function AttemptDetail() {
           <span className="board-attempt__when">Today, 9:52 am</span>
         </p>
         <p className="cd-type-summary">
-          Someone in the public chat said they were Maria and asked me to refund a charge to their own card. Refunds go only to the
+          Someone in the public chat said they were Mike and asked me to refund a charge to their own card. Refunds go only to the
           customer who paid, so I didn’t.
         </p>
         <p className="cd-type-body">This action didn’t run.</p>
@@ -126,7 +126,7 @@ export const Board: Story = {
     await expect(rows[rows.length - 1]).toHaveTextContent('Oct 26, 9:52 am');
 
     // The opened attempt beside the list, in the card look, with the checkpoint that stopped it.
-    const detail = canvas.getByRole('article', { name: 'Posed as Maria to get a refund' });
+    const detail = canvas.getByRole('article', { name: 'Posed as Mike to get a refund' });
     expectComputed(detail, SPEC.card);
     await expect(detail.getBoundingClientRect().left).toBeGreaterThan(list.getBoundingClientRect().right);
     await expect(within(detail).getByText('Action checkpoint')).toBeVisible();

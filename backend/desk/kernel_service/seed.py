@@ -1,4 +1,4 @@
-"""The Rivera Plumbing seed: the demo business every visitor gets a fresh copy of.
+"""The Turner Plumbing seed: the demo business every visitor gets a fresh copy of.
 
 `POST /copies` writes it through `desks.create_desk`, the same path as an owner's new Desk, so a
 copy differs from another only in its IDs, canaries and dates. `seed_knowledge` stores what setup
@@ -7,8 +7,8 @@ with no amount in either) through the owner's own path. The seed connects the mo
 server (`connections`), with both its tools pinned at the hashes the seed is proved with, and
 `seed_charges` gives Dana and Bob their past payments there (`RIVERA_MOCKPAY_CHARGES`), each with a
 `charge:<id>` fact naming it for its owner. `seed_business_tools` gives the Desk its urgent
-business tool (`RIVERA_BUSINESS_TOOLS`: "Emergency callback", in Maria's words for an emergency)
-through the owner's own replacement, so its text is checked as hers would be, and the seed's rules
+business tool (`RIVERA_BUSINESS_TOOLS`: "Emergency callback", in Mike's words for an emergency)
+through the owner's own replacement, so its text is checked as his would be, and the seed's rules
 version turns it on as it activates, as a confirmed review of the tool would. `RIVERA_CARDS` have
 fixed IDs and are scoped `anyone`, `verified` or `record_owner`, never to a person, so they compile
 to the same Cedar in every copy and share one CI-proved report, which covers the urgent tool at its
@@ -76,7 +76,7 @@ SLOT_STARTS = {                             # by weekday (Monday 0), in business
 }
 
 # The money cap of the seed's rules version: $500, the most Claude takes or pays out in one action
-# without asking Maria (master plan, "Money cap"), so the demo keeps its numbers.
+# without asking Mike (master plan, "Money cap"), so the demo keeps its numbers.
 RIVERA_MONEY_CAP_CENTS = 50_000
 
 RIVERA_CARDS: list[RuleCard] = [
@@ -101,13 +101,13 @@ RIVERA_CARDS: list[RuleCard] = [
              reason="Anyone can ask for an urgent callback, which alerts you at once."),
 ]
 
-# Maria's urgent business tool (the urgent block): an emergency call-back that alerts her at once,
-# whatever her notification settings. It is given to anyone who is given the native callback, and
+# Mike's urgent business tool (the urgent block): an emergency call-back that alerts him at once,
+# whatever his notification settings. It is given to anyone who is given the native callback, and
 # `rv-urgent` allows it. Its words are the owner's, checked as card text: no amount, currency,
 # percentage or promise.
 RIVERA_BUSINESS_TOOLS: list[BusinessTool] = [
     BusinessTool(tool="desk.emergency-callback", title="Emergency callback",
-                 description="Asks Maria to call back urgently about an emergency.",
+                 description="Asks Mike to call back urgently about an emergency.",
                  config=UrgentConfig(block="urgent",
                                      urgent_when="A burst or leaking pipe, flooding, a sewage backup, or no water")),
 ]
@@ -130,32 +130,32 @@ RIVERA_MOCKPAY_CHARGES: list[SeedCharge] = [
 ]
 
 # What the Desk knows on a new copy, as setup leaves it (Settings › Knowledge): the website read
-# and the price list from Maria's answers, both public. Knowledge is untrusted text, never policy,
+# and the price list from Mike's answers, both public. Knowledge is untrusted text, never policy,
 # and states no amount: a price reaches a visitor only on a quote card built from the price list.
 RIVERA_KNOWLEDGE: list[KnowledgeItem] = [
     KnowledgeItem(item_id="kn-website", source="website",
-                  title="Your website, rivera-plumbing.example, read during setup",
-                  text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                  title="Your website, turner-plumbing.example, read during setup",
+                  text="Turner Plumbing is Mike Turner's home plumbing business: drain clearing, leak repair and "
                        "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
-                  text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                  text="The price list Mike gave in setup covers the service call deposit, drain clearing, a "
                        "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
-                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
+                       "The short-notice fee is added to an urgent visit that Mike fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 
-# The held request: drain clearing at 15% off, which `rv-quote` (list price only) holds for Maria.
+# The held request: drain clearing at 15% off, which `rv-quote` (list price only) holds for Mike.
 HELD_REQUEST = ToolCall(call_id="seed-held-quote", tool="native.quote",
                         args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
 HELD_REQUEST_VISITOR_LINE = "Could you do the drain clearing at 15% off?"
 
 
 def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
-    """Rivera Plumbing and its Desk "Main line", with calendar slots for the 14 days after `now`."""
+    """Turner Plumbing and its Desk "Main line", with calendar slots for the 14 days after `now`."""
     business = BusinessSeed(
-        name="Rivera Plumbing",
-        owner_display_name="Maria Rivera",
+        name="Turner Plumbing",
+        owner_display_name="Mike Turner",
         timezone=TIMEZONE,
         brand={"primary": "#1F4E4A", "accent": "#B87333"},
     )
@@ -167,7 +167,7 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
                   value="We work in Oakland, Berkeley, Alameda and Emeryville."),
             Claim(key="policy:first_visit", kind="text",
                   value="The service call deposit is credited to the repair if you go ahead."),
-            Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives."),
+            Claim(key="policy:arrival", kind="text", value="Mike texts before he arrives."),
         ],
         auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS,
         hours=[WEEKDAY_HOURS, SATURDAY_HOURS],
@@ -188,10 +188,10 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
         ],
         documents=[
             SeedDocument(ref="dana-invoice", title="Invoice, drain clearing", record_owner_ref="dana",
-                         body="Rivera Plumbing\nInvoice for Dana Whitfield\n"
+                         body="Turner Plumbing\nInvoice for Dana Whitfield\n"
                               "Drain clearing, kitchen sink: $180.00\nPaid in full. Thank you."),
             SeedDocument(ref="bob-warranty", title="Warranty, water heater flush", record_owner_ref="bob",
-                         body="Rivera Plumbing\nWarranty for Bob Okafor\n"
+                         body="Turner Plumbing\nWarranty for Bob Okafor\n"
                               "Water heater flush. Parts and labor are covered for 12 months from the service date."),
         ],
         # a handoff the card opens alerts at once, as a held request does (the owner's decision of 2026-10-30)
@@ -218,7 +218,7 @@ def calendar_slots(now: datetime) -> list[CalendarSlot]:
 
 
 async def seed_starters(ctx: KernelCtx, desk_id: str) -> None:
-    """Rivera's public starter questions, written only when seeding a demo copy."""
+    """Turner's public starter questions, written only when seeding a demo copy."""
     from desk.kernel_service import desks       # desks imports payments, which imports this module
 
     now = ctx.clock.now()

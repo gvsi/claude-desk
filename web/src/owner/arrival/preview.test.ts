@@ -1,5 +1,5 @@
 /**
- * The preview's still copy against a new copy of the mock's Rivera seed opened at the same moment:
+ * The preview's still copy against a new copy of the mock's Turner seed opened at the same moment:
  * what Today draws from each read must be the same, so the dialog leaves onto the Today it showed.
  * Near midnight, part of the seed happened yesterday on the business's clock and part today.
  */
@@ -13,7 +13,7 @@ import { MockWorld } from '../../mocks/world.ts';
 import { needsYouKey, OWNER_INBOX_KEY, todayKey } from '../useDesks.ts';
 import { READ_AFTER_OPENING_MS, stillToday } from './preview.ts';
 
-/** What a new copy of the mock's Rivera seed reads at `ms`, opened as Today is, a moment before it is read. */
+/** What a new copy of the mock's Turner seed reads at `ms`, opened as Today is, a moment before it is read. */
 function mockCopyAt(ms: number): { today: Today; needsYou: NeedsYouItem[]; inbox: DemoInboxEntry[] } {
   const world = new MockWorld('rivera', 1, () => 'k7Hq2vX9');
   world.at(ms - READ_AFTER_OPENING_MS, () => seedWorld(world));

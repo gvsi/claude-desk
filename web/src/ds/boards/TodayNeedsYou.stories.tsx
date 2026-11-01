@@ -34,7 +34,7 @@ export const Board: Story = {
     const bar = canvas.getByRole('note');
     await expect(bar).toHaveTextContent(`You're ${rivera.business.ownerName} today. This is a concept prototype.`);
     await expect(bar.getBoundingClientRect().width).toBe(document.documentElement.clientWidth);
-    expectComputed(canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' }), SPEC.greeting);
+    expectComputed(canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' }), SPEC.greeting);
 
     // The held row says what is waiting with the held item's own rule.
     await expect(

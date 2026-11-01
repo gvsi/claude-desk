@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 it('async_consent_repeats_202_then_lands_on_a_read_without_a_second_turn', async () => {
-  const started = await mockStore.dispatch('startSetup', { body: { description: 'Rivera Plumbing.', timezone: 'UTC', idempotency_key: 'async-consent' } });
+  const started = await mockStore.dispatch('startSetup', { body: { description: 'Turner Plumbing.', timezone: 'UTC', idempotency_key: 'async-consent' } });
   if ('network' in started) throw new Error('start failed');
   const state = started.body as SetupState;
   expect(state.busy).toBe(false);
@@ -67,7 +67,7 @@ it('async_consent_repeats_202_then_lands_on_a_read_without_a_second_turn', async
 });
 
 it('failed_async_consent_restores_the_consent_question_and_can_be_answered_again', async () => {
-  const started = await mockStore.dispatch('startSetup', { body: { description: 'Rivera Plumbing.', timezone: 'UTC', idempotency_key: 'failed-consent' } });
+  const started = await mockStore.dispatch('startSetup', { body: { description: 'Turner Plumbing.', timezone: 'UTC', idempotency_key: 'failed-consent' } });
   if ('network' in started) throw new Error('start failed');
   const state = started.body as SetupState;
   const params = { id: state.interview_id };
@@ -151,7 +151,7 @@ describe('setup consultant run and decisions', () => {
 
   it('both_finish_paths_leave_a_non_consultant_desks_tools_unchanged', async () => {
     for (const ending of ['answer', 'suggestions']) {
-      let state = await startState('Rivera Plumbing. We fix leaks.');
+      let state = await startState('Turner Plumbing. We fix leaks.');
       const id = state.interview_id;
       state = await setupState('setupConsent', id, { allow: false });
       const desk = mockStore.world.desk(state.desk_id)!;
@@ -290,7 +290,7 @@ describe('setup consultant run and decisions', () => {
   });
 
   it('keeps_questions_done_only_when_no_closing_plan_is_written', async () => {
-    let state = await startState('Rivera Plumbing. We fix leaks.');
+    let state = await startState('Turner Plumbing. We fix leaks.');
     state = await setupState('setupConsent', state.interview_id, { allow: false });
     for (const { key: question } of SETUP_QUESTIONS) state = await setupState('setupAnswer', state.interview_id, { question, text: 'Yes' });
     expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
@@ -302,11 +302,11 @@ describe('setup consultant run and decisions', () => {
   });
 
   it('suggestions_preserve_a_scripted_runs_answered_money_limit', async () => {
-    let state = await startState('Rivera Plumbing. We fix leaks.');
+    let state = await startState('Turner Plumbing. We fix leaks.');
     state = await setupState('setupConsent', state.interview_id, { allow: false });
     for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) state = await setupState('setupAnswer', state.interview_id, { question, text: question === 'money_limit' ? 'Up to $500' : 'Yes' });
     state = await setupState('setupSuggestions', state.interview_id, {});
-    expect(state.messages.at(-1)?.text).toContain('Your plan for Rivera Plumbing:');
+    expect(state.messages.at(-1)?.text).toContain('Your plan for Turner Plumbing:');
     expect(state.messages.some(({ text }) => text === QUESTIONS_DONE)).toBe(false);
     expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 50000 } });
   });
@@ -542,15 +542,15 @@ describe("the business's name, from the description", () => {
     expect(ana.first).toMatch(/^Thanks, Ana\. .* about Ana's Bakery\?/);
 
     // "We run" and "I own" name it too, up to a comma, " on " or the sentence's end.
-    expect((await started("We run Rivera Plumbing, a two-van crew. I'm Maria.")).business).toBe('Rivera Plumbing');
+    expect((await started("We run Turner Plumbing, a two-van crew. I'm Mike.")).business).toBe('Turner Plumbing');
     expect((await started("I'm Lee and I own Acme Bakery on Main Street.")).business).toBe('Acme Bakery');
     expect((await started('Hello, I am Sam and I own Kernel Plumbing')).business).toBe('Kernel Plumbing');
 
     // A comma ends the name; with none, the whole name is kept, up to the API's 80 characters.
-    const long = await started("I'm Maria. I run Rivera Plumbing, Heating and Emergency Drain Services of the East Bay.");
-    expect(long.business).toBe('Rivera Plumbing');
-    const longer = await started("I'm Maria. I run Rivera Plumbing Heating and Emergency Drain Services of the East Bay.");
-    expect(longer.business).toBe('Rivera Plumbing Heating and Emergency Drain Services of the East Bay');
+    const long = await started("I'm Mike. I run Turner Plumbing, Heating and Emergency Drain Services of the East Bay.");
+    expect(long.business).toBe('Turner Plumbing');
+    const longer = await started("I'm Mike. I run Turner Plumbing Heating and Emergency Drain Services of the East Bay.");
+    expect(longer.business).toBe('Turner Plumbing Heating and Emergency Drain Services of the East Bay');
   });
 
   it('a_name_keeps_the_apis_80_characters_and_is_cut_only_at_a_whole_word', async () => {
@@ -560,7 +560,7 @@ describe("the business's name, from the description", () => {
     expect((await started(`${bayview}. I'm Sam, a plumber in Oakland.`)).business).toBe(bayview);
     expect((await started(`I'm Sam. ${bayview} is my business.`)).business).toBe(bayview);
     // Its white space as the API keeps it: one space between words.
-    expect((await started("Rivera   Plumbing. I'm Maria.")).business).toBe('Rivera Plumbing');
+    expect((await started("Turner   Plumbing. I'm Mike.")).business).toBe('Turner Plumbing');
 
     // A longer name ends on the last whole word that fits, with no comma, "&", "and" or "or" (or the
     // Spanish "y" or "o") left at its end.
@@ -597,20 +597,20 @@ describe("the business's name, from the description", () => {
     expect(ana.slug).toBe('ana-s-bakery-setup1');
     expect(ana.first).toMatch(/^Thanks, Ana\. .* about Ana's Bakery\?/);
     // Any of the words for a business, mine or ours; a curly apostrophe stays the owner's.
-    expect((await started('My name is Maria. Rivera Plumbing is our business.')).business).toBe('Rivera Plumbing');
+    expect((await started('My name is Mike. Turner Plumbing is our business.')).business).toBe('Turner Plumbing');
     expect((await started('I’m Lee. Lee’s Café is my café, on Main Street.')).business).toBe('Lee’s Café');
     // Not every "is my …": a day off names nothing, so the first sentence does.
     expect((await started('Acme Bakery. Sunday is my day off.')).business).toBe('Acme Bakery');
   });
 
   it('else_the_first_sentence_that_is_not_an_introduction', async () => {
-    const rivera = await started("Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.");
-    expect(rivera.business).toBe('Rivera Plumbing');
-    expect(rivera.slug).toBe('rivera-plumbing-setup1');
-    expect(rivera.first).toMatch(/^Thanks, Maria\. .* about Rivera Plumbing\?/);
+    const rivera = await started("Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.");
+    expect(rivera.business).toBe('Turner Plumbing');
+    expect(rivera.slug).toBe('turner-plumbing-setup1');
+    expect(rivera.first).toMatch(/^Thanks, Mike\. .* about Turner Plumbing\?/);
     // "We run a small crew", "Monday to Friday" or "3 vans" is no name, so the first sentence still is.
-    expect((await started("Rivera Plumbing. I'm Maria. We run a small crew in Oakland.")).business).toBe('Rivera Plumbing');
-    expect((await started('Rivera Plumbing. We run Monday to Friday, and I own 3 vans.')).business).toBe('Rivera Plumbing');
+    expect((await started("Turner Plumbing. I'm Mike. We run a small crew in Oakland.")).business).toBe('Turner Plumbing');
+    expect((await started('Turner Plumbing. We run Monday to Friday, and I own 3 vans.')).business).toBe('Turner Plumbing');
 
     // The owner's introduction is passed over, however it's put.
     for (const intro of ["I'm Lee.", 'I’m Lee.', 'I am Lee.', 'My name is Lee.', "Hi, I'm Lee.", "Hi! I'm Lee.", 'Hello, my name is Lee.']) {
@@ -630,10 +630,10 @@ describe("the business's name, from the description", () => {
   it('a_name_given_first_wins_over_a_later_phrase', async () => {
     // The sentences are read in order: a later "we run" or "we own" doesn't replace a name given first.
     const cases: [string, string][] = [
-      ["Rivera Plumbing. I'm Maria. We run QuickBooks for invoicing.", 'Rivera Plumbing'],
-      ["Rivera Plumbing. I'm Maria. We run Google Ads in the spring.", 'Rivera Plumbing'],
-      ['Rivera Plumbing. We own Ford vans and a Ridgid camera.', 'Rivera Plumbing'],
-      ['Rivera Plumbing. We run Mon-Fri, 8 to 6.', 'Rivera Plumbing'],
+      ["Turner Plumbing. I'm Mike. We run QuickBooks for invoicing.", 'Turner Plumbing'],
+      ["Turner Plumbing. I'm Mike. We run Google Ads in the spring.", 'Turner Plumbing'],
+      ['Turner Plumbing. We own Ford vans and a Ridgid camera.', 'Turner Plumbing'],
+      ['Turner Plumbing. We run Mon-Fri, 8 to 6.', 'Turner Plumbing'],
       ["Acme Bakery. I'm Lee. We run Thanksgiving pie orders every November.", 'Acme Bakery'],
       ["Ana's Bakery is my shop. We run Farmers Market stalls too.", "Ana's Bakery"],
     ];
@@ -651,7 +651,7 @@ describe("the business's name, from the description", () => {
       ["I'm Ana. I run a bakery named Ana's Bakery in Oakland.", "Ana's Bakery"],
       ["I'm Ana. My bakery is called Ana's Bakery.", "Ana's Bakery"],
       ["I'm Ana. My shop is Ana's Bakery.", "Ana's Bakery"],
-      ['Our business is Rivera Plumbing.', 'Rivera Plumbing'],
+      ['Our business is Turner Plumbing.', 'Turner Plumbing'],
     ];
     for (const [description, business] of cases) expect((await started(description)).business, description).toBe(business);
   });
@@ -676,15 +676,15 @@ describe("the business's name, from the description", () => {
       ["I'm Ana. I run Ana's Bakery with my sister.", "Ana's Bakery"],
       ["I'm Ana. I run Ana's Bakery at 5th and Main.", "Ana's Bakery"],
       ["I'm Ana. I run Ana's Bakery near Lake Merritt.", "Ana's Bakery"],
-      ['We run Rivera Plumbing out of Oakland since 2009.', 'Rivera Plumbing'],
-      ['We run Rivera Plumbing since 2009.', 'Rivera Plumbing'],
-      ['We run Rivera Plumbing for homes and small shops.', 'Rivera Plumbing'],
-      ['I own Rivera Plumbing from the start of 2009.', 'Rivera Plumbing'],
+      ['We run Turner Plumbing out of Oakland since 2009.', 'Turner Plumbing'],
+      ['We run Turner Plumbing since 2009.', 'Turner Plumbing'],
+      ['We run Turner Plumbing for homes and small shops.', 'Turner Plumbing'],
+      ['I own Turner Plumbing from the start of 2009.', 'Turner Plumbing'],
       ["I run Ana's Bakery and we bake sourdough to order.", "Ana's Bakery"],
       ["I run Ana's Bakery and my sister runs the café.", "Ana's Bakery"],
       ["I'm Ana. My shop is called Ana's Bakery and our café is next door.", "Ana's Bakery"],
       // An "and" that is part of the name stays in it.
-      ["I'm Maria and I run Rivera Plumbing and Heating in Oakland.", 'Rivera Plumbing and Heating'],
+      ["I'm Mike and I run Turner Plumbing and Heating in Oakland.", 'Turner Plumbing and Heating'],
     ];
     for (const [description, business] of cases) expect((await started(description)).business, description).toBe(business);
   });
@@ -697,8 +697,8 @@ describe("the business's name, from the description", () => {
       ["I'm Lee. We run Mondays Bar.", 'Mondays Bar'],
       ["I'm Lee. Sunday Bakery is my shop.", 'Sunday Bakery'],
       // Days that are only a schedule aren't.
-      ["I'm Maria. We run Monday to Friday. Rivera Plumbing is our business.", 'Rivera Plumbing'],
-      ["I'm Maria. We run Mon-Fri, 8 to 6. Rivera Plumbing.", 'Rivera Plumbing'],
+      ["I'm Mike. We run Monday to Friday. Turner Plumbing is our business.", 'Turner Plumbing'],
+      ["I'm Mike. We run Mon-Fri, 8 to 6. Turner Plumbing.", 'Turner Plumbing'],
       ["I'm Lee. We run Sundays.", 'Your business'],
       ["I'm Lee. We run Saturday mornings.", 'Your business'],
       ["I'm Lee. We run Tue–Sat 9 to 5.", 'Your business'],
@@ -710,10 +710,10 @@ describe("the business's name, from the description", () => {
 describe('the owner and the line about the business, from the description', () => {
   it('every_introduction_names_the_owner', async () => {
     const cases: [string, string][] = [
-      ['My name is Maria. Rivera Plumbing is our business.', 'Thanks, Maria.'],
+      ['My name is Mike. Turner Plumbing is our business.', 'Thanks, Mike.'],
       ['I am Sam and I own Kernel Plumbing.', 'Thanks, Sam.'],
       ["Hi, I'm Ana and Ana's Bakery is my shop in Oakland.", 'Thanks, Ana.'],
-      ['Rivera Plumbing. We fix leaks and clear drains.', 'Thanks.'],
+      ['Turner Plumbing. We fix leaks and clear drains.', 'Thanks.'],
     ];
     for (const [description, greeting] of cases) {
       expect((await started(description)).first?.slice(0, greeting.length + ' Before'.length), description).toBe(`${greeting} Before`);
@@ -723,7 +723,7 @@ describe('the owner and the line about the business, from the description', () =
   it('a_name_that_ends_in_a_stop_is_thanked_with_one', () => {
     // The description's reading never gives such a name, but the thanks mustn't add a second stop.
     expect(thanksTo('Bob Smith Jr.')).toBe('Thanks, Bob Smith Jr.');
-    expect(thanksTo('Maria')).toBe('Thanks, Maria.');
+    expect(thanksTo('Mike')).toBe('Thanks, Mike.');
     expect(thanksTo(null)).toBe('Thanks.');
   });
 
@@ -733,7 +733,7 @@ describe('the owner and the line about the business, from the description', () =
       ["I'm Ana. I run Ana's Bakery in Oakland. Sourdough and cakes to order.", 'Sourdough and cakes to order.'],
       ["We bake sourdough and cakes to order. I'm Ana and I run Ana's Bakery.", 'We bake sourdough and cakes to order.'],
       ['Acme Bakery. My name is Lee. Sourdough and cakes to order.', 'Sourdough and cakes to order.'],
-      ["Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks.", 'We fix leaks.'],
+      ["Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks.", 'We fix leaks.'],
       ["Hi! I'm Ana. Ana's Bakery.", null],
     ];
     for (const [description, about] of cases) expect((await started(description)).about, description).toBe(about);
@@ -767,7 +767,7 @@ describe('the owner and the line about the business, from the description', () =
 
   it('the_owner_in_a_setup_desks_chat_is_its_own', async () => {
     // The stream names whoever takes a chat over and types in it as the Desk's business names its
-    // owner: setup's fallback when no name was given, never the seeded Rivera's.
+    // owner: setup's fallback when no name was given, never the seeded Turner's.
     const joinedAs = async (description: string) => {
       const answer = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles', idempotency_key: `start-${++starts}` } });
       if ('network' in answer || answer.status !== 201) throw new Error('the mock starts a setup');
@@ -817,14 +817,14 @@ describe("setup's examples", () => {
     const expected = {
       en: [
         ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.'],
-        ['Rivera Plumbing', 'Maria', 'rivera-plumbing-setup1', null],
+        ['Turner Plumbing', 'Mike', 'turner-plumbing-setup1', null],
         ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', 'People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.'],
         // The raw description states free and a duration, so it stays private before public lines are seeded.
         ['Chen & Co.', 'Linda', 'chen-co-setup1', null],
       ],
       es: [
         ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.'],
-        ['Rivera Plumbing', 'Maria', 'rivera-plumbing-setup1', null],
+        ['Turner Plumbing', 'Mike', 'turner-plumbing-setup1', null],
         ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', 'La gente pregunta por unidades disponibles y visitas, los inquilinos reportan problemas de mantenimiento, y yo cobro las cuotas de solicitud y los depósitos.'],
         ['Chen & Co.', 'Linda', 'chen-co-setup1', 'Los clientes nuevos empiezan con una consulta gratis de 20 minutos, y cotizamos cada trabajo después de ella.'],
       ],
@@ -902,7 +902,7 @@ describe("the real situations, in the business's own words", () => {
   /** Each situation's who, plan and result, as the owner reads them. */
   const outcomes = (rows: readonly SituationResult[]) =>
     rows.map(({ situation, result, matches }) => [situation.who, situation.expected, result.outcome, result.reason_plain, result.card_ids, result.depends_on_review, matches]);
-  /** Rivera Plumbing's situations, as they always were. */
+  /** Turner Plumbing's situations, as they always were. */
   const RIVERA_OUTCOMES = [
     ['public', 'allow', 'allow', 'Books weekday visits in your hours.', ['card-2'], false, true],
     ['public', 'hold', 'hold', 'Discounts ask you first.', [], false, true],
@@ -946,8 +946,8 @@ describe("the real situations, in the business's own words", () => {
       saturday: 'public',
     },
     {
-      // Rivera Plumbing's are the situations as they always were.
-      business: 'Rivera Plumbing',
+      // Turner Plumbing's are the situations as they always were.
+      business: 'Turner Plumbing',
       titles: [
         'A visitor wants a drain cleared on Tuesday afternoon',
         'A visitor asks for 10% off if they pay cash',
@@ -1016,7 +1016,7 @@ describe("the real situations, in the business's own words", () => {
         const { rows, draft } = await triedOn(description);
         const titles = rows.map(({ situation }) => situation.title);
         expect(titles, `${chip}: ${starter.business}`).toEqual(starter.titles);
-        if (starter.business === 'Rivera Plumbing') expect(outcomes(rows), chip).toEqual(RIVERA_OUTCOMES);
+        if (starter.business === 'Turner Plumbing') expect(outcomes(rows), chip).toEqual(RIVERA_OUTCOMES);
         else for (const title of titles) expect(title, chip).not.toMatch(PLUMBING);
         // The English CPA run drafts its other cards from its own answers, which never ask about
         // documents: its document row follows its own documents rule
@@ -1024,7 +1024,7 @@ describe("the real situations, in the business's own words", () => {
         const consultant = language === 'en' && starter.business === 'Chen & Co.';
         const sameAsRivera = (r: readonly SituationResult[]) => probed(r).filter((_, row) => !consultant || row !== DOCUMENT);
         // Only the words, and the bookings that follow the business's own days, change: what each
-        // situation tries, plans and gets is otherwise Rivera's.
+        // situation tries, plans and gets is otherwise Turner's.
         expect(sameAsRivera(rows), chip).toEqual(sameAsRivera(rivera.rows));
         expectOwnBookings(rows, draft, starter, chip);
         // Nothing else about the cards changes. Only the two rules with the business's words are
@@ -1084,7 +1084,7 @@ describe("the real situations, in the business's own words", () => {
   const read = (row: SituationResult | undefined) => [row?.situation.expected, row?.result.outcome, row?.result.reason_plain, row?.result.card_ids, row?.matches];
   /** Where the rows the answers didn't plan for sit. */
   const flagged = (rows: readonly SituationResult[]) => rows.flatMap((row, at) => (row.matches ? [] : [at]));
-  /** Juniper Hair Studio, Rivera Plumbing, and a business no starter describes. */
+  /** Juniper Hair Studio, Turner Plumbing, and a business no starter describes. */
   const SUGGESTED = [
     START_EXAMPLES.en.examples[0]?.description ?? '',
     START_EXAMPLES.en.examples[1]?.description ?? '',
@@ -1296,7 +1296,7 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect((await repliesTo(slug, '¿Me reservas la primera?')).at(-1)).toEqual(
       cardBlock('booking_confirmed', { fact_id: 'booking:B-77', title: 'martes 3 de noviembre', lines: ['Llegada de 14:00 a 16:00', 'Con Linda'] }),
     );
-    // Rivera's Desk books with the fixtures' own card.
+    // Turner's Desk books with the fixtures' own card.
     expect((await repliesTo(RIVERA.slug, 'Book the first one')).at(-1)).toEqual(rivera.blocks.booking_confirmed.en);
     expect((await repliesTo(RIVERA.slug, '¿Me reservas la primera?')).at(-1)).toEqual(rivera.blocks.booking_confirmed.es);
   });
@@ -1361,13 +1361,13 @@ describe('a Desk setup made, speaking for its own owner', () => {
   });
 
   it('rivera_keeps_her_signed_held_line', async () => {
-    // Rivera's Desk keeps the signed boards' words, in either language.
+    // Turner's Desk keeps the signed boards' words, in either language.
     const asked = await turnOn(RIVERA.slug, 'Can I get 10% off?');
-    expect(linesOf(asked)).toEqual(['Waiting for Maria Rivera to approve', "Reply checked against Maria Rivera's rules"]);
-    expect(proseOf(asked)).toEqual(["That's for Maria to decide, so I've asked her. Her answer will show up here."]);
+    expect(linesOf(asked)).toEqual(['Waiting for Mike Turner to approve', "Reply checked against Mike Turner's rules"]);
+    expect(proseOf(asked)).toEqual(["That's for Mike to decide, so I've asked him. His answer will show up here."]);
     const pedido = await turnOn(RIVERA.slug, '¿Me hacen un descuento?');
-    expect(linesOf(pedido)).toEqual(['Esperando la aprobación de Maria Rivera', 'Respuesta revisada con las reglas de Maria Rivera']);
-    expect(proseOf(pedido)).toEqual(['Eso lo decide Maria, así que ya le pregunté. Su respuesta aparecerá aquí.']);
+    expect(linesOf(pedido)).toEqual(['Esperando la aprobación de Mike Turner', 'Respuesta revisada con las reglas de Mike Turner']);
+    expect(proseOf(pedido)).toEqual(['Eso lo decide Mike, así que ya le pregunté. Su respuesta aparecerá aquí.']);
   });
 
   it('a_held_request_waits_for_that_owner_by_name', async () => {
@@ -1409,14 +1409,14 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect(await repliesTo(slug, PUBLIC_COPY.es.askForOwner('Linda'))).toEqual([
       cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
     ]);
-    // Rivera's Desk still hands off to Maria Rivera, in the fixtures' own words.
-    expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.en.askForOwner('Maria Rivera'))).toEqual([rivera.blocks.handoff.en]);
-    expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.es.askForOwner('Maria Rivera'))).toEqual([rivera.blocks.handoff.es]);
+    // Turner's Desk still hands off to Mike Turner, in the fixtures' own words.
+    expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.en.askForOwner('Mike Turner'))).toEqual([rivera.blocks.handoff.en]);
+    expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.es.askForOwner('Mike Turner'))).toEqual([rivera.blocks.handoff.es]);
   });
 
   it('asking_for_the_owner_by_first_name_reaches_the_handoff', async () => {
     // A visitor's own words, not only the page's button: Linda's first name reaches her on her
-    // Desk, and Maria's reaches Maria only on Rivera's.
+    // Desk, and Mike's reaches Mike only on Turner's.
     const slug = await liveDesk(CPA);
     const toLinda = { en: cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }) };
     const asked = await turnOn(slug, 'Can I speak with Linda?');
@@ -1425,13 +1425,13 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect(await repliesTo(slug, '¿Está LINDA?')).toEqual([
       cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
     ]);
-    expect(await repliesTo(slug, 'Can I speak with Maria?')).not.toContainEqual(toLinda.en);
-    expect(await repliesTo(RIVERA.slug, 'Can I speak with Maria?')).toEqual([rivera.blocks.handoff.en]);
+    expect(await repliesTo(slug, 'Can I speak with Mike?')).not.toContainEqual(toLinda.en);
+    expect(await repliesTo(RIVERA.slug, 'Can I speak with Mike?')).toEqual([rivera.blocks.handoff.en]);
   });
 
   it('the_verification_code_names_that_business', async () => {
     // The code the kernel sends to the contact on record names the Desk's own business, as its
-    // public page does, in the chat's language; Rivera's reads as before.
+    // public page does, in the chat's language; Turner's reads as before.
     const codesFor = async (slug: string, text: string) => {
       await turnOn(slug, text);
       const sessionId = mockStore.visitorSession(slug)?.state.session_id;
@@ -1443,16 +1443,16 @@ describe('a Desk setup made, speaking for its own owner', () => {
     );
     expect(await codesFor(slug, 'Necesito mi factura')).toBe('Tu código de Chen & Co. es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.');
     expect(await codesFor(RIVERA.slug, 'Can you send my invoice?')).toBe(
-      "Your Rivera Plumbing code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
+      "Your Turner Plumbing code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
     );
     expect(await codesFor(RIVERA.slug, 'Necesito mi factura')).toBe(
-      'Tu código de Rivera Plumbing es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.',
+      'Tu código de Turner Plumbing es 482913. Vence en diez minutos. Si no lo pediste, ignora este mensaje.',
     );
   });
 
   it('the_kept_cards_handoff_names_that_owner', async () => {
     // The demo command whose checked card is kept with Claude's drafted handoff: the handoff is the
-    // Desk's own, and Rivera's Desk still gets the fixtures' card.
+    // Desk's own, and Turner's Desk still gets the fixtures' card.
     const slug = await liveDesk(CPA);
     expect((await repliesTo(slug, 'cards-kept-handoff')).at(-1)).toEqual(
       cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }),

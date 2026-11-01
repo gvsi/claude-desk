@@ -60,7 +60,7 @@ def test_resume_result_ids_cannot_bind_to_a_positional_argument():
 
 
 class Copy:
-    """A Rivera copy on FakeKernel: its owner's view, and visitors whose requests the tests decide."""
+    """A Turner copy on FakeKernel: its owner's view, and visitors whose requests the tests decide."""
 
     def __init__(self, kernel_http, fake, ro_schema: str):
         self.http, self.fake, self.ro_schema = kernel_http, fake, ro_schema

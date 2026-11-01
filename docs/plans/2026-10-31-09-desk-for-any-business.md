@@ -26,7 +26,7 @@
 2. **A limit question answered by clicking a choice** must take the amount the choice names, and its choices must be code's even when the model's turn offered others. Test in A2b.
 3. **A business unlike any starter** ("a dog walking service", "a church office") must get proposals only from the job kinds and blocks that exist; an unknown kind or block in Claude's answer is dropped, never shown. Test in A3.
 4. **"Use your suggestions" mid-interview** must finish with every remaining limit at ask-first (`None`, cap 0) and every remaining fact from what Claude already proposed. Test in A2b.
-5. **A sample memory write that fails** must leave setup reading an empty memory, never Rivera's. Test in A1.
+5. **A sample memory write that fails** must leave setup reading an empty memory, never Turner's. Test in A1.
 
 ---
 
@@ -119,7 +119,7 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 - Produces: `SetupStart.memory: list[MemoryDraft]` (`MemoryDraft{title ≤ 120, topics: list[str] ≤ 6, text ≤ 600}`, at most 8) and `SetupStart.connected_apps: list[ConnectorKey]` (at most 4), where `ConnectorKey = Literal["google_calendar", "gmail", "google_drive", "quickbooks", "stripe", "square", "calendly"]` in `prompts.py` with `CONNECTOR_LABELS: dict[ConnectorKey, str]`. `Interview.connected_apps: list[ConnectorKey]`, stored with the interview.
 
 - [ ] **Test** `test_start_writes_the_sample_memory_before_the_consent_read`: begin with `started(memory=[...], connected_apps=["google_calendar"])`; assert the fake kernel's calls run `POST /desks`, then `PUT /desks/{id}/memory` with items whose ids are slugs of their titles and whose topics include at least one word of `MEMORY_QUERY`, before any `native.read_memory` execute; after consent, the memory entry's content holds the drafted text.
-- [ ] **Test** `test_a_failed_memory_write_reads_an_empty_memory_never_riveras`: `fake.fail("PUT /desks/{id}/memory", "500")`; the start still answers 201, and after consent the memory content has no "Rivera" and no "Maria".
+- [ ] **Test** `test_a_failed_memory_write_reads_an_empty_memory_never_riveras`: `fake.fail("PUT /desks/{id}/memory", "500")`; the start still answers 201, and after consent the memory content has no "Turner" and no "Mike".
 - [ ] **Test** `test_connected_apps_outside_the_catalog_are_dropped`: the model's JSON names `"taxdome"`; the retry rule rejects it (`SetupStart` validation), and the stored interview's `connected_apps` holds only catalog keys.
 - [ ] Implement: `SETUP_START_SYSTEM` asks for what the owner's Claude memory would plausibly hold about this business (its name, what it does, its customers, how it prices, its hours and area, how it talks to customers), written as the owner's own notes, and up to four apps from the catalog a business like this would already use. `_make_desk` PUTs the memory right after `POST /desks`; a failed PUT logs and goes on.
 - [ ] Run the three tests, then `tests/api/test_setup_questions.py tests/api/test_prompts.py tests/api/test_schema_budget.py -q`; commit `feat(api): write a sample memory for each new Desk at setup start`.
@@ -211,7 +211,7 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 ### Task A7: keep a setup Desk's calendar open (1.5 h, could)
 
-**Files:** `backend/desk/calendar.py` (new: `calendar_slots`, moved from `setup.py` so the kernel can share it), `backend/desk/kernel_service/desks.py` (`extend_calendar`, `extend_calendars`, `keep_calendars_open`), `app.py` (the lifespan task), `repo.py` (`limit_lock_waits`, the lock order). The kernel's lifespan runs a pass at its start and then daily, beside the kernel and cancelled at shutdown. Each live Desk with hours that setup made (its version 1 came from the `ask_first` preset, which `POST /desks` activates; Rivera's seed starts from `rivera`) gets, in a transaction of its own under its Desk row, the slots its hours give for the days after its latest slot, up to 14 days ahead in the business's time zone. It only inserts: booked slots, slots a waiting request names and the owner's changes inside the covered days stay as they are, while a trimmed tail or a cleared calendar is filled again (wish #596). Each extension is ledgered as the owner's calendar write is, `desk_data` `{part: "calendar", refs, extended_from: "hours"}`. An API job was rejected because API jobs hold no credential and never call the kernel. Test `backend/tests/kernel/test_calendar_refresh.py`: `test_the_calendar_is_refreshed_from_the_hours`.
+**Files:** `backend/desk/calendar.py` (new: `calendar_slots`, moved from `setup.py` so the kernel can share it), `backend/desk/kernel_service/desks.py` (`extend_calendar`, `extend_calendars`, `keep_calendars_open`), `app.py` (the lifespan task), `repo.py` (`limit_lock_waits`, the lock order). The kernel's lifespan runs a pass at its start and then daily, beside the kernel and cancelled at shutdown. Each live Desk with hours that setup made (its version 1 came from the `ask_first` preset, which `POST /desks` activates; Turner's seed starts from `rivera`) gets, in a transaction of its own under its Desk row, the slots its hours give for the days after its latest slot, up to 14 days ahead in the business's time zone. It only inserts: booked slots, slots a waiting request names and the owner's changes inside the covered days stay as they are, while a trimmed tail or a cleared calendar is filled again (wish #596). Each extension is ledgered as the owner's calendar write is, `desk_data` `{part: "calendar", refs, extended_from: "hours"}`. An API job was rejected because API jobs hold no credential and never call the kernel. Test `backend/tests/kernel/test_calendar_refresh.py`: `test_the_calendar_is_refreshed_from_the_hours`.
 
 ### Task A8: the run's fixes (in flight)
 
@@ -223,7 +223,7 @@ Branch `fix/setup-live-run`: #295, #305, #306 (setup side), #311; #304's cause r
 
 ### B0: per-Desk sample memory (#303) (in progress)
 
-As agreed: `PUT /desks/{desk_id}/memory`, whole replace, owner-only, canary-checked, ledgered without text; `native.read_memory` reads the Desk's own memory, Rivera's seed keeps the fixture, any other unwritten Desk reads empty.
+As agreed: `PUT /desks/{desk_id}/memory`, whole replace, owner-only, canary-checked, ledgered without text; `native.read_memory` reads the Desk's own memory, Turner's seed keeps the fixture, any other unwritten Desk reads empty.
 
 ### B1 to B4: four building blocks (the kernel owns the internals; 13 h together, should)
 
@@ -267,7 +267,7 @@ Render `SetupMessage.card` (accept, rename, decline through A3's route) and `Set
 
 ### D3: four starter businesses (2 h, must)
 
-One click fills the start description: a hair salon (name to choose), Rivera Plumbing, Maple Street Rentals, Chen & Co. CPA. The setup API defines the four descriptions; Giovanni signs off the words.
+One click fills the start description: a hair salon (name to choose), Turner Plumbing, Maple Street Rentals, Chen & Co. CPA. The setup API defines the four descriptions; Giovanni signs off the words.
 
 ---
 
@@ -327,11 +327,11 @@ Work is divided by system area: the setup API owns the conversation engine, card
 - **A1:**
   - Memory ids are built by code: "m-" plus a letters-only slug, de-duplicated with letter suffixes, and a fallback when empty. Test: a title with digits.
   - A1 merges after B0.
-  - The test that an unwritten non-Rivera Desk reads empty is B0's.
+  - The test that an unwritten non-Turner Desk reads empty is B0's.
   - A1 updates README.md's "real, mocked and unfinished" row: the memory is drafted from the owner's description, connected apps are simulated, and web search is real.
 - **A1b:** search text reaches only the understanding turn. Queries are about the kind of business (Giovanni), at most 3.
 - **A6:** people only, with no document. The contact comes from the owner's answer on that turn, never `public_contact`.
-- **A7 belongs to the kernel** (the kernel extends a Desk's slots from its hours, as the Rivera seed does), as a could. The API job worker never calls the kernel.
+- **A7 belongs to the kernel** (the kernel extends a Desk's slots from its hours, as the Turner seed does), as a could. The API job worker never calls the kernel.
 
 **Kernel**
 - **Blocks core:** the kernel stores each business tool with a configuration hash, derives its adapter and Cedar effects from its block, and requires review after a change. Configuration changes invalidate stale decisions; the contract is specified below:

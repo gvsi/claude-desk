@@ -10,8 +10,8 @@
 
 ## What the consumer provides
 
-- `name`: the person's name as text, such as `owner_display_name` ("Maria Rivera") or "You".
-- `initials` (optional): the initials beside the name when the name shown isn't the person's own. On the owner's own screen her message reads "You" beside her own initials ("MR"), never a "Y" taken from the label.
+- `name`: the person's name as text, such as `owner_display_name` ("Mike Turner") or "You".
+- `initials` (optional): the initials beside the name when the name shown isn't the person's own. On the owner's own screen his message reads "You" beside his own initials ("MT"), never a "Y" taken from the label.
 - `role` (optional): what they are here, shown after the name in secondary text, such as "owner".
 - `blocks`: the message's blocks. Each block's `text` shows verbatim, with no card frame and no label, because the kernel delivers an owner's say exactly as written. There is no translated take-over message.
 - `language`: the event's `language`, set as `lang` on the words.

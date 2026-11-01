@@ -182,12 +182,12 @@ async def test_stub_returns_a_valid_response_with_the_expected_fields():
         "POST /decide",
         body=decide_body(),
         auth=Auth.none(),
-        expect=Expect(fields={"reason_plain": {"$len": 12}, "visitor_plain": {"$has": "Maria", "$len": 9}}),
+        expect=Expect(fields={"reason_plain": {"$len": 12}, "visitor_plain": {"$has": "Mike", "$len": 9}}),
     )
-    assert len(shaped.reason_plain) == 12 and "Maria" in shaped.visitor_plain and len(shaped.visitor_plain) == 9
+    assert len(shaped.reason_plain) == 12 and "Mike" in shaped.visitor_plain and len(shaped.visitor_plain) == 9
     public = await k.call(
         "GET /public/{desk_slug}",
-        path={"desk_slug": "rivera-plumbing-abc123"},
+        path={"desk_slug": "turner-plumbing-abc123"},
         auth=Auth.none(),
         expect=Expect(fields={"brand": {"$has": "accent", "$len": 2}, "charter": {"$not": {"$len": 1}}}),
     )
@@ -331,7 +331,7 @@ async def test_public_desk_takes_a_language():
     """`GET /public/{desk_slug}` takes `?lang=` ("Kernel HTTP API v2"), which its route key leaves
     out because a caller may; any other query parameter is still refused."""
     k = ContractStub()
-    path = {"desk_slug": "rivera-plumbing-abc123"}
+    path = {"desk_slug": "turner-plumbing-abc123"}
     for query in ({"lang": "en"}, {"lang": "es"}, None):
         await k.call("GET /public/{desk_slug}", path=path, query=query, auth=Auth.none())
     assert [called.route for called in k.responses] == ["GET /public/{desk_slug}"] * 3
@@ -488,15 +488,15 @@ async def test_agent_auth_signs_from_the_target_clock():
     issued = await k.call("POST /agents/demo", body={"desk_id": "d-1"}, auth=Auth.none())
     public_key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(issued.agent_private_key_hex)).public_key()
     k.clock.travel(datetime(2026, 11, 3, 17, 0, tzinfo=UTC))
-    agent = Auth.agent(issued, "rivera-plumbing-abc123", k.clock)
-    early = Auth.agent(issued, "rivera-plumbing-abc123", k.clock, ts_offset_s=-360)
+    agent = Auth.agent(issued, "turner-plumbing-abc123", k.clock)
+    early = Auth.agent(issued, "turner-plumbing-abc123", k.clock, ts_offset_s=-360)
 
     headers = agent.headers()
     assert headers["X-Agent-Ts"].startswith("2026-11-03T17:00:")
     assert headers["X-Agent-Key-Id"] == issued.agent_key_id
     assert headers["X-Agent-Body-Sha256"] == hashlib.sha256(agent.body).hexdigest()
     signed = rfc8785.dumps({
-        "desk_slug": "rivera-plumbing-abc123",
+        "desk_slug": "turner-plumbing-abc123",
         "ts": headers["X-Agent-Ts"],
         "nonce": headers["X-Agent-Nonce"],
         "body_sha256": headers["X-Agent-Body-Sha256"],
@@ -513,14 +513,14 @@ async def test_agent_auth_signs_from_the_target_clock():
 
     # A turn signed under a nonce already used, with another body: validly signed, so only the
     # kernel's nonce rules can refuse it.
-    reused = Auth.agent(issued, "rivera-plumbing-abc123", k.clock)
+    reused = Auth.agent(issued, "turner-plumbing-abc123", k.clock)
     reused.new_turn(session_id="s-agent", message="Another body", nonce=headers["X-Agent-Nonce"])
     again = reused.headers()
     assert again["X-Agent-Nonce"] == headers["X-Agent-Nonce"]
     assert again["X-Agent-Body-Sha256"] == hashlib.sha256(reused.body).hexdigest() != headers["X-Agent-Body-Sha256"]
     assert json.loads(reused.body)["session_id"] == "s-agent"
     public_key.verify(bytes.fromhex(again["X-Agent-Sig"]), rfc8785.dumps({
-        "desk_slug": "rivera-plumbing-abc123", "ts": again["X-Agent-Ts"], "nonce": again["X-Agent-Nonce"],
+        "desk_slug": "turner-plumbing-abc123", "ts": again["X-Agent-Ts"], "nonce": again["X-Agent-Nonce"],
         "body_sha256": again["X-Agent-Body-Sha256"],
     }))
 
@@ -537,7 +537,7 @@ async def test_agent_turn_signs_the_a2a_request_an_agent_sends():
     k = ContractStub()
     issued = await k.call("POST /agents/demo", body={"desk_id": "d-1"}, auth=Auth.none())
     public_key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(issued.agent_private_key_hex)).public_key()
-    agent = Auth.agent(issued, "rivera-plumbing-abc123", k.clock)
+    agent = Auth.agent(issued, "turner-plumbing-abc123", k.clock)
     agent.new_turn(session_id="s-agent", message="Here is my code", verify_code="123456")
     body = json.loads(agent.body)
     assert (body["session_id"], body["message"], body["verify_code"], body["mandate"]) == (
@@ -545,7 +545,7 @@ async def test_agent_turn_signs_the_a2a_request_an_agent_sends():
     sent = agent.a2a_headers()
     assert sorted(sent) == ["X-Agent-Key-Id", "X-Agent-Nonce", "X-Agent-Sig", "X-Agent-Ts"]
     public_key.verify(bytes.fromhex(sent["X-Agent-Sig"]), rfc8785.dumps({
-        "desk_slug": "rivera-plumbing-abc123", "ts": sent["X-Agent-Ts"], "nonce": sent["X-Agent-Nonce"],
+        "desk_slug": "turner-plumbing-abc123", "ts": sent["X-Agent-Ts"], "nonce": sent["X-Agent-Nonce"],
         "body_sha256": hashlib.sha256(agent.body).hexdigest(),
     }))
     agent.new_turn(message="Hello", mandate=issued.mandate)

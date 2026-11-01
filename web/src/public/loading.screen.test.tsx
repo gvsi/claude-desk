@@ -66,7 +66,7 @@ it('public_chat_opens_in_place_desktop', async () => {
 // head stays in place.
 it.each(['desktop', 'phone'] as const)('resumed_public_chat_keeps_its_head_in_place_%s', async (viewport) => {
   const first = await renderRoute(CHAT, { viewport, pollScale: 100 });
-  await expect.element(first.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+  await expect.element(first.screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
   const chat = mockStore.visitorSession(RIVERA.slug)!;
   mockStore.world.visitorText(chat, 'How much is drain clearing?');
   await renderRoute('/no/such/page');
@@ -130,7 +130,7 @@ it('public_chat_opens_in_spanish_desktop', async () => {
 /** A confirmed setup at its preview step, the Desk's public page not yet read. */
 async function setupAtPreview(): Promise<SetupState> {
   const started = await mockStore.dispatch('startSetup', { body: {
-    description: "Rivera Plumbing. I'm Maria, a plumber in Oakland.",
+    description: "Turner Plumbing. I'm Mike, a plumber in Oakland.",
     timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey(),
   } });
   if ('network' in started || started.status !== 201) throw new Error('Setup did not start');
@@ -191,7 +191,7 @@ it.each([
 
 it('setup_preview_ask_moves_once_for_the_owner_name', async () => {
   const started = await mockStore.dispatch('startSetup', { body: {
-    description: "Rivera Plumbing. I'm Maria, a plumber in Oakland.",
+    description: "Turner Plumbing. I'm Mike, a plumber in Oakland.",
     timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey(),
   } });
   if ('network' in started || started.status !== 201) throw new Error('Setup did not start');
@@ -235,13 +235,13 @@ it('setup_preview_ask_moves_once_for_the_owner_name', async () => {
     read.release();
     await vi.waitFor(() => expect(preview.querySelector('.cd-skeleton-screen__layer')).toBeNull());
     const button = preview.querySelector<HTMLButtonElement>('.cd-public-shell__chat-head > button')!;
-    expect(button.textContent).toBe('Ask for Maria');
+    expect(button.textContent).toBe('Ask for Mike');
     const real = bounds(button);
     const context = document.createElement('canvas').getContext('2d')!;
     context.font = getComputedStyle(button).font;
     context.letterSpacing = getComputedStyle(button).letterSpacing === 'normal' ? '0px' : getComputedStyle(button).letterSpacing;
     const ownerNameDifference = context.measureText(`Ask for ${BUSINESS.owner_display_name}`).width
-      - context.measureText('Ask for Maria').width;
+      - context.measureText('Ask for Mike').width;
     expect(ownerNameDifference).toBeGreaterThan(2);
     expect(Math.abs((shape.width - real.width) - ownerNameDifference)).toBeLessThanOrEqual(2);
     expect(Math.abs((real.left - shape.left) - ownerNameDifference)).toBeLessThanOrEqual(2);

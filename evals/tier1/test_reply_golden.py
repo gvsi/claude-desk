@@ -47,7 +47,7 @@ from evals.tier1.golden_desk import (
 from evals.tier1.harness import KERNEL_PLANS, PLANS, Auth, Expect, KernelHarness
 from evals.tier1.targets import SOFT_PROMISE_MODEL, SOFT_PROMISE_PASS
 
-OWNER = "Maria Rivera"   # the seed's owner_display_name, which the handoff clause names
+OWNER = "Mike Turner"   # the seed's owner_display_name, which the handoff clause names
 CLEAN_EN = "I can help with that. Which day works for you?"
 CLEAN_ES = "Con gusto le ayudo. ¿Qué día le viene bien?"
 QUOTE_PROSE = "Here is your quote."
@@ -618,7 +618,7 @@ async def test_soft_promise_check_runs_on_sonnet_once_per_draft(k: KernelHarness
     assert SOFT_PROMISE_MODEL == "claude-sonnet-5-5"
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
-    for prose in (CLEAN_EN, "You may want to ask Maria about that."):   # plain ASCII, so it reads back from the request
+    for prose in (CLEAN_EN, "You may want to ask Mike about that."):   # plain ASCII, so it reads back from the request
         all_before, before = len(fake.calls()), len(fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict"))
         await check_reply(k, visitor, prose, expect=passes(visitor, ["prose"]))
         if k.is_real:

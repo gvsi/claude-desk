@@ -94,7 +94,7 @@ def inbox_entry(kind: str, body: str) -> DemoInboxEntry:
 def test_code_from_inbox():
     """The code is read from the one `verification_code` entry; any other inbox fails with counts
     only, so no code the inbox held reaches a failure message, pytest's explanation included."""
-    code = inbox_entry("verification_code", "Your Rivera Plumbing code is 042917. It expires in ten minutes.")
+    code = inbox_entry("verification_code", "Your Turner Plumbing code is 042917. It expires in ten minutes.")
     assert code_from_inbox([code]) == "042917"
     alert = inbox_entry("alert", "A request needs your answer: 123456")
     assert code_from_inbox([alert, code]) == "042917"

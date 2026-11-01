@@ -15,11 +15,11 @@ it('reviewer_shape_matches_the_real_bar_on_its_first_commit_at_390px', async () 
   document.body.append(host);
   const root = createRoot(host);
   onTestFinished(() => { root.unmount(); host.remove(); });
-  flushSync(() => root.render(<><ReviewerBar ownerName="Maria Rivera" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
+  flushSync(() => root.render(<><ReviewerBar ownerName="Mike Turner" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
   const [real, shape] = host.querySelectorAll('.cd-reviewer-bar');
   expect(shape!.querySelectorAll('.cd-skeleton-line').length).toBe(2);
   expect(shape!.getBoundingClientRect().height).toBe(real!.getBoundingClientRect().height);
-  const ownerName = 'Alexandria Rivera de la Cruz '.repeat(3).trim();
+  const ownerName = 'Alexandria Turner de la Cruz '.repeat(3).trim();
   flushSync(() => root.render(<><ReviewerBar ownerName={ownerName} onStartOver={() => {}} /><ReviewerBarSkeleton ownerName={ownerName} /></>));
   const range = document.createRange();
   range.selectNodeContents(real!.querySelector('.cd-reviewer-bar__text')!);
@@ -37,7 +37,7 @@ it('reviewer_shape_measures_the_control_with_different_font_metrics', async () =
   document.body.append(host);
   const root = createRoot(host);
   onTestFinished(() => { root.unmount(); host.remove(); metrics.remove(); });
-  flushSync(() => root.render(<><ReviewerBar ownerName="Maria Rivera" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
+  flushSync(() => root.render(<><ReviewerBar ownerName="Mike Turner" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
   const real = host.querySelector('.cd-button')!;
   const shape = host.querySelector('.cd-reviewer-bar > .cd-skeleton')!;
   expect(shape.textContent).toBe('');
@@ -56,7 +56,7 @@ it('reviewer_shape_remeasures_when_its_font_loads_after_mount', { timeout: 15_00
   const root = createRoot(host);
   const late = new FontFace('Late Skeleton Control', `url(${source})`, { weight: '300 700' });
   onTestFinished(() => { root.unmount(); host.remove(); document.fonts.delete(late); });
-  flushSync(() => root.render(<><ReviewerBar ownerName="Maria Rivera" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
+  flushSync(() => root.render(<><ReviewerBar ownerName="Mike Turner" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
   const real = host.querySelector('.cd-button')!;
   const shape = host.querySelector('.cd-reviewer-bar > .cd-skeleton')!;
   await expect.poll(() => Math.abs(real.getBoundingClientRect().width - shape.getBoundingClientRect().width)).toBeLessThanOrEqual(2);
@@ -79,7 +79,7 @@ it('reviewer_shape_follows_natural_text_wrapping_between_breakpoints', async () 
   document.body.append(host);
   const root = createRoot(host);
   onTestFinished(() => { root.unmount(); host.remove(); });
-  flushSync(() => root.render(<><ReviewerBar ownerName="Maria Rivera" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
+  flushSync(() => root.render(<><ReviewerBar ownerName="Mike Turner" onStartOver={() => {}} /><ReviewerBarSkeleton /></>));
   const [real, shape] = host.querySelectorAll('.cd-reviewer-bar');
   // Resize the same mounted bar too: wrapping follows available space, not a phone breakpoint.
   for (const width of [620, 280, 320, 390, 440, 480, 540, 639, 640, 768, 1440]) {

@@ -63,7 +63,9 @@ def test_an_exception_note_on_a_list_price_quote_still_expects_a_pass():
 
 
 # Public facts the seed has reworded since the recorded reviewer run, each reviewed: key → (recorded, live).
-RENAMED: dict[str, tuple[str, str]] = {}
+RENAMED: dict[str, tuple[str, str]] = {
+    "policy:arrival": ("Maria texts before she arrives.", "Mike texts before he arrives."),   # the demo owner's rename
+}
 
 
 def test_the_recorded_facts_are_the_seeds_but_for_reviewed_renames():

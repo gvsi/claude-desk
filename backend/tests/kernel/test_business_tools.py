@@ -101,7 +101,7 @@ def test_amenity_exception_is_for_charter_policy_text_only():
                                             amenities=False) == {}
 
 
-# The Rivera seed's own business tool (test_rivera_urgent covers it); the tests here write the owner's.
+# The Turner seed's own business tool (test_rivera_urgent covers it); the tests here write the owner's.
 SEEDED = frozenset(tool.tool for tool in seed.RIVERA_BUSINESS_TOOLS)
 
 
@@ -746,7 +746,7 @@ async def test_put_rejects_unsafe_titles_before_they_can_reach_a_signed_receipt(
     assert allowed.outcome == 'allow'
     assert (await executed(client, visitor, allowed)).state == 'succeeded'
     receipt = await read(client, visitor.headers, allowed)
-    assert receipt.visitor_plain == '“New client intake”: details saved for Maria Rivera'
+    assert receipt.visitor_plain == '“New client intake”: details saved for Mike Turner'
     verify_signature(await public_key(client), receipt)
 
 

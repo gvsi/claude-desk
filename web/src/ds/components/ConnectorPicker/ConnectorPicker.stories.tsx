@@ -132,7 +132,7 @@ export const RiveraConnectable: Story = {
   parameters: {
     canvas: 'N-Conn-07-Add-Picker',
     canvasNote:
-      "Rivera Plumbing's picker, where the board draws Chen & Co. CPA's: every built-in connector is added and Stripe is connected, so Google Calendar is the one to connect. Verification is never listed, and a Close button the board doesn't draw closes it by pointer.",
+      "Turner Plumbing's picker, where the board draws Chen & Co. CPA's: every built-in connector is added and Stripe is connected, so Google Calendar is the one to connect. Verification is never listed, and a Close button the board doesn't draw closes it by pointer.",
   },
   play: async ({ args, canvas }) => {
     const dialog = canvas.getByRole('dialog', { name: 'Add a connector' });

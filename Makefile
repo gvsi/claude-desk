@@ -36,7 +36,7 @@ api-serve:
 	cd backend && uv run --env-file ../.env env -u TYPESAFE_API_KEY -u MOCKPAY_KEY uvicorn --factory desk.api.main:app_factory \
 		--host 127.0.0.1 --port 8700 --timeout-keep-alive 310 --no-access-log
 
-# Prove the Rivera seed's cards and the starter presets with desk-prove and write their reports to
+# Prove the Turner seed's cards and the starter presets with desk-prove and write their reports to
 # kernel/cedar/proofs/, which the kernel activates them from (run it in any commit that changes
 # cards, adapter profiles, the schema, baseline, invariants, compiler output or thresholds).
 # check-presets proves them again and fails unless every shipped report matches; CI runs it.
@@ -156,9 +156,11 @@ infra-check:
 # The docs check CI runs: relative links resolve across README.md, AGENTS.md and docs/, the shipped
 # docs carry the required disclosures, and they and docs/images/*.svg carry no private reference.
 # FINAL=1 also refuses placeholders ([measured: …], [owner: …]), for the docs as they ship.
+# Then no tracked file brings back the old demo owner's name (tools/rename_demo_owner.py).
 .PHONY: docs-check
 docs-check:
 	uv run --project tools python -m desk_tools.check_docs $(if $(FINAL),--final)
+	python3 tools/rename_demo_owner.py --check
 
 .PHONY: cvc5 setup dev
 # cvc5 1.4.2, the static build for this machine, checked against tools/cvc5.sha256 and unpacked to

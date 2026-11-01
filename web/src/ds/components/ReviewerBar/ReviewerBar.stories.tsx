@@ -25,7 +25,7 @@ export const Default: Story = {
   play: async ({ args, canvas, userEvent }) => {
     // A quiet note above the app, full width, on the muted fill with a hairline under it.
     const bar = canvas.getByRole('note');
-    await expect(bar).toHaveTextContent("You're Maria Rivera today. This is a concept prototype.Start over");
+    await expect(bar).toHaveTextContent("You're Mike Turner today. This is a concept prototype.Start over");
     expectComputed(bar, {
       height: '36px',
       backgroundColor: 'rgb(46, 44, 38)',

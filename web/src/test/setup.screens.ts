@@ -1,7 +1,7 @@
 /**
  * Setup for the `screens` project: the app's styles, as `main.tsx` loads them; the mock API's
  * service worker, started once, with every fetch and EventSource request to `/api/` stamped with
- * the test it was sent in; a fresh Rivera copy before every test, which none of those the last
+ * the test it was sent in; a fresh Turner copy before every test, which none of those the last
  * test's page sent late can reach, in a browser that has had no owner's copy and has noted no
  * payment link's chat; and after it, a
  * clean slate (the app unmounted, handlers a test added dropped, poll intervals and the retry delay

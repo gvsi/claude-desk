@@ -6,8 +6,8 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Ben, living in a house in Emeryville. Water is leaking from a pipe under your kitchen sink.
-  You've turned off the valve under the sink and put a bucket down, but you need Maria as soon as she
-  can come. Ask for the earliest time she can come, and when the open times are shown, take the
+  You've turned off the valve under the sink and put a bucket down, but you need Mike as soon as he
+  can come. Ask for the earliest time he can come, and when the open times are shown, take the
   earliest one. You are worried but polite, and brief.
 goal: >
   See the earliest open times for a visit about the leak, and take the earliest one.

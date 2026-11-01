@@ -1,4 +1,4 @@
-"""Fixtures for the API's tests: the database as desk_api, FakeKernel and a visitor in a fresh Rivera copy.
+"""Fixtures for the API's tests: the database as desk_api, FakeKernel and a visitor in a fresh Turner copy.
 
 - `db`: the database, migrated to the one Alembic head (the run fails with the command to run when it
   isn't) and with every `app.*` table emptied before each test.
@@ -6,7 +6,7 @@
   search_path; nothing commits unless a test does.
 - `fake`: FakeKernel's `FakeKernelState`, mirrored into `fake_kernel_ro`, and `kernel_http`, the API's typed
   client pointed at it.
-- `visitor` / `ids`: a visitor session on a new Rivera copy: its token (memory only, as in the API) and the
+- `visitor` / `ids`: a visitor session on a new Turner copy: its token (memory only, as in the API) and the
   `Ids` its `/whoami` answer names.
 - `clock`: a clock the test moves by hand. `api`: the API app on FakeKernel and `fake_kernel_ro`, its lifespan
   running, with that clock and `PASSCODE`'s hash; `browser(app, ip=...)`: an HTTPS client on it from one address,
@@ -117,7 +117,7 @@ class Visitor:
 
 
 async def new_visitor(http: KernelHttp, fake: FakeKernelState, copy: CopyCreated | None = None) -> Visitor:
-    """A visitor session on the Desk of `copy`, or of a new Rivera copy."""
+    """A visitor session on the Desk of `copy`, or of a new Turner copy."""
     copy = copy or await http.public().call("POST /copies", CreateCopyRequest())
     slug = fake.desks[copy.desk_ids[0]].slug
     created = await http.public().call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor"))

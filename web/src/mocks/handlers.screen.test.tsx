@@ -57,7 +57,7 @@ describe('mock API handlers', () => {
     const desk = await fetch(`/api/public/${RIVERA.slug}`);
     expect(desk.status).toBe(200);
     const publicDesk = (await desk.json()) as PublicDesk;
-    expect(publicDesk.owner_display_name).toBe('Maria Rivera');
+    expect(publicDesk.owner_display_name).toBe('Mike Turner');
     expect(Object.keys(publicDesk.brand).sort()).toEqual(['accent', 'primary']);
     // The kernel's open status, 90 seconds before the 6:00 pm close, which is when its text next changes.
     const status = publicDesk.open_status;
@@ -66,7 +66,7 @@ describe('mock API handlers', () => {
     expect(status?.until).toBe(status?.refresh_at);
     const spanish = (await (await fetch(`/api/public/${RIVERA.slug}?lang=es`)).json()) as PublicDesk;
     expect(spanish.open_status?.text).toBe('Abierto ahora, hasta las 18:00');
-    expect((await fetch('/api/public/rivera-plumbing-nope00')).status).toBe(404);
+    expect((await fetch('/api/public/turner-plumbing-nope00')).status).toBe(404);
 
     // The visitor's routes need the visitor cookie the session sets.
     const sessionPath = apiPath('visitorSession', { slug: RIVERA.slug });

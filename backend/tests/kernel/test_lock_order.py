@@ -340,7 +340,7 @@ async def test_a_run_that_raises_settles_in_the_lock_order(app, client, registry
 
 async def test_a_stale_execute_is_recorded_in_the_lock_order(app, client, registry):
     _, rows, visitor, allowed = await fake_quote_desk(app, client)
-    await set_mode(client, rows, visitor.session_id, "owner", 0)            # Maria takes over
+    await set_mode(client, rows, visitor.session_id, "owner", 0)            # Mike takes over
     with lock_log(app) as log:
         response = await post_execute(client, visitor, allowed)
     assert (response.status_code, response.json()) == (409, {"code": "stale_generation"})
@@ -426,7 +426,7 @@ async def test_a_reply_backed_by_an_open_handoff_keeps_the_lock_order(app, clien
     assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
     frozen_clock.advance(1)
     with lock_log(app) as log:
-        assert (await checked(client, visitor, "Maria Rivera will reply here.")).ok
+        assert (await checked(client, visitor, "Mike Turner will reply here.")).ok
     # a reply that passed on the open handoff's card: the session row, then that handoff FOR SHARE, held to the
     # commit, then the verdict's entry
     assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
@@ -589,7 +589,7 @@ async def test_the_owner_handling_a_conversation_closes_its_card_handoff_in_the_
         if how == "takeover":
             await set_mode(client, copy, visitor.session_id, "owner", 0)
         else:
-            await sent(client, copy, visitor.session_id, "Hi, this is Maria.")
+            await sent(client, copy, visitor.session_id, "Hi, this is Mike.")
     # the session row the route holds, then the card's handoff and its fact (none), then the ledger head
     assert log.transactions == [["sessions", "handoffs", "facts", "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))

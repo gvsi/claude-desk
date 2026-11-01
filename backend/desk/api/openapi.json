@@ -37,7 +37,7 @@
     "/api/owner/copies": {
       "post": {
         "summary": "Create Copy",
-        "description": "A fresh copy of the Rivera seed for whoever holds the passcode, and the owner cookie for it.",
+        "description": "A fresh copy of the Turner seed for whoever holds the passcode, and the owner cookie for it.",
         "operationId": "owner_create_copy",
         "requestBody": {
           "content": {

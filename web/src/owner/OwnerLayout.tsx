@@ -437,7 +437,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       {confirming ? (
         <Dialog
           title="Start over with a fresh copy?"
-          body="You'll get a new copy of Rivera Plumbing. This copy, its chats and its rules are left behind."
+          body="You'll get a new copy of Turner Plumbing. This copy, its chats and its rules are left behind."
           confirmLabel="Start over"
           cancelLabel="Keep this copy"
           pending={startOver.isPending}

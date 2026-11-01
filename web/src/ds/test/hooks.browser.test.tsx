@@ -41,7 +41,7 @@ describe('story hooks', () => {
   });
 
   it('canvas_parameter_is_required', async () => {
-    const text = () => <p>Reply checked against Maria Rivera’s rules.</p>;
+    const text = () => <p>Reply checked against Mike Turner’s rules.</p>;
     await expect(probe(text, {}).run()).rejects.toThrow(/parameters\.canvas/);
     await expect(probe(text, { canvas: 'none' }).run()).rejects.toThrow(/canvasNote/);
     await expect(probe(text, { canvas: 'none', canvasNote: '  ' }).run()).rejects.toThrow(/canvasNote/);
@@ -50,7 +50,7 @@ describe('story hooks', () => {
   });
 
   it('unknown_board_fails', async () => {
-    const text = () => <p>Reply checked against Maria Rivera’s rules.</p>;
+    const text = () => <p>Reply checked against Mike Turner’s rules.</p>;
     await expect(probe(text, { canvas: 'N-Nope' }).run()).rejects.toThrow(/"N-Nope"/);
     // Only the current N- boards count; an older board name is unknown too, as is a board that
     // left the reference list.

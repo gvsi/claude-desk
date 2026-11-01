@@ -14,7 +14,7 @@ import { brandOf } from './parts.tsx';
 import { SPEC, expectConversationType, expectFooter, expectReceiptsUnderMessages, one } from './spec.ts';
 
 /** Claude's answer to the visitor, as the board writes it: Claude's own message, before the Desk's. */
-const ANSWER = 'The payment link I sent earlier was cancelled. Maria changed her rules, so a new link needs her answer.';
+const ANSWER = 'The payment link I sent earlier was cancelled. Mike changed his rules, so a new link needs his answer.';
 
 /**
  * The Desk's own link_cancelled card for the deposit link, as the kernel renders it from the link's
@@ -30,17 +30,17 @@ function ChatLinkCancelled() {
       language="en"
       onAskForOwner={fn()}
       about={rivera.publicDesk.en.charter.slice(0, 2)}
-      composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />}
+      composer={<Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={fn()} />}
     >
-      <Transcript label="Conversation with Rivera Plumbing">
+      <Transcript label="Conversation with Turner Plumbing">
         <TranscriptRow>
           <VisitorMessage text="I clicked the payment link but it says it’s gone?" />
         </TranscriptRow>
-        <TranscriptRow margin={[<MarginReceipt key="reply" source={{ kind: 'reply', handoff: false }} plain="Reply checked against Maria Rivera’s rules" ledgerSeq={61} />]}>
+        <TranscriptRow margin={[<MarginReceipt key="reply" source={{ kind: 'reply', handoff: false }} plain="Reply checked against Mike Turner’s rules" ledgerSeq={61} />]}>
           <ClaudeMessage blocks={[{ kind: 'prose', text: ANSWER }]} language="en" ownerName={rivera.business.ownerName} />
         </TranscriptRow>
         <TranscriptRow
-          margin={[<MarginReceipt key="link" source={{ kind: 'reply', handoff: false }} plain="Link cancelled when Maria Rivera’s rules changed" ledgerSeq={62} />]}
+          margin={[<MarginReceipt key="link" source={{ kind: 'reply', handoff: false }} plain="Link cancelled when Mike Turner’s rules changed" ledgerSeq={62} />]}
         >
           {/* The Desk's own message (author desk) carries only the card. */}
           <ClaudeMessage blocks={[CARD]} language="en" ownerName={rivera.business.ownerName} />

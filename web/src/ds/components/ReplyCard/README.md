@@ -12,7 +12,7 @@
 
 - `block`: the `CardBlock` exactly as it arrived in the event. Don't edit, merge or reformat it.
 - `language`: the event's `language`, or the public page's `?lang=`. It picks the chrome and sets `lang` on the card, so a screen reader reads Spanish as Spanish.
-- `ownerName`: `owner_display_name` ("Maria Rivera"), used only in the "Maria Rivera said" label.
+- `ownerName`: `owner_display_name` ("Mike Turner"), used only in the "Mike Turner said" label.
 
 ## What the card shows
 

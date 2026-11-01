@@ -4,7 +4,7 @@ import { expect, within } from 'storybook/test';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { SituationRow, type SituationRowProps } from './SituationRow.tsx';
 
-/** Real situations as the setup interview's check returns them for Rivera Plumbing's draft rules. */
+/** Real situations as the setup interview's check returns them for Turner Plumbing's draft rules. */
 const SITUATIONS: SituationRowProps[] = [
   { title: 'A visitor wants a drain cleared on Tuesday afternoon', who: 'A visitor, not verified', outcome: 'allow', dependsOnReview: false, reason: 'Books weekday visits in your hours.', matches: true },
   { title: 'A visitor asks for 10% off if they pay cash', who: 'A visitor, not verified', outcome: 'hold', dependsOnReview: false, reason: 'Discounts ask you first.', matches: true },

@@ -298,7 +298,7 @@ describe('About pages', () => {
     const robots = () => [...document.head.querySelectorAll('meta[name="robots"]')].map((meta) => meta.getAttribute('content'));
     // The rest of the app asks nothing of search engines.
     const app = await renderRoute(`/d/${RIVERA.slug}`);
-    await expect.element(app.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    await expect.element(app.screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeVisible();
     expect(robots()).toEqual([]);
 
     for (const { path, title } of PAGES) {
@@ -323,8 +323,8 @@ describe('About pages', () => {
     const before = 'Before · Claude Desk';
     document.title = before;
     const { screen, router } = await renderRoute(`/d/${RIVERA.slug}`);
-    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
-    await expect.poll(() => document.title).toBe('Rivera Plumbing');
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeVisible();
+    await expect.poll(() => document.title).toBe('Turner Plumbing');
 
     for (const { path, title } of PAGES) {
       await router.navigate(path);

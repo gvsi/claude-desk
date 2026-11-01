@@ -21,7 +21,7 @@ TURNS = 2
 @pytest.mark.requires("01a", "02")
 async def test_latency_run_against_the_api_target(k, fake, api):
     fake.default(SOFT_PROMISE_MODEL, Sleep(0.3, Json(SOFT_PROMISE_PASS)), schema="SoftPromiseVerdict")
-    fake.default(OPUS, ToolUse("send_reply", {"prose": "Thanks for asking. Maria can help with that.", "clauses": []}))
+    fake.default(OPUS, ToolUse("send_reply", {"prose": "Thanks for asking. Mike can help with that.", "clauses": []}))
     fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
 
     measured = await measure_local(api, turns=TURNS)

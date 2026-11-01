@@ -201,7 +201,7 @@ export function TodaySkeleton() {
               className="cd-today-skeleton__link"
               radius="full"
               measure={{
-                label: publicLink('rivera-plumbing-abc123'),
+                label: publicLink('turner-plumbing-abc123'),
                 className: 'cd-greeting__link cd-type-meta',
                 tagName: 'span',
                 suffix: { className: 'cd-greeting__copy', width: 'calc(var(--size-control) - var(--space-6))' },
@@ -306,7 +306,7 @@ export function TodaySkeleton() {
         <SkeletonCard padding={16} anchor="public-card">
           <div className="cd-today-aside__public">
             <Skeleton shape="line" text="section" width={130} />
-            <TextLines words={publicLink('rivera-plumbing-abc123')} className="cd-today-aside__link" lineWidth="65%" lastWidth="65%" />
+            <TextLines words={publicLink('turner-plumbing-abc123')} className="cd-today-aside__link" lineWidth="65%" lastWidth="65%" />
             <TextLines words={TODAY_COPY.publicDescription} className="cd-today-aside__text" />
             <div className="cd-today-aside__action">
               <Skeleton shape="block" measure={{ label: 'Chat as a customer', className: BUTTON, tagName: 'a' }} height="var(--size-control)" anchor="public-page-action" />

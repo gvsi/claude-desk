@@ -45,12 +45,12 @@ from .test_release_document import DANA, TOOL, confirmed, documents
 
 ASK_FOR_DOCUMENTS = card("ask-docs", TOOL, mode="ask", who="record_owner")
 SECRET = "Dana Whitfield, account 4471"                 # what a misdeclared adapter returns
-QUOTED = "Quoted from Maria Rivera's price list"        # the stand-in's executed line, its tool being the quote's
+QUOTED = "Quoted from Mike Turner's price list"        # the stand-in's executed line, its tool being the quote's
 CHECKED = {"policy_version": 1, "auto_money_cap_cents": 50_000}   # the rules a stand-in Desk's step 6 ran under
 
 
 async def held_release(app, client):
-    """A Rivera copy whose owner asks before any document goes out, Dana verified in a session, and
+    """A Turner copy whose owner asks before any document goes out, Dana verified in a session, and
     her request for her invoice, held."""
     copy = await rivera(app, client)
     async with kernel_ctx(app) as ctx:

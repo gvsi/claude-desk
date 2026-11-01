@@ -2,7 +2,7 @@
 was replayed into it as owner-only data at the moments it happened, and Today says which of its sections count it.
 
 The app runs on FakeKernel, which replays the night a test records (`record_night`) into a copy that asks. Times are
-Rivera Plumbing's (America/Los_Angeles): the API's clock and the fake's stand at 10:00 on Friday 2026-10-30 there, so
+Turner Plumbing's (America/Los_Angeles): the API's clock and the fake's stand at 10:00 on Friday 2026-10-30 there, so
 "since last night" runs from 18:00 on Thursday and "last 7 days" from Saturday 2026-10-24.
 """
 
@@ -46,7 +46,7 @@ RIVERA = ZoneInfo("America/Los_Angeles")
 
 
 def local(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime:
-    """A wall-clock time at Rivera Plumbing, as a UTC instant."""
+    """A wall-clock time at Turner Plumbing, as a UTC instant."""
     return datetime(year, month, day, hour, minute, tzinfo=RIVERA).astimezone(UTC)
 
 
@@ -58,7 +58,7 @@ def booked_visit(at: datetime) -> RecordedSession:
     """A visitor asks, Claude answers and books an open time."""
     return RecordedSession(steps=(
         RecordedStep("said", at, "Hi, my kitchen sink drains slowly. Can someone come?"),
-        RecordedStep("replied", at + timedelta(seconds=20), "Maria can clear that. Here's an open time."),
+        RecordedStep("replied", at + timedelta(seconds=20), "Mike can clear that. Here's an open time."),
         RecordedStep("booked", at + timedelta(seconds=60))))
 
 
@@ -68,7 +68,7 @@ def agent_visit(at: datetime) -> RecordedSession:
     return RecordedSession(kind="agent", steps=(
         RecordedStep("said", at, "I'm asking for my client: what does a drain clearing cost?"),
         RecordedStep("blocked", at + timedelta(seconds=10)),
-        RecordedStep("replied", at + timedelta(seconds=20), "Maria can give your client a quote."),
+        RecordedStep("replied", at + timedelta(seconds=20), "Mike can give your client a quote."),
         RecordedStep("refused", at + timedelta(seconds=40)),
         RecordedStep("denied", at + timedelta(seconds=90))))
 
@@ -363,7 +363,7 @@ async def test_owner_cant_step_into_a_replayed_conversation(db, fake, api_settin
         before = app_rows(db, copy["copy_id"])
         answers = [await client.post(f"{path}/takeover", json={"generation": 0}),
                    await client.post(f"{path}/messages", json={"kind": "whisper", "text": "Offer her Monday."}),
-                   await client.post(f"{path}/messages", json={"kind": "say", "text": "Hi, it's Maria."}),
+                   await client.post(f"{path}/messages", json={"kind": "say", "text": "Hi, it's Mike."}),
                    await client.post(f"{path}/typing", json={"generation": 0})]
     assert [(answer.status_code, answer.json()) for answer in answers] == [
         (409, {"error": "kernel", "code": "closed"}), (409, {"error": "kernel", "code": "closed"}),
@@ -512,7 +512,7 @@ async def words_with_a_verdict(night: CopyCreated, kernel: Tampering) -> CopyCre
 
 
 async def a_reply_with_text_and_no_verdict(night: CopyCreated, kernel: Tampering) -> CopyCreated:
-    return changed(night, "reply", text="Maria can clear that.", verdict=None)
+    return changed(night, "reply", text="Mike can clear that.", verdict=None)
 
 
 async def a_receipt_without_its_decision(night: CopyCreated, kernel: Tampering) -> CopyCreated:

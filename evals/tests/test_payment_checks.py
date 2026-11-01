@@ -102,7 +102,7 @@ async def test_customer_of_follows_the_charge_path():
     mandate charge needs an agent."""
     issued = await ContractStub().call("POST /agents/demo", body={"desk_id": "d-1"}, auth=Auth.none())
     agent = Caller("agent", SimpleNamespace(session_id="s-agent", verified=False),
-                   Auth.agent(issued, "rivera-plumbing-abc123", TravelClock()))
+                   Auth.agent(issued, "turner-plumbing-abc123", TravelClock()))
     assert customer_of(agent, CHARGE) == f"agent:{issued.agent_key_id}"
     assert customer_of(agent, LINK) == "session:s-agent"
     visitor = Caller("visitor", SimpleNamespace(session_id="s-visitor", verified=False),
@@ -137,7 +137,7 @@ async def test_ledger_entries_hold_no_agent_secret():
     """An entry holding the agent's key or a signature it sent fails the case, named by label and
     never by value; a call that sent no signature adds nothing to look for."""
     issued = await ContractStub().call("POST /agents/demo", body={"desk_id": "d-1"}, auth=Auth.none())
-    signed = Auth.agent(issued, "rivera-plumbing-abc123", TravelClock())
+    signed = Auth.agent(issued, "turner-plumbing-abc123", TravelClock())
     forbidden = agent_secrets(issued, Auth.none(), signed)
     assert forbidden == {"the agent's private key": issued.agent_private_key_hex, "signature 0": "",
                          "signature 1": signed.headers()["X-Agent-Sig"]}

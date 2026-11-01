@@ -21,7 +21,7 @@ const ENTRY: DemoInboxEntry = {
   entry_id: 'inbox-code-dana',
   to: '•••• 0143',
   kind: 'verification_code',
-  body: 'Your Rivera Plumbing code is 482913. It works for 10 minutes.',
+  body: 'Your Turner Plumbing code is 482913. It works for 10 minutes.',
   created_at: '2026-10-30T10:46:00Z',
   decision_id: null,
 };
@@ -50,15 +50,15 @@ function InboxSheetPublic() {
         language="en"
         onAskForOwner={fn()}
         about={rivera.publicDesk.en.charter.slice(0, 2)}
-        composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />}
+        composer={<Composer variant="visitor" label="Message Turner Plumbing" placeholder="Message Turner Plumbing" maxLength={2000} onSend={fn()} />}
       >
-        <Transcript label="Conversation with Rivera Plumbing">
+        <Transcript label="Conversation with Turner Plumbing">
           <TranscriptRow>
             <VisitorMessage text="Hi, it’s Dana Whitfield. Can you send my last invoice?" />
           </TranscriptRow>
           <TranscriptRow
             margin={[
-              <MarginReceipt key="reply" source={{ kind: 'reply', handoff: false }} plain="Reply checked against Maria Rivera’s rules" ledgerSeq={41} />,
+              <MarginReceipt key="reply" source={{ kind: 'reply', handoff: false }} plain="Reply checked against Mike Turner’s rules" ledgerSeq={41} />,
               <MarginReceipt key="verify" source={{ kind: 'decision', state: 'executed' }} plain="Verification started" ledgerSeq={42} />,
             ]}
           >

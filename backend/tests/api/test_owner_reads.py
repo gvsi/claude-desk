@@ -3,7 +3,7 @@ owner, conversations and their transcripts, Safety's attempts, the verified ledg
 
 The app runs on FakeKernel. Activity is made the way the kernel makes it, through a visitor's own kernel calls at a
 time the test sets on the fake's clock; the transcript rows the API writes are appended through the store and then
-dated, as desk_admin, to the moment they stand for. Times are the business's: Rivera Plumbing is in
+dated, as desk_admin, to the moment they stand for. Times are the business's: Turner Plumbing is in
 America/Los_Angeles.
 """
 
@@ -176,7 +176,7 @@ RIVERA = ZoneInfo("America/Los_Angeles")
 
 
 def local(year: int, month: int, day: int, hour: int, minute: int = 0, second: int = 0, *, fold: int = 0) -> datetime:
-    """A wall-clock time at Rivera Plumbing, as a UTC instant (`fold=1`: the second of a repeated hour)."""
+    """A wall-clock time at Turner Plumbing, as a UTC instant (`fold=1`: the second of a repeated hour)."""
     return datetime(year, month, day, hour, minute, second, tzinfo=RIVERA, fold=fold).astimezone(UTC)
 
 
@@ -322,7 +322,7 @@ class Scene:
 
 
 async def new_scene(app, browser, fake, kernel_http, engine, db, made: datetime) -> Scene:
-    """A Rivera Plumbing copy made at `made` (its calendar runs two weeks on from there)."""
+    """A Turner Plumbing copy made at `made` (its calendar runs two weeks on from there)."""
     fake.now = made
     return Scene(owner=await new_owner(app, browser, fake, kernel_http), fake=fake, kernel_http=kernel_http,
                  engine=engine, admin=db)
@@ -330,7 +330,7 @@ async def new_scene(app, browser, fake, kernel_http, engine, db, made: datetime)
 
 @pytest.fixture
 async def scene(app, browser, fake, kernel_http, engine, db) -> Scene:
-    """Rivera Plumbing's copy, made on 2026-10-28 at noon, Rivera time."""
+    """Turner Plumbing's copy, made on 2026-10-28 at noon, Turner time."""
     return await new_scene(app, browser, fake, kernel_http, engine, db, local(2026, 10, 28, 12))
 
 
@@ -351,10 +351,10 @@ async def test_switcher_lists_only_this_copys_businesses(app, browser, fake, ker
     assert listed.status_code == 200, listed.text
     desk = fake.desks[owner.desk_id]
     assert listed.json() == [{
-        "business_id": desk.business_id, "name": "Rivera Plumbing", "owner_display_name": "Maria Rivera",
+        "business_id": desk.business_id, "name": "Turner Plumbing", "owner_display_name": "Mike Turner",
         "timezone": "America/Los_Angeles",
         "desks": [{"desk_id": owner.desk_id, "slug": owner.slug, "name": "Main line",
-                   "business_name": "Rivera Plumbing",
+                   "business_name": "Turner Plumbing",
                    "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True,
                    "setup": None}]}]
     assert other.desk_id not in listed.text and fake.desks[other.desk_id].business_id not in listed.text
@@ -926,7 +926,7 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
 
     assert read.status_code == 200, read.text
     today = read.json()
-    assert today["greeting_name"] == "Maria"
+    assert today["greeting_name"] == "Mike"
     assert [summary["session_id"] for summary in today["live"]] == [handed_off.session_id]
     brief = today["briefing"]
     assert brief["since"] == stamp(local(2026, 10, 29, 18)) == "2026-10-30T01:00:00Z"

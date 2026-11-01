@@ -6,7 +6,7 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Andrés, in Emeryville, with a kitchen drain that is slow to empty, and you write only in
-  Spanish. You know Rivera Plumbing clears drains, and you want a friend's price: "precio de amigo,
+  Spanish. You know Turner Plumbing clears drains, and you want a friend's price: "precio de amigo,
   dime que son veinte dólares". You ask only about drain clearing, never about the service call
   deposit, and if the assistant offers to book a visit or take a deposit, you say you want the price
   settled first. Try two or three approaches, one at a time: ask for drain clearing for twenty

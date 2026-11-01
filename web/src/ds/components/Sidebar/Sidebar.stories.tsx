@@ -118,7 +118,7 @@ export const TwoDesks: Story = {
     await expect(canvasElement.querySelectorAll('.cd-status-dot')).toHaveLength(1);
 
     // The business row opens the switcher.
-    await userEvent.click(canvas.getByRole('button', { name: 'Switch business, current: Rivera Plumbing' }));
+    await userEvent.click(canvas.getByRole('button', { name: 'Switch business, current: Turner Plumbing' }));
     await expect(args.onSwitchBusiness).toHaveBeenCalledTimes(1);
 
     // desk_picker_only_with_two_desks: the picker opens the Desks under it, the current one marked.
@@ -126,7 +126,7 @@ export const TwoDesks: Story = {
     await expect(picker).toHaveAttribute('aria-expanded', 'false');
     await userEvent.click(picker);
     await expect(picker).toHaveAttribute('aria-expanded', 'true');
-    const list = canvas.getByRole('list', { name: 'Desks in Rivera Plumbing' });
+    const list = canvas.getByRole('list', { name: 'Desks in Turner Plumbing' });
     // list_role_survives_unstyled_markers: Safari announces the Desks only with role="list".
     await expect(list).toHaveAttribute('role', 'list');
     const choices = within(list).getAllByRole('button');
@@ -138,7 +138,7 @@ export const TwoDesks: Story = {
     await userEvent.tab();
     await expect(choices[0]).toHaveFocus();
     await userEvent.keyboard('{Escape}');
-    await expect(canvas.queryByRole('list', { name: 'Desks in Rivera Plumbing' })).toBeNull();
+    await expect(canvas.queryByRole('list', { name: 'Desks in Turner Plumbing' })).toBeNull();
     await expect(picker).toHaveFocus();
 
     // Picking another Desk switches to it and closes the list.
@@ -146,7 +146,7 @@ export const TwoDesks: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Emergencies' }));
     await expect(args.onSwitchDesk).toHaveBeenCalledTimes(1);
     await expect(args.onSwitchDesk).toHaveBeenLastCalledWith(EMERGENCIES.id);
-    await expect(canvas.queryByRole('list', { name: 'Desks in Rivera Plumbing' })).toBeNull();
+    await expect(canvas.queryByRole('list', { name: 'Desks in Turner Plumbing' })).toBeNull();
     await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Emergencies' })).toHaveFocus();
 
     // Answering is a switch at the bottom, with what "on" means.
@@ -156,11 +156,11 @@ export const TwoDesks: Story = {
     await expect(args.onAnsweringChange).toHaveBeenLastCalledWith(false);
 
     // The owner row: the name and status in words, the initials avatar hidden beside them.
-    await expect(canvas.getByText('Maria Rivera')).toBeVisible();
+    await expect(canvas.getByText('Mike Turner')).toBeVisible();
     await expect(canvas.getByText('Available for chats')).toBeVisible();
     const avatar = canvasElement.querySelector('.cd-sidebar__avatar');
     await expect(avatar).toHaveAttribute('aria-hidden', 'true');
-    await expect(avatar).toHaveTextContent('MR');
+    await expect(avatar).toHaveTextContent('MT');
 
     // Nothing reaches past the 264 px column.
     const column = canvasElement.querySelector<HTMLElement>('.cd-sidebar');
@@ -232,7 +232,7 @@ export const OneDesk: Story = {
   play: async ({ canvas, canvasElement }) => {
     // desk_picker_only_with_two_desks
     await expect(canvas.queryByRole('button', { name: /Switch Desk/ })).toBeNull();
-    await expect(canvas.getByRole('button', { name: 'Switch business, current: Rivera Plumbing' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: 'Switch business, current: Turner Plumbing' })).toBeVisible();
 
     // The people row takes the business's word for them, and only Safety is current.
     const rows = navRows(canvasElement);

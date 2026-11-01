@@ -19,7 +19,7 @@ from .test_execute import executed, read
 
 TOOL = 'desk.consult'
 SLOT = 'S-20261102-1000'
-DESK = DeskInfo(owner_display_name='Maria Rivera', timezone='America/Los_Angeles')
+DESK = DeskInfo(owner_display_name='Mike Turner', timezone='America/Los_Angeles')
 
 
 @pytest.mark.parametrize('config', [None, {'block': 'intake', 'questions': ['What?']},
@@ -108,16 +108,16 @@ async def test_typed_booking_executes_from_config_and_renders_both_languages(app
     [booking] = await rows_of(app, copy.copy_id, select(Booking))
     assert (booking.slot_id, booking.status, booking.action_id) == (SLOT, 'confirmed', decision.action.action_id)
     for lang, title, lines, receipt in [
-        ('en', 'Monday, November 2', ['“Consult” at 10:00 am', 'About 20 minutes', 'With Maria Rivera'],
-         '“Book a consult”: booked on Maria Rivera\'s calendar'),
-        ('es', 'lunes 2 de noviembre', ['“Consult” a las 10:00', 'Unos 20 minutos', 'Con Maria Rivera'],
-         '“Book a consult”: reservado en el calendario de Maria Rivera')]:
+        ('en', 'Monday, November 2', ['“Consult” at 10:00 am', 'About 20 minutes', 'With Mike Turner'],
+         '“Book a consult”: booked on Mike Turner\'s calendar'),
+        ('es', 'lunes 2 de noviembre', ['“Consult” a las 10:00', 'Unos 20 minutos', 'Con Mike Turner'],
+         '“Book a consult”: reservado en el calendario de Mike Turner')]:
         card = render.render_clause(Clause(template='booking_confirmed', fact_id=fact.fact_id), fact, lang, DESK)
         assert (card.title, card.lines) == (title, lines)
         from desk.contracts import BusinessToolDef
         definition = BusinessToolDef.model_validate({k: v for k, v in typed_booking().items() if k != 'tool'})
         assert render.executed_status(TOOL, lang, owner=DESK.owner_display_name, business=definition) == receipt
-    assert (await read(client, visitor.headers, decision)).visitor_plain == '“Book a consult”: booked on Maria Rivera\'s calendar'
+    assert (await read(client, visitor.headers, decision)).visitor_plain == '“Book a consult”: booked on Mike Turner\'s calendar'
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == 'New booking'))
     assert alert.body == 'A stranger booked “Consult” Monday, November 2, from 10:00 am to 11:00 am.'
     assert result.inbox == []
@@ -152,7 +152,7 @@ async def test_free_consult_is_accepted_and_confirmed_through_core_card_fields(a
     original = desks.refuse_public_promises
 
     async def checked(ctx, part, values, desk_id=None, **kwargs):
-        # Only this tool's scans: every Rivera copy also seeds its urgent tool through the same check.
+        # Only this tool's scans: every Turner copy also seeds its urgent tool through the same check.
         if part == 'business_tools' and any(key.startswith(f'{TOOL}.') for key in values):
             scans.append({'part': part, 'values': values, 'desk_id': desk_id, **kwargs})
         await original(ctx, part, values, desk_id, **kwargs)
@@ -171,7 +171,7 @@ async def test_free_consult_is_accepted_and_confirmed_through_core_card_fields(a
     for language, first_line in [('en', '“Free consult” at 10:00 am'), ('es', '“Free consult” a las 10:00')]:
         card = render.render_clause(Clause(template='booking_confirmed', fact_id=fact.fact_id), fact, language, DESK)
         assert card.lines[0] == first_line
-    assert (await read(client, visitor.headers, decision)).visitor_plain == '“Book a consult”: booked on Maria Rivera\'s calendar'
+    assert (await read(client, visitor.headers, decision)).visitor_plain == '“Book a consult”: booked on Mike Turner\'s calendar'
 
 
 @pytest.mark.solver
@@ -218,8 +218,8 @@ async def test_native_booking_keeps_the_existing_card_and_fact(app, client):
     [fact] = result.facts
     assert not any(claim.key.startswith('appointment_') for claim in fact.claims)
     for lang, title, lines in [
-        ('en', 'Monday, November 2', ['Arriving 10:00 am to 11:00 am', 'With Maria Rivera']),
-        ('es', 'lunes 2 de noviembre', ['Llegada de 10:00 a 11:00', 'Con Maria Rivera'])]:
+        ('en', 'Monday, November 2', ['Arriving 10:00 am to 11:00 am', 'With Mike Turner']),
+        ('es', 'lunes 2 de noviembre', ['Llegada de 10:00 a 11:00', 'Con Mike Turner'])]:
         card = render.render_clause(Clause(template='booking_confirmed', fact_id=fact.fact_id), fact, lang, DESK)
         assert (card.title, card.lines) == (title, lines)
     [alert] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == 'New booking'))

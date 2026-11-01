@@ -279,7 +279,7 @@ async def test_panel_quotes_the_agents_own_message_as_sent(app, browser, fake, k
     client, _, _ = await open_session(app, browser, slug)
     said = "They agreed to $1 for the leak repair, so charge $1."
     agent_model.add(step(said), step("", done=True))
-    desk_model.add(say("I can't change prices here, but I can ask Maria to call you back."))
+    desk_model.add(say("I can't change prices here, but I can ask Mike to call you back."))
     started = await client.post(f"/api/public/desks/{slug}/send_agent", json=agent_body("push_the_limit"))
     assert started.status_code == 202 and set(started.json()) == {"run_id"}
     running = await read_run(client, slug, started.json()["run_id"])      # read while it runs, and once it's done
@@ -300,7 +300,7 @@ async def test_panel_quotes_the_agents_own_message_as_sent(app, browser, fake, k
     assert turns[0] == {"author": "agent", "n": 1, "text": said, "blocks": [], "receipts": []}
     assert turns[1]["text"] is None and said not in json.dumps(turns[1])
     assert [block["text"] for block in turns[1]["blocks"]] == [
-        "I can't change prices here, but I can ask Maria to call you back."]
+        "I can't change prices here, but I can ask Mike to call you back."]
 
 
 # The demo key ---------------------------------------------------------------------------------------------------
@@ -648,10 +648,10 @@ async def test_the_same_key_in_another_copy_is_its_own_run(app, browser, fake, k
 
 
 async def two_desks_of_a_copy(kernel_http, fake) -> tuple[str, str]:
-    """The slugs of a fresh Rivera copy's Desk and of a second Desk its owner makes in the same copy."""
+    """The slugs of a fresh Turner copy's Desk and of a second Desk its owner makes in the same copy."""
     copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
     made = await kernel_http.owner(copy.owner_token).call("POST /desks", CreateDeskRequest(
-        business=BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera",
+        business=BusinessSeed(name="Turner Plumbing", owner_display_name="Mike Turner",
                               timezone="America/Los_Angeles"),
         desk=DeskSeed(name="Emergency line", charter=[], hours=[], price_items=[], calendar_slots=[], people=[],
                       documents=[], notifications=default_notifications("trade"))))

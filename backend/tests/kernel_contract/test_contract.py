@@ -204,7 +204,7 @@ async def test_copy_returns_seeded_chat(kernel, ro_read):
     assert chat.session_id == decision.session_id
     assert chat.visitor_line == "Could you do the drain clearing at 15% off?"
     assert (decision.outcome, decision.state, decision.visitor_plain) == (
-        "hold", "held", "Waiting for Maria Rivera to approve")
+        "hold", "held", "Waiting for Mike Turner to approve")
     assert decision.action is not None
     assert (decision.action.tool, decision.action.discount_bp, decision.action.amount_cents) == (
         "native.quote", 1500, 15300)
@@ -240,7 +240,7 @@ async def test_a_copy_replays_the_recorded_night_only_when_asked(kernel, ro_read
         night = state.now - timedelta(hours=15)
         state.record_night(RecordedSession(steps=(
             RecordedStep("said", night, "Hi, can someone look at my water heater?"),
-            RecordedStep("replied", night + timedelta(seconds=20), "Yes, Maria can. Here's an open time."),
+            RecordedStep("replied", night + timedelta(seconds=20), "Yes, Mike can. Here's an open time."),
             RecordedStep("booked", night + timedelta(seconds=90)))))
 
     def marked(copy: CopyCreated) -> list[dict]:
@@ -474,7 +474,7 @@ async def test_answer_includes_the_approved_snapshot_only_for_an_allow(kernel, r
 
     assert result.approved is not None
     assert (result.approved.decision_id, result.approved.state, result.approved.visitor_plain) == (
-        held.decision_id, "approved", "Maria Rivera approved this")
+        held.decision_id, "approved", "Mike Turner approved this")
     assert result.approved.signature and result.approved.signature != result.decision.signature
     assert result.approved.owner_plain is None
     assert result.approved.ledger_seq < result.decision.ledger_seq
@@ -545,7 +545,7 @@ async def test_a_held_calls_free_text_is_claudes_note(kernel, ro_read):
     copy = await new_copy(http)
     visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
     view, session_id = http.session(visitor.session_token), visitor.state.session_id
-    note = "Asked whether Maria can come before lunch."
+    note = "Asked whether Mike can come before lunch."
     args = {**quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500), "note": note}
     held = await decide(view, session_id, 0, "call-1", "native.quote", args)
     assert held.state == "held"
@@ -672,7 +672,7 @@ async def test_check_reply_blocks_numbers_with_handoff(kernel, ro_read):
     blocked = await check_reply(view, session_id, 0, "It comes to $89 for the visit.")
     assert not blocked.ok and "number_in_prose" in {violation.kind for violation in blocked.violations}
     assert [(block.kind, block.template) for block in blocked.blocks] == [("card", "handoff")]
-    assert "Maria Rivera" in blocked.blocks[0].text and "89" not in blocked.blocks[0].text
+    assert "Mike Turner" in blocked.blocks[0].text and "89" not in blocked.blocks[0].text
     assert (blocked.generation, blocked.language) == (0, "en")
 
     clean = await check_reply(view, session_id, 0, "Happy to help with your drain.")
@@ -750,20 +750,20 @@ async def test_status_lines_are_the_kernels(kernel, ro_read):
                                 path={"decision_id": held.decision_id})
     denied = (await answer(owner, to_deny.decision_id, "deny_once")).decision
     assert [(decision.state, decision.visitor_plain) for decision in (allowed, held, unknown, cancelled, denied)] == [
-        ("allowed", "Checked against Maria Rivera's rules"), ("held", "Waiting for Maria Rivera to approve"),
+        ("allowed", "Checked against Mike Turner's rules"), ("held", "Waiting for Mike Turner to approve"),
         ("refused", "Not something I can do here"), ("cancelled", "Cancelled"),
-        ("denied", "Maria Rivera decided not to go ahead")]
+        ("denied", "Mike Turner decided not to go ahead")]
     assert (await check_reply(view, session_id, 0, "Happy to help.")).visitor_plain == (
-        "Reply checked against Maria Rivera's rules")
+        "Reply checked against Mike Turner's rules")
     assert (await check_reply(view, session_id, 0, "It costs 80 dollars.")).visitor_plain == (
-        "Passed to Maria Rivera to answer")
+        "Passed to Mike Turner to answer")
 
     spanish = await new_visitor(http, slug)
     view, session_id = http.session(spanish.session_token), spanish.state.session_id
     assert (await check_reply(view, session_id, 0, "Hola, puedo ayudarle con eso.")).visitor_plain == (
-        "Respuesta revisada con las reglas de Maria Rivera")
+        "Respuesta revisada con las reglas de Mike Turner")
     assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args(drain))).visitor_plain == (
-        "Revisado con las reglas de Maria Rivera")
+        "Revisado con las reglas de Mike Turner")
 
 
 @pytest.mark.kernel_plan("01b")
@@ -785,9 +785,9 @@ async def test_executed_lines_say_what_was_done(kernel, ro_read):
         assert (await execute(view, allowed, 0)).state == "succeeded", tool
         executed = await read_decision(view, allowed.decision_id)
         lines[tool] = (executed.state, executed.visitor_plain)
-    assert lines == {"native.quote": ("executed", "Quoted from Maria Rivera's price list"),
-                     "native.find_slots": ("executed", "Times read from Maria Rivera's calendar"),
-                     "native.request_callback": ("executed", "Callback request saved for Maria Rivera"),
+    assert lines == {"native.quote": ("executed", "Quoted from Mike Turner's price list"),
+                     "native.find_slots": ("executed", "Times read from Mike Turner's calendar"),
+                     "native.request_callback": ("executed", "Callback request saved for Mike Turner"),
                      "native.start_verification": ("executed", "Verification started")}
 
     spanish = await new_visitor(http, slug)
@@ -796,7 +796,7 @@ async def test_executed_lines_say_what_was_done(kernel, ro_read):
     allowed = await decide(view, session_id, 0, "call-1", "native.find_slots", {})
     await execute(view, allowed, 0)
     assert (await read_decision(view, allowed.decision_id)).visitor_plain == (
-        "Horarios tomados del calendario de Maria Rivera")
+        "Horarios tomados del calendario de Mike Turner")
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1038,7 +1038,7 @@ async def test_public_desk_shows_only_public_fields(kernel, ro_read):
 
     public = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
     assert (public.business_name, public.desk_name, public.owner_display_name) == (
-        "Rivera Plumbing", "Main line", "Maria Rivera")
+        "Turner Plumbing", "Main line", "Mike Turner")
     # the charter in the page's order: the hours, the contact, then the policies by their fact IDs
     assert public.brand and [block.template for block in public.charter] == [
         "hours", "contact", "policy", "policy", "policy"]
@@ -1056,7 +1056,7 @@ async def test_public_desk_shows_only_public_fields(kernel, ro_read):
         404, "not_found")
 
 
-# The Rivera seed's starter questions, in the order the public chat's chips show them.
+# The Turner seed's starter questions, in the order the public chat's chips show them.
 RIVERA_STARTERS = {
     "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
     "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
@@ -1065,7 +1065,7 @@ RIVERA_STARTERS = {
 
 @pytest.mark.kernel_plan("01b")
 async def test_public_desk_serves_the_seeds_starters_in_its_language(kernel, ro_read):
-    """Rivera's three seed-only starter questions, in the language asked for and never in a session's context; a Desk
+    """Turner's three seed-only starter questions, in the language asked for and never in a session's context; a Desk
     the owner makes has none."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
@@ -1123,7 +1123,7 @@ async def test_new_desk_naming_a_starter_is_refused(kernel, ro_read):
 
 
 RIVERA_TIME = ZoneInfo("America/Los_Angeles")
-# The Rivera seed's hours, by weekday (Monday 0): weekdays 8:00 am to 6:00 pm, Saturday 9:00 am to 1:00 pm.
+# The Turner seed's hours, by weekday (Monday 0): weekdays 8:00 am to 6:00 pm, Saturday 9:00 am to 1:00 pm.
 RIVERA_OPEN = {**{day: (time(8), time(18)) for day in range(5)}, 5: (time(9), time(13))}
 
 
@@ -1182,12 +1182,12 @@ async def test_public_desk_carries_the_agent_card(kernel, ro_read):
 
     english, spanish = await card("en"), await card("es")
     assert len(english) == len(spanish) == 6
-    assert english[0] == ("Visiting agents can talk to Rivera Plumbing here too. Answers come from Claude, an AI, "
-                          "working within Maria Rivera's rules, unless a message is marked as Maria Rivera's own.")
+    assert english[0] == ("Visiting agents can talk to Turner Plumbing here too. Answers come from Claude, an AI, "
+                          "working within Mike Turner's rules, unless a message is marked as Mike Turner's own.")
     assert english[1].startswith("What an agent can do here: get a quote from the price list, find open times, ")
     assert english[2] == f"Send each request to POST /api/a2a/{slug} on this site; {slug} is this Desk's slug."
     assert all(header in english[3] for header in ("X-Agent-Key-Id", "X-Agent-Ts", "X-Agent-Nonce", "X-Agent-Sig"))
-    assert spanish[0].startswith("Los agentes también pueden hablar aquí con Rivera Plumbing. ")
+    assert spanish[0].startswith("Los agentes también pueden hablar aquí con Turner Plumbing. ")
     assert spanish[2] == (f"Envía cada solicitud a POST /api/a2a/{slug} en este sitio; {slug} es el identificador de "
                           "este Desk.")
 
@@ -1427,11 +1427,11 @@ OTHER_LANGUAGE = "Bonjour, je peux vous aider."             # unsupported_langua
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
-    ("", [Clause(template="handoff")], True, True, ["handoff"], "Passed to Maria Rivera to answer"),
-    (BLOCKED_PROSE, [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
+    ("", [Clause(template="handoff")], True, True, ["handoff"], "Passed to Mike Turner to answer"),
+    (BLOCKED_PROSE, [], True, False, ["handoff"], "Passed to Mike Turner to answer"),
     (BLOCKED_PROSE, [Clause(template="hours", fact_id="charter:hours")], True, False, ["hours"],
-     "Reply checked against Maria Rivera's rules"),
-    (BLOCKED_PROSE, [], False, False, [], "Passed to Maria Rivera to answer"),
+     "Reply checked against Mike Turner's rules"),
+    (BLOCKED_PROSE, [], False, False, [], "Passed to Mike Turner to answer"),
 ], ids=["passing-handoff", "final-handoff", "final-kept-card", "unshown-first-attempt"])
 async def test_check_reply_receipt_follows_the_shown_handoff_clause(kernel, ro_read, prose, clauses, final, ok,
                                                                   templates, receipt):
@@ -1472,8 +1472,8 @@ async def test_delivered_handoff_flag_matches_the_reply_receipt(kernel, ro_read,
     reply = Reply(verdict, "claude", "api")
     assert [block.template for block in verdict.blocks] == templates
     assert reply.handoff is ("handoff" in templates)
-    assert reply.handoff is (verdict.visitor_plain == "Passed to Maria Rivera to answer")
-    assert verdict.visitor_plain in ("Passed to Maria Rivera to answer", "Reply checked against Maria Rivera's rules")
+    assert reply.handoff is (verdict.visitor_plain == "Passed to Mike Turner to answer")
+    assert verdict.visitor_plain in ("Passed to Mike Turner to answer", "Reply checked against Mike Turner's rules")
     assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == (
         [("card", "open")] if reply.handoff else [])
     (entry,) = [entry for entry in (await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])).entries
@@ -1703,7 +1703,7 @@ async def test_check_reply_finds_a_disguised_canary(kernel, ro_read, arrange):
 
 # Verification and the session's Demo inbox (Plan 01b) ----------------------------------------------------------
 
-DANA = "dana@example.com"               # a contact on record in the Rivera seed (master plan, "Rivera seed")
+DANA = "dana@example.com"               # a contact on record in the Turner seed (master plan, "Turner seed")
 SIX_DIGITS = re.compile(r"[0-9]{6}")
 
 
@@ -1935,7 +1935,7 @@ LINK_ROUTES = ("GET /payment_links/{token}", "POST /payment_links/{token}/comple
 
 async def issue_payment_link(view: CredentialView, session_id: str, item: str, n: int, *,
                              owner: CredentialView | None = None) -> tuple[str, ExecResult]:
-    """A payment link for the session's own quote of one `item`, under the Rivera seed's `rv-link` card, which allows
+    """A payment link for the session's own quote of one `item`, under the Turner seed's `rv-link` card, which allows
     a link only with the reviewer's pass: the token in its card's `href`, and the link's execution. The fake kernel
     has no reviewer and allows it. A kernel whose reviewer gives no review (the real kernel's offline reviewer, as
     `make kernel-contract` runs it) holds it instead, and `owner`, given for that kernel, approves it once, so the
@@ -1984,7 +1984,7 @@ async def test_payment_link_completes_once(kernel, ro_read):
     assert (shown.state, shown.amount_cents, shown.language) == ("issued", 2000, "en")
     assert shown.title == issued.model_view["title"]
     # the business as its public page names it; a stranger's link names no customer and was cancelled by nothing
-    assert (shown.business_name, shown.customer_name, shown.cancel_reason) == ("Rivera Plumbing", None, None)
+    assert (shown.business_name, shown.customer_name, shown.cancel_reason) == ("Turner Plumbing", None, None)
     paid = await checkout(http, complete, paying)
     assert (paid.state, paid.session_id) == ("paid", session_id)
     assert paid.verdict is not None and paid.verdict.ok and paid.verdict.generation == created.state.generation
@@ -2648,7 +2648,7 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     assert slots.outcome == "refuse" and slots.action is None
     visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
     fetch = await decide(http.session(visitor.session_token), visitor.state.session_id, 0, "visitor-fetch",
-                         "native.fetch_website", {"url": "https://rivera-plumbing.example"})
+                         "native.fetch_website", {"url": "https://turner-plumbing.example"})
     assert fetch.outcome == "refuse" and fetch.action is None
     stranger = http.owner(other.owner_token)
     theirs = (await stranger.whoami()).session
@@ -3403,7 +3403,7 @@ def charge_card(cents: int) -> RuleCard:
 
 @pytest.mark.kernel_plan("01b")   # the money cap on each rules version, Plan 01b's
 async def test_card_above_the_draft_cap_is_422(kernel, ro_read):
-    """The kernel holds a draft's cards to the draft's own money cap, whatever the API sends: lowering the Rivera cap
+    """The kernel holds a draft's cards to the draft's own money cap, whatever the API sends: lowering the Turner cap
     from $500 to $100 with an active $300 auto `effect:charge` card carried as it is, as an API that skipped the
     lowering would send it, is 422 `invalid` with nothing drafted. The same cards lowered by
     `desk.money_cap.lower_to_cap` draft at $100, the card at $100 and saying so."""
@@ -3436,7 +3436,7 @@ async def test_card_above_the_draft_cap_is_422(kernel, ro_read):
 @pytest.mark.kernel_plan("01b")   # the money cap on each rules version, Plan 01b's
 async def test_cap_changes_only_at_confirm(kernel, ro_read):
     """A draft at a new money cap carries it, and the Desk's cap stays its active version's until the owner confirms
-    the draft: raising the Rivera cap from $500 to $800 drafts a version at $800 while the active one stays at $500;
+    the draft: raising the Turner cap from $500 to $800 drafts a version at $800 while the active one stays at $500;
     confirming it supersedes the $500 version, and the Desk's cap is $800."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
@@ -3460,8 +3460,8 @@ async def test_cap_changes_only_at_confirm(kernel, ro_read):
 
 
 def verification_card(ro_read, ro_schema: str, copy: CopyCreated) -> tuple[dict, list[RuleCard], RuleCard]:
-    """The Rivera Desk's active version, its owner cards, and the presets' own card for starting a verification
-    among them (auto, for anyone, on the tool), which every preset and the Rivera seed carry."""
+    """The Turner Desk's active version, its owner cards, and the presets' own card for starting a verification
+    among them (auto, for anyone, on the tool), which every preset and the Turner seed carry."""
     active = active_version(ro_read, ro_schema, copy.copy_id, copy.desk_ids[0])
     kept = owner_cards(active)
     (shipped,) = [card for card in kept if card.applies_to == "native.start_verification"]
@@ -3711,13 +3711,13 @@ async def test_copy_starts_with_public_website_and_price_list_knowledge(kernel, 
     desk_id = copy.desk_ids[0]
     expected = [
         KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
-                      text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                      text="The price list Mike gave in setup covers the service call deposit, drain clearing, a "
                            "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
-                           "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
+                           "The short-notice fee is added to an urgent visit that Mike fits in at short notice. Each price is given in a quote from this list.",
                       label=Label(readers=["public"])),
         KnowledgeItem(item_id="kn-website", source="website",
-                      title="Your website, rivera-plumbing.example, read during setup",
-                      text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                      title="Your website, turner-plumbing.example, read during setup",
+                      text="Turner Plumbing is Mike Turner's home plumbing business: drain clearing, leak repair and "
                            "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
                       label=Label(readers=["public"])),
     ]
@@ -3828,7 +3828,7 @@ async def test_uploaded_document_gets_a_title_only_fact(kernel, ro_read):
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
     owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
-    body = "Rivera Plumbing\nEstimate, leak repair\nFor Dana Whitfield\n"
+    body = "Turner Plumbing\nEstimate, leak repair\nFor Dana Whitfield\n"
     estimate = SeedDocument(ref="dana-estimate", title="Estimate, leak repair", body=body, record_owner_ref="dana")
 
     created = await owner.call("POST /documents", DocumentUploadRequest(desk_id=desk_id, document=estimate))
@@ -3925,14 +3925,14 @@ async def test_a_turn_speaks_the_language_of_the_message_that_started_it(kernel,
     spanish = "Hola, ¿pueden venir mañana a revisar el desagüe?"
     assert await turn(view, session_id, 0, spanish) == TurnStarted(language="es")
     assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args(drain))).visitor_plain == (
-        "Revisado con las reglas de Maria Rivera")
+        "Revisado con las reglas de Mike Turner")
     neither = ("\U0001F44D", "Bonjour, je voudrais un rendez-vous.", "\U0001F44D")
     for said in neither:
         assert await turn(view, session_id, 0, said) == TurnStarted(language="es"), said
     english = "Can someone look at my water heater tomorrow?"
     assert await turn(view, session_id, 0, english) == TurnStarted(language="en")
     assert (await decide(view, session_id, 0, "call-2", "native.quote", quote_args(drain))).visitor_plain == (
-        "Checked against Maria Rivera's rules")
+        "Checked against Mike Turner's rules")
 
     assert (await view.whoami()).session == visitor.state           # mode, generation and verification untouched
     ledgered = json.dumps([entry.model_dump(mode="json") for entry in (await ledger_page(owner, desk_id)).entries
@@ -4017,13 +4017,13 @@ async def test_public_contact_is_structured(kernel, create):
 PUBLIC_CONTACTS = [*policy_cases.CONTACT_FORMS, "(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call us at (510) 555-0142",
                    "Email: help@example.test · Llámanos al 555-0142",
                    "https://example.test/book?services=drain,repair", "https://example.test/book;location=oakland",
-                   "maria@example.test or (510) 555-0142", "help@example.test / (510) 555-0142", "www.example.com",
+                   "mike@example.test or (510) 555-0142", "help@example.test / (510) 555-0142", "www.example.com",
                    "example.com", "help@example.test\r\nother@example.test",
                    "Call us at (510) 555-0142 or email hello@example.com",
                    "(510) 555-0142 ext. 12, hello@example.com, example.com",
                    "Phone: (510) 555-0142, Email: hello@example.com, Website: example.com",
                    "Office: (510) 555-0142 ext. 12", "Call or text (510) 555-0142"]
-PUBLIC_CONTACT_PROSE = [*policy_cases.CONTACT_SCAN_INPUTS, "https://example.test/" + "a" * 481, "Call us at (510) 555-0142 for a free quote", "maria@example.test or call for a free quote",
+PUBLIC_CONTACT_PROSE = [*policy_cases.CONTACT_SCAN_INPUTS, "https://example.test/" + "a" * 481, "Call us at (510) 555-0142 for a free quote", "mike@example.test or call for a free quote",
                         "https://example.test/book for a free quote", "Call us for a free quote",
                         "Call us at (510) 555-0142 anytime"]
 

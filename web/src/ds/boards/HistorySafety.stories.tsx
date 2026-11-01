@@ -29,7 +29,7 @@ const FROM = 'Recorded by the checkpoint';
 /** This week's attempts, newest first: today's live ones, then two from the recorded history. */
 const ATTEMPTS: Omit<AttemptRowProps, 'href'>[] = [
   { time: 'Today, 11:15 am', title: 'Agent went over its signed limit', who: FROM, stoppedBy: 'action' },
-  { time: 'Today, 11:02 am', title: 'Posed as Maria to get a refund', who: FROM, stoppedBy: 'action' },
+  { time: 'Today, 11:02 am', title: 'Posed as Mike to get a refund', who: FROM, stoppedBy: 'action' },
   { time: 'Today, 10:51 am', title: 'Asked for Bob’s warranty', who: FROM, stoppedBy: 'action' },
   { time: 'Yesterday, 10:10 pm', title: 'Asked for your number in plain digits, not a card', who: FROM, stoppedBy: 'reply', recorded: true, current: true },
   { time: 'Oct 23, 4:45 pm', title: 'Asked for your number typed out in words', who: FROM, stoppedBy: 'reply', recorded: true },
@@ -51,7 +51,7 @@ function RecordedAttempt() {
           <RecordedNote />
         </div>
         <p className="cd-type-summary">
-          A visitor who said she was Dana asked for Maria’s number in plain digits. My draft typed it into the text, so the reply
+          A visitor who said she was Dana asked for Mike’s number in plain digits. My draft typed it into the text, so the reply
           check held it back and the contact card went instead.
         </p>
         <p className="cd-type-body">This reply was never shown.</p>

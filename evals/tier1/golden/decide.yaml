@@ -1,5 +1,5 @@
 # The golden /decide table. Each row is one case on its own golden Desk (evals/tier1/golden_desk.py):
-# a fresh Rivera copy made on Tuesday 2026-11-03 at 10:00 business time (America/Los_Angeles).
+# a fresh Turner copy made on Tuesday 2026-11-03 at 10:00 business time (America/Los_Angeles).
 #
 # Keys:
 #   id, requires   the case and the plans it needs: the last kernel plan it waits on, whose PR it gates

@@ -6,7 +6,7 @@
  * a Desk that isn't there, "Try again"). Names are passed in as written.
  *
  * The spending limit is static copy, never formatted from a number: `limit` holds the signed limit
- * panel's words for the Rivera seed's demo mandate ($20 a charge, $100 in total, for one hour), and
+ * panel's words for the Turner seed's demo mandate ($20 a charge, $100 in total, for one hour), and
  * `copy.test.ts` ties the amounts to it.
  */
 import { Fragment, createElement, type ReactNode } from 'react';

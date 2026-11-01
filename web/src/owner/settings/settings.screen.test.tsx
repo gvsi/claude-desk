@@ -128,9 +128,9 @@ describe('Settings', () => {
     const terms = business.getByRole('term').elements().map((term) => term.textContent);
     const values = business.getByRole('definition').elements().map((value) => value.textContent);
     expect(terms.map((term, index) => [term, values[index]])).toEqual([
-      ['Business', 'Rivera Plumbing'],
+      ['Business', 'Turner Plumbing'],
       ['This Desk', 'Main line'],
-      ['Customers see you as', 'Maria Rivera'],
+      ['Customers see you as', 'Mike Turner'],
       ['Time zone', 'Pacific Time (Los Angeles)'],
       // In the signed board's words, pinned here rather than worked out from the formatter.
       ['Hours', 'Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm'],
@@ -145,9 +145,9 @@ describe('Settings', () => {
     const other = main(emergencies.screen).getByRole('region', { name: 'Your business' });
     await expect.element(other.getByText('Emergencies', { exact: true })).toBeVisible();
     expect(other.getByRole('definition').elements().map((value) => value.textContent)).toEqual([
-      'Rivera Plumbing',
+      'Turner Plumbing',
       'Emergencies',
-      'Maria Rivera',
+      'Mike Turner',
       'Pacific Time (Los Angeles)',
       'Every day, all day',
     ]);
@@ -188,7 +188,7 @@ describe('Settings', () => {
 
   it('answering_off_hands_a_price_question_to_maria', async () => {
     // Turned off here, Answering is what a visitor's chat goes by: a price question gets the
-    // handoff card, as asking for Maria does, with no quote and nothing decided for it.
+    // handoff card, as asking for Mike does, with no quote and nothing decided for it.
     const { screen } = await renderRoute(GENERAL);
     await main(screen).getByRole('switch', { name: 'Answering' }).click();
     await expect.poll(() => mockStore.world.desk(RIVERA.deskId)?.summary.answering).toBe(false);
@@ -259,7 +259,7 @@ describe('Settings', () => {
     expect(requests('deleteDesk').map((r) => r.path)).toEqual([0, 1, 2, 3].map(() => `/api/owner/desks/${RIVERA.deskId}`));
     expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
     await expect.element(screen.getByRole('button', { name: /^Switch Desk/ })).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(sawNotFound()).toBe(false);
 
     // A delete whose answer was lost but which went through is never reported as failed: the copy
@@ -271,7 +271,7 @@ describe('Settings', () => {
     await main(lost.screen).getByRole('button', { name: 'Delete this Desk' }).click();
     await lost.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => lost.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    await expect.element(lost.screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(lost.screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(lost.screen.getByText(UNAVAILABLE).elements()).toEqual([]);
     expect(lostSawNotFound()).toBe(false);
 
@@ -307,7 +307,7 @@ describe('Settings', () => {
     const before = requests('desks').length;
     await unconfirmed.getByRole('button', { name: 'Reload' }).click();
     await expect.poll(() => unsure.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    await expect.element(unsure.screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(unsure.screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(requests('desks').length).toBeGreaterThan(before);
     expect(requests('deleteDesk')).toHaveLength(1);
     expect(unsureSawNotFound()).toBe(false);
@@ -382,7 +382,7 @@ describe('Settings', () => {
     await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => requests('desks').length).toBeGreaterThan(reads);
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
 
     // The early read's answer, let through now, puts nothing back: one Desk, no alert, never "not found".
     early.release();
@@ -396,7 +396,7 @@ describe('Settings', () => {
   });
 
   it('deleted_desk_closes_its_chats_holds_and_links', async () => {
-    // Main line, when Maria deletes it here, has Dana's chat with her refund held for Maria and a
+    // Main line, when Mike deletes it here, has Dana's chat with her refund held for Mike and a
     // payment link open in it.
     const { screen, router } = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
     const refund = mockStore.world.addHeldRefund();
@@ -542,7 +542,7 @@ describe('Settings against its boards', () => {
 
   it('answering_lines_up_with_the_details', async () => {
     // Answering's words start where the details' do, on a laptop and on a phone: its label under
-    // "Business", its line under "Rivera Plumbing", and the switch's track as far in from the card's
+    // "Business", its line under "Turner Plumbing", and the switch's track as far in from the card's
     // right edge as the words are from its left.
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(GENERAL, { viewport });
