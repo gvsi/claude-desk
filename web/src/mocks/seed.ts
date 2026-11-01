@@ -312,10 +312,10 @@ export function riveraTools(): ToolRecord[] {
       resource_kind: 'document',
       description_confirmed: 'Send a verified customer a link to one of their own documents.',
     }),
-    nativeTool('native.payment_link', { effects: ['charge'], reversible: true, resource_kind: 'quote', description_confirmed: 'Make a one-time payment link for a quote.' }),
+    nativeTool('native.payment_link', { effects: ['charge'], reversible: false, resource_kind: 'quote', description_confirmed: 'Make a one-time payment link for a quote.' }),
     nativeTool('native.charge_mandate', {
       effects: ['charge'],
-      reversible: true,
+      reversible: false,
       resource_kind: 'quote',
       description_confirmed: "Charge a visiting agent within its owner's signed limit.",
     }),

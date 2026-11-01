@@ -36,6 +36,7 @@ import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
+import type { DocumentAnswer } from './documents.ts';
 import {
   CALLBACK_WINDOW,
   DECISIONS,
@@ -1117,8 +1118,9 @@ describe('the scripted Desk', () => {
   });
 
   it('open_handoff_quotes_its_visitors_latest_words', async () => {
-    // As the API reads Needs you (`last_texts`): an open handoff quotes what its visitor wrote last,
-    // on every read, not what they had written when it opened.
+    // As the API reads Needs you (`recent_texts`): an open handoff quotes what its visitor wrote
+    // most recently, their previous and last messages joined with " · ", on every read, not what
+    // they had written when it opened.
     const { session } = await openChat();
     const quoted = async () =>
       ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
@@ -1129,7 +1131,55 @@ describe('the scripted Desk', () => {
     expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
     await send('It is about the leak under my sink.');
     await drain();
-    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink.']]);
+    expect(await quoted()).toEqual([['card', 'Can I talk to Maria? · It is about the leak under my sink.']]);
+    await send('Is   Tuesday\n\nfine?');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink. · Is Tuesday fine?']]);
+  });
+
+  it('held_request_quotes_two_lines_each_cut_to_its_glimpse', async () => {
+    // A held request quotes the same two lines as a handoff (the API's `visitor_lines`): each with
+    // whitespace collapsed, and past 200 characters cut to 199, trimmed, and "…".
+    const { session } = await openChat();
+    const long = `${'x'.repeat(198)}   ${'y'.repeat(10)}`;
+    await send(long);
+    await drain();
+    await send('Can I get 50%   off if I pay cash?');
+    await drain();
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+      (item) => item.decision?.session_id === session.session_id,
+    );
+    expect(held?.from_the_visitor).toBe(`${'x'.repeat(198)}… · Can I get 50% off if I pay cash?`);
+    expect(Array.from(held?.from_the_visitor?.split(' · ')[0] ?? '')).toHaveLength(199);
+  });
+
+  it('needs_you_summarises_a_handoff_never_a_hold', async () => {
+    // As the API's Needs you sends `claude_summary`: on a handoff, the newest AI-written triage of
+    // its chat's stopped attempts, the summary Safety shows for it; on a held request, never, since
+    // a visitor could steer a summary to sway an approval.
+    const read = async () => (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const [seeded] = await read();
+    if (!seeded?.decision) throw new Error('a fresh copy holds the seeded request');
+    // The seeded chat has the stopped draft Safety lists, and its request still carries no summary.
+    expect(seeded.claude_summary).toBeNull();
+    const triage = ((await call('safety', { params: { desk_id: deskId } })).body as Attempt[]).find((a) => a.kind === 'reply_blocked')?.triage;
+    if (!triage) throw new Error("Safety triages the seeded chat's stopped draft");
+
+    // Denied, the request's follow-up shows the handoff card, which hands the chat to Maria.
+    expect((await call('answer', { params: { decision_id: seeded.decision.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    const handed = (await read()).find((item) => item.handoff?.session_id === seeded.session.session_id);
+    expect(handed?.handoff?.kind).toBe('card');
+    expect(handed?.claude_summary).toBe(triage.summary);
+    expect(handed?.from_the_visitor).toBe(seeded.from_the_visitor);
+
+    // A chat with nothing stopped has no triage to summarise it.
+    const { session } = await openChat();
+    await send('Can I talk to Maria?');
+    await drain();
+    const asked = (await read()).find((item) => item.handoff?.session_id === session.session_id);
+    expect(asked?.handoff?.kind).toBe('card');
+    expect(asked?.claude_summary).toBeNull();
   });
 
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
@@ -1356,6 +1406,94 @@ describe('the scripted Desk', () => {
     await send('Do you work weekends?');
     await drain();
     expect(await latest(preview.state.session_id)).toBeNull();
+  });
+});
+
+describe("a verified visitor's document link", () => {
+  /** The headers the API sends with a document and with a refusal on its link, so it is never cached, sniffed, sent on or indexed. */
+  const PRIVATE = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow' };
+  const USED_OR_EXPIRED = 'This link was already opened or has expired. Ask in the chat for a new one.';
+
+  /** A document link's answer, which must be one with a status (not a dropped connection). */
+  function open(method: 'GET' | 'HEAD', token: string, headers: Record<string, string> = {}): DocumentAnswer {
+    const answer = mockStore.document(method, token, { headers });
+    if ('network' in answer) throw new Error(`${method} ${token} dropped the connection`);
+    return answer;
+  }
+
+  /** Dana confirms it's her and gets her last invoice: the token of the link the newest card hands out. */
+  async function invoiceToken(): Promise<string> {
+    const { events } = await openChat();
+    await send("I'm Dana Whitfield. Please send my last invoice.");
+    await drain();
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    const card = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks : [])).filter((block) => block.template === 'document_link').at(-1);
+    expect(card?.title).toBe(rivera.blocks.document_link.en.title);
+    const token = /^\/api\/d\/([A-Za-z0-9_-]+)$/.exec(card?.href ?? '')?.[1];
+    if (token === undefined) throw new Error('the invoice card links to its document');
+    return token;
+  }
+
+  it('the_first_open_gets_the_document', async () => {
+    // As the API sends the kernel's document: plain text, shown in the tab under its title's file name.
+    const opened = open('GET', await invoiceToken());
+    expect(opened).toEqual({
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'inline; filename="Invoice-drain-clearing.txt"', ...PRIVATE },
+      body: 'Rivera Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
+    });
+  });
+
+  it('a_second_open_is_404', async () => {
+    const token = await invoiceToken();
+    expect(open('GET', token).status).toBe(200);
+    // The API's short static copy, in the browser's language, or its error when JSON is asked for.
+    const refused = { 'content-type': 'text/plain; charset=utf-8', ...PRIVATE, vary: 'accept, accept-language' };
+    expect(open('GET', token)).toEqual({ status: 404, headers: { ...refused, 'content-language': 'en' }, body: USED_OR_EXPIRED });
+    expect(open('GET', token, { 'accept-language': 'es-MX,es;q=0.9,en;q=0.8' })).toEqual({
+      status: 404,
+      headers: { ...refused, 'content-language': 'es' },
+      body: 'Este enlace ya se abrió o caducó. Pide uno nuevo en el chat.',
+    });
+    expect(open('GET', token, { accept: 'application/json' })).toEqual({
+      status: 404,
+      headers: { 'content-type': 'application/json', ...PRIVATE, vary: 'accept, accept-language' },
+      body: '{"error":"link_used_or_expired"}',
+    });
+  });
+
+  it('an_unknown_link_is_404', async () => {
+    // Before any card hands it out, the invoice's link names nothing, as a made-up one doesn't.
+    for (const token of [rivera.blocks.document_link.en.href?.slice('/api/d/'.length) ?? '', 'nothing-here']) {
+      expect([open('GET', token).status, open('GET', token).body], token).toEqual([404, USED_OR_EXPIRED]);
+    }
+    expect(open('GET', 'nothing-here').status).toBe(404);
+    const token = await invoiceToken();
+    expect(open('GET', `${token}x`).status).toBe(404);
+    expect(open('GET', token).status).toBe(200);
+  });
+
+  it('each_card_hands_out_a_link_of_its_own', async () => {
+    // Dana asks again and gets a new card: its link is a new one, which opens once, and the link
+    // she already opened stays used.
+    const first = await invoiceToken();
+    expect(open('GET', first).status).toBe(200);
+    const second = await invoiceToken();
+    expect(second).not.toBe(first);
+    expect(open('GET', first).status).toBe(404);
+    expect(open('GET', second).status).toBe(200);
+    expect([open('GET', first).status, open('GET', second).status]).toEqual([404, 404]);
+  });
+
+  it('a_look_before_opening_never_uses_the_link', async () => {
+    // A link checker's HEAD answers 200 with the document's privacy headers and no body, whatever
+    // the token names, and the link still opens once after it.
+    const token = await invoiceToken();
+    for (const named of [token, token, 'nothing-here']) expect(open('HEAD', named)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(200);
+    expect(open('HEAD', token)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(404);
   });
 });
 

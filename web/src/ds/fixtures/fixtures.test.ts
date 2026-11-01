@@ -425,12 +425,13 @@ describe('fixtures', () => {
   });
 
   test('booking_card_has_the_kernels_shape', () => {
-    // The kernel renders a confirmed booking as {date} / Arriving {start} to {end} / With {owner},
-    // with no booking ID (render/en.py and es.py); the fixture draws the same, in both languages.
+    // The kernel renders a confirmed booking as {date} / {start} to {end} / With {owner}, with no
+    // booking ID (render/en.py and es.py). The fixture's card below keeps its earlier "Arriving" line
+    // until the boards that draw it are redrawn with the new words.
     const render = (language: string) => readFileSync(path.join(BACKEND, 'kernel_service', 'render', `${language}.py`), 'utf8');
-    expect(render('en')).toContain('f"Arriving {clock(start)} to {clock(end)}"');
+    expect(render('en')).toContain('f"{clock(start)} to {clock(end)}"');
     expect(render('en')).toContain('f"With {desk.owner_display_name}"');
-    expect(render('es')).toContain('f"Llegada de {clock(start)} a {clock(end)}"');
+    expect(render('es')).toContain('f"De {clock(start)} a {clock(end)}"');
     expect(render('es')).toContain('f"Con {desk.owner_display_name}"');
     const owner = rivera.business.ownerName;
     const card = (language: 'en' | 'es') => rivera.blocks.booking_confirmed[language];

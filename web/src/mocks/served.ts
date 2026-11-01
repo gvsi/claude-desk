@@ -269,14 +269,17 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
 /**
- * How a store numbers its copies and names their payment links: the screen tests' one copy from
- * 1, so its ids are the seed's, and the dev server's at random, so each copy's are its own.
+ * How a store numbers its copies and names their payment and document links: the screen tests'
+ * one copy from 1, so its ids are the seed's, and the dev server's at random, so each copy's are
+ * its own.
  */
 export interface CopyNaming {
   /** A new copy's number, which its ids and slugs come from (seed.ts `copyIds`). */
   copyNo(): number;
   /** A new payment link's token, unique across the store's copies. */
   linkToken(): string;
+  /** A new document link's token, unique across the store's copies and never handed out again. */
+  documentToken(): string;
 }
 
 /** The API's side of one copy: the copy itself and the turns in progress. */
@@ -294,7 +297,7 @@ export class Server {
   }
 
   private freshWorld(seed: MockSeed = this.seed): MockWorld {
-    const world = new MockWorld(seed, this.naming.copyNo(), () => this.naming.linkToken());
+    const world = new MockWorld(seed, this.naming.copyNo(), () => this.naming.linkToken(), () => this.naming.documentToken());
     seedWorld(world);
     return world;
   }

@@ -561,8 +561,9 @@ export interface MoneyCapIn {
  * wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
  * characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
  * AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
- * labelled as Claude's and never quoted as the visitor's), else None. A held request asks the owner for a decision, so
- * it never carries AI-written text: a visitor could steer a summary to sway an approval.
+ * shown as "Claude's note on a stopped reply: {summary}" and never quoted as the visitor's), else None. A held
+ * request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
+ * AI-written text: a visitor could steer a summary to sway an approval.
  */
 export interface NeedsYouItem {
   decision: Decision | null;
@@ -841,6 +842,7 @@ export interface SetupAnswerIn {
         | "documents_and_payments"
         | "money_limit"
         | "contact_and_after_hours"
+        | "test_client"
       )
     | null;
   card?: string | null;
@@ -935,9 +937,9 @@ export interface SetupStartIn {
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the
- * conversation so far. Its messages start at Claude's consent
- * question: the owner's opening description isn't shown back to them.
+ * before consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end
+ * waits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's
+ * consent question: the owner's opening description isn't shown back to them.
  */
 export interface SetupState {
   interview_id: string;
@@ -954,6 +956,7 @@ export interface SetupState {
         | "documents_and_payments"
         | "money_limit"
         | "contact_and_after_hours"
+        | "test_client"
       )
     | null;
   pending_card?: string | null;

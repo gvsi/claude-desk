@@ -40,6 +40,7 @@ import type {
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
+import { DOCUMENT_HREF, type DocumentLink } from './documents.ts';
 import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -61,6 +62,12 @@ import {
 
 export const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
+
+/** Tokens `prefix1`, `prefix2`…, for a copy made without a store to name its links. */
+function counted(prefix: string): () => string {
+  let n = 0;
+  return () => `${prefix}${(n += 1)}`;
+}
 
 /** RFC 3339 UTC with microseconds, the form the kernel signs. */
 export function isoTime(ms: number): string {
@@ -97,7 +104,6 @@ export interface SessionRecord {
   /** The last turn's language; a follow-up after an answer uses it. */
   language: Language;
   lastActivity: number;
-  lastVisitorText: string | null;
   /** The owner's view: the visitor's view leaves out whispers. */
   items: TranscriptItem[];
   /** Every event the session's stream has carried, `seq` from 1 with no gaps. */
@@ -203,7 +209,6 @@ export interface DecisionRecord {
   approved?: Decision | null;
   deskId: string;
   createdAt: number;
-  fromTheVisitor: string | null;
 }
 
 /** An open or done handoff. What its visitor wrote is read from its chat on every read, as the API does. */
@@ -276,6 +281,8 @@ export class MockWorld {
   keepsKnowledgeOwnerOnly: (item: KnowledgeItem) => boolean = () => false;
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /** The document links this copy's document cards handed out, by token (documents.ts), opened or not. */
+  readonly documentLinks = new Map<string, DocumentLink>();
   /**
    * The Desks deleted from this copy, by id. Their chats, decisions and callback requests stay in
    * the copy, closed: the routes that name one answer 409 `closed` (served.ts), as the kernel does.
@@ -294,6 +301,8 @@ export class MockWorld {
     readonly copyNo: number,
     /** A new payment link's token, from the store that holds the copy. */
     private readonly linkToken: () => string,
+    /** A new document link's token, from the store that holds the copy; a copy made without one counts its own. */
+    private readonly documentToken: () => string = counted('doc'),
   ) {
     this.ids = copyIds(copyNo);
   }
@@ -397,7 +406,6 @@ export class MockWorld {
       displayName: opts.agent ?? null,
       language: 'en',
       lastActivity: this.now(),
-      lastVisitorText: null,
       items: [],
       events: [],
       listeners: new Set(),
@@ -443,7 +451,6 @@ export class MockWorld {
   /** The visitor's message: it takes the place of their typing, and their next keystroke counts at once. */
   visitorText(session: SessionRecord, text: string): void {
     this.addItem(session, 'visitor_text', text, null);
-    session.lastVisitorText = text;
     session.language = turnLanguage(text);
     session.lastActivity = this.now();
     session.typingUntil = null;
@@ -456,7 +463,6 @@ export class MockWorld {
    */
   agentText(session: SessionRecord, text: string): void {
     this.addItem(session, 'agent_text', text, null);
-    session.lastVisitorText = text;
     session.lastActivity = this.now();
   }
 
@@ -634,7 +640,6 @@ export class MockWorld {
       decision,
       deskId: desk.summary.desk_id,
       createdAt: this.now(),
-      fromTheVisitor: session.lastVisitorText,
     });
     return decision;
   }
@@ -860,6 +865,14 @@ export class MockWorld {
     const handoff = blocks.some((block) => block.template === 'handoff');
     const messageId = this.id('msg');
     if (this.replaying === 0 && handoff && !session.ownerPreview) this.openCardHandoff(session);
+    // Each document card hands out a link of its own, in place of the one it was written with,
+    // which opens once from now on.
+    const shown = blocks.map((block) => {
+      if (block.template !== 'document_link' || !DOCUMENT_HREF.test(block.href ?? '')) return block;
+      const token = this.documentToken();
+      this.documentLinks.set(token, { title: block.title ?? '', opened: false });
+      return { ...block, href: `/api/d/${token}` };
+    });
     const desk = this.deskOf(session);
     const checked = this.appendLedger(desk, {
       kind: 'reply',
@@ -875,7 +888,7 @@ export class MockWorld {
       author: 'claude',
       language,
       handoff,
-      blocks: blocks.map((block) => ({ ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] })),
+      blocks: shown.map((block) => ({ ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] })),
       visitor_plain: visitorLine(language, handoff ? 'reply_handed_off' : 'reply_checked', deskOwner(desk)),
       ledger_seq: checked.seq,
       signature: sign(messageId),

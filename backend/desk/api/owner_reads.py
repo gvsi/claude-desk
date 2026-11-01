@@ -258,8 +258,10 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
                 if row["session_id"] in who.sessions]
     asked = [decision.session_id for _, decision in held] + [row["session_id"] for row in handoffs]
     texts = {session_id: visitor_lines(said) for session_id, said in (await recent_texts(ctx, desk_id, asked)).items()}
-    # AI-written triage never sits on an approval card: only a handoff, which asks the owner for no decision, gets one.
-    handed = [row["session_id"] for row in handoffs]
+    # AI-written triage never sits beside an approval it could sway: only a handoff gets one, which asks the owner
+    # for no decision, and not while the same session has a held request awaiting them.
+    waiting = {decision.session_id for _, decision in held}
+    handed = [row["session_id"] for row in handoffs if row["session_id"] not in waiting]
     summaries = {session_id: triage.summary
                  for session_id, triage in (await newest_triage(ctx.ro.conn, ctx.copy_id, desk_id, handed)).items()}
     held_by = await _held_by(ctx, desk_id, [decision for _, decision in held])
@@ -355,6 +357,7 @@ REFUSAL_REASONS: dict[str, RefusalCause] = {
 }
 REFUSAL_CHECKS: dict[str, RefusalCause] = {
     "answer_count": "incomplete_request",  # Intake needs one answer per configured question at normalization.
+    "note_canary": "incomplete_request",  # A booking note holding private document text is refused at normalization.
     "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
     "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
     "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
@@ -393,7 +396,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       no_such_charge                                 no_such_charge        Couldn't find that payment
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
-      answer_count                                   incomplete_request    The request wasn't in a form I can use
+      answer_count, note_canary                      incomplete_request    The request wasn't in a form I can use
       not_verified, no_mandate, mandate_exhausted,
       not_an_agent_with_a_mandate (unreachable),
       search_limit (execution only)                   null                  (no label)
@@ -472,7 +475,7 @@ class Activity:
     entries at `entry_time`, the API's transcript rows at their `created_at`."""
 
     people: People
-    bookings: list[Timed]                      # native.book executed, at its ledger entry
+    bookings: list[Timed]                      # native or configured typed booking executed, at its ledger entry
     booked: dict[str, int]                     # each booking's amount, by its decision ID (`booked_amounts`)
     leads: list[Timed]
     stopped: list[Stopped]
@@ -577,10 +580,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     entries = {entry["seq"]: entry for entry in ledger}
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
 
-    def executed(tool: str) -> list[Timed]:
+    def executed(*tools: str) -> list[Timed]:
         return [Timed(at=entry_time(entry), session_id=row["session_id"], ref_id=row["decision_id"],
                       line=row["reason_plain"], replayed=decision_replayed(row, entry))
-                for row in decisions if row["tool"] == tool and row["state"] == "executed"
+                for row in decisions if row["tool"] in tools and row["state"] == "executed"
                 and (entry := entries.get(row["ledger_seq"])) is not None]
 
     rows = await ctx.ro.conn.execute(
@@ -606,7 +609,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
                 handoffs.append(at)
             else:
                 replies.append(at)
-    bookings = executed("native.book")
+    tools = await ctx.ro.rows("tools", desk_id=desk_id, source="business")
+    typed_bookings = [row["tool"] for row in tools if row.get("business") is not None
+                      and row["business"]["config"]["block"] == "typed_booking"]
+    bookings = executed("native.book", *typed_bookings)
     return Activity(
         people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
         callbacks=executed("native.request_callback"),

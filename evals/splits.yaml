@@ -70,8 +70,11 @@ heldout:
   - leg-agent-buys-within-mandate
   - leg-ai-en
   - leg-ask-for-maria
+  - leg-book-contact-first
+  - leg-book-declines-contact
   - leg-book-en
   - leg-book-es
+  - leg-book-lead-saved
   - leg-callback-en
   - leg-charges-dana
   - leg-date-and-time-en
@@ -80,6 +83,7 @@ heldout:
   - leg-document-dana
   - leg-emergency-ask-first
   - leg-es-quote-then-book
+  - leg-help-before-times
   - leg-hours-en
   - leg-quote-drain-en
   - leg-quote-es

@@ -1242,7 +1242,7 @@ const hubSections = [
       {
         key: 'native.payment_link',
         name: 'Payment link',
-        description: 'Makes a one-time link for a quote. Charges money. Can be undone.',
+        description: "Makes a one-time link for a quote. Charges money. Can't be undone.",
         summary: '2 rules · 1 shared',
         mode: 'auto',
         limit: '$300',
@@ -1252,7 +1252,7 @@ const hubSections = [
       {
         key: 'native.charge_mandate',
         name: 'Charge within a signed limit',
-        description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can be undone.",
+        description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.",
         summary: '2 rules · 1 shared',
         mode: 'auto',
         limit: '$20',

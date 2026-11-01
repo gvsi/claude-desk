@@ -123,4 +123,4 @@ The signed boards (`UXC-P1201-After`, `#artboard-dec46cf506e4`, and `UXC-P1202-A
 - `Waits`, `FastLoad`, `Lands`, `Continues` and `Fails`: the states, as Customers loads.
 - `Spanish`: the visitor's chat as shapes at 390, with its status in Spanish.
 
-The wait starts after mount observers and checks a monotonic deadline before showing, so a browser timer that fires just short of 200 ms cannot expose an early frame. Unmounting or ending a fast load cancels the pending wait.
+The wait starts after mount observers and checks a monotonic deadline before showing, so a browser timer that fires just short of 200 ms cannot expose an early frame. Unmounting or ending a fast load cancels the pending wait. A wait that comes due just as the part lands, which React can apply after the render that ended the load (a store read through `useSyncExternalStore`, such as React Query's, renders ahead of the wait's update), never brings the shapes back: once the part has landed the region neither waits nor shows, and a part that loads again waits afresh.

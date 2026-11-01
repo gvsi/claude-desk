@@ -49,15 +49,22 @@ from desk.api.store import (
     start_fresh_context,
 )
 from desk.api.tools import Caller
-from desk.contracts import Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, ToolCall
+from desk.contracts import (
+    BusinessTool, Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, RuleCard, ToolCall,
+)
 from desk.kernel_api import (
     AnswerRequest,
+    BusinessToolsRequest,
     CancelRequest,
     CheckReplyRequest,
     CreateCopyRequest,
     CreateSessionRequest,
     DecideRequest,
     ExecuteRequest,
+    PolicyConfirmRequest,
+    PolicyDraftRequest,
+    ToolPin,
+    ToolsConfirmRequest,
 )
 from desk.kernel_service import reply_check
 from tests.api.fakes import ScriptedModel, response, tool_use, unavailable
@@ -638,7 +645,8 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     """A handoff's context for the owner: the visitor's previous and last lines, each a one-line glimpse joined with
     " · ", and the conversation's newest AI-written triage summary, labelled as Claude's on the owner's screen. A
     triage row that doesn't parse is skipped rather than shown. A held request, which asks the owner for a decision,
-    never carries the summary (master plan: AI-written triage is never in approval cards)."""
+    never carries the summary, nor does a handoff in a chat whose request still awaits the owner (master plan:
+    AI-written triage is never in approval cards)."""
     owner = await new_owner(app, browser, fake, kernel_http)
     handed = await guest(kernel_http, fake, owner)
     await write(engine, db, handed.ids, "visitor_text", text="Personal. I started freelancing and I'm not sure what I need.")
@@ -657,17 +665,22 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     held = await guest(kernel_http, fake, owner)
     await write(engine, db, held.ids, "triage", text=json.dumps({"summary": "Asked for a discount.", "category": "prices"}))
     await held.decide("native.quote", discounted_quote(fake, owner))
+    # the same chat asks for a call back while its request waits: that handoff waits for its note too
+    await held.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                               "reason": "About the discount"})
 
     listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
 
     assert listed.status_code == 200, listed.text
-    items = {item["session"]["session_id"]: item for item in listed.json()}
+    items = {item["session"]["session_id"]: item for item in listed.json() if item["decision"] is None}
+    held_items = {item["session"]["session_id"]: item for item in listed.json() if item["decision"] is not None}
     assert items[handed.session_id]["from_the_visitor"] == (
         "Personal. I started freelancing and I'm not sure what I need. · Monday, November 2, 9:00 am")
     assert items[handed.session_id]["claude_summary"] == "Freelancer asked what to file; a booking reply was stopped."
     assert items[garbled.session_id]["from_the_visitor"] == "x" * 199 + "…"
     assert items[garbled.session_id]["claude_summary"] is None
-    assert items[held.session_id]["decision"] is not None and items[held.session_id]["claude_summary"] is None
+    assert held_items[held.session_id]["claude_summary"] is None
+    assert items[held.session_id]["handoff"]["kind"] == "callback" and items[held.session_id]["claude_summary"] is None
 
 
 async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
@@ -938,6 +951,42 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
                                   "line": "Call after 5, the side gate", "cause": None}
     # computed from the rows on each read: polling gives the same briefing
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"] == brief
+
+
+async def test_typed_booking_and_its_note_reach_today_with_default_notifications(scene, clock, api_conn, ro_schema):
+    owner = scene.owner
+    desk = scene.fake.desks[owner.desk_id]
+    prefs = await KernelRO(api_conn, owner.copy_id, ro_schema).one('notification_prefs', desk_id=owner.desk_id)
+    assert prefs['now'] == ['approval', 'callback', 'breaker', 'lockout', 'handoff']
+    assert prefs['briefing'] == ['lead', 'booking']
+    kernel = scene.kernel_http.owner(owner.token)
+    tool = BusinessTool(tool='desk.consult', title='Book a consult', description='Book an introduction.',
+                        config={'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 20})
+    await kernel.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': owner.desk_id})
+    profile = desk.tools[tool.tool]
+    confirmed = await kernel.call('POST /tools/confirm', ToolsConfirmRequest(desk_id=owner.desk_id,
+        tools=[ToolPin(tool=tool.tool, definition_sha256=profile.definition_sha256)], enable=True))
+    active = await kernel.call('POST /policy/confirm', PolicyConfirmRequest(
+        desk_id=owner.desk_id, version=confirmed.draft.version))
+    draft = await kernel.call('POST /policy/draft', PolicyDraftRequest(desk_id=owner.desk_id,
+        expected_parent=active.version, cards=[RuleCard(card_id='consult-auto', applies_to=tool.tool,
+            mode='auto', who='anyone', reason='Book consultations.')]))
+    await kernel.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=owner.desk_id, version=draft.version))
+    when = local(2026, 10, 29, 20)
+    visitor = await scene.visitor(when)
+    await scene.text(visitor, when, 'Book a consult, using the side entrance.')
+    slot = max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)
+    decision, result = await visitor.run(tool.tool, {'slot_id': slot, 'note': 'Use the side entrance.'})
+    assert result.state == 'succeeded'
+    await scene.reply(visitor, when + timedelta(seconds=30))
+    clock.now = local(2026, 10, 30, 9)
+    today = (await owner.get(f'desks/{owner.desk_id}/today')).json()
+    assert today['briefing']['bookings'] == today['this_week']['bookings'] == 1
+    assert today['briefing']['total'] == 1
+    assert today['briefing']['newest']['lead_or_answer'] is None
+    [item] = (await owner.get(f'desks/{owner.desk_id}/briefing')).json()['items']
+    assert (item['kind'], item['ref_id']) == ('booking', decision.decision_id)
+    assert 'Claude\'s note: “Use the side entrance.”' in item['line']
 
 
 

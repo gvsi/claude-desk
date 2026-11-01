@@ -2547,8 +2547,8 @@ def test_turns_capture_business_policies_with_short_bounded_fields():
     # A turn's schema compiles into a grammar of capped size, so each policy field's description is short: what it
     # holds, and that it is customer copy in words without numbers. The turn's guidance holds the full rules
     # (test_setup_prompt_keeps_policy_text_public_and_free_of_numbers).
-    assert POLICY_FIELD_RULE == ("Written to customers, in words: no amounts, percentages, times, days, numbers or "
-                                 "promise words.")
+    assert POLICY_FIELD_RULE == ("Written to customers, in words: no amounts, percentages, times, days, numbers "
+                                 "(even spelled out) or promise words.")
     descriptions = {
         "pricing": 'How the business prices (a fixed menu, "from" prices, or per case after a consult).',
         "intake": "What new customers are asked or should have ready before the owner takes them on.",
@@ -2606,12 +2606,35 @@ def test_suggested_fields_are_stored_only_by_code():
         SetupAnswers(summary="Tax advice.", suggested_fields=["pricing"] * (len(names) + 1))
 
 
+def test_homework_after_hours_suggestion_is_customer_copy():
+    # The homework's suggested after-hours line is published when the owner skips the contact question, and the
+    # kernel refuses a time or number in it ("answered 24/7"), as it does in the About line.
+    from desk.api.prompts import SETUP_UNDERSTAND_SYSTEM, SuggestedFacts
+
+    assert POLICY_FIELD_RULE in SuggestedFacts.model_fields["after_hours"].description
+    assert f"after_hours is customer copy: {POLICY_FIELD_RULE}" in SETUP_UNDERSTAND_SYSTEM
+
+
+def test_setup_summary_is_customer_copy_from_the_opening_parse():
+    summary_line = next(line for line in SETUP_START_SYSTEM.splitlines() if line.startswith("- summary:"))
+    descriptions = {"opening prompt": summary_line,
+                    "opening schema": SetupStart.model_fields["summary"].description,
+                    **{key: output.model_fields["summary"].description for key, output in SETUP_TURNS.items()
+                       if "summary" in output.model_fields}}
+    missing = {name: description for name, description in descriptions.items()
+               if POLICY_FIELD_RULE not in description or "spelled out" not in description}
+    assert not missing, missing
+    assert 'say "a small CPA firm", not "a two-person firm"' in summary_line
+
+
 def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
     assert ("On the quote question, pricing records how the business prices in words, only from the owner's "
             "answer; price_items holds only the prices that answer names.") in SETUP_TURN_SYSTEM
-    assert ("For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, "
-            "times, days and numbers, and promise words such as free, guaranteed, discount, refund or confirmed "
-            "out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    # summary is published as the public About line (`policy:about`), which the kernel's public-text check refuses
+    # with a number in it, spelled out or not ("a two-person firm"), so the customer-copy rule covers it too.
+    assert ("For summary, pricing, intake, after_hours and urgent, write them in words; keep amounts, percentages, "
+            "times, days and numbers (even spelled out), and promise words such as free, guaranteed, discount, "
+            "refund or confirmed out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
     assert ("summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to "
             "customers on the public page. Write them as the business speaking to its customers; never "
             "instructions to the Desk, private owner instructions, or a contact route other than the contact "
@@ -2676,7 +2699,8 @@ async def test_limits_patch_only_from_their_questions(app, browser, fake, kernel
     # The last question reads them again, and can't change a limit either.
     reply = await answer(owner, model, interview_id, "Call (510) 555-0142.",
                          carrying(quote_auto_max_cents=1, documents="none"), turn())
-    assert reply.status_code == 200 and reply.json()["step"] == "tools"
+    # Every topic is done: only the test-client offer waits, since the owner typed their own phone.
+    assert reply.status_code == 200 and reply.json()["question"] == "test_client"
     assert "<website" in turn_text(model, -2)
     answers = (await stored(engine, interview_id))["answers"]
     assert limits() == LIMITS
@@ -3035,7 +3059,8 @@ async def test_contact_asks_for_a_missing_owner_name_or_accepts_declining(
     second = await answer(owner, model, interview_id, name or "I'd rather not give a name.",
                           turn(owner_display_name=name or ""))
     assert second.status_code == 200, second.text
-    assert second.json()["step"] == "tools"
+    # Every topic is done: only the test-client offer waits, for the email the owner typed on the first answer.
+    assert second.json()["question"] == "test_client"
     assert f"you: {follow_up}" in turn_text(model)
     assert (await stored(engine, interview_id))["answers"]["owner_display_name"] == name
     assert fake.desks[state["desk_id"]].owner_display_name == (name or "Owner")

@@ -10931,7 +10931,7 @@
           "claude_summary"
         ],
         "title": "NeedsYouItem",
-        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200\ncharacters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff only, the conversation's newest\nAI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,\nlabelled as Claude's and never quoted as the visitor's), else None. A held request asks the owner for a decision, so\nit never carries AI-written text: a visitor could steer a summary to sway an approval."
+        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200\ncharacters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff only, the conversation's newest\nAI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,\nshown as \"Claude's note on a stopped reply: {summary}\" and never quoted as the visitor's), else None. A held\nrequest asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries\nAI-written text: a visitor could steer a summary to sway an approval."
       },
       "NeedsYouSession": {
         "properties": {
@@ -13086,7 +13086,8 @@
                   "discounts",
                   "documents_and_payments",
                   "money_limit",
-                  "contact_and_after_hours"
+                  "contact_and_after_hours",
+                  "test_client"
                 ]
               },
               {
@@ -13570,7 +13571,8 @@
                   "discounts",
                   "documents_and_payments",
                   "money_limit",
-                  "contact_and_after_hours"
+                  "contact_and_after_hours",
+                  "test_client"
                 ]
               },
               {
@@ -13623,7 +13625,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end\nwaits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's\nconsent question: the owner's opening description isn't shown back to them."
       },
       "SetupSuggestionsIn": {
         "properties": {},

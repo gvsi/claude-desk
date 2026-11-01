@@ -319,6 +319,7 @@ export { ToolReviewCard, type ToolReviewCardProps, type ToolRowView } from './co
 // Safety
 export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';
 export { ChainStatus, type ChainStatusProps } from './components/ChainStatus/ChainStatus.tsx';
+export { chainLine } from './components/ChainStatus/chainLine.ts';
 export { AttemptRow, type AttemptRowProps } from './components/AttemptRow/AttemptRow.tsx';
 export {
   CheckpointMeter,
