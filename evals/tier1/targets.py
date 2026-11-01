@@ -322,6 +322,7 @@ class KernelTarget:
         self._env.set("ANTHROPIC_BASE_URL", self.fake.url)
         self._env.set("ANTHROPIC_API_KEY", DUMMY_KEY)
         self._env.unset("ANTHROPIC_AUTH_TOKEN")
+        self._env.unset("TYPESAFE_API_KEY")           # no external Jev calls in the model-free target
         self._env.set("DESK_ENV", "test")
         self._env.set("DESK_DECISIONS", "anthropic")   # Plan 01a's "offline" backend would never review
         self._env.unset("DESK_SIGNING_SEED")           # the development key, reported by /health
