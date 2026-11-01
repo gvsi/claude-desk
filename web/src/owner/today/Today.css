@@ -636,7 +636,11 @@
 /* Shapes share the page's layout and line boxes. */
 /* Measurements stop while leaving. Keep scroll anchoring off as a backstop for a measurement
    queued just before the fade, so it cannot move the owner's restored place. */
-.cd-today--skeleton { overflow-anchor: none; }
+/* The signed summary and rule keep full desktop lines; only their phone tail is shorter. */
+.cd-today--skeleton { overflow-anchor: none; --cd-today-approval-last-width: 100%; }
+@media (max-width: 639.98px) {
+  .cd-today--skeleton { --cd-today-approval-last-width: 75%; }
+}
 .cd-today-skeleton__link { flex: none; margin-top: var(--space-6); }
 .cd-today-skeleton__rule { flex: 1; min-width: 0; }
 .cd-today-skeleton__text { display: block; min-width: 0; width: 100%; max-width: 100%; }

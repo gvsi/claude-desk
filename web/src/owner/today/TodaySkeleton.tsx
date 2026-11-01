@@ -143,6 +143,7 @@ function ApprovalTop() {
   return <div className="cd-today-skeleton__approval-top">
     <div ref={box} className="cd-approval-card__top cd-type-caption cd-today-skeleton__legend-room">
       <span className="cd-approval-card__status"><span className="cd-status-dot" /><WordRoom words="Waiting for your answer" probeClassName="cd-approval-card__status-line" /></span>
+      {/* Decision 15: the held age depends on relativeWait(held_at, now); it may land once at a different width. */}
       <span className="cd-approval-card__waiting"><WordRoom words="Web chat, 12 min ago" probeClassName="cd-type-caption" /></span>
     </div>
     <div className="cd-today-skeleton__approval-top-paint">
@@ -236,11 +237,11 @@ export function TodaySkeleton() {
           <SectionTitle anchor="needs-title" />
           <SkeletonCard anchor="held-card">
             <ApprovalTop />
-            <TextLines words={rivera.decisions.held.reason_plain} text="summary" className="cd-approval-card__reason" />
+            <TextLines words={rivera.decisions.held.reason_plain} text="summary" className="cd-approval-card__reason" lastWidth="var(--cd-today-approval-last-width)" />
             <TextLines words={`From the visitor: “${rivera.conversations.visitor.turns.find((turn) => turn.kind === 'visitor')?.text ?? ''}”`} className="cd-approval-card__context" />
             <div className="cd-approval-card__held-by">
               <Skeleton shape="block" width={16} height={16} />
-              <TextLines words={`${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`} className="cd-today-skeleton__rule" />
+              <TextLines words={`${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`} className="cd-today-skeleton__rule" lastWidth="var(--cd-today-approval-last-width)" />
             </div>
             <div className="cd-approval-card__answers">
               <ApprovalAnswers />

@@ -339,9 +339,9 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-things__vision .cd-skeleton-line', '.cd-things__vision', ['75%']);
   for (const child of [3, 4, 5]) lines(`.cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
   lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
-  lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '75%']);
+  lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
-  lines('.cd-today-skeleton__rule .cd-skeleton-line', '.cd-today-skeleton__rule', viewport === 'phone' ? ['100%', '75%'] : ['75%']);
+  lines('.cd-today-skeleton__rule .cd-skeleton-line', '.cd-today-skeleton__rule', viewport === 'phone' ? ['100%', '75%'] : ['100%']);
   lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', ['100%', '100%', '75%']);
   lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', ['75%']);
   for (const child of [1, 2]) {
