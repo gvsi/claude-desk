@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router';
 
 import type { PeopleOut } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
-import { Button, EmptyState, LeadRow, LoadingLine, Notice, PageHeader, PersonRow, RecordedHistoryLink, SectionHeader } from '../../ds/index.ts';
+import { Button, EmptyState, LeadRow, Notice, PageHeader, PersonRow, RecordedHistoryLink, SectionHeader, SkeletonScreen } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
@@ -18,13 +18,13 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { peopleQuery } from '../rules/RuleDraftReview.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
+import { PEOPLE_SUBTITLE } from './copy.ts';
+import { PeopleSkeleton } from './PeopleSkeleton.tsx';
 
 import './People.css';
 
 /** The Desk's people label, the one the sidebar shows: the page's title. The concept and route stay People. */
 export const PEOPLE_LABEL = 'Customers';
-
-const SUBTITLE = 'Leads and customers on this Desk. Verified means a code reached their contact on record.';
 
 /** The business's people and leads, polled as the owner's lists are. */
 export function usePeople(deskId: string) {
@@ -72,18 +72,15 @@ export function PeoplePage() {
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const people = usePeople(deskId);
-  const failure = useReadFailure(people);
+  const failure = useReadFailure(people, { pausedRoute: 'people' });
   const contactsId = useId();
   const leadsId = useId();
 
-  let body;
+  // The list's first read is out: no people and no failure yet.
+  const loading = people.data === undefined && failure === null;
+  let body = null;
   if (people.data === undefined) {
-    body =
-      failure === null ? (
-        <div className="cd-people__below">
-          <LoadingLine>Loading your customers</LoadingLine>
-        </div>
-      ) : null;
+    // Nothing read: the skeleton while the read is out, then the failure alone.
   } else if (people.data.people.length === 0 && people.data.leads.length === 0) {
     body = (
       <div className="cd-people__below">
@@ -149,9 +146,12 @@ export function PeoplePage() {
 
   return (
     <div className="cd-people" onClick={followInAppLinks(navigate)}>
-      <PageHeader title={PEOPLE_LABEL} subtitle={SUBTITLE} />
-      <ReadFailed failure={failure} />
-      {body}
+      <PageHeader title={PEOPLE_LABEL} subtitle={PEOPLE_SUBTITLE} />
+      {/* Under the real header, everything the people read draws: its failure, the sections or the empty state. */}
+      <SkeletonScreen loading={loading} status="Loading your customers" skeleton={<PeopleSkeleton withHeader={false} />} className="cd-people__region">
+        <ReadFailed failure={failure} />
+        {body}
+      </SkeletonScreen>
     </div>
   );
 }

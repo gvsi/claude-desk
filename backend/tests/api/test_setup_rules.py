@@ -19,6 +19,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from time import monotonic
 from types import SimpleNamespace
@@ -35,7 +36,7 @@ from sqlalchemy import text as sql
 
 from desk.api import proving, schemas, setup
 from desk.api.deps import ApiProblem, OwnerCtx, owner_ctx, proving_work
-from desk.api.kernel_client import KernelFailed, KernelUnavailable
+from desk.api.kernel_client import KernelFailed, KernelUnavailable, KernelView
 from desk.api.main import _install_error_handlers as install_error_handlers
 from desk.api.main import create_app
 from desk.api.prompts import (
@@ -57,7 +58,9 @@ from desk.api.prompts import (
 )
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
-from desk.api.setup import after_hours_start, calendar_slots, price_items, safety_probes, situation
+from desk.api.setup import (
+    SETUP_POLICY_CLAIMS, _put_parts, after_hours_start, calendar_slots, price_items, safety_probes, seed_parts, situation,
+)
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -83,6 +86,7 @@ from desk.kernel_service.decide import tools_given
 from desk.presets import PRESETS
 from tests.api.fakes import ScriptedModel, gated, response
 from tests.api.fakes import text as text_block
+from tests.api.test_kernel_client import ScriptedKernel
 from tests.api.test_setup_questions import (
     Owner,
     answer,
@@ -124,6 +128,76 @@ GOOD_CARDS = [
                   reason="Takes payments up to $300 on its own."),
     RuleCardDraft(applies_to="effect:pay_out", mode="ask", who="anyone", reason="Refunds ask you first."),
 ]
+
+
+def test_seed_parts_publish_policy_claims():
+    fields = {
+        "summary": "  Tax advice for small businesses.  ",
+        "service_area": "  Oakland and Berkeley  ",
+        "pricing": "  Priced per case after a consult.  ",
+        "intake": "  Ask whether the request is personal or business.  ",
+        "after_hours": "  Leave your details for the next business day.  ",
+        "urgent": "  For a filing notice, take the deadline and request a callback.  ",
+        "how_we_help": "  New client intake: Collect the business type and reason for reaching out.  ",
+        "public_contact": "  hello@example.test  ",
+    }
+    keys = {"summary": "policy:about", "public_contact": "contact",
+            **{name: f"policy:{name}" for name in fields if name not in ("summary", "public_contact")}}
+    parts = seed_parts(SetupAnswers(**fields), TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    assert {claim.key: (claim.kind, claim.value) for claim in parts.charter} == {
+        keys[name]: ("text", value.strip()) for name, value in fields.items()}
+    assert len(parts.charter) == len(fields)
+
+    # No empty card is published, including a blank summary or fields the owner never answered.
+    for empty in ({"summary": ""}, {name: " \n " for name in fields}):
+        assert seed_parts(SetupAnswers(**empty), TIMEZONE, business_type="office",
+                          today=date(2026, 10, 31)).charter == []
+
+
+@pytest.mark.parametrize("field,key", SETUP_POLICY_CLAIMS.items())
+def test_seed_parts_skip_suggested_policy_fields(field: str, key: str):
+    fields = {
+        "summary": "Tax advice for small businesses.",
+        "service_area": "Oakland and Berkeley",
+        "pricing": "Priced per case after a consult.",
+        "intake": "Ask whether the request is personal or business.",
+        "after_hours": "Leave your details for the next business day.",
+        "urgent": "For a filing notice, take the deadline and request a callback.",
+        "how_we_help": "New client intake: Collect the business type and reason for reaching out.",
+        "public_contact": "hello@example.test",
+    }
+    hours = [window.window() for window in HOURS]
+    answers = SetupAnswers(**fields, hours=hours, suggested_fields=[field])
+    parts = seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    claims = {claim.key: claim.value for claim in parts.charter}
+    assert key not in claims
+    assert claims == {
+        "contact": fields["public_contact"],
+        **{claim: fields[name] for name, claim in SETUP_POLICY_CLAIMS.items() if name != field},
+    }
+    assert parts.hours == hours
+    assert parts.calendar == calendar_slots(hours, TIMEZONE, date(2026, 10, 31))
+
+
+@pytest.mark.parametrize("public_contact", ["  hello@example.test  ", None])
+def test_seed_parts_can_disable_policy_claims_without_changing_other_parts(public_contact):
+    answers = SetupAnswers(**{field: f"Answer for {field}." for field in SETUP_POLICY_CLAIMS},
+                           public_contact=public_contact, hours=[window.window() for window in HOURS],
+                           price_items=PRICES)
+    saved = answers.model_dump()
+    enabled = seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    disabled = seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31),
+                          publish_policies=False)
+
+    assert {claim.key: claim.value for claim in disabled.charter} == (
+        {"contact": public_contact.strip()} if public_contact else {})
+    assert disabled.hours == enabled.hours
+    assert disabled.prices == enabled.prices
+    assert disabled.calendar == enabled.calendar
+    assert disabled.notifications == enabled.notifications
+    assert answers.model_dump() == saved
+    assert seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31)) == enabled
+    assert {claim.key for claim in enabled.charter if claim.key.startswith("policy:")} == set(SETUP_POLICY_CLAIMS.values())
 
 
 @pytest.fixture
@@ -183,6 +257,441 @@ async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards:
     reply = await owner.browser.post(policy(state, "rules"))
     assert reply.status_code == 200, reply.text
     return RulesDraft.model_validate(reply.json())
+
+
+@pytest.mark.parametrize("reenable", [False, True])
+async def test_setup_reads_policy_claim_switch_at_each_charter_write(app, browser, fake, kernel_http, model, engine,
+                                                                    reenable):
+    owner, state = await ready(app, browser, kernel_http, model)
+    saved_answers = (await stored(engine, state["interview_id"]))["answers"]
+    runtime = app.state.runtime
+    runtime.settings = replace(runtime.settings, setup_policy_claims_enabled=False)
+    fake.calls.clear()
+
+    # An interrupted draft leaves another charter write to retry after the runtime switch changes.
+    model.add(cut_short(DraftedRules(cards=GOOD_CARDS)))
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+    (off,) = fake.called("PUT /desks/{id}/charter")
+    assert off.body["charter"] == [{"key": "contact", "kind": "text", "value": "(510) 555-0142"}]
+    assert (await stored(engine, state["interview_id"]))["answers"] == saved_answers
+
+    runtime.settings = replace(runtime.settings, setup_policy_claims_enabled=reenable)
+    await drafted_rules(owner, model, state)
+    _, on = fake.called("PUT /desks/{id}/charter")
+    assert {claim["key"]: claim["value"] for claim in on.body["charter"]} == {
+        "contact": saved_answers["public_contact"],
+        **({key: saved_answers[field].strip() for field, key in SETUP_POLICY_CLAIMS.items()
+            if saved_answers.get(field) and field not in saved_answers["suggested_fields"]} if reenable else {}),
+    }
+    for part in ("hours", "prices", "calendar", "notifications"):
+        first, second = fake.called(f"PUT /desks/{{id}}/{part}")
+        assert first.body == second.body
+    assert (await stored(engine, state["interview_id"]))["answers"] == saved_answers
+    assert (await owner.browser.post(policy(state, "confirm"))).status_code == 200
+    assert (await owner.browser.post(policy(state, "go_live"))).status_code == 200
+
+
+async def test_setup_finishes_with_clean_charter_claims_after_a_pricing_refusal(
+        app, browser, fake, kernel_http, model, monkeypatch, caplog):
+    intake = "Ask about the work the customer needs."
+    monkeypatch.setitem(PATCHES, "what_you_do", {**PATCHES["what_you_do"], "intake": intake})
+    monkeypatch.setitem(PATCHES, "quote_limit", {**PATCHES["quote_limit"], "pricing": "from $90"})
+    owner, state = await ready(app, browser, kernel_http, model)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+
+    await drafted_rules(owner, model, state)
+    assert (await owner.browser.post(policy(state, "confirm"))).status_code == 200
+    reply = await owner.browser.post(policy(state, "go_live"))
+    assert reply.status_code == 200, reply.text
+
+    desk = fake.desks[state["desk_id"]]
+    claims = {claim.key: claim.value for fact in desk.facts.values()
+              if fact.kind == "charter" and fact.fact_id != "charter:hours" for claim in fact.claims}
+    assert claims == {"contact": "(510) 555-0142", "policy:about": PATCHES["what_you_do"]["summary"],
+                      "policy:service_area": "Oakland and Berkeley", "policy:intake": intake,
+                      "policy:after_hours": "Take a message."}
+    first, retry = fake.called("PUT /desks/{id}/charter")
+    assert retry.body["charter"] == [claim for claim in first.body["charter"] if claim["key"] != "policy:pricing"]
+    warnings = [record.getMessage() for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING
+                and record.getMessage().startswith("setup dropped refused charter claims:")]
+    assert len(warnings) == 1
+    assert "policy:pricing" in warnings[0] and "currency" in warnings[0] and "digit" in warnings[0]
+    assert "$90" not in caplog.text and intake not in caplog.text
+
+
+@pytest.mark.parametrize("interrupt_draft", [False, True])
+async def test_setup_exposes_held_policy_keys_and_clears_them_after_rewording(
+        app, browser, fake, kernel_http, model, engine, monkeypatch, interrupt_draft):
+    denied = "You're chatting with a human receptionist."
+    monkeypatch.setitem(PATCHES, "contact_and_after_hours", {**PATCHES["contact_and_after_hours"], "urgent": denied})
+    call = KernelView.call
+
+    async def refuse_denial(view, route, body=None, **kwargs):
+        if route == "PUT /desks/{id}/charter" and any(
+                claim.key == "policy:urgent" and claim.value == denied for claim in body.charter):
+            raise KernelFailed(422, "invalid", detail={"policy:urgent": ["policy.ai_denial"]})
+        return await call(view, route, body, **kwargs)
+
+    monkeypatch.setattr(KernelView, "call", refuse_denial)
+    owner, state = await ready(app, browser, kernel_http, model)
+    assert state["held_policy_keys"] == []
+    state_path = f"/api/owner/setup/{state['interview_id']}"
+    if interrupt_draft:
+        model.add(cut_short(DraftedRules(cards=GOOD_CARDS)))
+        reply = await owner.browser.post(policy(state, "rules"))
+        assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+        interrupted = (await owner.browser.get(state_path)).json()
+        assert interrupted["step"] == "tools" and interrupted["held_policy_keys"] == ["policy:urgent"]
+    await drafted_rules(owner, model, state)
+    resumed = (await owner.browser.get(state_path)).json()
+    assert resumed["step"] == "rules"
+    assert resumed["held_policy_keys"] == ["policy:urgent"]
+    desk = fake.desks[state["desk_id"]]
+    claims = {claim.key: claim.value for fact in desk.facts.values()
+              if fact.kind == "charter" and fact.fact_id != "charter:hours" for claim in fact.claims}
+    assert claims == {"contact": "(510) 555-0142", "policy:about": PATCHES["what_you_do"]["summary"],
+                      "policy:service_area": "Oakland and Berkeley", "policy:after_hours": "Take a message."}
+
+    # A later charter write uses the owner's reworded answer and replaces the stored held keys.
+    def reword(interview):
+        interview.answers.urgent = "Tell us if a pipe has burst."
+        interview.draft_cards = []
+
+    await setup._update(engine, owner, state["interview_id"], reword)
+    app.state.runtime.proving.forget(state["desk_id"])
+    await drafted_rules(owner, model, state)
+    resumed = (await owner.browser.get(state_path)).json()
+    assert resumed["step"] == "rules" and resumed["held_policy_keys"] == []
+    assert fake.called("PUT /desks/{id}/charter")[-1].body["charter"][-1] == {
+        "key": "policy:urgent", "kind": "text", "value": "Tell us if a pipe has burst."}
+    schema = schemas.SetupState.model_json_schema()
+    assert "held_policy_keys" in schema["required"]
+    assert schema["properties"]["held_policy_keys"]["items"] == {"type": "string"}
+
+
+async def test_setup_state_shows_a_refused_public_contact_as_held(app, browser, fake, kernel_http, model, engine,
+                                                                 monkeypatch):
+    refused = "Call (510) 555-0142 for a free quote"
+    monkeypatch.setitem(PATCHES, "contact_and_after_hours",
+                        {**PATCHES["contact_and_after_hours"], "public_contact": refused})
+    call = KernelView.call
+
+    async def refuse_contact(view, route, body=None, **kwargs):
+        if route == "PUT /desks/{id}/charter" and any(
+                claim.key == "contact" and claim.value == refused for claim in body.charter):
+            raise KernelFailed(422, "invalid", detail={"contact": ["contact_format"]})
+        return await call(view, route, body, **kwargs)
+
+    monkeypatch.setattr(KernelView, "call", refuse_contact)
+    owner, state = await ready(app, browser, kernel_http, model)
+    await drafted_rules(owner, model, state)
+    resumed = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    assert resumed["step"] == "rules" and resumed["held_policy_keys"] == ["contact"]
+    desk = fake.desks[state["desk_id"]]
+    claims = {claim.key for fact in desk.facts.values()
+              if fact.kind == "charter" and fact.fact_id != "charter:hours" for claim in fact.claims}
+    assert "contact" not in claims and "policy:after_hours" in claims
+    description = schemas.SetupState.model_json_schema()["properties"]["held_policy_keys"]["description"]
+    assert "public contact" in description
+
+
+@pytest.mark.parametrize("detail", [
+    {"charter": ["policy_count_limit"]},
+    {"charter": ["policy_text_limit"]},
+    {"policy:unknown": ["language"]},
+], ids=["policy-count-cap", "policy-text-cap", "no-matching-claim"])
+async def test_a_charter_refusal_without_claim_keys_retries_with_contact_only(detail, caplog):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About our business",
+                                    intake="Ask about consultations", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    charters = []
+
+    def respond(request):
+        if request.url.path.endswith("/charter"):
+            charters.append(json.loads(request.content)["charter"])
+            if len(charters) == 1:
+                return httpx.Response(422, json={"code": "invalid", "detail": detail})
+        return httpx.Response(200, json={"desk_id": "d1", "updated_at": "2026-10-31T17:00:00Z"})
+
+    kernel.fail(respond)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        held = await _put_parts(owner, "d1", parts)
+
+    assert len(charters) == 2
+    assert held == [claim.key for claim in parts.charter if claim.key.startswith("policy:")]
+    assert charters[0] == [claim.model_dump(mode="json") for claim in parts.charter]
+    assert charters[1] == [claim for claim in charters[0] if claim["key"] == "contact"]
+    assert [request.url.path for request in kernel.requests[2:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record.getMessage() for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert all(claim.key in warnings[0] for claim in parts.charter if claim.key.startswith("policy:"))
+    assert all(claim.value not in caplog.text for claim in parts.charter)
+
+
+async def test_a_second_charter_refusal_drops_all_policies_before_the_third_put(caplog):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="No", pricing="from $90",
+                                    intake="charge for consultations.", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusals = [{"policy:pricing": ["currency", "digit"]},
+                {"policy:about": ["lex.en.promise"], "policy:intake": ["lex.en.promise"]}]
+    charters = []
+
+    def respond(request):
+        if request.url.path.endswith("/charter"):
+            charters.append(json.loads(request.content)["charter"])
+            if len(charters) <= 2:
+                return httpx.Response(422, json={"code": "invalid", "detail": refusals[len(charters) - 1]})
+        return httpx.Response(200, json={"desk_id": "d1", "updated_at": "2026-10-31T17:00:00Z"})
+
+    kernel.fail(respond)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        held = await _put_parts(owner, "d1", parts)
+
+    assert len(charters) == 3
+    assert held == ["policy:pricing", "policy:about", "policy:service_area", "policy:intake"]
+    assert charters[0] == [claim.model_dump(mode="json") for claim in parts.charter]
+    assert charters[1] == [claim for claim in charters[0] if claim["key"] != "policy:pricing"]
+    assert charters[2] == [claim for claim in charters[0] if claim["key"] == "contact"]
+    assert [request.url.path for request in kernel.requests[3:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert [record.args for record in warnings] == [
+        refusals[0], {"policy:about": ["lex.en.promise"], "policy:service_area": [],
+                      "policy:intake": ["lex.en.promise"]}]
+    assert "$90" not in caplog.text and "charge for consultations." not in caplog.text
+
+
+def charter_writes(kernel: ScriptedKernel, refusals: list[dict]) -> list[list[dict]]:
+    """Answers the first `len(refusals)` charter writes with 422 `invalid` and each refusal's detail, and every other
+    write with 200; returns the charters written, in order."""
+    charters: list[list[dict]] = []
+
+    def respond(request):
+        if request.url.path.endswith("/charter"):
+            charters.append(json.loads(request.content)["charter"])
+            if len(charters) <= len(refusals):
+                return httpx.Response(422, json={"code": "invalid", "detail": refusals[len(charters) - 1]})
+        return httpx.Response(200, json={"desk_id": "d1", "updated_at": "2026-10-31T17:00:00Z"})
+
+    kernel.fail(respond)
+    return charters
+
+
+REFUSED_CONTACT = "Call (510) 555-0142 for a free quote"
+
+
+async def test_a_refused_contact_is_held_with_the_named_policy_and_the_rest_saved(caplog):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
+                                    pricing="from $90", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusal = {"policy:pricing": ["currency", "digit"], "contact": ["contact_format"]}
+    charters = charter_writes(kernel, [refusal])
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        held = await _put_parts(owner, "d1", parts)
+
+    assert held == ["contact", "policy:pricing"]
+    assert len(charters) == 2
+    assert charters[1] == [claim for claim in charters[0] if claim["key"] not in refusal]
+    assert [claim["key"] for claim in charters[1]] == ["policy:about", "policy:service_area"]
+    warnings = [record for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert [record.args for record in warnings] == [{"contact": ["contact_format"],
+                                                     "policy:pricing": ["currency", "digit"]}]
+    assert REFUSED_CONTACT not in caplog.text and "$90" not in caplog.text
+
+
+async def put_parts(kernel: ScriptedKernel, parts) -> list[str]:
+    """Writes setup's parts to Desk d1 through `kernel` as its owner; returns the held charter keys."""
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        return await _put_parts(owner, "d1", parts)
+
+
+async def test_a_lone_contact_refusal_leaves_the_targeted_policy_retry(caplog):
+    """The kernel checks the contact before any policy line, so a bad contact comes back alone on the first write.
+    Holding it doesn't use up the retry that drops only the policy lines the next refusal names."""
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
+                                    pricing="from $90", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusals = [{"contact": ["contact_format"]}, {"policy:pricing": ["currency", "digit"]}]
+    charters = charter_writes(kernel, refusals)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    held = await put_parts(kernel, parts)
+
+    assert held == ["contact", "policy:pricing"]
+    assert len(charters) == 3
+    assert charters[1] == [claim for claim in charters[0] if claim["key"] != "contact"]
+    assert [claim["key"] for claim in charters[2]] == ["policy:about", "policy:service_area"]
+    assert [request.url.path for request in kernel.requests[3:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert [record.args for record in warnings] == refusals
+    assert REFUSED_CONTACT not in caplog.text and "$90" not in caplog.text
+
+
+@pytest.mark.parametrize("second_refusal", [
+    {"charter": ["policy_count_limit"]}, {"charter": ["policy_text_limit"]}, {"policy:unknown": ["language"]},
+], ids=["policy-count-cap", "policy-text-cap", "no-matching-claim"])
+async def test_a_policy_fallback_after_a_lone_contact_refusal_drops_every_policy_line(second_refusal, caplog):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
+                                    intake="Ask about consultations", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    charters = charter_writes(kernel, [{"contact": ["contact_format"]}, second_refusal])
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    held = await put_parts(kernel, parts)
+
+    assert held == ["contact", "policy:about", "policy:service_area", "policy:intake"]
+    assert len(charters) == 3 and charters[2] == []
+    assert [request.url.path for request in kernel.requests[3:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert [record.args for record in warnings] == [
+        {"contact": ["contact_format"]},
+        {"policy:about": [], "policy:service_area": [], "policy:intake": []}]
+    assert REFUSED_CONTACT not in caplog.text
+
+
+@pytest.mark.parametrize("cap", ["policy_count_limit", "policy_text_limit"])
+async def test_a_cap_refusal_that_also_names_the_contact_drops_the_contact_and_every_policy_line(cap, caplog):
+    """One combined refusal can name the contact and a cap together; it is still a cap, so the next write carries
+    neither the contact nor any policy line instead of sending the over-cap policies again."""
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
+                                    intake="Ask about consultations", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusal = {"contact": ["contact_format"], "charter": [cap]}
+    charters = charter_writes(kernel, [refusal])
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    held = await put_parts(kernel, parts)
+
+    policy_keys = [claim.key for claim in parts.charter if claim.key.startswith("policy:")]
+    assert held == ["contact", *policy_keys]
+    assert len(charters) == 2
+    assert not [claim for claim in charters[1] if claim["key"] == "contact" or claim["key"].startswith("policy:")]
+    assert [request.url.path for request in kernel.requests[2:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert [record.args for record in warnings] == [
+        {"contact": ["contact_format"], **{key: [] for key in policy_keys}}]
+    assert all(claim.value not in caplog.text for claim in parts.charter)
+
+
+async def test_a_refusal_after_the_cap_with_nothing_left_to_drop_propagates():
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About our business",
+                                    intake="Ask about consultations", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusals = [{"charter": ["policy_count_limit"]}, {"policy:unknown": ["x"]}]
+    charters = charter_writes(kernel, refusals)
+    with pytest.raises(KernelFailed) as caught:
+        await put_parts(kernel, parts)
+
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", refusals[1])
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * 2
+    assert charters[1] == [{"key": "contact", "kind": "text", "value": "hello@example.test"}]
+
+
+async def test_a_lone_contact_refusal_allows_at_most_four_charter_writes():
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="No", pricing="from $90",
+                                    intake="charge for consultations.", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    detail = {"policy:about": ["lex.en.promise"]}
+    kernel.fail(lambda request: httpx.Response(422, json={
+        "code": "invalid", "detail": {"contact": ["contact_format"]} if len(kernel.requests) == 1 else detail}))
+    with pytest.raises(KernelFailed) as caught:
+        await put_parts(kernel, parts)
+
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", detail)
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * 4
+    first, *later = [json.loads(request.content)["charter"] for request in kernel.requests]
+    assert later == [[claim for claim in first if claim["key"] != "contact"],
+                     [claim for claim in first if claim["key"] not in ("contact", "policy:about")],
+                     []]
+
+
+@pytest.mark.parametrize("detail", [{"policy:unknown": ["x"]}, {"charter": ["policy_count_limit"]}],
+                         ids=["no-matching-claim", "policy-count-cap"])
+async def test_a_fallback_with_nothing_to_drop_propagates_without_resending_the_charter(detail):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About our business",
+                                    intake="Ask about consultations"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31), publish_policies=False)
+    assert [claim.key for claim in parts.charter] == ["contact"]
+    charter_writes(kernel, [detail])
+    with pytest.raises(KernelFailed) as caught:
+        await put_parts(kernel, parts)
+
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", detail)
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"]
+
+
+@pytest.mark.parametrize("prior_refusals", [0, 1, 2])
+@pytest.mark.parametrize(("status", "code", "detail"), [
+    (422, "invalid", None), (422, "invalid", {}),
+    (409, "conflict", {"policy:about": ["digit"]}),
+    (422, "conflict", {"policy:about": ["digit"]}),
+])
+async def test_other_charter_errors_propagate_without_another_put(prior_refusals, status, code, detail):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About us", intake="Ask us"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+
+    def respond(request):
+        if len(kernel.requests) <= prior_refusals:
+            return httpx.Response(422, json={"code": "invalid", "detail": {"policy:intake": ["digit"]}})
+        return httpx.Response(status, json={"code": code, "detail": detail})
+
+    kernel.fail(respond)
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        with pytest.raises(KernelFailed) as caught:
+            await _put_parts(owner, "d1", parts)
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (status, code, detail or {})
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * (prior_refusals + 1)
+
+
+async def test_a_third_detailed_charter_refusal_propagates_without_a_fourth_put():
+    kernel = ScriptedKernel()
+    detail = {"policy:about": ["lex.en.promise"], "policy:intake": ["lex.en.promise"]}
+    kernel.fail(httpx.Response(422, json={"code": "invalid", "detail": detail}))
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="No",
+                                    intake="charge for consultations.", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        with pytest.raises(KernelFailed) as caught:
+            await _put_parts(owner, "d1", parts)
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", detail)
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * 3
+    first, second, third = [json.loads(request.content)["charter"] for request in kernel.requests]
+    assert second == [claim for claim in first if claim["key"] not in detail]
+    assert third == [claim for claim in first if claim["key"] == "contact"]
 
 
 async def stored(engine, interview_id: str) -> dict:
@@ -684,6 +1193,10 @@ async def test_proving_timeout_rereads_the_same_draft(app, browser, fake, kernel
     reply = await owner.browser.post(path)
     assert reply.status_code == 202 and monotonic() - started < 2
     assert reply.json() == {"retry": {"path": path, "body": None}}
+    # Putting the Desk's parts can outlast the polling wait; test joining once the gated draft has started.
+    async with asyncio.timeout(10):
+        while not fake.called("POST /policy/draft"):
+            await asyncio.sleep(0.01)
     reply = await owner.browser.post(reply.json()["retry"]["path"])
     assert reply.status_code == 202 and len(fake.called("POST /policy/draft")) == 1
     release.set()
@@ -1181,7 +1694,7 @@ async def test_confirm_conflict_returns_a_new_draft_to_confirm(app, browser, fak
     assert reply.status_code == 409 and reply.json()["error"] == "rules_changed_since_draft", reply.text
     again = RulesDraft.model_validate(reply.json()["draft"])
     assert desk.policy_version != again.version
-    reply = await owner.browser.post(policy(state, "confirm"))
+    reply = await settled(owner, policy(state, "confirm"))
     assert reply.status_code == 200, reply.text
     assert desk.policy_version == again.version
 

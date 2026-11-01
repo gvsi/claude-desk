@@ -12,7 +12,7 @@ import {
   Composer,
   ConnectorList,
   ConnectorSection,
-  LoadingLine,
+  SkeletonScreen,
   MoneyLimit,
   Notice,
   PRESET_WORDS,
@@ -38,22 +38,18 @@ import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
 import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
+import { RulesSkeleton } from './RulesSkeleton.tsx';
+import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, rulesVersionLine } from './copy.ts';
+
 import './RulesPage.css';
 
 /** The Rules page's title, which the pages under it (All rules, a change's review) name it by. */
 export const RULES_TITLE = 'Rules';
 
-/**
- * Rivera's examples of what the owner can ask Claude for on Rules, in her words (the presets board's).
- * While a request is held, any Desk can also ask why the latest one was (`holdQuestion`).
- */
-const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
-
 // The optional reads share one deadline, starting when the rules read settles.
 const NEEDS_YOU_FIRST_LOAD_WAIT_MS = 3_000;
 
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
-const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
 
 /** RulesPage.css hides the chips below 640 px, so their read cannot move a phone's sections. */
 const CHIPS_HIDDEN = '(max-width: 639.98px)';
@@ -182,13 +178,19 @@ export function RulesPage() {
   }, [rules.isFetched, waitingForOpening]);
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
   const question = current && !skipHoldQuestion ? holdQuestion(needsYou.data ?? []) : null;
-  const failure = useReadFailure(rules);
+  const failure = useReadFailure(rules, { pausedRoute: 'rules' });
+  const peopleFailure = useReadFailure(people, { pausedRoute: 'people' });
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
   const [limit, setLimit] = useState<LimitField | null>(null);
 
   const active = rules.data?.active;
-  const drawn = !waitingForOpening && active !== undefined;
+  // Suggestions use the capped optional wait above; they must not keep this region busy after it expires.
+  const settled = [rules, people].every((read) => read.isFetched || read.isPaused);
+  const [firstReadsEnded, setFirstReadsEnded] = useState(settled);
+  if (settled && !firstReadsEnded) setFirstReadsEnded(true);
+  const loading = (!settled && !firstReadsEnded) || waitingForOpening;
+  const drawn = !loading && active !== undefined;
   // Back and "Keep my rules" may return while the gate leaves the page too short to restore.
   useLayoutEffect(() => {
     if (drawn) reachPlace(location.key);
@@ -306,14 +308,14 @@ export function RulesPage() {
   if (rules.data === undefined && rules.isError) {
     body = null;
   } else if (waitingForOpening || rules.data === undefined || active === undefined) {
-    body = <LoadingLine>Reading your rules</LoadingLine>;
+    body = null;
   } else {
     const cap = capOf(active);
     const sections = hubSections(rules.data, people.data ?? null);
     body = (
       <>
         <BusinessJobs view={rules.data} people={people.data ?? null} landed={landed.tools} />
-        <ConnectorList summary={`Version ${active.version} of your rules, checked against the always-on rules`}>
+        <ConnectorList summary={rulesVersionLine(active.version)}>
           {sections.map((section) => {
             const editing = limit !== null && limit.group === section.connector.id ? limit : null;
             return (
@@ -361,7 +363,7 @@ export function RulesPage() {
       <div className="cd-rules__header">
         <PageHeader
           title={RULES_TITLE}
-          subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
+          subtitle={RULES_SUBTITLE}
           actions={
             <>
               <span className="cd-type-control">
@@ -379,10 +381,15 @@ export function RulesPage() {
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
         {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
-      {active === undefined || waitingForOpening || skipSuggestions ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
       {readError}
-      {body}
-      {waitingForOpening ? null : <AlwaysOnList />}
+      <SkeletonScreen loading={loading} status="Reading your rules" skeleton={<RulesSkeleton withHeader={false} />} className="cd-rules__region">
+        {active === undefined || waitingForOpening || skipSuggestions ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
+        {peopleFailure === null ? null : (
+          <Notice tone="error" action={<Button variant="secondary" busy={peopleFailure.retrying} onClick={peopleFailure.retry}>Try again</Button>}>{peopleFailure.line}</Notice>
+        )}
+        {body}
+        {waitingForOpening ? null : <AlwaysOnList />}
+      </SkeletonScreen>
     </div>
   );
 }

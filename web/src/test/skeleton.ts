@@ -15,7 +15,7 @@ export interface SkeletonAnchor {
   page: string;
   size?: boolean;
   /** Extra dimensions when only width or height is predictable before data arrives. */
-  dimensions?: readonly ('width' | 'height')[];
+  dimensions?: readonly ('width' | 'height' | 'bottom')[];
 }
 export interface SkeletonLoad {
   status: string;
@@ -37,7 +37,7 @@ function landed(selector: string): HTMLElement {
   return element;
 }
 
-function compare(shape: DOMRect, real: DOMRect, label: string, size = false, dimensions: readonly ('width' | 'height')[] = []): void {
+function compare(shape: DOMRect, real: DOMRect, label: string, size = false, dimensions: readonly ('width' | 'height' | 'bottom')[] = []): void {
   for (const edge of size ? (['top', 'left', 'width', 'height'] as const) : (['top', 'left', ...dimensions] as const)) {
     expect(Math.abs(shape[edge] - real[edge]), `${label} ${edge}: shape ${shape[edge]}, page ${real[edge]}`).toBeLessThanOrEqual(
       SKELETON_TOLERANCE_PX,

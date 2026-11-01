@@ -224,25 +224,28 @@ describe('Conversations', () => {
   });
 
   it('late_callback_reveals_its_card_then_scrolling_to_the_end_follows_arrivals', async () => {
+    // The chat opens once Needs you's first read is in, since it draws the requests held in it, so a
+    // callback comes late on a later read: she is still where the chat opened, at its latest.
     const chat = named(DANA_LIVE, DANA);
     const last = lengthen(chat);
-    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
-    const held = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
     const region = screen.container.querySelector('.cd-conversation__scroll')!;
     const endGap = () => region.scrollHeight - region.clientHeight - region.scrollTop;
     await expect.poll(endGap).toBeLessThanOrEqual(1);
     expect(region.scrollTop).toBeGreaterThan(0);
-    await expect.poll(held.held).toBeGreaterThan(0);
-    held.release();
+    mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeInTheDocument();
     await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
     expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
     expect(region.scrollTop).toBe(0);
-    // Reading to the end resumes following even though the handoff is still open.
-    region.scrollTop = region.scrollHeight;
+    // Following resumes on the scroll event, not on assigning scrollTop. Wait for that event
+    // before a poll can append the next message, even though the handoff is still open.
+    await new Promise<void>((resolve) => {
+      region.addEventListener('scroll', () => resolve(), { once: true });
+      region.scrollTop = region.scrollHeight;
+    });
     await expect.poll(endGap).toBeLessThanOrEqual(1);
     mockStore.world.visitorText(chat, 'Please use the side gate.');
     await expect.element(log(screen).getByText('Please use the side gate.', { exact: true })).toBeInTheDocument();
@@ -355,11 +358,14 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(LIST, { retryScale: 0 });
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
     await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    const before = row.element().getBoundingClientRect().top;
     mockStore.inject({ route: 'needsYou', status: 500, times: 10_000 });
     // Several failed reads later.
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(row.element().textContent).toContain('Wants you');
     expect(row.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('alert').elements()).toHaveLength(0);
+    expect(row.element().getBoundingClientRect().top).toBe(before);
   });
 
   it('callback_marks_the_list_and_closes_in_the_chat_with_focus_on_its_name', async () => {
@@ -1227,13 +1233,16 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(conversation(SEEDED_HOLD), { pollScale: 100 });
     // With no card under it, the hold's receipt says why itself.
     await expect.element(receipt(screen, `Held for you. ${SEEDED_REASON}`)).toBeVisible();
-    const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    const pane = screen.getByRole('region', { name: 'Visitor', exact: true });
+    const line = pane.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    expect(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('alert').elements()).toHaveLength(0);
+    expect(screen.getByRole('alert').elements()).toHaveLength(1);
     expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Reading again works: the request is there to answer, and the line goes.
-    await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+    await pane.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(line).not.toBeInTheDocument();
     // The card says why now, so the receipt over it names only the state.

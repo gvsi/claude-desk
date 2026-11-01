@@ -31,7 +31,7 @@ Work reaches `main` through a pull request: a branch in a worktree, the review p
 - Watch checks with `gh pr checks <n> --watch` and fix until they are green. An assertion failure is never infrastructure, and a test is not "flaky" without evidence.
 - Infrastructure failure (no runner, a job that died before running tests): `gh run rerun <run-id> --failed`, at most twice, then stop and report.
 - If the repo has no CI checks yet, `gh pr checks` reports none. Say so in the PR body; the quoted local test results are the evidence.
-- **Updating:** if `origin/main` has moved and the PR conflicts or falls behind, `git fetch origin && git rebase origin/main`, rerun the tests and `git push --force-with-lease`. A rebase that changes behaviour gets another review round.
+- **Updating:** don't rebase just because `origin/main` moved. A PR whose own CI is green on its head merges as long as GitHub reports no conflict; main's CI run after the merge is the integration check, and deploys ship only a green `main`. Rebase (`git fetch origin && git rebase origin/main`, rerun the tests, `git push --force-with-lease`) only for a real conflict, a database migration, a `PROMPT_VERSION` bump, or a PR that changes the same files as what just landed (owner, 2026-11-01). A rebase that changes behaviour gets another review round.
 
 ## Merge
 
