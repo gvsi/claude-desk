@@ -9,7 +9,7 @@ import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import type { PeopleOut, PolicyVersionOut, RulesDraft, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { formatHours } from '../../lib/format.ts';
-import { PRESETS } from '../../mocks/seed.ts';
+import { PRESETS, RIVERA_HOURS, presetCards } from '../../mocks/seed.ts';
 import { connectorByKey } from '../connectors/catalog.ts';
 import { DEFAULT_SIDE, cancelsLinksFor, changeRows } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
@@ -668,9 +668,10 @@ describe('rule drafts', () => {
   });
 
   it('recommended_preset_keeps_what_it_automates', () => {
-    // Rivera's rules as the seed has them, the starter's cards included, drafted to "Recommended rules".
+    // Rivera's rules as the seed has them, the starter's cards included, drafted to "Recommended rules"
+    // in her Desk's own hours, as the API drafts it: weekdays 8:00 am to 6:00 pm.
     const owner = [...PRESETS.ask_first, ...RIVERA_CARDS];
-    const preset = PRESETS.auto.map((card) => ({ ...card }));
+    const preset = presetCards('auto', RIVERA_HOURS);
     const presetIds = new Set(ids(preset));
     const draft = draftFromDiff(
       rulesDraft({
@@ -705,15 +706,40 @@ describe('rule drafts', () => {
     expect(byKey.get('rv-refund')?.after).toMatchObject({ appliesTo: 'Every tool that sends money out', mode: 'ask' });
     expect(byKey.get('rv-refund')?.changed).not.toContain('mode');
 
-    // Weekday bookings from 8:00 am to 6:00 pm reach outside the preset's 9-to-5 rule and Saturdays lie
-    // outside it, so both fall to the default ask rather than claiming "Automatic"; the 9-to-5 rule,
-    // which no dropped rule goes to, is added at "Automatic".
-    expect(byKey.get('rv-book-wk')?.after).toEqual(DEFAULT_SIDE);
+    // Weekday bookings from 8:00 am to 6:00 pm go to the preset's rule in the same hours and words, Rivera's
+    // own rule in all but its id, so they have no row, and no 9-to-5 rule is added. Saturdays lie outside
+    // the preset's weekday bookings, so they fall to the default ask rather than claiming "Automatic".
+    expect(byKey.has('rv-book-wk')).toBe(false);
+    expect(rows.filter((row) => row.title === 'Book a visit').map((row) => row.key)).toEqual(['rv-book-sat']);
     expect(byKey.get('rv-book-sat')?.after).toEqual(DEFAULT_SIDE);
     expect(byKey.get('rv-book-sat')?.before?.appliesTo).toBeUndefined();
+    expect(rows.filter((row) => row.change === 'added')).toEqual([]);
+  });
+
+  it('recommended_preset_books_nine_to_five_without_hours', () => {
+    // A Desk with no hours drafts "Recommended rules" as the presets have them: weekdays 9 to 5.
+    const owner = [...PRESETS.ask_first, ...RIVERA_CARDS];
+    const preset = presetCards('auto', []);
+    expect(preset).toEqual(PRESETS.auto);
+    const presetIds = new Set(ids(preset));
+    const draft = draftFromDiff(
+      rulesDraft({
+        cards: preset,
+        diff: { added: preset.filter((card) => !ids(owner).includes(card.card_id)), removed: owner.filter((card) => !presetIds.has(card.card_id)), changed: [] },
+      }),
+      version(7, owner),
+      'auto',
+    );
+    const byKey = new Map(changeRows(draft, PEOPLE, TOOLS).map((row) => [row.key, row]));
+
+    // Weekday bookings from 8:00 am to 6:00 pm reach outside the 9-to-5 rule and Saturdays lie outside
+    // it, so both fall to the default ask rather than claiming "Automatic"; the 9-to-5 rule, which no
+    // dropped rule goes to, is added at "Automatic".
+    expect(byKey.get('rv-book-wk')?.after).toEqual(DEFAULT_SIDE);
+    expect(byKey.get('rv-book-sat')?.after).toEqual(DEFAULT_SIDE);
     expect(byKey.get('preset-book-weekday')).toMatchObject({ change: 'added', title: 'Book a visit', after: { mode: 'auto' } });
     expect(byKey.get('preset-book-weekday')?.after?.appliesTo).toBeUndefined();
-    expect(rows.filter((row) => row.change === 'added').map((row) => row.key)).toEqual(['preset-book-weekday']);
+    expect([...byKey.values()].filter((row) => row.change === 'added').map((row) => row.key)).toEqual(['preset-book-weekday']);
   });
 
   it('cancels_links_follows_the_draft', () => {

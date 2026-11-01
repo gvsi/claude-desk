@@ -21,12 +21,13 @@ The owner is alerted per the Desk's notification defaults; the alert is read onl
 inbox, so the result's `inbox` stays empty. In the owner's own preview (`session_row.preview`),
 the call-back instead inserts its row already `done`, skips `close_open` and sends no alert: no
 Needs-you item and no `desk_data` closing entry (the owner's decision of 2026-10-31). Its fact stays
-committed until its window ends, readable only by the owner and that session even after verification,
-so the preview still shows the card; its row stays for reconciliation.
+committed until its window ends (an unscheduled one, an urgent request's, for `PREVIEW_UNSCHEDULED_TTL`,
+since no Mark done ever closes it), readable only by the owner and that session even after
+verification, so the preview still shows the card; its row stays for reconciliation.
 """
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -97,12 +98,19 @@ async def close_open(ctx: KernelCtx, desk_id: str, session_id: str) -> list[Hand
     return rows
 
 
+PREVIEW_UNSCHEDULED_TTL = timedelta(hours=24)   # an urgent preview call-back's card, which no Mark done closes
+
+
 async def open_callback(xctx: ExecCtx, action: NormalizedAction, args: RequestCallbackArgs, *,
-                        alert: Callable[[tuple[datetime, datetime] | None], Awaitable[None]]) -> AdapterResult:
-    """Open the native callback once; the caller chooses the owner alert in the same transaction."""
+                        alert: Callable[[tuple[datetime, datetime] | None], Awaitable[None]],
+                        scheduled: bool = True) -> AdapterResult:
+    """Open the native callback once; the caller chooses the owner alert in the same transaction. With
+    `scheduled` false (an urgent request) the callback gets no next-open-hour window, so the visitor's
+    card promises no time and the owner is alerted to call back now."""
     ctx = xctx.ctx
     now = ctx.clock.now()
-    window = desks.next_open_window(xctx.desk_row.hours, await business_timezone(ctx, xctx.desk_row), now)
+    window = (desks.next_open_window(xctx.desk_row.hours, await business_timezone(ctx, xctx.desk_row), now)
+              if scheduled else None)
     session_id = xctx.session_row.session_id
     start, end = window or (None, None)
     preview = xctx.session_row.preview
@@ -124,7 +132,8 @@ async def open_callback(xctx: ExecCtx, action: NormalizedAction, args: RequestCa
     label = (Label(readers=["owner", f"session:{session_id}"]) if preview
              else labels.new_fact_label(xctx.session_row))
     fact = Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
-                claims=window_claims(window), label=label, expires_at=end)
+                claims=window_claims(window), label=label,
+                expires_at=now + PREVIEW_UNSCHEDULED_TTL if preview and window is None and not scheduled else end)
     ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
                                action_id=action.action_id))
     await ctx.db.flush()

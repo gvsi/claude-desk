@@ -3,7 +3,7 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
-import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
+import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -36,7 +36,7 @@ import { rivera } from '../ds/fixtures/index.ts';
 import { AGENT_CARD_BLOCKS } from './agents.ts';
 import { refusalCause } from './causes.ts';
 import { VISITOR_PLAIN, type Language } from './script.ts';
-import { BUSINESS, PRESETS } from './seed.ts';
+import { BUSINESS, PRESETS, presetCards } from './seed.ts';
 import {
   LEDGER_KEY,
   MINUTE,
@@ -79,6 +79,24 @@ function decisionsOf(world: MockWorld, deskId: string): DecisionRecord[] {
   return [...world.decisions.values()].filter((d) => d.deskId === deskId);
 }
 
+/** The most of a visitor's newest message a conversation summary carries, "…" included. */
+const LATEST_VISITOR_TEXT_MAX = 200;
+
+/**
+ * What the visitor typed last in `session`, as the API's summary carries it: whitespace collapsed
+ * to single spaces, and cut to 199 characters and "…" past 200, with no space left before the
+ * "…". Null for an agent's or the owner's chat, the owner's preview, before the visitor writes,
+ * and when what they wrote last is all whitespace.
+ */
+function latestVisitorText(session: SessionRecord): string | null {
+  if (session.state.kind !== 'visitor' || session.ownerPreview) return null;
+  const newest = session.items.findLast((item) => item.kind === 'visitor_text');
+  if (newest?.text == null) return null;
+  const chars = Array.from(newest.text.split(/\s+/).filter(Boolean).join(' '));
+  if (chars.length === 0) return null;
+  return chars.length > LATEST_VISITOR_TEXT_MAX ? `${chars.slice(0, LATEST_VISITOR_TEXT_MAX - 1).join('').trimEnd()}…` : chars.join('');
+}
+
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {
   const counts: Partial<Record<DecisionState, number>> = {};
   for (const { decision } of world.decisions.values()) {
@@ -93,6 +111,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     last_activity: isoTime(session.lastActivity),
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
+    latest_visitor_text: latestVisitorText(session),
   };
 }
 
@@ -436,6 +455,7 @@ function briefingOf(a: Activity): Briefing {
     conversations: conversationsIn(a, since, end).size,
     bookings: within(a.bookings, since, end).length,
     leads: within(a.leads, since, end).length,
+    answers: items.filter((i) => i.kind === 'answer').length,
     turned_down: items.filter((i) => i.kind === 'turned_down').length,
     total: items.length,
     newest: { turned_down: first('turned_down'), booking: first('booking'), lead_or_answer: leadOrAnswer },
@@ -635,13 +655,14 @@ export const HEALTH: HealthOut = {
 };
 
 /**
- * The preset the owner cards came from: the one whose cards they are, exactly, else null. It is
- * provenance only, and Rivera's own rules match neither.
+ * The preset the owner cards came from: the one whose cards they are, exactly, as a Desk with these
+ * opening hours drafts it (`presetCards`), else null. It is provenance only, and Rivera's own rules
+ * match neither.
  */
-function presetOf(cards: readonly RuleCard[]): RulesPreset | null {
+function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[]): RulesPreset | null {
   const set = (list: readonly RuleCard[]) => list.filter((card) => card.is_default !== true).map(canonicalCard).sort().join('\n');
   const owned = set(cards);
-  const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(PRESETS[preset]) === owned);
+  const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(presetCards(preset, hours)) === owned);
   return match ?? null;
 }
 
@@ -671,7 +692,7 @@ export function rulesView(desk: DeskRecord): RulesView {
         .map((card) => ({ card_id: card.card_id, mode: card.mode, reason: card.reason, shared: card.applies_to.startsWith('effect:') })),
     };
   });
-  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards) };
+  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards, desk.summary.hours) };
 }
 
 /**

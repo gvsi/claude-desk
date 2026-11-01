@@ -52,6 +52,7 @@ while the link is issued and unexpired; the API proxies the checkout page's read
 import logging
 import secrets
 from datetime import timedelta
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from psycopg import errors as pg_errors
@@ -206,6 +207,113 @@ async def _issued(ctx: KernelCtx, action: NormalizedAction) -> AdapterResult | N
     return AdapterResult(facts=[fact], model_view=model_view(fact))
 
 
+async def execution_rules(xctx: ExecCtx, action: NormalizedAction) -> tuple[bool, int | None]:
+    """Fence auto execution against activation before writing a quote or calling the provider."""
+    ctx = xctx.ctx
+    decision = await _decision(ctx, action)
+    approved = await payments.owner_approved(ctx, decision)
+    version = xctx.recheck_version
+    if not approved:
+        active = await payments.lock_active_version(ctx, action.desk_id)
+        if active is None or (active.version != xctx.recheck_version
+                              and not await payments.link_rules_allow(ctx, decision, action, active)):
+            raise AdapterFailure("rules_changed")
+        version = active.version
+    return approved, version
+
+
+async def open_link_answer(ctx: KernelCtx, action: NormalizedAction, quote_row: Quote) -> AdapterResult | None:
+    """The quote's open link (`payments.open_link_fact`) as this action's result, or None when it has
+    none: no second checkout or link, and nothing held for this action, since the open link holds what
+    it needs. The caller holds the quote's row `FOR UPDATE`."""
+    if (open_fact := await payments.open_link_fact(ctx, quote_row)) is None:
+        return None
+    await mandates.release(ctx, action.action_id)
+    return AdapterResult(facts=[open_fact], model_view=model_view(open_fact))
+
+
+async def issue_for_quote(xctx: ExecCtx, action: NormalizedAction, quote_id: str, *,
+                          approved: bool, version: int | None) -> AdapterResult:
+    """The shared locked quote, open-link, provider-idempotency and issue path."""
+    ctx = xctx.ctx
+    found = await payable_quote(ctx, action.desk_id, quote_id, xctx.session_row.session_id, lock=True,
+                                action_id=action.action_id)
+    if isinstance(found, str) and found != NO_SUCH_QUOTE:
+        raise AdapterFailure(found)                      # paid, or being paid, since the re-check
+    if isinstance(found, str) or found[0].amount_cents != action.amount_cents:
+        raise AdapterFailure("quote_changed")
+    quote, quote_fact = found
+    if (answer := await open_link_answer(ctx, action, quote)) is not None:
+        return answer
+    try:
+        checkout_id = await payments.provider(ctx).create_checkout(
+            idempotency_key=action.action_id, amount_cents=action.amount_cents, title=items_text(quote.items),
+            customer_id=_customer(xctx.session_row))
+    except payments.ProviderError:
+        raise AdapterFailure("provider_refused") from None
+    except payments.ProviderTimeout:
+        raise AdapterUnknown("provider_unknown") from None
+    fact = await _issue(ctx, xctx.session_row, action, quote=quote,
+                        quote_label=labels.label_of(quote_fact.readers, quote_fact.record_owner),
+                        checkout_id=checkout_id, version=version, approved=approved)
+    return AdapterResult(facts=[fact], model_view=model_view(fact))
+
+
+async def reconcile_checkout(xctx: ExecCtx, action: NormalizedAction, *,
+                             make_quote: Callable[[], Awaitable[str | None]] | None = None) -> AdapterResult | None:
+    """Settle by action key, fencing rules and quote NOWAIT. A block can supply its own quote
+    after a landed checkout passes the rules check; a voided checkout writes nothing."""
+    ctx = xctx.ctx
+    if (existing := await _issued(ctx, action)) is not None:
+        return existing
+    client = payments.provider(ctx)
+    try:
+        settled = await client.void("checkout", action.action_id)
+    except (payments.ProviderError, payments.ProviderTimeout):
+        raise AdapterUnknown("provider_unknown") from None
+    if settled.state == "voided":
+        return None                                   # nothing landed, and nothing late can
+    decision = await _decision(ctx, action)
+    approved = await payments.owner_approved(ctx, decision)
+    version: int | None = None
+    found = await stored_quote(ctx, action.desk_id, action.resource.id) if make_quote is None else None
+    rules_allow = True
+    if not approved:
+        try:
+            async with ctx.db.begin_nested():
+                active = await payments.lock_active_version(ctx, action.desk_id, nowait=True)
+        except DBAPIError as error:
+            if isinstance(error.orig, pg_errors.LockNotAvailable):
+                raise AdapterUnknown("rules_changing") from None     # a confirm is running: the next read
+            raise
+        if active is None or not await payments.link_rules_allow(ctx, decision, action, active):
+            found = None
+            rules_allow = False
+        else:
+            version = active.version
+    if make_quote is not None and rules_allow:
+        quote_id = await make_quote()
+        if quote_id is not None:
+            found = await stored_quote(ctx, action.desk_id, quote_id)
+    if found is not None:
+        # a quote paid, being paid or with another open link meanwhile takes no second link
+        try:
+            quote_row = await payments.lock_quote_nowait(ctx, found[0].quote_id)
+        except payments.QuoteBusy:
+            raise AdapterUnknown("quote_busy") from None      # a payment of it is running: the next read
+        if (quote_row is None or await payments.quote_unpayable(ctx, quote_row) is not None
+                or await payments.open_link_fact(ctx, quote_row) is not None):
+            found = None
+    if found is None:
+        await _cancel_checkout(client, settled.object_id)
+        return None
+    quote, quote_fact = found
+    fact = await _issue(ctx, xctx.session_row, action, quote=quote,
+                        quote_label=labels.label_of(quote_fact.readers, quote_fact.record_owner),
+                        checkout_id=settled.object_id, version=version, approved=approved)
+    return AdapterResult(facts=[fact], model_view=model_view(fact))
+
+
 class PaymentLinkAdapter:
     profile = PROFILE
     Args = PaymentLinkArgs
@@ -242,86 +350,12 @@ class PaymentLinkAdapter:
 
     async def execute(self, xctx: ExecCtx, action: NormalizedAction, args: PaymentLinkArgs) -> AdapterResult:
         """The checkout and the link for the quote the action resolved (see the module docstring)."""
-        ctx = xctx.ctx
-        decision = await _decision(ctx, action)
-        approved = await payments.owner_approved(ctx, decision)
-        version = xctx.recheck_version
-        if not approved:
-            active = await payments.lock_active_version(ctx, action.desk_id)
-            if active is None or (active.version != xctx.recheck_version
-                                  and not await payments.link_rules_allow(ctx, decision, action, active)):
-                raise AdapterFailure("rules_changed")
-            version = active.version
-        found = await payable_quote(ctx, action.desk_id, action.resource.id, xctx.session_row.session_id, lock=True,
-                                    action_id=action.action_id)
-        if isinstance(found, str) and found != NO_SUCH_QUOTE:
-            raise AdapterFailure(found)                      # paid, or being paid, since the re-check
-        if isinstance(found, str) or found[0].amount_cents != action.amount_cents:
-            raise AdapterFailure("quote_changed")
-        quote, quote_fact = found
-        if (open_fact := await payments.open_link_fact(ctx, quote)) is not None:
-            # the quote's open link answers for it: no second checkout or link, and nothing held for
-            # this action, since the open link holds what it needs
-            await mandates.release(ctx, action.action_id)
-            return AdapterResult(facts=[open_fact], model_view=model_view(open_fact))
-        try:
-            checkout_id = await payments.provider(ctx).create_checkout(
-                idempotency_key=action.action_id, amount_cents=action.amount_cents, title=items_text(quote.items),
-                customer_id=_customer(xctx.session_row))
-        except payments.ProviderError:
-            raise AdapterFailure("provider_refused") from None
-        except payments.ProviderTimeout:
-            raise AdapterUnknown("provider_unknown") from None
-        fact = await _issue(ctx, xctx.session_row, action, quote=quote,
-                            quote_label=labels.label_of(quote_fact.readers, quote_fact.record_owner),
-                            checkout_id=checkout_id, version=version, approved=approved)
-        return AdapterResult(facts=[fact], model_view=model_view(fact))
+        approved, version = await execution_rules(xctx, action)
+        return await issue_for_quote(xctx, action, action.resource.id, approved=approved, version=version)
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
         """What became of an unknown link, settled at the provider (see the module docstring)."""
-        ctx = xctx.ctx
-        if (existing := await _issued(ctx, action)) is not None:
-            return existing
-        client = payments.provider(ctx)
-        try:
-            settled = await client.void("checkout", action.action_id)
-        except (payments.ProviderError, payments.ProviderTimeout):
-            raise AdapterUnknown("provider_unknown") from None
-        if settled.state == "voided":
-            return None                                   # nothing landed, and nothing late can
-        decision = await _decision(ctx, action)
-        approved = await payments.owner_approved(ctx, decision)
-        version: int | None = None
-        found = await stored_quote(ctx, action.desk_id, action.resource.id)
-        if not approved:
-            try:
-                async with ctx.db.begin_nested():
-                    active = await payments.lock_active_version(ctx, action.desk_id, nowait=True)
-            except DBAPIError as error:
-                if isinstance(error.orig, pg_errors.LockNotAvailable):
-                    raise AdapterUnknown("rules_changing") from None     # a confirm is running: the next read
-                raise
-            if active is None or not await payments.link_rules_allow(ctx, decision, action, active):
-                found = None
-            else:
-                version = active.version
-        if found is not None:
-            # a quote paid, being paid or with another open link meanwhile takes no second link
-            try:
-                quote_row = await payments.lock_quote_nowait(ctx, found[0].quote_id)
-            except payments.QuoteBusy:
-                raise AdapterUnknown("quote_busy") from None      # a payment of it is running: the next read
-            if (quote_row is None or await payments.quote_unpayable(ctx, quote_row) is not None
-                    or await payments.open_link_fact(ctx, quote_row) is not None):
-                found = None
-        if found is None:
-            await _cancel_checkout(client, settled.object_id)
-            return None
-        quote, quote_fact = found
-        fact = await _issue(ctx, xctx.session_row, action, quote=quote,
-                            quote_label=labels.label_of(quote_fact.readers, quote_fact.record_owner),
-                            checkout_id=settled.object_id, version=version, approved=approved)
-        return AdapterResult(facts=[fact], model_view=model_view(fact))
+        return await reconcile_checkout(xctx, action)
 
 
 async def _cancel_checkout(client: "payments.ProviderClient", checkout_id: str) -> None:

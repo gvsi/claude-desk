@@ -6,7 +6,7 @@ from sqlalchemy import select
 from desk.db.models import Tool
 from desk.db.models import Document, Fact, Lead
 from desk.contracts import RuleCard
-from desk.kernel_service import adapters
+from desk.kernel_service import adapters, seed
 
 from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
 from .test_adapters import rivera
@@ -101,9 +101,27 @@ def test_amenity_exception_is_for_charter_policy_text_only():
                                             amenities=False) == {}
 
 
+# The Rivera seed's own business tool (test_rivera_urgent covers it); the tests here write the owner's.
+SEEDED = frozenset(tool.tool for tool in seed.RIVERA_BUSINESS_TOOLS)
+
+
 async def business_rows(app, copy):
+    """The owner's business tools on the Desk: its business rows, leaving out the seed's."""
     return {row.tool: row for row in await rows_of(app, copy.copy_id, select(Tool).where(
-        Tool.desk_id == copy.desk_id, Tool.source == 'business'))}
+        Tool.desk_id == copy.desk_id, Tool.source == 'business')) if row.tool not in SEEDED}
+
+
+async def owner_entries(app, copy):
+    """The Desk's `business_tools` entries after the seed's own, which writes its urgent tool."""
+    seeded, *entries = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
+    assert [tool['tool'] for tool in seeded.summary['tools']] == sorted(SEEDED)
+    return entries
+
+
+def removed_seed(summary) -> dict:
+    """A replacement's summary without the seed's tools it disables (each change "removed")."""
+    tools = [tool for tool in summary['tools'] if tool['tool'] not in SEEDED or tool['change'] != 'removed']
+    return {**summary, 'tools': tools}
 
 
 async def test_put_profiles_all_blocks_and_replace(app, client):
@@ -132,7 +150,7 @@ async def test_put_profiles_all_blocks_and_replace(app, client):
     assert (rows['desk.new-enquiry'].status, rows['desk.new-enquiry'].review_reason) == ('needs_review', 'changed')
     assert rows['desk.new-enquiry'].definition_sha256 != old
     assert all(row.status == 'disabled' for name, row in rows.items() if name != 'desk.new-enquiry')
-    events = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
+    events = await owner_entries(app, copy)
     assert len(events) == 2
     assert 'Take the details' not in json.dumps([event.model_dump(mode='json') for event in events])
 
@@ -281,8 +299,8 @@ async def test_resolver_is_quiet_for_unsupported_blocks_and_warns_on_stale_hashe
     import logging
     from desk.kernel_service.adapters import blocks
 
+    copy = await rivera(app, client)            # the seed's urgent tool needs its block supported
     monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset({'intake'}))
-    copy = await rivera(app, client)
     marker = 'Owner-only description marker'
     config = {'block': 'intake', 'questions': ['What?']} if supported else {'block': 'urgent', 'urgent_when': marker}
     assert (await put(client, copy, [intake(description=marker, config=config)])).status_code == 200
@@ -428,7 +446,7 @@ async def test_batches_refuse_duplicates_limits_canaries_and_other_copies(app, c
         assert response.status_code == 422, response.text
         assert 'detail' not in response.json()          # only card-text refusals carry detail
         assert (await business_rows(app, copy))['desk.new-enquiry'].definition_sha256 == original
-    assert len([row for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']) == 6
+    assert len(await owner_entries(app, copy)) == 6
     response = await client.put(f'/desks/{copy.desk_id}/business_tools', headers=other.owner, json={'tools': []})
     assert response.status_code == 404
     visitor = await open_visitor(client, copy)
@@ -444,12 +462,12 @@ async def test_refused_batches_ledger_only_a_refusal_code(app, client):
                         ([intake(description=document.canary)], 'business_tools_canary'),
                         ([intake(title='Guaranteed help')], 'public_promise')]:
         assert (await put(client, copy, batch)).status_code == 422
-        events = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
+        events = await owner_entries(app, copy)
         assert events[-1].summary == {'tools': [], 'refused': code}
         assert await business_rows(app, copy) == {}
     assert (await put(client, copy, [])).status_code == 200
-    events = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
-    assert events[-1].summary == {'tools': []}
+    events = await owner_entries(app, copy)
+    assert removed_seed(events[-1].summary) == {'tools': []}
 
 
 async def test_intake_step_one_refuses_unknown_extra_and_wrong_answer_count(app, client):
@@ -889,9 +907,9 @@ async def test_removed_tool_is_disabled_and_answering_off_keeps_intake(app, clie
 async def test_supported_blocks_gate_resolution_and_context_even_for_enabled_rows(app, client, monkeypatch):
     from desk.kernel_service.adapters import blocks
 
+    copy = await rivera(app, client)            # the seed's urgent tool needs its block supported
     monkeypatch.setattr(blocks, 'SUPPORTED_BLOCKS', frozenset({'intake'}))
     assert blocks.SUPPORTED_BLOCKS == frozenset({'intake'})
-    copy = await rivera(app, client)
     urgent = intake(tool='desk.urgent', title='Urgent support', description='Urgent-only marker.',
                     config={'block': 'urgent', 'urgent_when': 'Urgent trigger marker.'})
     assert (await put(client, copy, [intake(), urgent])).status_code == 200
