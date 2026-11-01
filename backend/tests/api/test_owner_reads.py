@@ -51,16 +51,22 @@ from desk.api.store import (
 )
 from desk.api.tools import Caller
 from desk.contracts import (
-    BusinessToolDef, Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, ToolCall,
+    BusinessTool, BusinessToolDef, Clause, Decision, ExecResult, RenderedBlock, ReplyDraft, ReplyVerdict, RuleCard,
+    ToolCall,
 )
 from desk.kernel_api import (
     AnswerRequest,
+    BusinessToolsRequest,
     CancelRequest,
     CheckReplyRequest,
     CreateCopyRequest,
     CreateSessionRequest,
     DecideRequest,
     ExecuteRequest,
+    PolicyConfirmRequest,
+    PolicyDraftRequest,
+    ToolPin,
+    ToolsConfirmRequest,
 )
 from desk.kernel_service import reply_check
 from tests.api.fakes import ScriptedModel, response, tool_use, unavailable
@@ -950,6 +956,43 @@ async def test_a_block_built_urgent_call_counts_as_a_callback_not_answered_alone
         done = await owner_reads.activity(ctx, owner.desk_id, when)
     assert [(call.ref_id, call.session_id, call.at, call.replayed) for call in done.callbacks] == [
         (decision_id, caller.session_id, when, False)]
+
+
+async def test_an_urgent_business_tool_run_on_the_kernel_counts_as_a_callback(scene, clock, app):
+    """The owner adds, reviews and allows an urgent business tool, and a visitor's call through it runs on the
+    kernel, which writes the tool's row, its decision and its ledger entries as it writes any business tool's."""
+    owner = scene.owner
+    kernel = scene.kernel_http.owner(owner.token)
+    tool = BusinessTool(tool="desk.urgent-help", title="Urgent help", description="Report an urgent problem.",
+                        config={"block": "urgent", "urgent_when": "A burst pipe or no heating."})
+    await kernel.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[tool]), path={"id": owner.desk_id})
+    pin = ToolPin(tool=tool.tool, definition_sha256=scene.fake.desks[owner.desk_id].tools[tool.tool].definition_sha256)
+    confirmed = await kernel.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=owner.desk_id, tools=[pin],
+                                                                              enable=True))
+    active = await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=owner.desk_id,
+                                                                             version=confirmed.draft.version))
+    draft = await kernel.call("POST /policy/draft", PolicyDraftRequest(
+        desk_id=owner.desk_id, expected_parent=active.version, cards=[RuleCard(
+            card_id="urgent-auto", applies_to=tool.tool, mode="auto", who="anyone", reason="Report urgent problems.")]))
+    await kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=owner.desk_id, version=draft.version))
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when, "A pipe burst under the sink")
+    decision, result = await caller.run(tool.tool, {"name": "Sam Lee", "contact": "(510) 555-0100",
+                                                    "reason": "A pipe burst under the sink"})
+    assert result.state == "succeeded"
+    await scene.reply(caller, when + timedelta(minutes=1))
+    clock.now = local(2026, 10, 30, 9)
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    brief = read.json()["briefing"]
+    assert brief["conversations"] == 1
+    assert brief["total"] == 0 and brief["newest"]["lead_or_answer"] is None
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert [call.ref_id for call in done.callbacks] == [decision.decision_id]
 
 
 @pytest.mark.parametrize(("hour", "count"), [(17, 0), (18, 1), (19, 1)])
