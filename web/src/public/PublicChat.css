@@ -43,6 +43,17 @@
   }
 }
 
+/* Inside an owner screen (setup's preview): the region, its body and the shapes that hold the page's
+   place while it opens are the height of the frame that holds them, so the shell and its skeleton
+   (each the height of what holds it, embedded) fill a frame with a set height. In a frame that grows
+   with what it holds, as on a phone on its side, these heights come to nothing and the page grows
+   with the chat. */
+.cd-public-chat-screen--embedded,
+.cd-public-chat-screen--embedded > .cd-skeleton-screen__body,
+.cd-public-chat-screen--embedded > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+  height: 100%;
+}
+
 /* The page around the shell: nothing of its own while the Demo inbox has no column, then the
    shell and the inbox's column side by side, the column as wide as the owner's sidebar. */
 .cd-public-chat-page {
