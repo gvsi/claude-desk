@@ -245,6 +245,46 @@ describe('askRuleChat', () => {
     }
   });
 
+  it('closes_the_json_request_it_fell_back_to_when_asked', async () => {
+    let fallback: AbortSignal | undefined;
+    fetchMock.mockResolvedValueOnce(events([frame('delta', { text: 'Yes' })]).response).mockImplementationOnce((_input, init) => {
+      fallback = init?.signal ?? undefined;
+      // The JSON answer never comes until the request is closed.
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+      });
+    });
+    const controller = new AbortController();
+    const asked = askRuleChat(DESK, 'Hi', { onText: () => {}, signal: controller.signal }).catch((e: unknown) => e);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    controller.abort();
+    const err = await asked;
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe('AbortError');
+    expect(fallback?.aborted).toBe(true);
+    // Closed is not a failure: nothing is reported as one.
+    expect(outcomes.filter((outcome) => !outcome.ok)).toEqual([]);
+  });
+
+  it('closes_the_json_fallback_while_it_waits_to_check_the_rules_again', async () => {
+    vi.useFakeTimers();
+    try {
+      const retry = { retry: { path: `/api/owner/policy/${DESK}/chat`, body: { text: 'Hi' } } };
+      fetchMock.mockResolvedValueOnce(events([frame('delta', { text: 'Yes' })]).response).mockResolvedValueOnce(json(202, retry));
+      const controller = new AbortController();
+      const asked = askRuleChat(DESK, 'Hi', { onText: () => {}, signal: controller.signal }).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(5_000);
+      const err = await asked;
+      expect((err as DOMException).name).toBe('AbortError');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fails_closed_on_a_final_it_cannot_read', async () => {
     fetchMock.mockResolvedValueOnce(events([frame('final', { answer: 3 })]).response);
     expect(await askRuleChat(DESK, 'Hi', { onText: () => {} }).catch((e: unknown) => e)).toMatchObject({ kind: 'unavailable', route: 'ruleChat' });

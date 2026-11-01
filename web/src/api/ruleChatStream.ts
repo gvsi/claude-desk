@@ -66,13 +66,13 @@ function readEvent(name: string, data: string, onText: (text: string) => void): 
  */
 export async function askRuleChat(deskId: string, text: string, { onText, signal }: AskRuleChatOptions): Promise<RuleChatOut | RulesDraft> {
   const opts = { params: { desk_id: deskId }, body: { text } };
-  if (!canStream()) return request('ruleChat', opts);
+  if (!canStream()) return request('ruleChat', { ...opts, signal });
   try {
     const answered = await requestEvents('ruleChat', opts, { signal, onEvent: (name, data) => readEvent(name, data, onText) });
     return answered.value;
   } catch (err) {
     if (!(err instanceof StreamBroken)) throw err;
     onText('');
-    return request('ruleChat', opts);
+    return request('ruleChat', { ...opts, signal });
   }
 }
