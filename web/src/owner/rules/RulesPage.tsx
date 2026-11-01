@@ -31,7 +31,7 @@ import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
 import { BusinessJobs } from './BusinessJobs.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
-import { holdQuestion, hubSections, parseLimit, type HubSection } from './hub.ts';
+import { holdQuestion, hubSections, parseLimit } from './hub.ts';
 import { reducesMotion, takeLanding, useLanding, type Landing } from './landing.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
@@ -99,20 +99,16 @@ function withLanding(landed: Landed, landing: Landing): Landed {
 const ASK_CLAUDE_SHEET = '(max-width: 1023.98px)';
 
 /**
- * The first row `landing` changed, in the page's order (`sections`), within the connector list
- * `list`: the payment limit's line or a tool's row. Null when none is drawn.
+ * The first row `landing` changed, in the page's order, within `page`: a business job's card or a
+ * tool's row (each carries its landing as `data-landed`), or the payment limit's line. Null when
+ * none is drawn.
  */
-function firstLandedRow(list: Element, sections: readonly HubSection[], landing: Landing): HTMLElement | null {
-  const cards = list.querySelectorAll<HTMLElement>('.cd-connector-section');
-  for (const [index, section] of sections.entries()) {
-    const card = cards[index];
-    if (card === undefined) return null;
-    if (section.moneyLimit && landing.rows.moneyLimit) return card.querySelector<HTMLElement>('.cd-connector-section__above');
-    const changed: readonly string[] = landing.rows.tools;
-    const at = section.tools.findIndex((tool) => changed.includes(tool.key));
-    if (at !== -1) return card.querySelectorAll<HTMLElement>('.cd-connector-section__tool')[at] ?? null;
-  }
-  return null;
+function firstLandedRow(page: Element, landing: Landing): HTMLElement | null {
+  const rows = [...page.querySelectorAll<HTMLElement>(`[data-landed="${landing.id}"]`)];
+  const limit = landing.rows.moneyLimit ? page.querySelector<HTMLElement>('.cd-money-limit--updated') : null;
+  if (limit !== null) rows.push(limit);
+  rows.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  return rows[0] ?? null;
 }
 
 /** The nearest ancestor of `el` that scrolls, or none when the window does. */
@@ -222,12 +218,10 @@ export function RulesPage() {
   // frame in which a closing sheet gives focus back to what opened it, so that doesn't scroll the
   // page back. With nothing landed, the place stays. Once per landing, at the rules it landed on.
   const page = useRef<HTMLDivElement>(null);
-  const shown = rules.data;
   useEffect(() => {
-    if (toReveal === null || shown === undefined) return undefined;
+    if (toReveal === null) return undefined;
     const frame = requestAnimationFrame(() => {
-      const list = page.current?.querySelector('.cd-connector-list');
-      const row = list === null || list === undefined ? null : firstLandedRow(list, hubSections(shown, null), toReveal);
+      const row = page.current === null ? null : firstLandedRow(page.current, toReveal);
       if (row !== null) bringToMiddle(row);
     });
     return () => cancelAnimationFrame(frame);
@@ -318,7 +312,7 @@ export function RulesPage() {
     const sections = hubSections(rules.data, people.data ?? null);
     body = (
       <>
-        <BusinessJobs view={rules.data} people={people.data ?? null} />
+        <BusinessJobs view={rules.data} people={people.data ?? null} landed={landed.tools} />
         <ConnectorList summary={`Version ${active.version} of your rules, checked against the always-on rules`}>
           {sections.map((section) => {
             const editing = limit !== null && limit.group === section.connector.id ? limit : null;

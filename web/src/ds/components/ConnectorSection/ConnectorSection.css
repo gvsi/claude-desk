@@ -120,55 +120,8 @@
 }
 
 .cd-connector-section__tool:last-child .cd-connector-section__tool-link::after,
-.cd-connector-section__tool:last-child > .cd-connector-section__glow {
+.cd-connector-section__tool:last-child > .cd-landed-glow {
   border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px);
-}
-
-/* Where a confirmed change landed: the row lights up in the selected fill on motion-fast, holds
-   1.6 s (eight motion-base beats), then lets go on motion-base, behind its words. "Updated"
-   arrives with it, growing from 95% as it fades in on motion-base. Under reduced motion the row is
-   at its end state at once: "Updated", and no fill. */
-.cd-connector-section__glow {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  pointer-events: none;
-  animation:
-    cd-connector-section-light var(--motion-fast) var(--motion-ease) forwards,
-    cd-connector-section-let-go var(--motion-base) var(--motion-ease) calc(var(--motion-fast) + var(--motion-base) * 8) forwards;
-}
-
-@keyframes cd-connector-section-light {
-  from {
-    background-color: transparent;
-  }
-
-  to {
-    background-color: var(--bg-selected);
-  }
-}
-
-@keyframes cd-connector-section-let-go {
-  from {
-    background-color: var(--bg-selected);
-  }
-
-  to {
-    background-color: transparent;
-  }
-}
-
-.cd-connector-section__updated {
-  display: inline-flex;
-  flex: none;
-  animation: cd-connector-section-updated var(--motion-base) var(--motion-ease-emphasis) backwards;
-}
-
-@keyframes cd-connector-section-updated {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
 }
 
 .cd-connector-section__tool-link:focus-visible {
@@ -267,13 +220,5 @@
 @media (prefers-reduced-motion: reduce) {
   .cd-connector-section__chevron {
     transition: none;
-  }
-
-  .cd-connector-section__glow {
-    display: none;
-  }
-
-  .cd-connector-section__updated {
-    animation: none;
   }
 }

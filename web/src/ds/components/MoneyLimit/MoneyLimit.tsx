@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, type FormEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { CrossFade } from '../ConnectorSection/CrossFade.tsx';
-import { Pill } from '../Pill/Pill.tsx';
+import { UpdatedPill } from '../ConnectorSection/Landing.tsx';
 import { TextField } from '../TextField/TextField.tsx';
 
 import './MoneyLimit.css';
@@ -42,7 +42,7 @@ interface MoneyLimitEditable extends MoneyLimitLine {
   /**
    * The owner's confirmed change set this limit since they opened the page: the line carries
    * "Updated", and the words that changed cross-fade as it arrives. The screen keeps it until the
-   * owner leaves the page.
+   * owner leaves the page. The limit then carries `cd-money-limit--updated`, so a screen can find it.
    */
   updated?: boolean;
 }
@@ -90,7 +90,8 @@ export function MoneyLimit(props: MoneyLimitProps) {
     target?.focus();
   }, [editing]);
 
-  const className = `cd-money-limit${editing ? ' cd-money-limit--editing' : ''}${prominent ? ' cd-money-limit--prominent' : ''}`;
+  const updated = props.onEdit !== undefined && props.updated === true && !editing;
+  const className = `cd-money-limit${editing ? ' cd-money-limit--editing' : ''}${prominent ? ' cd-money-limit--prominent' : ''}${updated ? ' cd-money-limit--updated' : ''}`;
   if (props.onEdit === undefined) {
     return (
       <div ref={root} className={className}>
@@ -101,7 +102,7 @@ export function MoneyLimit(props: MoneyLimitProps) {
     );
   }
 
-  const { label = 'Most a payment can be without asking you, in dollars', value, hint, error, onEdit, onChange, onReview, onCancel, disabled = false, updated = false } = props;
+  const { label = 'Most a payment can be without asking you, in dollars', value, hint, error, onEdit, onChange, onReview, onCancel, disabled = false } = props;
   const review = (event?: FormEvent) => {
     event?.preventDefault();
     if (disabled) return;
@@ -128,11 +129,7 @@ export function MoneyLimit(props: MoneyLimitProps) {
         <div className="cd-money-limit__reading">
           <p id={lineId} className="cd-money-limit__line cd-type-body">
             <CrossFade text={line} fade={updated} byWord />
-            {updated ? (
-              <span className="cd-money-limit__updated">
-                <Pill>Updated</Pill>
-              </span>
-            ) : null}
+            {updated ? <UpdatedPill /> : null}
           </p>
           <Button variant="secondary" waiting={disabled} describedBy={lineId} onClick={() => onEdit()}>
             Change

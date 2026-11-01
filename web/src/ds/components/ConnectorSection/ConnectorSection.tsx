@@ -6,10 +6,10 @@ import { Card } from '../Card/Card.tsx';
 import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
 import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { OUTCOME_TONE, outcomePhrase, type RuleMode } from '../OutcomeMenu/outcomeWords.ts';
-import { Pill } from '../Pill/Pill.tsx';
 import { StatusLabel, type StatusTone } from '../StatusDot/StatusDot.tsx';
 import type { RulesLinkProps } from '../ToolRulesCard/ToolRulesCard.tsx';
 import { CrossFade } from './CrossFade.tsx';
+import { LandedGlow, UpdatedPill } from './Landing.tsx';
 
 import './ConnectorSection.css';
 
@@ -39,7 +39,8 @@ export interface ToolSummaryView {
    * The owner's confirmed change changed this tool's rules since they opened the page: the row
    * carries "Updated" after its name, its words cross-fade to the new ones, and it lights up in the
    * selected fill, holds, then lets go. The screen keeps it until the owner leaves the page. Each
-   * new value (the next change that changed it) lights the row up again.
+   * new value (the next change that changed it) lights the row up again. The row carries it as
+   * `data-landed`, so a screen can find where a landing's rows are.
    */
   landed?: number;
 }
@@ -120,9 +121,13 @@ export function ConnectorSection({ connector, href, tools, addedNote, aboveTools
               return (
                 // The tool's name is its link, and the link's overlay covers the row, so the whole row
                 // opens the tool while the link's own text stays its name's first words.
-                <li key={tool.key} className={`cd-connector-section__tool${linked ? '' : ' cd-connector-section__tool--plain'}`}>
+                <li
+                  key={tool.key}
+                  className={`cd-connector-section__tool${linked ? '' : ' cd-connector-section__tool--plain'}`}
+                  {...(landed ? { 'data-landed': tool.landed } : {})}
+                >
                   {/* The fill it lights up in, behind its words: drawn again for each change that lands on it. */}
-                  {landed ? <span key={`glow-${tool.landed}`} className="cd-connector-section__glow" aria-hidden="true" /> : null}
+                  {landed ? <LandedGlow key={`glow-${tool.landed}`} /> : null}
                   <span className="cd-connector-section__tool-head">
                     {tool.href === undefined ? (
                       <span className="cd-connector-section__tool-name cd-type-body">{tool.name}</span>
@@ -130,17 +135,13 @@ export function ConnectorSection({ connector, href, tools, addedNote, aboveTools
                       <Link
                         href={tool.href}
                         className="cd-connector-section__tool-name cd-connector-section__tool-link cd-type-body"
-                        aria-label={`${tool.name}: ${tool.summary}, ${outcome.words}. Open`}
+                        aria-label={`${tool.name}${landed ? ', updated' : ''}: ${tool.summary}, ${outcome.words}. Open`}
                         aria-describedby={descriptionId}
                       >
                         {tool.name}
                       </Link>
                     )}
-                    {landed ? (
-                      <span className="cd-connector-section__updated">
-                        <Pill>Updated</Pill>
-                      </span>
-                    ) : null}
+                    {landed ? <UpdatedPill /> : null}
                   </span>
                   <span id={descriptionId} className="cd-connector-section__tool-description cd-type-meta">
                     {tool.description}

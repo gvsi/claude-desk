@@ -46,12 +46,12 @@ it('a_landed_row_lights_up_holds_and_lets_go', async () => {
   const [find, book] = [...el.querySelectorAll<HTMLElement>('.cd-connector-section__tool')];
   if (!find || !book) throw new Error('Bookings has two rows');
   // Only the landed row lights up and says "Updated".
-  expect(find.querySelector('.cd-connector-section__glow')).toBeNull();
+  expect(find.querySelector('.cd-landed-glow')).toBeNull();
   expect(find.textContent).not.toContain('Updated');
-  const glow = book.querySelector<HTMLElement>('.cd-connector-section__glow');
+  const glow = book.querySelector<HTMLElement>('.cd-landed-glow');
   if (!glow) throw new Error('the landed row has its glow');
   expect(book.querySelector('.cd-pill')?.textContent).toBe('Updated');
-  expectComputed(book.querySelector('.cd-connector-section__updated') ?? book, { animationName: 'cd-connector-section-updated', animationDuration: '0.2s' });
+  expectComputed(book.querySelector('.cd-landed-updated') ?? book, { animationName: 'cd-landed-updated', animationDuration: '0.2s' });
   // Lit on motion-fast, held, then let go on motion-base: the fill is the selected one while held.
   const [light, letGo] = glow.getAnimations();
   if (!light || !letGo) throw new Error('the glow lights up and lets go');
@@ -90,17 +90,17 @@ it('a_row_that_isnt_landed_changes_its_words_at_once', async () => {
   draw(quotes);
   const el = draw(withTool(quotes, 'Quote', { summary: 'Anyone · No discounts · Weekdays, all day' }));
   expect(el.querySelector('.cd-cross-fade')).toBeNull();
-  expect(el.querySelector('.cd-connector-section__glow')).toBeNull();
+  expect(el.querySelector('.cd-landed-glow')).toBeNull();
   expect(el.querySelector('.cd-connector-section__tool-summary')?.textContent).toBe('Anyone · No discounts · Weekdays, all day');
 });
 
 it('a_later_change_lights_the_row_up_again', async () => {
   await motion();
   const draw = mount();
-  const first = draw(withTool(quotes, 'Quote', { landed: 1 })).querySelector('.cd-connector-section__glow');
-  const second = draw(withTool(quotes, 'Quote', { landed: 2 })).querySelector<HTMLElement>('.cd-connector-section__glow');
+  const first = draw(withTool(quotes, 'Quote', { landed: 1 })).querySelector('.cd-landed-glow');
+  const second = draw(withTool(quotes, 'Quote', { landed: 2 })).querySelector<HTMLElement>('.cd-landed-glow');
   expect(second).not.toBe(first);
-  expect(second?.getAnimations().map((a) => (a as CSSAnimation).animationName)).toEqual(['cd-connector-section-light', 'cd-connector-section-let-go']);
+  expect(second?.getAnimations().map((a) => (a as CSSAnimation).animationName)).toEqual(['cd-landed-light', 'cd-landed-let-go']);
 });
 
 it('a_landed_row_is_at_its_end_state_under_reduced_motion', () => {
@@ -109,8 +109,8 @@ it('a_landed_row_is_at_its_end_state_under_reduced_motion', () => {
   const el = draw(withTool(quotes, 'Quote', { summary: 'Anyone · No discounts · Weekdays, all day', landed: 1 }));
   // "Updated" at once, no fill, and only the new words.
   expect(el.querySelector('.cd-pill')?.textContent).toBe('Updated');
-  expectComputed(el.querySelector('.cd-connector-section__updated') ?? el, { animationName: 'none' });
-  expectComputed(el.querySelector('.cd-connector-section__glow') ?? el, { display: 'none' });
+  expectComputed(el.querySelector('.cd-landed-updated') ?? el, { animationName: 'none' });
+  expectComputed(el.querySelector('.cd-landed-glow') ?? el, { display: 'none' });
   expect(el.querySelector('.cd-cross-fade')).toBeNull();
   expect(el.querySelector('.cd-connector-section__tool-summary')?.textContent).toBe('Anyone · No discounts · Weekdays, all day');
   expect(document.getAnimations().filter((a) => el.contains((a.effect as KeyframeEffect | null)?.target ?? null))).toEqual([]);

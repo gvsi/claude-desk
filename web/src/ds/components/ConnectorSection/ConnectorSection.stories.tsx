@@ -315,9 +315,10 @@ export const Landed: Story = {
     await expect(Math.round(gap)).toBe(8);
     const middle = (el: Element) => (el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2;
     await expect(Math.abs(middle(pill) - middle(name))).toBeLessThan(1);
-    // The link's name keeps the words it shows, and the row its new words.
-    await expect(canvas.getByRole('link', { name: 'Quote: Anyone · No discounts · Weekdays, all day, Automatic. Open' })).toBeVisible();
-    const glow = row.querySelector<HTMLElement>('.cd-connector-section__glow');
+    // The link's name starts with the words it shows, says the row was updated, and has its new words.
+    await expect(canvas.getByRole('link', { name: 'Quote, updated: Anyone · No discounts · Weekdays, all day, Automatic. Open' })).toBeVisible();
+    await expect(row).toHaveAttribute('data-landed', '1');
+    const glow = row.querySelector<HTMLElement>('.cd-landed-glow');
     if (!glow) throw new Error('no glow behind the landed row');
     await expect(glow).toHaveAttribute('aria-hidden', 'true');
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -328,7 +329,7 @@ export const Landed: Story = {
     }
     // Lit in the selected fill behind its words, on motion-fast, then let go on motion-base after a 1.6 s hold.
     expectComputed(glow, {
-      animationName: 'cd-connector-section-light, cd-connector-section-let-go',
+      animationName: 'cd-landed-light, cd-landed-let-go',
       animationDuration: '0.12s, 0.2s',
       animationDelay: '0s, 1.72s',
     });

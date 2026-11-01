@@ -14,6 +14,7 @@ import type { RuleCard } from '../../api/contracts.ts';
 import { apiPath, ROUTES } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { worker } from '../../mocks/browser.ts';
+import { chenBusinessTools, seedBusinessTools } from '../../mocks/businessTools.ts';
 import { businessOut } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -87,7 +88,7 @@ function toolRow(root: HTMLElement, name: string): HTMLElement {
 
 /** The fill a row is lit with now: its glow's, or none when it has no glow. */
 function fillOf(row: HTMLElement): string {
-  const glow = row.querySelector('.cd-connector-section__glow');
+  const glow = row.querySelector('.cd-landed-glow');
   return glow === null ? 'none' : getComputedStyle(glow).backgroundColor;
 }
 
@@ -247,7 +248,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Anyone · No discounts · Weekdays, all day');
     expect([...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].filter(saysUpdated)).toEqual([]);
-    expect(root.querySelectorAll('.cd-connector-section__glow')).toHaveLength(0);
+    expect(root.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
   });
 
   it('a_row_out_of_view_scrolls_to_the_middle', async () => {
@@ -307,7 +308,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     const rows = [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__tool')];
     expect(rows.length).toBeGreaterThan(5);
     expect(rows.filter(saysUpdated)).toEqual([]);
-    expect(screen.container.querySelectorAll('.cd-connector-section__glow')).toHaveLength(0);
+    expect(screen.container.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
     await expect.element(screen.getByText('Version 7 of your rules, checked against the always-on rules', { exact: true })).toBeVisible();
     expect(desk().policy.version).toBe(7);
   });
@@ -523,7 +524,7 @@ describe('under reduced motion', () => {
     const quote = toolRow(root, 'Quote');
     expect(wordsOf(quote)).toBe('Anyone · No discounts · Weekdays, all day');
     expect(quote.querySelector('.cd-cross-fade')).toBeNull();
-    const glow = quote.querySelector('.cd-connector-section__glow');
+    const glow = quote.querySelector('.cd-landed-glow');
     expect(glow === null || getComputedStyle(glow).display === 'none').toBe(true);
     // Brought into view with no scroll animation: where it is now, it stays.
     await expect.poll(() => inView(toolRow(root, 'Quote'), main)).toBe(true);
@@ -595,7 +596,7 @@ describe('on a phone', () => {
     await expect.poll(() => wordsOf(toolRow(root, 'Refund'))).not.toBe('');
     await pause(500);
     expect(updatedRows(root)).toEqual([]);
-    expect(root.querySelectorAll('.cd-connector-section__glow')).toHaveLength(0);
+    expect(root.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
   });
 
   it('the_sheet_shows_the_receipt_and_closing_it_brings_rules_to_the_row', async () => {
@@ -630,3 +631,64 @@ describe('on a phone', () => {
     expect(main.scrollTop).toBeGreaterThan(0);
   });
 });
+
+describe("the business's own jobs", () => {
+  /** New clients answer three questions before they book, on their own: one of Chen & Co.'s jobs. */
+  const INTAKE: RuleCard = {
+    card_id: 'intake-auto',
+    applies_to: 'desk.new-client-intake',
+    mode: 'auto',
+    who: 'anyone',
+    person_id: null,
+    agent_key_id: null,
+    max_amount_cents: null,
+    max_discount_bp: 0,
+    hours: null,
+    review: false,
+    is_default: false,
+    reason: 'New clients answer three questions before they book.',
+  };
+  const INTAKE_ASKS: RuleCard = { ...INTAKE, mode: 'ask', reason: 'New clients answer three questions, then wait for your answer.' };
+  const INTAKE_ASKS_ANSWER = "Here's that change: new client intake waits for your answer.";
+
+  /** The main Desk as Chen & Co. CPA, with its two jobs on and the intake rule its only rule. */
+  function seedJobs(): void {
+    desk().summary.business_name = 'Chen & Co. CPA';
+    seedBusinessTools(desk(), chenBusinessTools.map((row) => ({ ...row, status: 'enabled', review_reason: null })));
+    desk().policy = { ...desk().policy, cards: [INTAKE] };
+  }
+
+  /** The card of the job named `name` on Rules. */
+  function jobCard(root: HTMLElement, name: string): HTMLElement {
+    const card = [...root.querySelectorAll<HTMLElement>('[aria-label="Your Desk’s jobs"] section')].find((el) => el.getAttribute('aria-label') === name);
+    if (!card) throw new Error(`no ${name} job on Rules`);
+    return card;
+  }
+
+  it('a_change_to_a_job_lands_on_its_card', async () => {
+    seedJobs();
+    answerWith(INTAKE_ASKS, INTAKE_ASKS_ANSWER);
+    const { screen, log } = await askForTheWeekdayChange({}, 'Make new client intake ask me first');
+    await expect.element(log.getByText(INTAKE_ASKS_ANSWER, { exact: true })).toBeVisible();
+    const root = screen.container;
+    // Rules scrolled to its end, the jobs at its top out of view.
+    const main = screen.getByRole('main').element();
+    main.scrollTop = main.scrollHeight;
+    await expect.poll(() => inView(jobCard(root, 'New client intake'), main)).toBe(false);
+    const version = desk().lastVersion;
+    await log.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+
+    // The intake card comes into view, lit, with "Updated" by its title and its new words.
+    const intake = () => jobCard(root, 'New client intake');
+    await expect.poll(() => intake().querySelector('.cd-tool-rules__tool .cd-pill')?.textContent).toBe('Updated');
+    await expect.poll(() => fillOf(intake())).toBe(SELECTED);
+    await expect.poll(() => inView(intake(), main)).toBe(true);
+    await expect.poll(() => intake().querySelector('.cd-rule-row__reason')?.textContent).toBe(INTAKE_ASKS.reason);
+    // The other job carries neither.
+    const booking = jobCard(root, 'Book a free intro call');
+    expect(booking.querySelector('.cd-pill')).toBeNull();
+    expect(fillOf(booking)).toBe('none');
+  });
+});
+

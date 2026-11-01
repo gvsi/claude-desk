@@ -57,7 +57,7 @@ it('an_updated_limit_says_so_and_cross_fades_its_amount', async () => {
   expect(line.querySelector('.cd-cross-fade__now')?.textContent).toBe('$600');
   const pill = line.querySelector<HTMLElement>('.cd-pill');
   expect(pill?.textContent).toBe('Updated');
-  expectComputed(pill?.parentElement ?? line, { animationName: 'cd-money-limit-updated', animationDuration: '0.2s', marginLeft: '8px' });
+  expectComputed(pill?.parentElement ?? line, { animationName: 'cd-landed-updated', animationDuration: '0.2s', marginLeft: '8px' });
   await Promise.all(line.getAnimations({ subtree: true }).map((a) => a.finished));
   await expect.poll(() => line.querySelector('.cd-cross-fade')).toBeNull();
   expect(line.textContent).toBe(`${lineAt('$600')}Updated`);
