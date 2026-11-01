@@ -431,3 +431,21 @@
   clauses: [{template: handoff}, {template: quote, fact: own-quote}]
   final: true
   expect: {ok: false, violations: [number_in_prose], blocks: [quote, handoff]}
+
+# A visitor asks to pay the service call deposit: the quote and its payment link pass their clause
+# checks, and the soft check flags both drafts. The final check keeps both cards, so the visitor can
+# still pay (a live report: the handoff used to replace them).
+- id: c-deposit-soft-flag-first
+  requires: [01c]
+  prose: "Here's the quote for the service call deposit, and a link to pay it."
+  clauses: [{template: quote, fact: own-quote}, {template: payment_link, fact: own-payment-link}]
+  soft_promise: flag
+  expect: {ok: false, violations: [soft_promise]}
+
+- id: c-deposit-soft-flag-final
+  requires: [01c]
+  prose: "Here's the quote for the service call deposit, and a link to pay it."
+  clauses: [{template: quote, fact: own-quote}, {template: payment_link, fact: own-payment-link}]
+  soft_promise: flag
+  final: true
+  expect: {ok: false, violations: [soft_promise], blocks: [quote, payment_link]}
