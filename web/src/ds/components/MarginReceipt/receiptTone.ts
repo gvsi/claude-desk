@@ -1,7 +1,7 @@
 import type { DecisionState, EvMessage, StatusEvent } from '../../../api/contracts.ts';
 import type { StatusTone } from '../StatusDot/StatusDot.tsx';
 
-/** What a receipt reports on: a reply's check (`handoff` when it was blocked), or an action's decision. */
+/** What a receipt reports on: a reply's check (`handoff` when it shows the handoff clause), or an action's decision. */
 export type ReceiptSource = { kind: 'reply'; handoff: boolean } | { kind: 'decision'; state: DecisionState };
 
 /** Each decision state's dot. A state missing here is a compile error. */
@@ -20,9 +20,10 @@ const DECISION_TONES = {
 } as const satisfies Record<DecisionState, StatusTone>;
 
 /**
- * The receipt's status dot. A reply is handled only when it passed its check (`handoff: false`);
- * a blocked draft goes to the owner, so it waits like a hold. A state this build doesn't know
- * reads as held, never as handled.
+ * The receipt's status dot. A reply is handled when it shows no handoff clause (`handoff: false`),
+ * the checked cards kept from a draft whose prose failed included; a reply that shows the handoff
+ * clause goes to the owner, so it waits like a hold. A state this build doesn't know reads as
+ * held, never as handled.
  */
 export function receiptTone(source: ReceiptSource): StatusTone {
   if (source.kind === 'reply') return source.handoff === false ? 'handled' : 'held';

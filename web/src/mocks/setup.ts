@@ -36,6 +36,7 @@ import type {
 import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { formatHours } from '../lib/format.ts';
+import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { appendBusinessTools } from './businessTools.ts';
 import type { Language } from './script.ts';
@@ -1044,6 +1045,11 @@ function connectPayments(desk: DeskRecord): void {
   }
 }
 
+/** How Claude's first words thank the owner: by the name they gave, if any, with one stop after it ("Bob Smith Jr."). */
+export function thanksTo(ownerName: string | null): string {
+  return ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}${afterName(ownerName, '.')}`;
+}
+
 /** A new interview and its Desk, made with Answering off from the owner's description. */
 function newInterview(world: MockWorld, text: string, timezone: string): Interview {
   const business = businessNameOf(text);
@@ -1060,7 +1066,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     suggestions: [],
   };
   world.desks.push(desk);
-  const greeting = ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}.`;
+  const greeting = thanksTo(ownerName);
   const interview: Interview = {
     consultant: CPA_FIRM.test(text),
     words: situationWordsOf(text),

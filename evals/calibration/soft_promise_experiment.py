@@ -82,7 +82,7 @@ def wire_request(prompt: str, data: BaseModel, arm: str = "new") -> dict:
             "messages": [{"role": "user", "content": sp.request_message(data)}],
             "thinking": {"type": "adaptive" if arm == "sonnet" else "disabled"},
             "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": d.SOFT_PROMISE_SCHEMA}},
-            "timeout": 6.0 if arm == "sonnet" else sp.HAIKU_TIMEOUT_S}
+            "timeout": d.SOFT_PROMISE_TIMEOUT_S if arm == "sonnet" else sp.HAIKU_TIMEOUT_S}
 
 
 def acceptance(new: sp.RunResult) -> dict:

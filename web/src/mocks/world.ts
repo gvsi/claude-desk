@@ -39,6 +39,7 @@ import type {
 } from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
+import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -339,6 +340,16 @@ export class MockWorld {
   /** The owner's display name on the session's Desk: its own, or Rivera's on a seeded Desk. */
   ownerNameOf(session: SessionRecord): string {
     return this.deskOf(session).ownerName ?? BUSINESS.owner_display_name;
+  }
+
+  /**
+   * Whom the session's Desk hands a visitor to on its handoff card: its owner, by display name, or
+   * the business when the owner gave no name and the Desk carries setup's fallback, "Owner", which
+   * is no one's name and which the public page never shows (`brandFrom`).
+   */
+  handoffNameOf(session: SessionRecord): string {
+    const owner = this.ownerNameOf(session);
+    return owner === OWNER_NAME_FALLBACK ? this.deskOf(session).summary.business_name : owner;
   }
 
   sessionsOf(deskId: string): SessionRecord[] {
@@ -838,15 +849,17 @@ export class MockWorld {
   }
 
   /**
-   * A reply of Claude's, checked and recorded. One that shows the handoff card opens the owner's
-   * handoff first, as the kernel's check does (`openCardHandoff`), except in history the seed or a
-   * test writes: the kernel's seed holds its request without checking a reply.
+   * A reply of Claude's, checked and recorded. Outside the owner's preview, one that shows the
+   * handoff card opens the owner's handoff first, as the kernel's check does (`openCardHandoff`),
+   * except in history the seed or a test writes: the kernel's seed holds its request without
+   * checking a reply.
    */
   reply(session: SessionRecord, blocks: RenderedBlock[], language: Language, opts: { blocked?: boolean; paused?: boolean } = {}): EvMessage {
     const paused = opts.paused ?? false;
     const blocked = paused || (opts.blocked ?? false);
+    const handoff = blocks.some((block) => block.template === 'handoff');
     const messageId = this.id('msg');
-    if (this.replaying === 0 && blocks.some((block) => block.template === 'handoff')) this.openCardHandoff(session);
+    if (this.replaying === 0 && handoff && !session.ownerPreview) this.openCardHandoff(session);
     const checked = this.appendLedger(this.deskOf(session), {
       kind: 'reply',
       origin: 'kernel',
@@ -860,9 +873,9 @@ export class MockWorld {
       generation: session.state.generation,
       author: 'claude',
       language,
-      handoff: blocked,
+      handoff,
       blocks: blocks.map((block) => ({ ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] })),
-      visitor_plain: VISITOR_PLAIN[language][blocked ? 'reply_handed_off' : 'reply_checked'],
+      visitor_plain: VISITOR_PLAIN[language][handoff ? 'reply_handed_off' : 'reply_checked'],
       ledger_seq: checked.seq,
       signature: sign(messageId),
     };
@@ -870,11 +883,16 @@ export class MockWorld {
 
   /** The step context for one turn of `session`, in `language`. */
   context(session: SessionRecord, language: Language, text: string): TurnContext {
+    // Looked up only when a step hands off, so making a context still never reads the Desk.
+    const handoffName = () => this.handoffNameOf(session);
     return {
       language,
       text,
       get person() {
         return session.person;
+      },
+      get handoffName() {
+        return handoffName();
       },
       decide: (spec) => this.decide(session, spec, language),
       status: (type, decision) => statusEvent(type, decision),
