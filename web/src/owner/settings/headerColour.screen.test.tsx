@@ -185,6 +185,75 @@ it('keeps an unconfirmed pick when the save response and reread both fail', asyn
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
 });
 
+it('retries the selected unconfirmed colour without duplicating an in-flight save', async () => {
+  const { screen } = await renderRoute(GENERAL, { retryScale: 0 });
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  const clay = group.getByRole('radio', { name: 'Clay', exact: true });
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  mockStore.inject({ route: 'setBusiness', status: 'network' });
+  let connected = false;
+  worker.use(http.get(ROUTES.desks.path, () => connected ? undefined : HttpResponse.error()));
+  await clay.click();
+  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await expect.element(card.getByRole('alert')).toHaveTextContent("We couldn't reach Claude Desk. Check your connection, then try again.");
+  await expect.element(clay).toHaveAttribute('aria-checked', 'true');
+
+  connected = true;
+  let release!: () => void;
+  const until = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(() => release());
+  worker.use(http.put(ROUTES.setBusiness.path.replace('{desk_id}', ':desk_id'), async () => {
+    await until;
+    return undefined;
+  }));
+  await clay.click();
+  await expect.element(group).toHaveAttribute('aria-busy', 'true');
+  await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
+  // Bypass aria-disabled to exercise the in-flight guard on the selected swatch itself.
+  (clay.element() as HTMLButtonElement).click();
+  release();
+  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await expect.element(clay).toHaveAttribute('aria-checked', 'true');
+  expect(mockStore.requests.filter(({ key }) => key === 'setBusiness')).toHaveLength(2);
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
+});
+
+it('settles an unconfirmed pick after refocus reads the unchanged server colour and lets Clay retry', async () => {
+  const { screen } = await renderRoute(GENERAL, { retryScale: 0 });
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  const teal = group.getByRole('radio', { name: 'Teal', exact: true });
+  const clay = group.getByRole('radio', { name: 'Clay', exact: true });
+  await expect.element(teal).toHaveAttribute('aria-checked', 'true');
+  mockStore.inject({ route: 'setBusiness', status: 'network' });
+  let connected = false;
+  let failedReads = 0;
+  worker.use(http.get(ROUTES.desks.path, () => {
+    if (connected) return undefined;
+    failedReads += 1;
+    return HttpResponse.error();
+  }));
+  await clay.click();
+  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await expect.element(card.getByRole('alert')).toHaveTextContent("We couldn't reach Claude Desk. Check your connection, then try again.");
+  await expect.element(clay).toHaveAttribute('aria-checked', 'true');
+  expect(failedReads).toBe(4); // Both readbacks, each with the query's one retry.
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'teal' });
+
+  const reads = mockStore.requests.filter(({ key }) => key === 'desks').length;
+  connected = true;
+  document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+  await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'desks').length).toBeGreaterThan(reads);
+  await expect.element(teal).toHaveAttribute('aria-checked', 'true');
+  await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
+  await clay.click();
+  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await expect.element(clay).toHaveAttribute('aria-checked', 'true');
+  expect(mockStore.requests.filter(({ key }) => key === 'setBusiness')).toHaveLength(2);
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
+});
+
 
 it('keeps the server pick when an earlier response returns after leaving and coming back', async () => {
   const { screen, router } = await renderRoute(GENERAL);

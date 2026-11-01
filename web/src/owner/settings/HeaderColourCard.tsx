@@ -7,11 +7,12 @@ import type { BusinessOut, DeskSummary } from '../../api/views.ts';
 import { Card, Notice } from '../../ds/index.ts';
 import { brandFrom } from '../../public/brand.ts';
 import { PALETTE_KEYS, PALETTE_NAMES, paletteBrand, paletteKey } from '../../public/palette.ts';
-import { DESKS_KEY, desksQuery } from '../useDesks.ts';
+import { DESKS_KEY, desksQuery, useDesks } from '../useDesks.ts';
 
 /** The signed SET-02 card: a palette pick saves on tap and previews before the answer arrives. */
 export function HeaderColourCard({ business, desk }: { business: BusinessOut; desk: DeskSummary }) {
   const queryClient = useQueryClient();
+  const { dataUpdatedAt, status } = useDesks(desk.desk_id, { passive: true });
   const titleId = useId();
   const captionId = useId();
   const [optimistic, setOptimistic] = useState<BrandPalette | null>(null);
@@ -59,16 +60,17 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
   useEffect(() => {
     // Keep the preview through the write and its readback. If both reads failed, keep it until
     // a later successful read (or leaving the page) settles the unconfirmed choice.
-    if (save.isPending || queryClient.getQueryState(DESKS_KEY)?.status !== 'success') return;
+    // The read timestamp changes even when structural sharing preserves the business object.
+    if (save.isPending || status !== 'success') return;
     setOptimistic(null);
     if (unconfirmed.current) {
       setFailure(null);
       unconfirmed.current = false;
     }
-  }, [business, save.isPending, queryClient]);
+  }, [dataUpdatedAt, status, save.isPending]);
 
   function pick(palette: BrandPalette) {
-    if (saving.current || palette === selected) return;
+    if (saving.current || (palette === selected && !unconfirmed.current)) return;
     saving.current = true;
     unconfirmed.current = false;
     setFailure(null);
