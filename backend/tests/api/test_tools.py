@@ -716,7 +716,8 @@ async def test_reply_blocked_once_then_the_offer_or_the_handoff(api_conn, caller
         assert not message.handoff and [block.template for block in message.blocks] == [None]
         assert message.blocks[0].text == "Would you like me to arrange a callback?"
         assert (second.result, second.is_error, second.delivered) == (
-            {"outcome": "delivered", "message_id": message.message_id, "prose_shown": False}, False, "reply")
+            {"outcome": "delivered", "message_id": message.message_id, "prose_shown": False,
+             "shown_instead": "Would you like me to arrange a callback?"}, False, "reply")
         assert fake.handoffs == {}
     else:
         assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
