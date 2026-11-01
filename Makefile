@@ -33,7 +33,7 @@ kernel-contract:
 # It reaches the kernel at KERNEL_URL (default http://127.0.0.1:8701): run `make kernel-serve` beside it.
 # No access log, as in the deploy: a request path can carry a single-use token (/api/d/..., /api/pay/...).
 api-serve:
-	cd backend && uv run --env-file ../.env uvicorn --factory desk.api.main:app_factory \
+	cd backend && uv run --env-file ../.env env -u TYPESAFE_API_KEY -u MOCKPAY_KEY uvicorn --factory desk.api.main:app_factory \
 		--host 127.0.0.1 --port 8700 --timeout-keep-alive 310 --no-access-log
 
 # Prove the Rivera seed's cards and the starter presets with desk-prove and write their reports to

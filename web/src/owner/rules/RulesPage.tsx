@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, RulesPreset, Suggestion } from '../../api/views.ts';
@@ -49,11 +49,24 @@ export const RULES_TITLE = 'Rules';
  */
 const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
 
-// A slow hold-question read must not keep already-read rules hidden for more than three seconds.
+// The optional reads share one deadline, starting when the rules read settles.
 const NEEDS_YOU_FIRST_LOAD_WAIT_MS = 3_000;
 
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
 const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
+
+/** RulesPage.css hides the chips below 640 px, so their read cannot move a phone's sections. */
+const CHIPS_HIDDEN = '(max-width: 639.98px)';
+
+function subscribeChipsHidden(onChange: () => void): () => void {
+  const query = window.matchMedia(CHIPS_HIDDEN);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function chipsHidden(): boolean {
+  return window.matchMedia(CHIPS_HIDDEN).matches;
+}
 
 const draftPath = (deskId: string, version: number) => `${deskPath(deskId)}/rules/drafts/${version}`;
 
@@ -85,11 +98,12 @@ interface LimitField {
  * Payments and Stripe; the always-on rules. Every change opens its proved review first.
  */
 export function RulesPage() {
-  const { desk } = useOwnerDesk();
+  const { desk, reachPlace } = useOwnerDesk();
   useDocumentTitle(inApp(RULES_TITLE));
   const deskId = desk.desk_id;
   const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? RULES_CHIPS : [];
   const navigate = useNavigate();
+  const location = useLocation();
   const { ask } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
   const people = useQuery(peopleQuery(deskId));
@@ -99,19 +113,29 @@ export function RulesPage() {
   // worked and none waiting for the network, so a hold answered or expired since never shows. The
   // page reads it as it opens, so the question doesn't wait for the first poll.
   const needsYou = useNeedsYou(deskId, { readOnOpen: true });
-  // Open once this visit's read settles, pauses offline, or takes too long after rules arrive.
-  // Later reads must not put the body back on its loading line.
-  const [needsYouWaitEnded, setNeedsYouWaitEnded] = useState(false);
-  const firstNeedsYouReady = needsYouWaitEnded || needsYou.isFetchedAfterMount || needsYou.isPaused;
-  if (firstNeedsYouReady && !needsYouWaitEnded) setNeedsYouWaitEnded(true);
-  const waitingForNeedsYou = fixedChips.length === 0 && !firstNeedsYouReady;
+  const hidesChips = useSyncExternalStore(subscribeChipsHidden, chipsHidden, () => false);
+  const waitingForNeedsYou = !hidesChips && fixedChips.length === 0 && !needsYou.isFetchedAfterMount && !needsYou.isPaused;
+  // Suggested cards move the connectors at every width, so they join the same opening wait.
+  const waitingForSuggestions = suggestions.data === undefined && !suggestions.isError && !suggestions.isPaused;
+  const [openingWaitEnded, setOpeningWaitEnded] = useState(false);
+  const [openingWaitExpired, setOpeningWaitExpired] = useState(false);
+  const [skipHoldQuestion, setSkipHoldQuestion] = useState(false);
+  const [skipSuggestions, setSkipSuggestions] = useState(false);
+  const firstReadsReady = openingWaitEnded || openingWaitExpired || (!waitingForNeedsYou && !waitingForSuggestions);
+  if (firstReadsReady && !openingWaitEnded) {
+    setOpeningWaitEnded(true);
+    // Optional content still unknown at the cap waits for the next visit, keeping sections still.
+    if (waitingForNeedsYou) setSkipHoldQuestion(true);
+    if (waitingForSuggestions) setSkipSuggestions(true);
+  }
+  const waitingForOpening = !firstReadsReady;
   useEffect(() => {
-    if (!rules.isFetched || !waitingForNeedsYou) return;
-    const timer = window.setTimeout(() => setNeedsYouWaitEnded(true), NEEDS_YOU_FIRST_LOAD_WAIT_MS);
+    if (!rules.isFetched || !waitingForOpening) return;
+    const timer = window.setTimeout(() => setOpeningWaitExpired(true), NEEDS_YOU_FIRST_LOAD_WAIT_MS);
     return () => window.clearTimeout(timer);
-  }, [rules.isFetched, waitingForNeedsYou]);
+  }, [rules.isFetched, waitingForOpening]);
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
-  const question = current ? holdQuestion(needsYou.data ?? []) : null;
+  const question = current && !skipHoldQuestion ? holdQuestion(needsYou.data ?? []) : null;
   const failure = useReadFailure(rules);
   const peopleFailure = useReadFailure(people, { pausedRoute: 'people' });
   const suggestionsFailure = useReadFailure(suggestions, { pausedRoute: 'suggestions' });
@@ -120,7 +144,17 @@ export function RulesPage() {
   const [limit, setLimit] = useState<LimitField | null>(null);
 
   const active = rules.data?.active;
-  const chips = question === null || (fixedChips.length === 0 && !rules.isFetched) ? fixedChips : [...fixedChips, question];
+  // Suggestions use the capped optional wait above; they must not keep this region busy after it expires.
+  const settled = [rules, people].every((read) => read.isFetched || read.isPaused);
+  const [firstReadsEnded, setFirstReadsEnded] = useState(settled);
+  if (settled && !firstReadsEnded) setFirstReadsEnded(true);
+  const loading = (!settled && !firstReadsEnded) || waitingForOpening;
+  const drawn = !loading && active !== undefined;
+  // Back and "Keep my rules" may return while the gate leaves the page too short to restore.
+  useLayoutEffect(() => {
+    if (drawn) reachPlace(location.key);
+  }, [drawn, reachPlace, location.key]);
+  const chips = question === null || (fixedChips.length === 0 && (!rules.isFetched || waitingForOpening)) ? fixedChips : [...fixedChips, question];
 
   /** Opens a card draft's review, with what it was drafted from. */
   const review = (draft: RulesDraft, from: PolicyVersionOut, extra: { preset?: RulesPreset; title?: string } = {}) => {
@@ -166,13 +200,10 @@ export function RulesPage() {
     }
   };
 
-  const settled = [rules, people, suggestions].every((read) => read.isFetched || read.isPaused);
-  const [firstReadsEnded, setFirstReadsEnded] = useState(settled);
-  if (settled && !firstReadsEnded) setFirstReadsEnded(true);
-  const loading = (!settled && !firstReadsEnded) || waitingForNeedsYou;
-  let body;
+  // A Rules error belongs to its read, regardless of whether the rows above it are ready.
+  let readError = null;
   if (rules.data === undefined && rules.isError) {
-    body = (
+    readError = (
       <Notice
         tone="error"
         action={
@@ -184,25 +215,31 @@ export function RulesPage() {
         {ownerErrorCopy(rules.error)}
       </Notice>
     );
-  } else if (rules.data === undefined || active === undefined || waitingForNeedsYou) {
+  } else if (failure !== null) {
+    readError = (
+      <Notice
+        tone="error"
+        action={
+          <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
+            Try again
+          </Button>
+        }
+      >
+        {failure.line}
+      </Notice>
+    );
+  }
+
+  let body;
+  if (rules.data === undefined && rules.isError) {
+    body = null;
+  } else if (waitingForOpening || rules.data === undefined || active === undefined) {
     body = null;
   } else {
     const cap = capOf(active);
     const sections = hubSections(rules.data, people.data ?? null);
     body = (
       <>
-        {failure === null ? null : (
-          <Notice
-            tone="error"
-            action={
-              <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-                Try again
-              </Button>
-            }
-          >
-            {failure.line}
-          </Notice>
-        )}
         <BusinessJobs view={rules.data} people={people.data ?? null} />
         <ConnectorList summary={`Version ${active.version} of your rules, checked against the always-on rules`}>
           {sections.map((section) => {
@@ -266,13 +303,14 @@ export function RulesPage() {
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
         {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />}
       </div>
+      {readError}
       <SkeletonScreen loading={loading} status="Reading your rules" skeleton={<RulesSkeleton withHeader={false} />} className="cd-rules__region">
-        {active === undefined || waitingForNeedsYou ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
+        {active === undefined || waitingForOpening || skipSuggestions ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
         {[peopleFailure, suggestionsFailure].map((failed, i) => failed === null ? null : (
           <Notice key={i} tone="error" action={<Button variant="secondary" busy={failed.retrying} onClick={failed.retry}>Try again</Button>}>{failed.line}</Notice>
         ))}
         {body}
-        <AlwaysOnList />
+        {waitingForOpening ? null : <AlwaysOnList />}
       </SkeletonScreen>
     </div>
   );

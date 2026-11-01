@@ -959,6 +959,96 @@ export const OwnerInChatEs: Story = {
   },
 };
 
+// No owner name: the owner gave none in setup (issue #335).
+
+/**
+ * The chat head's words for a Desk whose owner gave no name: the shell's own, with no name in
+ * them, in the owner's approved words.
+ */
+const NO_NAME = {
+  en: {
+    disclosure: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for a person anytime.",
+    ask: 'Ask for a person',
+    ownerInChat: 'The business owner is in this chat. Claude, an AI, is paused until they hand it back.',
+  },
+  es: {
+    disclosure: 'Estás hablando con Claude, una IA que responde por Rivera Plumbing. Puedes pedir hablar con una persona cuando quieras.',
+    ask: 'Pedir hablar con una persona',
+    ownerInChat: 'El dueño del negocio está en este chat. Claude, una IA, está en pausa hasta que le devuelva el chat.',
+  },
+};
+
+const noNameNote =
+  'No board draws this yet: N-Public-Rivera-Run1 for a Desk whose owner gave no name in setup, so the page has no one to name. The disclosure and Ask say "a person" instead, and the owner-in-chat line names no one, in the owner’s approved words (issue #335).';
+
+/**
+ * no_owner_name_asks_for_a_person: the disclosure and Ask say "a person", in the shell's own words:
+ * the business's name is the only name marked as written by someone, and Ask is one run of text.
+ */
+async function expectAskForAPerson(main: HTMLElement, language: 'en' | 'es'): Promise<HTMLElement> {
+  const line = lineReading(main, NO_NAME[language].disclosure);
+  await expect(line).toBeVisible();
+  await expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual(['Rivera Plumbing']);
+  const ask = within(main).getByRole('button', { name: NO_NAME[language].ask });
+  await expect([...ask.childNodes].map((node) => node.textContent)).toEqual([NO_NAME[language].ask]);
+  await expect(ask.querySelector('[data-copy="user"]')).toBeNull();
+  await expect(main.querySelector('.cd-public-shell__chat-head')).not.toHaveTextContent(/Owner|Maria/);
+  return ask;
+}
+
+/**
+ * no_owner_name_in_chat_line: the head's line while the owner is in the chat names no one, still
+ * names Claude as an AI, on the disclosure's own line and in its type, and there is no Ask.
+ */
+async function expectNoNameOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Promise<void> {
+  const head = root.querySelector<HTMLElement>('.cd-public-shell__chat-head');
+  if (!head) throw new Error('no chat head');
+  const line = lineReading(head, NO_NAME[language].ownerInChat);
+  await expect(line).toHaveClass('cd-public-shell__disclosure', 'cd-type-meta');
+  await expect(line.querySelector('[data-copy="user"]')).toBeNull();
+  await expect(root).not.toHaveTextContent(NO_NAME[language].disclosure);
+  await expect(head.querySelectorAll('button')).toHaveLength(0);
+}
+
+export const NoOwnerName: Story = {
+  args: { ownerName: null },
+  parameters: { canvas: 'none', canvasNote: noNameNote },
+  play: async ({ args, canvas, userEvent }) => {
+    const ask = await expectAskForAPerson(canvas.getByRole('main'), 'en');
+    await userEvent.click(ask);
+    await expect(args.onAskForOwner).toHaveBeenCalledTimes(1);
+  },
+};
+
+export const NoOwnerNameEs: Story = {
+  args: { ...spanish, ownerName: null },
+  parameters: { canvas: 'none', canvasNote: `${noNameNote} In Spanish, as a visitor whose browser asks for it reads it.` },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'es');
+    const ask = await expectAskForAPerson(canvas.getByRole('main'), 'es');
+    await userEvent.click(ask);
+    await expect(args.onAskForOwner).toHaveBeenCalledTimes(1);
+    await expect(canvasElement).not.toHaveTextContent(/Ask for|anytime/);
+  },
+};
+
+export const NoOwnerNameOwnerInChat: Story = {
+  args: { ownerName: null, ownerInChat: true, openStatus: OPEN_EN },
+  parameters: { canvas: 'none', canvasNote: `${noNameNote} Here the owner has taken the chat over.` },
+  play: async ({ canvas }) => {
+    await expectNoNameOwnerInChat(canvas.getByRole('main'), 'en');
+  },
+};
+
+export const NoOwnerNameOwnerInChatEs: Story = {
+  args: { ...spanish, ownerName: null, ownerInChat: true, openStatus: CLOSED_ES },
+  parameters: { canvas: 'none', canvasNote: `${noNameNote} Here the owner has taken the chat over, in Spanish.` },
+  play: async ({ canvas, canvasElement }) => {
+    await expectNoNameOwnerInChat(canvas.getByRole('main'), 'es');
+    await expect(canvasElement).not.toHaveTextContent('is in this chat');
+  },
+};
+
 export const Skeleton: Story = {
   beforeEach: loadWebFonts,
   parameters: {

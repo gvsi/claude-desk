@@ -21,10 +21,21 @@ const ACCENT_FALLBACK = 'var(--line-hairline)';
 /** WCAG AA for text. */
 const MIN_TEXT_CONTRAST = 4.5;
 
+/**
+ * The name setup gives a Desk whose owner gave none: the API's `OWNER_NAME_FALLBACK`
+ * (backend/desk/api/setup.py), which a unit test keeps equal to this one. `PublicDesk` has no
+ * field that says no name was given, so the page reads exactly this value as "no name"; a
+ * contract field for it would replace this.
+ */
+export const OWNER_NAME_FALLBACK = 'Owner';
+
 export interface DeskBrand {
   brand: PublicBrand;
-  /** `owner_display_name`: "Maria Rivera". */
-  ownerName: string;
+  /**
+   * Whom a visitor can ask for: `owner_display_name` ("Maria Rivera"), or null when the owner gave
+   * no name and the Desk carries setup's fallback (`OWNER_NAME_FALLBACK`).
+   */
+  ownerName: string | null;
 }
 
 function plainHex(value: unknown): string | null {
@@ -55,6 +66,6 @@ export function brandFrom(desk: PublicDesk): DeskBrand {
       inkSecondary: INK_SECONDARY,
       accent: plainHex(brand.accent) ?? ACCENT_FALLBACK,
     },
-    ownerName: desk.owner_display_name,
+    ownerName: desk.owner_display_name === OWNER_NAME_FALLBACK ? null : desk.owner_display_name,
   };
 }

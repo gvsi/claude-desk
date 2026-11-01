@@ -30,6 +30,7 @@ import type {
 } from '../api/views.ts';
 import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
+import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
@@ -642,6 +643,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     holdConsent: false,
     consentResult: null,
   };
+  desk.ownerName = ownerOf(interview);
   interviewsOf(world).set(interview.state.interview_id, interview);
   return interview;
 }
@@ -858,6 +860,15 @@ export const SETUP_ROUTES: ServedRoutes = {
   },
 };
 
+/**
+ * The name customers see for the interview's owner, as the API's setup gives it (`owner_name`):
+ * the one the description gave, else setup's fallback, "Owner". A business's name is never a
+ * person's.
+ */
+function ownerOf(interview: Interview): string {
+  return interview.ownerName ?? OWNER_NAME_FALLBACK;
+}
+
 /** The interview that made the Desk, if setup made it. */
 function interviewForDesk(world: MockWorld, deskId: string): Interview | undefined {
   return [...interviewsOf(world).values()].find((interview) => interview.state.desk_id === deskId);
@@ -873,7 +884,7 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
   return {
     business_name: interview.business,
     desk_name: desk.summary.name,
-    owner_display_name: interview.ownerName ?? interview.business,
+    owner_display_name: ownerOf(interview),
     brand: { ...BUSINESS.brand },
     charter: interview.about === null ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })],
     agent_card: [],
@@ -912,7 +923,7 @@ export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[])
       {
         business_id: `biz-${interview.state.desk_id}`,
         name: interview.business,
-        owner_display_name: interview.ownerName ?? interview.business,
+        owner_display_name: ownerOf(interview),
         timezone: interview.timezone,
         desks: [{ ...desk.summary, setup: unfinishedSetup(world, desk.summary.desk_id) }],
       },
@@ -925,7 +936,7 @@ export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[])
 export function withSetupGreeting(world: MockWorld, desk: DeskRecord, today: Today): Today {
   const interview = interviewForDesk(world, desk.summary.desk_id);
   if (!interview) return today;
-  const owner = interview.ownerName ?? interview.business;
+  const owner = ownerOf(interview);
   return { ...today, greeting_name: owner.split(' ')[0] ?? owner };
 }
 

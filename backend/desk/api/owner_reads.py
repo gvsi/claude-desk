@@ -76,6 +76,7 @@ REPLY_STOPPED = "A reply was stopped before it was shown"
 BOOKING_CLAIM = "it said a booking was made instead of showing the card"
 REPLY_WHY_BY_RULE = {
     "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
+    "soft.jev": "a second check flagged a promise the business's records don't back",
     # Proposed wording awaiting the owner's sign-off.
     "soft.unavailable": "the checkpoint wasn't available",
     "soft.denies_ai": "it said it wasn't an AI",
@@ -402,7 +403,11 @@ def reply_violations(summary: dict) -> list[tuple[str, str | None]]:
 
 def reply_reason(violations: Iterable[tuple[str, str | None]]) -> str:
     """The owner's line for a blocked reply of Claude's, from its violations: each one's rule ID's line, else its
-    kind's."""
+    kind's. When both promise checkers block, the owner reads the model check's line alone (owner decision,
+    2026-10-31)."""
+    violations = list(violations)
+    if any(rule_id == "soft.promise" for _, rule_id in violations):
+        violations = [(kind, rule_id) for kind, rule_id in violations if rule_id != "soft.jev"]
     why = list(dict.fromkeys(line for kind, rule_id in violations
                              if (line := REPLY_WHY_BY_RULE.get(rule_id or "") or REPLY_WHY.get(kind))))
     return f"{REPLY_STOPPED}, because {' and '.join(why)}." if why else f"{REPLY_STOPPED}."

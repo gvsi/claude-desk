@@ -153,7 +153,7 @@ async def test_a_failed_resume_job_logs_no_arguments(app, browser, fake, model, 
     (decision_id,) = [record.decision.decision_id for record in fake.decisions.values()
                       if record.decision.session_id == session_id and record.decision.state == "held"]
 
-    async def fails(conn, ids, decision, approved=None):
+    async def fails(conn, ids, decision, approved=None, *, result_fact_ids=None):
         raise RuntimeError(f"{JOB_FAILED}: {decision.reason_plain}")
 
     monkeypatch.setattr(jobs, "resume_after_answer", fails)

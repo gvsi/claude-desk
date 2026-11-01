@@ -28,6 +28,7 @@ from desk.api import a2a, loop, tools
 from desk.api import ro as ro_module
 from desk.api.deliver import Reply, deliver
 from desk.api.main import create_app
+from desk.api.prompts import NOTES
 from desk.api.ratelimit import LIMITS, Limit
 from desk.api.runner import TurnRunner
 from desk.api.store import Ids
@@ -1062,7 +1063,7 @@ async def test_verify_code_goes_only_to_the_kernel(app, browser, fake, kernel_ht
     assert check.headers["x-agent-key-id"] == agent.issued.agent_key_id
     assert fake.sessions[agent.session_id].verified
     sent_to_claude = json.dumps([request.messages for request in model.requests])
-    assert "The visitor verified as the contact on record." in sent_to_claude
+    assert NOTES["verified"] in sent_to_claude
     for place in (sent_to_claude, at_rest(db), json.dumps(await sse(engine, agent.session_id)), caplog.text):
         assert code not in place and wrong not in place
 
@@ -1084,10 +1085,10 @@ async def test_an_agents_verified_note_is_written_once(app, browser, fake, kerne
     # Claude reads it. Once noted, it isn't again.
     model.add(say("Thanks, you're confirmed."), say("You're all set."))
     assert (await agent.send("Here is the code", verify_code=code)).status_code == 200
-    assert "The visitor verified as the contact on record." in model_text(model.requests[-1])
+    assert NOTES["verified"] in model_text(model.requests[-1])
     assert (await agent.send("Here it is again", verify_code=code)).status_code == 200
     assert await conversation_notes(engine, agent.session_id, "text", "wake") == [
-        ("The visitor verified as the contact on record.", True)]
+        (NOTES["verified"], True)]
 
 
 async def test_mode_owner_answers_with_the_owners_blocks(app, browser, fake, kernel_http, model, engine):
