@@ -20,6 +20,7 @@ import secrets
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from typing import get_args, get_origin
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -1145,6 +1146,23 @@ def turn_text(model: ScriptedModel, call: int = -1) -> str:
     return block["text"]
 
 
+def test_a_reasked_topic_keeps_its_earlier_answer_and_follow_up():
+    interview = interview_with(SetupAnswers(summary="Tax work."), [
+        desk_setup.Entry(role="claude", text="Old limit question", question="money_limit", covered=[]),
+        desk_setup.Entry(role="owner", text="Old limit answer"),
+        desk_setup.Entry(role="claude", text="What do you do?", question="what_you_do"),
+        desk_setup.Entry(role="owner", text="Tax work."),
+        desk_setup.Entry(role="claude", text="Got it."),
+        desk_setup.Entry(role="claude", text="For individuals or businesses?", question="what_you_do"),
+    ])
+    text = desk_setup._turn_message(interview, "what_you_do", "Both")["content"][0]["text"]
+    assert "<question_asked>For individuals or businesses?</question_asked>" in text
+    assert ("<this_question_so_far>\nowner: Tax work.\nyou: Got it.\n"
+            "you: For individuals or businesses?\n</this_question_so_far>") in text
+    assert "Old limit answer" not in text
+    assert text.count("<owner_answer>") == 1
+
+
 async def test_a_short_answer_reads_with_claudes_follow_up(app, browser, kernel_http, model, engine):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type="office")
@@ -1161,7 +1179,8 @@ async def test_a_short_answer_reads_with_claudes_follow_up(app, browser, kernel_
                           turn(summary="Tax work for individuals and small businesses."))
     assert second.status_code == 200, second.text
     text = turn_text(model)
-    exchange = f"<this_question_so_far>\nowner: taxes\nyou: {follow_up}\n</this_question_so_far>"
+    exchange = (f"<this_question_so_far>\nowner: taxes\nyou: {follow_up}\n"
+                f"you: {question_text('what_you_do', 'office')}\n</this_question_so_far>")
     assert exchange in text
     assert text.endswith(f"{exchange}\n\n<owner_answer>both</owner_answer>")
     assert second.json()["question"] == "hours_and_area"
@@ -1182,7 +1201,8 @@ async def test_an_earlier_owner_answer_cant_escape_the_exchange(app, browser, ke
 
     text = turn_text(model)
     escaped = html.escape(" ".join(forged.splitlines()), quote=False)
-    exchange = f"<this_question_so_far>\nowner: {escaped}\nyou: Who for?\n</this_question_so_far>"
+    exchange = (f"<this_question_so_far>\nowner: {escaped}\nyou: Who for?\n"
+                f"you: {question_text('what_you_do', 'trade')}\n</this_question_so_far>")
     assert exchange in text
     assert text.count("<this_question_so_far>") == text.count("</this_question_so_far>") == 1
     assert text.count("<owner_answer>") == text.count("</owner_answer>") == 1
@@ -1207,7 +1227,7 @@ async def test_a_later_questions_exchange_leaves_out_earlier_replies(app, browse
 
     text = turn_text(model)
     exchange = ("<this_question_so_far>\nowner: Weekdays, 8 to 6.\nyou: Which areas do you cover?\n"
-                "</this_question_so_far>")
+                f"you: {question_text('hours_and_area', 'trade')}\n</this_question_so_far>")
     assert text.endswith(f"{exchange}\n\n<owner_answer>Oakland</owner_answer>")
     assert text.index("</memory>") < text.index("</website>") < text.index(exchange)
     assert planted in html.unescape(text[:text.index(exchange)])  # reads stay available outside the exchange
@@ -1412,10 +1432,11 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
     await consent(owner, interview_id, False, model)
 
     for key in QUESTION_KEYS:
-        if key == "discounts":                          # a follow-up first: the same question stays, asked once
+        if key == "discounts":                          # a follow-up repeats the code-owned limit question
             followed = await answer(owner, model, interview_id, "Maybe?", turn("How much, at most?", step_done=False))
             assert followed.json()["question"] == "discounts"
-            assert followed.json()["messages"][-1] == {"role": "claude", "text": "How much, at most?",
+            assert followed.json()["messages"][-2]["text"] == "How much, at most?"
+            assert followed.json()["messages"][-1] == {"role": "claude", "text": question_text(key, "trade"),
                                                        "choices": [{"text": choice.text, "recommended": False}
                                                                    for choice in LIMIT_CHOICES[key]("trade")],
                                                        "card": None}
@@ -1434,7 +1455,8 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
     assert done["step"] == "tools" and done["question"] is None
     assert done["messages"][-1]["role"] == "claude"
     asked = [message["text"] for message in done["messages"] if message["role"] == "claude"]
-    assert all(asked.count(question_text(key, "trade")) == 1 for key in QUESTION_KEYS)    # each asked once
+    assert all(asked.count(question_text(key, "trade")) == (2 if key == "discounts" else 1)
+               for key in QUESTION_KEYS)
     (renamed,) = fake.called("PUT /desks/{id}/business")                 # the named owner, sent once
     assert renamed.path == f"/desks/{state['desk_id']}/business"
     assert renamed.body == {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera", "timezone": TIMEZONE,
@@ -1836,7 +1858,8 @@ async def test_a_limit_turn_reads_only_the_limits_answered_so_far(app, browser, 
     confirmed = await answer(owner, model, interview_id, "yes", turn(quote_auto_max_cents=50_000))
     assert confirmed.status_code == 200, confirmed.text
     text = turn_text(model)
-    exchange = f"<this_question_so_far>\nowner: Up to 500\nyou: {follow_up}\n</this_question_so_far>"
+    exchange = (f"<this_question_so_far>\nowner: Up to 500\nyou: {follow_up}\n"
+                f"you: {question_text('quote_limit', 'trade')}\n</this_question_so_far>")
     assert text.endswith(f"{exchange}\n\n<owner_answer>yes</owner_answer>")
     assert all(tag not in text for tag in ("<memory>", "<website", "Read your website", "Oakland, Berkeley"))
     assert said[:40] not in html.unescape(text) and "Plumbing." not in text
@@ -2603,6 +2626,147 @@ async def test_claude_chooses_the_next_fact_topic_and_its_words(app, browser, ke
                                              "choices": choices, "card": None}
 
 
+async def test_a_follow_up_with_its_question_in_the_question_field_asks_it(
+    app, browser, kernel_http, model, engine, caplog,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    await answer(owner, model, interview_id, "We prepare tax returns.",
+                 turn(next=next_ask("contact_and_after_hours")))
+    acknowledgement = "Got it, clients will see linda@chenco-cpa.example as the way to reach the office directly."
+    question = "What should the Desk do with messages that come in after hours?"
+    choices = [{"text": "Take a message", "recommended": False},
+               {"text": "Ask for their details", "recommended": True}]
+    response = await answer(owner, model, interview_id, "linda@chenco-cpa.example",
+                            turn(acknowledgement, step_done=False, question=question, choices=choices))
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "contact_and_after_hours"
+    assert [message["text"] for message in response.json()["messages"][-2:]] == [acknowledgement, question]
+    assert response.json()["messages"][-1]["choices"] == [choices[1], choices[0]]
+    row = await stored(engine, interview_id)
+    assert row["transcript"][-1]["question"] == "contact_and_after_hours"
+    assert "setup answer gap filled (contact_and_after_hours)" in caplog.text
+    assert "linda@chenco-cpa.example" not in caplog.text
+
+
+@pytest.mark.parametrize("reply", ["Got it.", ""])
+async def test_a_turn_with_nothing_to_answer_asks_the_topic_again(reply, caplog):
+    key = "contact_and_after_hours"
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="claude", text="How can clients reach you?", question=key, covered=[]),
+        desk_setup.Entry(role="owner", text="office@example.com"),
+    ])
+    since = len(interview.transcript)
+    entry = desk_setup.Entry(role="claude", text=reply)
+    interview.transcript.append(entry)
+    replies = desk_setup._TurnReplies()
+    replies.track(entry)
+    await desk_setup._ensure_answerable(None, None, None, interview, since=since, replies=replies, key=key,
+                                        follow_up=answer_turn(SETUP_TURNS[key], reply, step_done=False, question="  "))
+    assert interview.transcript[-1] == desk_setup._ask(interview, key)
+    assert interview.transcript[-2] is entry and entry.text == reply
+    assert "setup answer gap filled (contact_and_after_hours)" in caplog.text
+
+
+@pytest.mark.parametrize("covered,next_topic", [
+    (["what_you_do"], "hours_and_area"),
+    (["what_you_do", "hours_and_area"], "quote_limit"),
+])
+async def test_a_covered_topic_with_no_ask_gets_the_next_question(covered, next_topic, caplog):
+    reply = desk_setup.Entry(role="claude", text="Got it.", covered=covered)
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."), reply,
+    ])
+    replies = desk_setup._TurnReplies()
+    replies.track(reply)
+    await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=replies)
+    assert interview.transcript[-1] == desk_setup._ask(interview, next_topic)
+    assert reply.text == ("" if next_topic in LIMIT_CHOICES else "Got it.")
+    assert f"setup answer gap filled ({next_topic})" in caplog.text
+
+
+@pytest.mark.parametrize("key", tuple(LIMIT_CHOICES))
+async def test_a_limit_follow_up_always_leaves_codes_question(key):
+    reply = desk_setup.Entry(role="claude", text="Could you clarify?")
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="claude", text="Earlier ask", question=key, covered=[]),
+        desk_setup.Entry(role="owner", text="I'm not sure."), reply,
+    ])
+    replies = desk_setup._TurnReplies()
+    replies.track(reply, reads_untrusted=False)
+    before = interview.answers.model_dump()
+    await desk_setup._ensure_answerable(None, None, None, interview, since=2, replies=replies, key=key,
+                                        follow_up=answer_turn(SETUP_TURNS[key], reply.text, step_done=False))
+    assert interview.transcript[-1] == desk_setup._ask(interview, key)
+    assert reply.text == "Could you clarify?" and reply.choices == []
+    assert interview.answers.model_dump() == before
+
+
+@pytest.mark.parametrize("path", ["fact", "next_step", "card_turn", "guard"])
+@pytest.mark.parametrize("closing", ["plan", "empty", "failed", "empty_then_failed"])
+async def test_every_close_ends_with_the_plan_or_the_fixed_line(monkeypatch, path, closing):
+    plan = "Your Desk will take tax preparation requests."
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."),
+        desk_setup.Entry(role="claude", text="Got it.", covered=list(QUESTION_KEYS)),
+    ])
+    next_turn = SetupNextStep(reply="", next=next_ask("done"), question="", choices=[], skip=[], drop=[],
+                              add_jobs=[], plan=plan if closing == "plan" else "")
+    calls = [None] if closing == "failed" else [next_turn, None if closing == "empty_then_failed" else next_turn]
+    if path == "card_turn":
+        card = desk_setup.Entry.model_validate(proposal_entries()[1])
+        card.card.state = "accepted"
+        interview.transcript.append(card)
+        calls.insert(0, next_turn)
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(side_effect=calls))
+    finish = desk_setup.finish
+
+    def checked_finish(current):
+        assert current.step == "questions"
+        assert current.transcript[-1].role == "claude"
+        assert current.transcript[-1].text == (plan if closing == "plan" else desk_setup.QUESTIONS_DONE)
+        finish(current)
+
+    monkeypatch.setattr(desk_setup, "finish", checked_finish)
+    if path == "card_turn":
+        await desk_setup.card_turn(None, None, None, interview, card.card.proposal_id)
+    elif path == "guard":
+        await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=desk_setup._TurnReplies())
+    else:
+        source = (answer_turn(SETUP_TURNS["contact_and_after_hours"], next=next_ask("done"))
+                  if path == "fact" else next_turn)
+        await desk_setup._advance(None, None, None, interview, source, interview.transcript[-1])
+    assert interview.step == "tools"
+    assert interview.transcript[-1].text == (plan if closing == "plan" else desk_setup.QUESTIONS_DONE)
+
+
+@pytest.mark.parametrize("typed", [True, False])
+@pytest.mark.parametrize("next_topic", ["what_you_do", "quote_limit"])
+async def test_a_card_answer_with_no_ask_uses_the_same_guard(monkeypatch, typed, next_topic, caplog):
+    covered = [] if next_topic == "what_you_do" else ["what_you_do", "hours_and_area"]
+    card = desk_setup.Entry.model_validate(proposal_entries()[1])
+    if not typed:
+        card.card.state = "accepted"
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use cards.", cards=True),
+        desk_setup.Entry(role="claude", text="Take appointment requests?", covered=covered), card,
+        desk_setup.Entry(role="owner", text="Yes."),
+    ])
+    following = desk_setup.SetupCardAnswer(reply="Got it.", decision="accept", revised=[],
+                                           next=next_ask("done"), question="", choices=[], skip=[], drop=[],
+                                           add_jobs=[], plan="")
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(return_value=following))
+    # Force the missing-ask seam: the public card_turn must repair it before its caller saves.
+    monkeypatch.setattr(desk_setup, "_advance_ask", AsyncMock())
+    await desk_setup.card_turn(None, None, None, interview, card.card.proposal_id, text="Yes." if typed else None)
+    assert card.card.state == "accepted" and interview.pending_card is None
+    assert interview.transcript[-1] == desk_setup._ask(interview, next_topic)
+    assert interview.transcript[-2].text == ("" if next_topic in LIMIT_CHOICES else "Got it.")
+    assert f"setup answer gap filled ({next_topic})" in caplog.text
+
+
 async def test_a_limit_topic_always_asks_codes_question_and_choices(app, browser, kernel_http, model):
     from desk.api.prompts import LIMIT_CHOICES
     owner = await new_owner(app, browser, kernel_http)
@@ -2769,7 +2933,7 @@ async def test_a_follow_up_wins_over_next_topic(app, browser, kernel_http, model
                                  question="Move on?", skip=["hours_and_area"]))
     assert response.status_code == 200, response.text
     assert response.json()["question"] == "what_you_do"
-    assert response.json()["messages"][-1]["text"] == "Which dogs?"
+    assert [message["text"] for message in response.json()["messages"][-2:]] == ["Which dogs?", "Move on?"]
     row = await stored(engine, state["interview_id"])
     assert not any(entry.get("covered") for entry in row["transcript"])
     assert not any(entry.get("question") == "money_limit" for entry in row["transcript"])

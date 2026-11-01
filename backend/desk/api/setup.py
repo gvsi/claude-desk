@@ -30,11 +30,11 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   No memory or website read ever runs after no, and a website the owner names later is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
-  answered in that question's own model (`SETUP_TURNS`). The exchange starts after this question's last ask. Its
-  patch merges into the answers. Each limit (the quote, discount and payment link limits, the documents rule, the
-  money cap and the refunds rule, which is the money question's: refunds are money going out) is a field only of its
-  own question's model, whose message leaves the memory and website out, and code drops it from any other turn's
-  patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
+  answered in that question's own model (`SETUP_TURNS`). The exchange starts with this topic's first ask and keeps
+  its follow-ups. Its patch merges into the answers. Each limit (the quote, discount and payment link limits, the
+  documents rule, the money cap and the refunds rule, which is the money question's: refunds are money going out) is
+  a field only of its own question's model, whose message leaves the memory and website out, and code drops it from
+  any other turn's patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
   fact either (its turn reads none of the facts so far), and code drops a fact from a limit turn's patch too, but for
   the quote question's prices, named from the owner's answer alone (the turn reads no price list): code updates the
   item of each title or adds it, never removing one. A fact question clears the hours or the prices only by its
@@ -1241,10 +1241,10 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
     even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
-    turn includes earlier owner answers and Claude replies only after this question's last ask, never tool labels
-    or their content. On a limit question these replies were made under the same isolation; earlier questions'
-    replies, which may repeat memory or website text, never enter the exchange. The run's staged entries never
-    enter history: its current answer appears only in `owner_answer`."""
+    turn includes earlier owner answers and Claude replies since this topic began, including its follow-up asks,
+    never tool labels or their content. On a limit question these replies were made under the same isolation;
+    earlier questions' replies, which may repeat memory or website text, never enter the exchange. The run's staged
+    entries never enter history: its current answer appears only in `owner_answer`."""
     transcript = _history(interview, run_id)
     limit_turn = key in LIMIT_QUESTIONS.values()
     so_far = interview.answers.model_dump_json(exclude_defaults=True)
@@ -1266,8 +1266,13 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     if not limit_turn:
         parts.append(SETUP_CLIENT_CARDS[interview.shows_cards])
         parts.append(wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview, run_id=run_id), ensure_ascii=False)))
-    start = next((index + 1 for index in range(len(transcript) - 1, -1, -1)
-                  if transcript[index].question == key), len(transcript))
+    start = len(transcript)
+    for index in range(len(transcript) - 1, -1, -1):
+        entry = transcript[index]
+        if entry.card is not None or (entry.question is not None and entry.question != key):
+            break
+        if entry.question == key:
+            start = index + 1
     lines = [summary_line(SETUP_EXCHANGE_LABELS[entry.role], entry.text)
              for entry in transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS and entry.card is None]
     if lines:
@@ -1434,6 +1439,32 @@ class _TurnReplies:
                     reply.text = ""
 
 
+async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview, *,
+                             since: int, replies: _TurnReplies, key: QuestionKey | None = None,
+                             follow_up=None) -> None:
+    """Before saving, leave a fresh question, a waiting card, or a closed interview."""
+    if interview.step != "questions" or interview.pending_card is not None:
+        return
+    if any(entry.role == "claude" and entry.question in QUESTION_KEYS and entry.text.strip()
+           for entry in interview.transcript[since:]):
+        return
+    if follow_up is not None:
+        asked = _ask(interview, key)
+        if key not in LIMIT_CHOICES and follow_up.question.strip():
+            asked.text = follow_up.question.strip()
+            asked.choices = _normalize_choices(follow_up.choices)
+    else:
+        next_key = next((topic for topic in QUESTION_KEYS
+                         if topic not in interview.covered and topic not in OPT_IN_TOPICS), None)
+        asked = _ask(interview, next_key) if next_key is not None else None
+    logger.warning("setup answer gap filled (%s)", asked.question if asked is not None else "done")
+    if asked is not None:
+        replies.before(asked.question)
+        interview.transcript.append(asked)
+    else:
+        await close_setup(owner, engine, model, interview)
+
+
 async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
                    source, reply: Entry, *, closing_call: bool = False, replies: _TurnReplies | None = None) -> None:
     """Choose the final ask before deciding which of this answer's replies can be stored beside it."""
@@ -1509,6 +1540,15 @@ def _decide_typed(interview: Interview, proposal_id: str, accept: bool) -> bool:
 async def card_turn(owner, engine, model, interview: Interview, proposal_id: str,
                     text: str | None = None) -> None:
     """Continue an in-place or typed card decision. The guarded route owns saving and after_finish."""
+    since = len(interview.transcript)
+    await _card_turn(owner, engine, model, interview, proposal_id, text)
+    replies = _TurnReplies(entries=[(entry, True) for entry in interview.transcript[since:]
+                                    if entry.role == "claude"])
+    await _ensure_answerable(owner, engine, model, interview, since=since, replies=replies)
+
+
+async def _card_turn(owner, engine, model, interview: Interview, proposal_id: str,
+                     text: str | None = None) -> None:
     card = next((entry.card for entry in reversed(interview.transcript)
                  if entry.card and entry.card.proposal_id == proposal_id), None)
     if card is None or (text is None and card.state == "proposed"):
@@ -1569,6 +1609,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         if card is not None:
             await card_turn(ctx, engine, model, interview, card, text=text)
             return
+        since = len(interview.transcript)
         key = question
         desk_id = interview.desk_id
         said, = staged
@@ -1582,9 +1623,10 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                 patch = SetupPatch.model_validate({**patch.model_dump(), **choice.values})
                 turn.step_done = True
         entries = []
-        reply = Entry(role="claude", text=turn.reply.strip(),
-                      choices=_limit_choices(interview, key) if not turn.step_done else [])
-        if reply.text or reply.choices:
+        reply = Entry(role="claude", text=turn.reply.strip())
+        replies = _TurnReplies()
+        replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
+        if reply.text:
             entries.append(reply)
         site = website_url(turn.website)
         if site is not None and site[0] not in interview.tried_websites():
@@ -1597,8 +1639,6 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         interview.transcript += entries
         if turn.step_done:
             interview.cover([key])
-            replies = _TurnReplies()
-            replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
             following = await _next_step(ctx, engine, model, interview) if key in LIMIT_CHOICES else turn
             next_reply = reply
             if key in LIMIT_CHOICES:
@@ -1612,6 +1652,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             if not any(entry is reply for entry in interview.transcript):
                 interview.transcript.append(reply)
             _record_plan(interview, turn, reply)
+        await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
+                                 follow_up=turn if not turn.step_done else None)
 
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if interview.step == "tools":
