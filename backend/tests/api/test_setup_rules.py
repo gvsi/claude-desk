@@ -263,6 +263,44 @@ async def test_setup_finishes_with_clean_charter_claims_after_a_pricing_refusal(
     assert "$90" not in caplog.text and intake not in caplog.text
 
 
+@pytest.mark.parametrize("detail", [
+    {"charter": ["policy_count_limit"]},
+    {"charter": ["policy_text_limit"]},
+    {"policy:unknown": ["language"]},
+], ids=["policy-count-cap", "policy-text-cap", "no-matching-claim"])
+async def test_a_charter_refusal_without_claim_keys_retries_with_contact_only(detail, caplog):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About our business",
+                                    intake="Ask about consultations", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    charters = []
+
+    def respond(request):
+        if request.url.path.endswith("/charter"):
+            charters.append(json.loads(request.content)["charter"])
+            if len(charters) == 1:
+                return httpx.Response(422, json={"code": "invalid", "detail": detail})
+        return httpx.Response(200, json={"desk_id": "d1", "updated_at": "2026-10-31T17:00:00Z"})
+
+    kernel.fail(respond)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        await _put_parts(owner, "d1", parts)
+
+    assert len(charters) == 2
+    assert charters[0] == [claim.model_dump(mode="json") for claim in parts.charter]
+    assert charters[1] == [claim for claim in charters[0] if claim["key"] == "contact"]
+    assert [request.url.path for request in kernel.requests[2:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record.getMessage() for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert all(claim.key in warnings[0] for claim in parts.charter if claim.key.startswith("policy:"))
+    assert all(claim.value not in caplog.text for claim in parts.charter)
+
+
 async def test_a_second_charter_refusal_drops_all_policies_before_the_third_put(caplog):
     kernel = ScriptedKernel()
     parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="No", pricing="from $90",
@@ -1320,7 +1358,7 @@ async def test_confirm_conflict_returns_a_new_draft_to_confirm(app, browser, fak
     assert reply.status_code == 409 and reply.json()["error"] == "rules_changed_since_draft", reply.text
     again = RulesDraft.model_validate(reply.json()["draft"])
     assert desk.policy_version != again.version
-    reply = await owner.browser.post(policy(state, "confirm"))
+    reply = await settled(owner, policy(state, "confirm"))
     assert reply.status_code == 200, reply.text
     assert desk.policy_version == again.version
 

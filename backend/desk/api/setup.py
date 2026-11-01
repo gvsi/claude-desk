@@ -1831,6 +1831,12 @@ async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> N
         if refused.status != 422 or refused.code != "invalid" or not refused.detail:
             raise
         dropped = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
+        if refused.detail in ({"charter": ["policy_count_limit"]}, {"charter": ["policy_text_limit"]}) or not dropped:
+            logger.warning("setup dropped refused charter claims: %s",
+                           [claim.key for claim in charter if claim.key.startswith("policy:")])
+            charter = [claim for claim in charter if not claim.key.startswith("policy:")]
+            await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
+            return
         logger.warning("setup dropped refused charter claims: %s", dropped)
         charter = [claim for claim in charter if claim.key not in refused.detail]
     try:
