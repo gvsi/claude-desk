@@ -634,14 +634,15 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                               violations=[Violation(kind="session_paused", span="", rule_id="session_paused")],
                               fact_ids=fact_ids, seen=True, canaries=canaries, final=final)
     prose = shown(draft.prose)
-    detected = lang.detect(prose)
+    # Canaries are attack tokens, not evidence of the reply's language.
+    language_prose, _ = _blank_canaries(prose, canaries)
+    detected = lang.detect(language_prose)
     language: render.Language = detected if detected in ("en", "es") else fallback
     violations: list[Violation] = []
     if detected in ("other", "unmarked"):
-        excerpt, _ = _blank_canaries(prose, canaries)
         violations.append(Violation(
             kind="uncertain_language" if detected == "unmarked" else "unsupported_language",
-            span=_span(excerpt), rule_id="language_uncertain" if detected == "unmarked" else "language"))
+            span=_span(language_prose), rule_id="language_uncertain" if detected == "unmarked" else "language"))
     # the clauses first, so the scan knows whether a booking card is shown; their refusals follow the prose's
     cards, refused, rendered_claims = await check_clauses(
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)

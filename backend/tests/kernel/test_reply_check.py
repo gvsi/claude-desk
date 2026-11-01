@@ -1839,12 +1839,36 @@ async def test_payment_caption_rewrites_and_prose_failure_keeps_its_card(app, cl
     assert await handoffs_of(app, copy) == []
 
 
+async def set_document_canary(app: FastAPI, copy: Rivera, canary: str) -> None:
+    async with kernel_ctx(app) as ctx:
+        repo = ctx.bind(copy.copy_id)
+        document = (await ctx.db.scalars(repo.scoped(select(Document)))).first()
+        document.body = document.body.replace(document.canary, canary)
+        document.canary = canary
+
+
 async def test_uncertain_language_span_never_echoes_a_document_canary(app, client):
     copy, visitor = await visitor_of(app, client)
-    canary = (await rows_of(app, copy.copy_id, select(Document)))[0].canary
+    canary = "cdk-01be234567890123"              # "be" is an English marker, not reply prose
+    await set_document_canary(app, copy, canary)
     verdict = await checked(client, visitor, f"{canary} Entendido, revisamos ambos grifos.", final=False)
     assert {v.kind for v in verdict.violations} == {"uncertain_language", "canary"}
+    assert all(canary not in violation.span for violation in verdict.violations)
     assert canary not in verdict.model_dump_json()
     assert_handed_off(verdict)
     assert all(canary not in entry.envelope_jcs for entry in await reply_entries(app, copy))
     assert (await session_of(app, copy, visitor)).last_language is None
+
+
+async def test_english_language_ignores_spanish_markers_in_a_document_canary(app, client):
+    copy, visitor = await visitor_of(app, client)
+    await set_session(app, copy, visitor.session_id, last_language="es")
+    canary = "cdk-el1la2los3las4un5una"          # synthetic Spanish markers outnumber the prose's English ones
+    await set_document_canary(app, copy, canary)
+    verdict = await checked(client, visitor, f"Here is the link to pay. {canary}")
+    assert {v.kind for v in verdict.violations} == {"canary"}
+    assert all(canary not in violation.span for violation in verdict.violations)
+    assert canary not in verdict.model_dump_json()
+    assert_handed_off(verdict, "en")
+    assert all(canary not in entry.envelope_jcs for entry in await reply_entries(app, copy))
+    assert (await session_of(app, copy, visitor)).last_language == "en"
