@@ -466,8 +466,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
     tools_by_block = {"urgent": {"native.request_callback"}, "typed_booking": {"native.book"}}
     for row in await ctx.ro.rows("tools", desk_id=desk_id):
-        block = (row["business"] or {}).get("config", {}).get("block")
-        if block in tools_by_block:
+        business = row["business"]
+        config = business.get("config") if isinstance(business, dict) else None
+        block = config.get("block") if isinstance(config, dict) else None
+        if isinstance(block, str) and block in tools_by_block:
             tools_by_block[block].add(row["tool"])
 
     def executed(tools: set[str]) -> list[Timed]:

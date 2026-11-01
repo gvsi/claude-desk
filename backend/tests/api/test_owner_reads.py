@@ -18,6 +18,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
+from psycopg.types.json import Jsonb
 from sqlalchemy import text as sql
 
 from desk.api import owner_reads
@@ -58,6 +59,7 @@ from desk.kernel_api import (
 )
 from desk.kernel_service import reply_check
 from tests.api.fakes import ScriptedModel
+from tests.api.test_owner_desks import new_desk
 from tests.api.test_store import SYSTEM
 from tests.kernel_contract.fake_kernel import fake_kernel_app, signed_time
 
@@ -592,7 +594,7 @@ def block_execution(scene: Scene, who: Guest, when: datetime, tool: str, config:
                         session_id=who.session_id, ref_id=decision_id)
     fake._put("decisions", (decision_id,), {
         "decision_id": decision_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id,
-        "session_id": who.session_id, "tool": tool, "effects": ["notify_external"], "outcome": "allow",
+        "session_id": who.session_id, "tool": tool, "effects": ["change"], "outcome": "allow",
         "state": "executed", "answers": [], "policy_version": desk.policy_version, "card_ids": [],
         "review": None, "reason_plain": "The owner's rule allows this.", "visitor_plain": "Done",
         "expires_at": None, "ledger_seq": entry.seq, "created_at": decided_at or when, "policy_ids": []})
@@ -658,6 +660,65 @@ async def test_an_intake_block_counts_as_neither_a_callback_nor_a_booking(scene,
     await scene.reply(caller, when + timedelta(minutes=1))
     clock.now = local(2026, 10, 30, 9)
     owner = scene.owner
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    brief = read.json()["briefing"]
+    assert brief["bookings"] == 0
+    assert brief["total"] == 1
+    assert brief["newest"]["lead_or_answer"]["kind"] == "answer"
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert done.callbacks == done.bookings == []
+
+
+@pytest.mark.parametrize("business", [
+    None, [], "malformed", {}, {"config": None}, {"config": []}, {"config": "malformed"},
+    {"config": {"block": None}}, {"config": {"block": []}}, {"config": {"block": {}}},
+])
+async def test_a_malformed_business_tool_counts_as_neither_a_callback_nor_a_booking(scene, clock, app, business):
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when)
+    block_execution(scene, caller, when, "desk.x", {"block": "urgent", "urgent_when": "A pipe burst."})
+    await scene.reply(caller, when + timedelta(minutes=1))
+    owner = scene.owner
+    scene.admin.execute(
+        "UPDATE fake_kernel_ro.tools SET business = %s WHERE desk_id = %s AND tool = %s",
+        (Jsonb(business), owner.desk_id, "desk.x"))
+    clock.now = local(2026, 10, 30, 9)
+
+    read = await owner.get(f"desks/{owner.desk_id}/today")
+
+    assert read.status_code == 200, read.text
+    brief = read.json()["briefing"]
+    assert brief["bookings"] == 0
+    assert brief["total"] == 1
+    assert brief["newest"]["lead_or_answer"]["kind"] == "answer"
+    async with owner_context(app.state.runtime.started(), owner.token) as ctx:
+        done = await owner_reads.activity(ctx, owner.desk_id, when)
+    assert done.callbacks == done.bookings == []
+
+
+async def test_block_counts_use_only_the_current_desks_tool_definition(scene, clock, app):
+    owner = scene.owner
+    created = await owner.browser.post("/api/owner/desks", json=new_desk())
+    assert created.status_code == 201, created.text
+    other = scene.fake.desks[created.json()["desk_id"]]
+    assert other.copy_id == owner.copy_id
+    when = local(2026, 10, 29, 19)
+    caller = await scene.visitor(when)
+    await scene.text(caller, when)
+    block_execution(scene, caller, when, "desk.x", {"block": "intake", "questions": ["How can we help?"]})
+    await scene.reply(caller, when + timedelta(minutes=1))
+    template = scene.fake.desks[owner.desk_id].tools["native.request_callback"]
+    scene.fake._put_tool(other, template.model_copy(update={
+        "tool": "desk.x", "source": "business", "business": BusinessToolDef(
+            title="Urgent help", description="Help with an urgent service.",
+            config={"block": "urgent", "urgent_when": "A pipe burst."})}))
+    scene.fake.flush()
+    clock.now = local(2026, 10, 30, 9)
 
     read = await owner.get(f"desks/{owner.desk_id}/today")
 
