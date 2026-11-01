@@ -270,7 +270,9 @@ export function TodaySkeleton() {
         <div className="cd-today__section">
           <SectionTitle anchor="since-title" />
           <SkeletonCard anchor="since-card">
-            <TextLines words={FRESH_NIGHT} text="summary" className="cd-since__line" />
+            {/* The box's inset is already taken off the width the words are measured in, so the probe
+                carries the type alone, or it would take the inset off again. */}
+            <TextLines words={FRESH_NIGHT} text="summary" className="cd-since__line" probeClassName="" />
             <div className="cd-briefing">
               {['booking', 'answer'].map((kind) => (
                 <div key={kind} className="cd-briefing__item">
