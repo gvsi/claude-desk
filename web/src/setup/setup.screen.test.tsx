@@ -128,6 +128,21 @@ async function microtasks(): Promise<void> {
 /** The idempotency key of each start the page sent, in order. */
 const startKeys = () => requests('startSetup').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
 
+/**
+ * Resolves once `key`'s next request has its answer on the page. The memory question's answer and
+ * Claude's writing dots show the moment it is pressed, before its request is answered, so a test
+ * that lets a held turn go, or moves time on, waits for this first.
+ */
+function answerOf(key: RouteKey): Promise<void> {
+  return new Promise((resolve) => {
+    const stop = observeRequests((outcome) => {
+      if (outcome.key !== key) return;
+      stop();
+      resolve();
+    });
+  });
+}
+
 /** Where `key`'s first request sits in the request log, or -1. */
 const firstAt = (key: RouteKey) => mockStore.requests.findIndex((r) => r.key === key);
 
@@ -1349,8 +1364,12 @@ describe('setup', () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       const state = await startInterview(null);
       const finish = holdNextConsent(mockStore.world, state.interview_id);
+      // The line is for a step that can't follow the reads as they stream: here the stream is refused.
+      mockStore.inject({ route: 'setupEvents', status: 503, times: 10 });
       const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const answered = answerOf('setupConsent');
       await screen.getByRole('button', { name: 'Yes, use it' }).click();
+      await answered;
       const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
       const wait = screen.getByText(words, { exact: true });
       await expect.element(writing).toBeVisible();
@@ -1390,9 +1409,11 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
+    await answered;
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
@@ -1415,9 +1436,11 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
+    await answered;
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     expectNoHorizontalScroll();
     finish('failed');
@@ -1437,11 +1460,13 @@ describe('setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
+    await answered;
     await vi.advanceTimersByTimeAsync(89999);
     expect(screen.container.querySelector('[role="alert"]')).toBeNull();
     await vi.advanceTimersByTimeAsync(1);
@@ -1496,7 +1521,7 @@ describe('setup', () => {
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
-    expect(requests('setup', mark)).toHaveLength(1);
+    await expect.poll(() => requests('setup', mark)).toHaveLength(1);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
     finish('landed');
@@ -1556,11 +1581,13 @@ describe('setup', () => {
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { routes: firstVisit.routes });
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const answered = answerOf('setupConsent');
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
     });
+    await answered;
     await vi.advanceTimersByTimeAsync(90000);
     await until(() => {
       vi.advanceTimersByTime(0);

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
-import type { SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
+import type { Choice, SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
 import { Button, ClaudeMessage, Composer, ConceptFooter, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { GrowingReply, settledWords } from '../lib/GrowingReply.tsx';
@@ -17,6 +17,8 @@ import { useSetupWork } from './useSetupWork.ts';
 const ANSWER_MAX = 2000;
 
 const copy = SETUP_COPY.questions;
+/** The memory question's two answers, docked as every question's choices are. */
+const CONSENT_CHOICES: Choice[] = [{ text: copy.allow, recommended: false }, { text: copy.decline, recommended: false }];
 const ACTIVE_CHOICE = '.cd-setup-q3__list button[aria-current="true"]:not(:disabled), .cd-setup-q3__row.is-active input:not(:disabled)';
 
 export interface QuestionsStepProps {
@@ -66,9 +68,10 @@ function Line({ message }: { message: SetupMessage }) {
 }
 
 /**
- * "A few questions": the setup conversation in order, Claude's words in its serif, the owner's as
+ * "Let's set up your Desk": the setup conversation in order, Claude's words in its serif, the owner's as
  * theirs and each read of their memory or website as its label. First Claude asks to read the
- * owner's Claude memory ("Yes, use it" or "No, I'll type it"); then each answer goes to the API,
+ * owner's Claude memory, docked with its two answers ("Yes, use it" or "No, I'll type it") above
+ * the message box, and words typed there are "No, I'll type it"; then each answer goes to the API,
  * which asks the next question. An answer that didn't go through stays in the composer.
  */
 export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsStepProps) {
@@ -111,10 +114,14 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const closePanel = () => {
     if (live) setDismissed((previous) => new Set([...previous, live.index]));
   };
+  const toComposer = () => composer.current?.querySelector('textarea')?.focus({ preventScroll: true });
   const dismissPanel = () => {
     closePanel();
-    composer.current?.querySelector('textarea')?.focus({ preventScroll: true });
+    toComposer();
   };
+  // The memory question docks like every question, its ask moved into the panel, until it is answered.
+  const askAt = asking && !busy && consenting === null ? state.messages.findLastIndex((message) => message.role === 'claude' && !isCard(message)) : -1;
+  const consentPanel = askAt >= 0 ? askAt : null;
   useEffect(() => { if (!busy) setDeciding(null); }, [busy]);
   const work = useSetupWork(state, reread);
   const wasBusy = useRef(busy);
@@ -292,6 +299,12 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const send = (text: string) => {
     // While an answer is unsettled the composer shows it with "Try again", which reads first; nothing posts blind.
     if (failed !== null || retrying) return;
+    if (asking) {
+      // Typing is "No, I'll type it": nothing is read, and the words wait for the question they answer.
+      setRefill({ text });
+      void consent(false);
+      return;
+    }
     if (state.question === null && !state.pending_card) {
       // No question is waiting here: read where the interview stands, and keep the words.
       setRefill({ text });
@@ -309,7 +322,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     if (refill === null || !box || box.disabled) return;
     fillComposer(box, refill.text, { focus: false });
     setRefill(null);
-  }, [refill, sending, retrying, failed, busy]);
+  }, [refill, sending, retrying, failed, busy, consenting]);
 
   useEffect(() => {
     // Disabling the textarea drops focus to the page. An owner's move elsewhere cancels its return,
@@ -386,7 +399,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       <Transcript label={copy.conversation}>
         {state.messages.map((message, index) => (
           <Fragment key={`${index}-${message.role}`}>
-            {panel?.index === index ? null : isCard(message) ? <ProposalCard proposal={message.card!}
+            {panel?.index === index || consentPanel === index ? null : isCard(message) ? <ProposalCard proposal={message.card!}
               amountRequired={amountRequired === message.card!.proposal_id}
               failed={decisionFailed?.proposal_id === message.card!.proposal_id}
               onRetry={() => { if (decisionFailed) void decide(decisionFailed); }}
@@ -398,16 +411,19 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
           </Fragment>
         ))}
         {sending !== null ? <VisitorMessage text={sending} /> : null}
+        {/* The memory question's answer shows the moment it is pressed, with Claude writing under it. */}
+        {consenting === null ? null : <VisitorMessage text={consenting ? copy.allow : copy.decline} />}
         {/* The running turn as it is written: its reads' labels, then Claude's reply, which the saved turn replaces. */}
         {growing?.labels.map((label) => <ToolLabel key={label.read} text={label.text} />)}
         {growing !== null && settledWords(growing.text) !== '' ? (
           <div className="cd-claude-message cd-setup-growing" lang="en" aria-busy="true">
             <GrowingReply text={growing.text} streaming />
           </div>
-        ) : sending !== null || busy || deciding !== null || suggesting ? (
+        ) : sending !== null || consenting !== null || busy || deciding !== null || suggesting ? (
           <WritingIndicator language="en" />
         ) : null}
-        {consentBusy && growing === null ? (
+        {/* While the reads stream, they say what is happening; only a step that can't follow them says it waits. */}
+        {consentBusy && growing === null && stream.fellBack ? (
           <p className="cd-setup-step__line cd-type-meta">{copy.putting}</p>
         ) : null}
       </Transcript>
@@ -428,19 +444,10 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       {panel ? <SetupChoices key={panel.index} question={state.messages[panel.index]!.text} choices={panel.choices}
         maxLength={ANSWER_MAX} disabled={blocked || failed !== null} onDismiss={dismissPanel}
         onChoose={(text) => { returnFocus.current = true; returnToTextarea.current = false; send(text); }} /> : null}
-      {closing ? <div className="cd-setup-step__actions"><Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button></div> : asking && !busy ? (
-        <>
-          {consentError === null ? null : <Notice tone="error">{consentError}</Notice>}
-          <div className="cd-setup-step__actions">
-            <Button variant="primary" size="main" busy={consenting === true} waiting={consenting === false} onClick={() => void consent(true)}>
-              {copy.allow}
-            </Button>
-            <Button variant="secondary" size="main" busy={consenting === false} waiting={consenting === true} onClick={() => void consent(false)}>
-              {copy.decline}
-            </Button>
-          </div>
-        </>
-      ) : (
+      {asking && !busy && consentError !== null ? <Notice tone="error">{consentError}</Notice> : null}
+      {consentPanel === null ? null : <SetupChoices key="consent" kind="consent" question={state.messages[consentPanel]!.text} choices={CONSENT_CHOICES}
+        maxLength={ANSWER_MAX} disabled={blocked} onDismiss={toComposer} onChoose={(text) => void consent(text === copy.allow)} />}
+      {closing ? <div className="cd-setup-step__actions"><Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button></div> : (
         <div ref={composer}>
           <Composer
             variant="owner"
