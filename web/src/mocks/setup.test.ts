@@ -1298,6 +1298,10 @@ describe('a Desk setup made, speaking for its own owner', () => {
     if (held?.type !== 'held') throw new Error('the discount was held');
     const answered = await eventsWhile(slug, () => mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } }));
     expect(linesOf(answered)).toEqual(['Linda lo aprobó', 'Cotizado con la lista de precios de Linda', 'Respuesta revisada con las reglas de Linda']);
+    const retenido = pedido.find((ev) => ev.type === 'held');
+    if (retenido?.type !== 'held') throw new Error('the discount was held');
+    const denied = await eventsWhile(slug, () => mockStore.dispatch('answer', { params: { decision_id: retenido.decision_id }, body: { answer: 'deny_once' } }));
+    expect(linesOf(denied)).toEqual(['Linda decidió no seguir adelante', 'Pasado a Linda para responder']);
   });
 
   it('the_status_lines_name_that_owner', async () => {
@@ -1328,7 +1332,9 @@ describe('a Desk setup made, speaking for its own owner', () => {
     // Desk, and Maria's reaches Maria only on Rivera's.
     const slug = await liveDesk(CPA);
     const toLinda = { en: cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }) };
-    expect(await repliesTo(slug, 'Can I speak with Linda?')).toEqual([toLinda.en]);
+    const asked = await turnOn(slug, 'Can I speak with Linda?');
+    expect(asked.flatMap((ev) => (ev.type === 'message' ? ev.blocks : []))).toEqual([toLinda.en]);
+    expect(linesOf(asked)).toEqual(['Passed to Linda to answer']);
     expect(await repliesTo(slug, '¿Está LINDA?')).toEqual([
       cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
     ]);
