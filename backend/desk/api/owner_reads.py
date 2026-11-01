@@ -361,12 +361,12 @@ class Activity:
     entries at `entry_time`, the API's transcript rows at their `created_at`."""
 
     people: People
-    bookings: list[Timed]                      # native.book executed, at its ledger entry
+    bookings: list[Timed]                      # native.book or a typed_booking block executed, at its ledger entry
     booked: dict[str, int]                     # each booking's amount, by its decision ID (`booked_amounts`)
     leads: list[Timed]
     stopped: list[Stopped]
     holds: list[Timed]                         # decisions with outcome hold
-    callbacks: list[Timed]                     # native.request_callback executed, at its ledger entry
+    callbacks: list[Timed]                     # native.request_callback or an urgent block executed, at its ledger entry
     stepped: list[Timed]                       # the owner stepping into a session
     texts: list[Timed]                         # visitor and agent text rows
     replies: list[Timed]                       # Claude's delivered replies, a handoff clause left out
@@ -464,11 +464,16 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     entries = {entry["seq"]: entry for entry in ledger}
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
+    tools_by_block = {"urgent": {"native.request_callback"}, "typed_booking": {"native.book"}}
+    for row in await ctx.ro.rows("tools", desk_id=desk_id):
+        block = (row["business"] or {}).get("config", {}).get("block")
+        if block in tools_by_block:
+            tools_by_block[block].add(row["tool"])
 
-    def executed(tool: str) -> list[Timed]:
+    def executed(tools: set[str]) -> list[Timed]:
         return [Timed(at=entry_time(entry), session_id=row["session_id"], ref_id=row["decision_id"],
                       line=row["reason_plain"], replayed=decision_replayed(row, entry))
-                for row in decisions if row["tool"] == tool and row["state"] == "executed"
+                for row in decisions if row["tool"] in tools and row["state"] == "executed"
                 and (entry := entries.get(row["ledger_seq"])) is not None]
 
     rows = await ctx.ro.conn.execute(
@@ -490,10 +495,10 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         elif row.kind == "delivered" and row.author == "claude" and not any(
                 block.template == "handoff" for block in row.blocks or []):
             replies.append(at)
-    bookings = executed("native.book")
+    bookings = executed(tools_by_block["typed_booking"])
     return Activity(
         people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
-        callbacks=executed("native.request_callback"),
+        callbacks=executed(tools_by_block["urgent"]),
         leads=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["lead_id"], line=row["note"])
                for row in leads],
         stopped=_stopped_attempts(decisions, ledger, who.sessions),
