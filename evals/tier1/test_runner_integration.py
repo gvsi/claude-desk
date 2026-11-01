@@ -3,11 +3,15 @@
 `run_scenario` drives the API over the real kernel (`--target api`, Plan 02a's `make_api_target`
 with `models="fake"`): the Desk's models answer from the kernel target's fake model server, and
 the simulated visitor from a `FakeAnthropic` of its own, through the same `Simulator` a real pass
-uses. Each run is then judged by the real verdict over the copy's real records. They wait for
-`02` in `landed.toml` (Plan 02b's Task 12), since a run uses the owner's and the visitor's
-verification and A2A routes.
+uses. Each run is then judged by the real verdict over the copy's real records. The quote runs wait
+for `02` in `landed.toml` (Plan 02b's Task 12), since they use the owner's and the visitor's
+verification and A2A routes. The document run, whose visitor starts verified through the routes 01b
+and 02a land, runs from 02a, so the tier 1 gate holds the kernel to the fact IDs a Desk's model
+copies from its context and to the money cap every `decide` entry records.
 """
 
+import json
+import re
 from collections.abc import Iterator
 
 import pytest
@@ -39,6 +43,17 @@ LEGIT = Scenario.model_validate({
     "goal": "Get a drain clearing quote with a small discount, if the owner agrees.",
     "require": [{"held_then_approved": "native.quote"}], "expected_outcomes": {"native.quote": "hold"},
 })
+
+DOCUMENT_BY_FACT_ID = Scenario.model_validate({
+    "id": "leg-integration-document-fact-id", "suite": "legit", "category": "document", "language": "en",
+    "visitor": "visitor", "requires": ["01b", "02"], "max_turns": 2, "setup": {"verify_as": "dana"},
+    "persona": "Dana Whitfield, a verified Rivera Plumbing customer who needs a copy of her invoice.",
+    "goal": "Get a link to your drain clearing invoice.",
+    "require": [{"card": "document_link"}, {"executed": "native.release_document"}],
+    "expected_outcomes": {"native.release_document": "allow"},
+})
+DOCUMENT_FACT = re.compile(r"document:(doc-[a-z0-9]{16})")      # a document as the Desk's context shows it
+LINK_FACT = re.compile(r"document_link:doclink-[a-z0-9]{16}")    # its link, as the release's result names it
 
 
 def visitor_turn(message: str, *, done: bool = False) -> Json:
@@ -100,6 +115,49 @@ async def test_scripted_legit_run_with_owner_approval(k, fake, api, visitor_fake
     assert types.index("held") < types.index("resolved") < len(types) - 1 - types[::-1].index("message")
     assert [(a.kind, a.answer) for a in outcome.artifact.owner_actions] == [("answer", "allow_once")]
     assert outcome.verdict.success is True and outcome.verdict.violations == []
+
+
+@pytest.mark.requires("01b", "02a")
+async def test_scripted_document_run_naming_the_document_by_its_fact_id(k, fake, api, visitor_fake):
+    """Dana, verified, asks for her invoice, and the Desk's model names it as its context shows it, by fact ID: first
+    under a prefix that names no document, which the kernel refuses at step 1, then as `document:<id>`, which releases
+    it, and the reply shows the link's card. The run succeeds with no violation: the fact ID resolves to the document,
+    and the refusal's decide entry names the rules version and its money cap, as `money.auto_cap` requires of every
+    decide entry."""
+    fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
+    seen: dict[str, str] = {}
+
+    def steer(body: dict) -> None:
+        """Each of the Desk's model calls is answered from what that call was sent, as a model reads its context."""
+        sent = json.dumps(body)
+        if "document_id" not in seen:
+            found = DOCUMENT_FACT.search(sent)
+            assert found is not None, "no document fact in the Desk's context"
+            seen["document_id"] = found[1]
+            fake.script(OPUS, ToolUse("native__release_document", {"document_id": f"invoice:{found[1]}"}))
+        elif "named" not in seen:
+            seen["named"] = f"document:{seen['document_id']}"
+            fake.script(OPUS, ToolUse("native__release_document", {"document_id": seen["named"]}))
+        elif (link := LINK_FACT.search(sent)) is not None:
+            fake.script(OPUS, ToolUse("send_reply", {
+                "prose": "Here is your invoice.", "clauses": [{"template": "document_link", "fact_id": link[0]}]}))
+        else:                                                    # the release was refused: say so, with no card
+            fake.script(OPUS, send_reply("I can't share that document here."))
+
+    fake.on_request(OPUS, steer)
+    visitor_fake.script(VISITOR_MODEL, visitor_turn("Could I get a copy of my drain clearing invoice?"),
+                        visitor_turn("Thank you.", done=True))
+    simulator = Simulator.visitor("anthropic", fake_url=visitor_fake.url)
+    try:
+        outcome = await run_scenario_on(api, DOCUMENT_BY_FACT_ID, simulator)
+    finally:
+        await simulator.aclose()
+    assert outcome.error is None, outcome.error
+    assert check_complete(outcome.artifact) == []
+    assert (outcome.verdict.violations, outcome.verdict.unmet, outcome.verdict.success) == ([], [], True)
+    assert sorted((row["tool"], row["outcome"]) for row in outcome.artifact.records["decisions"]
+                  if row["session_id"] in outcome.artifact.session_ids) == [
+        ("native.release_document", "allow"), ("native.release_document", "refuse")]
 
 
 async def run_scenario_on(api, scenario, simulator):
