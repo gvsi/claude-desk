@@ -358,11 +358,14 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(LIST, { retryScale: 0 });
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
     await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    const before = row.element().getBoundingClientRect().top;
     mockStore.inject({ route: 'needsYou', status: 500, times: 10_000 });
     // Several failed reads later.
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(row.element().textContent).toContain('Wants you');
     expect(row.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('alert').elements()).toHaveLength(0);
+    expect(row.element().getBoundingClientRect().top).toBe(before);
   });
 
   it('callback_marks_the_list_and_closes_in_the_chat_with_focus_on_its_name', async () => {
@@ -1227,8 +1230,9 @@ describe('Conversations', () => {
     await expect.element(receipt(screen, `Held for you. ${SEEDED_REASON}`)).toBeVisible();
     const pane = screen.getByRole('region', { name: 'Visitor', exact: true });
     const line = pane.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
-    await expect.element(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    expect(screen.getByRole('navigation', { name: 'Conversations' }).getByRole('alert').elements()).toHaveLength(0);
+    expect(screen.getByRole('alert').elements()).toHaveLength(1);
     expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
 

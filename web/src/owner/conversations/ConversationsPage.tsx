@@ -146,19 +146,18 @@ export function ConversationsPage() {
                 <RecordedHistoryLink href={entriesPath(deskId)} />
               </p>
             ) : null}
-            {[failure, needsFailure].map((failed, i) => failed === null ? null : (
+            {failure === null ? null : (
               <Notice
-                key={i}
                 tone="error"
                 action={
-                  <Button variant="secondary" busy={failed.retrying} onClick={failed.retry}>
+                  <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
                     Try again
                   </Button>
                 }
               >
-                {failed.line}
+                {failure.line}
               </Notice>
-            ))}
+            )}
             {listBody}
           </div>
         </SkeletonScreen>
