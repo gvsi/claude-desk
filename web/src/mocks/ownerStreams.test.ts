@@ -6,6 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { growingWords, playReply, type PlayedEvent } from './ownerStreams.ts';
+import { RIVERA } from './seed.ts';
+import { mockStore } from './store.ts';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -154,5 +156,16 @@ describe('playReply', () => {
     await vi.runAllTimersAsync();
     expect(out.played).toEqual([{ name: 'delta', text: 'one' }]);
     expect(out.ended()).toBeNull();
+  });
+});
+
+describe('a rule chat refused for the payment limit', () => {
+  it('keeps_its_answer_only_for_the_stream_of_that_chat', async () => {
+    mockStore.reset('rivera');
+    const params = { desk_id: RIVERA.deskId };
+    // Asked as JSON, the refusal comes back at once; the answer it kept must not outlive that chat.
+    expect(await mockStore.dispatch('ruleChat', { params, body: { text: 'Send payment links on your own up to $800' } })).toMatchObject({ status: 422 });
+    expect(await mockStore.dispatch('ruleChat', { params, body: { text: 'x'.repeat(2001) } })).toMatchObject({ status: 422, body: { error: 'invalid' } });
+    expect(mockStore.ruleChatStream().refusedAnswer).toBeNull();
   });
 });

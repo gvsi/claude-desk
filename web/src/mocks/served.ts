@@ -653,6 +653,8 @@ const SERVED: ServedRoutes = {
     return isFailure(desk) ? desk : ok(rulesView(desk));
   },
   ruleChat(sv, req) {
+    // Only this chat's own refusal may stream its answer: whatever an earlier chat kept goes now.
+    sv.refusedAnswer = null;
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
     const text = isRecord(req.body) ? req.body.text : undefined;
@@ -670,7 +672,6 @@ const SERVED: ServedRoutes = {
       })
       .reverse();
     const reply = ruleChatReply(text, desk.policy.cards, held);
-    sv.refusedAnswer = null;
     if (reply.add.length === 0) return ok({ answer: reply.answer, draft: null } satisfies RuleChatOut);
     const refused = aboveMoneyCap(desk, reply.add);
     if (refused === null) return ok({ answer: reply.answer, draft: sv.world.draft(desk, reply.add) } satisfies RuleChatOut);
