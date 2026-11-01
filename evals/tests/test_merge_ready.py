@@ -327,3 +327,25 @@ def test_make_target_passes_default_or_selected_head(head):
 
     assert planned.returncode == 0, planned.stderr
     assert planned.stdout.strip().endswith(f'python -m evals.run merge-ready --head "{head or "HEAD"}"')
+
+
+def test_files_alembic_ignores_in_the_versions_folder_never_block(repo):
+    write(repo, "backend/alembic/versions/__init__.py", "")
+    write(repo, "backend/alembic/versions/archive/old_helper.py", "HELPERS = []\n")
+    commit(repo, "files Alembic doesn't read as revisions")
+
+    assert results.merge_ready(root=repo) == (
+        True, "ready: results inputs changed on at most one side since the merge base with origin/main")
+
+
+def test_a_conflict_is_not_ready_even_when_only_one_side_changed_results_inputs(repo):
+    write(repo, "README.md", "This branch's README.\n")
+    commit(repo, "branch README")
+    git(repo, "checkout", "-q", "main")
+    write(repo, "README.md", "Main's README.\n")
+    commit(repo, "main README")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "plan/change")
+
+    assert results.merge_ready(root=repo) == (
+        False, "not ready: the PR conflicts with origin/main in 'README.md'; rebase onto origin/main")

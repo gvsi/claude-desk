@@ -310,9 +310,10 @@ def _migration_heads(root: Path, tree: str) -> list[str] | None:
         raise GitError(f"{MIGRATIONS_PATH} can't be read as a directory in the merge tree")
     revisions: set[str] = set()
     parents: set[str] = set()
-    paths = git(root, "ls-tree", "-r", "-z", "--name-only", tree, "--", MIGRATIONS_PATH + "/").split("\0")
+    # Like Alembic: only the folder's own .py files, not subfolders, and never an `__init__` file.
+    paths = git(root, "ls-tree", "-z", "--name-only", tree, "--", MIGRATIONS_PATH + "/").split("\0")
     for path in paths:
-        if not path.endswith(".py"):
+        if not path.endswith(".py") or path.rsplit("/", 1)[-1].startswith("__"):
             continue
         raw = show(root, tree, path)
         if raw is None:
