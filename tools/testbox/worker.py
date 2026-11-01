@@ -23,6 +23,7 @@ def stop(signum, _frame):
 
 def run(cmd, **kwargs):
     global ACTIVE
+    kwargs.setdefault("stdout", sys.stderr)
     ACTIVE = subprocess.Popen(cmd, start_new_session=True, **kwargs)
     try:
         code = ACTIVE.wait()
@@ -70,6 +71,8 @@ def main():
     repo = base / "repo"
     transfer = base / "transfer"
     request = json.loads((transfer / "request.json").read_text())
+    if request.get("timing"):
+        os.environ["TESTBOX_TIMING"] = "1"
     # Remove files that disappeared on branch switches, without touching lane build state.
     current = set(json.loads((transfer / "manifest.json").read_text()))
     completed = base / "manifest.tmp"
@@ -109,7 +112,7 @@ def main():
     stamp = base / "kernel-hash"
     rebuilt = False
     if not stamp.exists() or stamp.read_text() != kernel_hash or not (repo / "kernel/target/release/desk-prove").exists():
-        print("testbox: building lane kernel", flush=True)
+        print("testbox: building lane kernel", file=sys.stderr, flush=True)
         run(["make", "kernel"], env=env)
         stamp.write_text(kernel_hash)
         rebuilt = True
@@ -129,11 +132,11 @@ def main():
         run([str(repo / "backend/.venv/bin/python"), helper, str(base), template, database, schema], env=env)
     timing.mark("database_setup")
     command = request["command"]
-    print("testbox: running " + repr(command), flush=True)
+    print("testbox: running " + repr(command), file=sys.stderr, flush=True)
     if rebuilt and command == ["make", "kernel"]:
         return 0  # The requested build already ran above.
     try:
-        run(command, env=env)
+        run(command, env=env, stdout=None)
         timing.mark("command")
         return 0
     except subprocess.CalledProcessError as exc:

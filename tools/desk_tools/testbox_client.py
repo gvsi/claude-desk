@@ -187,6 +187,16 @@ with (base / 'lock').open('w') as lock:
 """.replace('BASE', repr(base)).replace('STATE', repr(lane_state_script(base))).replace('COMMAND', repr(command)).replace('CANCEL', repr(cancel))
 
 
+def read_remote_state(holder):
+    line = holder.stdout.readline()
+    if line:
+        return json.loads(line)
+    if holder.wait() == 75:
+        print("testbox: the test machine is bootstrapping, retry shortly", file=sys.stderr)
+        return None
+    raise RuntimeError("Could not lock the remote lane")
+
+
 def control_path(cache: Path, region: str, instance: str) -> Path:
     return cache / (hashlib.sha256(("v2:" + region + instance).encode()).hexdigest()[:20] + ".sock")
 
@@ -270,7 +280,7 @@ def run(args, root, lane, cache):
             raise RuntimeError(f"Expected one running test box in {args.region}, found {len(instances)}")
         instance = instances[0]["InstanceId"]
     timing.mark("discovery")
-    print(f"testbox: connecting in {args.region}; lane={lane}", flush=True)
+    print(f"testbox: connecting in {args.region}; lane={lane}", file=sys.stderr, flush=True)
     # Reuse one encrypted SSM stream for SSH/rsync. No inbound port is opened.
     with (cache / f"connection-{instance}.lock").open("w") as connection_lock:
         fcntl.flock(connection_lock, fcntl.LOCK_EX)
@@ -318,14 +328,13 @@ def run(args, root, lane, cache):
     unit = f"desk-testbox-run-{lane}-{call_id}"
     # stop is idempotent even if cancellation happens before the service was created.
     cancel = ["sudo", "sh", "-c", f"systemctl stop {unit}.service 2>/dev/null || ! systemctl is-active --quiet {unit}.service"]
-    transaction = transaction_script(base, ["sudo", "env", f"TESTBOX_PROTOCOL={PROTOCOL_VERSION}", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/transfer/tools/testbox/worker.py", base], cancel)
+    transaction = transaction_script(base, ["sudo", "env", f"TESTBOX_PROTOCOL={PROTOCOL_VERSION}", f"TESTBOX_TIMING={int(os.environ.get('TESTBOX_TIMING') == '1')}", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/transfer/tools/testbox/worker.py", base], cancel)
     prepare = f"test -f /opt/testbox/ready || exit 75; exec 8</opt/testbox/bootstrap.lock; flock -s 8; test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c "
     holder = subprocess.Popen(ssh + [prepare + shlex.quote(transaction)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, start_new_session=True)
     try:
-        line = holder.stdout.readline()
-        if not line:
-            raise RuntimeError("Could not lock the remote lane")
-        remote = json.loads(line)
+        remote = read_remote_state(holder)
+        if remote is None:
+            return 75
         timing.mark("remote_lock")
         with tempfile.TemporaryDirectory(prefix="desk-testbox-") as tmp:
             tmp = Path(tmp)
@@ -334,7 +343,7 @@ def run(args, root, lane, cache):
             state = source_state(root, files)
             delta = changed_files(state, remote["sources"])
             timing.mark("file_list")
-            print(f"testbox: syncing {len(delta)} of {len(files)} source files and Git HEAD", flush=True)
+            print(f"testbox: syncing {len(delta)} of {len(files)} source files and Git HEAD", file=sys.stderr, flush=True)
             (tmp / "manifest.json").write_text(json.dumps(files))
             (tmp / "files").write_bytes(b"\0".join(p.encode() for p in delta) + (b"\0" if delta else b""))
             head = capture(["git", "rev-parse", "HEAD"], cwd=root)
@@ -346,7 +355,7 @@ def run(args, root, lane, cache):
             if old != signature:
                 bundled = create_bundle(root, tmp / "source.bundle", old)
             timing.mark("git_bundle")
-            (tmp / "request.json").write_text(json.dumps({"lane": lane, "command": args.command, "ci": args.ci, "head": head, "main": main_ref, "signature": signature, "bundle": bundled}))
+            (tmp / "request.json").write_text(json.dumps({"lane": lane, "command": args.command, "ci": args.ci, "head": head, "main": main_ref, "signature": signature, "bundle": bundled, "timing": os.environ.get("TESTBOX_TIMING") == "1"}))
             rsync = shutil.which("rsync")
             if not rsync:
                 raise RuntimeError("rsync is required (macOS openrsync is supported)")
@@ -362,7 +371,7 @@ def run(args, root, lane, cache):
                 # and mtime match. This also repairs sources altered by a previous remote job.
                 subprocess.run([rsync, "-rlpt", "--ignore-times", "--from0", "--files-from=" + str(tmp / "files"), "-e", transport, str(root) + "/", host + ":" + base + "/repo/"], check=True)
             timing.mark("source_transfer")
-            print(f"testbox: sync complete ({time.monotonic() - start:.2f}s)", flush=True)
+            print(f"testbox: sync complete ({time.monotonic() - start:.2f}s)", file=sys.stderr, flush=True)
             # Run the worker shipped by this client, even if the selected tree has no tools.
             holder.stdin.write("run\n")
             holder.stdin.flush()
@@ -370,7 +379,7 @@ def run(args, root, lane, cache):
                 print(line, end="", flush=True)
             code = holder.wait()
             timing.mark("remote_execution")
-            print(f"testbox: lane={lane} exit={code} elapsed={time.monotonic() - start:.2f}s", flush=True)
+            print(f"testbox: lane={lane} exit={code} elapsed={time.monotonic() - start:.2f}s", file=sys.stderr, flush=True)
             return code
     finally:
         # Closing the lease tells the remote watchdog to stop this exact call. Wait for its

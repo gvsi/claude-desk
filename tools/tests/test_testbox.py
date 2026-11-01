@@ -25,3 +25,15 @@ def test_environment_is_lane_scoped_and_ci_is_explicit():
 
 def test_command_preserves_argument_boundaries():
     assert remote_command(["printf", "%s", "hello; touch /bad"]) == "printf %s 'hello; touch /bad'"
+
+
+def test_timings_are_opt_in_and_use_stderr(monkeypatch, capsys):
+    from desk_tools.testbox import Timings
+    monkeypatch.delenv('TESTBOX_TIMING', raising=False)
+    Timings('fixture').mark('quiet')
+    assert capsys.readouterr() == ('', '')
+    monkeypatch.setenv('TESTBOX_TIMING', '1')
+    Timings('fixture').mark('visible')
+    output = capsys.readouterr()
+    assert output.out == ''
+    assert 'testbox timing: fixture.visible=' in output.err

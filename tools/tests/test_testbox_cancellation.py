@@ -69,7 +69,7 @@ spec = importlib.util.spec_from_file_location('worker', {str(worker)!r})
 worker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(worker)
 signal.signal(signal.SIGTERM, worker.stop)
-worker.run([{sys.executable!r}, '-c', {('import os, time; from pathlib import Path; Path(' + repr(str(tmp_path / 'pid')) + ').write_text(str(os.getpid())); print("WAITING", flush=True); time.sleep(90)')!r}])
+worker.run([{sys.executable!r}, '-c', {('import os, time; from pathlib import Path; Path(' + repr(str(tmp_path / 'pid')) + ').write_text(str(os.getpid())); print("WAITING", flush=True); time.sleep(90)')!r}], stdout=None)
 '''
     process = subprocess.Popen([sys.executable, '-c', script], stdout=subprocess.PIPE, text=True, start_new_session=True)
     try:

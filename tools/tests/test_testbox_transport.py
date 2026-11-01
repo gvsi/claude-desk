@@ -256,3 +256,15 @@ def test_next_sync_removes_remote_created_sources_but_keeps_ignored_builds(tmp_p
     assert (repo / 'local.py').exists()
     assert (repo / 'build/cache').read_text() == 'warm'
     assert (repo / '.env').exists()
+
+
+def test_not_ready_status_reaches_the_caller_as_retryable_75(capsys):
+    import io
+    from types import SimpleNamespace
+    from desk_tools.testbox_client import read_remote_state
+
+    holder = SimpleNamespace(stdout=io.StringIO(''), wait=lambda: 75)
+    assert read_remote_state(holder) is None
+    output = capsys.readouterr()
+    assert output.out == ''
+    assert 'the test machine is bootstrapping, retry shortly' in output.err

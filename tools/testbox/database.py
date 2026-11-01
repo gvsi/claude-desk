@@ -25,4 +25,4 @@ with psycopg.connect(admin, autocommit=True) as conn:
         conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database)))
         conn.execute(sql.SQL("CREATE DATABASE {} WITH TEMPLATE {} OWNER desk_admin").format(sql.Identifier(database), sql.Identifier(template)))
         stamp.write_text(schema)
-        print(f"testbox: database {database} cloned from migrated template", flush=True)
+        print(f"testbox: database {database} cloned from migrated template", file=sys.stderr, flush=True)

@@ -1,4 +1,6 @@
 """Pure client rules shared with the remote runner (standard library only)."""
+import os
+import sys
 import hashlib
 import re
 import shlex
@@ -18,7 +20,8 @@ class Timings:
 
     def mark(self, phase):
         now = time.monotonic()
-        print(f"testbox timing: {self.scope}.{phase}={now - self.previous:.3f}s", flush=True)
+        if os.environ.get("TESTBOX_TIMING") == "1":
+            print(f"testbox timing: {self.scope}.{phase}={now - self.previous:.3f}s", file=sys.stderr, flush=True)
         self.previous = now
 
 
