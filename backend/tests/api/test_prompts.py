@@ -135,14 +135,34 @@ def test_system_prompt_uses_the_business_policies():
         assert instruction in section
 
 
+def test_visitor_asks_in_person_or_remote_before_the_town():
+    text = conversation_system(RIVERA)[0]["text"]
+    assert "If the visit is at Rivera Plumbing's own place" in text
+    assert "you can find open times right away" in text
+    assert "ask whether they'd like to meet in person or remotely, unless they've already said" in text
+    assert "the request means a visit or an in-person appointment" in text
+    assert "before you offer to book, unless they've already said" in text
+    assert "In every case, show charter:policy:service_area" in text
+    assert "For something urgent (what charter:policy:urgent treats as urgent, or an emergency happening now)" in text
+    assert "this check still comes before any booking" in text
+
+
 def test_system_prompt_checks_service_area_before_offering_to_book():
     lines = conversation_system(RIVERA)[0]["text"].splitlines()
     next_step = next(i for i, line in enumerate(lines) if line.startswith("- When you suggest a next step,"))
-    assert lines[next_step + 1] == (
-        "- If <desk_context> states where the business works and the request means going to a place, find out "
-        "which town that is before you offer to book. If it isn't one they serve, tell them Rivera Plumbing "
-        "doesn't list that place, then offer to take a message for Maria Rivera or arrange a callback. "
-        "Either way, show charter:policy:service_area with the policy clause."
+    rule = lines[next_step + 1]
+    assert "  " not in rule
+    assert rule == (
+        "- If <desk_context> states where the business works and the request means a visit or an in-person "
+        "appointment, find out which town that is before you offer to book, unless they've already said. "
+        "If the visit is at Rivera Plumbing's own place, such as a salon clients come to or a building it manages, "
+        "don't ask for a town. When the area it states also includes remote work, you can find open times right away; "
+        "ask whether they'd like to meet in person or remotely, unless they've already said, and ask for the town "
+        "before you book only if they want in person. If the town isn't one they serve, tell them Rivera Plumbing "
+        "doesn't list that place, then offer to take a message for Maria Rivera or arrange a callback. In every case, "
+        "show charter:policy:service_area with the policy clause. For something urgent (what charter:policy:urgent "
+        "treats as urgent, or an emergency happening now), the urgent steps come first; this check still comes before "
+        "any booking."
     )
 
 
@@ -256,7 +276,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.17"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.18"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -427,6 +447,16 @@ def test_setup_planning_prompts_ask_prerequisites_before_proposing_jobs():
         assert "propose stripe first, then the payment job" in system
         assert "A documents job needs a client on record" in system
         assert "each job's prerequisites before it" in system
+
+
+def test_setup_only_offers_answers_from_facts_it_can_store():
+    for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_TURN_SYSTEM,
+                   SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert "there's no place yet for other terms such as deposit or cancellation rules" in system
+
+
+def test_setup_follow_up_asks_about_the_part_still_open():
+    assert "asked as a question about the part still open" in SETUP_TURN_SYSTEM
 
 
 def test_setup_asks_one_thing_at_a_time_and_keeps_limits_after_the_fit_view():
