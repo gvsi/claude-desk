@@ -15,6 +15,31 @@ from tests.api.test_setup_questions import (
 )
 
 
+def proposal_entries(jobs, connectors, *, business_tools_enabled: bool = False) -> list[setup.Entry]:
+    """Build stored cards, including legacy payment states, for decision and settlement tests."""
+    cards = []
+    for drafted in jobs:
+        try:
+            proposed = JobProposal.model_validate(drafted).model_copy(deep=True)
+        except ValueError:
+            continue
+        proposed.can_do_today = setup.CAPABILITIES[proposed.job]
+        if isinstance(proposed.config, setup.PurposePaymentConfig):
+            proposed.config.amount_cents = None
+        if not business_tools_enabled:
+            proposed.config = None
+        cards.append(setup.ProposalCard(proposal_id=setup.new_proposal_id(), kind="job", state="proposed",
+                                        job=proposed, connector=None))
+    for drafted_connector in connectors:
+        connector = drafted_connector.model_copy(deep=True)
+        connector.connectable = True
+        connector.connected = False
+        connector.label = setup.CONNECTOR_LABELS[connector.app]
+        cards.append(setup.ProposalCard(proposal_id=setup.new_proposal_id(), kind="connector", state="proposed",
+                                        job=None, connector=connector))
+    return [setup.Entry(role="claude", text="", card=card) for card in cards]
+
+
 def job(kind="schedule", **fields):
     return JobProposal(**{
         "job": kind, "title": "Book an intro", "why": "Meet new clients", "how": "Books an open slot",
@@ -75,14 +100,30 @@ async def test_first_rules_draft_publishes_only_owner_facts(proposals, model, en
         assert bool(call.body[part]) is (field not in suggested)
 
 
-def test_connector_connection_state_is_code_written_and_not_a_model_output():
+async def mint_opening(monkeypatch, answer, *, business_tools_enabled=False):
+    state = interview_with(SetupAnswers(summary="Tax advice"), [setup.Entry(role="owner", text="Tax advice")])
+    state.business_tools_enabled = business_tools_enabled
+
+    async def drafts(*args, **kwargs):
+        return answer
+
+    monkeypatch.setattr(setup, "_ask_drafts", drafts)
+    monkeypatch.setattr(setup, "recorder", lambda *_: None)
+    await setup._after_consent(None, None, None, state, [])
+    return state
+
+
+async def test_connector_connection_state_is_code_written_and_not_a_model_output(monkeypatch):
     from pydantic import ValidationError
     from desk.api.model import strict_schema
     from desk.api.prompts import ConnectorDraft
 
     assert ConnectorProposal.model_validate(stripe().model_dump(exclude={"connected"})).connected is False
-    supplied = stripe().model_copy(update={"connected": True})
-    assert setup.proposal_entries([], [supplied])[0].card.connector.connected is False
+    from tests.api.test_setup_questions import understanding
+    answer = setup.SetupUnderstanding(**understanding(jobs=[]))
+    answer.connectors = [ConnectorDraft(app="stripe", why="Take payments").model_copy(update={"connected": True})]
+    state = await mint_opening(monkeypatch, answer)
+    assert state.planned[0].connector.connected is False
     with pytest.raises(ValidationError):
         ConnectorDraft(app="stripe", why="Help", connected=True)
     for output in (setup.SetupUnderstanding, setup.SetupNextStep, setup.SetupCardAnswer, *setup.SETUP_TURNS.values()):
@@ -91,7 +132,7 @@ def test_connector_connection_state_is_code_written_and_not_a_model_output():
 
 @pytest.mark.parametrize("app_key", list(setup.CONNECTOR_LABELS))
 def test_connected_apps_come_only_from_current_accepted_cards(app_key):
-    entries = setup.proposal_entries([], [ConnectorProposal(
+    entries = proposal_entries([], [ConnectorProposal(
         app=app_key, label="App", why="Help", connectable=False)] * 2)
     state = plan_state(entries)
     assert state.connected == []
@@ -123,7 +164,7 @@ def test_connected_apps_come_only_from_current_accepted_cards(app_key):
 @pytest.mark.parametrize("app_key", list(setup.CONNECTOR_LABELS))
 @pytest.mark.parametrize("connectable", [False, True])
 def test_only_stripe_reserves_a_real_attempt_regardless_of_connectable(app_key, connectable):
-    entries = setup.proposal_entries([], [ConnectorProposal(
+    entries = proposal_entries([], [ConnectorProposal(
         app=app_key, label="App", why="Help", connectable=connectable)])
     entries[0].card.state = "accepted"
     entries[0].card.connector.connectable = connectable  # Include transcripts from before this change.
@@ -134,28 +175,41 @@ def test_only_stripe_reserves_a_real_attempt_regardless_of_connectable(app_key, 
     assert state.connected == []  # Reserving an attempt is not a completed connection.
 
 
-def test_proposals_come_as_cards_on_the_understanding():
-    opening = setup.Entry(role="claude", text="Here is how your Desk can help.")
-    state = interview_with(SetupAnswers(summary="Tax advice"), [setup.Entry(role="owner", text="Tax advice"), opening])
-    state.transcript.extend(setup.proposal_entries([job(), job("answer", config=None)], [stripe()]))
-    cards = [entry.card for entry in state.transcript if entry.card]
+async def test_understanding_mints_hidden_proposals_with_code_owned_availability(monkeypatch):
+    from tests.api.test_setup_questions import understanding
+    answer = setup.SetupUnderstanding(**understanding(jobs=[
+        proposed.model_dump(exclude={"can_do_today"}) for proposed in (job(), job("answer", config=None))],
+        connectors=[{"app": "stripe", "why": "Take payments"}]))
+    state = await mint_opening(monkeypatch, answer)
+    cards = state.planned
     assert [card.kind for card in cards] == ["job", "job", "connector"]
     assert [card.state for card in cards] == ["proposed"] * 3
     assert len({card.proposal_id for card in cards}) == 3
-    assert all(entry.role == "claude" and entry.text == "" and entry.choices == []
-               for entry in state.transcript[2:])
-    assert state.transcript[1] == opening
+    assert not any(entry.card for entry in state.transcript)
+    assert state.transcript[1].text == answer.reply
     assert all(card.job.can_do_today for card in cards[:2])
     assert cards[-1].connector.connectable is True
     assert cards[-1].connector.label == "Stripe"
 
 
-def test_an_unknown_job_kind_or_block_is_never_shown():
-    valid = job().model_dump()
-    drafted = [valid, {**valid, "job": "teleport"}, {**valid, "config": {"block": "teleport"}},
-               {**valid, "job": "payment"}, {**valid, "title": "x" * 61}]
-    entries = setup.proposal_entries(drafted, [])
-    assert [entry.card.job.job for entry in entries] == ["schedule"]
+@pytest.mark.parametrize("bad", [{"job": "teleport"}, {"config": {"block": "teleport"}},
+                                  {"job": "payment"}, {"title": "x" * 61}])
+async def test_an_invalid_job_is_never_minted_by_the_understanding(monkeypatch, bad):
+    from tests.api.fakes import ScriptedModel
+    from tests.api.test_setup_questions import understanding, unparsed
+    invalid = understanding(jobs=[{**job().model_dump(exclude={"can_do_today"}), **bad}])
+    model = ScriptedModel([unparsed(invalid), unparsed(invalid)])
+    state = interview_with(SetupAnswers(summary="Tax advice"), [setup.Entry(role="owner", text="Tax advice")])
+
+    async def record(response):
+        pass
+
+    monkeypatch.setattr(setup, "recorder", lambda *_: record)
+    await setup._after_consent(None, None, model, state, [])
+    assert not any(card.job for card in state.planned)
+    assert not any(entry.card for entry in state.transcript)
+    assert state.question == "hours_and_area"
+    assert len(model.requests) == 2
 
 
 @pytest.fixture
@@ -167,7 +221,7 @@ async def proposals(app, browser, kernel_http, model, engine, monkeypatch):
     await consent(owner, interview_id, False, model, cards=True)
     payment = job("payment", title="Pay a retainer", config={
         "block": "purpose_payment", "purpose": "Retainer", "amount_cents": 999_999})
-    entries = setup.proposal_entries([job(), payment], [stripe()], business_tools_enabled=True)
+    entries = proposal_entries([job(), payment], [stripe()], business_tools_enabled=True)
     transcript = (await stored(engine, interview_id))["transcript"] + [
         setup.Entry(role="claude", text="The setup plan", planned=[entry.card for entry in entries]).model_dump(mode="json"),
         entries[0].model_dump(mode="json")]
@@ -284,7 +338,7 @@ async def test_a_zero_payment_amount_cannot_be_accepted(proposals, model, engine
 
 @pytest.mark.parametrize("state", ["unshown", "pending", "accepted"])
 def test_finish_declines_zero_payment_amounts(state):
-    entries = setup.proposal_entries([job("payment", title="Deposit", config={
+    entries = proposal_entries([job("payment", title="Deposit", config={
         "block": "purpose_payment", "purpose": "Deposit", "amount_cents": None})], [],
         business_tools_enabled=True)
     card = entries[0].card
@@ -304,7 +358,7 @@ def test_finish_declines_zero_payment_amounts(state):
 
 async def test_status_and_documents_are_never_available_today(proposals, engine):
     owner, state, ids = proposals
-    entries = setup.proposal_entries([job(kind, config=None, can_do_today=True) for kind in ("status", "documents")], [])
+    entries = proposal_entries([job(kind, config=None, can_do_today=True) for kind in ("status", "documents")], [])
     assert all(entry.card.job.can_do_today is False for entry in entries)
     transcript = (await stored(engine, state["interview_id"]))["transcript"] + [entry.model_dump(mode="json") for entry in entries]
     async with engine.begin() as conn:
@@ -329,7 +383,7 @@ async def test_config_is_cleared_while_business_tools_are_off(proposals, app, en
     assert Settings(api_database_url="unused", desk_env="test").business_tools_enabled is False
     owner, state, ids = proposals
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
-    entries = setup.proposal_entries([job()], [])
+    entries = proposal_entries([job()], [])
     assert entries[0].card.job.config is None
     path = f"/api/owner/setup/{state['interview_id']}"
     cards = shown(await owner.browser.get(path + "?cards=1"))
@@ -342,7 +396,7 @@ async def test_config_is_cleared_while_business_tools_are_off(proposals, app, en
 
 
 def test_finish_accepts_still_proposed_cards_and_keeps_declines():
-    entries = setup.proposal_entries([job(), job("answer", config=None)], [stripe()])
+    entries = proposal_entries([job(), job("answer", config=None)], [stripe()])
     entries[1].card.state = "declined"
     state = plan_state(entries, answers=SetupAnswers(summary="Tax advice", quote_auto_max_cents=3000, refunds="never"))
     entries[0].card.state = "accepted"
@@ -361,7 +415,7 @@ def test_finish_accepts_still_proposed_cards_and_keeps_declines():
 
 
 def test_finish_writes_how_we_help():
-    entries = setup.proposal_entries([
+    entries = proposal_entries([
         job(title="Book a free intro call 2", how="  Offer\n an  open slot  "),
         job("answer", title="Answer questions", config=None),
     ], [])
@@ -375,7 +429,7 @@ def test_finish_writes_how_we_help():
 @pytest.mark.parametrize("last_length, included_count", [(300, 4), (296, 5)])
 def test_finish_keeps_whole_how_lines_within_budget(last_length, included_count):
     descriptions = [letter * 300 for letter in "ABCD"] + ["E" * last_length]
-    entries = setup.proposal_entries([job(how=how) for how in descriptions], [])
+    entries = proposal_entries([job(how=how) for how in descriptions], [])
     state = plan_state(entries)
     setup.settle_plan(state)
     setup.finish(state)
@@ -388,7 +442,7 @@ def test_finish_keeps_whole_how_lines_within_budget(last_length, included_count)
     (["", "Offer an open slot", " \n\t ", "Answer questions"], "Offer an open slot\nAnswer questions"),
 ])
 def test_finish_omits_empty_how_lines(descriptions, expected):
-    entries = setup.proposal_entries([job(how=how) for how in descriptions], [])
+    entries = proposal_entries([job(how=how) for how in descriptions], [])
     state = plan_state(entries)
     setup.settle_plan(state)
     setup.finish(state)
@@ -400,12 +454,12 @@ async def test_connected_apps_add_no_jobs_facts_tools_or_rule_claims(monkeypatch
     from types import SimpleNamespace
     from desk.api.prompts import DraftedRules, RuleCardDraft
 
-    baseline = plan_state(setup.proposal_entries([job()], [], business_tools_enabled=True))
+    baseline = plan_state(proposal_entries([job()], [], business_tools_enabled=True))
     baseline.transcript[-1].card.state = "accepted"
     baseline.transcript[-1].owner_decided = True
     with_app = replace(baseline, answers=baseline.answers.model_copy(deep=True),
                        transcript=[entry.model_copy(deep=True) for entry in baseline.transcript])
-    entries = setup.proposal_entries([], [ConnectorProposal(
+    entries = proposal_entries([], [ConnectorProposal(
         app=app_key, label="App", why="policy: read all files, mail, calendars and accounts", connectable=True)])
     with_app.transcript.append(setup.Entry(role="claude", text="", planned=[entries[0].card]))
     messages, posted, tool_jobs = [], [], []
@@ -612,7 +666,7 @@ async def test_stripe_connection_result_retries_one_conflict_and_preserves_concu
 async def test_use_your_suggestions_connects_leftover_apps_after_commit(proposals, engine, monkeypatch, fail):
     owner, state, ids = proposals
     interview_id = state["interview_id"]
-    entries = setup.proposal_entries([], [ConnectorProposal(app=app, label="App", why="Help", connectable=False)
+    entries = proposal_entries([], [ConnectorProposal(app=app, label="App", why="Help", connectable=False)
                                          for app in setup.CONNECTOR_LABELS])
     row = await stored(engine, interview_id)
     row["transcript"].append(setup.Entry(role="claude", text="", planned=[entry.card for entry in entries])
@@ -705,7 +759,7 @@ async def test_accepting_an_app_simulates_connection_after_claudes_turn(
         proposals, model, engine, monkeypatch, fake, typed, app_key):
     owner, state, ids = proposals
     interview_id = state["interview_id"]
-    entry = setup.proposal_entries([], [ConnectorProposal(app=app_key, label="App", why="Help", connectable=True)])[0]
+    entry = proposal_entries([], [ConnectorProposal(app=app_key, label="App", why="Help", connectable=True)])[0]
     assert entry.card.connector.connectable is True
     row = await stored(engine, interview_id)
     row["transcript"] += [setup.Entry(role="claude", text="", planned=[entry.card]).model_dump(mode="json"),
@@ -871,7 +925,8 @@ async def test_a_connector_without_an_accept_does_not_connect(proposals, model, 
 
 
 @pytest.mark.parametrize("action", ["decision", "typed", "suggestions"])
-async def test_a_decision_while_busy_is_202(proposals, engine, action):
+@pytest.mark.parametrize("busy_source", ["pending", "guard"])
+async def test_a_decision_while_busy_is_202(proposals, engine, action, busy_source):
     owner, state, ids = proposals
     path = f"/api/owner/setup/{state['interview_id']}"
     suffix, body = {
@@ -879,7 +934,15 @@ async def test_a_decision_while_busy_is_202(proposals, engine, action):
         "typed": ("/answer", {"card": ids[0], "text": "Yes"}),
         "suggestions": ("/suggestions", {}),
     }[action]
-    row = await stored(engine, state["interview_id"])
+    before = await stored(engine, state["interview_id"])
+    if busy_source == "guard":
+        assert not any(entry.get("pending") for entry in before["transcript"])
+        with setup._turn(state["interview_id"]):
+            reply = await owner.browser.post(path + suffix, json=body)
+            assert reply.status_code == 202, reply.text
+        assert await stored(engine, state["interview_id"]) == before
+        return
+    row = before
     row["transcript"].append(setup.Entry(role="owner", text="Consent in progress", pending="consent-run")
                              .model_dump(mode="json"))
     async with engine.begin() as conn:
@@ -891,9 +954,6 @@ async def test_a_decision_while_busy_is_202(proposals, engine, action):
     assert visible.json()["busy"] is True
     reply = await owner.browser.post(path + suffix, json=body)
     assert reply.status_code == 202, reply.text
-    with setup._turn(state["interview_id"]):
-        reply = await owner.browser.post(path + suffix, json=body)
-        assert reply.status_code == 202, reply.text
     assert await stored(engine, state["interview_id"]) == before
 
 
@@ -1090,7 +1150,7 @@ async def test_finish_and_after_finish_never_connect(monkeypatch, app_key, decli
     from types import SimpleNamespace
 
     connector = ConnectorProposal(app=app_key, label="Model label", why="Help customers", connectable=True)
-    entries = setup.proposal_entries([], [connector])
+    entries = proposal_entries([], [connector])
     entries[0].card.state = "declined" if declined else "accepted"
     assert entries[0].card.connector.connectable is True
     state = plan_state(entries)
@@ -1152,7 +1212,7 @@ async def test_suggestions_keep_owner_facts_given_on_another_topic(proposals, mo
 
 @pytest.mark.parametrize("kind", ["documents", "status"])
 def test_how_we_help_omits_jobs_unavailable_today(kind):
-    entries = setup.proposal_entries([job(kind, title="Unavailable job", config=None), job()], [])
+    entries = proposal_entries([job(kind, title="Unavailable job", config=None), job()], [])
     entries[0].card.state = "accepted"
     state = plan_state(entries)
     setup.settle_plan(state)
@@ -1163,7 +1223,7 @@ def test_how_we_help_omits_jobs_unavailable_today(kind):
 def test_finish_declines_an_unpriced_purpose_payment():
     payment = job("payment", title="Pay a retainer", config={
         "block": "purpose_payment", "purpose": "Retainer", "amount_cents": 5000})
-    entries = setup.proposal_entries([payment, job()], [], business_tools_enabled=True)
+    entries = proposal_entries([payment, job()], [], business_tools_enabled=True)
     assert entries[0].card.job.config.amount_cents is None
     state = plan_state(entries)
     setup.settle_plan(state)
@@ -1250,7 +1310,7 @@ async def test_duplicate_stripe_cards_connect_once(proposals, model, engine, mon
     assert (await owner.browser.post(path, json={"accept": True})).status_code == 409
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).status_code == 200
     # A new card in the same interview still cannot trigger another connection, even after a failure.
-    duplicate = setup.proposal_entries([], [stripe()])[0]
+    duplicate = proposal_entries([], [stripe()])[0]
     row = await stored(engine, interview_id)
     row["transcript"] += [setup.Entry(role="claude", text="", planned=[duplicate.card]).model_dump(mode="json"),
                           duplicate.model_dump(mode="json")]
@@ -1287,7 +1347,7 @@ async def test_a_failed_business_tool_write_keeps_saved_setup(proposals, engine,
 
 
 def test_apply_decision_changes_only_the_pending_card_and_is_shared_with_typed_answers():
-    entries = setup.proposal_entries([job(), job('payment', config={
+    entries = proposal_entries([job(), job('payment', config={
         'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': None})], [], business_tools_enabled=True)
     state = interview_with(SetupAnswers(summary="Tax advice"), [setup.Entry(role='claude', text='', planned=[e.card.model_copy(deep=True) for e in entries]), entries[0]])
     before = setup._stored(state)
@@ -1305,7 +1365,7 @@ def test_apply_decision_changes_only_the_pending_card_and_is_shared_with_typed_a
 
 
 def test_settle_plan_is_idempotent_and_emits_each_leftover_card_once():
-    entries = setup.proposal_entries([job(), job('payment', config={
+    entries = proposal_entries([job(), job('payment', config={
         'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': None}), job('answer', config=None)],
         [stripe()], business_tools_enabled=True)
     planned = [entry.card.model_copy(deep=True) for entry in entries]
@@ -1328,7 +1388,7 @@ def test_settle_plan_is_idempotent_and_emits_each_leftover_card_once():
 @pytest.mark.parametrize("app_key", list(setup.CONNECTOR_LABELS))
 @pytest.mark.parametrize("status", ["pending", "unshown", "declined"])
 def test_settling_apps_marks_only_accepted_simulated_connections(app_key, status):
-    entries = setup.proposal_entries([], [ConnectorProposal(app=app_key, label="App", why="Help", connectable=True)])
+    entries = proposal_entries([], [ConnectorProposal(app=app_key, label="App", why="Help", connectable=True)])
     state = plan_state(entries)
     if status == "unshown":
         state.transcript.pop()
@@ -1346,7 +1406,7 @@ def test_settling_apps_marks_only_accepted_simulated_connections(app_key, status
 
 
 def test_finish_reads_shown_and_unshown_items():
-    entries = setup.proposal_entries([job(title='Shown', how='Books a call'), job('answer', title='Unshown', how='Answers questions', config=None),
+    entries = proposal_entries([job(title='Shown', how='Books a call'), job('answer', title='Unshown', how='Answers questions', config=None),
                                      job(title='Still waiting')], [])
     entries[0].card.state = entries[1].card.state = 'accepted'
     state = interview_with(SetupAnswers(summary='Tax advice'), [
@@ -1363,7 +1423,7 @@ def test_finish_reads_shown_and_unshown_items():
 def test_finish_deduplicates_how_and_skips_unsafe_lines(caplog):
     descriptions = ["Books a call", "  Books   a call  ", "Offers FREE consultations", "Calls within 2 days",
                     "Answers carefree questions"]
-    entries = setup.proposal_entries([job(how=how) for how in descriptions], [])
+    entries = proposal_entries([job(how=how) for how in descriptions], [])
     for entry in entries:
         entry.card.state = "accepted"
     state = plan_state(entries)
@@ -1374,7 +1434,7 @@ def test_finish_deduplicates_how_and_skips_unsafe_lines(caplog):
 
 
 def test_a_decision_on_a_card_that_isnt_pending_is_409():
-    entries = setup.proposal_entries([job(), job('answer', config=None)], [])
+    entries = proposal_entries([job(), job('answer', config=None)], [])
     state = interview_with(SetupAnswers(summary='Tax advice'), [
         setup.Entry(role='claude', text='Understanding', planned=[entry.card.model_copy(deep=True) for entry in entries]),
         entries[0]])
@@ -1522,7 +1582,7 @@ async def test_a_decision_changes_the_card_and_claude_asks_the_next_thing(propos
 
 
 def test_pending_card_hides_the_question():
-    entries = setup.proposal_entries([job()], [])
+    entries = proposal_entries([job()], [])
     state = interview_with(SetupAnswers(summary='Tax advice'), [setup.Entry(role='owner', text='Tax advice'),
         setup.Entry(role='claude', text='Question', question='what_you_do'), entries[0]])
     result = setup.setup_state(state, 'tax-advice', cards=True)
@@ -1587,7 +1647,7 @@ async def test_drafting_gets_only_jobs_decided_on_a_shown_card(proposals, model,
     from tests.api.test_setup_rules import drafted, settled
     owner, state, ids = proposals
     interview_id = state["interview_id"]
-    extra = setup.proposal_entries([job("answer", title="Answer tax questions", config=None)], [])[0].card
+    extra = proposal_entries([job("answer", title="Answer tax questions", config=None)], [])[0].card
     row = await stored(engine, interview_id)
     row["transcript"].append(setup.Entry(role="claude", text="More possibilities", planned=[extra]).model_dump(mode="json"))
     async with engine.begin() as conn:
@@ -1817,7 +1877,7 @@ async def test_stored_accepted_unpriced_payment_is_declined_and_excluded_from_ru
 
 
 def revised_plan(*, old_shown=True, replacement_shown=True):
-    old, replacement = [entry.card for entry in setup.proposal_entries(
+    old, replacement = [entry.card for entry in proposal_entries(
         [job(title="Original intro", who="Original clients"),
          job(title="Revised intro", who="New clients", how="Ask before booking a call")], [],
         business_tools_enabled=True)]
@@ -2059,7 +2119,7 @@ def test_finish_with_business_tools_off_omits_payments_and_normalizes_job_lines(
     payment = job("payment", title="Take a deposit", how="Send a deposit link", config={
         "block": "purpose_payment", "purpose": "Deposit", "amount_cents": 20000})
     schedule = job(title="  Book an\n intro  ", how="  Offer\n an  open slot  ")
-    entries = setup.proposal_entries([payment, schedule] if payment_first else [schedule, payment], [],
+    entries = proposal_entries([payment, schedule] if payment_first else [schedule, payment], [],
                                      business_tools_enabled=False)
     state = plan_state(entries)
     assert all(entry.card.job.config is None for entry in entries)

@@ -84,7 +84,8 @@ finished (`max_tokens`, say), or a call that ran out of time, is 503 at once, wh
 No transaction waits on the model, a read or the kernel. Consent saves its busy state first; its final write and an
 answer lock the row only to check that nothing changed since the snapshot and save (409 `conflict` when something
 did, with nothing saved); every row lock is waited for at most `LOCK_TIMEOUT`, then 409 too. While a turn runs,
-another turn is 409 at once in this process, except a busy consent repeat, which answers 202 before taking the guard.
+another turn returns the busy state with 202 at once in this process, before taking the guard. A simultaneous fresh
+consent before its first pending commit is still 409.
 Another process's changed snapshot is caught when it saves.
 An answer names the question it answers (409 when another is waiting), so two answers can't both answer one question
 and an answer sent twice can't answer the next.
@@ -431,33 +432,6 @@ class Entry(BaseModel):
     owner_fields: list[str] = []  # Fact fields this owner turn set or explicitly cleared.
     owner_decided: bool = False
     connector_connect_attempted: bool = False
-
-
-def proposal_entries(jobs: Iterable[JobProposal | dict], connectors: Iterable[ConnectorProposal], *,
-                     business_tools_enabled: bool = False) -> list[Entry]:
-    """Mint stable proposal cards in job-then-connector order, with availability owned by code."""
-    cards = []
-    for drafted in jobs:
-        try:
-            proposed = JobProposal.model_validate(drafted).model_copy(deep=True)
-        except ValidationError:
-            logger.warning("an invalid setup job proposal was dropped")
-            continue
-        proposed.can_do_today = CAPABILITIES[proposed.job]
-        if isinstance(proposed.config, PurposePaymentConfig):
-            proposed.config.amount_cents = None
-        if not business_tools_enabled:
-            proposed.config = None
-        cards.append(ProposalCard(proposal_id=new_proposal_id(), kind="job", state="proposed",
-                                  job=proposed, connector=None))
-    for drafted_connector in connectors:
-        connector = drafted_connector.model_copy(deep=True)
-        connector.connectable = True
-        connector.connected = False
-        connector.label = CONNECTOR_LABELS[connector.app]
-        cards.append(ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed",
-                                  job=None, connector=connector))
-    return [Entry(role="claude", text="", card=card) for card in cards]
 
 
 class ConnectedApp(BaseModel):
@@ -1403,8 +1377,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     """
     interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
-    if interview.busy:
-        return render(interview, await _slug(owner, desk_id))
+    if interview.busy or (interview.consent is not None and interview_id in _RUNNING):
+        return render(interview, await _slug(owner, desk_id)).model_copy(update={"busy": True})
     seen = _stored(interview)
     check(interview)
     guard = contextlib.ExitStack()

@@ -3972,7 +3972,7 @@ async def test_typed_text_cant_accept_an_unpriced_payment(app, browser, kernel_h
     assert response.json()["pending_card"] == proposal_id
     card = next(message["card"] for message in response.json()["messages"] if message["card"])
     assert card["state"] == "proposed" and card["job"]["config"]["amount_cents"] is None
-    assert response.json()["messages"][-1]["text"] == "Enter the amount on the card before accepting it."
+    assert response.json()["messages"][-1]["text"] == desk_setup.AMOUNT_FIRST_LINE
 
 
 async def test_a_typed_answer_must_name_the_pending_card(app, browser, kernel_http, model, engine):
