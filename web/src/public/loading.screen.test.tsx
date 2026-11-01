@@ -155,11 +155,11 @@ const PREVIEW_ANCHORS = CHAT_ANCHORS.filter((anchor) => anchor.name !== 'ask-own
 
 it.each([
   ['desktop', PREVIEW_ANCHORS],
-  // On a phone the skeleton's brand header keeps a row for opening hours, which a Desk fresh from
-  // setup doesn't have yet, so the header and the chat's head land 16 px higher than their shapes;
-  // and the skeleton draws the first view, its composer under the greeting, where the preview lands
-  // its composer at the frame's foot. Until the skeleton knows both, the phone checks only that the
-  // shapes fill the frame.
+  // A Desk fresh from setup has neither opening hours nor starter questions yet, and on a phone the
+  // skeleton draws both: a row for the hours in its brand header (#553), so the header and the chat's
+  // head land 16 px higher than their shapes, and three starter chips under its composer, which in the
+  // short frame sits at the chat's foot, so the composer lands 128 px lower than its shape. Until the
+  // skeleton knows what a Desk has, the phone checks only that the shapes fill the frame.
   ['phone', []],
 ] as const)('setup_preview_opens_in_place_%s', async (viewport, anchors) => {
   // The preview's shapes fill its frame, inside the frame's 1 px border, as the page that replaces

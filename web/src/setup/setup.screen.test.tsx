@@ -3058,17 +3058,47 @@ describe('setup', () => {
     expect(Math.abs(footer.getBoundingClientRect().bottom + parseFloat(getComputedStyle(main).paddingBottom) - window.innerHeight)).toBeLessThanOrEqual(1);
   }
 
+  /**
+   * The public page's first view in a shell under 900 px wide, before the first message: the composer
+   * under the greeting, and About under the composer, in the chat rather than its scroll region.
+   */
+  function expectNarrowFirstView(screen: RenderResult) {
+    const { shell, chat, composer } = previewParts(screen);
+    expect(shell.classList.contains('cd-public-shell--first-view')).toBe(true);
+    const greeting = shell.querySelector('.cd-public-shell__greeting')!.getBoundingClientRect();
+    const composerBox = composer.getBoundingClientRect();
+    expect(composerBox.top).toBeGreaterThanOrEqual(greeting.bottom - 1);
+    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
+    expect(about.parentElement).toBe(chat);
+    expect(about.getBoundingClientRect().top).toBeGreaterThanOrEqual(composerBox.bottom - 1);
+  }
+
+  /** Once a message is sent: the shell leaves its first view, and About opens the scroll region. */
+  async function expectAboutInTheScrollRegionOnceTheChatStarts(screen: RenderResult) {
+    const { shell, scroll } = previewParts(screen);
+    await vi.waitFor(() => expect(shell.classList.contains('cd-public-shell--first-view')).toBe(false));
+    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
+    expect(about.parentElement).toBe(scroll);
+  }
+
   it('preview_fills_to_go_live_with_about_in_the_scroll_region_at_800', async () => {
+    // Below 900 px of shell width About can't sit beside the chat. Before the first message the page
+    // shows its first view (the composer under the greeting, About under the composer); once the chat
+    // starts, About opens the scroll region and the composer sits at the frame's foot. The frame fills
+    // down to the launch bar throughout, and the page doesn't scroll.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 800, height: 900 } });
     await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
-    const { preview, scroll, composer } = previewParts(screen);
-    const frame = preview.getBoundingClientRect();
+    const { preview, composer } = previewParts(screen);
     expectPreviewFillsToFooter(screen);
     expectLaunchBarOneGapUnder(screen, preview);
-    expect(Math.round(frame.bottom - composer.getBoundingClientRect().bottom)).toBe(1);
-    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
-    expect(about.parentElement).toBe(scroll);
+    expectNarrowFirstView(screen);
+    expectNoWindowScroll();
+
+    await sayInPreview(screen, 'How much is drain clearing?');
+    await expectAboutInTheScrollRegionOnceTheChatStarts(screen);
+    expect(Math.round(preview.getBoundingClientRect().bottom - composer.getBoundingClientRect().bottom)).toBe(1);
+    expectPreviewFillsToFooter(screen);
     expectNoWindowScroll();
     expectNoHorizontalScroll();
   });
@@ -3165,8 +3195,9 @@ describe('setup', () => {
 
   /**
    * The preview in a window too short for the full-height chat: the frame is as tall as the page it
-   * holds, About opens the conversation under the chat's head, and as the conversation grows the frame
-   * grows with it and the page scrolls, never the frame. Nothing scrolls sideways.
+   * holds, the first view's About under the composer and, once the chat starts, About opening the
+   * conversation under the chat's head; as the conversation grows the frame grows with it and the page
+   * scrolls, never the frame. Nothing scrolls sideways.
    */
   async function expectPreviewGrowsWithTheChat(screen: RenderResult): Promise<void> {
     await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
@@ -3180,11 +3211,11 @@ describe('setup', () => {
       expectNoHorizontalScroll();
     };
     holdsItAll('as it opens');
-    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
-    expect(about.parentElement).toBe(scroll);
+    expectNarrowFirstView(screen);
     const opened = preview.getBoundingClientRect().height;
 
     await sayInPreview(screen, 'How much is drain clearing?');
+    await expectAboutInTheScrollRegionOnceTheChatStarts(screen);
     holdsItAll('after an answer');
     expect(preview.getBoundingClientRect().height).toBeGreaterThan(opened);
     expect(document.documentElement.scrollHeight).toBeGreaterThan(window.innerHeight);
@@ -3192,13 +3223,14 @@ describe('setup', () => {
 
   it('preview_fills_the_height_down_to_the_launch_bar_on_a_phone', async () => {
     // A phone is tall enough for the full-height chat: the frame runs from under the title down to the
-    // launch bar, "Go live" stays on the first screen, and a long conversation scrolls inside the frame
-    // with the composer at its foot. The frame is under 520 px tall, so the public page takes its
-    // short layout, its brand header scrolling with the chat.
+    // launch bar and "Go live" stays on the first screen. Before the first message the page shows its
+    // first view in the frame; once the chat starts, a long conversation scrolls inside the frame with
+    // the composer at its foot. The frame is under 520 px tall, so the public page takes its short
+    // layout, its brand header scrolling with the chat.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
     await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
-    const { preview, shell, scroll, composer } = previewParts(screen);
+    const { preview, shell, composer } = previewParts(screen);
     const title = screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' }).element();
     const border = parseFloat(getComputedStyle(preview).borderBottomWidth);
     const opened = preview.getBoundingClientRect();
@@ -3207,11 +3239,11 @@ describe('setup', () => {
     expectLaunchBarOneGapUnder(screen, preview);
     expectPreviewFillsToFooter(screen);
     expectLaunchBarOnTheFirstScreen(screen);
-    expect(Math.abs(opened.bottom - border - composer.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
-    const about = screen.getByRole('region', { name: 'About Rivera Plumbing' }).element();
-    expect(about.parentElement).toBe(scroll);
+    expectNarrowFirstView(screen);
     await vi.waitFor(() => expect(shell.classList.contains('cd-public-shell--short')).toBe(true));
 
+    await sayInPreview(screen, 'How much is drain clearing?');
+    await expectAboutInTheScrollRegionOnceTheChatStarts(screen);
     const transcript = shell.querySelector<HTMLElement>('.cd-transcript')!;
     for (let n = 0; transcript.scrollHeight <= shell.clientHeight && n < 6; n += 1) await sayInPreview(screen, 'How much is drain clearing?');
     expect(shell.scrollHeight).toBeGreaterThan(shell.clientHeight);
