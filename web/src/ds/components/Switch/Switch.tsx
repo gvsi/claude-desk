@@ -15,13 +15,15 @@ export interface SwitchProps {
    * ignores presses until the screen passes the answer back.
    */
   waiting?: boolean;
+  /** Another write prevents changes: aria-disabled without announcing this switch as busy. */
+  disabled?: boolean;
 }
 
 /**
  * An on/off setting as one row: the label and its description, then the track. The whole row is
  * the control, a `button` with `role="switch"`, named by the label and described by the description.
  */
-export function Switch({ label, description, checked, onChange, waiting = false }: SwitchProps) {
+export function Switch({ label, description, checked, onChange, waiting = false, disabled = false }: SwitchProps) {
   const id = useId();
   const labelId = `${id}-label`;
   const descriptionId = `${id}-description`;
@@ -32,11 +34,11 @@ export function Switch({ label, description, checked, onChange, waiting = false 
       aria-checked={checked}
       aria-labelledby={labelId}
       aria-describedby={description ? descriptionId : undefined}
-      aria-disabled={waiting || undefined}
+      aria-disabled={waiting || disabled || undefined}
       aria-busy={waiting || undefined}
       className="cd-switch"
       onClick={() => {
-        if (!waiting) onChange(!checked);
+        if (!waiting && !disabled) onChange(!checked);
       }}
     >
       <span className="cd-switch__text">

@@ -6,8 +6,8 @@ import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { KnowledgeList, type KnowledgeRowView } from './KnowledgeList.tsx';
 
 /**
- * What Rivera Plumbing's Desk knows, as N-Run2-Settings-Knowledge draws it. Fixture data: the list
- * waits on an API that returns the Desk's knowledge items to the owner. The third is a note the
+ * What Rivera Plumbing's Desk knows, as N-Run2-Settings-Knowledge draws it. Fixture data for the
+ * served knowledge list route. The third is a note the
  * kernel keeps owner-only, so its title and text never reach the web.
  */
 const ITEMS: KnowledgeRowView[] = [
@@ -150,4 +150,39 @@ export const Phone: Story = {
     }
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
+};
+
+/** A missing date takes no line or gap; the title and pill centre in the shorter row. */
+export const NoDate: Story = {
+  args: { items: [
+    { id: 'website', title: 'Your website', detail: null, readers: ['public'] },
+    { id: 'price-list', title: 'Price list', detail: 'Added Oct 27', readers: ['public'] },
+  ] },
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'A row without a recorded date beside a dated row.' },
+  play: async ({ canvas }) => {
+    const [noDate, dated] = within(canvas.getByRole('list', { name: 'What I know now' })).getAllByRole('listitem') as [HTMLElement, HTMLElement];
+    await expect(noDate.querySelector('.cd-knowledge-list__detail')).toBeNull();
+    const words = noDate.querySelector('.cd-knowledge-list__words') as HTMLElement;
+    const title = noDate.querySelector('.cd-knowledge-list__title') as HTMLElement;
+    const pill = noDate.querySelector('.cd-pill') as HTMLElement;
+    const rowBox = noDate.getBoundingClientRect();
+    const titleBox = title.getBoundingClientRect();
+    const pillBox = pill.getBoundingClientRect();
+    // No empty child or leftover gap: the words box is exactly the one title line.
+    await expect(words.children).toHaveLength(1);
+    await expect(words.getBoundingClientRect().height).toBe(20);
+    await expect(rowBox.height).toBe(44);
+    await expect(dated.getBoundingClientRect().height).toBe(65);
+    await expect(titleBox.top - rowBox.top).toBe(12);
+    await expect(rowBox.bottom - titleBox.bottom).toBe(12);
+    await expect(titleBox.left - rowBox.left).toBe(16);
+    await expect(pillBox.top + pillBox.height / 2).toBe(rowBox.top + rowBox.height / 2);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const NoDatePhone: Story = {
+  ...NoDate,
+  globals: { viewport: { value: 'phone', isRotated: false } },
 };

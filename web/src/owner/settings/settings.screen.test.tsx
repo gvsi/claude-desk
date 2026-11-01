@@ -53,8 +53,8 @@ const PLUMBER = [
   ['Not at all', 'Messages Claude answered on its own'],
 ];
 
-/** The sections Settings ships with, in order. Knowledge and Channels join when their pages do. */
-const SECTIONS = ['General', 'Notifications', 'Billing'];
+/** The sections Settings ships with, in order. Channels joins when its page does. */
+const SECTIONS = ['General', 'Knowledge', 'Notifications', 'Billing'];
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
