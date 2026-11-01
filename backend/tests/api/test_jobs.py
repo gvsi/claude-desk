@@ -266,6 +266,50 @@ async def test_resume_drops_a_snapshot_that_isnt_approved(copy, engine, caplog):
     assert snapshot.visitor_plain not in caplog.text
 
 
+async def test_resume_strips_owner_reason_from_approved_snapshot(copy, engine, monkeypatch):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "call-private-approved", discount_bp=1500)
+    result = await copy.owner.call("POST /approvals/{decision_id}/answer", AnswerRequest(answer="allow_once"),
+                                   path={"decision_id": held.decision_id})
+    assert result.approved is not None
+    approved = result.approved.model_copy(update={"owner_plain": "Private approved snapshot reason"})
+    outcome = result.decision.model_copy(update={"owner_plain": "Private outcome reason"})
+    connector = InMemoryConnector()
+    app = jobs_app(connector, schedule=False)
+    async with app.open_async():
+        await jobs.defer_resume_after_answer(app, caller.ids, outcome, approved)
+    (job,) = connector.jobs.values()
+    assert "owner_plain" not in job["args"]["approved"]
+    assert "owner_plain" not in job["args"]["decision"]
+    assert job["args"]["approved"] == approved.model_dump(mode="json", exclude={"owner_plain"})
+    assert job["args"]["decision"] == outcome.model_dump(mode="json", exclude={"owner_plain"})
+
+    seen = []
+    deliver = jobs.deliver
+
+    async def checked(conn, ids, item):
+        seen.append((item.phase, item.decision.owner_plain))
+        return await deliver(conn, ids, item)
+
+    monkeypatch.setattr(jobs, "deliver", checked)
+    # Older queued arguments may still contain the field: clear both before building even a Status.
+    status = jobs.Status
+
+    def checked_status(decision, phase):
+        assert decision.owner_plain is None
+        return status(decision, phase)
+
+    monkeypatch.setattr(jobs, "Status", checked_status)
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, outcome, approved)
+    assert seen == [("receipt", None), ("resolved", None)]
+    found = await session_rows(engine, caller.session_id)
+    assert found["sse"] == [("receipt", "approved"), ("resolved", "executed")]
+    assert len(found["action_update"]) == 1
+    assert approved.owner_plain == "Private approved snapshot reason"
+    assert outcome.owner_plain == "Private outcome reason"
+
+
 async def test_direct_resume_clears_the_owner_reason(copy, engine, monkeypatch):
     caller = await copy.visitor()
     held = await copy.decide(caller, "call-private-reason", discount_bp=1500)
