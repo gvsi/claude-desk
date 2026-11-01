@@ -909,6 +909,25 @@ describe('the scripted Desk', () => {
     expect(toolsDecided(preview.session_id)).toEqual(['native.quote']);
   });
 
+  it.each(['Talk to Maria', 'cards-kept-handoff'])('preview_handoff_opens_no_owner_item_%s', async (text) => {
+    mockStore.reset('rivera_quiet');
+    const opened = await call('openPreview', { params: { desk_id: deskId } });
+    expect(opened.status).toBe(200);
+    const { state } = opened.body as VisitorSession;
+    const events: [number, SseEvent][] = [];
+    mockStore.listen(slug, 0, (seq, ev) => events.push([seq, ev]));
+    await send(text);
+    await drain();
+
+    const reply = events.find(([, ev]) => ev.type === 'message')?.[1];
+    expect(reply).toMatchObject({ handoff: true, visitor_plain: VISITOR_PLAIN.en.reply_handed_off });
+    expect(reply?.type === 'message' && reply.blocks.some((block) => block.template === 'handoff')).toBe(true);
+    expect([...mockStore.world.handoffs.values()].filter((h) => h.handoff.session_id === state.session_id)).toEqual([]);
+    expect((await call('needsYou', { params: { desk_id: deskId } })).body).toEqual([]);
+    const entries = mockStore.world.desks[0]?.ledger.filter((e) => e.event.session_id === state.session_id);
+    expect(entries?.some((e) => e.event.summary.part === 'handoffs')).toBe(false);
+  });
+
   it('answering_is_read_when_a_turn_starts', async () => {
     // As the API gives a turn its tools when the turn starts: a question waiting behind a turn in
     // progress goes by Answering as it stands when its own turn begins, not when it was sent.
