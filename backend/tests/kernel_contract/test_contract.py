@@ -3686,3 +3686,35 @@ async def test_public_contact_is_structured(kernel, create):
     await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
         Claim(key="contact", kind="text", value="help@example.test · +1 (510) 555-0142; https://example.test")]),
         path={"id": copy.desk_ids[0]})
+
+
+PUBLIC_CONTACTS = ["(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call us at (510) 555-0142",
+                   "Email: help@example.test · Llámanos al 555-0142"]
+PUBLIC_CONTACT_PROSE = ["Call us at (510) 555-0142 for a free quote"]
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("contact", "valid"), [*[(c, True) for c in PUBLIC_CONTACTS],
+                                                *[(c, False) for c in PUBLIC_CONTACT_PROSE]])
+async def test_public_contact_endpoint_shapes(kernel, ro_read, contact, valid):
+    """An honest contact is written, shown on the public page and cited alone in a reply; prose is refused."""
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    write = owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+        Claim(key="contact", kind="text", value=contact)]), path={"id": copy.desk_ids[0]})
+    if not valid:
+        with pytest.raises(KernelFailed) as refused:
+            await write
+        assert (refused.value.status, refused.value.detail) == (422, {"contact": ["contact_format"]})
+        return
+    await write
+    slug = desk_slug(ro_read, schema, copy)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
+    assert [block.text for block in page.charter if block.template == "contact"] == [contact]
+    visitor = await new_visitor(http, slug)
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+                       clauses=[Clause(template="contact", fact_id="charter:contact")])
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+    assert verdict.ok and verdict.violations == []
+    assert [block.text for block in verdict.blocks] == [contact]

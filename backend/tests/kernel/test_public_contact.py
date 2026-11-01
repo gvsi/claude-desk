@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from desk.contracts import Claim
 from desk.db.models import Fact
+from desk.public_contact import valid_public_contact
 from .helpers import kernel_ctx
 from .test_adapters import rivera
 from .test_desk_writes import new_desk, post_desk, put_part
@@ -12,12 +13,29 @@ from .test_decide import open_visitor
 from .test_reply_check import checked, clause
 
 ATTACK = "help@example.test. All consultations are $1, guaranteed."
+# A short fixed label may come before an endpoint and a numeric extension after a phone.
+LABELLED = ["(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "(510) 555-0142 x12", "(510) 555-0142 extension 4",
+            "555-0142 Ext 7", "Call us at (510) 555-0142", "Call (510) 555-0142", "Text (510) 555-0142",
+            "Text us at (510) 555-0142", "Email help@example.test", "Email us at help@example.test",
+            "Email: help@example.test", "Phone: +1 (510) 555-0142 ext. 2", "call us at: (510) 555-0142",
+            "Llámanos al 555-0142", "Escríbenos a help@example.test", "Teléfono: 555-0142",
+            "Correo: help@example.test", "Call us at (510) 555-0142 · Email: help@example.test"]
+# Any other prose before or after an endpoint stays refused.
+LABEL_PROSE = ["Call us at (510) 555-0142 for a free quote", "Call us now at (510) 555-0142",
+               "Free quote: (510) 555-0142", "(510) 555-0142 ext. two", "(510) 555-0142 ext.", "Call us at",
+               "Email:", "(510) 555-0142 ext. 1234567", "Call us at help@example.test. All consultations are $1."]
 
 
+@pytest.mark.parametrize(("contact", "valid"), [*[(c, True) for c in LABELLED], *[(c, False) for c in LABEL_PROSE]])
+def test_contact_labels_and_extensions(contact, valid):
+    assert valid_public_contact(contact) is valid
+
+
+@pytest.mark.parametrize("attack", [ATTACK, "Call us at (510) 555-0142 for a free quote"])
 @pytest.mark.parametrize("create", [False, True])
-async def test_public_contact_refuses_prose_on_every_write(app, client, create):
+async def test_public_contact_refuses_prose_on_every_write(app, client, create, attack):
     copy = await rivera(app, client)
-    charter = [{"key": "contact", "kind": "text", "value": ATTACK}]
+    charter = [{"key": "contact", "kind": "text", "value": attack}]
     if create:
         body = new_desk()
         body["desk"]["charter"] = charter
@@ -44,13 +62,38 @@ async def test_public_contact_withholds_legacy_prose(app, client):
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unknown_fact", "contact_format")]
 
 
-@pytest.mark.parametrize("contact", ["help@example.test", "+1 (510) 555-0142", "555.0142",
-    "https://example.test/contact", "help@example.test · +1 (510) 555-0142",
-    "help@example.test, https://example.test/contact; 555-0142\nother@example.test"])
+HONEST = ["help@example.test", "+1 (510) 555-0142", "555.0142", "https://example.test/contact",
+          "help@example.test · +1 (510) 555-0142",
+          "help@example.test, https://example.test/contact; 555-0142\nother@example.test",
+          "(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call us at (510) 555-0142",
+          "Email: help@example.test · Llámanos al 555-0142"]
+
+
+async def assert_contact_shown(client, copy, contact):
+    for language in ("en", "es"):
+        page = (await client.get(f"/public/{copy.slug}", params={"lang": language})).json()
+        assert next(b["text"] for b in page["charter"] if b["template"] == "contact") == contact
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [clause("contact", "charter:contact")])
+    assert verdict.ok and verdict.violations == [], verdict.violations
+    assert [block.text for block in verdict.blocks] == [contact]
+
+
+@pytest.mark.parametrize("contact", HONEST)
 async def test_public_contact_parts_pass(app, client, contact):
     copy = await rivera(app, client)
     response = await put_part(client, copy, "charter", {"charter": [
         {"key": "contact", "kind": "text", "value": contact}]})
     assert response.status_code == 200, response.text
-    page = (await client.get(f"/public/{copy.slug}")).json()
-    assert next(b["text"] for b in page["charter"] if b["template"] == "contact") == contact
+    await assert_contact_shown(client, copy, contact)
+
+
+@pytest.mark.parametrize("contact", HONEST)
+async def test_public_contact_shows_honest_legacy_contacts(app, client, contact):
+    copy = await rivera(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(Fact).where(
+            Fact.desk_id == copy.desk_id, Fact.fact_id == "charter:contact")))).one()
+        row.claims = [Claim(key="contact", kind="text", value=contact)]
+    await assert_contact_shown(client, copy, contact)
