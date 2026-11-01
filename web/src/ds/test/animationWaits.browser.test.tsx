@@ -1,12 +1,16 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 
+import { ANIMATION_DEADLINE_MS } from './animationWithin.ts';
 import { expectDrawsShortArmFirst } from './expectDrawsShortArmFirst.ts';
+import { framesWithin } from './framesWithin.ts';
 import { settled } from './settled.ts';
 
 const root = document.createElement('div');
 document.body.append(root);
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
   for (const animation of root.getAnimations({ subtree: true })) animation.cancel();
   root.replaceChildren();
 });
@@ -44,4 +48,20 @@ it('allows_a_correct_sequence_longer_than_the_simple_deadline', async () => {
   const fade = root.animate({ opacity: [0, 1] }, { duration: 2200, fill: 'forwards', id: 'long-sequence' });
   await settled(root);
   expect(fade.playState).toBe('finished');
+});
+
+it.each([
+  { name: 'screen redraw frames', count: 2 },
+  { name: 'cd-skeleton-sweep frame', count: 1 },
+])('times_out_and_cancels_the_pending_$name', async ({ name, count }) => {
+  vi.useFakeTimers();
+  const callbacks: FrameRequestCallback[] = [];
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => callbacks.push(callback));
+  const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+  const waiting = framesWithin(name, count).catch((error: unknown) => error);
+  if (count === 2) callbacks[0]!(0);
+  await vi.advanceTimersByTimeAsync(ANIMATION_DEADLINE_MS);
+  const outcome = await Promise.race([waiting, Promise.resolve('still pending')]);
+  expect(outcome).toEqual(new Error(`${name} did not settle within ${ANIMATION_DEADLINE_MS} ms`));
+  expect(cancel).toHaveBeenCalledWith(count);
 });
