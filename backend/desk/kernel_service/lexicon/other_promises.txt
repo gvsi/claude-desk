@@ -15,8 +15,10 @@ folded	remboursée?s?|remboursements?
 
 # Portuguese
 accented	grátis
-folded	sem[\s-]+(?:custos?|taxas?)
-folded	descontos?|garantid[oa]s?
+folded	sem[\s-]+(?:custos?|taxas?|cobrancas?)
+folded	descontos?|garantid[oa]s?|garant(?:o|imos|e|em)
+# Keep the Portuguese noun distinct from Spanish garantía.
+accented	garantia
 
 # Italian
 folded	senza[\s-]+cost[oi]

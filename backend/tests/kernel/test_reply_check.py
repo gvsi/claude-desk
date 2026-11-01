@@ -1955,3 +1955,21 @@ def test_public_policy_other_commitments_do_not_scan_reply_prose_or_word_parts(m
     assert reply_check.scan_prose("Is it gratuit?") == []
     assert reply_check.policy_card_violations("Is it gratuit?", [RenderedBlock(
         kind="card", template="policy", fact_id="charter:policy:about", text="Ask about our services.")]) == []
+
+
+@pytest.mark.parametrize("text", [
+    "garanto", "garantimos", "garante", "garantem", "garantia",
+    "garantido", "garantida", "garantidos", "garantidas", "sem cobrança", "sem cobranças",
+])
+def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    prose_rules = {v.rule_id for v in reply_check.scan_prose(text)}
+    assert reply_check.scan_public_text(text) == sorted(prose_rules | {"language"})
+    assert reply_check.scan_public_text("x" + text.replace(" ", "x") + "x") == []
+    assert "language" not in prose_rules  # policy-only vocabulary
+
+
+@pytest.mark.parametrize("text", ["Ask about our services.", "Consultas con cita previa.", "garantía"])
+def test_public_policy_portuguese_terms_preserve_english_and_spanish(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert "language" not in reply_check.scan_public_text(text)
