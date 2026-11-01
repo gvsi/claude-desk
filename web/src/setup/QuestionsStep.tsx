@@ -474,7 +474,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
           />
         </div>
       )}
-      {!closing && !asking ? <div className="cd-setup-suggestions">
+      {/* Not while the memory question's turn runs, from the press until Claude's opening is saved. */}
+      {!closing && !asking && consenting === null && !consentBusy ? <div className="cd-setup-suggestions">
         <Button variant="ghost" busy={suggesting} waiting={!suggesting && (blocked || failed !== null)} onClick={() => void suggestions()}>{copy.suggestions}</Button>
         <p className="cd-setup-suggestions__line cd-type-meta">{copy.suggestionsLine}</p>
       </div> : null}

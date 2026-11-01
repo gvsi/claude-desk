@@ -15,6 +15,7 @@ import { worker } from '../mocks/browser.ts';
 import { growingWords } from '../mocks/ownerStreams.ts';
 import { CPA_COPY, MEMORY_LABEL } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
+import { SETUP_COPY } from './copy.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
@@ -113,6 +114,27 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(growing()).toBeNull();
     expect(screen.getByText(MEMORY_LABEL, { exact: true }).elements()).toHaveLength(1);
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: true }]);
+  });
+
+  it('keeps_use_your_suggestions_out_of_the_dock_until_the_opening_is_saved', async () => {
+    const { state } = await waitingInterview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    mockStore.streamSetupTurns();
+    const held = gate();
+    mockStore.planStream('setup', { pauseAfter: 3, until: held.until });
+    const suggestions = () => screen.getByRole('button', { name: 'Use your suggestions', exact: true }).elements();
+    const line = () => screen.getByText(SETUP_COPY.questions.suggestionsLine, { exact: true }).elements();
+    await screen.getByRole('button', { name: YES, exact: true }).click();
+    // While the reads and the opening stream, the dock holds only the message box.
+    await expect.element(screen.getByText(MEMORY_LABEL, { exact: true })).toBeVisible();
+    await expect.poll(() => growing()?.textContent).toBe(growingWords(CPA_COPY.opening.join('\n\n'))[1]);
+    expect(suggestions()).toHaveLength(0);
+    expect(line()).toHaveLength(0);
+    held.release();
+    await expect.element(screen.getByRole('region', { name: CPA_COPY.first, exact: true })).toBeVisible();
+    // The opening is saved: the row is back, as before.
+    await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeVisible();
+    expect(line()).toHaveLength(1);
   });
 
   it('writes_the_opening_with_no_reads_after_no', async () => {
