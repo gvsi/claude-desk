@@ -83,8 +83,36 @@ it('confirms all editable lines, rescans seeded answers and leaves the interview
   });
 });
 
+it('shows saved and confirmed lines in the public charter for their claims', async () => {
+  const params = await atRules();
+  const setup = await mockStore.dispatch('setup', { params });
+  if ('network' in setup) throw new Error('setup read failed');
+  const { slug } = setup.body as SetupState;
+  for (const [key, text] of [
+    ['policy:about', 'We help local businesses.'],
+    ['policy:pricing', 'Ask Linda for a quote.'],
+  ]) {
+    expect(await mockStore.dispatch('setupPublicLine', { params, body: { key, text } })).toMatchObject({ status: 200 });
+  }
+  const confirmed = await mockStore.dispatch('setupPublicLinesConfirm', { params, body: {} });
+  if ('network' in confirmed) throw new Error('confirm failed');
+  expect(confirmed.status).toBe(200);
+  expect(await mockStore.dispatch('publicDesk', { params: { slug } })).toMatchObject({
+    status: 200,
+    body: {
+      charter: (confirmed.body as PublicLines).lines.map(({ key, text }) => expect.objectContaining({
+        fact_id: `charter:${key}`, title: text,
+      })),
+    },
+  });
+});
+
 it('guards all three routes by owner, interview and stage, and isolates saved lines', async () => {
   const params = await atRules();
+  expect(await mockStore.dispatch('setupPublicLine', { params, body: { key: 'policy:about', text: 'Changed.' } })).toMatchObject({ status: 200 });
+  expect(await mockStore.dispatch('setupPublicLines', { params })).toMatchObject({
+    status: 200, body: { lines: expect.arrayContaining([expect.objectContaining({ key: 'policy:about', text: 'Changed.' })]) },
+  });
   const calls = [
     { key: 'setupPublicLines', body: undefined },
     { key: 'setupPublicLine', body: { key: 'policy:about', text: 'Changed.' } },

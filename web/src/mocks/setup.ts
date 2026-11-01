@@ -40,6 +40,7 @@ import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
 import { idempotencyKeyOf } from './keys.ts';
+import { storedPublicLines } from './publicLineStore.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
 
@@ -1267,18 +1268,20 @@ function interviewForDesk(world: MockWorld, deskId: string): Interview | undefin
 }
 
 /**
- * A Desk setup made, as its public page shows it: the business's own name and owner, and a line
- * about it from the description; null for any other Desk.
+ * A setup Desk's public page: its name, owner and saved public lines (the original About before
+ * its lines are seeded); null for any other Desk.
  */
 export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: Language): PublicDesk | null {
   const interview = interviewForDesk(world, desk.summary.desk_id);
   if (!interview) return null;
+  const lines = storedPublicLines(world, interview.state.interview_id);
   return {
     business_name: interview.business,
     desk_name: desk.summary.name,
     owner_display_name: ownerOf(interview),
     brand: { ...BUSINESS.brand },
-    charter: interview.about === null ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })],
+    charter: lines?.map(({ key, text }) => cardBlock('policy', { fact_id: `charter:${key}`, title: text }))
+      ?? (interview.about === null ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })]),
     agent_card: [],
     open_status: null,
   };

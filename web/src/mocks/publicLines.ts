@@ -2,9 +2,8 @@
 import type { PublicLine, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
 import { SETUP_QUESTIONS, SETUP_ROUTES, setupPublicDesk } from './setup.ts';
-import type { MockWorld } from './world.ts';
+import { storedPublicLines, storePublicLines } from './publicLineStore.ts';
 
-const LINES = new WeakMap<MockWorld, Map<string, PublicLine[]>>();
 const REFUSED = /\$\s*[-+]?(?:\d|\.\d)|\d\s*%|\b\d{1,2}(?:\s*(?:am|pm)\b|:\d{2}\b|\s+to\s+\d{1,2}\b)|\b(?:guarantee|promise|always|never)\b/i;
 
 /** The signed Chen & Co. board's starter lines. */
@@ -50,15 +49,10 @@ function read(sv: Server, req: Req): { lines: PublicLine[] } | Failure {
   if (found.status !== 200) return found as Failure;
   const state = found.body as SetupState;
   if (state.step !== 'rules' && state.step !== 'situations') return { status: 409, body: { error: 'conflict' } };
-  let interviews = LINES.get(sv.world);
-  if (!interviews) {
-    interviews = new Map();
-    LINES.set(sv.world, interviews);
-  }
-  let lines = interviews.get(state.interview_id);
+  let lines = storedPublicLines(sv.world, state.interview_id);
   if (!lines) {
     lines = seed(sv, state);
-    interviews.set(state.interview_id, lines);
+    storePublicLines(sv.world, state.interview_id, lines);
   }
   return { lines };
 }
