@@ -2018,6 +2018,22 @@ describe('public chat page', () => {
     expect(reply.textContent).not.toMatch(/\*|^- /m);
   });
 
+  it('a_link_in_a_reply_shows_where_it_goes_and_opens_nothing', async () => {
+    // The reply check doesn't read Markdown link targets yet, so a link that showed only its text
+    // could hide a target nothing checked: it shows its text, then its address, and opens nothing.
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const messages = shownMessages().length;
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([proseBlock('You can [Pay here](https://evil.example/pay) today.')]));
+    await vi.waitFor(() => expect(shownMessages()).toHaveLength(messages + 1));
+
+    const reply = shownMessages()[messages] as HTMLElement;
+    expect(reply.querySelectorAll('a')).toHaveLength(0);
+    expect(reply.textContent).toBe('You can Pay here (https://evil.example/pay) today.');
+  });
+
   it('a_replayed_join_doesnt_confirm_the_owner_while_her_hand_back_is_on_its_way', async () => {
     const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);

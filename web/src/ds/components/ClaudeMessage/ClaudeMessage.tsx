@@ -5,6 +5,14 @@ import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
 
 import './ClaudeMessage.css';
 
+/**
+ * How links in Claude's prose show. The kernel's reply check doesn't read Markdown link targets
+ * yet, so a link that showed only its text could hide a target nothing checked: each shows its
+ * text, then its address, and opens nothing. This flips to 'open' once the kernel's Markdown link
+ * check is on main.
+ */
+const PROSE_LINKS = 'inert' as const;
+
 export interface ClaudeMessageProps {
   /** The delivered message's blocks (`EvMessage.blocks`), in order, exactly as they arrived. */
   blocks: readonly RenderedBlock[];
@@ -39,7 +47,7 @@ export function ClaudeMessage({ blocks, language, ownerName, inertDownload = fal
           }
           return (
             <div key={index} className="cd-claude-message__prose cd-type-reply">
-              <ChatMarkdown text={block.text} />
+              <ChatMarkdown text={block.text} links={PROSE_LINKS} />
             </div>
           );
         }
