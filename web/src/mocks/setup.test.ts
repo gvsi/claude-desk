@@ -1135,7 +1135,7 @@ describe("a Desk's unfinished setup, in the owner's Desks", () => {
   });
 });
 
-describe('a Desk setup made, asked for its owner', () => {
+describe('a Desk setup made, speaking for its own owner', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -1159,8 +1159,8 @@ describe('a Desk setup made, asked for its owner', () => {
     return slug;
   }
 
-  /** The blocks of the Desk's replies to `text`, sent in this browser's chat with the Desk on `slug`. */
-  async function repliesTo(slug: string, text: string): Promise<RenderedBlock[]> {
+  /** The events of the Desk's turn answering `text`, sent in this browser's chat with the Desk on `slug`. */
+  async function turnOn(slug: string, text: string): Promise<SseEvent[]> {
     const opened = await mockStore.dispatch('openSession', { params: { slug } });
     if ('network' in opened || opened.status !== 200) throw new Error('the mock opens a chat');
     const events: SseEvent[] = [];
@@ -1170,8 +1170,26 @@ describe('a Desk setup made, asked for its owner', () => {
     if ('network' in sent || sent.status !== 202) throw new Error('the mock takes the message');
     await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 12);
     stop();
-    return events.slice(before).flatMap((ev) => (ev.type === 'message' ? ev.blocks : []));
+    return events.slice(before);
   }
+
+  /** The blocks of the Desk's replies to `text`, sent in this browser's chat with the Desk on `slug`. */
+  async function repliesTo(slug: string, text: string): Promise<RenderedBlock[]> {
+    return (await turnOn(slug, text)).flatMap((ev) => (ev.type === 'message' ? ev.blocks : []));
+  }
+
+  /** The visitor's status lines in a turn, in order: each decision's, then each reply's. */
+  function linesOf(events: readonly SseEvent[]): string[] {
+    return events.flatMap((ev) => ('visitor_plain' in ev ? [ev.visitor_plain] : []));
+  }
+
+  it('the_status_lines_name_that_owner', async () => {
+    // As the kernel renders them from the Desk's owner_display_name: on Linda's Desk a quote's
+    // receipt and its reply's check name her, in either language.
+    const slug = await liveDesk(CPA);
+    expect(linesOf(await turnOn(slug, 'How much is it?'))).toEqual(["Quoted from Linda's price list", "Reply checked against Linda's rules"]);
+    expect(linesOf(await turnOn(slug, '¿Cuánto cuesta?'))).toEqual(['Cotizado con la lista de precios de Linda', 'Respuesta revisada con las reglas de Linda']);
+  });
 
   it('asking_for_the_owner_hands_off_to_that_owner_by_name', async () => {
     // What the public page's "Ask for Linda" sends, in either language, as the kernel's handoff card

@@ -45,50 +45,113 @@ export function turnLanguage(text: string): Language {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Visitor-facing text: the kernel's templates and the fixture cards, by language
+// Whom the visitor's lines name: the Desk's own owner
 
 /**
- * The kernel's visitor status lines for Maria Rivera's Desk, as the Rivera fixtures write them (a
- * store test holds each one to the fixtures). An executed action has no line here: it carries its
- * tool's own line, the design system's `executedLine`.
+ * Whom a Desk's visitor lines name (`MockWorld.ownerOf`), as the kernel renders them from the
+ * Desk's `owner_display_name`: the owner's display name, or null when they gave none and the Desk
+ * carries setup's fallback, "Owner", which is no one's name; and the business's name, which
+ * `NO_NAME_OWNER` may name in that owner's place.
  */
-export const VISITOR_PLAIN = {
+export interface DeskOwner {
+  readonly name: string | null;
+  readonly business: string;
+}
+
+/** Maria Rivera, whom Rivera Plumbing's seeded Desks name, in the fixtures' signed words. */
+export const RIVERA_OWNER: DeskOwner = { name: rivera.business.ownerName, business: rivera.business.name };
+
+/**
+ * How the visitor's lines name an owner who gave no name: the words the project owner approved
+ * for the public page's "Ask for a person", "the business owner" ("el dueño del negocio").
+ * Proposed here for his sign-off. Should he decline, set this to `null`: the lines then name the
+ * business instead, as the handoff card did before.
+ */
+export const NO_NAME_OWNER: Record<Language, string> | null = { en: 'the business owner', es: 'el dueño del negocio' };
+
+/** How a line in `language` names the Desk's owner within a sentence: by display name, else `NO_NAME_OWNER`. */
+function ownerIn(language: Language, owner: DeskOwner): string {
+  return owner.name ?? NO_NAME_OWNER?.[language] ?? owner.business;
+}
+
+/**
+ * `template` naming the owner as `who`, as the kernel's templates do: `{owner}` within a sentence
+ * and `{Owner}` starting one. A sentence that ends on the owner gets one stop, never a second
+ * after a name that ends in one ("Bob Smith Jr."). Spanish joins "de" and "a" with an "el" that
+ * follows ("del dueño del negocio"); a name's own "El" keeps its capital, so it is never joined.
+ */
+function naming(template: string, who: string, language: Language): string {
+  const line = template.replace(/\{(owner|Owner)\}(\.?)/g, (_, form: string, stop: string) =>
+    `${form === 'Owner' ? who.charAt(0).toUpperCase() + who.slice(1) : who}${afterName(who, stop)}`,
+  );
+  return language === 'es' ? line.replace(/(?<!\p{L})(de|a) el(?!\p{L})/gu, '$1l') : line;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Visitor-facing text: the kernel's templates and the fixture cards, by language
+
+/** A visitor status line: a decision state's, but an executed one's, and a reply's. */
+export type VisitorLine = Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'reply_checked' | 'reply_handed_off' | 'owner_said';
+
+/**
+ * The kernel's visitor status lines (its render/en.py and es.py), `{owner}` naming the Desk's
+ * owner. An executed action has no line here: it carries its tool's own line, the design system's
+ * `executedLine`.
+ */
+const VISITOR_TEMPLATES = {
   en: {
-    allowed: "Checked against Maria Rivera's rules",
-    held: 'Waiting for Maria Rivera to approve',
+    allowed: "Checked against {owner}'s rules",
+    held: 'Waiting for {owner} to approve',
     refused: 'Not something I can do here',
     refused_over_mandate: 'Refused: over the signed limit for this agent',
-    approved: 'Maria Rivera approved this',
-    denied: 'Maria Rivera decided not to go ahead',
+    approved: '{Owner} approved this',
+    denied: '{Owner} decided not to go ahead',
     expired: 'This request timed out',
     cancelled: 'Cancelled',
     failed: "That didn't go through",
     unknown: 'Still confirming this',
     refused_at_execution: "The rules changed, so this didn't go ahead",
-    reply_checked: "Reply checked against Maria Rivera's rules",
-    reply_handed_off: 'Passed to Maria Rivera to answer',
-    owner_said: 'Written by Maria Rivera',
+    reply_checked: "Reply checked against {owner}'s rules",
+    reply_handed_off: 'Passed to {owner} to answer',
+    owner_said: 'Written by {owner}',
   },
   es: {
-    allowed: 'Revisado con las reglas de Maria Rivera',
-    held: 'Esperando la aprobación de Maria Rivera',
+    allowed: 'Revisado con las reglas de {owner}',
+    held: 'Esperando la aprobación de {owner}',
     refused: 'No es algo que pueda hacer aquí',
     refused_over_mandate: 'Rechazado: supera el límite firmado para este agente',
-    approved: 'Maria Rivera lo aprobó',
-    denied: 'Maria Rivera decidió no seguir adelante',
+    approved: '{Owner} lo aprobó',
+    denied: '{Owner} decidió no seguir adelante',
     expired: 'Esta solicitud venció',
     cancelled: 'Cancelado',
     failed: 'No se pudo completar',
     unknown: 'Todavía lo estamos confirmando',
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
-    reply_checked: 'Respuesta revisada con las reglas de Maria Rivera',
-    reply_handed_off: 'Pasado a Maria Rivera para responder',
-    owner_said: 'Escrito por Maria Rivera',
+    reply_checked: 'Respuesta revisada con las reglas de {owner}',
+    reply_handed_off: 'Pasado a {owner} para responder',
+    owner_said: 'Escrito por {owner}',
   },
-} as const satisfies Record<
-  Language,
-  Record<Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
->;
+} as const satisfies Record<Language, Record<VisitorLine, string>>;
+
+/** The visitor's status line `line` on a Desk whose owner is `owner`, in `language`. */
+export function visitorLine(language: Language, line: VisitorLine, owner: DeskOwner): string {
+  return naming(VISITOR_TEMPLATES[language][line], ownerIn(language, owner), language);
+}
+
+/** Every visitor status line on a Desk whose owner is `owner`, in `language`. */
+function visitorLines(language: Language, owner: DeskOwner): Record<VisitorLine, string> {
+  const lines = Object.keys(VISITOR_TEMPLATES[language]) as VisitorLine[];
+  return Object.fromEntries(lines.map((line) => [line, visitorLine(language, line, owner)])) as Record<VisitorLine, string>;
+}
+
+/**
+ * The visitor status lines on Maria Rivera's Desk, as the Rivera fixtures write them (a store test
+ * holds each one to the fixtures).
+ */
+export const VISITOR_PLAIN: Record<Language, Record<VisitorLine, string>> = {
+  en: visitorLines('en', RIVERA_OWNER),
+  es: visitorLines('es', RIVERA_OWNER),
+};
 
 /**
  * Tools that only read for Claude and so have no executed line of their own. Every other tool has
@@ -105,16 +168,16 @@ function hasExecutedLine(tool: string): tool is ExecutedTool {
   return !Object.hasOwn(NO_EXECUTED_LINE, tool);
 }
 
-const OWNER = rivera.business.ownerName;
-
 /**
- * The visitor's line for a decision in `state`: an executed one names what its tool did, in the
- * signed per-tool words the design system's fixtures carry, never a bare "Done".
+ * The visitor's line for a decision in `state` on a Desk whose owner is `owner` (Rivera's unless
+ * given): an executed one names what its tool did, in the signed per-tool words the design
+ * system's fixtures carry, never a bare "Done".
  */
-export function statusLine(language: Language, state: DecisionState | 'refused_over_mandate', tool: string | null): string {
-  if (state !== 'executed') return VISITOR_PLAIN[language][state];
+export function statusLine(language: Language, state: DecisionState | 'refused_over_mandate', tool: string | null, owner: DeskOwner = RIVERA_OWNER): string {
+  if (state !== 'executed') return visitorLine(language, state, owner);
   if (tool === null || !hasExecutedLine(tool)) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
-  return executedLine(tool, language, OWNER);
+  // The tool's line as the fixtures write it, with `{owner}` left in, named as every line here is.
+  return naming(executedLine(tool, language, '{owner}'), ownerIn(language, owner), language);
 }
 
 const { blocks } = rivera;
@@ -217,6 +280,7 @@ export const HELD_PROSE: Record<Language, string> = {
  * The kernel's `link_cancelled` line, rendered from the owner's name (master plan, "Payment links";
  * kernel plan 01c), which only the kernel issues.
  */
+const OWNER = rivera.business.ownerName;
 export const LINK_CANCELLED: Record<Language, string> = {
   en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
   es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}${afterName(OWNER, '. Pídelo de nuevo si todavía quieres pagar.')}`,
