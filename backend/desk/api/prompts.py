@@ -398,7 +398,15 @@ plumbing".
 - owner_display_name: the owner's own name if they give it, else null. Never derive it from the business name.
 - business_type: trade, office, landlord or other.
 - summary: what the business does, in one or two plain sentences.
-- website: the business's website address if the description gives one, else null. Never make one up."""
+- website: the business's website address if the description gives one, else null. Never make one up.
+- memory: up to eight short notes the owner's Claude memory would plausibly hold about this business, written \
+as the owner's own notes. Cover its name, what it does, its customers, how it prices, its hours and area, how it \
+talks to customers, and one or two habits a real memory would hold. Be plausible and specific, and never contradict \
+the description. Give each note a title, text and up to six topics: plain words such as business, services, prices, \
+hours, area, contact and website, as fit.
+- connected_apps: up to four apps a business like this would already use, with no repeats. Choose only from \
+google_calendar (Google Calendar), gmail (Gmail), google_drive (Google Drive), quickbooks (QuickBooks), stripe \
+(Stripe), square (Square) and calendly (Calendly)."""
 
 _STYLE = """\
 How you write
@@ -786,6 +794,23 @@ def setup_turn_head(business_type: BusinessType, key: QuestionKey) -> str:
     return SETUP_TURN_HEAD.format(business_type=business_type, question=question_text(key, business_type))
 
 
+ConnectorKey = Literal["google_calendar", "gmail", "google_drive", "quickbooks", "stripe", "square", "calendly"]
+CONNECTOR_LABELS: dict[ConnectorKey, str] = {
+    "google_calendar": "Google Calendar", "gmail": "Gmail", "google_drive": "Google Drive",
+    "quickbooks": "QuickBooks", "stripe": "Stripe", "square": "Square", "calendly": "Calendly",
+}
+
+
+class MemoryDraft(BaseModel):
+    """A short simulated note drafted from the owner's description."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=120, pattern=r"\S")
+    topics: list[str] = Field(max_length=6)
+    text: str = Field(min_length=1, max_length=600, pattern=r"\S")
+
+
 class SetupStart(BaseModel):
     """What the owner's first description says (route `setup`)."""
 
@@ -799,6 +824,14 @@ class SetupStart(BaseModel):
     summary: str = Field(min_length=1, max_length=1500, pattern=r"\S",
                          description="What the business does, in one or two plain sentences.")
     website: str | None = Field(None, max_length=2048, description="The business's website address, else null.")
+    memory: list[MemoryDraft] = Field(default_factory=list, max_length=8)
+    connected_apps: list[ConnectorKey] = Field(default_factory=list, max_length=4)
+
+    @model_validator(mode="after")
+    def _unique_connected_apps(self) -> Self:
+        if len(set(self.connected_apps)) != len(self.connected_apps):
+            raise ValueError("connected apps must be unique")
+        return self
 
 
 class HoursAnswer(BaseModel):
@@ -930,11 +963,6 @@ class Choice(BaseModel):
 JobKind = Literal["answer", "intake", "schedule", "price", "documents", "status", "payment", "urgent"]
 Block = Literal["intake", "typed_booking", "purpose_payment", "urgent"]
 Autonomy = Literal["auto", "ask"]
-ConnectorKey = Literal["google_calendar", "gmail", "google_drive", "quickbooks", "stripe", "square", "calendly"]
-CONNECTOR_LABELS: dict[ConnectorKey, str] = {
-    "google_calendar": "Google Calendar", "gmail": "Gmail", "google_drive": "Google Drive",
-    "quickbooks": "QuickBooks", "stripe": "Stripe", "square": "Square", "calendly": "Calendly",
-}
 CAPABILITIES: dict[JobKind, bool] = {
     "answer": True, "intake": True, "schedule": True, "price": True, "documents": False,
     "status": False, "payment": True, "urgent": True,

@@ -97,6 +97,7 @@ export const VISITOR_PLAIN = {
 const NO_EXECUTED_LINE = {
   'native.fetch_website': true,
   'native.read_memory': true,
+  'native.web_search': true,
 } as const satisfies Record<Exclude<ToolName, ExecutedTool>, true>;
 
 function hasExecutedLine(tool: ToolName): tool is ExecutedTool {
@@ -773,22 +774,26 @@ export function allows(answer: ApprovalAnswer): boolean {
 }
 
 /**
- * What the visitor's chat gets once the owner has answered: the resolved receipt, then Claude's
- * follow-up, which reports what ran (the discounted quote, or the refund) or hands off to Maria.
- * The receipt reports what the answer already did, so a take-over doesn't fence it; the follow-up
+ * What the visitor's chat gets once the owner has answered: the signed approved receipt when
+ * allowed, then the resolved outcome, then Claude's follow-up (the quote, refund or handoff).
+ * The receipts report what the answer already did, so a take-over doesn't fence them; the follow-up
  * is Claude's, so it does.
  */
-export function afterAnswer(answer: ApprovalAnswer, decision: Decision): Step[] {
+export function afterAnswer(answer: ApprovalAnswer, decision: Decision, approved: Decision | null): Step[] {
+  // As in the API's resume_after_answer, only an earlier approval for this decision can precede it.
+  if (approved !== null && (approved.decision_id !== decision.decision_id
+    || approved.state !== 'approved' || approved.ledger_seq >= decision.ledger_seq)) approved = null;
   const resolved = unfenced((ctx) => ctx.status('resolved', decision));
   if (!allows(answer)) return [resolved, writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+  const statuses = [...(approved === null ? [] : [unfenced((ctx) => ctx.status('receipt', approved))]), resolved];
   if (decision.action?.tool === 'payments.create_refund') {
-    return [resolved, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
+    return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
   }
   // The quote at the discount Maria allowed, the one the visitor asked for.
   const listCents = decision.action?.list_cents ?? DECISIONS.heldQuote.listCents;
   const discountBp = decision.action?.discount_bp ?? DEFAULT_DISCOUNT_BP;
   const quote = { listCents, discountBp, amountCents: decision.action?.amount_cents ?? discountedCents(listCents, discountBp) };
-  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
+  return [...statuses, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
 }
 
 /**

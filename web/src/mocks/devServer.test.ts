@@ -173,7 +173,7 @@ async function inTab<T>(tab: Tab, load: () => Promise<T>): Promise<{ result: T; 
 }
 
 describe('the dev server mock', () => {
-  it('two_tabs_share_one_mock', { timeout: 15_000 }, async () => {
+  it('two_tabs_share_one_mock_and_stream_approval_before_outcome', { timeout: 15_000 }, async () => {
     const api = createMockApi();
     const browser = browserOf(api);
     const tabA = browser.tab();
@@ -208,10 +208,11 @@ describe('the dev server mock', () => {
       });
       expect(answered.decision.state).toBe('executed');
 
-      // Tab B's open stream carries the answer back into the chat.
+      // Tab B's open stream carries approval first, then the outcome, back into the chat.
       const followUp = await stream.until('message');
-      expect(followUp.map((ev) => ev.type)).toEqual(['resolved', 'writing', 'message']);
-      expect(followUp[0]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
+      expect(followUp.map((ev) => ev.type)).toEqual(['receipt', 'resolved', 'writing', 'message']);
+      expect(followUp[0]).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved', visitor_plain: 'Maria Rivera approved this' });
+      expect(followUp[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed', visitor_plain: "Quoted from Maria Rivera's price list" });
     } finally {
       await stream.close();
     }

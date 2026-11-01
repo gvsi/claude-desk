@@ -138,9 +138,10 @@ async def test_tools_follow_the_session_kind(app, client, registry):
     seen = await context_of(client, kim.session_id, kim.headers)
     assert "native.release_document" in tools(seen.tools)
     assert not {"payments.create_refund", "payments.list_charges"} & set(tools(seen.tools_declared))
-    # the owner is given the setup tools: reading the website and the owner's memory
+    # the owner is given the setup tools: website, memory and web research
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
-    assert tools(owner.tools) == tools(owner.tools_declared) == ["native.fetch_website", "native.read_memory"]
+    assert tools(owner.tools) == tools(owner.tools_declared) == [
+        "native.fetch_website", "native.read_memory", "native.web_search"]
 
     # each kind and standing is given its own tools; a kind's tools are declared in any standing
     # or status, and only that kind's

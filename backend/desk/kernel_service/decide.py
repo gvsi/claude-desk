@@ -163,7 +163,7 @@ def with_review(request: dict[str, Any], review: Review) -> dict[str, Any]:
 
 # ---- Which tools a session is given ("Model-visible tools") ---------------------------------------
 
-OWNER_TOOLS: frozenset[str] = frozenset({"native.fetch_website", "native.read_memory"})
+OWNER_TOOLS: frozenset[str] = frozenset({"native.fetch_website", "native.read_memory", "native.web_search"})
 ANSWERING_OFF_TOOLS: frozenset[str] = frozenset({"native.capture_lead", "native.request_callback"})
 TOOL_NAMES: frozenset[str] = frozenset(get_args(ToolName))
 

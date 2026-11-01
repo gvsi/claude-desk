@@ -26,6 +26,7 @@ const EVERY_TOOL = {
   'native.start_verification': true,
   'native.fetch_website': true,
   'native.read_memory': true,
+  'native.web_search': true,
   'payments.list_charges': true,
   'payments.create_refund': true,
 } as const satisfies Record<ToolName, true>;
@@ -43,7 +44,7 @@ const DS_CONNECTOR_IDS = {
 } as const satisfies Record<ConnectorIconName, true>;
 
 /** The setup interview's own tools, which belong to no connector. */
-const SETUP_ONLY: readonly ToolName[] = ['native.fetch_website', 'native.read_memory'];
+const SETUP_ONLY: readonly ToolName[] = ['native.fetch_website', 'native.read_memory', 'native.web_search'];
 
 /** A tool row as the API lists it, with `fields` over a plain enabled native tool. */
 function row(fields: Partial<ToolRow> = {}): ToolRow {
@@ -152,6 +153,7 @@ describe('the connector catalog', () => {
     expect(TOOL_NAMES['native.quote'].line).toBe('Prices a job from your price list.');
     expect(TOOL_NAMES['native.fetch_website'].name).toBe('Website reading');
     expect(TOOL_NAMES['native.read_memory'].name).toBe('Memory reading');
+    expect(TOOL_NAMES['native.web_search']).toEqual({ name: 'Web search', line: 'Searches the web to learn how businesses like yours work.' });
     for (const tool of Object.keys(EVERY_TOOL) as ToolName[]) expect(TOOL_NAMES[tool].line, tool).toMatch(/^[A-Z].*\.$/);
   });
 
@@ -175,6 +177,7 @@ describe('the connector catalog', () => {
       // The setup interview's own tools hold nothing on a Desk.
       'native.fetch_website': null,
       'native.read_memory': null,
+      'native.web_search': null,
       'payments.list_charges': 'payment history',
       'payments.create_refund': 'refund',
     });
