@@ -141,9 +141,15 @@
    from the column's edge. What it holds takes the column's width too (CNV-01): the conversation's
    own parts, or the page that says it isn't here or couldn't be read. Messages and cards keep their
    own widths, and the take-over bar its own reading column. */
-/* The transcript's rows take the pane's width too, so a visitor's bubble sits at its right edge. */
+/* The transcript's rows take the pane's width too, so a visitor's bubble sits at its right edge.
+   Claude's words keep to the reading width from the row's left, so their lines stay around 80
+   characters; its cards keep their own widths. */
 .cd-conversation-pane {
   --cd-row-max: 100%;
+}
+
+.cd-conversation-pane .cd-claude-message__prose {
+  max-width: var(--size-reading);
 }
 
 .cd-conversation-pane,

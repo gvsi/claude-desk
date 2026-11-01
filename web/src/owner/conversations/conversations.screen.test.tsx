@@ -225,6 +225,15 @@ describe('Conversations', () => {
     const bubble = chat.getByText(first ?? '', { exact: true }).element().getBoundingClientRect();
     expect(Math.abs(bubble.right - transcript.getBoundingClientRect().right)).toBeLessThanOrEqual(1);
     expect(bubble.width).toBeLessThanOrEqual(transcript.getBoundingClientRect().width * 0.85 + 1);
+    // Claude's words keep to the reading width (640 px), from the transcript's left, so their lines
+    // stay around 80 characters while the row is the pane's width.
+    const prose = [...transcript.querySelectorAll<HTMLElement>('.cd-claude-message__prose')];
+    expect(prose.length).toBeGreaterThan(0);
+    expect(prose.some((p) => p.getBoundingClientRect().width > 600), 'a reply long enough to reach the cap').toBe(true);
+    for (const p of prose) {
+      expect(p.getBoundingClientRect().width).toBeLessThanOrEqual(640);
+      expect(Math.abs(p.getBoundingClientRect().left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    }
     // Take over and its lines keep to their own reading column, from the left.
     const takeOver = screen.getByRole('button', { name: 'Take over' }).element().getBoundingClientRect();
     expect(takeOver.left).toBeGreaterThanOrEqual(inner.left - 1);
