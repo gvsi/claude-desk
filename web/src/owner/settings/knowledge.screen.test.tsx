@@ -639,8 +639,8 @@ describe('knowledge', () => {
     const empty = await renderRoute(KNOWLEDGE);
     await expect.element(main(empty.screen).getByRole('region', { name: 'Add something' })).toBeVisible();
     await expect.poll(() => mockStore.requests.filter((r) => r.key === 'knowledge').length).toBeGreaterThan(0);
+    await expect.element(main(empty.screen).getByRole('status').filter({ hasText: 'Loading what I know' })).not.toBeInTheDocument();
     expect(main(empty.screen).getByRole('region', { name: 'What I know now' }).query()).toBeNull();
-    expect(main(empty.screen).getByRole('status').filter({ hasText: 'Loading what I know' }).query()).toBeNull();
 
     // While the list is read: the loading line where it goes, until the answer lands.
     know({ item_id: 'website', source: 'website', title: 'Your website', text: 'Leaks and drains.' }, ['public'], 1);
