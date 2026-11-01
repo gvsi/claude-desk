@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { PublicDesk } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { BusinessOut, CopyOut, RulesDraft, SetupState, SetupTools, Today } from '../api/views.ts';
+import type { BusinessOut, CopyOut, RulesDraft, SetupState, SetupTools, SituationResult, Today } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
 import { holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk } from './setup.ts';
@@ -830,6 +830,144 @@ describe("setup's examples", () => {
         expect(desk.slug, chip).toBe(slug);
         expect(desk.about, chip).toBe(about);
       }
+    }
+  });
+});
+
+describe("the real situations, in the business's own words", () => {
+  /**
+   * The situations setup tries on `description`'s draft and the draft itself, every question answered
+   * and $500 the money limit: the scripted questions, or the CPA run's proposals (its unpriced
+   * retainer declined) and its money turn, opted into.
+   */
+  async function triedOn(description: string): Promise<{ rows: SituationResult[]; draft: RulesDraft }> {
+    let state = await startState(description);
+    const id = state.interview_id;
+    state = await setupState('setupConsent', id, { allow: false });
+    for (let turn = 0; state.step === 'questions'; turn += 1) {
+      if (turn > 20) throw new Error('setup must reach its tools');
+      const card = state.messages.find((message) => message.card !== null && message.card.proposal_id === state.pending_card)?.card;
+      if (card) {
+        state = await setupState('setupProposal', id, { accept: card.job?.job !== 'payment' }, card.proposal_id);
+        continue;
+      }
+      const offered = state.messages.at(-1)?.choices.map(({ text }) => text) ?? [];
+      const text = state.question === 'money_limit' ? (offered.includes('Set an amount now') ? 'Set an amount now' : 'Up to $500') : (offered[0] ?? 'Yes, that works.');
+      state = await setupState('setupAnswer', id, { question: state.question, text });
+    }
+    const drafted = await mockStore.dispatch('setupRules', { params: { id } });
+    if ('network' in drafted || drafted.status !== 200) throw new Error('setup must draft its rules');
+    const draft = drafted.body as RulesDraft;
+    expect(draft.auto_money_cap_cents, description).toBe(50000);
+    const tried = await mockStore.dispatch('setupSituations', { params: { id } });
+    if ('network' in tried || tried.status !== 200) throw new Error('setup must try its situations');
+    return { rows: tried.body as SituationResult[], draft };
+  }
+
+  /** Everything a situation tries and what the kernel said, but its words. */
+  const probed = (rows: readonly SituationResult[]) =>
+    rows.map(({ situation, result, matches }) => ({ who: situation.who, probe: situation.probe, expected: situation.expected, result, matches }));
+  /** The draft's cards, the agent payment's reason left out. */
+  const withoutReason = (draft: RulesDraft) => draft.cards.map((card) => (card.card_id === 'card-7' ? { ...card, reason: '' } : card));
+  const reasonOf = (draft: RulesDraft) => draft.cards.find((card) => card.card_id === 'card-7')?.reason;
+
+  /** Words that belong to a plumber's work: none of them in another business's situations. */
+  const PLUMBING = /\b(?:drains?|plumb\w*|leaks?|water heaters?|service calls?|visits?)\b/i;
+  /** The starters, in `START_EXAMPLES`' order: their situations, and the reason of the rule that lets agents pay. */
+  const STARTERS: readonly { business: string; titles: readonly string[]; reason: string }[] = [
+    {
+      business: 'Juniper Hair Studio',
+      titles: [
+        'A visitor wants a cut on Tuesday afternoon',
+        'A visitor asks for 10% off a cut and color',
+        'An agent pays the color appointment deposit',
+        'A client asks for their last receipt',
+        'A visitor wants balayage on Saturday morning',
+        "Someone asks for another client's phone number",
+      ],
+      reason: 'Agents pay the color appointment deposit within their signed limit, checked by the reviewer.',
+    },
+    {
+      // Rivera Plumbing's are the situations as they always were.
+      business: 'Rivera Plumbing',
+      titles: [
+        'A visitor wants a drain cleared on Tuesday afternoon',
+        'A visitor asks for 10% off if they pay cash',
+        'An agent pays the service call deposit',
+        'A customer asks for their last invoice',
+        'A visitor wants a Saturday morning visit for a slow drain',
+        "Someone asks for another customer's address",
+      ],
+      reason: 'Agents pay the service call deposit within their signed limit, checked by the reviewer.',
+    },
+    {
+      business: 'Maple Street Rentals',
+      titles: [
+        'A visitor wants a viewing on Tuesday afternoon',
+        "A visitor asks for 10% off the first month's rent",
+        'An agent pays the application fee',
+        'A tenant asks for a copy of their lease',
+        'A visitor wants a Saturday morning viewing',
+        'Someone asks which apartment another tenant lives in',
+      ],
+      reason: 'Agents pay the application fee within their signed limit, checked by the reviewer.',
+    },
+    {
+      business: 'Chen & Co.',
+      titles: [
+        'A visitor wants a free consult on Tuesday afternoon',
+        'A visitor asks for 10% off their tax return',
+        'An agent pays the retainer',
+        "A client asks for last year's return",
+        'A visitor wants a free consult on Saturday morning',
+        "Someone asks for another client's tax return",
+      ],
+      reason: 'Agents pay the retainer within their signed limit, checked by the reviewer.',
+    },
+  ];
+
+  it('each_starter_gets_its_own_words_with_riveras_probes_and_results', async () => {
+    const rivera = await triedOn(START_EXAMPLES.en.examples[1]?.description ?? '');
+    for (const language of ['en', 'es'] as const) {
+      for (const [at, { chip, description }] of START_EXAMPLES[language].examples.entries()) {
+        const starter = STARTERS[at];
+        const { rows, draft } = await triedOn(description);
+        const titles = rows.map(({ situation }) => situation.title);
+        expect(titles, `${chip}: ${starter?.business ?? ''}`).toEqual(starter?.titles);
+        if (starter?.business !== 'Rivera Plumbing') for (const title of titles) expect(title, chip).not.toMatch(PLUMBING);
+        // Only the words change: what each situation tries, plans and gets is Rivera's.
+        expect(probed(rows), chip).toEqual(probed(rivera.rows));
+        // The rule that lets agents pay names what they pay as the situation does, and nothing else
+        // about the cards changes. The English CPA run drafts its other cards from its own answers,
+        // so only that rule is compared there.
+        expect(reasonOf(draft), chip).toBe(starter?.reason);
+        const consultant = language === 'en' && starter?.business === 'Chen & Co.';
+        const compared = (d: RulesDraft) => withoutReason(d).filter((card) => !consultant || card.card_id === 'card-7');
+        expect(compared(draft), chip).toEqual(compared(rivera.draft));
+      }
+    }
+  });
+
+  it('a_business_no_starter_describes_gets_words_that_fit_any_business', async () => {
+    const rivera = await triedOn(START_EXAMPLES.en.examples[1]?.description ?? '');
+    for (const description of [
+      "I'm Lena, and Lena's Bike Repair fixes bikes in Berkeley, Monday to Saturday.",
+      'Soy Ana. Tengo la Panadería Ana en Oakland: pan de masa madre y pasteles por encargo.',
+    ]) {
+      const { rows, draft } = await triedOn(description);
+      const titles = rows.map(({ situation }) => situation.title);
+      expect(titles, description).toEqual([
+        'A visitor wants to book a time on Tuesday afternoon',
+        'A visitor asks for 10% off if they pay cash',
+        'An agent pays the deposit',
+        'A customer asks for their last invoice',
+        'A visitor wants to book a time on Saturday morning',
+        "Someone asks for another customer's address",
+      ]);
+      for (const title of titles) expect(title, description).not.toMatch(PLUMBING);
+      expect(probed(rows), description).toEqual(probed(rivera.rows));
+      expect(reasonOf(draft), description).toBe('Agents pay the deposit within their signed limit, checked by the reviewer.');
+      expect(withoutReason(draft), description).toEqual(withoutReason(rivera.draft));
     }
   });
 });
