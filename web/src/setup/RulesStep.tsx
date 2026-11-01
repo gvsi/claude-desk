@@ -27,6 +27,7 @@ import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
 import { SETUP_COPY } from './copy.ts';
 import { useLanding } from './landing.ts';
 import { aroundBusiness, setupRulesQuery } from './shared.ts';
+import { PublicLinesStep } from './PublicLinesStep.tsx';
 
 const copy = SETUP_COPY.rules;
 
@@ -36,6 +37,7 @@ export interface RulesStepProps {
   business: string;
   /** The interview moved on. */
   onNext: (step: SetupStep) => void;
+  reread: () => Promise<SetupState | null>;
   /**
    * The owner came to Real situations on this page (from the rules): the situations are tried as
    * they watch, and their rows land as they arrive. Setup opened at Real situations (a reload, or
@@ -91,12 +93,12 @@ function DraftRules({ draft, people, check }: { draft: RulesDraft; people: Peopl
  * what Claude does on its own, asks about and never does, the always-on rules and the check. A
  * draft that can't be checked can't go on: only "Save and exit". "Check real situations" runs the
  * draft on situations from the owner's answers, which land one by one as they arrive; "Looks right"
- * goes on to the safety check.
+ * opens the public lines review before the safety check.
  */
-export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
+export function RulesStep({ state, business, onNext, reread, live }: RulesStepProps) {
   const id = state.interview_id;
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
-  const [view, setView] = useState<'rules' | 'situations'>(state.step === 'situations' ? 'situations' : 'rules');
+  const [view, setView] = useState<'rules' | 'situations' | 'public_lines'>(state.step === 'situations' ? 'situations' : 'rules');
   const draft = useQuery(setupRulesQuery(id));
   const people = useQuery({ ...peopleQuery(state.desk_id), refetchOnWindowFocus: false });
   const situations = useQuery({
@@ -141,6 +143,7 @@ export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
 
   // The situations go on only from a draft whose check passed, however the stage was opened.
   const checked = draft.data !== undefined && checkStatus(draft.data.proof).status === 'checked';
+  if (view === 'public_lines' && checked) return <PublicLinesStep state={state} onNext={onNext} reread={reread} />;
   if (view === 'situations' && checked) {
     const s = SETUP_COPY.situations;
     let body: ReactNode;
@@ -173,7 +176,7 @@ export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
             </Card>
           )}
           <div className="cd-setup-step__actions">
-            <Button variant="primary" size="main" onClick={() => onNext('safety_check')}>
+            <Button variant="primary" size="main" onClick={() => setView('public_lines')}>
               {s.looksRight}
             </Button>
           </div>

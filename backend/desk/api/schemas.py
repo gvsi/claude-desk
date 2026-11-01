@@ -679,6 +679,61 @@ class SetupMessage(BaseModel):
     card: ProposalCard | None = None
 
 
+class SetupPublicLine(BaseModel):
+    """A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's
+    public-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay
+    off the charter until the owner rewords it."""
+
+    key: str
+    text: str
+    source: Literal["owner", "suggested"]
+    editable: bool
+    held: bool
+
+
+class SetupPublicHours(BaseModel):
+    source: Literal["owner", "suggested"]
+    windows: list[HoursWindow]
+
+
+class SetupPublicPriceItem(BaseModel):
+    item_id: str
+    title: str
+    unit_cents: int
+
+
+class SetupPublicPrices(BaseModel):
+    source: Literal["owner", "suggested"]
+    items: list[SetupPublicPriceItem]
+
+
+class SetupPublicLines(BaseModel):
+    revision: str
+    lines: list[SetupPublicLine]
+    hours: SetupPublicHours | None
+    prices: SetupPublicPrices | None
+
+
+class SetupPublicLineIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1500)]
+
+
+class SetupPublicLineError(BaseModel):
+    error: Literal["line_refused", "not_editable", "not_suggested"]
+    key: str | None = None
+    reason: list[str] | None = None
+
+
+class SetupPublicLinesConfirmIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    keys: Annotated[list[str], Field(min_length=1)]
+    revision: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class SetupState(BaseModel):
     """A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
     owner let Claude read their memory and website (None until asked), the question waiting for an answer (None

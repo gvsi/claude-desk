@@ -576,6 +576,56 @@ export interface SetupTools {
   connectable: 'mock_payments'[];
 }
 
+/** Line keys understood by setup's public-lines review, shared without importing UI code. */
+export const SETUP_PUBLIC_LINE_KEYS = ['policy:about', 'contact', 'policy:pricing', 'policy:intake', 'policy:after_hours', 'policy:urgent', 'policy:service_area', 'policy:how_we_help'] as const;
+
+/** The public charter lines the owner reviews before the safety check. */
+export interface SetupPublicLine {
+  key: string;
+  text: string;
+  source: 'owner' | 'suggested';
+  editable: boolean;
+  /** Stored owner words held from publication; absent on older answers means false. */
+  held?: boolean;
+}
+
+export type PublicHoursWindow = HoursWindow;
+
+export interface SetupPublicHours {
+  source: 'owner' | 'suggested';
+  windows: HoursWindow[];
+}
+
+export type PublicPriceItem = SetupPublicPriceItem;
+
+export interface SetupPublicPriceItem {
+  item_id: string;
+  title: string;
+  unit_cents: number;
+}
+
+export interface SetupPublicPrices {
+  source: 'owner' | 'suggested';
+  items: SetupPublicPriceItem[];
+}
+
+export interface SetupPublicLines {
+  lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+  revision: string;
+}
+
+export interface SetupPublicLinesConfirmIn {
+  keys: string[];
+  revision: string;
+}
+
+export interface SetupPublicLineIn {
+  key: string;
+  text: string;
+}
+
 /** A situation Claude wrote from the owner's answers to try on the draft rules (plan 02b Task 7). */
 export interface Situation {
   /** Claude's words, from the owner's answers. */

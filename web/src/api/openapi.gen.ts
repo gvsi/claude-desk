@@ -853,6 +853,53 @@ export interface SetupProposalIn {
   amount_cents?: number | null;
   autonomy?: ("auto" | "ask") | null;
 }
+export interface SetupPublicHours {
+  source: "owner" | "suggested";
+  windows: HoursWindow[];
+}
+/**
+ * A nonblank setup charter line and whether the owner has confirmed its text. `held` marks a line the kernel's
+ * public-text checks held back (the setup state's `held_policy_keys`, the contact included): its stored words stay
+ * off the charter until the owner rewords it.
+ */
+export interface SetupPublicLine {
+  key: string;
+  text: string;
+  source: "owner" | "suggested";
+  editable: boolean;
+  held: boolean;
+}
+export interface SetupPublicLineError {
+  error: "line_refused" | "not_editable" | "not_suggested";
+  key?: string | null;
+  reason?: string[] | null;
+}
+export interface SetupPublicLineIn {
+  key: string;
+  text: string;
+}
+export interface SetupPublicLines {
+  revision: string;
+  lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+}
+export interface SetupPublicPrices {
+  source: "owner" | "suggested";
+  items: SetupPublicPriceItem[];
+}
+export interface SetupPublicPriceItem {
+  item_id: string;
+  title: string;
+  unit_cents: number;
+}
+export interface SetupPublicLinesConfirmIn {
+  /**
+   * @minItems 1
+   */
+  keys: [string, ...string[]];
+  revision: string;
+}
 /**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
  * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
@@ -1196,6 +1243,11 @@ export const API_OPERATIONS = {
   "POST /api/owner/setup/{id}/suggestions": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
+  "GET /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
+  "PUT /api/owner/setup/{id}/public_lines": { 200: "SetupPublicLines" },
+  "POST /api/owner/setup/{id}/public_lines/confirm": { 200: "SetupPublicLines" },
+  "DELETE /api/owner/setup/{id}/public_lines/{key}": { 200: "SetupPublicLines" },
+  "DELETE /api/owner/setup/{id}/public_lines/prices/{item_id}": { 200: "SetupPublicLines" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
   "GET /api/public/desks/{slug}/agent_card": { 200: "AgentCardOut" },
   "POST /api/public/desks/{slug}/sessions": { 200: "VisitorSession" },
