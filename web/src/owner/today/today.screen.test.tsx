@@ -42,12 +42,13 @@ import {
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
 import { CAUSE_COPY } from '../safety/copy.ts';
-import { needsYouKey } from '../useDesks.ts';
+import { needsYouKey, ownerInboxQuery } from '../useDesks.ts';
 import { COPIED_FOR_MS, TodayPage } from './TodayPage.tsx';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
 const CONVERSATIONS = `/app/${RIVERA.deskId}/conversations`;
+const CUSTOMERS = `/app/${RIVERA.deskId}/people`;
 const LA = 'America/Los_Angeles';
 
 const SEEDED_REASON = rivera.decisions.held.reason_plain;
@@ -546,15 +547,15 @@ describe('Today', () => {
   });
 
   it('today_after_a_reload_elsewhere_opens_drawn', async () => {
-    // Reloaded on Conversations, the frame keeps Today read, but Needs you is read only as Today
-    // opens, here slowly. Today keeps its columns as shapes until Needs you is in too, so
+    // Reloaded on Customers, which doesn't read Needs you, the frame keeps Today read, but Needs
+    // you is first read as Today opens, here slowly. Today keeps its columns as shapes until it is in, so
     // "Since last night" never shows and is then pushed down by the requests above it.
     const first = await renderRoute(TODAY);
     await expect.element(heldCard(first.screen, SEEDED_REASON)).toBeVisible();
-    await mainNav(first.screen).getByRole('link', { name: /^Conversations/ }).click();
-    await expect.poll(() => first.router.state.location.pathname).toBe(CONVERSATIONS);
-    const { screen } = await renderRoute(CONVERSATIONS);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    await mainNav(first.screen).getByRole('link', { name: 'Customers' }).click();
+    await expect.poll(() => first.router.state.location.pathname).toBe(CUSTOMERS);
+    const { screen } = await renderRoute(CUSTOMERS);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
     await expect.poll(() => requests('today').length).toBeGreaterThan(0);
 
     const needsYou = holdReads(needsYouPath);
@@ -574,6 +575,29 @@ describe('Today', () => {
     await expectScreenBasics(screen.container, { owner: true });
     // Within the frame, never the owner's loading page: moving between pages keeps Today's own hold.
     expect(pages().slice(1)).toEqual(['today opening', 'today']);
+  });
+
+  it('today_after_conversations_opens_on_its_needs_you_read', async () => {
+    // Reloaded on Conversations, its fresh Needs you read lets Today open drawn without another
+    // read. Any further Needs you reads stay held until after the opening assertions.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    await expect.poll(() => queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.status).toBe('success');
+    // Settle the unrelated inbox read first so only Needs you could hold this opening.
+    await queryClient.prefetchQuery(ownerInboxQuery());
+
+    const needsYou = holdReads(needsYouPath);
+    const since = watchTop(sinceLastNightHeading);
+    const pages = watchPages();
+    await mainNav(screen).getByRole('link', { name: 'Today' }).click();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
+    expect(since()).toHaveLength(1);
+    expect(pages().slice(1)).toEqual(['today']);
+    expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer')).toBeNull();
+    needsYou.release();
   });
 
   it('today_from_another_page_opens_with_its_inbox_read', async () => {

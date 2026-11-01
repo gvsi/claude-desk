@@ -180,10 +180,6 @@ export function forgetReadAhead(queryClient: QueryClient, deskId: string): void 
   deadlinesOf(queryClient).delete(deskId);
 }
 
-// A shared Needs you read on Conversations doesn't stand in for Today's first visit. Later visits
-// can open on what Today already read, as before. The query client belongs to this app mount.
-const openedTodays = new WeakMap<QueryClient, Set<string>>();
-
 /**
  * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
  * you, and the copy's Demo inbox), so its sections open together rather than one by one, each
@@ -203,8 +199,7 @@ export function useTodayOpening(deskId: string): boolean {
   // opening reads it again.
   const [readAheadForThisVisit] = useState(() => deadlinesOf(queryClient).has(deskId));
   const today = useToday(deskId, { retryOnMount: false });
-  const [firstToday] = useState(() => !readAheadForThisVisit && !openedTodays.get(queryClient)?.has(deskId));
-  const needsYou = useNeedsYou(deskId, { retryOnMount: false, readOnOpen: firstToday });
+  const needsYou = useNeedsYou(deskId, { retryOnMount: false });
   // Read here only as Today opens, unless it was just read: the inbox itself reads it again while its
   // sheet is open, and never while it is closed, so this observer, which stays mounted with Today,
   // doesn't read it again on focus or reconnect.
@@ -215,19 +210,13 @@ export function useTodayOpening(deskId: string): boolean {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  const needsYouRead = needsYou.isError || needsYou.isPaused || (needsYou.data !== undefined && (!firstToday || needsYou.isFetchedAfterMount));
-  const read = needsYouRead && [today, inbox].every((query) => query.data !== undefined || query.isError || query.isPaused);
+  const read = [today, needsYou, inbox].every((query) => query.data !== undefined || query.isError || query.isPaused);
   const [open, setOpen] = useState(read);
   if (read && !open) setOpen(true);
   // Taken once Today has it: the Desk's next Today is a later visit, with a wait of its own.
   useEffect(() => {
     deadlinesOf(queryClient).delete(deskId);
-    if (open) {
-      const opened = openedTodays.get(queryClient) ?? new Set<string>();
-      opened.add(deskId);
-      openedTodays.set(queryClient, opened);
-    }
-  }, [queryClient, deskId, open]);
+  }, [queryClient, deskId]);
   return !open;
 }
 
