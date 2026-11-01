@@ -46,6 +46,7 @@ OWNER_STATUS: dict[str, str] = {
 }
 
 EXECUTED: dict[str, str] = {
+    "urgent": "{title}: solicitud urgente enviada a {owner}",
     "intake": "{title}: datos guardados para {owner}",
     "native.quote": "Cotizado con la lista de precios de {owner}",
     "native.find_slots": "Horarios tomados del calendario de {owner}",

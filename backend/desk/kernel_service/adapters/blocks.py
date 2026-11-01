@@ -7,14 +7,15 @@ import desk_kernel
 from pydantic import BaseModel, ConfigDict, Field
 
 from desk.contracts import BusinessToolDef, Claim, Fact, Label, ToolName, ToolProfile
-from desk.kernel_service import labels
+from desk.kernel_service import demo_inbox, labels, render
+from desk.kernel_service.adapters import request_callback
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, AdapterResult, ExecCtx, Normalized, NormalizeCtx, quoted
 from desk.kernel_service.adapters.book import BookArgs
 from desk.kernel_service.adapters.capture_lead import ADAPTER as CAPTURE_LEAD, CaptureLeadArgs
 from desk.kernel_service.adapters.request_callback import RequestCallbackArgs
 
 Block = Literal["intake", "typed_booking", "purpose_payment", "urgent"]
-SUPPORTED_BLOCKS: frozenset[Block] = frozenset({"intake"})
+SUPPORTED_BLOCKS: frozenset[Block] = frozenset({"intake", "urgent"})
 CARD_FIELDS: dict[Block, tuple[str, ...]] = {
     "intake": ("title",),
     "typed_booking": ("title", "appointment_type"),
@@ -99,7 +100,26 @@ class BlockAdapter:
         return await CAPTURE_LEAD.reconcile(xctx, action)
 
 
-BLOCK_ADAPTERS: dict[Block, type] = {"intake": BlockAdapter}
+class UrgentAdapter(request_callback.RequestCallbackAdapter):
+    """Native callback declarations and lifecycle, with an unconditional urgent owner alert."""
+
+    def __init__(self, stored: ToolProfile):
+        if stored.business is None or stored.business.config.block != "urgent":
+            raise ValueError("unsupported_block")
+        self.profile = profile(stored.tool, stored.business).model_copy(update={"status": "enabled", "review_reason": None})
+
+    async def execute(self, xctx: ExecCtx, action, args: RequestCallbackArgs) -> AdapterResult:
+        async def alert(window):
+            await demo_inbox.deliver(
+                xctx.ctx, copy_id=action.copy_id, desk_id=action.desk_id, to="owner", person_id=None,
+                kind="alert", preview=render.owner_preview("urgent"),
+                body=f"Reported as urgent through {quoted(self.profile.business.title)}. "
+                     + request_callback.alert_body(window, args))
+
+        return await request_callback.open_callback(xctx, action, args, alert=alert)
+
+
+BLOCK_ADAPTERS: dict[Block, type] = {"intake": BlockAdapter, "urgent": UrgentAdapter}
 
 
 def adapter_for(definition: BusinessToolDef, tool: str) -> Adapter:
