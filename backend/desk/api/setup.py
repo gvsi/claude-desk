@@ -2612,8 +2612,8 @@ _TIMES = re.compile(rf"(?<![\w.+-])(?:{_HOUR}\s*(?:-|–|—|\bto\b|\buntil\b|\b
                     r"|24\s*/\s*7|(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?\s*[ap]\.?m\b\.?|(?:[01]?\d|2[0-4]):[0-5]\d)"
                     r"(?![\w-]|[.:]\d)", re.IGNORECASE)
 CONTACT_ON_RECORD_MAX = 120        # the most characters the kernel keeps for a contact on record
-# A contact answer's clauses end at a sentence's or a list's punctuation (a dot inside an address doesn't end one).
-_CLAUSE_END = re.compile(r"[;!?\n]|[.,](?=\s|$)")
+# A contact answer's sentences end at ".", ";", "!", "?" or a new line (a dot inside an address doesn't end one).
+_SENTENCE_END = re.compile(r"[;!?\n]|\.(?=\s|$)")
 # The words just before a contact, in its clause, that tell whose it is: one the owner rejects, one they mark as their
 # own, and one of another person's (by role; a name is checked against the owner's own, `_contact_names`).
 _REJECTED = re.compile(r"\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b")
@@ -2623,8 +2623,10 @@ _OWNERS = re.compile(r"\b(?:my own|my email|my e-mail|my phone|my number|my cell
 _SOMEONE_ELSE = re.compile(r"\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|"
                            r"daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|"
                            r"recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b")
-# A name just before a contact ("Ana at …", "Maria: …"), and the capitalized words that are never a person's name.
+# A name just before a contact ("Ana at …", "Maria: …"), a possessive name ("Ana's email is …"), and the capitalized
+# words that are never a person's name.
 _NAMED = re.compile(r"([^\W\d_][^\W\d_'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$")
+_POSSESSIVE = re.compile(r"([^\W\d_][^\W\d_-]*)'s\b")
 _NOT_NAMES = _CONTACT_LABEL_WORDS | frozenset({
     "my", "me", "contact", "contacts", "customers", "clients", "reach", "use", "write", "message", "us", "our", "the",
     "for", "please", "bookings", "booking", "sales", "orders", "support", "info", "hello", "emergencies", "emergency",
@@ -2674,14 +2676,42 @@ def _contacts_in(text: str) -> list[tuple[int, int, str, bool]]:
     return sorted(found)
 
 
+def _whose(words: str, owner_words: frozenset[str], not_names: frozenset[str]) -> str | None:
+    """What the words before a contact say about whose it is, by the marker closest to it: "owner" for the owner's own
+    ("my email", "reach me", "mi correo", their own name in front or as a possessive …), "rejected" for one they reject
+    ("not", "no longer", "old", "instead of", "ya no" …), "other" for another person's (a role such as "my assistant",
+    or another name in front, "Ana at …", "Ana: …", or as a possessive, "Ana's email is …"); None when they say
+    nothing of it."""
+    folded = words.casefold()
+    closest: dict[str, int] = {}
+
+    def note(kind: str, at: int) -> None:
+        closest[kind] = max(closest.get(kind, -1), at)
+
+    for pattern, kind in ((_REJECTED, "rejected"), (_OWNERS, "owner"), (_SOMEONE_ELSE, "other")):
+        for match in pattern.finditer(folded):
+            note(kind, match.end())
+    names = [(match.group(1), match.end()) for match in _POSSESSIVE.finditer(words)]
+    if (named := _NAMED.search(words)) is not None:
+        names.append((named.group(1), named.end()))
+    for name, at in names:
+        if not name[0].isupper():
+            continue
+        if name.casefold() in owner_words:
+            note("owner", at)
+        elif name.casefold() not in not_names:
+            note("other", at)
+    return max(closest, key=lambda kind: closest[kind]) if closest else None
+
+
 def _owner_contact(interview: Interview) -> str | None:
     """The contact the owner gave as theirs, from their own answers to the contact question
     (`contact_and_after_hours`): never the public contact the turn's model wrote, which the website or memory may have
     suggested, and never one typed on another question. Of every email and phone they typed there (`_contacts_in`),
-    one they reject in its clause ("not", "no longer", "old", "instead of", "ya no" …) or give as another person's ("my
-    assistant Ana at …", "Ana: …") never counts. Of the rest, those they mark as their own ("my email", "reach me",
-    "mi correo", their own name in front …) come first: the one email among them, else the one phone. Two emails, or
-    two phones with no email, that nothing tells apart make no contact, so no offer."""
+    one they reject or give as another person's (`_whose`) never counts, and that carries on to every contact after it
+    in its sentence ("Do not use a@… or b@…", "my assistant Ana at 510-… or ana@…") until the owner marks one as their
+    own. Of the rest, those they mark as their own come first: the one email among them, else the one phone. Two
+    emails, or two phones with no email, that nothing tells apart make no contact, so no offer."""
     owner_words, not_names = _contact_names(interview)
     contacts: dict[str, _Contact] = {}
     asked: str | None = None
@@ -2691,23 +2721,25 @@ def _owner_contact(interview: Interview) -> str | None:
             continue
         if entry.role != "owner" or asked != "contact_and_after_hours":
             continue
-        text = entry.text.replace("’", "'")
-        clause_ends = [match.end() for match in _CLAUSE_END.finditer(text)]
-        previous = 0
+        text = entry.text.replace("\u2019", "'")
+        sentence_ends = [match.end() for match in _SENTENCE_END.finditer(text)]
+        sentence, carried, previous = -1, None, 0
         for start, end, value, email in _contacts_in(text):
-            before = text[max([previous, *(stop for stop in clause_ends if stop <= start)]):start]
+            begins = max([0, *(stop for stop in sentence_ends if stop <= start)])
+            if begins != sentence:
+                sentence, carried, previous = begins, None, begins
+            said = _whose(text[previous:start], owner_words, not_names)
             previous = end
+            if said is not None:
+                carried = None if said == "owner" else said
             key = value.casefold() if email else re.sub(r"\D", "", value)
             contact = contacts.setdefault(key, _Contact(value=value, email=email))
             contact.value = value
-            folded = before.casefold()
-            named = _NAMED.search(before)
-            name = named.group(1).casefold() if named is not None and named.group(1)[0].isupper() else None
-            if _REJECTED.search(folded):
+            if carried == "rejected":
                 contact.rejected = True
-            elif _SOMEONE_ELSE.search(folded) or (name is not None and name not in owner_words | not_names):
+            elif carried == "other":
                 contact.someone_elses = True
-            elif _OWNERS.search(folded) or (name is not None and name in owner_words):
+            elif said == "owner":
                 contact.marked = True
     kept = [contact for contact in contacts.values() if not contact.rejected and not contact.someone_elses]
     pool = [contact for contact in kept if contact.marked] or kept

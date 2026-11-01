@@ -338,12 +338,24 @@ def contact_interview(*said: str, owner_name: str | None = "Maria Rivera") -> se
     (["hello@example.test or bookings@example.test"], None),
     (["My email is maria@example.test and my email for work is m.rivera@example.test"], None),
     (["Use my assistant Ana at ana@example.test."], None),
+    (["Ana: ana@example.test"], None),
+    # Another person's, or a rejected, contact carries over to the alternatives after it in its sentence, until the
+    # owner marks one as theirs; a possessive name is another person's too.
+    (["Call my assistant Ana at (510) 555-0142 or email ana@example.test."], None),
+    (["Do not use old@example.test or 510-555-0142."], None),
+    (["Ana's email is ana@example.test"], None),
+    (["Ana’s email is ana@example.test, and my own is maria@example.test."], "maria@example.test"),
+    (["Ana handles bookings. My own email is maria@example.test."], "maria@example.test"),
+    (["Don't call 510-555-0199, email me at maria@example.test."], "maria@example.test"),
     # An email beside a phone is the one taken, and the latest answer's correction counts.
     (["Email maria@example.test or call (510) 555-0142."], "maria@example.test"),
-    (["old@example.test", "Not old@example.test any more, it's maria@example.test now."], "maria@example.test"),
+    (["old@example.test", "Not old@example.test any more. My email is maria@example.test now."],
+     "maria@example.test"),
     # In Spanish.
     (["Para clientes, mi asistente Ana en ana@example.test. Mi correo es maria@example.test."], "maria@example.test"),
-    (["Ya no uso viejo@example.test, ahora maria@example.test"], "maria@example.test"),
+    (["Ya no uso viejo@example.test, ahora mi correo es maria@example.test"], "maria@example.test"),
+    # A correction with no mark of the owner's own leaves the pick unclear: no offer.
+    (["Ya no uso viejo@example.test, ahora maria@example.test"], None),
 ])
 def test_the_test_client_contact_is_the_owners_own(said, contact):
     assert setup._owner_contact(contact_interview(*said)) == contact
