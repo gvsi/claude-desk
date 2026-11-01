@@ -391,10 +391,19 @@ class Health(BaseModel):                  # GET /health (selftest result cached 
     key_id: str
     unproved_seeds: list[str]
 
+ERROR_DETAIL_KEY_PATTERN = r"^[A-Za-z0-9_.:-]{1,120}$"
+ERROR_RULE_ID_PATTERN = r"^[a-z0-9_.]{1,64}$"
+ErrorDetailKey = Annotated[str, StringConstraints(pattern=ERROR_DETAIL_KEY_PATTERN)]
+ErrorRuleId = Annotated[str, StringConstraints(pattern=ERROR_RULE_ID_PATTERN)]
+
+
 class KernelError(BaseModel):             # the body of every non-2xx kernel answer
     code: Literal["auth", "not_found", "closed", "stale_generation", "mode_owner", "mode_paused", "replayed",
                   "conflict", "invalid", "rate_limited", "seed_unproved", "internal"]   # rate_limited: 429 (POST /agents/demo)
-    detail: dict[str, list[str]] | None = None   # refused public policy or card field keys and rule IDs, never values
+    # Refused public policy or card field keys and rule IDs, never values. propertyNames also closes
+    # unmatched keys in JSON Schema, beyond patternProperties.
+    detail: dict[ErrorDetailKey, list[ErrorRuleId]] | None = Field(
+        default=None, json_schema_extra={"propertyNames": {"pattern": ERROR_DETAIL_KEY_PATTERN}})
 
 KERNEL_RESPONSES: tuple[type[BaseModel], ...] = (
     DeskCreated, DeskUpdated, DocumentCreated, VerifyStarted, WhoAmI, SessionContext, TurnStarted, ToolConfirmed,

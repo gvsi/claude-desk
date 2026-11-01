@@ -919,6 +919,10 @@ export interface KernelError {
     | "seed_unproved"
     | "internal";
   detail?: {
+    /**
+     * This interface was referenced by `undefined`'s JSON-Schema definition
+     * via the `patternProperty` "^[A-Za-z0-9_.:-]{1,120}$".
+     */
     [k: string]: string[];
   } | null;
 }

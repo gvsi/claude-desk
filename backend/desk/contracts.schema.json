@@ -2078,11 +2078,14 @@
         "detail": {
           "anyOf": [
             {
-              "additionalProperties": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
+              "patternProperties": {
+                "^[A-Za-z0-9_.:-]{1,120}$": {
+                  "items": {
+                    "pattern": "^[a-z0-9_.]{1,64}$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
               },
               "type": "object"
             },
@@ -2091,6 +2094,9 @@
             }
           ],
           "default": null,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_.:-]{1,120}$"
+          },
           "title": "Detail"
         }
       },
