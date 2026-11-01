@@ -11,7 +11,9 @@ found, the check says that private terms were not checked and still passes. The 
 docs/images/, whose titles and labels are public text too, are scanned line by line for the same
 references private anywhere and the same terms.
 Each phrase in DISCLOSURES appears in every doc it names, ignoring case, line breaks and curly
-apostrophes. With --final, the shipped docs also hold no placeholder: a value still to be measured
+apostrophes. The path to MVP's metric tables require a source for each row: an evals file, a pull
+request, an estimate with its formula, or a paired final-pass placeholder. With --final, the shipped
+docs also hold no placeholder: a value still to be measured
 (`[measured: …]`) or a link the owner still has to give (`[owner: …]`).
 
 Exit 0 when every check passes, 1 when any fails (each failure printed as `file:line: what`),
@@ -271,8 +273,72 @@ def check_placeholders(root: Path) -> list[Problem]:
     return problems
 
 
+def _mvp_source(root: Path, source: str) -> bool:
+    if source.startswith("estimate:"):
+        # Judge the formula itself, not a '+' or '-' in a linked file name.
+        formula = source.removeprefix("estimate:").split(";", 1)[0].split("[", 1)[0]
+        return "=" in formula and bool(re.search(r"[+×*/−-]", formula))
+    for _, raw in link_targets(source):
+        target = raw.strip("<>")
+        if re.fullmatch(r"https://github\.com/[^/]+/[^/]+/pull/\d+(?:#[^\s]*)?", target):
+            return True
+        if _SCHEME.match(target) or target.startswith("//"):
+            continue
+        path = unquote(target.split("#", 1)[0].split("?", 1)[0])
+        resolved = ((root / path.lstrip("/")) if path.startswith("/") else root / "docs" / path).resolve()
+        if resolved.is_relative_to((root / "evals").resolve()) and resolved.is_file():
+            return True
+    return False
+
+
+def check_mvp_number_sources(root: Path) -> list[Problem]:
+    """Every metric row needs its own source, even when the row contains no digits yet."""
+    name = "docs/path-to-mvp.md"
+    doc = root / name
+    if not doc.is_file():
+        return []  # The section test requires the real document; temp trees may leave it out.
+    metric_sections = {"Architecture", "Model integration", "Scaling and what breaks first",
+                       "Latency and cost per conversation"}
+    problems = []
+    section, header = "", None
+    for number, line, in_fence in _lines(doc.read_text()):
+        if in_fence:
+            continue
+        if line.startswith("## "):
+            section, header = line[3:].strip(), None
+        if section not in metric_sections or not line.strip().startswith("|"):
+            header = None
+            continue
+        cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+        if header is None:
+            header = [cell.casefold() for cell in cells]
+            if "source" not in header:
+                problems.append(Problem(name, number, "metric table needs a source column"))
+            continue
+        if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            continue
+        if "source" not in header:
+            continue
+        if len(cells) != len(header):
+            problems.append(Problem(name, number, "metric row must have a cell for every column, including source"))
+            continue
+        source = cells[header.index("source")]
+        pending = any("[measured:" in cell for cell in cells)
+        if pending:
+            valid = (source == "[measured: source, final held-out pass]"
+                     and "value" in header
+                     and re.fullmatch(r"\[measured: [^\[\]\n]+, final held-out pass\]",
+                                      cells[header.index("value")]))
+        else:
+            valid = _mvp_source(root, source)
+        if not valid:
+            problems.append(Problem(name, number, "metric row needs an evals file or pull request source, "
+                                    "an estimate: formula, or paired final held-out pass placeholders"))
+    return problems
+
+
 def check(root: Path, final: bool = False) -> list[Problem]:
-    problems = check_links(root) + check_private(root) + check_disclosures(root)
+    problems = check_links(root) + check_private(root) + check_disclosures(root) + check_mvp_number_sources(root)
     if final:
         problems += check_placeholders(root)
     return problems

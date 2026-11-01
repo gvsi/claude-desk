@@ -630,6 +630,68 @@ def sections(text: str) -> dict[str, str]:
     return found
 
 
+def test_path_to_mvp_sections():
+    text = (REPO / "docs/path-to-mvp.md").read_text()
+
+    assert re.findall(r"^## (.+)$", text, re.MULTILINE) == [
+        "Architecture",
+        "Infrastructure",
+        "Model integration",
+        "Scaling and what breaks first",
+        "Latency and cost per conversation",
+        "What changes for real users",
+        "Trade-offs made and deferred",
+    ]
+
+
+@pytest.mark.parametrize("row, accepted", [
+    (None, True),  # The real draft, including every latency, cost and scaling row.
+    ("42 ms | [Run](../evals/reports/run.md)", True),
+    ("42 ms | [PR](https://github.com/gvsi/claude-desk/pull/33)", True),
+    ("estimate: 30 | estimate: 20 + 10 = 30; [pool](../backend/pool.py)", True),
+    ("[measured: local reveal latency, final held-out pass] | [measured: source, final held-out pass]", True),
+    ("42 ms |", False),
+    ("42 ms", False),
+    ("42 ms | [Notes](../docs/notes.md)", False),
+    ("42 ms | [Pool](../backend/pool.py)", False),
+    ("42 ms | [Pricing](https://example.com/pricing)", False),
+    ("42 ms | [Folder](../evals/reports/)", False),
+    ("42 ms | [Missing](../evals/reports/missing.md)", False),
+    ("estimate: 30 | estimate: from the configured pool", False),
+    ("estimate: 30 | estimate: x = y; [pool](../backend/pool.py)", False),
+    ("42 ms | [measured: source, final held-out pass]", False),
+    ("[measured: local reveal latency, final held-out pass] | [measured: source]", False),
+    ("[measured: local reveal latency, final held-out pass] | [Run](../evals/reports/run.md)", False),
+])
+def test_every_number_has_a_source(tmp_path, row, accepted):
+    if row is None:
+        assert check_docs.check_mvp_number_sources(REPO) == []
+        return
+
+    root = passing_tree(tmp_path)
+    write(root, "evals/reports/run.md", "# Measured run\n")
+    write(root, "backend/pool.py", "# Configured pool\n")
+    write(root, "docs/notes.md", "# Notes\n")
+    text = "## Scaling and what breaks first\n\n| Metric | Value | Source |\n|---|---|---|\n"
+    write(root, "docs/path-to-mvp.md", text + f"| Test metric | {row} |\n")
+
+    code, out = run(root)
+    assert (code == 0) == accepted, out
+    if not accepted:
+        assert "docs/path-to-mvp.md:5:" in out
+    elif "[measured:" in row:
+        final_code, final_out = run(root, "--final")
+        assert final_code == 1
+        assert "docs/path-to-mvp.md:5: placeholder [measured:" in final_out
+
+    # Removing the source column cannot make the table evade the check.
+    write(root, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n| Metric | Value |\n|---|---|\n| Test | 42 ms |\n")
+    code, out = run(root)
+    assert code == 1
+    assert "source column" in out
+
+
 def test_readme_sections():
     text = (REPO / "README.md").read_text()
     lines = [line for line in text.splitlines() if line.strip()]
