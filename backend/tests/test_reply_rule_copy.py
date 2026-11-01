@@ -41,5 +41,7 @@ async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict, jev_bl
 
 def test_both_promise_checkers_have_one_owner_explanation():
     assert reply_reason([("soft_promise", "soft.promise"), ("soft_promise", "soft.jev")]) == (
+        "A reply was stopped before it was shown, because it made a promise the rules don't back.")
+    assert reply_reason([("soft_promise", "soft.jev")]) == (
         "A reply was stopped before it was shown, because "
         "a second check flagged a promise the business's records don't back.")

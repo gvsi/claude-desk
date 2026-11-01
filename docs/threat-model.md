@@ -53,7 +53,7 @@ HTTPS API for evaluation by `jev-1.13.0`.
 Card text may contain information the verified session is entitled to read. This adds an external
 data recipient. TypeSafe's terms on retaining or training on inputs (reply and card text) are
 not verified here; this is not a privacy guarantee. TypeSafe's terms bar us from training on
-Jev's outputs; the scores are used only for reply decisions.
+Jev's outputs; the scores are used only for live reply decisions, under the owner's agreement with TypeSafe.
 The key stays in the kernel container. Request and response bodies and the key are never logged;
 only call status and latency are logged.
 
