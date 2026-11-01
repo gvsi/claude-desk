@@ -15,6 +15,7 @@ import { apiPath } from '../api/routes.ts';
 import type { ApprovalAnswerOut, CopyOut, NeedsYouItem, VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { openChat } from '../public/PublicChatProvider.tsx';
 import { createMockApi, mockApiPlugin, type MockApi } from './devServer.ts';
+import { DEMO_CODE } from './script.ts';
 
 const ORIGIN = 'http://localhost:5373';
 const DISCOUNT = 'Can I get 50% off if I pay cash?';
@@ -366,6 +367,45 @@ describe('the dev server mock', () => {
     // The first copy is as it was.
     expect(await tabA.json<NeedsYouItem[]>('GET', apiPath('needsYou', deskPath))).toEqual(needsYouA);
     expect((await tabA.json<CopyOut>('GET', apiPath('me', {}))).copy_id).toBe(copy.copy_id);
+  });
+
+  it('a_document_cards_link_opens_once_in_a_tab', { timeout: 15_000 }, async () => {
+    const api = createMockApi();
+    const tab = browserOf(api).tab();
+    const copy = await tab.json<CopyOut>('POST', apiPath('copies', {}), { passcode: 'demo' }, 201);
+    const desk = copy.desks[0];
+    if (!desk) throw new Error('the copy has a Desk');
+    const slug = { slug: desk.slug };
+
+    // Dana asks for her last invoice, confirms it's her with the Demo inbox's code, and gets its card.
+    await tab.json<VisitorSession>('POST', apiPath('openSession', slug));
+    const stream = await tab.stream(apiPath('events', slug, { after: 0 }));
+    let href: string | null | undefined;
+    try {
+      await tab.json('POST', apiPath('sendMessage', slug), { text: "I'm Dana Whitfield. Please send my last invoice." }, 202);
+      await stream.until('turn_end');
+      await tab.json('POST', apiPath('verifyCheck', slug), { code: DEMO_CODE });
+      const turn = await stream.until('turn_end');
+      href = turn.flatMap((ev) => (ev.type === 'message' ? ev.blocks : [])).find((block) => block.template === 'document_link')?.href;
+    } finally {
+      await stream.close();
+    }
+    if (!href) throw new Error('the invoice card links to its document');
+
+    // A look first leaves it unopened; the tab then shows the document once, and the API's refusal after.
+    const look = await tab.send('HEAD', href);
+    expect([look.status, look.headers.get('cache-control'), await look.text()]).toEqual([200, 'no-store', '']);
+    const opened = await tab.send('GET', href);
+    expect([opened.status, opened.headers.get('content-type'), opened.headers.get('content-disposition')]).toEqual([
+      200,
+      'text/plain; charset=utf-8',
+      'inline; filename="Invoice-drain-clearing.txt"',
+    ]);
+    expect(await opened.text()).toMatch(/^Rivera Plumbing\nInvoice for Dana Whitfield\n/);
+    const again = await tab.send('GET', href);
+    expect([again.status, await again.text()]).toEqual([404, 'This link was already opened or has expired. Ask in the chat for a new one.']);
+    const unknown = await tab.send('GET', `${href}x`, undefined, { headers: { accept: 'application/json' } });
+    expect([unknown.status, await unknown.json()]).toEqual([404, { error: 'link_used_or_expired' }]);
   });
 
   it('plugin_is_mock_mode_only', { timeout: 30_000 }, async () => {

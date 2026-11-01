@@ -40,6 +40,7 @@ import type {
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
+import { DOCUMENT_HREF, type DocumentLink } from './documents.ts';
 import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
@@ -275,6 +276,11 @@ export class MockWorld {
   keepsKnowledgeOwnerOnly: (item: KnowledgeItem) => boolean = () => false;
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /**
+   * The document links this copy's document cards handed out, by token (documents.ts). Every
+   * copy's invoice card hands out the fixtures' token, and handing it out again opens it again.
+   */
+  readonly documentLinks = new Map<string, DocumentLink>();
   /**
    * The Desks deleted from this copy, by id. Their chats, decisions and callback requests stay in
    * the copy, closed: the routes that name one answer 409 `closed` (served.ts), as the kernel does.
@@ -860,6 +866,11 @@ export class MockWorld {
     const handoff = blocks.some((block) => block.template === 'handoff');
     const messageId = this.id('msg');
     if (this.replaying === 0 && handoff && !session.ownerPreview) this.openCardHandoff(session);
+    // A document card hands out its link, which opens once from now on.
+    for (const block of blocks) {
+      const token = block.template === 'document_link' ? DOCUMENT_HREF.exec(block.href ?? '')?.[1] : undefined;
+      if (token !== undefined) this.documentLinks.set(token, { title: block.title ?? '', opened: false });
+    }
     const checked = this.appendLedger(this.deskOf(session), {
       kind: 'reply',
       origin: 'kernel',

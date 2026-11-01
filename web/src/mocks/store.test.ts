@@ -36,6 +36,7 @@ import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
+import type { DocumentAnswer } from './documents.ts';
 import {
   CALLBACK_WINDOW,
   DECISIONS,
@@ -1318,6 +1319,82 @@ describe('the scripted Desk', () => {
     expect(listed.filter((c) => c.owner_preview).map((c) => c.session_id).sort()).toEqual(
       [preview.state.session_id, again.state.session_id].sort(),
     );
+  });
+});
+
+describe("a verified visitor's document link", () => {
+  /** The headers the API sends with a document and with a refusal on its link, so it is never cached, sniffed, sent on or indexed. */
+  const PRIVATE = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow' };
+  const USED_OR_EXPIRED = 'This link was already opened or has expired. Ask in the chat for a new one.';
+
+  /** A document link's answer, which must be one with a status (not a dropped connection). */
+  function open(method: 'GET' | 'HEAD', token: string, headers: Record<string, string> = {}): DocumentAnswer {
+    const answer = mockStore.document(method, token, { headers });
+    if ('network' in answer) throw new Error(`${method} ${token} dropped the connection`);
+    return answer;
+  }
+
+  /** Dana confirms it's her and gets her last invoice: the token of the link its card hands out. */
+  async function invoiceToken(): Promise<string> {
+    const { events } = await openChat();
+    await send("I'm Dana Whitfield. Please send my last invoice.");
+    await drain();
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    const card = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks : [])).find((block) => block.template === 'document_link');
+    expect(card?.title).toBe(rivera.blocks.document_link.en.title);
+    const token = /^\/api\/d\/([A-Za-z0-9_-]+)$/.exec(card?.href ?? '')?.[1];
+    if (token === undefined) throw new Error('the invoice card links to its document');
+    return token;
+  }
+
+  it('the_first_open_gets_the_document', async () => {
+    // As the API sends the kernel's document: plain text, shown in the tab under its title's file name.
+    const opened = open('GET', await invoiceToken());
+    expect(opened).toEqual({
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'inline; filename="Invoice-drain-clearing.txt"', ...PRIVATE },
+      body: 'Rivera Plumbing\nInvoice for Dana Whitfield\nDrain clearing, kitchen sink: $180.00\nPaid in full. Thank you.',
+    });
+  });
+
+  it('a_second_open_is_404', async () => {
+    const token = await invoiceToken();
+    expect(open('GET', token).status).toBe(200);
+    // The API's short static copy, in the browser's language, or its error when JSON is asked for.
+    const refused = { 'content-type': 'text/plain; charset=utf-8', ...PRIVATE, vary: 'accept, accept-language' };
+    expect(open('GET', token)).toEqual({ status: 404, headers: { ...refused, 'content-language': 'en' }, body: USED_OR_EXPIRED });
+    expect(open('GET', token, { 'accept-language': 'es-MX,es;q=0.9,en;q=0.8' })).toEqual({
+      status: 404,
+      headers: { ...refused, 'content-language': 'es' },
+      body: 'Este enlace ya se abrió o caducó. Pide uno nuevo en el chat.',
+    });
+    expect(open('GET', token, { accept: 'application/json' })).toEqual({
+      status: 404,
+      headers: { 'content-type': 'application/json', ...PRIVATE, vary: 'accept, accept-language' },
+      body: '{"error":"link_used_or_expired"}',
+    });
+  });
+
+  it('an_unknown_link_is_404', async () => {
+    // Before any card hands it out, the invoice's link names nothing, as a made-up one doesn't.
+    for (const token of [rivera.blocks.document_link.en.href?.slice('/api/d/'.length) ?? '', 'nothing-here']) {
+      expect([open('GET', token).status, open('GET', token).body], token).toEqual([404, USED_OR_EXPIRED]);
+    }
+    expect(open('GET', 'nothing-here').status).toBe(404);
+    const token = await invoiceToken();
+    expect(open('GET', `${token}x`).status).toBe(404);
+    expect(open('GET', token).status).toBe(200);
+  });
+
+  it('a_look_before_opening_never_uses_the_link', async () => {
+    // A link checker's HEAD answers 200 with the document's privacy headers and no body, whatever
+    // the token names, and the link still opens once after it.
+    const token = await invoiceToken();
+    for (const named of [token, token, 'nothing-here']) expect(open('HEAD', named)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(200);
+    expect(open('HEAD', token)).toEqual({ status: 200, headers: PRIVATE, body: null });
+    expect(open('GET', token).status).toBe(404);
   });
 });
 

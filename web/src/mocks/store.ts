@@ -24,6 +24,7 @@
  */
 import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, apiPath, type RouteKey, type RouteParams } from '../api/routes.ts';
+import { lookAtDocument, openDocument, type DocumentAnswer, type DocumentLink } from './documents.ts';
 import { PAYMENT_TOKEN } from './script.ts';
 import type { MockSeed } from './seed.ts';
 import {
@@ -247,6 +248,15 @@ class CookieCopies {
 
   byLinkToken(token: string | undefined): Server | undefined {
     return token === undefined ? undefined : this.copies.find((server) => server.world.links.has(token));
+  }
+
+  /**
+   * The document link `token` names. Every copy's invoice card hands out the same token, so it is
+   * the one a copy handed out and nobody opened yet, if any.
+   */
+  documentLink(token: string): DocumentLink | undefined {
+    const links = this.copies.flatMap((server) => server.world.documentLinks.get(token) ?? []);
+    return links.find((link) => !link.opened) ?? links[0];
   }
 }
 
@@ -473,6 +483,18 @@ export class MockStore {
       return { status: injection.status, body: wire(injection.body === undefined ? faultBody(injection.status, key) : injection.body) };
     }
     return { status: served.status, body: wire(served.body), ...(setCookie.length > 0 ? { setCookie: [...setCookie] } : {}) };
+  }
+
+  /**
+   * A document card's link (`/api/d/{token}`, documents.ts), which the visitor's browser opens in a
+   * tab rather than the app calling it: a GET opens the document the copy's card handed out, once,
+   * and a HEAD only looks. A request from an earlier epoch is dropped.
+   */
+  document(method: 'GET' | 'HEAD', token: string, init: { headers?: HeadersInit; epoch?: number } = {}): DocumentAnswer | { network: true } {
+    if (!this.admits(init.epoch)) return { network: true };
+    if (method === 'HEAD') return lookAtDocument();
+    const link = this.one === null ? this.many.documentLink(token) : this.one.server.world.documentLinks.get(token);
+    return openDocument(link, new Headers(init.headers));
   }
 
   /** For tests: this browser's visitor cookie for `slug` is gone, as when its chat's session has ended. */
