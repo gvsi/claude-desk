@@ -150,6 +150,8 @@ async def test_every_other_number_stays_blocked(app, client, prose, span):
     ("Save 10&percnt; on it.", {"digit", "percent_sign"}),
     ("&#xbd; the deposit comes back.", {"digit"}),
     ("You get a fr<b></b>ee inspection.", {"lex.en.promise"}),        # a renderer may drop the tags
+    ("You get a fr~ee~ inspection.", {"lex.en.promise"}),              # GFM strikes single tildes through
+    ("You get a fr~~ee~~ inspection.", {"lex.en.promise"}),
     # what the raw text shows inside a tag the chats drop
     ("<span>$100</span> for the visit.", {"currency", "digit"}),
     ("<div>\n$100 for the visit\n</div>", {"currency", "digit"}),
@@ -160,6 +162,12 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     assert verdict.ok is False
     assert rule_ids <= {violation.rule_id for violation in verdict.violations}, verdict.violations
     assert [block.template for block in verdict.blocks] == ["handoff"]      # none of the prose is shown
+
+
+def test_struck_through_text_is_still_read_with_one_tilde_or_two():
+    """The chats' renderer (remark-gfm) strikes text through between one tilde or two; a reader still
+    reads it."""
+    assert markdown_text.read("fr~ee~ and ~~fr~~ee").visible == "free and free\n"
 
 
 def test_titles_and_alt_text_are_read_after_the_body_so_they_split_no_word():

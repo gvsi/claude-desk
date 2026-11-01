@@ -1,17 +1,18 @@
 """What a visitor sees of Claude's prose, which the chats render as Markdown (the owner's decision of
-2026-11-01: CommonMark with GFM tables and strikethrough, no raw HTML, links clickable by their text).
+2026-11-01: CommonMark with GFM tables and strikethrough by one tilde or two, no raw HTML, links
+clickable by their text).
 
-`read` parses the prose with markdown-it (CommonMark, tables and strikethrough, no linkify, raw HTML
-recognised) and returns what a reader sees of it: the text of every block, a newline after each,
-with entities and escapes decoded, emphasis joined to the letters around it, code as written, table
-cells, link text, and each ordered list item's number as its list renders it ("N. ", counted from
-its start), so formatting can hide no number or word from the reply check's scan; then link titles
-and images' alt text and titles, after the whole body, so none splits a word of it. Every link a
-reader can click, with its text and target, for the reply check to judge (the owner's decision of
-2026-11-01: every clickable link goes to the business's contact): inline, reference and autolink
-forms, with a target of any scheme, and, since the chats autolink as GFM does, each URL with a
-scheme or "www." (read as https) and each email address in the visible reading, code included
-(`literal_links`). And whether there is an image. Pure, with no I/O.
+`read` parses the prose with markdown-it (CommonMark, tables and strikethrough by one tilde or two,
+no linkify, raw HTML recognised) and returns what a reader sees of it: the text of every block, a
+newline after each, with entities and escapes decoded, emphasis joined to the letters around it,
+code as written, table cells, link text, and each ordered list item's number as its list renders
+it ("N. ", counted from its start), so formatting can hide no number or word from the reply check's
+scan; then link titles and images' alt text and titles, after the whole body, so none splits a
+word of it. Every link a reader can click, with its text and target, for the reply check to judge
+(the owner's decision of 2026-11-01: every clickable link goes to the business's contact): inline,
+reference and autolink forms, with a target of any scheme, and, since the chats autolink as GFM
+does, each URL with a scheme or "www." (read as https) and each email address in the visible
+reading, code included (`literal_links`). And whether there is an image. Pure, with no I/O.
 
 A numbered list of steps passes (the owner's decision of 2026-11-01): an ordered list that starts at
 1 and has at most nine items, as the parser reads it, shows only the numbers 1 to 9, so its numbers
@@ -71,7 +72,9 @@ class MarkdownText:
 
 def _parser() -> MarkdownIt:
     # Raw HTML is recognised so the visible reading can leave it out: its tokens add nothing to `visible`.
-    parser = MarkdownIt("commonmark", {"html": True, "maxNesting": MAX_NESTING}).enable(["table", "strikethrough"])
+    # Single tildes strike through as well as double ones, as the chats' renderer (remark-gfm) does.
+    parser = MarkdownIt("commonmark", {"html": True, "maxNesting": MAX_NESTING, "strikethrough_single_tilde": True})
+    parser.enable(["table", "strikethrough"])
     # markdown-it leaves "javascript:" and other unsafe targets unlinked, but the browser's parser links
     # them (then strips the target): every target is tokenized here, for the reply check to judge.
     parser.validateLink = lambda url: True
