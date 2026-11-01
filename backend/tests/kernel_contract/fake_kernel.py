@@ -4006,7 +4006,7 @@ class FakeKernelState:
         from desk.kernel_service.adapters import profile_sha256
         from desk.kernel_service.adapters.blocks import profile as block_profile
         from desk.kernel_service.business_tools import (config_texts, free_allow_words, public_fields,
-                                                        payment_title_refused_fields, public_promise_fields,
+                                                        payment_title_refused_fields, public_refusal_detail,
                                                         unindexed_detail)
         from desk.kernel_service.repo import storable
 
@@ -4030,9 +4030,10 @@ class FakeKernelState:
             refuse("business_tools_canary")
         detail = {}
         for tool in batch.tools:
-            if fields := (public_promise_fields(public_fields(tool), allow_words=free_allow_words(tool))
-                          or payment_title_refused_fields(tool)):
-                detail.update(unindexed_detail({field: ["public_promise"] for field in fields}))
+            errors = public_refusal_detail(public_fields(tool), allow_words=free_allow_words(tool))
+            if not errors:
+                errors = {field: ["public_promise"] for field in payment_title_refused_fields(tool)}
+            detail.update(unindexed_detail(errors))
         if detail:
             refuse("public_promise", detail=detail)
         # Build the entire batch before changing any row.

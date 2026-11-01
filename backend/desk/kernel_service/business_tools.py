@@ -125,12 +125,23 @@ def public_promise_fields(values: Mapping[str, str], *,
     return [] if all(permitted(hit) for hit in hits) else list(values)
 
 
+def public_refusal_detail(values: Mapping[str, str], *,
+                          allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
+    """Classify hidden characters before normalization; keep the real and fake refusals identical."""
+    from desk.kernel_service import reply_check
+
+    if any(reply_check._unseen(ch) for value in values.values() for ch in value):
+        return {field: ["format_control"] for field in values}
+    return {field: ["public_promise"]
+            for field in public_promise_fields(values, allow_words=allow_words)}
+
+
 async def refuse_public_promises(ctx, part, values, desk_id=None, *,
                                 allow_words: Mapping[str, frozenset[str]] = {}) -> None:
     # TODO B7: replace this shim with desks.refuse_public_promises and its shared scanner.
-    if fields := public_promise_fields(values, allow_words=allow_words):
+    if detail := public_refusal_detail(values, allow_words=allow_words):
         failure = _invalid(ctx, desk_id, "public_promise")
-        failure.detail = {field: ["public_promise"] for field in fields}
+        failure.detail = detail
         raise failure
 
 

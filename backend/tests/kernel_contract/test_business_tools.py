@@ -49,11 +49,14 @@ async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read
 
 
 @pytest.mark.kernel_plan('01c')
-@pytest.mark.parametrize('title,config,fields', [
-    ('Pay no', {'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000}, ['title', 'purpose']),
-    ('Intake \u202edeetnaraug\u202c', {'block': 'intake', 'questions': ['What?']}, ['title']),
+@pytest.mark.parametrize('title,config,fields,rule', [
+    ('Pay no', {'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000},
+     ['title', 'purpose'], 'public_promise'),
+    ('Intake \u202edeetnaraug\u202c', {'block': 'intake', 'questions': ['What?']}, ['title'], 'format_control'),
+    ('guaran\u200bteed', {'block': 'intake', 'questions': ['What?']}, ['title'], 'format_control'),
 ])
-async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receipt(kernel, ro_read, title, config, fields):
+async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receipt(
+        kernel, ro_read, title, config, fields, rule):
     from desk.api.kernel_client import KernelFailed
 
     http, schema, _ = kernel
@@ -64,7 +67,7 @@ async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receip
         await http.owner(copy.owner_token).call('PUT /desks/{id}/business_tools',
             BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
     assert (refused_call.value.status, refused_call.value.code) == (422, 'invalid')
-    assert refused_call.value.detail == {f'{tool.tool}.{field}': ['public_promise'] for field in fields}
+    assert refused_call.value.detail == {f'{tool.tool}.{field}': [rule] for field in fields}
     assert ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ()) == []
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
     blocked = await decide(http.session(visitor.session_token), visitor.state.session_id, visitor.state.generation,
@@ -74,7 +77,13 @@ async def test_public_refusal_details_use_stable_fields_and_never_reach_a_receip
 
 
 @pytest.mark.kernel_plan("01c")
-async def test_batch_refusal_names_every_unsafe_tool_without_changing_stored_rows(kernel, ro_read):
+@pytest.mark.parametrize('first_title,second_title,first_rule,second_rule', [
+    ('Tomorrow intake', 'Guaranteed service', 'public_promise', 'public_promise'),
+    ('Intake \u202edeetnaraug\u202c', 'Guaranteed service', 'format_control', 'public_promise'),
+    ('Tomorrow intake', 'guaran\u200bteed', 'public_promise', 'format_control'),
+])
+async def test_batch_refusal_names_every_unsafe_tool_without_changing_stored_rows(
+        kernel, ro_read, first_title, second_title, first_rule, second_rule):
     from desk.api.kernel_client import KernelFailed
 
     http, schema, _ = kernel
@@ -90,13 +99,12 @@ async def test_batch_refusal_names_every_unsafe_tool_without_changing_stored_row
 
     before = rows()
     tools = [stored.model_copy(update={'tool': 'desk.safe'}),
-             stored.model_copy(update={'tool': 'desk.first', 'title': 'Tomorrow intake'}),
-             stored.model_copy(update={'tool': 'desk.second', 'title': 'Guaranteed service'})]
+             stored.model_copy(update={'tool': 'desk.first', 'title': first_title}),
+             stored.model_copy(update={'tool': 'desk.second', 'title': second_title})]
     with pytest.raises(KernelFailed) as refused_call:
         await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=tools), path={'id': desk_id})
     assert (refused_call.value.status, refused_call.value.code) == (422, 'invalid')
-    assert refused_call.value.detail == {'desk.first.title': ['public_promise'],
-                                         'desk.second.title': ['public_promise']}
+    assert refused_call.value.detail == {'desk.first.title': [first_rule], 'desk.second.title': [second_rule]}
     assert rows() == before
     ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
     events = [entry.event for entry in ledger.entries if entry.event.kind == 'business_tools']
@@ -157,7 +165,9 @@ async def test_readded_business_tool_returns_for_review_as_new(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01c")
-async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, ro_read):
+async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, ro_read, arrange):
+    from desk.api.kernel_client import KernelFailed
+
     http, schema, _ = kernel
     copy = await new_copy(http)
     desk_id = copy.desk_ids[0]
@@ -166,11 +176,18 @@ async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, 
                         config={"block": "intake", "questions": ["What do you need?"]})
     valid = BusinessToolsRequest(tools=[tool])
     await owner.call("PUT /desks/{id}/business_tools", valid, path={"id": desk_id})
-    for invalid in (BusinessToolsRequest(tools=[tool, tool]),
-                    BusinessToolsRequest.model_construct(tools=[tool.model_copy(update={"tool": f"desk.enquiry-{i}"})
-                                                                 for i in range(9)]),
-                    BusinessToolsRequest(tools=[tool.model_copy(update={"title": "Guaranteed help"})])):
-        assert await refused(owner.call("PUT /desks/{id}/business_tools", invalid, path={"id": desk_id})) == (422, "invalid")
+    for invalid, detail in (
+            (BusinessToolsRequest(tools=[tool, tool]), None),
+            (BusinessToolsRequest.model_construct(tools=[tool.model_copy(update={"tool": f"desk.enquiry-{i}"})
+                                                         for i in range(9)]), None),
+            (BusinessToolsRequest(tools=[tool.model_copy(update={
+                "title": "Guaranteed help", "description": arrange.canary(copy.copy_id)})]), None),
+            (BusinessToolsRequest(tools=[tool.model_copy(update={"title": "Guaranteed help"})]),
+             {f'{tool.tool}.title': ['public_promise']})):
+        with pytest.raises(KernelFailed) as refused_call:
+            await owner.call("PUT /desks/{id}/business_tools", invalid, path={"id": desk_id})
+        assert (refused_call.value.status, refused_call.value.code) == (422, "invalid")
+        assert refused_call.value.detail == detail
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
     assert await refused(http.session(visitor.session_token).call(
         "PUT /desks/{id}/business_tools", valid, path={"id": desk_id})) == (401, "auth")
