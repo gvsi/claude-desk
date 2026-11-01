@@ -173,7 +173,8 @@ async def test_title_or_amount_without_accept_is_422(proposals, engine, change):
     assert await stored(engine, state["interview_id"]) == before
 
 
-async def test_a_purpose_payment_needs_an_amount_to_accept(proposals, engine):
+@pytest.mark.parametrize("amount", [1, 25_000])
+async def test_a_purpose_payment_needs_an_amount_to_accept(proposals, engine, amount):
     owner, state, ids = proposals
     await show_card(engine, state["interview_id"], ids[1])
     path = f"/api/owner/setup/{state['interview_id']}/proposals/{ids[1]}?cards=1"
@@ -184,10 +185,56 @@ async def test_a_purpose_payment_needs_an_amount_to_accept(proposals, engine):
     reply = await owner.browser.post(path, json={"accept": True})
     assert reply.status_code == 422 and reply.json()["error"] == "amount_required", reply.text
     assert await stored(engine, state["interview_id"]) == before
-    reply = await owner.browser.post(path, json={"accept": True, "amount_cents": 25_000})
-    assert shown(reply)[1]["job"]["config"]["amount_cents"] == 25_000
+    reply = await owner.browser.post(path, json={"accept": True, "amount_cents": amount})
+    assert shown(reply)[1]["job"]["config"]["amount_cents"] == amount
     assert (await owner.browser.post(path, json={"accept": False})).status_code == 409
     assert (await stored(engine, state["interview_id"]))["answers"]["auto_money_cap_cents"] == 0
+
+
+@pytest.mark.parametrize("source", ["request", "stored", "typed"])
+async def test_a_zero_payment_amount_cannot_be_accepted(proposals, model, engine, source):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[1])
+    if source != "request":
+        saved = await stored(engine, interview_id)
+        saved["transcript"][-1]["card"]["job"]["config"]["amount_cents"] = 0
+        async with engine.begin() as conn:
+            await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                                   " WHERE interview_id = :id"),
+                               {"transcript": json.dumps(saved["transcript"]), "id": interview_id})
+    before = await stored(engine, interview_id)
+    path = f"/api/owner/setup/{interview_id}"
+    if source == "typed":
+        model.add(card_answer("accept", next=next_ask("hours_and_area")))
+        reply = await owner.browser.post(path + "/answer?cards=1", json={"card": ids[1], "text": "Yes"})
+        assert reply.status_code == 200 and reply.json()["pending_card"] == ids[1], reply.text
+        assert next(card for card in shown(reply) if card["proposal_id"] == ids[1])["state"] == "proposed"
+    else:
+        body = {"accept": True, **({"amount_cents": 0} if source == "request" else {})}
+        reply = await owner.browser.post(path + f"/proposals/{ids[1]}", json=body)
+        assert reply.status_code == 422 and reply.json()["error"] == "amount_required", reply.text
+        assert await stored(engine, interview_id) == before
+
+
+@pytest.mark.parametrize("state", ["unshown", "pending", "accepted"])
+def test_finish_declines_zero_payment_amounts(state):
+    entries = setup.proposal_entries([job("payment", title="Deposit", config={
+        "block": "purpose_payment", "purpose": "Deposit", "amount_cents": None})], [],
+        business_tools_enabled=True)
+    card = entries[0].card
+    card.job.config.amount_cents = 0  # A stored owner amount; the block schema still permits zero.
+    interview = plan_state(entries)
+    if state == "unshown":
+        interview.transcript = interview.transcript[:1]
+    elif state == "accepted":
+        card.state = "accepted"
+        interview.transcript[-1].owner_decided = True
+    setup.settle_plan(interview)
+    setup.finish(interview)
+    assert [card.state for card in interview.planned] == ["declined"]
+    assert setup.accepted_jobs(interview) == [] and setup.owner_job_answers(interview) == []
+    assert interview.answers.how_we_help is None
 
 
 async def test_status_and_documents_are_never_available_today(proposals, engine):

@@ -1187,7 +1187,8 @@ def _check_decision(interview: Interview, proposal_id: str, decision: SetupPropo
     config = card.job.config if card.job is not None and configs else None
     if (decision.accept and card.job is not None and card.job.job == "payment"
             and (not isinstance(config, PurposePaymentConfig)
-                 or (decision.amount_cents is None and config.amount_cents is None))):
+                 or (decision.amount_cents if decision.amount_cents is not None
+                     else config.amount_cents or 0) < 1)):
         raise ApiProblem(422, "amount_required")
     if decision.amount_cents is not None and not isinstance(config, PurposePaymentConfig):
         raise ApiProblem(422, "invalid")
@@ -2029,7 +2030,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
 
 def _unpriced_payment(job: JobProposal | None) -> bool:
     return (job is not None and job.job == "payment"
-            and (not isinstance(job.config, PurposePaymentConfig) or job.config.amount_cents is None))
+            and (not isinstance(job.config, PurposePaymentConfig) or (job.config.amount_cents or 0) < 1))
 
 
 def settle_plan(interview: Interview) -> None:
