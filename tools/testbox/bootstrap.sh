@@ -3,15 +3,20 @@
 set -euo pipefail
 exec > >(tee -a /var/log/desk-testbox-bootstrap.log) 2>&1
 trap 'echo "testbox bootstrap failed at line $LINENO"' ERR
-exec 9>/run/desk-testbox-bootstrap.lock
-flock 9
+# Direct runs and provisioning both drain shared run leases before mutation.
+rm -f /opt/testbox/ready
+if [ "${TESTBOX_BOOTSTRAP_LOCKED:-0}" != 1 ]; then
+  exec 9>/opt/testbox/bootstrap.lock
+  flock -x 9
+fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y build-essential pkg-config libssl-dev curl unzip git rsync openssh-server postgresql-16 postgresql-client-16 python3 acl iproute2 iptables socat fonts-liberation
 install -d -o ubuntu -g ubuntu /srv/testbox /srv/testbox/lanes /srv/testbox/cache
 install -d -o root -g root /opt/testbox
 # This server holds only disposable test data. Never apply these settings elsewhere.
-cat > /etc/postgresql/16/main/conf.d/testbox.conf <<'PG'
+pg_changed=0
+cat > /tmp/desk-testbox-postgres.conf <<'PG'
 listen_addresses = '127.0.0.1,10.200.0.1'
 fsync = off
 synchronous_commit = off
@@ -19,6 +24,10 @@ full_page_writes = off
 max_connections = 1000
 shared_buffers = '8GB'
 PG
+if ! cmp -s /tmp/desk-testbox-postgres.conf /etc/postgresql/16/main/conf.d/testbox.conf; then
+  install -m 644 /tmp/desk-testbox-postgres.conf /etc/postgresql/16/main/conf.d/testbox.conf
+  pg_changed=1
+fi
 # A bridge provides internet egress while each lane keeps its own loopback and fixed test ports.
 cat > /opt/testbox/network.sh <<'NET'
 #!/usr/bin/env bash
@@ -61,9 +70,14 @@ HOSTS
 systemctl daemon-reload
 systemctl enable --now desk-testbox-network
 if ! grep -q '10.200.0.0/16' /etc/postgresql/16/main/pg_hba.conf; then
+  pg_changed=1
   echo 'host all all 10.200.0.0/16 scram-sha-256' >> /etc/postgresql/16/main/pg_hba.conf
 fi
-systemctl restart postgresql
+if [ "$pg_changed" = 1 ]; then
+  systemctl restart postgresql
+else
+  systemctl start postgresql
+fi
 runuser -u postgres -- psql -v ON_ERROR_STOP=1 <<'SQL'
 SELECT 'CREATE ROLE desk_admin LOGIN SUPERUSER PASSWORD ''change-me-admin'''
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'desk_admin') \gexec

@@ -319,7 +319,7 @@ def run(args, root, lane, cache):
     # stop is idempotent even if cancellation happens before the service was created.
     cancel = ["sudo", "sh", "-c", f"systemctl stop {unit}.service 2>/dev/null || ! systemctl is-active --quiet {unit}.service"]
     transaction = transaction_script(base, ["sudo", "env", f"TESTBOX_PROTOCOL={PROTOCOL_VERSION}", "/opt/testbox/lane-exec.py", lane, call_id, "python3", f"{base}/transfer/tools/testbox/worker.py", base], cancel)
-    prepare = f"test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c "
+    prepare = f"test -f /opt/testbox/ready || exit 75; exec 8</opt/testbox/bootstrap.lock; flock -s 8; test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c "
     holder = subprocess.Popen(ssh + [prepare + shlex.quote(transaction)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, start_new_session=True)
     try:
         line = holder.stdout.readline()

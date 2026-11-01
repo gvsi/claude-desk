@@ -61,10 +61,12 @@ def main():
         assets["cvc5.sha256"] = (HERE.parent / "cvc5.sha256").read_bytes()
         version = hashlib.sha256(b"".join(assets.values())).hexdigest()
         payload += f"if test -f /opt/testbox/ready && test \"$(cat /opt/testbox/bootstrap-version 2>/dev/null)\" = {version}; then exit 0; fi\n"
+        # Stop admitting new runs, drain existing shared leases, then replace assets.
+        payload += "rm -f /opt/testbox/ready\nexec 9>/opt/testbox/bootstrap.lock\nflock -x 9\n"
         for name, data in assets.items():
             encoded = base64.b64encode(data).decode()
             payload += f"echo '{encoded}' | base64 -d > /opt/testbox/{name}\n"
-        payload += "bash /opt/testbox/bootstrap.sh\n"
+        payload += "TESTBOX_BOOTSTRAP_LOCKED=1 bash /opt/testbox/bootstrap.sh\n"
         payload += f"echo '{version}' > /opt/testbox/bootstrap-version\n"
         deadline = time.monotonic() + 1800
         command = None
@@ -185,10 +187,8 @@ def main():
         subnets = [s for s in subnets if s["AvailabilityZone"] in zones and s["MapPublicIpOnLaunch"]]
         if not subnets:
             raise RuntimeError("No public default subnet offers c8g.24xlarge; SSM needs internet egress")
-        checksum = base64.b64encode((HERE.parent / "cvc5.sha256").read_bytes()).decode()
-        launcher = base64.b64encode((HERE / "lane-exec.py").read_bytes()).decode()
-        bootstrap = base64.b64encode((HERE / "bootstrap.sh").read_bytes()).decode()
-        user_data = f"#!/bin/bash\nset -eu\nmkdir -p /opt/testbox\necho '{checksum}' | base64 -d > /opt/testbox/cvc5.sha256\necho '{bootstrap}' | base64 -d > /opt/testbox/bootstrap.sh\necho '{launcher}' | base64 -d > /opt/testbox/lane-exec.py\nbash /opt/testbox/bootstrap.sh\n"
+        # SSM owns the single bootstrap/version path after cloud-init completes.
+        user_data = "#!/bin/bash\nset -eu\ninstall -d -o root -g root /opt/testbox\n"
         # Only retry capacity errors across AZs. ClientToken prevents duplicate launches on retry.
         for subnet in subnets:
             try:
@@ -209,7 +209,7 @@ def main():
         if not instance:
             raise RuntimeError("No capacity in default VPC availability zones")
         print(f"Created test box: {instance} ({args.region}), security group {group}, role/profile {role}")
-        print("Bootstrap runs in cloud-init. Log: /var/log/desk-testbox-bootstrap.log", flush=True)
+        print("Bootstrap runs through SSM after cloud-init. Log: /var/log/desk-testbox-bootstrap.log", flush=True)
         bootstrap_and_wait(instance)
     except BaseException:
         # Roll back only resources this invocation created; pre-existing resources are preserved.

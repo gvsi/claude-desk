@@ -148,3 +148,44 @@ def test_rollback_continues_deleting_resources_after_association_cleanup_failure
         invoke(monkeypatch, fail_cleanup)
     assert 'delete-instance-profile' in fixture.calls
     assert 'delete-role' in fixture.calls
+
+
+def test_fresh_instance_bootstraps_once_with_small_user_data(monkeypatch):
+    fixture = AWS(fresh=True)
+    requests = {}
+    def record(command, **kwargs):
+        if command[4] == 'run-instances':
+            requests['user_data'] = command[command.index('--user-data') + 1]
+        if command[4] == 'send-command':
+            requests['payload'] = json.loads(command[command.index('--parameters') + 1])['commands'][0]
+        return fixture(command, **kwargs)
+    invoke(monkeypatch, record)
+    assert len(requests['user_data'].encode()) < 1024
+    assert 'bash /opt/testbox/bootstrap.sh' not in requests['user_data']
+    payload = requests['payload']
+    assert payload.index('rm -f /opt/testbox/ready') < payload.index('flock -x 9')
+    assert payload.index('flock -x 9') < payload.index('base64 -d')
+    assert 'bootstrap-version' in payload
+
+
+def test_rebootstrap_restarts_postgres_only_when_configuration_changes(tmp_path):
+    import os
+    import subprocess
+    script = (Path(__file__).parents[1] / 'testbox/bootstrap.sh').read_text()
+    config = script[script.index('pg_changed=0'):script.index('# A bridge')]
+    restart = script[script.index("if ! grep -q '10.200.0.0/16'"):script.index('runuser -u postgres')]
+    pg = tmp_path / 'postgres'
+    (pg / 'conf.d').mkdir(parents=True)
+    (pg / 'pg_hba.conf').write_text('')
+    log = tmp_path / 'services'
+    (tmp_path / 'bin').mkdir()
+    service = tmp_path / 'bin/systemctl'
+    service.write_text('#!/bin/sh\necho "$*" >> ' + str(log) + '\n')
+    service.chmod(0o755)
+    commands = (config + restart).replace('/etc/postgresql/16/main', str(pg)).replace('/tmp/desk-testbox-postgres.conf', str(tmp_path / 'desired.conf'))
+    env = {**os.environ, 'PATH': str(tmp_path / 'bin') + ':' + os.environ['PATH']}
+    for _ in range(2):
+        subprocess.run(['bash', '-e', '-c', commands], check=True, env=env)
+    (pg / 'conf.d/testbox.conf').write_text('old configuration')
+    subprocess.run(['bash', '-e', '-c', commands], check=True, env=env)
+    assert log.read_text().splitlines() == ['restart postgresql', 'start postgresql', 'restart postgresql']
