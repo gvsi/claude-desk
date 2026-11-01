@@ -11,6 +11,26 @@ import { cardChrome } from '../ds/components/ReplyCard/chrome.ts';
 
 beforeEach(() => mockStore.reset('rivera'));
 
+it('validates price deletion query bounds before reading the interview', async () => {
+  const params = await atRules();
+  const before = await mockStore.dispatch('setupPublicLines', { params });
+  const queries = [
+    { title: '', unit_cents: '25000' },
+    { title: '   ', unit_cents: '25000' },
+    { title: 'a'.repeat(81), unit_cents: '25000' },
+    { title: 'Tax return review', unit_cents: '-1' },
+    { title: 'Tax return review', unit_cents: '2000000' },
+  ];
+  for (const query of queries) {
+    for (const id of [params.id, 'missing']) {
+      expect(await mockStore.dispatch('removePublicPrice', { params: { id, item_id: 'tax-return-review' }, query })).toMatchObject({ status: 422, body: { error: 'invalid' } });
+    }
+    expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(before);
+  }
+  expect(await mockStore.dispatch('removePublicPrice', { params: { ...params, item_id: 'tax-return-review' }, query: { title: 'a'.repeat(80), unit_cents: '1000000' } })).toMatchObject({ status: 409, body: { error: 'conflict' } });
+  expect(await mockStore.dispatch('setupPublicLines', { params })).toEqual(before);
+});
+
 it('checks price deletion query and current item before rejecting owner prices', async () => {
   const params = await atRules();
   expect(await confirmShown(params)).toMatchObject({ status: 200 });

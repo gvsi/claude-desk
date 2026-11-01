@@ -106,13 +106,14 @@ function read(sv: Server, req: Req): SetupPublicLines | Failure {
 
 export const PUBLIC_LINES_ROUTES = {
   removePublicPrice(sv, req) {
-    const found = read(sv, req);
-    if ('status' in found) return found;
     const title = req.query.get('title');
     const amount = req.query.get('unit_cents');
-    if (title === null || amount === null || !amount.trim() || !Number.isSafeInteger(Number(amount))) {
+    if (title === null || !title.trim() || Array.from(title).length > 80
+      || amount === null || !amount.trim() || !Number.isSafeInteger(Number(amount)) || Number(amount) < 0 || Number(amount) > 1_000_000) {
       return { status: 422, body: { error: 'invalid' } };
     }
+    const found = read(sv, req);
+    if ('status' in found) return found;
     const index = found.prices?.items.findIndex((item) => item.item_id === req.params.item_id) ?? -1;
     if (!found.prices || index === -1) return { status: 409, body: { error: 'conflict' } };
     const item = found.prices.items[index]!;
