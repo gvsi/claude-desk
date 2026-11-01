@@ -149,8 +149,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     if (pending.kind === 'done') {
       if (needsYouSection.current !== null && callbacks.some((item) => item.handoff.handoff_id === pending.handoffId)) {
         // Wait for the committed list to lose this card. A settled read that keeps it (including
-        // a failed read) spends the request, so a later poll cannot move focus unexpectedly.
-        if (readAt > pending.readAt || needsYou.errorUpdatedAt > pending.failedAt) pendingFocus.current = null;
+        // a failed or paused read) spends the request, so a later poll cannot move focus unexpectedly.
+        if (readAt > pending.readAt || needsYou.errorUpdatedAt > pending.failedAt || needsYou.isPaused) pendingFocus.current = null;
         return;
       }
       pendingFocus.current = null;

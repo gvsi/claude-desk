@@ -3,7 +3,7 @@
  * place, callbacks to join), who is live now, what happened since last night with its full list,
  * and the last 7 days, every figure as the API reads it.
  */
-import { QueryClient } from '@tanstack/react-query';
+import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { useLayoutEffect } from 'react';
 import { useLocation } from 'react-router';
@@ -12,7 +12,7 @@ import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
-import { newIdempotencyKey, observeRequests } from '../../api/http.ts';
+import { newIdempotencyKey, observeRequests, OWNER_ERROR_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, RefusalCause, SetupState, ThisWeek, Today } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
@@ -1839,6 +1839,35 @@ describe('Today', () => {
     (done.element() as HTMLElement).blur();
     expect(document.activeElement).toBe(document.body);
     (needs.getByRole('button', { name: 'Try again' }).element() as HTMLElement).click();
+    await expect.element(needs).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('marking_a_callback_done_clears_pending_focus_when_the_reread_pauses_offline', async () => {
+    mockStore.world.decisions.clear();
+    openCallback();
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const needs = region(screen, 'Needs you');
+    const done = needs.getByRole('button', { name: 'Mark done' });
+    await expect.element(done).toBeVisible();
+    onTestFinished(() => onlineManager.setOnline(true));
+    worker.use(
+      http.post(ROUTES.handoffDone.path.replace('{handoff_id}', ':handoff_id'), () => {
+        // The close succeeds, but its refreshed reads cannot start until reconnection.
+        onlineManager.setOnline(false);
+        return undefined;
+      }),
+    );
+    (done.element() as HTMLElement).focus({ preventScroll: true });
+    await userEvent.keyboard('{Enter}');
+    await expect.element(needs.getByRole('alert').getByText(OWNER_ERROR_COPY.network, { exact: true })).toBeVisible();
+    await expect.element(done).not.toHaveAttribute('aria-busy');
+    expect(document.activeElement).toBe(done.element());
+
+    // Reconnection removes the stale card, after the paused read has spent its focus request.
+    (done.element() as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    onlineManager.setOnline(true);
     await expect.element(needs).not.toBeInTheDocument();
     expect(document.activeElement).toBe(document.body);
   });
