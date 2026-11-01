@@ -116,3 +116,8 @@ def test_db_throwaway_turns_off_durable_commits_in_ci(tmp_path: Path):
     for setting in ("fsync", "synchronous_commit", "full_page_writes"):
         assert f"ALTER SYSTEM SET {setting} = off" in args
     assert "SELECT pg_reload_conf()" in args
+
+
+def test_waiver_review_target_is_local_and_names_its_pass(tmp_path):
+    command = planned("evals-waiver-review", tmp_path, "PASS=fixture-pass")
+    assert "python -m evals.run waiver-review --pass fixture-pass" in command
