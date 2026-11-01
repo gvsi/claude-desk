@@ -1311,9 +1311,10 @@ describe('setup', () => {
       const finish = holdNextConsent(mockStore.world, state.interview_id);
       const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
       await screen.getByRole('button', { name: 'Yes, use it' }).click();
-      const writing = screen.getByText('Claude is writing', { exact: true });
+      const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
       const wait = screen.getByText(words, { exact: true });
       await expect.element(writing).toBeVisible();
+      expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
       await expect.element(wait).toBeVisible();
       await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
       await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).not.toBeInTheDocument();
@@ -1337,6 +1338,7 @@ describe('setup', () => {
       await screen.getByRole('textbox', { name: 'Your answer' }).fill('We repair leaks.');
       await screen.getByRole('button', { name: 'Send' }).click();
       await expect.element(writing).toBeVisible();
+      expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
       await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
       await expect.element(wait).not.toBeInTheDocument();
       release();
@@ -1349,7 +1351,9 @@ describe('setup', () => {
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
-    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
+    await expect.element(writing).toBeVisible();
+    expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
     const box = screen.getByRole('textbox', { name: 'Your answer' });
@@ -1364,7 +1368,7 @@ describe('setup', () => {
     await expect.element(box).toBeEnabled();
     await expect.element(box).toHaveFocus();
     expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
-    await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
+    await expect.element(writing).not.toBeInTheDocument();
   });
 
   it('failed_async_consent_restores_the_buttons_with_a_notice_and_can_be_answered_again', async () => {
@@ -1372,7 +1376,9 @@ describe('setup', () => {
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
-    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
+    await expect.element(writing).toBeVisible();
+    expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     expectNoHorizontalScroll();
     finish('failed');
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
@@ -1427,7 +1433,9 @@ describe('setup', () => {
     // Another request got there first while this page still shows the consent buttons.
     await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
-    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
+    await expect.element(writing).toBeVisible();
+    expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
     finish('landed');
@@ -1445,7 +1453,9 @@ describe('setup', () => {
     const mark = mockStore.requests.length;
     mockStore.inject({ route: 'setupConsent', status: 503, afterCommit: true });
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
-    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
+    await expect.element(writing).toBeVisible();
+    expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     expect(requests('setup', mark)).toHaveLength(1);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
@@ -1460,7 +1470,9 @@ describe('setup', () => {
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { strict: true });
-    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
+    await expect.element(writing).toBeVisible();
+    expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     const exit = screen.getByRole('link', { name: 'Save and exit' });
     (exit.element() as HTMLElement).focus();
     const mark = requests('setup').length;
@@ -1478,8 +1490,9 @@ describe('setup', () => {
     const firstVisit = holdFirstVisit();
     onTestFinished(firstVisit.draw);
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { routes: firstVisit.routes, strict: true });
-    const writing = screen.getByText('Claude is writing', { exact: true });
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
+    expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
     const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
@@ -1537,8 +1550,9 @@ describe('setup', () => {
     onTestFinished(firstVisit.draw);
     const path = `/app/setup/${state.interview_id}`;
     const { screen, router } = await renderRoute(path, { routes: firstVisit.routes, strict: true });
-    const writing = screen.getByText('Claude is writing', { exact: true });
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
+    expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     const before = writing.element();
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
@@ -1560,7 +1574,9 @@ describe('setup', () => {
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
+    await expect.element(writing).toBeVisible();
+    expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
     const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
