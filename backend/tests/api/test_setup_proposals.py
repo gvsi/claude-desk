@@ -81,6 +81,27 @@ def test_owner_supports_bare_domains_as_contact_parts(contact, owner_text, suppo
     assert setup.owner_supports("public_contact", contact, owner_text) is supported
 
 
+@pytest.mark.parametrize("contact,owner_text,supported", [
+    # Phones match on their last 10 digits; a shorter number needs all of its digits.
+    ("+1 415-555-0118", "(415) 555-0118", True),
+    ("(415) 555-0118", "+1 415 555 0118", True),
+    ("+1 415-555-0118", "Call 415-555-0119", False),
+    ("+1 510-555-0118", "(415) 555-0118", False),
+    ("555-0118", "Call 555-0118", True),
+    ("555-0118", "Call 555-0119", False),
+    ("+1 415-555-0118", "Call 555-0118", False),
+    ("415-555-0118", "Call 415–555–0118", True),
+    # Each phone is compared with one number the owner typed, never digits joined across numbers.
+    ("510-555-0118", "A repair is $510. Call 555-0118.", False),
+    # A label word around a part doesn't matter, nor a scheme the owner left out.
+    ("Website: bobs.com", "bobs.com", True),
+    ("https://bobs.com", "bobs.com", True),
+    ("Call or text +1 415-555-0118, or Website: bobs.com", "Call (415) 555-0118 or see bobs.com", True),
+])
+def test_owner_supports_honest_contact_forms(contact, owner_text, supported):
+    assert setup.owner_supports("public_contact", contact, owner_text) is supported
+
+
 def proposal_entries(jobs, connectors, *, business_tools_enabled: bool = False) -> list[setup.Entry]:
     """Build stored cards, including legacy payment states, for decision and settlement tests."""
     cards = []

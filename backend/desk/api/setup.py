@@ -1589,7 +1589,7 @@ def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> l
 _CONTACT_ADDRESS = re.compile(r"(?:https?://|www\.)[^\s<>\"']+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _CONTACT_DOMAIN = re.compile(r"(?<![\w@.-])(?:[^\W_](?:[\w-]*[^\W_])?\.)+[^\W\d_]{2,63}(?![\w-]|\.[^\W_])"
                              r"(?:/[^\s<>\"']*)?")
-_CONTACT_PHONE = re.compile(r"(?<!\w)\+?\d[\d\s().-]*\d(?!\w)")
+_CONTACT_PHONE = re.compile(r"(?<!\w)\+?\d[\d\s().\-\u2010-\u2015\u2212]*\d(?!\w)")
 
 
 def _contact_parts(text: str) -> tuple[set[str], list[str]]:
@@ -1611,8 +1611,8 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                    value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str, *,
                    stated_prices: bool = False) -> bool:
     """Whether the owner's typed text contains every structured value, independent of model or read text. A contact
-    needs every part in it (`_contact_parts`): each address whole, each phone by its digits; a contact with no part
-    needs its whole text. With `stated_prices`, an amount counts only when written as a price ("$150")."""
+    needs every part in it (`_contact_parts`): each address whole, and each phone's last 10 digits (all of them when
+    it has fewer) in one number the owner typed; a contact with no part needs its whole text. With `stated_prices`, an amount counts only when written as a price ("$150")."""
     if not value:
         return True
     folded = owner_text.casefold()
@@ -1620,9 +1620,9 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
         contact = cast(str, value).casefold()
         addresses, phones = _contact_parts(contact)
         if addresses or phones:
-            owner_addresses, _ = _contact_parts(owner_text)
+            owner_addresses, owner_phones = _contact_parts(owner_text)
             return addresses <= owner_addresses and all(
-                digits in re.sub(r"\D", "", owner_text) for digits in phones)
+                any(digits[-10:] in typed for typed in owner_phones) for digits in phones)
         return contact in folded
     if field == "price_items":
         sign = r"\$\s?" if stated_prices else r"\$?"
