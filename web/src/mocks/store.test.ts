@@ -1118,8 +1118,9 @@ describe('the scripted Desk', () => {
   });
 
   it('open_handoff_quotes_its_visitors_latest_words', async () => {
-    // As the API reads Needs you (`last_texts`): an open handoff quotes what its visitor wrote last,
-    // on every read, not what they had written when it opened.
+    // As the API reads Needs you (`recent_texts`): an open handoff quotes what its visitor wrote
+    // most recently, their previous and last messages joined with " · ", on every read, not what
+    // they had written when it opened.
     const { session } = await openChat();
     const quoted = async () =>
       ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
@@ -1130,7 +1131,55 @@ describe('the scripted Desk', () => {
     expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
     await send('It is about the leak under my sink.');
     await drain();
-    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink.']]);
+    expect(await quoted()).toEqual([['card', 'Can I talk to Maria? · It is about the leak under my sink.']]);
+    await send('Is   Tuesday\n\nfine?');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink. · Is Tuesday fine?']]);
+  });
+
+  it('held_request_quotes_two_lines_each_cut_to_its_glimpse', async () => {
+    // A held request quotes the same two lines as a handoff (the API's `visitor_lines`): each with
+    // whitespace collapsed, and past 200 characters cut to 199, trimmed, and "…".
+    const { session } = await openChat();
+    const long = `${'x'.repeat(198)}   ${'y'.repeat(10)}`;
+    await send(long);
+    await drain();
+    await send('Can I get 50%   off if I pay cash?');
+    await drain();
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+      (item) => item.decision?.session_id === session.session_id,
+    );
+    expect(held?.from_the_visitor).toBe(`${'x'.repeat(198)}… · Can I get 50% off if I pay cash?`);
+    expect(Array.from(held?.from_the_visitor?.split(' · ')[0] ?? '')).toHaveLength(199);
+  });
+
+  it('needs_you_summarises_a_handoff_never_a_hold', async () => {
+    // As the API's Needs you sends `claude_summary`: on a handoff, the newest AI-written triage of
+    // its chat's stopped attempts, the summary Safety shows for it; on a held request, never, since
+    // a visitor could steer a summary to sway an approval.
+    const read = async () => (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const [seeded] = await read();
+    if (!seeded?.decision) throw new Error('a fresh copy holds the seeded request');
+    // The seeded chat has the stopped draft Safety lists, and its request still carries no summary.
+    expect(seeded.claude_summary).toBeNull();
+    const triage = ((await call('safety', { params: { desk_id: deskId } })).body as Attempt[]).find((a) => a.kind === 'reply_blocked')?.triage;
+    if (!triage) throw new Error("Safety triages the seeded chat's stopped draft");
+
+    // Denied, the request's follow-up shows the handoff card, which hands the chat to Maria.
+    expect((await call('answer', { params: { decision_id: seeded.decision.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    const handed = (await read()).find((item) => item.handoff?.session_id === seeded.session.session_id);
+    expect(handed?.handoff?.kind).toBe('card');
+    expect(handed?.claude_summary).toBe(triage.summary);
+    expect(handed?.from_the_visitor).toBe(seeded.from_the_visitor);
+
+    // A chat with nothing stopped has no triage to summarise it.
+    const { session } = await openChat();
+    await send('Can I talk to Maria?');
+    await drain();
+    const asked = (await read()).find((item) => item.handoff?.session_id === session.session_id);
+    expect(asked?.handoff?.kind).toBe('card');
+    expect(asked?.claude_summary).toBeNull();
   });
 
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {

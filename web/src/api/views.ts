@@ -4,7 +4,8 @@
  * bodies carry no copy, session or Desk ID: the API takes identity from its cookies.
  *
  * Text a visitor typed (`TranscriptItem.text`, `display_name`, `Handoff.reason`,
- * `from_the_visitor`) is untrusted and renders as text only.
+ * `from_the_visitor`) is untrusted and renders as text only, as does AI-written text a visitor
+ * could steer (`claude_summary`, triage).
  */
 import type {
   ActorKind,
@@ -224,8 +225,19 @@ export interface NeedsYouSession {
 
 interface NeedsYouBase {
   session: NeedsYouSession;
-  /** The last thing the visitor wrote, labelled. Untrusted. */
+  /**
+   * What the visitor (or visiting agent) wrote most recently, labelled: their previous and last
+   * messages, oldest first, each with whitespace collapsed and, past 200 characters, cut to 199 and "…",
+   * joined with " · "; just the last when there's one. Untrusted.
+   */
   from_the_visitor: string | null;
+  /**
+   * On a handoff, the conversation's newest AI-written triage summary (what the person asked for
+   * and what the Desk did, at most 400 characters), for the owner alone and never quoted as the
+   * visitor's; null when it has none. A held request never carries one: a visitor could steer a
+   * summary to sway an approval. Optional until the API sends it; an item without it draws as before.
+   */
+  claude_summary?: string | null;
 }
 
 /**

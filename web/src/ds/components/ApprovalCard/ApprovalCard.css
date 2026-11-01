@@ -1,4 +1,4 @@
-/* ApprovalCard: the status line, Claude's summary in serif, the context and the rule that held it,
+/* ApprovalCard: the status line, the kernel's reason in serif, the context and the rule that held it,
    then the answers: Allow and Deny side by side, each a plain button or a menu button. A menu is a
    popover under its button; in a narrow card it opens inline, a full-width list under the two. */
 

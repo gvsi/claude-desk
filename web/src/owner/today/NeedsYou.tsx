@@ -53,6 +53,8 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
   const open = held.length + callbacks.length;
   // Each request keeps its place, and its card, from held to answered.
   const requests = heldOldestFirst([...held, ...[...answers.answered.values()].map((entry) => entry.item)]);
+  // The chats with a request held and not yet answered here: their handoff cards leave Claude's note out.
+  const heldChats = new Set(held.filter((item) => !answers.answered.has(item.decision.decision_id)).map((item) => item.decision.session_id));
   const { register: registerAnswered } = answeredFocus;
   const register = useCallback(
     (decisionId: string, el: HTMLElement | null) => {
@@ -106,7 +108,7 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
           })}
           {callbacks.map((item) => (
             <li key={item.handoff.handoff_id} className="cd-needs-you__item">
-              <CallbackCard item={item} />
+              <CallbackCard item={item} showSummary={!heldChats.has(item.handoff.session_id)} />
             </li>
           ))}
         </ul>

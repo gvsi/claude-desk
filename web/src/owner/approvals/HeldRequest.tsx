@@ -28,6 +28,9 @@ export function aboutTheRequest(item: HeldItem, now: Date) {
   const name = session.display_name?.trim() ? session.display_name : undefined;
   return {
     heldBy: item.held_by ?? undefined,
+    // Only the visitor's own words, labelled as theirs: a held request draws no AI-written summary
+    // (`claude_summary`), since a visitor could steer one to sway the owner's answer. The API never
+    // sends one on a held request; its `NeedsYouItem` docstring says why.
     context:
       item.from_the_visitor !== null && item.from_the_visitor !== '' ? (
         <>

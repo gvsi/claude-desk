@@ -21,7 +21,7 @@
   color: var(--text-secondary);
 }
 
-/* The visitor's words, as a held request's card quotes them. */
+/* The visitor's words, as a held request's card quotes them, and Claude's note under them. */
 .cd-callback__context {
   margin: 0;
   color: var(--text-secondary);

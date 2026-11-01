@@ -127,7 +127,7 @@ function HandoffCardShape({ anchor }: { anchor?: string }) {
 }
 
 /**
- * The held request's card, as `ApprovalCard` lays one out: its status line, Claude's summary, the
+ * The held request's card, as `ApprovalCard` lays one out: its status line, the kernel's reason, the
  * visitor's words and the rule that held it beside its icon, each as many lines as its words take,
  * then Allow and Deny at the answers' own heights (`cd-conversation-skeleton__answer`).
  */

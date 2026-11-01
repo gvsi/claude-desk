@@ -38,7 +38,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Ok: Story = {
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByText('Every entry checks out')).toBeVisible();
+    await expect(canvas.getByText('Every entry matches the chain')).toBeVisible();
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
     // The count is a pill that reads as words.
     const count = canvas.getByRole('img', { name: '3 entries' });
@@ -56,7 +56,7 @@ export const Broken: Story = {
   args: { chainOk: broken.chain_ok, firstBadSeq: broken.first_bad_seq, entries: broken.entries.length, devKey: false },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByText("Entry 2 doesn't match the chain")).toBeVisible();
-    await expect(canvas.queryByText('Every entry checks out')).toBeNull();
+    await expect(canvas.queryByText('Every entry matches the chain')).toBeNull();
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--refused');
     await expect(canvas.getByRole('img', { name: '3 entries' })).toBeVisible();
     await expect(canvas.queryByText('Signed with a development key')).toBeNull();
