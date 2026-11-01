@@ -154,12 +154,11 @@ function latestAgentOutcome(world: MockWorld, session: SessionRecord): Conversat
     if (item.kind === 'status') {
       const decision = event && 'decision_id' in event ? decisions.get(event.decision_id) : undefined;
       if (event && 'state' in event && event.state === 'executed' && decision?.state === 'executed') pending.push(decision);
-      else pending = [];
       continue;
     }
+    if (item.kind !== 'delivered' || event?.type !== 'message') continue;
     const receipts = pending;
     pending = [];
-    if (item.kind !== 'delivered' || event?.type !== 'message') continue;
     const cards = event.blocks.filter((b) => b.kind === 'card').map((b) => b.template ?? '');
     if (event.handoff || cards.includes('handoff')) {
       events.push({ at: Date.parse(item.created_at), seq: event.ledger_seq, priority: 2, n: item.n, outcome: null });

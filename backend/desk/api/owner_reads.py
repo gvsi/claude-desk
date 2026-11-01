@@ -935,12 +935,10 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
             decision = by_id.get(payload.get("decision_id"))
             if payload.get("state") == "executed" and decision and decision["state"] == "executed":
                 pending.setdefault(session, []).append(decision)
-            else:
-                pending[session] = []
             continue
-        receipts = pending.pop(session, [])
         if row.kind != "delivered":
             continue
+        receipts = pending.pop(session, [])
         cards = payload.get("cards") or []
         if payload.get("handoff") or "handoff" in cards:
             events[session].append((utc(row.created_at), payload.get("ledger_seq", row.n), 2, row.n, None))

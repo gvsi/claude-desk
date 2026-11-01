@@ -41,6 +41,36 @@ async def record(scene, ids, at, *, state="executed", tool="native.book", card="
         await conn.commit()
     scene.admin.execute("UPDATE app.messages SET created_at = %s WHERE session_id = %s AND created_at > %s",
                         (at, ids.session_id, at))
+    return decision
+
+
+@pytest.mark.parametrize("reverse_publication", [False, True])
+@pytest.mark.parametrize("newer_refusal", [False, True])
+async def test_agent_outcome_uses_ledger_order_not_receipt_publication(scene, reverse_publication, newer_refusal):
+    at = local(2026, 10, 30, 9)
+    fake, owner = scene.fake, scene.owner
+    fake.now = at
+    session, _ = fake._new_session(owner.copy_id, owner.desk_id, "agent")
+    fake.flush()
+    ids = Ids(copy_id=owner.copy_id, desk_id=owner.desk_id, session_id=session.session_id)
+    states = ["executed", "refused"] if newer_refusal else ["refused", "executed"]
+    decisions = [await record(scene, ids, at, state=state,
+                              tool="native.book" if state == "executed" else "native.quote",
+                              card=None, receipt=False) for state in states]
+    booking = next(d for d in decisions if d.state == "executed")
+    verdict = ReplyVerdict(ok=True, language="en",
+                           blocks=[RenderedBlock(kind="card", template="booking_confirmed", text="Checked card")],
+                           violations=[], message_id=booking.decision_id, generation=0, visitor_plain="Checked",
+                           ledger_seq=booking.ledger_seq, signature="fake:outcome")
+    async with scene.engine.connect() as conn:
+        for decision in reversed(decisions) if reverse_publication else decisions:
+            await deliver(conn, ids, Status(decision, "receipt"))
+        await deliver(conn, ids, Reply(verdict, "claude", "api"), ro_schema="fake_kernel_ro")
+        await conn.commit()
+    result = await owner.get(f"desks/{owner.desk_id}/conversations")
+    assert result.status_code == 200, result.text
+    summary = next(row for row in result.json() if row["session_id"] == session.session_id)
+    assert summary["latest_outcome"] == ("turned_down" if newer_refusal else "visit_booked")
 
 
 @pytest.mark.parametrize("case,expected", [

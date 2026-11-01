@@ -100,6 +100,23 @@ afterEach(() => {
 
 describe('the scripted Desk', () => {
   it.each([
+    [false, false], [false, true], [true, false], [true, true],
+  ])('agent_summary_uses_ledger_order_with_newer_refusal_%s_and_reverse_publication_%s', async (newerRefusal, reversePublication) => {
+    const world = mockStore.world;
+    const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+    const ctx = world.context(agent, 'en', 'Book a visit');
+    const refuse = () => ctx.decide({ ...DECISIONS.quote, outcome: 'refuse', executed: false });
+    // Fake time stays fixed: ledger sequence alone decides which result is newer.
+    const decisions = newerRefusal ? [ctx.decide(DECISIONS.book), refuse()] : [refuse(), ctx.decide(DECISIONS.book)];
+    const published = reversePublication ? [...decisions].reverse() : decisions;
+    for (const decision of published) world.emit(agent, ctx.status('receipt', decision));
+    world.emit(agent, ctx.reply([rivera.blocks.booking_confirmed.en]));
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome)
+      .toBe(newerRefusal ? 'turned_down' : 'visit_booked');
+  });
+
+  it.each([
     ['book_visit', 'visit_booked'],
     ['quote_and_deposit', 'deposit_paid'],
     ['push_the_limit', 'turned_down'],
