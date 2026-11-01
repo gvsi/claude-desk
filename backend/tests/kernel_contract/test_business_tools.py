@@ -182,11 +182,11 @@ async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, 
     valid = BusinessToolsRequest(tools=[tool])
     await owner.call("PUT /desks/{id}/business_tools", valid, path={"id": desk_id})
     for invalid, detail in (
-            (BusinessToolsRequest(tools=[tool, tool]), None),
+            (BusinessToolsRequest(tools=[tool, tool]), {}),
             (BusinessToolsRequest.model_construct(tools=[tool.model_copy(update={"tool": f"desk.enquiry-{i}"})
-                                                         for i in range(9)]), None),
+                                                         for i in range(9)]), {}),
             (BusinessToolsRequest(tools=[tool.model_copy(update={
-                "title": "Guaranteed help", "description": arrange.canary(copy.copy_id)})]), None),
+                "title": "Guaranteed help", "description": arrange.canary(copy.copy_id)})]), {}),
             (BusinessToolsRequest(tools=[tool.model_copy(update={"title": "Guaranteed help"})]),
              {f'{tool.tool}.title': ['public_promise']})):
         with pytest.raises(KernelFailed) as refused_call:
