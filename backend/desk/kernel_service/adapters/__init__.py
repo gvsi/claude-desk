@@ -52,7 +52,10 @@ def profile_sha256(profile: ToolProfile) -> str:
 
 
 async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
-    """Resolve only the copy's own Desk row; malformed or stale block profiles fail closed."""
+    """Resolve only the copy's own Desk row; malformed or stale block profiles fail closed.
+
+    The pin check for native and MCP tools lives in context.resolved_tools.
+    """
     from sqlalchemy import select
     from desk.contracts import is_business_tool
     from desk.db.models import Tool
