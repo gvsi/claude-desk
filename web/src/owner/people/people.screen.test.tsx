@@ -3,6 +3,7 @@
  * people on record with their contacts masked, the leads with recorded ones tagged, a person's own
  * rules read only, and the Desk's public link with its QR card and ready-made words.
  */
+import { http, HttpResponse } from 'msw';
 import QRCode from 'qrcode';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { cdp, page, userEvent } from 'vitest/browser';
@@ -14,6 +15,7 @@ import type { RulesView, SetupState } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { copyResultLine } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -126,6 +128,24 @@ const JORDAN = { name: 'Jordan Pike', note: 'Asked about a gas line for an outdo
 
 /** An email address written out in full: no "•" standing in for its name. */
 const UNMASKED_EMAIL = /[\w.+-]*[\w+-]@[\w-]+\.[\w.]+/g;
+
+/** The Desk's rules read, as the owner app makes it. */
+const RULES_READ = '/api/owner/desks/:deskId/rules';
+
+/** The voicemail's words as Share shows them, or null before they show. */
+function voicemailIn(root: HTMLElement): string | null {
+  return [...root.querySelectorAll('.cd-copy-list__words')].find((words) => words.textContent?.startsWith('You’ve reached'))?.textContent ?? null;
+}
+
+/** The sentence a voicemail says only with an urgent callback tool on. */
+const EMERGENCY = 'For an emergency, leave a message';
+
+/** Turns Rivera's urgent callback tool on or off on the Desk, as the owner would elsewhere. */
+function riverasUrgentTool(status: 'enabled' | 'disabled'): void {
+  const desk = mockStore.world.desk(RIVERA.deskId);
+  if (!desk) throw new Error('the mock has the main Desk');
+  desk.tools = desk.tools.map((row) => (row.tool === 'desk.emergency-callback' ? { ...row, status, review_reason: null } : row));
+}
 
 /** Rivera's business and owner, as the share kit names them. */
 const RIVERA_BUSINESS = rivera.business.name;
@@ -612,9 +632,7 @@ describe('share', () => {
   });
 
   it('voicemail_promises_an_emergency_callback_only_with_an_urgent_callback_tool', async () => {
-    /** The voicemail's words as the page shows them. */
-    const voicemail = (root: HTMLElement) =>
-      [...root.querySelectorAll('.cd-copy-list__words')].find((words) => words.textContent?.startsWith('You’ve reached'))?.textContent ?? null;
+    const voicemail = voicemailIn;
     const rulesRead = () => mockStore.requests.filter((r) => r.key === 'rules').length;
 
     // A Desk Linda made in setup has no tool for urgent callbacks, only the callback every Desk has:
@@ -651,6 +669,60 @@ describe('share', () => {
       'You’ve reached Rivera Plumbing. For quotes and bookings, visit ' +
         `${window.location.host} slash d slash ${RIVERA.slug}, where Claude, an AI, answers any time. For an emergency, leave a message and Maria Rivera will call you back.`,
     );
+  });
+
+  it('a_cached_emergency_promise_waits_for_shares_own_read', async () => {
+    // Rules read with Rivera's urgent callback on, a read the app keeps; then the tool goes off
+    // elsewhere. Share, in the same app, leaves the promise out while its own read is out, and
+    // after it lands with the tool off.
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' })).toBeVisible();
+    riverasUrgentTool('disabled');
+    const held = holdReads(RULES_READ);
+    const reads = mockStore.requests.filter((r) => r.key === 'rules').length;
+    await router.navigate(`${DESK}/share`);
+    await expect.element(screen.getByRole('list', { name: 'Ready-made words' })).toBeVisible();
+    await expect.poll(held.held).toBeGreaterThan(0);
+    expect(voicemailIn(screen.container)).not.toContain(EMERGENCY);
+    held.release();
+    await expect.poll(() => mockStore.requests.filter((r) => r.key === 'rules').length).toBeGreaterThan(reads);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const url = `${window.location.origin}/d/${RIVERA.slug}`;
+    expect(voicemailIn(screen.container)).toBe(SHARE_COPY(RIVERA_BUSINESS, RIVERA_OWNER, url, { urgentCallback: false })[2]?.text);
+  });
+
+  it('a_failed_read_leaves_the_cached_emergency_promise_out', async () => {
+    // The same cached read with the tool on, but Share's own read fails, its retry too.
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { retryScale: 0 });
+    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' })).toBeVisible();
+    riverasUrgentTool('disabled');
+    let failed = 0;
+    worker.use(
+      http.get(RULES_READ, () => {
+        failed += 1;
+        return HttpResponse.json({ detail: 'unavailable' }, { status: 503 });
+      }),
+    );
+    await router.navigate(`${DESK}/share`);
+    await expect.element(screen.getByRole('list', { name: 'Ready-made words' })).toBeVisible();
+    expect(voicemailIn(screen.container)).not.toContain(EMERGENCY);
+    await expect.poll(() => failed).toBeGreaterThanOrEqual(2);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(voicemailIn(screen.container)).not.toContain(EMERGENCY);
+  });
+
+  it('a_fresh_read_with_the_urgent_tool_on_keeps_the_promise', async () => {
+    // A cached read with the tool on, the tool still on: the promise only once Share's own read lands.
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' })).toBeVisible();
+    const held = holdReads(RULES_READ);
+    await router.navigate(`${DESK}/share`);
+    await expect.element(screen.getByRole('list', { name: 'Ready-made words' })).toBeVisible();
+    await expect.poll(held.held).toBeGreaterThan(0);
+    expect(voicemailIn(screen.container)).not.toContain(EMERGENCY);
+    held.release();
+    const url = `${window.location.origin}/d/${RIVERA.slug}`;
+    await expect.poll(() => voicemailIn(screen.container)).toBe(SHARE_COPY(RIVERA_BUSINESS, RIVERA_OWNER, url, { urgentCallback: true })[2]?.text);
   });
 
   it('print_card_prints_the_card_alone', async () => {
