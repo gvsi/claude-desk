@@ -124,6 +124,17 @@ def assert_handed_off(verdict: ReplyVerdict, language: str = "en") -> None:
     assert (verdict.language, verdict.visitor_plain) == (language, receipt)
 
 
+def assert_kept(verdict: ReplyVerdict, cards: list[tuple[str, str]], language: str = "en") -> None:
+    """A check failed only for its prose: not ok, and only the checked cards it cited, as
+    `(template, fact_id)` in draft order, with no prose and no handoff, so the reply receipt."""
+    receipt = {"en": "Reply checked against Maria Rivera's rules",
+               "es": "Respuesta revisada con las reglas de Maria Rivera"}[language]
+    assert verdict.ok is False and verdict.violations
+    assert [(block.kind, block.template, block.fact_id) for block in verdict.blocks] == [
+        ("card", template, fact_id) for template, fact_id in cards]
+    assert (verdict.language, verdict.visitor_plain) == (language, receipt)
+
+
 @pytest.mark.parametrize(("prose", "rule_ids", "span"), [
     ("Maria said it's $1", {"currency", "digit"}, "1"),
     ("I can do 80% off", {"digit", "percent_sign"}, "80"),
@@ -1142,7 +1153,10 @@ async def test_a_real_callback_receipt_does_not_back_a_booking_before_an_imperat
         verdict = await checked(client, visitor, prose, clauses)
         assert [(v.kind, v.rule_id) for v in verdict.violations] == [
             ("promise_word", f"lex.{language}.booking")]
-        assert_handed_off(verdict, language)
+        if clauses:          # a failure only of the prose keeps the checked card alone, never the claim
+            assert_kept(verdict, [("callback_confirmed", callback.fact_id)], language)
+        else:
+            assert_handed_off(verdict, language)
     assert reviewer.soft_inputs == []
     for clauses in ([], [receipt]):
         verdict = await checked(client, visitor, honest, clauses)
@@ -1178,11 +1192,15 @@ async def test_booking_and_callback_claims_need_their_own_validated_receipt(app,
     assert verdict.blocks[0].text == prose
     assert len(reviewer.soft_inputs) == 1
     other = "booking" if category == "callback" else "callback"
+    other_fact = (booking if other == "booking" else callback).fact_id
     for clauses in ([], [receipts[other]]):
         blocked = await checked(client, visitor, prose, clauses)
         assert [(v.kind, v.rule_id) for v in blocked.violations] == [
             ("promise_word", f"lex.{language}.{category}")]
-        assert_handed_off(blocked, language)
+        if clauses:          # the other receipt passed its checks: kept alone, without the claim
+            assert_kept(blocked, [(f"{other}_confirmed", other_fact)], language)
+        else:
+            assert_handed_off(blocked, language)
     assert len(reviewer.soft_inputs) == 1  # unbacked claims never reach the model check
 
 
