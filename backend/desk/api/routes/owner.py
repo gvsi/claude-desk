@@ -94,7 +94,7 @@ async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, 
     desks = [row for row in await ctx.ro.desks() if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    return desks, businesses, await owner_reads.unfinished_setups(ctx)
+    return desks, businesses, await owner_reads.unfinished_setups(ctx, desks)
 
 
 def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup]) -> DeskSummary:

@@ -1269,8 +1269,8 @@ async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, ke
     assert not fake.desks[state["desk_id"]].answering
     assert len(fake.called("PUT /desks/{id}/answering")) == 2 and not fake.called("DELETE /desks/{id}")
 
-    # It fails again: the new Desk is deleted, so nothing answers the public at its address, no interview is made (the
-    # start's row keeps its failure, with no Desk, so its key is spent), and the owner gets the kernel's error.
+    # It fails again: the new Desk is deleted, so nothing answers the public at its address. The row keeps the
+    # returned Desk's ID and its failure, but no readable interview; the owner gets the kernel's error.
     fake.fail("PUT /desks/{id}/answering", "timeout")
     before = set(fake.desks)
     model.add(started())
@@ -1289,7 +1289,7 @@ async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, ke
     async with engine.connect() as conn:
         kept = (await conn.execute(sql("SELECT desk_id, start_error IS NOT NULL FROM app.setup_interviews"
                                        " ORDER BY created_at"))).all()
-    assert [tuple(row) for row in kept] == [(state["desk_id"], False), (None, True)]
+    assert [tuple(row) for row in kept] == [(state["desk_id"], False), (made, True)]
 
     # The delete is best effort: when it fails too, the owner still gets the kernel's error, and it is logged.
     caplog.set_level(logging.WARNING, logger="desk.api.setup")
