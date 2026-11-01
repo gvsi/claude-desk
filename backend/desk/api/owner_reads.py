@@ -336,7 +336,8 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
       not_verified, no_mandate, mandate_exhausted,
-      not_an_agent_with_a_mandate (unreachable)       null                  (no label)
+      not_an_agent_with_a_mandate (unreachable),
+      search_limit (execution only)                   null                  (no label)
     policy precedence:
       F.never.*                                      owner_rule            Your rule says no
       B.same_copy                                    other_copy            Not a record on this Desk
