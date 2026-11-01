@@ -2,10 +2,24 @@
 import hashlib
 import re
 import shlex
+import time
 from pathlib import Path, PurePosixPath
 
 
 RESERVED = {".git", ".aws", ".ssh", ".local", ".worktrees", ".plan-runs", ".venv", "node_modules", "target", ".tools", "__pycache__", ".pytest_cache", "test-results", "playwright-report", "cdk.out", ".npmrc", ".pypirc", ".netrc", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
+
+
+class Timings:
+    """Report phase wall times without source contents or connection identifiers."""
+
+    def __init__(self, scope):
+        self.scope = scope
+        self.previous = time.monotonic()
+
+    def mark(self, phase):
+        now = time.monotonic()
+        print(f"testbox timing: {self.scope}.{phase}={now - self.previous:.3f}s", flush=True)
+        self.previous = now
 
 
 def lane_name(worktree: str) -> str:

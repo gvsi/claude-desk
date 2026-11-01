@@ -5,6 +5,27 @@ import subprocess
 from desk_tools.testbox_client import source_files
 
 
+def test_delta_sync_detects_same_size_same_mtime_edits_modes_and_symlink_changes(tmp_path):
+    import os
+    from desk_tools.testbox_client import source_state, changed_files
+
+    (tmp_path / 'source.py').write_text('before')
+    (tmp_path / 'alias.py').symlink_to('source.py')
+    paths = ['source.py', 'alias.py']
+    before = source_state(tmp_path, paths)
+    assert changed_files(before, before) == []
+    stamp = (tmp_path / 'source.py').stat()
+    (tmp_path / 'source.py').write_text('after!')
+    os.utime(tmp_path / 'source.py', ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert changed_files(source_state(tmp_path, paths), before) == ['source.py']
+    (tmp_path / 'source.py').write_text('before')
+    (tmp_path / 'source.py').chmod(0o755)
+    (tmp_path / 'alias.py').unlink()
+    (tmp_path / 'alias.py').symlink_to('other.py')
+    assert changed_files(source_state(tmp_path, paths), before) == ['alias.py', 'source.py']
+    assert changed_files(before, {}) == ['alias.py', 'source.py']
+
+
 def test_sync_includes_dirty_and_untracked_sources_but_never_env_or_symlink_escapes(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -42,3 +63,4 @@ def test_branch_switch_cleans_nested_directories_without_removing_build_state(tm
     subprocess.run([sys.executable, "-c", cleanup_script(str(base))], check=True)
     assert not (repo / "old").exists()
     assert (repo / "backend/.venv/keep").read_text() == "lane build state"
+
