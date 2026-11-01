@@ -291,10 +291,11 @@ evals-soft-promise:
 	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise spends money: give MAX_USD=<dollars>, the most it may spend))
 	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
 
-# Both arms share MAX_USD (the remaining allowance), plus a durable $1.70 experiment cap.
+# The revision measures new and diagnostic steps_only, reusing unchanged old-arm evidence.
+# Both measured arms share MAX_USD, plus a durable $1.70 cap in the ledger named by baseline SHA.
 .PHONY: evals-soft-promise-experiment
 CASES ?= evals/calibration/soft_promise.yaml
-ARMS ?= old,new
+ARMS ?= new,steps_only
 RESULTS ?= evals/out/soft-promise/next-steps-experiment.json
 evals-soft-promise-experiment:
 	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise-experiment spends money: give the remaining MAX_USD=<dollars>))

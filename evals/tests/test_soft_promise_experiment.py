@@ -131,6 +131,37 @@ def test_a_prompt_revision_keeps_the_budget_and_marks_prior_evidence_stale(deps,
     assert second["revisions"][0]["identity_sha256"] != second["revisions"][1]["identity_sha256"]
 
 
+def test_revision_reuses_old_evidence_and_measures_only_new_and_steps_only(deps, tmp_path, monkeypatch, capsys):
+    from evals.calibration import soft_promise_experiment as exp
+    write(deps.root, "backend/desk/kernel_service/decisions.py", "SOFT_PROMISE_SYSTEM = 'baseline'\n")
+    baseline = commit(deps.root, "freeze the baseline")
+    config = exp.Experiment(baseline_sha=baseline, samples=1, max_usd=1,
+                            output=tmp_path / "experiment.json")
+    first = asyncio.run(exp.experiment(config, deps))
+    count = len(deps.client.client.requests)
+    revised = exp.sp.decisions.SOFT_PROMISE_SYSTEM + " Revised."
+    monkeypatch.setattr(exp.sp.decisions, "SOFT_PROMISE_SYSTEM", revised)
+    deps.client.client.answer = lambda prose: (
+        "flag" if "sort everything" in prose and deps.client.client.requests[-1]["system"] == revised else "pass")
+    second = asyncio.run(exp.experiment(config.model_copy(update={"arms": "new,steps_only"}), deps))
+    assert len(deps.client.client.requests) - count == 4
+    assert set(second["attempts"][1]["arms"]) == {"new", "steps_only"}
+    assert not second["attempts"][0]["arms"]["old"]["stale"]
+    assert second["attempts"][0]["arms"]["new"]["stale"]
+    assert second["attempts"][1]["reused_arms"] == ["old"]
+    assert second["attempts"][1]["acceptance"]["accepted"]
+    assert not second["attempts"][1]["steps_only_diagnostic"]["accepted"]
+    assert second["cumulative_spend_usd"] == pytest.approx(first["cumulative_spend_usd"] * 2)
+    assert len(second["revisions"]) == 2
+    assert second["diagnostic_arms"] == ["steps_only"]
+    diagnostic = second["experiment"]["arms"]["steps_only"]
+    assert diagnostic["input_shape"] == "new"
+    assert diagnostic["prompt"] == revised.replace(exp.SYMPATHY_SENTENCE + " ", "")
+    assert "Sympathy, and general advice" not in diagnostic["prompt"]
+    assert [r["system"] for r in deps.client.client.requests[count:]] == [revised] * 2 + [diagnostic["prompt"]] * 2
+    assert "Arms to run: new,steps_only; reusing old; 4 calls; estimate $0.0020" in capsys.readouterr().out
+
+
 def test_acceptance_needs_every_unsafe_sample_and_a_majority_for_each_offer():
     from evals.calibration.soft_promise import CaseResult
     from evals.calibration.soft_promise_experiment import acceptance
