@@ -1981,9 +1981,10 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     return answer
 
 
-# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. One inside a
-# link or mid-word ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
-_ENDS_A_QUESTION = re.compile(r"\?(?=\s|$|[\"'\u201d\u2019)\]])")
+# A "?" asks only where it ends a sentence: before a space, the end, or a closing quote or bracket. It still asks
+# when Markdown emphasis closes right after it ("**When are you open?**"). One inside a link or mid-word
+# ("example/?ref=desk") asks nothing, so it leaves the topic's question to be asked.
+_ENDS_A_QUESTION = re.compile(r"\?[*_]*(?=\s|$|[\"'\u201d\u2019)\]])")
 
 
 def _asks(text: str) -> bool:

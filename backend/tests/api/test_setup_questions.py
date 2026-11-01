@@ -1198,6 +1198,10 @@ def test_a_reasked_topic_keeps_its_earlier_answer_and_follow_up():
      "Who are your clients mostly?"),
     ("Who are your clients mostly? That helps me word the Desk's answers.", ""),
     ("Who are your clients mostly?", "Who are your clients mostly?"),
+    # Markdown emphasis may close the question
+    ("**Who are your clients mostly?**", ""),
+    ("Got it, tax work.\n\n*Who are your clients mostly?*", ""),
+    ("_Who are your clients mostly?_", ""),
 ])
 async def test_a_compliant_follow_up_asks_exactly_one_question(
     app, browser, kernel_http, model, engine, caplog, follow_up, question,
@@ -3159,6 +3163,7 @@ async def test_a_covered_topic_with_no_ask_gets_the_next_question(covered, next_
 @pytest.mark.parametrize("key", tuple(LIMIT_CHOICES))
 @pytest.mark.parametrize("text", [
     "Could you clarify?", "Which amount? That will set the limit.", "Got it, a drain clean is $150.", "  ",
+    "**Could you clarify?**", "Got it.\n\n_Which amount should that be?_",
 ])
 async def test_a_limit_follow_up_uses_its_reply_with_codes_choices(key, text, caplog):
     reply = desk_setup.Entry(role="claude", text=text)
@@ -3185,8 +3190,9 @@ async def test_a_limit_follow_up_uses_its_reply_with_codes_choices(key, text, ca
 
 
 @pytest.mark.parametrize("key", ["contact_and_after_hours", "quote_limit"])
-async def test_a_question_mark_that_ends_no_sentence_still_asks_the_topics_question(key, caplog):
-    text = "Got it, your site is rivera.example/?ref=desk."
+@pytest.mark.parametrize("text", ["Got it, your site is rivera.example/?ref=desk.",
+                                  "Got it, your site is **rivera.example/?ref=desk**."])
+async def test_a_question_mark_that_ends_no_sentence_still_asks_the_topics_question(key, text, caplog):
     question = "What should the Desk do with messages that come in after hours?"
     reply = desk_setup.Entry(role="claude", text=text)
     interview = interview_with(SetupAnswers(summary="Plumbing."), [
