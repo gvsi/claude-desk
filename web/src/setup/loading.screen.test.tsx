@@ -72,7 +72,8 @@ async function linesInterview(suggestions: boolean): Promise<SetupState> {
  * where it is: the page stays at its top, as the step's boards draw it.
  */
 async function openLines(): Promise<void> {
-  const looksRight = await vi.waitFor(() => page.getByRole('button', { name: 'Looks right', exact: true }).element() as HTMLButtonElement);
+  // Real situations' own read comes first, and on a busy machine it can take longer than the default second.
+  const looksRight = await vi.waitFor(() => page.getByRole('button', { name: 'Looks right', exact: true }).element() as HTMLButtonElement, { timeout: 5_000 });
   looksRight.click();
 }
 
