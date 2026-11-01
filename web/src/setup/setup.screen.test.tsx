@@ -2175,8 +2175,11 @@ describe('setup', () => {
     expect(ticks.every((n, i) => i === 0 || n > (ticks[i - 1] ?? 0))).toBe(true);
 
     // Once landed, nothing lingers: the rows are drawn still, and the count is the check's own.
+    // The landing class leaves on the render after the last animation ends, so wait for that too.
     await expect.poll(() => moving(list.element())).toEqual([]);
-    for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
+    const landed = () => [...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName);
+    await expect.poll(() => landed().filter((name) => name !== 'none')).toEqual([]);
+    expect(landed().length).toBeGreaterThan(0);
     await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
 
     // A screen reader reads the check's own count from the first, never the ticks, all six rows

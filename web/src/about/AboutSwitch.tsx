@@ -1,6 +1,6 @@
 /**
  * The switch at the top of each About this prototype page: the set's three pages as links, in order, the one on
- * show marked as the current page. Each page draws it in its own look, so the classes are the page's.
+ * show marked as the current page. The set's top bar (AboutBar) gives it its classes.
  */
 import { Link } from 'react-router';
 
