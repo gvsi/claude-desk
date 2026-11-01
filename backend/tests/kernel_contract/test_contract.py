@@ -2264,7 +2264,7 @@ async def test_expired_mandate_at_execution_names_no_rule_change(kernel, ro_read
                if entry.event.ref_id == decision.decision_id
                and entry.event.kind == ("execute" if path == "allow" else "approval")]
     assert entries[-1]["check"] == "conditions"
-    assert read.owner_plain == "This couldn't run when you answered, so it wasn't done."
+    assert read.owner_plain == "This couldn't run, so it wasn't done."
     assert (await read_decision(view, decision.decision_id)).owner_plain is None
     (mandate,) = ro_read(ro_schema, copy.copy_id, "SELECT committed_cents, reserved_cents FROM {ro}.mandates"
                                                   " WHERE mandate_id = %s", (issued.mandate.mandate_id,))

@@ -42,7 +42,7 @@ OWNER_STATUS: dict[str, str] = {
     "refused_session_closed": "No se compartió: su sesión terminó antes de tu respuesta",
     "refused_rules_changed": "Tus reglas cambiaron antes de que se hiciera, así que no se hizo.",
     "refused_desk_deleted": "Este Desk se eliminó antes de que se hiciera, así que no se hizo.",
-    "refused_fallback": "No se pudo hacer cuando respondiste, así que no se hizo.",
+    "refused_fallback": "No se pudo hacer, así que no se hizo.",
 }
 
 EXECUTED: dict[str, str] = {

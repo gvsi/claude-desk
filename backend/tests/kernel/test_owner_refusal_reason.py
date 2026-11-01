@@ -44,12 +44,12 @@ OWNER_LINES = {
     "en": {
         "refused_rules_changed": "Your rules changed before this ran, so it wasn't done.",
         "refused_desk_deleted": "This Desk was deleted before this ran, so it wasn't done.",
-        "refused_fallback": "This couldn't run when you answered, so it wasn't done.",
+        "refused_fallback": "This couldn't run, so it wasn't done.",
     },
     "es": {
         "refused_rules_changed": "Tus reglas cambiaron antes de que se hiciera, así que no se hizo.",
         "refused_desk_deleted": "Este Desk se eliminó antes de que se hiciera, así que no se hizo.",
-        "refused_fallback": "No se pudo hacer cuando respondiste, así que no se hizo.",
+        "refused_fallback": "No se pudo hacer, así que no se hizo.",
     },
 }
 SESSION_ENDED = ("refused_contact_changed", "refused_person_removed", "refused_session_closed")

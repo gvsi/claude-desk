@@ -571,7 +571,7 @@ async def test_unreachable_server_refuses_the_call(desk_prove, app, client, tool
     assert (refused.state, refused.visitor_plain) == (
         "refused_at_execution", "This isn't available right now, so it didn't go ahead")
     owner_decision = await read(client, copy.owner, decision) if case == "list" else refused
-    assert owner_decision.owner_plain == "This couldn't run when you answered, so it wasn't done."
+    assert owner_decision.owner_plain == "This couldn't run, so it wasn't done."
     assert await executions_of(app, copy.copy_id) == [] and tool_calls == [] and provider_refunds(copy) == []
     # a pin that can't be checked changes nothing about the tool
     after = (await tool_rows(app, copy.copy_id, copy.desk_id))[tool]

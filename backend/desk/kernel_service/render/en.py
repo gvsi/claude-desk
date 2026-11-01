@@ -47,7 +47,7 @@ OWNER_STATUS: dict[str, str] = {
     "refused_session_closed": "Not shared: their session ended before your answer",
     "refused_rules_changed": "Your rules changed before this ran, so it wasn't done.",
     "refused_desk_deleted": "This Desk was deleted before this ran, so it wasn't done.",
-    "refused_fallback": "This couldn't run when you answered, so it wasn't done.",
+    "refused_fallback": "This couldn't run, so it wasn't done.",
 }
 
 # What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a

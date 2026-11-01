@@ -445,7 +445,7 @@ STATUS_TEXT = {
 # The owner has no language setting yet, so these stay English whatever the session's language.
 OWNER_REFUSAL_TEXT = {
     "rules_changed": "Your rules changed before this ran, so it wasn't done.",
-    "fallback": "This couldn't run when you answered, so it wasn't done.",
+    "fallback": "This couldn't run, so it wasn't done.",
 }
 # What a visitor's or an agent's executed action did, by tool (the kernel's `render.en.EXECUTED` and
 # `render.es.EXECUTED`, Plans 01b and 01c), in place of the generic executed line.
