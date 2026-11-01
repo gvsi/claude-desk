@@ -63,9 +63,10 @@ db-roles:
 	fi
 
 # The web app's checks, as CI's `web tests` runs them: install, type-check and unit tests, then the
-# production build, its check and the mocked end-to-end test (which uses web-test's install).
+# production build, its check and the mocked end-to-end test (which uses web-test's install). WebKit
+# runs the skeleton's sweep checks (the `ds-webkit` project), as iPhones draw it.
 web-test:
-	cd web && npm ci && npx playwright install --with-deps chromium && npm run typecheck && npm test
+	cd web && npm ci && npx playwright install --with-deps chromium webkit && npm run typecheck && npm test
 
 web-e2e:
 	cd web && npm run build && npm run check:build && npm run e2e:mock
