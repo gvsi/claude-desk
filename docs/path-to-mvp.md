@@ -6,7 +6,7 @@ What the prototype needs to become a minimum viable product (MVP) for real busin
 
 Today the API runs conversations; the kernel holds business credentials, compiles and proves rules, and checks actions and replies. Postgres roles prevent API writes to kernel records. Both processes trust their shared host. Keep that authority boundary for an MVP, add browser-signed approvals and rule confirmations, and verify signed replies in the browser. Separating the kernel onto another host would require authenticated calls and credential isolation.
 
-Read the safety and usefulness numbers together: a Desk that refused everything would have no violations and complete nothing. The results cover only the attacks and assumptions the [evals guide](evals.md) lists.
+Read the safety and usefulness numbers together: a Desk that refused everything would have no violations and complete nothing. Here, held-out means scenarios not used to tune the reviewer. The results cover only the attacks and assumptions the [evals guide](evals.md) lists.
 
 | Metric | Value | Source |
 |---|---|---|
@@ -19,7 +19,7 @@ A waived violation stays in the report, counted apart and with who signed the wa
 
 ## Infrastructure
 
-The [service configuration](../infra/stacks/compute_express.py) runs exactly one task, a single copy of the API and kernel containers, each with [its own secrets](../infra/stacks/task.py). [RDS](../infra/stacks/data_stack.py) is private, encrypted and single-AZ, with backups and a final snapshot. [CloudFront](../infra/stacks/edge.py) serves S3 assets and uncached API traffic at the same origin; the fallback uses an internal load balancer. This describes the configuration in the repository, not an audit of the live deployment.
+The [service configuration](../infra/stacks/compute_express.py) runs exactly one task, a single copy of the API and kernel containers, each with [its own secrets](../infra/stacks/task.py). [RDS](../infra/stacks/data_stack.py) is private, encrypted and single-AZ, with backups and a final snapshot. [CloudFront](../infra/stacks/edge.py) serves S3 assets and uncached API traffic on one domain; the fallback compute mode uses an internal load balancer. This describes the configuration in the repository, not an audit of the live deployment.
 
 For an MVP, run the database across availability zones, rehearse restores and failover, and move rate limits into shared storage before adding tasks, since today each task keeps its own. Add a web application firewall, and alerts for spend, waits for database connections and the ledger, holds, payment reconciliation and failed replies. Set an availability target and name who is on call. The [deploy guide](deploy.md) covers releases and infrastructure costs.
 
@@ -42,9 +42,9 @@ Model cost and latency may limit useful traffic before the infrastructure does; 
 |---|---|---|
 | Opus cost per Desk reply (one reply the visitor waits for), mean / p50 / p95, including calls after tools | [measured: Opus cost per reply, final held-out pass] | [measured: source, final held-out pass] |
 | Opus model time per Desk reply (one reply the visitor waits for), p50 / p95, including calls after tools | [measured: Opus model time per reply, final held-out pass] | [measured: source, final held-out pass] |
-| Proof, Rivera seed, local p50 / p95 | 381 / 702 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
-| Proof, 30 cards, local p50 / p95 | 1,172 / 2,390 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
-| SSE streams per task, steady state | estimate: at most min(3S, 30I) for S visitor sessions across I counted client addresses; no total task cap | estimate: min(3 × S, 30 × I) = stream ceiling; [stream slots](../backend/desk/api/ratelimit.py). Excludes address-exempt streams and brief overlap while an evicted stream closes. |
+| Proof, Rivera Plumbing's starter rules, local p50 / p95 | 381 / 702 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
+| Proof, 30 rule cards, local p50 / p95 | 1,172 / 2,390 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
+| SSE streams per task, steady state | estimate: at most min(3S, 30I) for S visitor sessions across I internet addresses subject to the per-address limit; no total task cap | estimate: min(3 × S, 30 × I) = stream ceiling; [stream slots](../backend/desk/api/ratelimit.py). Excludes streams with no per-address limit and brief overlap while an older stream closes after a new one replaces it. |
 | API Postgres connection budget per task | estimate: up to 47 | estimate: (20 pool + 10 overflow) + 10 turn locks + 5 job connections + 1 event listener + 1 job listener = 47; [API pools](../backend/desk/api/main.py), [job pool](../backend/desk/db/session.py), [event listener](../backend/desk/api/sse.py), [job listener](../backend/desk/api/jobs.py). |
 | Postgres demand with T app tasks | estimate: up to 77T, plus admin and operational connections | estimate: T × (47 + 2 × (5 pool + 10 overflow)) = 77T; SQLAlchemy defaults left implicit by the [kernel](../backend/desk/kernel_service/app.py) and [mock provider](../backend/desk/mockpay/store.py). Database connection capacity is not pinned. |
 | Ledger writes to one busy Desk | estimate: at most 1,000 / L entries/s, L = amortized locked time per entry in ms through commit | estimate: 1 exclusive ledger-head lock / (L / 1,000) = 1,000 / L; [ledger append](../backend/desk/kernel_service/ledger.py), [lock order](../backend/desk/kernel_service/repo.py). L is not measured. |
@@ -63,8 +63,8 @@ Each source names its report, pass, date and latency run. Cost per legitimate-ta
 | Reply check, p50 / p95 | Local, server-side | [measured: local reply-check latency, final held-out pass] | [measured: source, final held-out pass] | — |
 | Decide, p50 / p95 | Local, server-side | [measured: local decide latency, final held-out pass] | [measured: source, final held-out pass] | No separate estimate specified |
 | Reviewer when called, p50 / p95 | Local, server-side | [measured: local reviewer latency, final held-out pass] | [measured: source, final held-out pass] | 0.8–1.5 s, 4 s timeout |
-| Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured | [Hosted metering restriction](../evals/latency.py) | No full-turn estimate specified |
-| Reviewer when called, p50 / p95 | Hosted | Not measured | [Hosted metering restriction](../evals/latency.py) | — |
+| Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | No full-turn estimate specified |
+| Reviewer when called, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | — |
 
 All latency here is local: `make evals-latency PASS=<id>` measures it. Hosted latency wasn't measured. The harness refuses a run against the deployment until the deployment reports what its model calls cost, so that a run can stop at its spending limit.
 
