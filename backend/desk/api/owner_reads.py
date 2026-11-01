@@ -636,7 +636,8 @@ def briefing(done: Activity, frame: Windows) -> Briefing:
     return Briefing(
         since=frame.since, conversations=len(_sessions(_within(done.texts, frame.since, frame.now))),
         bookings=sum(item.kind == "booking" for item in items), leads=sum(item.kind == "lead" for item in items),
-        turned_down=sum(item.kind == "turned_down" for item in items), total=len(items),
+        turned_down=sum(item.kind == "turned_down" for item in items),
+        answers=sum(item.kind == "answer" for item in items), total=len(items),
         newest=BriefingNewest(turned_down=first("turned_down"), booking=first("booking"),
                               lead_or_answer=first("lead", "answer")))
 

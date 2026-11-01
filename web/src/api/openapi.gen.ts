@@ -157,8 +157,9 @@ export interface Triage {
   category: "prices" | "records" | "codes" | "instructions" | "limits" | "wording" | "other";
 }
 /**
- * "Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of
- * the full list (`BriefingList`).
+ * "Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `answers` counts the
+ * list's `answer` items, the conversations Claude answered alone; `total` is the length of the full list
+ * (`BriefingList`).
  */
 export interface Briefing {
   since: string;
@@ -166,6 +167,7 @@ export interface Briefing {
   bookings: number;
   leads: number;
   turned_down: number;
+  answers: number;
   total: number;
   newest: BriefingNewest;
 }

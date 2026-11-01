@@ -725,7 +725,7 @@ async def test_briefing_does_not_count_an_earlier_answer_when_the_chat_ends_in_h
     owner = scene.owner
 
     brief = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]
-    assert brief["newest"]["lead_or_answer"] is None and brief["total"] == 0
+    assert brief["newest"]["lead_or_answer"] is None and brief["total"] == brief["answers"] == 0
     assert (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"] == []
     assert [(item["kind"], item["ref_id"]) for item in
             (await owner.get(f"desks/{owner.desk_id}/safety")).json()] == [("reply_blocked", str(seq))]
@@ -810,8 +810,8 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert [summary["session_id"] for summary in today["live"]] == [handed_off.session_id]
     brief = today["briefing"]
     assert brief["since"] == stamp(local(2026, 10, 29, 18)) == "2026-10-30T01:00:00Z"
-    assert {key: brief[key] for key in ("conversations", "bookings", "leads", "turned_down", "total")} == {
-        "conversations": 6, "bookings": 1, "leads": 1, "turned_down": 1, "total": 5}
+    assert {key: brief[key] for key in ("conversations", "bookings", "leads", "turned_down", "answers", "total")} == {
+        "conversations": 6, "bookings": 1, "leads": 1, "turned_down": 1, "answers": 2, "total": 5}
     assert brief["newest"] == {
         "turned_down": {"kind": "turned_down", "at": stamp(local(2026, 10, 29, 20)),
                         "session_id": refused_chat.session_id, "display_name": None,

@@ -466,14 +466,16 @@ class BriefingNewest(BaseModel):
 
 
 class Briefing(BaseModel):
-    """"Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of
-    the full list (`BriefingList`)."""
+    """"Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `answers` counts the
+    list's `answer` items, the conversations Claude answered alone; `total` is the length of the full list
+    (`BriefingList`)."""
 
     since: AwareDatetime
     conversations: int
     bookings: int
     leads: int
     turned_down: int
+    answers: int
     total: int
     newest: BriefingNewest
 

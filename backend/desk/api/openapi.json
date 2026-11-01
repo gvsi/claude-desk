@@ -7736,6 +7736,10 @@
             "type": "integer",
             "title": "Turned Down"
           },
+          "answers": {
+            "type": "integer",
+            "title": "Answers"
+          },
           "total": {
             "type": "integer",
             "title": "Total"
@@ -7751,11 +7755,12 @@
           "bookings",
           "leads",
           "turned_down",
+          "answers",
           "total",
           "newest"
         ],
         "title": "Briefing",
-        "description": "\"Since last night\": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of\nthe full list (`BriefingList`)."
+        "description": "\"Since last night\": from 18:00 yesterday in the business's time zone (`since`) to now. `answers` counts the\nlist's `answer` items, the conversations Claude answered alone; `total` is the length of the full list\n(`BriefingList`)."
       },
       "BriefingItem": {
         "properties": {
