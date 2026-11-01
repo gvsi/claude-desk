@@ -296,6 +296,8 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
         "Never state a year, date or deadline yourself."
     )
     assert not re.search(r"\d", period)
+    assert ("When a price depends on a count you don't know yet, such as how many people or rooms, quote the "
+            "basic case first and show its card, then ask how many.") in text
     # the example question itself passes the reply check's prose scan, as Claude would send it
     from desk.kernel_service.reply_check import scan_prose
     example = re.search(r'"(Is it [^"]+)"', period).group(1)
