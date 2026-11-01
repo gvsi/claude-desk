@@ -199,18 +199,18 @@ const cards = {
       options: slotOptions.es,
     }),
   },
-  // As the kernel renders a confirmed booking: {date} / Arriving {start} to {end} / With {owner},
+  // As the kernel renders a confirmed booking: {date} / {start} to {end} / With {owner},
   // and no booking ID (render/en.py and es.py).
   booking_confirmed: {
     en: cardBlock('booking_confirmed', {
       fact_id: 'booking:B-77',
       title: 'Tuesday, November 3',
-      lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
+      lines: ['2:00 pm to 4:00 pm', 'With Maria Rivera'],
     }),
     es: cardBlock('booking_confirmed', {
       fact_id: 'booking:B-77',
       title: 'martes 3 de noviembre',
-      lines: ['Llegada de 14:00 a 16:00', 'Con Maria Rivera'],
+      lines: ['De 14:00 a 16:00', 'Con Maria Rivera'],
     }),
   },
   payment_link: {

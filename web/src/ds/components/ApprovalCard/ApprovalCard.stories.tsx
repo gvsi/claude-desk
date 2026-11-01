@@ -540,7 +540,7 @@ export const TwoPlainButtons: Story = {
     await expect(card).toHaveTextContent('Waiting for your answer');
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
     await expect(canvas.getByText('Web chat, 2 min ago')).toBeVisible();
-    // Claude's summary of the request is in serif; the rule that held it follows.
+    // The kernel's reason for the hold is in serif; the rule that held it follows.
     expectComputed(canvas.getByText(held.reason_plain), { fontFamily: /Source Serif 4/, fontSize: '18px', lineHeight: '27px' });
     await expect(card).toHaveTextContent(`Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`);
     await expect(card).toHaveTextContent('From the visitor: “How much to clear a clogged drain? Can I get 15% off if I pay cash?”');

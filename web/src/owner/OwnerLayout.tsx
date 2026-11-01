@@ -224,8 +224,13 @@ function DeskGate({ deskId }: { deskId: string }) {
  * land on Rules' top. Each place is remembered by its history entry as the owner scrolls, since by
  * the time a page has gone its area already holds the next one. A page is its route on this Desk;
  * moving within one page (an attempt or a conversation beside its list) keeps the page's place, as
- * those routes are made to. A place the page can't reach yet, because it is still loading, waits for
- * the page to ask for it once drawn (the `reachPlace` this returns).
+ * those routes are made to. A page still loading asks for its place again once drawn (the
+ * `reachPlace` this returns): it may have been too short to reach the place yet, or what came in
+ * with it above the place (Rules' question about a hold) would otherwise carry the place down with
+ * it as the browser keeps what it showed in view. A page drawn as it opens has its place at once,
+ * with nothing left to ask for, and a place kept for a page never outlives its history entry, so a
+ * later visit to that entry (Back from an address within the same page) keeps where the owner
+ * scrolled since.
  */
 function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string): (key: string) => void {
   const matches = useMatches();
@@ -235,12 +240,17 @@ function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string
   // The main area's place in each history entry, and the entry it is showing.
   const places = useRef(new Map<string, number>());
   const entry = useRef(key);
-  // The place Back or Forward returned to that the page was too short to hold, and its entry.
-  const unreached = useRef<{ key: string; top: number } | null>(null);
+  // The place Back or Forward returned to, and its entry, until the page asks for it once drawn.
+  const returned = useRef<{ key: string; top: number } | null>(null);
+  // The entry whose page, drawn as it opened, asked for its place before the place below was set:
+  // a page's effects run before its frame's.
+  const drawnAtOnce = useRef<string | null>(null);
 
-  // Set before the page's place below, so the scroll that place makes is heard as this entry's.
+  // Set before the page's place below, so the scroll that place makes is heard as this entry's. A
+  // place kept for another entry goes with it, a move within the same page included.
   useLayoutEffect(() => {
     entry.current = key;
+    if (returned.current?.key !== key) returned.current = null;
   }, [key]);
 
   useLayoutEffect(() => {
@@ -257,16 +267,23 @@ function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string
     // `key` and `navigationType` are read only when the page changes: within a page, its place stays.
     const top = navigationType === 'POP' ? (places.current.get(key) ?? 0) : 0;
     main.scrollTop = top;
-    unreached.current = main.scrollTop < top - 1 ? { key, top } : null;
+    // A page drawn as it opened is at its place now; one still loading asks for it once drawn.
+    returned.current = top > 0 && drawnAtOnce.current !== key ? { key, top } : null;
+    drawnAtOnce.current = null;
   }, [inside, deskId, page]);
 
   return useCallback(
     (at: string) => {
       const main = inside.current?.closest('main');
-      const place = unreached.current;
-      if (!main || place?.key !== at) return;
-      unreached.current = null;
-      main.scrollTop = place.top;
+      const place = returned.current;
+      if (place?.key === at) {
+        if (!main) return;
+        returned.current = null;
+        main.scrollTop = place.top;
+      } else if (at !== entry.current) {
+        // Asked as the page opens, before this entry is the frame's: the page is drawn already.
+        drawnAtOnce.current = at;
+      }
     },
     [inside],
   );

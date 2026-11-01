@@ -2812,10 +2812,77 @@
         }
       }
     },
+    "/api/owner/setup/{id}/events": {
+      "get": {
+        "summary": "Setup Events",
+        "description": "One owner turn's whole reply so far, then done once its state is saved and the interview takes the next turn,\nor error after rollback.\n\nNo running turn sends done with run null immediately. Choices, cards and plans are read only\nfrom the existing state route. Authentication and interview scoping finish before SSE starts.",
+        "operationId": "owner_setup_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/owner/setup/{id}/consent": {
       "post": {
         "summary": "Setup Consent",
-        "description": "Use the shared turn runner to store consent, then read Claude memory and the named website through the\nkernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit; answer 200 when finished within 25 seconds, otherwise 202 `SetupState` with `busy: true`.\nCancelling the request leaves the run working. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
+        "description": "Use the shared turn runner to store consent, then read Claude memory and the named website through the\nkernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit, then answer 202 `SetupState` with `busy: true` at once; the turn's events stream follows the\nreads and Claude's opening, and the state route has the result. Cancelling the request leaves the run\nworking. A repeat while busy answers 202 without starting or counting another run; after it lands, consent\nis 409 `conflict`. Failed or abandoned runs reopen consent.",
         "operationId": "owner_setup_consent",
         "parameters": [
           {
@@ -4882,10 +4949,70 @@
         }
       }
     },
+    "/api/public/desks/{slug}/agent_tasks": {
+      "get": {
+        "summary": "Agent Tasks",
+        "description": "Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from\n(`agents.demo_task_set`): the business type setup stored for the Desk, or Rivera's on the copy's own Desk. A key\nthe page words its task chips by, never text of the Desk's. Read with the visitor's session; never cached.",
+        "operationId": "public_agent_tasks",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTasks"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/public/desks/{slug}/send_agent": {
       "post": {
         "summary": "Send Agent",
-        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.",
+        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.\n\nThe agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Rivera's\nfor the copy's own Desk), read before anything is claimed.",
         "operationId": "public_send_agent",
         "parameters": [
           {
@@ -6897,7 +7024,7 @@
     "/api/owner/policy/{desk_id}/chat": {
       "post": {
         "summary": "Rule Chat",
-        "description": "Ask Claude about the Desk's rules in plain words. A question gets an answer and drafts nothing; a change comes\nback as a draft the kernel compiled and proved, with how it differs from the active rules, which nothing changes\nuntil `confirm`. Counts on the copy's `owner_ai` limit (40 an hour) and, in production, the daily model budget\n(503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer.",
+        "description": "Ask Claude about the Desk's rules in plain words. A question gets an answer and drafts nothing; a change comes\nback as a draft the kernel compiled and proved, with how it differs from the active rules, which nothing changes\nuntil `confirm`. Counts on the copy's `owner_ai` limit (40 an hour) and, in production, the daily model budget\n(503 `demo_budget`); 503 `model_unavailable` when Claude couldn't answer.\n\nAccept: text/event-stream subscribes to whole-answer deltas, reset on retry, then final\nRuleChatOut after any kernel proof, or an error: the JSON error body this route would answer,\nplus its status. Admission failures remain JSON. Without that header the existing JSON/202\nbehavior is unchanged.",
         "operationId": "owner_rule_chat",
         "parameters": [
           {
@@ -7913,6 +8040,27 @@
         "title": "AgentRunStarted",
         "description": "202: the built-in agent is on its way; poll `GET .../send_agent/{run_id}` for its run (Plan 02b)."
       },
+      "AgentTasks": {
+        "properties": {
+          "task_set": {
+            "type": "string",
+            "enum": [
+              "rivera",
+              "trade",
+              "office",
+              "landlord",
+              "other"
+            ],
+            "title": "Task Set"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_set"
+        ],
+        "title": "AgentTasks",
+        "description": "Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else\nthe business type setup stored for it (`other` without one). A key, never words: the page holds every word."
+      },
       "AgentTurn": {
         "properties": {
           "author": {
@@ -7980,7 +8128,7 @@
           "receipts"
         ],
         "title": "AgentTurn",
-        "description": "One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,\nwith the blocks and signed statuses the kernel checked and the Desk showed the agent.\n\nAn agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most\n2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is\n(owner decision, 2026-11-01). The agent's model writes it from a fixed `DemoTask` and the Desk's kernel-checked\nreplies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the\nDesk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked\nblocks and statuses."
+        "description": "One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,\nwith the blocks and signed statuses the kernel checked and the Desk showed the agent.\n\nAn agent turn's `text` is the message the agent sent the Desk in that request, exactly as signed and sent (at most\n2,000 characters, the agent's send limit), shown to the visitor who launched it as a visitor's own message is\n(owner decision, 2026-11-01). The agent's model writes it from a fixed task line that code picks from signed\ntemplates, keyed by the Desk's setup business type, with no owner or visitor text, and the Desk's kernel-checked\nreplies alone, and the kernel doesn't check it. It is untrusted plain text, the agent's words and never the\nDesk's: the page shows it quoted and labelled as the agent's. A Desk turn's `text` is null; the Desk's replies stay the kernel-checked\nblocks and statuses."
       },
       "AlreadyResolved": {
         "properties": {
@@ -13086,7 +13234,8 @@
                   "discounts",
                   "documents_and_payments",
                   "money_limit",
-                  "contact_and_after_hours"
+                  "contact_and_after_hours",
+                  "test_client"
                 ]
               },
               {
@@ -13570,7 +13719,8 @@
                   "discounts",
                   "documents_and_payments",
                   "money_limit",
-                  "contact_and_after_hours"
+                  "contact_and_after_hours",
+                  "test_client"
                 ]
               },
               {
@@ -13623,7 +13773,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one; `test_client` while the test-client offer at the plan's end\nwaits), whether an owner turn is pending (`busy`), and the conversation so far. Its messages start at Claude's\nconsent question: the owner's opening description isn't shown back to them."
       },
       "SetupSuggestionsIn": {
         "properties": {},

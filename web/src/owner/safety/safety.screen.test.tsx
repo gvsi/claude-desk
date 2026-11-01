@@ -317,7 +317,7 @@ describe('Safety', () => {
     const { screen } = await renderRoute(SAFETY);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
     await expect.element(screen.getByText('I turned down 2 requests this week.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('img', { name: `${entries} entries`, exact: true })).toBeVisible();
     expect(document.body.textContent).not.toMatch(/talk me around|attempts? (?:was|were) stopped/);
 
@@ -418,7 +418,7 @@ describe('Safety', () => {
     const ask = 'Can I get 50% off if I pay cash?';
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: ask } });
-    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.fromTheVisitor === ask)?.decision;
+    const asked = () => [...mockStore.world.decisions.values()].find((d) => d.decision.action?.discount_bp === 5000)?.decision;
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('held');
     await mockStore.dispatch('answer', { params: { decision_id: asked()?.decision_id ?? '' }, body: { answer: 'allow_once' } });
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('executed');
@@ -444,7 +444,7 @@ describe('Safety', () => {
     injectLedger(ledgerPage(threeEntries(), { chain_ok: false, first_bad_seq: 2 }));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
     await expect.element(screen.getByText("Entry 2 doesn't match the chain", { exact: true })).toBeVisible();
-    expect(screen.getByText('Every entry checks out').elements()).toHaveLength(0);
+    expect(screen.getByText('Every entry matches the chain').elements()).toHaveLength(0);
 
     // An entry's full trace says the chain is broken, and where, never that it was verified.
     await recordRow(screen, 3).click();
@@ -975,7 +975,7 @@ describe('Safety', () => {
     await listSeededHold();
     const { screen } = await renderRoute(SAFETY);
     await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     // A held request is held, not stopped, and claims nothing about what happens next.
     await screen.getByRole('link', { name: /^Today, \d{1,2}:\d{2} [ap]m A visitor not on record/ }).click();
@@ -1015,7 +1015,7 @@ describe('Safety', () => {
     // The record was read and checked; then a later read fails. The check says so, first, beside
     // what it last found, and stays until a read works, so an old check never reads as current.
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    const checked = screen.getByText('Every entry checks out', { exact: true });
+    const checked = screen.getByText('Every entry matches the chain', { exact: true });
     const record = screen.getByRole('list', { name: 'Every entry, newest first' });
     await expect.element(checked).toBeVisible();
     await expect.element(record).toBeVisible();
@@ -1074,7 +1074,7 @@ describe('Safety', () => {
     const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
     await expect.element(line, { timeout: 5_000 }).toBeVisible();
     await expect.element(nothing).not.toBeInTheDocument();
-    expect(line.element().compareDocumentPosition(screen.getByText('Every entry checks out').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.element().compareDocumentPosition(screen.getByText('Every entry matches the chain').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await readsMore('safety', 2);
     await readsMore('today', 1);
     expect(nothing.elements()).toHaveLength(0);
