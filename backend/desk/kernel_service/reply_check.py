@@ -767,12 +767,12 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, soft_checks, dropped,
     final}`, the reply receipt and the signature, at the session's generation as the request read it.
     `dropped` names each card refused at signing (`{fact_id, rule_id}`, never text), so a card a
-    prose-blocked draft lost is still accounted for. `ok` is no violations. The receipt is the status line `visitor_plain_key`, or for a shown reply
-    `reply_handed_off` exactly when its blocks include the handoff clause (template `handoff`),
-    otherwise `reply_checked`. The receipt, the API's delivered event flag `handoff` and the public
-    chat's handling of the "Reply checked" line all follow this same shown-block rule. A blocked
-    first attempt with no shown blocks keeps `reply_handed_off`. The owner's say ends here too, with
-    its own receipts and the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
+    prose-blocked draft lost is still accounted for. `ok` is no violations. The receipt is the
+    status line `visitor_plain_key`, or for a shown reply `reply_handed_off` exactly when its blocks
+    include the handoff clause (template `handoff`), otherwise `reply_checked`, so checked cards
+    kept alone after a prose-only failure carry the reply receipt. A blocked first attempt with no
+    shown blocks keeps `reply_handed_off`. The owner's say ends here too, with its own receipts and
+    the message ID its fact is named after (`message_id`; a new one otherwise). A cited fact ID
     holding one of `canaries` is ledgered only as a marker of its hash (`ledger.withheld_ref`).
 
     With `seen` (a draft the session's own call sent), the session row is written first: seen

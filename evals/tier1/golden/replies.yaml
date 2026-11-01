@@ -21,8 +21,9 @@
 #                  "maybe"); refusal. A flag is soft_promise; no verdict is check_unavailable.
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows
-#                  in order: "prose" or a card's template. A failed check shows only the handoff clause
-#                  (the default); a passing one its prose when not empty, then a card per clause, each
+#                  in order: "prose" or a card's template. A failed check shows its checked cards alone
+#                  when only the prose failed, else the handoff clause, and nothing on a first draft a
+#                  rewrite can fix; a passing one its prose when not empty, then a card per clause, each
 #                  carrying its clause's fact and card data.
 #
 # On the real kernel every verdict also has its signature verified, its visible free text scanned by
