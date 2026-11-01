@@ -5,9 +5,9 @@
  * the API refuses leaves the step reading the interview while it is busy, as before.
  */
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 
-import { newIdempotencyKey } from '../api/http.ts';
+import { newIdempotencyKey, observeRequests } from '../api/http.ts';
 import type { SetupState } from '../api/views.ts';
 import { worker } from '../mocks/browser.ts';
 import { growingWords } from '../mocks/ownerStreams.ts';
@@ -162,10 +162,29 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     const writing = gate();
     const landing = gate();
     mockStore.planStream('setup', { pauseAfter: 3, until: writing.until, landAfter: landing.until });
-    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    // When the answer's request answers, and how many times a growing reply comes and goes.
+    let answeredAt: number | null = null;
+    const stop = observeRequests((outcome) => {
+      if (outcome.key === 'setupAnswer') answeredAt = mockStore.requests.filter((r) => r.key === 'setupEvents').length;
+    });
+    onTestFinished(stop);
     const log = screen.getByRole('log', { name: 'Setup questions' });
+    await expect.element(screen.getByRole('button', { name: 'Both, about evenly', exact: true })).toBeVisible();
+    const swaps = { added: 0, removed: 0 };
+    const watch = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) if (node instanceof HTMLElement && node.matches('.cd-setup-growing')) swaps.added += 1;
+        for (const node of record.removedNodes) if (node instanceof HTMLElement && node.matches('.cd-setup-growing')) swaps.removed += 1;
+      }
+    });
+    watch.observe(log.element(), { childList: true, subtree: true });
+    onTestFinished(() => watch.disconnect());
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
     const owner = () => log.getByText('Both, about evenly', { exact: true }).elements();
+    // The stream opened as the answer went out, and the reply grows while the request waits.
     await expect.poll(() => growing()?.textContent).toBe(growingWords(CPA_COPY.consult)[1]);
+    expect(answeredAt).toBeNull();
+    expect(mockStore.requests.filter((r) => r.key === 'setupEvents').length).toBeGreaterThan(0);
     writing.release();
     // Done, while the request is still out: the reply shows whole, its last word too.
     await expect.poll(() => growing()?.textContent).toBe(CPA_COPY.consult);
@@ -173,12 +192,41 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     await expect.element(log.getByRole('status').filter({ hasText: 'Claude is writing' })).toBeInTheDocument();
     expect(screen.getByRole('article', { name: 'Google Calendar', exact: true }).elements()).toHaveLength(0);
     // The request answers with the saved turn: it takes the growing reply's place, each bubble once.
+    expect(answeredAt).toBeNull();
     landing.release();
     await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
+    expect(answeredAt).toBeGreaterThan(0);
     expect(growing()).toBeNull();
     expect(owner()).toHaveLength(1);
     expect(log.getByText(CPA_COPY.consult, { exact: true }).elements()).toHaveLength(1);
     expect(log.element().querySelector('.cd-writing-indicator')).toBeNull();
+    // One growing reply, replaced once by the saved turn.
+    expect(swaps).toEqual({ added: 1, removed: 1 });
+  });
+
+  it('looks_again_when_its_stream_reaches_the_api_before_the_answer_does', async () => {
+    const state = await cpaInterview(true);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    mockStore.streamSetupTurns();
+    const writing = gate();
+    mockStore.planStream('setup', { pauseAfter: 3, until: writing.until });
+    // The answer reaches the API only once the stream has: no turn runs yet, so it hears done with no run.
+    const events = () => mockStore.requests.filter((r) => r.key === 'setupEvents').length;
+    worker.use(
+      http.post(`/api/owner/setup/${state.interview_id}/answer`, async () => {
+        await expect.poll(() => events()).toBe(1);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return undefined;
+      }),
+    );
+    await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+    // While the answer is out, it looks again, and follows the turn once it runs.
+    await expect.poll(() => growing()?.textContent).toBe(growingWords(CPA_COPY.consult)[1]);
+    expect(events()).toBeGreaterThanOrEqual(2);
+    writing.release();
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
+    expect(growing()).toBeNull();
+    expect(screen.getByRole('log', { name: 'Setup questions' }).getByText(CPA_COPY.consult, { exact: true }).elements()).toHaveLength(1);
   });
 
   it('keeps_the_writing_dots_through_a_turn_that_streams_no_words', async () => {
