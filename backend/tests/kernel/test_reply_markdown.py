@@ -243,6 +243,34 @@ async def test_every_clickable_link_must_go_to_the_business_contact(app, client,
     assert ("promise_word", "markdown.link", span) in found(verdict)
 
 
+TABLE = "| Service | Notes |\n|---|---|\n"
+
+
+async def test_a_cell_past_the_header_is_read_as_the_chats_show_it(app, client):
+    """markdown-it drops a row's cells past its header's width, but the chats' renderer shows them,
+    so each table's lines are read whole too."""
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, f"{TABLE}| Drain | Fast | You get a fr*ee* inspection |")
+    assert verdict.ok is False and ("promise_word", "lex.en.promise", "free") in found(verdict)
+    verdict = await checked(client, visitor, f"{TABLE}| Drain | Fast | [pay](https://elsewhere.example/pay) |")
+    assert verdict.ok is False and ("promise_word", "markdown.link", "pay") in found(verdict)
+
+
+@pytest.mark.parametrize(("prose", "span"), [
+    ("Thanks for asking.\n\n[unused]: https://elsewhere.example/pay", "https://elsewhere.example/pay"),
+    ('<a href="https://elsewhere.example/pay">Our reviews</a> are kind.', 'https://elsewhere.example/pay">Our'),
+    ("Write to <!-- someone@elsewhere.example --> us.", "someone@elsewhere.example"),
+])
+async def test_a_url_or_email_written_anywhere_in_the_prose_is_held_to_the_contact(app, client, prose, span):
+    """Defence in depth: the raw prose is read for URLs and email addresses too, so one the visible
+    reading doesn't show (a reference never used, HTML a renderer drops) is still held to the contact."""
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, prose)
+    assert verdict.ok is False and ("promise_word", "markdown.link", span) in found(verdict)
+
+
 @pytest.mark.parametrize("prose", [
     "- Turn off the main valve\n- Open the lowest tap\n- Keep the area dry until Maria gets there",
     "* Turn off the main valve\n* Keep the area dry until Maria gets there",
@@ -333,15 +361,17 @@ async def test_prose_the_parser_cannot_read_whole_is_refused(app, client, monkey
         ("number_in_prose", "digit"), ("number_in_prose", "digit"), ("promise_word", "markdown.parse")]
 
 
-@pytest.mark.parametrize(("prose", "span"), [
-    ("Here is your quote, and you can [pay here](https://elsewhere.example/pay).", "pay here"),
-    ("Here is your quote. Reviews are at https://elsewhere.example/reviews.", "https://elsewhere.example/reviews"),
+@pytest.mark.parametrize(("prose", "spans"), [
+    # the link by its text, and its URL as the raw prose writes it
+    ("Here is your quote, and you can [pay here](https://elsewhere.example/pay).",
+     ["pay here", "https://elsewhere.example/pay"]),
+    ("Here is your quote. Reviews are at https://elsewhere.example/reviews.", ["https://elsewhere.example/reviews"]),
 ])
-async def test_a_cited_card_is_kept_when_only_a_link_in_the_prose_fails(app, client, prose, span):
+async def test_a_cited_card_is_kept_when_only_a_link_in_the_prose_fails(app, client, prose, spans):
     """A link to a site the contact doesn't name is a failure of Claude's own words: the checked card
     it cited is still shown, without the prose."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
     assert_kept(verdict, [("quote", quote.fact_id)])
-    assert found(verdict) == [("promise_word", "markdown.link", span)]
+    assert found(verdict) == [("promise_word", "markdown.link", span) for span in spans]

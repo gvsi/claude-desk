@@ -7,8 +7,9 @@ no linkify, raw HTML recognised) and returns what a reader sees of it: the text 
 newline after each, with entities and escapes decoded, emphasis joined to the letters around it,
 code as written, table cells, link text, and each ordered list item's number as its list renders
 it ("N. ", counted from its start), so formatting can hide no number or word from the reply check's
-scan; then link titles and images' alt text and titles, after the whole body, so none splits a
-word of it. Every link a reader can click, with its text and target, for the reply check to judge
+scan; then each table's lines read whole, since the chats show a cell past the header's width,
+which markdown-it drops; then link titles and images' alt text and titles, after the whole body,
+so none splits a word of it. Every link a reader can click, with its text and target, for the reply check to judge
 (the owner's decision of 2026-11-01: every clickable link goes to the business's contact): inline,
 reference and autolink forms, with a target of any scheme, and, since the chats autolink as GFM
 does, each URL with a scheme or "www." (read as https) and each email address in the visible
@@ -45,7 +46,7 @@ MARKER_PREFIX = re.compile(r"[ \t>*+-]*")           # indentation, quote and bul
 # email address (its extended autolinks). Matched anywhere, so a stricter reading than GFM's own.
 URL_LITERAL = re.compile(r"(?:https?://|www\.)[^\s<]+", re.IGNORECASE)
 EMAIL_LITERAL = re.compile(r"[A-Za-z0-9.+_-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+")
-TRAILING = "?!.,:;*_~'\"()[]{}"                        # punctuation after a literal URL, which a sentence puts there
+TRAILING = "?!.,:;*_~'\"()[]{}>"                       # punctuation after a literal URL, which a sentence puts there
 INLINE_TEXT = frozenset({"text", "code_inline"})
 LINE_BREAKS = frozenset({"softbreak", "hardbreak"})
 
@@ -160,7 +161,8 @@ def _inline(children: list[Token], links: list[Link], extras: list[str]) -> tupl
 
 def read(text: str) -> MarkdownText:
     """`text` as a reader sees it once rendered (see the module's docstring)."""
-    tokens = PARSER.parse(text)
+    env: dict = {}                                     # the reference definitions, for the table lines too
+    tokens = PARSER.parse(text, env)
     if any(token.level >= MAX_NESTING - 1 for token in tokens):
         raise TooDeep("the prose nests deeper than the parser follows")
     items = _ordered_items(tokens)
@@ -179,6 +181,16 @@ def read(text: str) -> MarkdownText:
             images = images or has_image
         elif token.type in ("code_block", "fence"):
             parts.append(token.content if token.content.endswith("\n") else f"{token.content}\n")
+    # markdown-it drops a row's cells past its header's width, which the chats' renderer shows: each
+    # table's lines are read whole as well, after the body.
+    lines = LINE_BREAK.split(text)
+    for token in tokens:
+        if token.type == "table_open" and token.map:
+            for line in lines[token.map[0]:token.map[1]]:
+                for inline in PARSER.parseInline(line, env):
+                    shown, has_image = _inline(inline.children or [], links, extras)
+                    parts.append(f"{shown}\n")
+                    images = images or has_image
     visible = "".join(parts) + "".join(f"{extra}\n" for extra in extras)
     return MarkdownText(visible=visible, links=(*links, *literal_links(visible)), images=images,
                         list_markers=_marker_spans(text, tokens, items))

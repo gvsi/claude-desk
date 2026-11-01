@@ -662,9 +662,10 @@ async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str,
     passed cards) on the visible text, each violation whose kind, rule ID and span `raw` doesn't
     hold, in order. Then a `promise_word` (`markdown.link`, spanning the link's text, once per
     text) for each link a reader can click, shown or hidden (`markdown_text.read`'s links: Markdown
-    links and autolinks, and the URLs and email addresses the chats autolink), whose target isn't
-    the business's own contact (`own_target`, the owner's decision of 2026-11-01): payment and
-    booking links come only from cards. Any image is one `promise_word`
+    links and autolinks, and the URLs and email addresses the chats autolink), and each URL or email
+    address written anywhere in the raw prose, whose target isn't the business's own contact
+    (`own_target`, the owner's decision of 2026-11-01): payment and booking links come only from
+    cards. Any image is one `promise_word`
     (`markdown.image`, spanning "image"), since a picture could show anything. Prose the parser can't
     read whole (no `reading`) is one `promise_word` (`markdown.parse`), and nothing of it is trusted:
     the raw scan then blanks no list marker either."""
@@ -673,9 +674,11 @@ async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str,
     reported = {(violation.kind, violation.rule_id, violation.span) for violation in raw}
     found = [violation for violation in scan(reading.visible)
              if (violation.kind, violation.rule_id, violation.span) not in reported]
-    if reading.links:
+    # Defence in depth: a URL or email address written anywhere in the prose is held to the contact too.
+    links = [*reading.links, *markdown_text.literal_links(prose)]
+    if links:
         hosts, emails = await contact_endpoints(ctx, desk_id)
-        spans = dict.fromkeys(_span(link.text) for link in reading.links if not own_target(link.href, hosts, emails))
+        spans = dict.fromkeys(_span(link.text) for link in links if not own_target(link.href, hosts, emails))
         found += [Violation(kind="promise_word", span=span, rule_id="markdown.link") for span in spans]
     if reading.images:
         found.append(Violation(kind="promise_word", span="image", rule_id="markdown.image"))
