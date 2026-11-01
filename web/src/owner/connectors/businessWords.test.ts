@@ -152,8 +152,9 @@ it('describes intake with one question or several', () => {
     const def: BusinessToolDef = { title: 'Intake', description: 'Asks questions.', config: { block: 'intake', questions } };
     expect(businessLine(def)).toBe(`${questions.length} ${questions.length === 1 ? 'question' : 'questions'} before a booking`);
     expect(businessGlyph(def.config)).toBe('person');
+    // The questions reach the review one by one (`items`), as the owner wrote them; `value` is them in one line.
     expect(businessRows(def, 'ask')).toEqual([
-      { label: 'Asks', value: questions.join(' ') },
+      { label: 'Asks', value: questions.join(' '), items: questions },
       { label: 'Next for you', value: 'Their answers show on the booking' },
     ]);
   }
