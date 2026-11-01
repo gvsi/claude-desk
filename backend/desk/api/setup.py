@@ -1449,15 +1449,35 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
            for entry in interview.transcript[since:]):
         return
     if follow_up is not None:
+        reason = "topic_again"
+        reply = next((entry for entry, _ in reversed(replies.entries) if entry.text.strip()), None)
         asked = _ask(interview, key)
-        if key not in LIMIT_CHOICES and follow_up.question.strip():
-            asked.text = follow_up.question.strip()
-            asked.choices = _normalize_choices(follow_up.choices)
+        if key in LIMIT_CHOICES and reply is not None:
+            reply.question = key
+            reply.choices = asked.choices
+            return
+        if key not in LIMIT_CHOICES:
+            question = follow_up.question.strip()
+            fitting = follow_up.next.kind == "done" or (follow_up.next.kind == "topic"
+                                                        and follow_up.next.topic not in LIMIT_CHOICES)
+            if question and fitting and (reply is None or question != reply.text.strip()):
+                asked.text = question
+                asked.choices = _normalize_choices(follow_up.choices)
+                reason = "turn_question"
+            elif reply is not None and reply.text.rstrip().endswith("?"):
+                reply.question = key
+                return
     else:
-        next_key = next((topic for topic in QUESTION_KEYS
-                         if topic not in interview.covered and topic not in OPT_IN_TOPICS), None)
-        asked = _ask(interview, next_key) if next_key is not None else None
-    logger.warning("setup answer gap filled (%s)", asked.question if asked is not None else "done")
+        following = _next_ask(interview, None, interview.unshown)
+        if isinstance(following, str):
+            asked = _ask(interview, following)
+        elif isinstance(following, ProposalCard):
+            asked = Entry(role="claude", text="", card=following.model_copy(deep=True))
+        else:
+            asked = None
+        reason = "next_topic" if asked is not None else "close"
+    topic = (asked.question or "card") if asked is not None else "done"
+    logger.warning("setup answer gap filled (%s, %s)", topic, reason)
     if asked is not None:
         replies.before(asked.question)
         interview.transcript.append(asked)
@@ -1542,6 +1562,8 @@ async def card_turn(owner, engine, model, interview: Interview, proposal_id: str
     """Continue an in-place or typed card decision. The guarded route owns saving and after_finish."""
     since = len(interview.transcript)
     await _card_turn(owner, engine, model, interview, proposal_id, text)
+    if len(interview.transcript) == since:
+        return
     replies = _TurnReplies(entries=[(entry, True) for entry in interview.transcript[since:]
                                     if entry.role == "claude"])
     await _ensure_answerable(owner, engine, model, interview, since=since, replies=replies)
