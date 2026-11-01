@@ -702,6 +702,15 @@ describe('design system source guards', () => {
       'vision/PhonePage.tsx',
       'vision/VisionFrame.tsx',
     ]);
+    // And every ClaudeMessage they draw passes it, however its props are laid out across lines.
+    const withoutPlainProse = (text: string) =>
+      matches(/<ClaudeMessage\b[\s\S]*?\/>/)(withoutComments(text)).filter((tag) => !/\bplainProse\b/.test(tag));
+    expect(withoutPlainProse('<ClaudeMessage\n  blocks={blocks}\n  language="en"\n/>\n<ClaudeMessage\n  plainProse\n  blocks={blocks}\n/>')).toEqual([
+      '<ClaudeMessage\n  blocks={blocks}\n  language="en"\n/>',
+    ]);
+    const visionTags = files.filter(({ file }) => file.startsWith('vision/') || file === 'ds/boards/vision.tsx');
+    expect(visionTags.flatMap(({ file, text }) => withoutPlainProse(text).map((tag) => `${file}: ${tag}`))).toEqual([]);
+    expect(visionTags.flatMap(({ text }) => matches(/<ClaudeMessage\b/)(withoutComments(text))).length).toBeGreaterThanOrEqual(14);
   });
 
   // Importing the index transforms every component on first use. When the whole suite runs, the
