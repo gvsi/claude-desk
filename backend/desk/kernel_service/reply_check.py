@@ -38,10 +38,11 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    and has at most nine items are blanked from the raw text and left out of the rendered one, and
    every other number stays a violation (the owner's decision of 2026-11-01). Every link a reader
    can click, shown or hidden (a Markdown link or autolink, or a URL with a scheme or "www." or an
-   email address, which the chats autolink), must go to the business's public contact (`https` to
-   a host, or `mailto:` an email, that `charter:contact` names), else `markdown.link` (the owner's
-   decision of 2026-11-01, which replaces the 2026-10-30 one for clickable links); a domain alone
-   isn't a link. Any image is `markdown.image` (`markdown_violations`).
+   email address, which the chats autolink, and any written anywhere in the raw prose), must go to
+   the business's public contact (`https` to a host, or `mailto:` an email, that `charter:contact`
+   names), else `markdown.link` (the owner's decision of 2026-11-01, which replaces the 2026-10-30
+   one for clickable links); a domain alone isn't a link. Any image is `markdown.image`
+   (`markdown_violations`).
 4. Each clause renders from a fact this session may read, current, of the template's kind and ID,
    with no canary in any field it renders or in the fact ID it names. The Desk's catalog
    (`context.catalog_fact`) is cited like a stored fact, and no template renders it, so it backs
@@ -663,30 +664,41 @@ def markdown_reading(prose: str) -> markdown_text.MarkdownText | None:
 
 async def markdown_violations(ctx: KernelCtx, desk_id: str, prose: str,
                               reading: markdown_text.MarkdownText | None, raw: Sequence[Violation],
+                              canaries: Mapping[str, str],
                               scan: Callable[[str], list[Violation]]) -> list[Violation]:
     """What the prose shows once rendered as Markdown (`reading`, the owner's decision of 2026-11-01)
     that the raw scan didn't report: `scan` (the prose scan, with the draft's canaries, names and
-    passed cards) on the visible text, each violation whose kind, rule ID and span `raw` doesn't
-    hold, in order. Then a `promise_word` (`markdown.link`, spanning the link's text, once per
-    text) for each link a reader can click, shown or hidden (`markdown_text.read`'s links: Markdown
-    links and autolinks, and the URLs and email addresses the chats autolink), whose target isn't
-    the business's own contact (`own_target`, the owner's decision of 2026-11-01): payment and
-    booking links come only from cards. Any image is one `promise_word`
-    (`markdown.image`, spanning "image"), since a picture could show anything. Prose the parser can't
-    read whole (no `reading`) is one `promise_word` (`markdown.parse`), and nothing of it is trusted:
-    the raw scan then blanks no list marker either."""
+    passed cards) on the visible text, each violation whose kind, rule ID, span and fact IDs `raw`
+    doesn't hold, in order, so a canary only the rendered text joins up is named too. Then a
+    `promise_word` (`markdown.link`, spanning the link's text, once per text) for each link a reader
+    can click, shown or hidden (`markdown_text.read`'s links: Markdown links and autolinks, and the
+    URLs and email addresses the chats autolink), and each URL or email address written anywhere in
+    the raw prose, whose target isn't the business's own contact (`own_target`, the owner's decision
+    of 2026-11-01): payment and booking links come only from cards. Any image is one `promise_word`
+    (`markdown.image`, spanning "image"), since a picture could show anything. Prose the parser
+    can't read whole (no `reading`) is one `promise_word` (`markdown.parse`), and nothing of it is
+    trusted: the raw scan then blanks no list marker either. These spans quote no canary of
+    `canaries`: each is blanked out first, as the scan's own are."""
     if reading is None:
-        return [Violation(kind="promise_word", span=_span(prose), rule_id="markdown.parse")]
-    reported = {(violation.kind, violation.rule_id, violation.span) for violation in raw}
-    found = [violation for violation in scan(reading.visible)
-             if (violation.kind, violation.rule_id, violation.span) not in reported]
-    if reading.links:
+        span = _span(_blank_canaries(prose, canaries)[0])
+        return [Violation(kind="promise_word", span=span, rule_id="markdown.parse")]
+    reported = {_union_key(violation) for violation in raw}
+    found = [violation for violation in scan(reading.visible) if _union_key(violation) not in reported]
+    # Defence in depth: a URL or email address written anywhere in the prose is held to the contact too.
+    links = [*reading.links, *markdown_text.literal_links(prose)]
+    if links:
         hosts, emails = await contact_endpoints(ctx, desk_id)
-        spans = dict.fromkeys(_span(link.text) for link in reading.links if not own_target(link.href, hosts, emails))
+        spans = dict.fromkeys(_span(_blank_canaries(link.text, canaries)[0]) for link in links
+                              if not own_target(link.href, hosts, emails))
         found += [Violation(kind="promise_word", span=span, rule_id="markdown.link") for span in spans]
     if reading.images:
         found.append(Violation(kind="promise_word", span="image", rule_id="markdown.image"))
     return found
+
+
+def _union_key(violation: Violation) -> tuple[str, str, str, tuple[str, ...]]:
+    """What makes a violation of the rendered reading the same as one of the raw reading."""
+    return violation.kind, violation.rule_id, violation.span, tuple(violation.fact_ids)
 
 
 def own_target(href: str, hosts: frozenset[str], emails: frozenset[str]) -> bool:
@@ -1180,7 +1192,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     markers = reading.list_markers if reading is not None else ()
     raw = scan_prose(markdown_text.blank(prose, markers) if markers else draft.prose, canaries, names, **passed)
     violations += raw
-    violations += await markdown_violations(ctx, desk_id, prose, reading, raw,
+    violations += await markdown_violations(ctx, desk_id, prose, reading, raw, canaries,
                                             lambda visible: scan_prose(visible, canaries, names, **passed))
     violations += refused
     violations += policy_card_violations(prose, cards)

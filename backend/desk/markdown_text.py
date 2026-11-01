@@ -1,16 +1,19 @@
 """What a visitor sees of Claude's prose, which the chats render as Markdown (the owner's decision of
-2026-11-01: CommonMark with GFM tables and strikethrough, no raw HTML, links clickable by their text).
+2026-11-01: CommonMark with GFM tables and strikethrough by one tilde or two, no raw HTML, links
+clickable by their text).
 
-`read` parses the prose with markdown-it (CommonMark, tables and strikethrough, no linkify, raw HTML
-recognised) and returns what a reader sees of it: the text of every block, a newline after each,
-with entities and escapes decoded, emphasis joined to the letters around it, code as written,
-table cells, link and image text, link titles, and each ordered list item's number as its list
-renders it ("N. ", counted from its start), so formatting can hide no number or word from the reply
-check's scan. Every link a reader can click, with its text and target, for the reply check to judge
+`read` parses the prose with markdown-it (CommonMark, tables and strikethrough by one tilde or two,
+no linkify, raw HTML recognised) and returns what a reader sees of it: the text of every block, a
+newline after each, with entities and escapes decoded, emphasis joined to the letters around it,
+code as written, table cells, link text, and each ordered list item's number as its list renders
+it ("N. ", counted from its start), so formatting can hide no number or word from the reply check's
+scan; then each table's lines read whole, since the chats show a cell past the header's width,
+which markdown-it drops; then link titles and images' alt text and titles, after the whole body,
+so none splits a word of it. Every link a reader can click, with its text and target, for the reply check to judge
 (the owner's decision of 2026-11-01: every clickable link goes to the business's contact): inline,
-reference and autolink forms, with a target of any scheme, and, since the chats autolink as GFM does,
-each URL with a scheme or "www." (read as https) and each email address in the visible reading,
-code included (`literal_links`). And whether there is an image. Pure, with no I/O.
+reference and autolink forms, with a target of any scheme, and, since the chats autolink as GFM
+does, each URL with a scheme or "www." (read as https) and each email address in the visible
+reading, code included (`literal_links`). And whether there is an image. Pure, with no I/O.
 
 A numbered list of steps passes (the owner's decision of 2026-11-01): an ordered list that starts at
 1 and has at most nine items, as the parser reads it, shows only the numbers 1 to 9, so its numbers
@@ -43,7 +46,7 @@ MARKER_PREFIX = re.compile(r"[ \t>*+-]*")           # indentation, quote and bul
 # email address (its extended autolinks). Matched anywhere, so a stricter reading than GFM's own.
 URL_LITERAL = re.compile(r"(?:https?://|www\.)[^\s<]+", re.IGNORECASE)
 EMAIL_LITERAL = re.compile(r"[A-Za-z0-9.+_-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+")
-TRAILING = "?!.,:;*_~'\"()[]{}"                        # punctuation after a literal URL, which a sentence puts there
+TRAILING = "?!.,:;*_~'\"()[]{}>"                       # punctuation after a literal URL, which a sentence puts there
 INLINE_TEXT = frozenset({"text", "code_inline"})
 LINE_BREAKS = frozenset({"softbreak", "hardbreak"})
 
@@ -70,7 +73,9 @@ class MarkdownText:
 
 def _parser() -> MarkdownIt:
     # Raw HTML is recognised so the visible reading can leave it out: its tokens add nothing to `visible`.
-    parser = MarkdownIt("commonmark", {"html": True, "maxNesting": MAX_NESTING}).enable(["table", "strikethrough"])
+    # Single tildes strike through as well as double ones, as the chats' renderer (remark-gfm) does.
+    parser = MarkdownIt("commonmark", {"html": True, "maxNesting": MAX_NESTING, "strikethrough_single_tilde": True})
+    parser.enable(["table", "strikethrough"])
     # markdown-it leaves "javascript:" and other unsafe targets unlinked, but the browser's parser links
     # them (then strips the target): every target is tokenized here, for the reply check to judge.
     parser.validateLink = lambda url: True
@@ -126,8 +131,10 @@ def _marker_spans(text: str, tokens: list[Token], items: dict[int, tuple[int, bo
     return tuple(spans)
 
 
-def _inline(children: list[Token], links: list[Link]) -> tuple[str, bool]:
-    """An inline token's visible text, adding its links to `links`; and whether it holds an image."""
+def _inline(children: list[Token], links: list[Link], extras: list[str]) -> tuple[str, bool]:
+    """An inline token's body text, adding its links to `links`, and its link titles and images' alt
+    text and titles to `extras`, which are read after the whole body so none splits a word of it;
+    and whether it holds an image."""
     parts: list[str] = []
     images = False
     open_links: list[tuple[Token, int]] = []
@@ -138,28 +145,30 @@ def _inline(children: list[Token], links: list[Link]) -> tuple[str, bool]:
             parts.append("\n")
         elif child.type == "image":
             images = True
-            alt, _ = _inline(child.children or [], links)
-            parts.append(alt)
+            alt, _ = _inline(child.children or [], links, extras)
+            extras.append(alt)
             if title := child.attrGet("title"):
-                parts.append(f"\n{title}\n")
+                extras.append(str(title))
         elif child.type == "link_open":
             open_links.append((child, len(parts)))
         elif child.type == "link_close" and open_links:
             opened, first = open_links.pop()
             links.append(Link(text="".join(parts[first:]), href=str(opened.attrGet("href") or "")))
             if title := opened.attrGet("title"):
-                parts.append(f"\n{title}\n")
+                extras.append(str(title))
     return "".join(parts), images
 
 
 def read(text: str) -> MarkdownText:
     """`text` as a reader sees it once rendered (see the module's docstring)."""
-    tokens = PARSER.parse(text)
+    env: dict = {}                                     # the reference definitions, for the table lines too
+    tokens = PARSER.parse(text, env)
     if any(token.level >= MAX_NESTING - 1 for token in tokens):
         raise TooDeep("the prose nests deeper than the parser follows")
     items = _ordered_items(tokens)
     parts: list[str] = []
     links: list[Link] = []
+    extras: list[str] = []
     images = False
     for index, token in enumerate(tokens):
         if index in items:
@@ -167,12 +176,22 @@ def read(text: str) -> MarkdownText:
             if not passes:
                 parts.append(f"{number}. ")
         elif token.type == "inline":
-            shown, has_image = _inline(token.children or [], links)
+            shown, has_image = _inline(token.children or [], links, extras)
             parts.append(f"{shown}\n")
             images = images or has_image
         elif token.type in ("code_block", "fence"):
             parts.append(token.content if token.content.endswith("\n") else f"{token.content}\n")
-    visible = "".join(parts)
+    # markdown-it drops a row's cells past its header's width, which the chats' renderer shows: each
+    # table's lines are read whole as well, after the body.
+    lines = LINE_BREAK.split(text)
+    for token in tokens:
+        if token.type == "table_open" and token.map:
+            for line in lines[token.map[0]:token.map[1]]:
+                for inline in PARSER.parseInline(line, env):
+                    shown, has_image = _inline(inline.children or [], links, extras)
+                    parts.append(f"{shown}\n")
+                    images = images or has_image
+    visible = "".join(parts) + "".join(f"{extra}\n" for extra in extras)
     return MarkdownText(visible=visible, links=(*links, *literal_links(visible)), images=images,
                         list_markers=_marker_spans(text, tokens, items))
 

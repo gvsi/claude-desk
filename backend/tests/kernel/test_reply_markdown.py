@@ -8,11 +8,14 @@ to the business's own contact; images are refused.
 """
 
 import pytest
+from sqlalchemy import select
 
 from desk import markdown_text, public_contact
 from desk.contracts import RenderedBlock
+from desk.db.models import Document
 from desk.kernel_service import reply_check
 
+from .helpers import rows_of
 from .test_adapters import visitor_of
 from .test_reply_check import assert_kept, change_fact, checked, clause, own_quote
 
@@ -150,6 +153,8 @@ async def test_every_other_number_stays_blocked(app, client, prose, span):
     ("Save 10&percnt; on it.", {"digit", "percent_sign"}),
     ("&#xbd; the deposit comes back.", {"digit"}),
     ("You get a fr<b></b>ee inspection.", {"lex.en.promise"}),        # a renderer may drop the tags
+    ("You get a fr~ee~ inspection.", {"lex.en.promise"}),              # GFM strikes single tildes through
+    ("You get a fr~~ee~~ inspection.", {"lex.en.promise"}),
     # what the raw text shows inside a tag the chats drop
     ("<span>$100</span> for the visit.", {"currency", "digit"}),
     ("<div>\n$100 for the visit\n</div>", {"currency", "digit"}),
@@ -160,6 +165,25 @@ async def test_formatting_hides_no_claim_from_the_scan(app, client, prose, rule_
     assert verdict.ok is False
     assert rule_ids <= {violation.rule_id for violation in verdict.violations}, verdict.violations
     assert [block.template for block in verdict.blocks] == ["handoff"]      # none of the prose is shown
+
+
+def test_struck_through_text_is_still_read_with_one_tilde_or_two():
+    """The chats' renderer (remark-gfm) strikes text through between one tilde or two; a reader still
+    reads it."""
+    assert markdown_text.read("fr~ee~ and ~~fr~~ee").visible == "free and free\n"
+
+
+def test_titles_and_alt_text_are_read_after_the_body_so_they_split_no_word():
+    read = markdown_text.read('You get a [fr](https://r.example "details")ee ![x](https://r.example/a.png "t") visit.')
+    assert read.visible == "You get a free  visit.\ndetails\nx\nt\n"
+
+
+async def test_a_link_title_splits_no_word_from_the_scan(app, client):
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, 'You get a [fr](https://riveraplumbing.example "details")ee inspection.')
+    assert verdict.ok is False
+    assert ("promise_word", "lex.en.promise", "free") in found(verdict)
 
 
 async def test_html_an_escaping_renderer_shows_is_caught_by_the_raw_reading(app, client):
@@ -220,6 +244,34 @@ async def test_every_clickable_link_must_go_to_the_business_contact(app, client,
     verdict = await checked(client, visitor, prose)
     assert verdict.ok is False
     assert ("promise_word", "markdown.link", span) in found(verdict)
+
+
+TABLE = "| Service | Notes |\n|---|---|\n"
+
+
+async def test_a_cell_past_the_header_is_read_as_the_chats_show_it(app, client):
+    """markdown-it drops a row's cells past its header's width, but the chats' renderer shows them,
+    so each table's lines are read whole too."""
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, f"{TABLE}| Drain | Fast | You get a fr*ee* inspection |")
+    assert verdict.ok is False and ("promise_word", "lex.en.promise", "free") in found(verdict)
+    verdict = await checked(client, visitor, f"{TABLE}| Drain | Fast | [pay](https://elsewhere.example/pay) |")
+    assert verdict.ok is False and ("promise_word", "markdown.link", "pay") in found(verdict)
+
+
+@pytest.mark.parametrize(("prose", "span"), [
+    ("Thanks for asking.\n\n[unused]: https://elsewhere.example/pay", "https://elsewhere.example/pay"),
+    ('<a href="https://elsewhere.example/pay">Our reviews</a> are kind.', 'https://elsewhere.example/pay">Our'),
+    ("Write to <!-- someone@elsewhere.example --> us.", "someone@elsewhere.example"),
+])
+async def test_a_url_or_email_written_anywhere_in_the_prose_is_held_to_the_contact(app, client, prose, span):
+    """Defence in depth: the raw prose is read for URLs and email addresses too, so one the visible
+    reading doesn't show (a reference never used, HTML a renderer drops) is still held to the contact."""
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    verdict = await checked(client, visitor, prose)
+    assert verdict.ok is False and ("promise_word", "markdown.link", span) in found(verdict)
 
 
 @pytest.mark.parametrize("prose", [
@@ -312,15 +364,44 @@ async def test_prose_the_parser_cannot_read_whole_is_refused(app, client, monkey
         ("number_in_prose", "digit"), ("number_in_prose", "digit"), ("promise_word", "markdown.parse")]
 
 
-@pytest.mark.parametrize(("prose", "span"), [
-    ("Here is your quote, and you can [pay here](https://elsewhere.example/pay).", "pay here"),
-    ("Here is your quote. Reviews are at https://elsewhere.example/reviews.", "https://elsewhere.example/reviews"),
+@pytest.mark.parametrize(("prose", "spans"), [
+    # the link by its text, and its URL as the raw prose writes it
+    ("Here is your quote, and you can [pay here](https://elsewhere.example/pay).",
+     ["pay here", "https://elsewhere.example/pay"]),
+    ("Here is your quote. Reviews are at https://elsewhere.example/reviews.", ["https://elsewhere.example/reviews"]),
 ])
-async def test_a_cited_card_is_kept_when_only_a_link_in_the_prose_fails(app, client, prose, span):
+async def test_a_cited_card_is_kept_when_only_a_link_in_the_prose_fails(app, client, prose, spans):
     """A link to a site the contact doesn't name is a failure of Claude's own words: the checked card
     it cited is still shown, without the prose."""
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
     assert_kept(verdict, [("quote", quote.fact_id)])
-    assert found(verdict) == [("promise_word", "markdown.link", span)]
+    assert found(verdict) == [("promise_word", "markdown.link", span) for span in spans]
+
+
+async def test_no_markdown_span_echoes_a_document_canary(app, client):
+    """A canary in a link's text, in a URL, or at the start of prose the parser can't read whole is
+    refused as a canary, and the Markdown violations' spans never quote it."""
+    copy, visitor = await visitor_of(app, client)
+    await with_contact(app, copy)
+    [canary, _] = [row.canary for row in await rows_of(app, copy.copy_id, select(Document))]
+    for prose in (f"See [{canary} details](https://elsewhere.example).", f"See https://elsewhere.example/{canary}.",
+                  ">" * 25 + f" {canary}"):
+        verdict = await checked(client, visitor, prose)
+        assert verdict.ok is False and "canary" in {violation.kind for violation in verdict.violations}
+        assert {violation.rule_id for violation in verdict.violations} & {"markdown.link", "markdown.parse"}
+        assert canary not in verdict.model_dump_json(), prose
+
+
+async def test_a_canary_only_the_rendered_text_shows_is_named_beside_the_raw_one(app, client):
+    """A second document's canary that only the rendered text joins up (its tag dropped) is named
+    too, beside the one the raw text holds."""
+    copy, visitor = await visitor_of(app, client)
+    documents = await rows_of(app, copy.copy_id, select(Document))
+    [plain, hidden] = [row.canary for row in documents]
+    verdict = await checked(client, visitor, f"Your references are {plain} and {hidden[:8]}<b></b>{hidden[8:]}.")
+    named = {fact_id for violation in verdict.violations if violation.kind == "canary"
+             for fact_id in violation.fact_ids}
+    assert named == {f"document:{row.document_id}" for row in documents}
+    assert plain not in verdict.model_dump_json() and hidden not in verdict.model_dump_json()
