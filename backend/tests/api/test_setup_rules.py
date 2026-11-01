@@ -311,6 +311,55 @@ async def offered(app, browser, kernel_http, model: ScriptedModel) -> tuple[Owne
     return owner, state
 
 
+def contact_interview(*said: str, owner_name: str | None = "Maria Rivera") -> setup.Interview:
+    """An interview whose owner gave `said` as their answers to the contact question, Claude replying between them."""
+    transcript = [setup.Entry(role="owner", text="Rivera Plumbing fixes leaks around Oakland."),
+                  setup.Entry(role="claude", text=setup.CONSENT_QUESTION, question="consent"),
+                  setup.Entry(role="owner", text=setup.CONSENT_ANSWERS[False]),
+                  setup.Entry(role="claude", text="Which contact should customers see?",
+                              question="contact_and_after_hours")]
+    for text in said:
+        transcript += [setup.Entry(role="owner", text=text), setup.Entry(role="claude", text="Got it.")]
+    answers = SetupAnswers(summary="Plumbing.", business_name="Rivera Plumbing", owner_display_name=owner_name)
+    return setup.Interview(interview_id="setup-test", copy_id="copy-test", desk_id="desk-test", business_type="trade",
+                           step="questions", consent=False, answers=answers, transcript=transcript)
+
+
+@pytest.mark.parametrize("said, contact", [
+    (["maria@example.test"], "maria@example.test"),
+    # Someone else's address, or one the owner rejects, is never theirs.
+    (["For customers use my assistant Ana at ana@example.test. My own email is maria@example.test."],
+     "maria@example.test"),
+    (["Do not use old@example.test. My contact is maria@example.test"], "maria@example.test"),
+    (["Ana: ana@example.test, Maria: maria@example.test"], "maria@example.test"),
+    (["Bookings go to our team at team@example.test, or reach me at maria@example.test."], "maria@example.test"),
+    # Two addresses with neither marked as the owner's, or both: no offer.
+    (["hello@example.test or bookings@example.test"], None),
+    (["My email is maria@example.test and my email for work is m.rivera@example.test"], None),
+    (["Use my assistant Ana at ana@example.test."], None),
+    # An email beside a phone is the one taken, and the latest answer's correction counts.
+    (["Email maria@example.test or call (510) 555-0142."], "maria@example.test"),
+    (["old@example.test", "Not old@example.test any more, it's maria@example.test now."], "maria@example.test"),
+    # In Spanish.
+    (["Para clientes, mi asistente Ana en ana@example.test. Mi correo es maria@example.test."], "maria@example.test"),
+    (["Ya no uso viejo@example.test, ahora maria@example.test"], "maria@example.test"),
+])
+def test_the_test_client_contact_is_the_owners_own(said, contact):
+    assert setup._owner_contact(contact_interview(*said)) == contact
+
+
+@pytest.mark.parametrize("said, contact", [
+    ("Call 510-555-0142 9 to 5", "510-555-0142"),
+    ("(510) 555-0142 (9-5 weekdays)", "(510) 555-0142"),
+    ("Mobile 0412 345 678 24/7", "0412 345 678"),
+    ("We are open 8.00-17.00", None),
+    ("Call or text 510-555-0142, weekdays 9am-5pm and Saturdays 9-1.", "510-555-0142"),
+    ("Maria, 510.555.0142, open 8:00 to 17:00", "510.555.0142"),
+])
+def test_a_test_client_phone_is_one_number_without_the_hours(said, contact):
+    assert setup._owner_contact(contact_interview(said)) == contact
+
+
 @pytest.mark.parametrize("yes", [True, False])
 async def test_a_test_client_is_put_only_when_the_owner_says_yes(app, browser, fake, kernel_http, model, engine, yes):
     owner, state = await offered(app, browser, kernel_http, model)

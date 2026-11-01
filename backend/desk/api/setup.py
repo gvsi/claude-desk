@@ -2591,35 +2591,122 @@ def finish(interview: Interview) -> None:
 
 # The test client -------------------------------------------------------------------------------------------------
 
-# A phone number as the kernel keeps one on record: digits, spaces, brackets, dots, dashes and a leading "+".
-_TYPED_PHONE = re.compile(r"(?<![\w+(])\+?\(?\d[\d ().-]*\d(?!\w)")
+# A phone number as the kernel keeps one on record: digits, brackets, dots, dashes and a leading "+", with single spaces
+# only before a digit or a bracket, so a number never runs on into the words or hours after it.
+_TYPED_PHONE = re.compile(r"(?<![\w+(])\+?\(?\d(?:[\d().-]|\s(?=[\d(]))*\d(?!\w)")
+# A phone's last group of one or two digits after a longer group, which is the start of something else ("… 0142 9").
+_TRAILING_GROUP = re.compile(r"(.*\d{3})[\s(]+\d{1,2}")
+# Hours and times, which are never part of a phone: a range ("9-5", "9 to 5", "8.00-17.00", "9am-5pm", "9 a 5"), a
+# time ("9am", "17:00") and "24/7".
+_HOUR = r"(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?(?:\s*[ap]\.?m\b\.?)?"
+_TIMES = re.compile(rf"(?<![\w.+-])(?:{_HOUR}\s*(?:-|–|—|\bto\b|\buntil\b|\btill\b|\ba\b|\bhasta\b)\s*{_HOUR}"
+                    r"|24\s*/\s*7|(?:[01]?\d|2[0-4])(?:[:.][0-5]\d)?\s*[ap]\.?m\b\.?|(?:[01]?\d|2[0-4]):[0-5]\d)"
+                    r"(?![\w-]|[.:]\d)", re.IGNORECASE)
 CONTACT_ON_RECORD_MAX = 120        # the most characters the kernel keeps for a contact on record
+# A contact answer's clauses end at a sentence's or a list's punctuation (a dot inside an address doesn't end one).
+_CLAUSE_END = re.compile(r"[;!?\n]|[.,](?=\s|$)")
+# The words just before a contact, in its clause, that tell whose it is: one the owner rejects, one they mark as their
+# own, and one of another person's (by role; a name is checked against the owner's own, `_contact_names`).
+_REJECTED = re.compile(r"\b(?:not|don't|do not|no longer|old|instead of|no|ya no|antiguo|antigua|en vez de)\b")
+_OWNERS = re.compile(r"\b(?:my own|my email|my e-mail|my phone|my number|my cell|my mobile|me at|me on|reach me|"
+                     r"mine is|email me|call me|text me|mi correo|mi teléfono|mi telefono|mi número|mi numero|"
+                     r"mi celular|el mío|el mio)\b")
+_SOMEONE_ELSE = re.compile(r"\b(?:assistant|partner|colleague|co-?worker|receptionist|secretary|manager|wife|husband|"
+                           r"daughter|brother|sister|team|staff|employee|asistente|socio|socia|secretari[ao]|"
+                           r"recepcionista|espos[ao]|marido|hij[ao]|herman[ao]|equipo|gerente)\b")
+# A name just before a contact ("Ana at …", "Maria: …"), and the capitalized words that are never a person's name.
+_NAMED = re.compile(r"([^\W\d_][^\W\d_'-]*)\s*(?::|-|–|\bat\b|\bon\b|\bal\b|\ben\b|\bis\b|\bes\b)?\s*$")
+_NOT_NAMES = _CONTACT_LABEL_WORDS | frozenset({
+    "my", "me", "contact", "contacts", "customers", "clients", "reach", "use", "write", "message", "us", "our", "the",
+    "for", "please", "bookings", "booking", "sales", "orders", "support", "info", "hello", "emergencies", "emergency",
+    "urgent", "after", "hours", "business", "ask", "just", "then", "otherwise", "also", "contacto", "clientes",
+    "cliente", "escríbeme", "llámame", "llama", "escribe", "reservas", "urgencias", "para", "por", "favor", "mi",
+})
 
 
-def _typed_contact(text: str) -> str | None:
-    """The contact in `text` as the owner wrote it: its first email address, else its first phone number of 7 to 15
-    digits outside any web address; None when it has neither."""
+@dataclass
+class _Contact:
+    """A contact the owner typed, with what its clauses said about it across their answers."""
+
+    value: str
+    email: bool
+    rejected: bool = False
+    someone_elses: bool = False
+    marked: bool = False
+
+
+def _contact_names(interview: Interview) -> tuple[frozenset[str], frozenset[str]]:
+    """The owner's name's words, and the words that are no other person's name: labels and the business's name."""
+    def words(text: str | None) -> frozenset[str]:
+        return frozenset(re.findall(r"[^\W\d_]+", (text or "").casefold()))
+    return words(interview.answers.owner_display_name), _NOT_NAMES | words(interview.answers.business_name)
+
+
+def _contacts_in(text: str) -> list[tuple[int, int, str, bool]]:
+    """Each email address and phone number in `text`, in order: (start, end, as written, whether an email). A phone is
+    one number of 7 to 15 digits, outside any web address and without the hours or times beside it."""
+    found = []
     for match in _CONTACT_ADDRESS.finditer(text):
-        found = match.group().rstrip(".,;:!?)]}")
-        if "@" in found and "/" not in found and len(found) <= CONTACT_ON_RECORD_MAX:
-            return found
-    rest = _CONTACT_DOMAIN.sub(" ", _CONTACT_ADDRESS.sub(" ", text))
-    return next((match.group() for match in _TYPED_PHONE.finditer(rest)
-                 if 7 <= len(re.sub(r"\D", "", match.group())) <= 15), None)
+        address = match.group().rstrip(".,;:!?)]}")
+        if "@" in address and "/" not in address and len(address) <= CONTACT_ON_RECORD_MAX:
+            found.append((match.start(), match.start() + len(address), address, True))
+
+    def blank(match: re.Match[str]) -> str:
+        return " " * len(match.group())
+
+    rest = _TIMES.sub(blank, _CONTACT_DOMAIN.sub(blank, _CONTACT_ADDRESS.sub(blank, text)))
+    for match in _TYPED_PHONE.finditer(rest):
+        phone = match.group()
+        if (shorter := _TRAILING_GROUP.fullmatch(phone)) is not None:
+            phone = shorter.group(1)
+        phone = phone.rstrip(" (.-")
+        if 7 <= len(re.sub(r"\D", "", phone)) <= 15:
+            found.append((match.start(), match.start() + len(phone), phone, False))
+    return sorted(found)
 
 
 def _owner_contact(interview: Interview) -> str | None:
-    """The contact the owner gave as theirs: typed in their own answer to the contact question
-    (`contact_and_after_hours`), from the latest answer that names one (`_typed_contact`). Never the public contact
-    the turn's model wrote, which the website or memory may have suggested, and never one typed on another question."""
+    """The contact the owner gave as theirs, from their own answers to the contact question
+    (`contact_and_after_hours`): never the public contact the turn's model wrote, which the website or memory may have
+    suggested, and never one typed on another question. Of every email and phone they typed there (`_contacts_in`),
+    one they reject in its clause ("not", "no longer", "old", "instead of", "ya no" …) or give as another person's ("my
+    assistant Ana at …", "Ana: …") never counts. Of the rest, those they mark as their own ("my email", "reach me",
+    "mi correo", their own name in front …) come first: the one email among them, else the one phone. Two emails, or
+    two phones with no email, that nothing tells apart make no contact, so no offer."""
+    owner_words, not_names = _contact_names(interview)
+    contacts: dict[str, _Contact] = {}
     asked: str | None = None
-    found = None
     for entry in interview.transcript:
         if entry.role == "claude" and (entry.question is not None or entry.card is not None):
             asked = entry.question
-        elif entry.role == "owner" and asked == "contact_and_after_hours":
-            found = _typed_contact(entry.text) or found
-    return found
+            continue
+        if entry.role != "owner" or asked != "contact_and_after_hours":
+            continue
+        text = entry.text.replace("’", "'")
+        clause_ends = [match.end() for match in _CLAUSE_END.finditer(text)]
+        previous = 0
+        for start, end, value, email in _contacts_in(text):
+            before = text[max([previous, *(stop for stop in clause_ends if stop <= start)]):start]
+            previous = end
+            key = value.casefold() if email else re.sub(r"\D", "", value)
+            contact = contacts.setdefault(key, _Contact(value=value, email=email))
+            contact.value = value
+            folded = before.casefold()
+            named = _NAMED.search(before)
+            name = named.group(1).casefold() if named is not None and named.group(1)[0].isupper() else None
+            if _REJECTED.search(folded):
+                contact.rejected = True
+            elif _SOMEONE_ELSE.search(folded) or (name is not None and name not in owner_words | not_names):
+                contact.someone_elses = True
+            elif _OWNERS.search(folded) or (name is not None and name in owner_words):
+                contact.marked = True
+    kept = [contact for contact in contacts.values() if not contact.rejected and not contact.someone_elses]
+    pool = [contact for contact in kept if contact.marked] or kept
+    emails = [contact.value for contact in pool if contact.email]
+    phones = [contact.value for contact in pool if not contact.email]
+    if emails:
+        return emails[0] if len(emails) == 1 else None
+    return phones[0] if len(phones) == 1 else None
 
 
 def _offer_test_client(interview: Interview) -> None:
