@@ -1831,7 +1831,7 @@ async def test_the_quote_turn_stores_and_publishes_a_pricing_policy(app, browser
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type="office")
     interview_id = state["interview_id"]
-    await consent(owner, interview_id, False)
+    await consent(owner, interview_id, False, model)
     await answered_up_to(owner, model, interview_id, "quote_limit")
 
     pricing = "priced per case after a consult"

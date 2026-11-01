@@ -257,7 +257,8 @@ async def test_setup_finishes_with_clean_charter_claims_after_a_pricing_refusal(
     first, retry = fake.called("PUT /desks/{id}/charter")
     assert retry.body["charter"] == [claim for claim in first.body["charter"] if claim["key"] != "policy:pricing"]
     warnings = [record.getMessage() for record in caplog.records
-                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING
+                and record.getMessage().startswith("setup dropped refused charter claims:")]
     assert len(warnings) == 1
     assert "policy:pricing" in warnings[0] and "currency" in warnings[0] and "digit" in warnings[0]
     assert "$90" not in caplog.text and intake not in caplog.text

@@ -186,9 +186,9 @@ Text charter claims, each only when set: `policy:about` (the summary), `policy:s
 
 ### Task A4: publish what setup learned for the visitor agent (1.5 h, must)
 
-**Files:** Modify `prompts.py` (`SetupAnswers` gains `pricing`, `intake`, `urgent`, each `str | None ≤ 500`; the fact turn fields), `setup.py` (`seed_parts`). Test `test_setup_rules.py`.
+**Files:** Modify `prompts.py` (`SetupAnswers` gains `pricing`, `intake`, `urgent`, each `str | None ≤ 500`, stored-only `how_we_help` ≤ 1500 for the finish step, and code-only `suggested_fields: list[str]`, default empty; the fact turn fields), `setup.py` (`seed_parts`). Test `test_setup_rules.py` and `test_setup_questions.py`. Policy descriptions and the consultant prompt keep amounts, percentages, times, days and numbers out of policy text, leave hours to their topic, and keep `after_hours` customer-facing, without private owner instructions or personal phone numbers. Limit turns read no stored policies; only the existing quote turn may set `pricing` from the owner's answer alongside its `price_items`.
 
-**Interfaces:** `seed_parts` writes text claims `policy:about` (the summary), `policy:service_area`, `policy:pricing`, `policy:intake`, `policy:after_hours`, `policy:urgent`, and `contact`, each only when set. Consumed by C1.
+**Interfaces:** `seed_parts` uses one `SETUP_POLICY_CLAIMS` field-to-key map to write trimmed, nonblank text claims `policy:about` (the summary), `policy:service_area`, `policy:pricing`, `policy:intake`, `policy:after_hours`, `policy:urgent`, and `policy:how_we_help`. Fields in `suggested_fields` publish no policy claim until owner confirmation. `contact` comes from `public_contact`; hours keep their own part. Consumed by C1. The kernel policy-text check (B7) must ship with these claims. A detailed promise refusal drops its named keys and retries once; a cap refusal or detail naming no charter key goes straight to contact only. A second detailed refusal falls back to contact; at most three charter PUTs occur and other failures propagate.
 
 - [ ] **Test** `test_seed_parts_publish_policy_claims`: answers with every field give exactly those keys, kind `text`, values trimmed; unset fields give no claim.
 - [ ] Implement; run `test_setup_rules.py test_setup_questions.py -q`; commit `feat(api): publish setup's business summary and policies to the Desk`.
