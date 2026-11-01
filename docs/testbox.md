@@ -97,8 +97,10 @@ sync are reconciled on the next call. Successful sync atomically promotes the ma
 Changing branches removes stale synced files and invalidates affected build/schema caches.
 The client transfers its own worker and helper modules separately from the selected tree;
 another checkout's client works with `--lane` even on a branch without `tools/testbox`.
-The launcher accepts the current and previous protocol versions; older clients must update
-their branch's tools or re-provision. Runner diagnostics go to stderr; set `TESTBOX_TIMING=1`
+Each client sends its protocol version. The launcher accepts the current version and the one
+before it, so from the next version on a client one version behind keeps working. Version 2 is
+the first that clients send: clients from before it send none and are refused, and must update
+their branch's `tools/testbox`. Runner diagnostics go to stderr; set `TESTBOX_TIMING=1`
 for phase timings. Exit 75 means the test machine is bootstrapping: retry shortly. Exit 78
 means its last setup failed or was cut short: re-run `tools/testbox/provision.sh`.
 Do merges, rebases, fetches and commits locally: the remote copy is disposable and nothing comes back.

@@ -11,8 +11,9 @@ import signal
 import subprocess
 import sys
 
-# Versions 1 and 2 share the lane/call-id/command envelope. Keep one previous
-# client generation usable when a newer branch provisions the machine.
+# Accept this protocol version and the one before it, so from the next version on a client one
+# version behind keeps working after a newer branch re-provisions the machine. Version 2 is the
+# first one clients send; clients from before it send none and are refused, so only 2 is in use.
 PROTOCOL_VERSION = 2
 if os.environ.get("TESTBOX_PROTOCOL") not in {str(PROTOCOL_VERSION), str(PROTOCOL_VERSION - 1)}:
     raise SystemExit("update your branch's tools/testbox or re-provision")

@@ -225,13 +225,16 @@ def test_runner_transfer_is_independent_of_the_selected_repository(tmp_path):
 
 
 def test_launcher_accepts_current_and_previous_protocol_only():
+    """Clients before version 2 sent no version at all, so they are refused like any unknown version."""
     import os
     from desk_tools.testbox_client import PROTOCOL_VERSION
 
     launcher = Path(__file__).parents[1] / 'testbox/lane-exec.py'
-    for version in (PROTOCOL_VERSION, PROTOCOL_VERSION - 1, 0, PROTOCOL_VERSION + 1):
-        result = subprocess.run(['python3', str(launcher), 'INVALID', 'a' * 32, 'true'],
-            env={**os.environ, 'TESTBOX_PROTOCOL': str(version)}, capture_output=True, text=True)
+    for version in (PROTOCOL_VERSION, PROTOCOL_VERSION - 1, 0, PROTOCOL_VERSION + 1, None):
+        env = {key: value for key, value in os.environ.items() if key != 'TESTBOX_PROTOCOL'}
+        if version is not None:
+            env['TESTBOX_PROTOCOL'] = str(version)
+        result = subprocess.run(['python3', str(launcher), 'INVALID', 'a' * 32, 'true'], env=env, capture_output=True, text=True)
         if version in (PROTOCOL_VERSION, PROTOCOL_VERSION - 1):
             assert 'Invalid lane name' in result.stderr
         else:
