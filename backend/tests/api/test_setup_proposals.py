@@ -1623,6 +1623,27 @@ async def test_disabling_tools_declines_an_already_accepted_payment(proposals, a
     assert "Pay a retainer" not in (interview.answers.how_we_help or "")
 
 
+async def test_minted_configless_payment_accepts_an_owner_amount(proposals, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+        interview.business_tools_enabled = True
+        card = setup._planned_job(interview, setup.JobDraft.model_validate(
+            job("payment", title="Pay a retainer", config=None).model_dump(exclude={"can_do_today"})))
+        interview.transcript.append(setup.Entry(role="claude", text="", planned=[card]))
+        setup._show_card(interview, card)
+        await setup._save(conn, interview)
+    path = f"/api/owner/setup/{interview_id}/proposals/{card.proposal_id}?cards=1"
+    refused = await owner.browser.post(path, json={"accept": True})
+    assert refused.status_code == 422 and refused.json()["error"] == "amount_required"
+    response = await owner.browser.post(path, json={"accept": True, "amount_cents": 2500})
+    accepted = next(item for item in shown(response) if item["proposal_id"] == card.proposal_id)
+    assert accepted["state"] == "accepted"
+    assert accepted["job"]["config"] == {
+        "block": "purpose_payment", "purpose": "Pay a retainer", "amount_cents": 2500}
+
+
 @pytest.mark.parametrize("typed", [False, True])
 @pytest.mark.parametrize("amount", [None, 25_000])
 async def test_payment_accept_is_refused_while_business_tools_are_disabled(proposals, app, model, engine, typed, amount):

@@ -1661,6 +1661,9 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
         logger.warning("setup dropped an unavailable job of kind %s", draft.job)
         return None
     fields = draft.model_dump(mode="json")
+    if draft.job == "payment" and fields["config"] is None:
+        fields["config"] = PurposePaymentConfig(block="purpose_payment", purpose=draft.title[:60],
+                                                 amount_cents=None).model_dump(mode="json")
     if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
         fields["config"]["amount_cents"] = None
     if not interview.business_tools_enabled:
