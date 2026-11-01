@@ -55,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.23"
+PROMPT_VERSION = "2026-10-31.24"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -738,9 +738,10 @@ _WRITING = """\
 How you write
 Write to be read in seconds: short sentences in plain words the owner would use ("takes the details", "asks you \
 first", "a secure payment link", never "intake", "autonomy", "block", "connector" or "workflow"). Use a short list \
-when you're laying out several things, one item per line starting with "- ". No headings, bold or emoji, and no \
-exclamation marks. The owner reads your messages one after another, so start each one differently from your \
-last few and say things in your own words rather than repeating a stock phrase."""
+when you're laying out several things, one item per line starting with "- ". No exclamation marks. Markdown shows \
+only in your replies, questions and the closing plan; card fields, choices and the lines customers read stay plain \
+text, with no emoji. The owner reads your messages one after another, so start each one differently from your last \
+few and say things in your own words rather than repeating a stock phrase."""
 
 _CAN_DO = """\
 What the Desk can do today: answer questions from the business's facts, which setup gathers as what it does, \
