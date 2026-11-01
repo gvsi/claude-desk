@@ -162,12 +162,17 @@ for (const viewport of ['desktop', 'phone'] as const) {
 it('setup_reload_hands_off', async () => {
   // A reload at the tools: while the interview is read, the column draws a step's header as shapes;
   // then the real header lands and the tools list's own shapes carry on at once, with no frame
-  // without shapes until the list lands.
+  // without shapes until the list lands. The page keeps one heading throughout: setup's name,
+  // visually hidden, while the interview is read, then the step's own title.
   const state = await interviewAt('tools');
   const interview = holdReads(path('setup', state));
   const tools = holdReads(path('setupTools', state));
   const gaps = watchSkeletonGaps('.cd-setup-tools');
   let title: DOMRect | undefined;
+  /** The page's headings at each commit from the interview's shapes on, with its region's layer state. */
+  const headings: { layer: string; h1: string[] }[] = [];
+  let watching: MutationObserver | undefined;
+  onTestFinished(() => watching?.disconnect());
   await expectSkeletonLoad({
     status: 'Reading your tools',
     continues: true,
@@ -183,6 +188,23 @@ it('setup_reload_hands_off', async () => {
       });
       expect(opening.closest('.cd-skeleton-screen')!.querySelector('[role="status"]')!.textContent).toBe('Opening your setup');
       title = opening.querySelector('[data-skeleton-anchor="page-title"]')!.getBoundingClientRect();
+      // While the interview is read: one heading, setup's name, visually hidden in the page's main,
+      // outside the hidden layer.
+      const h1s = document.querySelectorAll('h1');
+      expect(h1s).toHaveLength(1);
+      expect(h1s[0]!.textContent).toBe('Set up your Desk');
+      expect(h1s[0]!.classList.contains('cd-sr-only')).toBe(true);
+      expect(h1s[0]!.closest('.cd-skeleton-screen__layer')).toBeNull();
+      expect(h1s[0]!.closest('main')).not.toBeNull();
+      const region = opening.closest('.cd-skeleton-screen')!;
+      const record = () =>
+        headings.push({
+          layer: region.querySelector<HTMLElement>(':scope > .cd-skeleton-screen__body > .cd-skeleton-screen__layer')?.dataset.state ?? 'gone',
+          h1: [...document.querySelectorAll('h1')].map((h1) => h1.textContent ?? ''),
+        });
+      record();
+      watching = new MutationObserver(record);
+      watching.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-state'] });
       interview.release();
       // The header lands real while the list keeps its shapes.
       await vi.waitFor(() => expect(tools.held()).toBe(1));
@@ -194,6 +216,13 @@ it('setup_reload_hands_off', async () => {
   expect(Math.abs(real.top - title!.top)).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
   expect(Math.abs(real.left - title!.left)).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
   expect(gaps()).toBe(0);
+  // One heading at every commit: setup's name while the interview's shapes show, then the step's
+  // title, already while those shapes fade over it, and after.
+  watching!.disconnect();
+  expect(headings.filter(({ h1 }) => h1.length !== 1), 'one h1 at every commit').toEqual([]);
+  expect(headings.find(({ layer }) => layer === 'shown')?.h1).toEqual(['Set up your Desk']);
+  expect(headings.find(({ layer }) => layer === 'leaving')?.h1).toEqual(['What Claude can use']);
+  expect(headings.at(-1)).toEqual({ layer: 'gone', h1: ['What Claude can use'] });
   await expectScreenBasics(document.body, { owner: true });
 });
 

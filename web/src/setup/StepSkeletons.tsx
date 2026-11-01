@@ -13,13 +13,18 @@ import { SETUP_COPY } from './copy.ts';
  * Setup's column while the interview itself is read ("Opening your setup"): a step's header as
  * shapes, since every step opens with a `PageHeader`, a title over a line (two on a phone). The
  * step is drawn in it once read: a step whose own read is still out carries the shapes on at once
- * under its real header, so a reload never goes blank between the two.
+ * under its real header, so a reload never goes blank between the two. Meanwhile the page keeps one
+ * heading, setup's name, visually hidden outside the shapes, as Today's opening does; the step's own
+ * title replaces it in the commit the step is drawn in.
  */
 export function SetupOpening({ loading, children }: { loading: boolean; children?: ReactNode }) {
   return (
-    <SkeletonScreen loading={loading} status={SETUP_COPY.questions.loading} skeleton={<PageHeaderSkeleton subtitleLines={{ wide: 1, phone: 2 }} />}>
-      {children}
-    </SkeletonScreen>
+    <>
+      {loading ? <h1 className="cd-sr-only">{SETUP_COPY.stepsLabel}</h1> : null}
+      <SkeletonScreen loading={loading} status={SETUP_COPY.questions.loading} skeleton={<PageHeaderSkeleton subtitleLines={{ wide: 1, phone: 2 }} />}>
+        {children}
+      </SkeletonScreen>
+    </>
   );
 }
 
