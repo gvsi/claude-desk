@@ -1352,6 +1352,7 @@ class Desk:
     cards: list[RuleCard] = field(default_factory=list)
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
+    seed_enables: tuple[ToolPin, ...] = ()   # the tools the seed's version 1 turned on as it activated (its enables)
     auto_money_cap_cents: int = 0       # the active version's money cap: 0 for a Desk `POST /desks` makes
     notify_now: list[str] = field(default_factory=list)              # event kinds that alert at once
     ledger: list[LedgerEntry] = field(default_factory=list)
@@ -1866,8 +1867,7 @@ class FakeKernelState:
                        for ref, title, owner_ref, body in RIVERA_DOCUMENTS],
             notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
-        desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS,
-                                 business_tools=RIVERA_BUSINESS_TOOLS)
+        desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
         desk.rivera_seed = True
         for lang, questions in RIVERA_STARTERS.items():
             for n, question in enumerate(questions, start=1):
@@ -1879,18 +1879,36 @@ class FakeKernelState:
             # Preserve insertion order without moving the shared clock used by other fake activity.
             self._store_knowledge(desk, item.model_copy(deep=True),
                                   created_at=self.now + timedelta(microseconds=index))
+        self._seed_business_tools(desk, RIVERA_BUSINESS_TOOLS)
         return desk
 
-    def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
-                     cards: list[RuleCard], business_tools: list[dict] | None = None) -> Desk:
-        """The one `DeskSeed` path (`POST /copies` and `POST /desks`): the business (or an existing one of the copy),
-        the Desk, its people, documents (each body ending with a fresh canary, its fact naming only the title), prices,
-        slots, notification prefs, `tools` rows (each of `business_tools` enabled at its definition, as the seed's rules
-        version turns the Rivera seed's on), the active policy version of `cards`, the charter facts, the
-        `charter:hours` fact and a `desk_data` entry."""
+    def _seed_business_tools(self, desk: Desk, business_tools: list[dict]) -> None:
+        """The seed's business tools as the kernel writes them: through the owner's replacement (ledgered
+        `business_tools`, each "new"), then turned on by version 1 as it activates (its `enables`, the version's row
+        written again over them, and a `tool_pin` "enabled" entry for each, naming version 1 and the pin)."""
         from desk.contracts import BusinessTool, BusinessToolDef
         from desk.kernel_service.adapters.blocks import profile as block_profile
 
+        profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
+                    for tool in map(BusinessTool.model_validate, business_tools)]
+        self.append(desk, "business_tools", {"tools": [
+            {"tool": profile.tool, "block": profile.business.config.block,
+             "definition_sha256": profile.definition_sha256, "change": "new"} for profile in profiles]})
+        for profile in profiles:
+            self._put_tool(desk, profile.model_copy(update={"status": "enabled", "review_reason": None}))
+        desk.seed_enables = tuple(ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256)
+                                  for profile in profiles)
+        self._put_policy(desk)
+        for pin in desk.seed_enables:
+            self.append(desk, "tool_pin", {"tool": pin.tool, "event": "enabled", "version": desk.policy_version,
+                                           "definition_sha256": pin.definition_sha256})
+
+    def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
+                     cards: list[RuleCard]) -> Desk:
+        """The one `DeskSeed` path (`POST /copies` and `POST /desks`): the business (or an existing one of the copy),
+        the Desk, its people, documents (each body ending with a fresh canary, its fact naming only the title), prices,
+        slots, notification prefs, `tools` rows, the active policy version of `cards`, the charter facts, the
+        `charter:hours` fact and a `desk_data` entry."""
         if business.existing_business_id is not None:
             existing = next((desk for desk in self.desks.values() if desk.copy_id == copy_id
                              and desk.business_id == business.existing_business_id), None)
@@ -1929,10 +1947,6 @@ class FakeKernelState:
         self._put("notification_prefs", (desk.desk_id,), {**ids, **seed.notifications.model_dump()})
         for tool in tools:
             self._put_tool(desk, tool_profile(tool))
-        for configured in map(BusinessTool.model_validate, business_tools or ()):
-            definition = BusinessToolDef.model_validate(configured.model_dump(exclude={"tool"}))
-            self._put_tool(desk, block_profile(configured.tool, definition).model_copy(
-                update={"status": "enabled", "review_reason": None}))
         desk.cards = list(cards)
         self._put_policy(desk)
         for claim in seed.charter:

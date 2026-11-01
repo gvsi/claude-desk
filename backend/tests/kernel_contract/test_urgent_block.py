@@ -1,5 +1,6 @@
 """The same urgent callback and immediate owner delivery against fake and real kernels."""
 
+import json
 
 import pytest
 
@@ -92,6 +93,15 @@ async def test_a_fresh_copy_handles_an_emergency_through_the_seeded_urgent_tool(
                                'description': 'Asks Maria to call back urgently about an emergency.',
                                'config': {'block': 'urgent', 'urgent_when':
                                           'A burst or leaking pipe, flooding, a sewage backup, or no water'}}
+    # written as the owner's replacement writes it, then turned on by the seed's version 1
+    ledger = await owner.call('GET /ledger/{desk_id}?verify=true', path={'desk_id': desk_id})
+    seeded = [(entry.event.kind, entry.event.summary) for entry in ledger.entries
+              if entry.event.kind in ('business_tools', 'tool_pin') and 'emergency' in json.dumps(entry.event.summary)]
+    assert seeded == [
+        ('business_tools', {'tools': [{'tool': 'desk.emergency-callback', 'block': 'urgent',
+                                       'definition_sha256': row['definition_sha256'], 'change': 'new'}]}),
+        ('tool_pin', {'tool': 'desk.emergency-callback', 'event': 'enabled', 'version': 1,
+                      'definition_sha256': row['definition_sha256']})]
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
     session = http.session(visitor.session_token)
     seen = await session.call('GET /context/{session_id}?desk_id=', path={'session_id': visitor.state.session_id})
