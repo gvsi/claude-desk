@@ -55,8 +55,12 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     const { panel } = await ask(viewport);
     // Four words sent: the fourth waits for what follows it.
     await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
-    // Claude's words take the writing dots' place, in its serif, and nothing it drafted shows yet.
-    expect(panel.element().querySelector('.cd-writing-indicator')).toBeNull();
+    // Claude's words take the writing dots' place, in its serif, and nothing it drafted shows yet. A
+    // screen reader hears "Claude is writing" until the final answer, which it hears once.
+    const writing = panel.getByRole('status').filter({ hasText: 'Claude is writing' });
+    await expect.element(writing).toBeInTheDocument();
+    expect(writing.element().getBoundingClientRect().width).toBeLessThanOrEqual(1);
+    expect(growing(panel)?.getAttribute('aria-hidden')).toBe('true');
     expect(getComputedStyle(growing(panel)!.querySelector('p')!).fontFamily).toContain('Source Serif 4');
     expect(panel.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     expect(requests('ruleChat')).toHaveLength(1);

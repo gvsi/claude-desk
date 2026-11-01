@@ -413,15 +413,19 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
         {sending !== null ? <VisitorMessage text={sending} /> : null}
         {/* The memory question's answer shows the moment it is pressed, with Claude writing under it. */}
         {consenting === null ? null : <VisitorMessage text={consenting ? copy.allow : copy.decline} />}
-        {/* The running turn as it is written: its reads' labels, then Claude's reply, which the saved turn replaces. */}
-        {growing?.labels.map((label) => <ToolLabel key={label.read} text={label.text} />)}
+        {/* The running turn as it is written: its reads' labels, then Claude's reply, which the saved
+            turn replaces. Screen readers hear "Claude is writing" until the saved turn, then it once. */}
+        {growing?.labels.map((label) => (
+          <div key={label.read} aria-hidden="true">
+            <ToolLabel text={label.text} />
+          </div>
+        ))}
         {growing !== null && settledWords(growing.text) !== '' ? (
-          <div className="cd-claude-message cd-setup-growing" lang="en" aria-busy="true">
+          <div className="cd-claude-message cd-setup-growing" lang="en" aria-hidden="true">
             <GrowingReply text={growing.text} streaming />
           </div>
-        ) : sending !== null || consenting !== null || busy || deciding !== null || suggesting ? (
-          <WritingIndicator language="en" />
         ) : null}
+        {sending !== null || consenting !== null || busy || deciding !== null || suggesting ? <WritingIndicator language="en" /> : null}
         {/* While the reads stream, they say what is happening; only a step that can't follow them says it waits. */}
         {consentBusy && growing === null && stream.fellBack ? (
           <p className="cd-setup-step__line cd-type-meta">{copy.putting}</p>

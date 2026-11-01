@@ -56,8 +56,14 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     await expect.poll(() => growing()?.textContent).toBe(growingWords(OPENING)[3]);
     // The read's label came first, as the saved interview will hold it.
     await expect.element(screen.getByText(MEMORY_LABEL, { exact: true })).toBeVisible();
-    // Claude's words take the writing dots' place, and its question waits for the saved turn.
-    expect(document.querySelector('.cd-writing-indicator')).toBeNull();
+    // Claude's words take the writing dots' place on screen, and its question waits for the saved turn.
+    // A screen reader hears "Claude is writing" until the saved turn, which it hears once: never
+    // the words as they grow, nor the read's label twice.
+    const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
+    await expect.element(writing).toBeInTheDocument();
+    expect(writing.element().getBoundingClientRect().width).toBeLessThanOrEqual(1);
+    expect(growing()?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByText(MEMORY_LABEL, { exact: true }).element().closest('[aria-hidden="true"]')).not.toBeNull();
     expect(screen.getByRole('region', { name: FIRST_QUESTION, exact: true }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Both, about evenly', exact: true }).elements()).toHaveLength(0);
     expectNoHorizontalScroll();
@@ -66,6 +72,7 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     held.release();
     await expect.element(screen.getByRole('region', { name: FIRST_QUESTION, exact: true })).toBeVisible();
     expect(growing()).toBeNull();
+    expect(screen.getByText(MEMORY_LABEL, { exact: true }).element().closest('[aria-hidden="true"]')).toBeNull();
     // The saved message takes the growing one's place: each paragraph once.
     for (const paragraph of CPA_COPY.opening) expect(screen.getByText(paragraph, { exact: true }).elements()).toHaveLength(1);
     expect(screen.getByText(MEMORY_LABEL, { exact: true }).elements()).toHaveLength(1);

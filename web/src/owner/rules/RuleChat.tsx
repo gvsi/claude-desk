@@ -224,7 +224,7 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
   useRevealGrowing(root, turns, writing);
   return (
     <div ref={root} className="cd-rule-chat">
-      <AskClaudePanel onClose={onClose} onSend={onSend} busy={busy && writing === null}>
+      <AskClaudePanel onClose={onClose} onSend={onSend} busy={busy}>
         {turns.map((turn) => {
           if (turn.kind === 'owner') {
             return (
@@ -265,8 +265,9 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
           );
         })}
         {writing === null ? null : (
-          // Claude's answer as it is written: its words only. What it drafts shows once the answer is final.
-          <div className="cd-rule-chat__turn cd-rule-chat__answer cd-rule-chat__growing" aria-busy="true">
+          // Claude's answer as it is written: its words only. What it drafts shows once the answer is
+          // final. Screen readers hear "Claude is writing" until then, and the final answer once.
+          <div className="cd-rule-chat__turn cd-rule-chat__answer cd-rule-chat__growing" aria-hidden="true">
             <div className="cd-claude-message" lang="en">
               <GrowingReply text={writing} streaming />
             </div>
