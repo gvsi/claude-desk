@@ -1053,7 +1053,7 @@ export const Skeleton: Story = {
   beforeEach: loadWebFonts,
   parameters: {
     canvas: 'none',
-    canvasNote: 'P12-02, UXC-P1202-After (#artboard-d122e70134a0). The shapes follow the current shell; greeting and starter chips have not shipped.',
+    canvasNote: 'P12-02, UXC-P1202-After (#artboard-d122e70134a0). The shapes draw the docked composer and footer of a resumed chat. A first visit lands on the greeting, inline composer and optional starter chips.',
   },
   render: (args) => (
     <div>
