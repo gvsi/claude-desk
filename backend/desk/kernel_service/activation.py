@@ -368,6 +368,8 @@ def profiles_sha256(profiles: Iterable[ToolProfile]) -> str:
         if profile.tool in by_tool:
             raise ValueError(f"{profile.tool} is enabled twice")
         by_tool[profile.tool] = profile.model_dump(mode="json", exclude=set(adapters.UNHASHED_PROFILE_FIELDS))
+        if profile.business is None:
+            by_tool[profile.tool].pop("business", None)
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(by_tool)).encode()).hexdigest()
 
 
@@ -1210,7 +1212,9 @@ def _hashes(profiles: Sequence[ToolProfile], schema: Mapping[str, Any], auto_mon
 async def draft_profiles(ctx: KernelCtx, desk_id: str, enables: Sequence[ToolPin] = ()) -> list[ToolProfile]:
     """The profiles a version of the Desk enabling `enables` is proved over: its enabled tools'
     plus each tool `enables` turns on, pinned at its hash."""
-    return mcp_pins.enabled_with(await desks.enabled_profiles(ctx, desk_id), enables)
+    rows = await mcp_pins._rows(ctx, desk_id, [pin.tool for pin in enables], lock=False)
+    return mcp_pins.enabled_with(await desks.enabled_profiles(ctx, desk_id), enables,
+                                 {tool: row.profile for tool, row in rows.items()})
 
 
 async def current_hashes(ctx: KernelCtx, desk_id: str, auto_money_cap_cents: int, *,
@@ -1493,7 +1497,11 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
                             persist=partial(_ledger_unavailable, copy_id=copy_id, desk_id=desk_id, version=version))
     if pins.state != "ok":
         raise ConfirmConflict(copy_id, desk_id, version, "pin_changed", drifted=pins.drifted)
-    if _proved_against(row) != await current_hashes(ctx, desk_id, row.auto_money_cap_cents, enables=row.enables):
+    try:
+        hashes = await current_hashes(ctx, desk_id, row.auto_money_cap_cents, enables=row.enables)
+    except mcp_pins.BusinessProfileChanged:
+        raise ConfirmConflict(copy_id, desk_id, version, "pin_changed") from None
+    if _proved_against(row) != hashes:
         raise ConfirmConflict(copy_id, desk_id, version, "hash_changed")
     if compiler.above_money_cap(row.cards, row.auto_money_cap_cents):
         raise ConfirmConflict(copy_id, desk_id, version, "above_money_cap")
@@ -2017,12 +2025,18 @@ async def _probe_tools(ctx: KernelCtx, row: PolicyVersionRow) -> dict[str, _Prob
     off."""
     from desk.kernel_service import decide       # decide builds on this module
 
-    tools = {tool: _ProbeTool(tool_row.profile, tool_row.profile_sha256)
+    tools = {tool: _ProbeTool(tool_row.profile.model_copy(update={"status": tool_row.status}), tool_row.profile_sha256)
              for tool, tool_row in (await decide.enabled_tools(ctx, row.desk_id)).items()}
     if row.status not in ("active", "superseded"):
         for pin in row.enables or ():
-            if pin.tool in adapters.ADAPTERS:    # a tool no adapter runs is never given
-                profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256)
+            # A stale draft pin never borrows a newer enabled definition from the live Desk.
+            tools.pop(pin.tool, None)
+            adapter = await adapters.resolve(ctx, row.desk_id, pin.tool)
+            if adapter is not None:    # a tool no adapter runs is never given
+                try:
+                    profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256, adapter.profile)
+                except mcp_pins.BusinessProfileChanged:
+                    continue          # a changed business pin is not given; the batch still runs
                 tools[pin.tool] = _ProbeTool(profile, adapters.profile_sha256(profile))
     return tools
 
@@ -2083,6 +2097,7 @@ class _Prober:
         principal, session_row = _probe_principal(ctx.copy_id, row.desk_id, probe)
         subject, tool = _probe_subject(probe, self.people), probe.call.tool
         list_cents, discount = probe.amount_cents, None
+        adapter = await adapters.resolve(self.ctx, self.desk_row.desk_id, tool)
 
         def discounted() -> int | None:
             """The stand-in price less the discount asked for ("Discounts")."""
@@ -2090,13 +2105,13 @@ class _Prober:
 
         def asked() -> str:
             """"<subject> asks to <what>.", with the stand-in amount and the discount asked for."""
-            return explain.asked(subject, "asks", tool, discounted(), discount)
+            return explain.asked(subject, "asks", tool, discounted(), discount,
+                                 business=adapter.profile.business if adapter is not None else None)
 
         def refused(code: str) -> ProbeResult:
             return self._result(probe, "refuse", [], False,
                                 [asked(), PROBE_OUTCOME_PLAIN["refuse"], PROBE_REFUSED_PLAIN[code]])
 
-        adapter = adapters.ADAPTERS.get(tool) if tool in decide.TOOL_NAMES else None
         if adapter is None:
             return refused("unknown_tool")
         if tool not in decide.tools_given(principal, session_row, self.desk_row, self.tools):

@@ -65,12 +65,15 @@ async def test_both_soft_checkers_read_each_card_with_its_kind(language, prose, 
     assert violations == []
 
 
-@pytest.mark.parametrize(("verdict", "jev_blocked"), [
-    pytest.param(None, False, id="unavailable"),
-    pytest.param(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=True), False, id="denies-ai"),
-    pytest.param(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False), True, id="jev"),
+@pytest.mark.parametrize(("verdict", "jev_blocked", "found"), [
+    pytest.param(None, False, [("check_unavailable", "soft.unavailable")], id="unavailable"),
+    pytest.param(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=True), False,
+                 [("soft_promise", "soft.denies_ai")], id="denies-ai"),
+    pytest.param(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False), True,
+                 [("soft_promise", "soft.jev")], id="jev"),
 ])
-async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict, jev_blocked, monkeypatch):
+async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict, jev_blocked, found, monkeypatch):
+    """One Sonnet try (no recheck): the kernel asks the model once, with no per-try timeout of its own."""
     soft_promise = AsyncMock(return_value=(verdict, None))
     ctx = stub_ctx(soft_promise)
     monkeypatch.setattr(reply_check.context, "resolved_tools", AsyncMock(return_value=[]))
@@ -85,7 +88,7 @@ async def test_owner_copy_covers_the_kernels_soft_check_rule_ids(verdict, jev_bl
 
     soft_promise.assert_awaited_once_with(SoftPromiseInput(language="en", prose=prose, cards=[]))
     assert usage is None
-    assert len(violations) == 1 and violations[0].kind == "soft_promise"
+    assert [(violation.kind, violation.rule_id) for violation in violations] == found
     assert {violation.rule_id for violation in violations} <= REPLY_WHY_BY_RULE.keys()
     if jev_blocked:
         assert REPLY_WHY_BY_RULE["soft.jev"] == "a second check flagged a promise the business's records don't back"

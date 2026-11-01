@@ -3,7 +3,8 @@
 A draft from Claude is guarded prose plus typed clauses. The kernel scans the prose in English and
 Spanish for numbers, money, percentages, dates and promise words, renders each clause from
 a fact the session may read, in the reply's language, and answers with a signed, ledgered verdict:
-the prose and cards when everything passed, else only the handoff clause.
+the prose and cards when everything passed, checked cards alone when only the prose failed,
+and the handoff clause when no card can be kept.
 
 Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), with
 the facts made the way a conversation makes them: a quote, open times and a booking decided and
@@ -73,9 +74,9 @@ def clause(template: str, fact_id: str | None = None) -> dict:
 
 
 async def post_check(client: httpx.AsyncClient, visitor: Visitor, prose: str, clauses=(), *, generation: int = 0,
-                     headers: dict[str, str] | None = None) -> httpx.Response:
+                     headers: dict[str, str] | None = None, final: bool = True) -> httpx.Response:
     return await client.post("/check_reply", headers=visitor.headers if headers is None else headers, json={
-        "draft": {"session_id": visitor.session_id, "generation": generation, "prose": prose,
+        "final": final, "draft": {"session_id": visitor.session_id, "generation": generation, "prose": prose,
                   "clauses": list(clauses)}})
 
 
@@ -125,6 +126,7 @@ async def test_clean_prose_with_a_quote_card_passes(app, client):
                                                   "blocked": False},
                                        "jev": {"status": "off", "scores": None, "blocked": False, "latency_ms": 0,
                                                "top_statement": None}},
+                                   "dropped": [],                     # no card was dropped at signing
                                    "final": True}                     # no `final` sent: the reply's last attempt
     assert (await session_of(app, copy, visitor)).last_language == "en"
 
@@ -159,6 +161,17 @@ def assert_handed_off(verdict: ReplyVerdict, language: str = "en") -> None:
     assert verdict.ok is False and verdict.violations
     [block] = verdict.blocks
     assert (block.kind, block.template, block.fact_id, block.title) == ("card", "handoff", None, handoff)
+    assert (verdict.language, verdict.visitor_plain) == (language, receipt)
+
+
+def assert_kept(verdict: ReplyVerdict, cards: list[tuple[str, str]], language: str = "en") -> None:
+    """A check failed only for its prose: not ok, and only the checked cards it cited, as
+    `(template, fact_id)` in draft order, with no prose and no handoff, so the reply receipt."""
+    receipt = {"en": "Reply checked against Maria Rivera's rules",
+               "es": "Respuesta revisada con las reglas de Maria Rivera"}[language]
+    assert verdict.ok is False and verdict.violations
+    assert [(block.kind, block.template, block.fact_id) for block in verdict.blocks] == [
+        ("card", template, fact_id) for template, fact_id in cards]
     assert (verdict.language, verdict.visitor_plain) == (language, receipt)
 
 
@@ -422,7 +435,8 @@ async def test_a_fraction_beside_its_quote_is_blocked(app, client, reviewer):
     verdict = await checked(client, visitor, "That's a quarter off.", [clause("quote", quote.fact_id)])
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("number_in_prose", "lex.en.number",
                                                                           "quarter")]
-    assert_handed_off(verdict)
+    assert not verdict.ok
+    assert [(b.template, b.fact_id) for b in verdict.blocks] == [("quote", quote.fact_id)]
     assert reviewer.soft_inputs == []
 
 
@@ -465,9 +479,10 @@ async def test_promise_words_are_blocked(app, client, prose, rule_id, span, lang
     ("Come by on the wee\u043aend.", "wee\u043aend"),        # a Cyrillic k, which no table reads as k
     ("H\u0435llo, how can I help?", "H\u0435llo"),            # a Cyrillic e in a word no lexicon holds
 ])
-async def test_a_word_mixing_scripts_is_blocked(app, client, prose, span):
+@pytest.mark.parametrize("final", [True, False])
+async def test_a_word_mixing_scripts_is_blocked(app, client, prose, span, final):
     copy, visitor = await visitor_of(app, client)
-    verdict = await checked(client, visitor, prose)
+    verdict = await checked(client, visitor, prose, final=final)
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("unsupported_language", "mixed_script", span)]
     assert_handed_off(verdict)
 
@@ -721,15 +736,17 @@ async def test_a_canary_in_prose_is_blocked(app, client):
     ("Con gusto le ayudo.", "es"),
     ("Je peux vous aider avec ça.", "other"),
     ("Je peux envoyer un plombier pour la fuite.", "other"),            # French, with Spanish's "la" and "un"
-    ("Posso ajudar você com isso.", "other"),                           # Portuguese
+    ("Posso ajudar você com isso.", "other"),
+    ("我可以帮忙。", "other"),                           # Portuguese
     ("OK", "none"),                                                     # too little to tell: the last language
 ])
-async def test_language_detection(app, client, prose, detected):
+@pytest.mark.parametrize("final", [True, False])
+async def test_language_detection(app, client, prose, detected, final):
     copy, visitor = await visitor_of(app, client)
     assert lang.detect(prose) == detected
     if detected == "none":
         assert (await checked(client, visitor, "Con gusto le ayudo.")).language == "es"
-    verdict = await checked(client, visitor, prose)
+    verdict = await checked(client, visitor, prose, final=final)
     if detected == "other":
         assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
         assert_handed_off(verdict, "en")                                # in the session's last language
@@ -835,14 +852,15 @@ async def test_a_tie_with_english_reads_as_english(app, client, prose):
     "Il tecnico arriva all'una.",                   # and "all", as "all'" ("at one o'clock")
     "Se for urgente, vou às dez.",                  # Portuguese writes "for" ("se for", "if it is")
 ])
-async def test_english_markers_another_language_writes_dont_outvote_it(app, client, prose):
+@pytest.mark.parametrize("final", [True, False])
+async def test_english_markers_another_language_writes_dont_outvote_it(app, client, prose, final):
     # "on", "in", "an", "am", "was", "will", "i", "also", "her", "all", "for" and "but" are English
     # markers that French, German, Italian or Portuguese write as their own, so they don't count
     # against that language: one of its own markers still hands off on a first reply, and a time, a
     # day or a price in its words never rests on the model check alone
     copy, visitor = await visitor_of(app, client)
     assert lang.detect(prose) == "other"
-    verdict = await checked(client, visitor, prose)
+    verdict = await checked(client, visitor, prose, final=final)
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
     assert_handed_off(verdict, "en")
     assert (await session_of(app, copy, visitor)).last_language is None
@@ -898,7 +916,7 @@ def test_a_dropped_english_word_alone_is_too_little_to_tell(prose):
     "Maria checks heaters too.",
 ])
 async def test_frequent_english_words_keep_plumbing_english_english(app, client, prose):
-    # four or more words with no marker of any language hand off; one frequent English word
+    # four or more words with no marker of any language get a rewrite; one frequent English word
     # neither other list holds ("down", "up", "out", "off", "then", "now", "until", "after",
     # "before", "than", "too") makes these English, on a first reply too
     copy, visitor = await visitor_of(app, client)
@@ -909,26 +927,51 @@ async def test_frequent_english_words_keep_plumbing_english_english(app, client,
 
 
 @pytest.mark.parametrize("prose", [
-    "Entendido, revisamos ambos grifos.",           # Spanish in words no list holds hands off too
+    "Entendido, revisamos ambos grifos.",           # Spanish in words no list holds gets a rewrite
     "Por favor, me diga o endereço.",               # Portuguese with no Portuguese marker
     "O técnico chega às dez, combinado?",           # a time in words neither lexicon reads
     "Harganya lima puluh ribu rupiah saja.",        # a price in a language no list covers
 ])
-async def test_an_unmarked_reply_hands_off_on_a_first_reply_too(app, client, prose):
-    # four or more words and no marker of any language are another language whether or not the
-    # session has a language yet, so a time or a price in words no lexicon reads never reaches the
-    # visitor on the model check alone; the handoff is in the session's last language, else English
+async def test_an_unmarked_reply_gets_one_rewrite_and_never_shows(app, client, prose):
+    from .test_handoff_card import handoffs_of
+
     copy, visitor = await visitor_of(app, client)
-    verdict = await checked(client, visitor, prose)
-    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
-    assert_handed_off(verdict, "en")
+    verdict = await checked(client, visitor, prose, final=False)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("uncertain_language", "language_uncertain")]
+    assert not verdict.ok and verdict.blocks == []
+    assert await handoffs_of(app, copy) == []
     assert (await session_of(app, copy, visitor)).last_language is None
+    verdict = await checked(client, visitor, prose, final=True)
+    assert_handed_off(verdict, "en")
+    assert len(await handoffs_of(app, copy)) == 1
     assert (await checked(client, visitor, "Con gusto le ayudo.")).language == "es"
-    verdict = await checked(client, visitor, prose)
-    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("unsupported_language", "language")]
+    verdict = await checked(client, visitor, prose, final=True)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("uncertain_language", "language_uncertain")]
     assert_handed_off(verdict, "es")
     assert (await session_of(app, copy, visitor)).last_language == "es"
-    assert lang.detect(prose) == "other"
+    assert lang.detect(prose) == "unmarked"
+
+
+@pytest.mark.parametrize(("prose", "detected", "kind", "rule_id"), [
+    ("Absolutely. Payment link below.", "unmarked", "uncertain_language", "language_uncertain"),
+    ("Je peux vous aider avec ça.", "other", "unsupported_language", "language"),
+    ("H\u0435llo, how can I help?", "en", "unsupported_language", "mixed_script"),
+], ids=["uncertain", "other-language", "mixed-script"])
+@pytest.mark.parametrize("final", [False, True])
+async def test_refused_prose_preserves_the_visitors_turn_language(app, client, prose, detected, kind, rule_id, final):
+    from .test_turn_language import SPANISH, turn
+
+    copy, visitor = await visitor_of(app, client)
+    assert await turn(client, visitor, SPANISH) == "es"
+    assert lang.detect(prose) == detected
+    verdict = await checked(client, visitor, prose, final=final)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [(kind, rule_id)]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    if final or kind == "unsupported_language":
+        assert_handed_off(verdict, "es")
+    else:
+        assert not verdict.ok and verdict.blocks == [] and verdict.language == "es"
+    assert (await session_of(app, copy, visitor)).last_language == "es"
 
 
 async def own_slots(client: httpx.AsyncClient, visitor: Visitor, call_id: str = "call-slots") -> Fact:
@@ -1058,7 +1101,11 @@ async def test_a_booking_claim_without_a_booking_card_is_blocked(app, client, re
         verdict = await checked(client, visitor, prose, clauses)
         assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
             ("promise_word", f"lex.{language}.booking", span)], clauses
-        assert_handed_off(verdict, language)
+        if clauses:
+            assert not verdict.ok
+            assert [(b.template, b.fact_id) for b in verdict.blocks] == [("quote", quote.fact_id)]
+        else:
+            assert_handed_off(verdict, language)
     assert reviewer.soft_inputs == []
 
 
@@ -1149,7 +1196,10 @@ async def test_a_real_callback_receipt_does_not_back_a_booking_before_an_imperat
         verdict = await checked(client, visitor, prose, clauses)
         assert [(v.kind, v.rule_id) for v in verdict.violations] == [
             ("promise_word", f"lex.{language}.booking")]
-        assert_handed_off(verdict, language)
+        if clauses:          # a failure only of the prose keeps the checked card alone, never the claim
+            assert_kept(verdict, [("callback_confirmed", callback.fact_id)], language)
+        else:
+            assert_handed_off(verdict, language)
     assert reviewer.soft_inputs == []
     for clauses in ([], [receipt]):
         verdict = await checked(client, visitor, honest, clauses)
@@ -1185,11 +1235,15 @@ async def test_booking_and_callback_claims_need_their_own_validated_receipt(app,
     assert verdict.blocks[0].text == prose
     assert len(reviewer.soft_inputs) == 1
     other = "booking" if category == "callback" else "callback"
+    other_fact = (booking if other == "booking" else callback).fact_id
     for clauses in ([], [receipts[other]]):
         blocked = await checked(client, visitor, prose, clauses)
         assert [(v.kind, v.rule_id) for v in blocked.violations] == [
             ("promise_word", f"lex.{language}.{category}")]
-        assert_handed_off(blocked, language)
+        if clauses:          # the other receipt passed its checks: kept alone, without the claim
+            assert_kept(blocked, [(f"{other}_confirmed", other_fact)], language)
+        else:
+            assert_handed_off(blocked, language)
     assert len(reviewer.soft_inputs) == 1  # unbacked claims never reach the model check
 
 
@@ -2132,14 +2186,16 @@ async def public_key(client: httpx.AsyncClient) -> str:
     return (await client.get("/health")).json()["public_key_hex"]
 
 
-async def test_a_failed_check_returns_a_signed_handoff(app, client):
+async def test_failed_checks_sign_the_kept_cards_or_handoff(app, client):
     copy, visitor = await visitor_of(app, client)
     quote = await own_quote(client, visitor)
     key = await public_key(client)
     english = await checked(client, visitor, "That will be $180.", [clause("quote", quote.fact_id)])
     spanish = await checked(client, visitor, "Le hago el cincuenta por ciento de descuento, con gusto.")
-    for verdict, language in ((english, "en"), (spanish, "es")):
-        assert_handed_off(verdict, language)                              # neither the prose nor the card
+    assert not english.ok and english.violations
+    assert [(b.template, b.fact_id) for b in english.blocks] == [("quote", quote.fact_id)]
+    assert_handed_off(spanish, "es")
+    for verdict in (english, spanish):
         verify_verdict(key, visitor.session_id, verdict)
     entries = await reply_entries(app, copy)
     assert [(entry.seq, entry.event.ref_id, entry.event.summary["ok"], entry.event.summary["language"])
@@ -2311,6 +2367,89 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
         desk.deleted_at = frozen_clock.now()
     deleted = await client.get(f"/public/{copy.slug}")
     assert (deleted.status_code, deleted.json()) == (404, {"code": "not_found"})
+
+
+@pytest.mark.parametrize(("prose", "flagged"), [
+    ("The total is lima puluh ribu rupiah, thanks.", True),
+    ("Here is the link to pay.", False),
+])
+async def test_unread_price_still_needs_the_soft_check(app, client, reviewer, prose, flagged):
+    copy, visitor = await visitor_of(app, client)
+    assert lang.detect(prose) == "en"
+    assert reply_check.scan_prose(prose) == []
+    reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
+    verdict = await checked(client, visitor, prose, final=False)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == ([("soft_promise", "soft.promise")] if flagged else [])
+    assert verdict.ok == (not flagged)
+    assert [b.kind for b in verdict.blocks] == ([] if flagged else ["prose"])
+    assert len(reviewer.soft_inputs) == 1
+
+
+async def test_payment_caption_rewrites_and_prose_failure_keeps_its_card(app, client, reviewer):
+    from .test_handoff_card import handoffs_of
+
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    reviewer.answer = PASS
+    link = await decided(client, visitor, "native.payment_link", {"quote_id": quote.fact_id.removeprefix("quote:")},
+                         call_id="call-link")
+    assert link.outcome == "allow", link.reason_plain
+    [fact] = (await executed(client, visitor, link)).facts
+    cited = [clause("payment_link", fact.fact_id)]
+    first = await checked(client, visitor, "Absolutely. Payment link below.", cited, final=False)
+    assert [(v.kind, v.rule_id) for v in first.violations] == [("uncertain_language", "language_uncertain")]
+    assert first.blocks == []
+    assert first.visitor_plain == "Passed to Maria Rivera to answer"
+    assert await handoffs_of(app, copy) == []
+    corrected = await checked(client, visitor, "Here is the link to pay.", cited)
+    assert corrected.ok
+    assert [b.template for b in corrected.blocks] == [None, "payment_link"]
+    assert corrected.blocks[-1].fact_id == fact.fact_id
+    assert await handoffs_of(app, copy) == []
+    kept = await checked(client, visitor, "Absolutely. Payment link below.", cited)
+    assert not kept.ok
+    assert [(v.kind, v.rule_id) for v in kept.violations] == [("uncertain_language", "language_uncertain")]
+    assert [b.template for b in kept.blocks] == ["payment_link"]
+    assert kept.blocks[0].fact_id == fact.fact_id
+    assert kept.visitor_plain == "Reply checked against Maria Rivera's rules"
+    assert await handoffs_of(app, copy) == []
+
+
+async def set_document_canary(app: FastAPI, copy: Rivera, canary: str) -> None:
+    async with kernel_ctx(app) as ctx:
+        repo = ctx.bind(copy.copy_id)
+        document = (await ctx.db.scalars(repo.scoped(select(Document)))).first()
+        document.body = document.body.replace(document.canary, canary)
+        document.canary = canary
+
+
+async def test_uncertain_language_span_never_echoes_a_document_canary(app, client):
+    copy, visitor = await visitor_of(app, client)
+    canary = "cdk-01be234567890123"              # "be" is an English marker, not reply prose
+    await set_document_canary(app, copy, canary)
+    verdict = await checked(client, visitor, f"{canary} Entendido, revisamos ambos grifos.", final=False)
+    assert {v.kind for v in verdict.violations} == {"uncertain_language", "canary"}
+    assert all(canary not in violation.span for violation in verdict.violations)
+    assert canary not in verdict.model_dump_json()
+    assert_handed_off(verdict)
+    assert all(canary not in entry.envelope_jcs for entry in await reply_entries(app, copy))
+    assert (await session_of(app, copy, visitor)).last_language is None
+
+
+async def test_english_language_ignores_spanish_markers_in_a_document_canary(app, client):
+    copy, visitor = await visitor_of(app, client)
+    await set_session(app, copy, visitor.session_id, last_language="es")
+    canary = "cdk-el1la2los3las4un5una"          # synthetic Spanish markers outnumber the prose's English ones
+    await set_document_canary(app, copy, canary)
+    verdict = await checked(client, visitor, f"Here is the link to pay. {canary}")
+    assert {v.kind for v in verdict.violations} == {"canary"}
+    assert all(canary not in violation.span for violation in verdict.violations)
+    assert canary not in verdict.model_dump_json()
+    assert_handed_off(verdict, "en")
+    assert all(canary not in entry.envelope_jcs for entry in await reply_entries(app, copy))
+    assert (await session_of(app, copy, visitor)).last_language == "en"
+
+
 @pytest.mark.parametrize(("text", "rules"), [
     ("20% off for first-time clients", ["digit", "percent_sign"]),
     ("$50 deposit", ["currency", "digit"]),

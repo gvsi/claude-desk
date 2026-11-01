@@ -10,6 +10,7 @@ import type {
   ActorKind,
   ApprovalAnswer,
   Assurance,
+  BusinessToolDef,
   Decision,
   DecisionState,
   EvHeld,
@@ -340,38 +341,8 @@ export interface PeopleOut {
  */
 export type ToolReviewReason = 'new' | 'changed' | 'delisted';
 
-/**
- * Business tool definitions, typed here until the kernel's business tools change (branch
- * `plan/09-blocks-core`) regenerates their types, then imported from `contracts.ts`.
- * The owner's title, description and configuration are untrusted text.
- */
-export interface BusinessToolDef {
-  title: string;
-  description: string;
-  config: IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig;
-}
-
-export interface IntakeConfig {
-  block: 'intake';
-  questions: string[];
-}
-
-export interface TypedBookingConfig {
-  block: 'typed_booking';
-  appointment_type: string;
-  minutes: number;
-}
-
-export interface PurposePaymentConfig {
-  block: 'purpose_payment';
-  purpose: string;
-  amount_cents: number;
-}
-
-export interface UrgentConfig {
-  block: 'urgent';
-  urgent_when: string;
-}
+/** Owner configuration is untrusted text, with its shape from the kernel's generated contract. */
+export type { BusinessToolDef, IntakeConfig, TypedBookingConfig, PurposePaymentConfig, UrgentConfig } from './contracts.ts';
 
 /** A catalog tool or a Desk's own tool, whose title comes from its business definition. */
 export type AnyToolName = ToolName | `desk.${string}`;
@@ -574,6 +545,56 @@ export interface SetupState {
 export interface SetupTools {
   tools: ToolRow[];
   connectable: 'mock_payments'[];
+}
+
+/** Line keys understood by setup's public-lines review, shared without importing UI code. */
+export const SETUP_PUBLIC_LINE_KEYS = ['policy:about', 'contact', 'policy:pricing', 'policy:intake', 'policy:after_hours', 'policy:urgent', 'policy:service_area', 'policy:how_we_help'] as const;
+
+/** The public charter lines the owner reviews before the safety check. */
+export interface SetupPublicLine {
+  key: string;
+  text: string;
+  source: 'owner' | 'suggested';
+  editable: boolean;
+  /** Stored owner words held from publication; absent on older answers means false. */
+  held?: boolean;
+}
+
+export type PublicHoursWindow = HoursWindow;
+
+export interface SetupPublicHours {
+  source: 'owner' | 'suggested';
+  windows: HoursWindow[];
+}
+
+export type PublicPriceItem = SetupPublicPriceItem;
+
+export interface SetupPublicPriceItem {
+  item_id: string;
+  title: string;
+  unit_cents: number;
+}
+
+export interface SetupPublicPrices {
+  source: 'owner' | 'suggested';
+  items: SetupPublicPriceItem[];
+}
+
+export interface SetupPublicLines {
+  lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+  revision: string;
+}
+
+export interface SetupPublicLinesConfirmIn {
+  keys: string[];
+  revision: string;
+}
+
+export interface SetupPublicLineIn {
+  key: string;
+  text: string;
 }
 
 /** A situation Claude wrote from the owner's answers to try on the draft rules (plan 02b Task 7). */

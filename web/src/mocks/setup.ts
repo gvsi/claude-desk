@@ -35,11 +35,16 @@ import type {
 } from '../api/views.ts';
 import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
+import { formatHours } from '../lib/format.ts';
+import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
+import { appendBusinessTools } from './businessTools.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
 import { idempotencyKeyOf } from './keys.ts';
+import { storedPublicState } from './publicLineStore.ts';
+import { publicLineRefused } from './publicLineScan.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
 
@@ -86,6 +91,8 @@ interface Interview {
   covered: Set<QuestionKey>;
   answers: Partial<Record<QuestionKey, string>>;
   usedSuggestions: boolean;
+  /** The words and booking days of the business the description names, for its situations and draft rules (`situationWordsOf`). */
+  words: SituationWords;
   /** The business's name, its owner's first name and a line about it, as the API takes them from the description. */
   business: string;
   ownerName: string | null;
@@ -354,12 +361,130 @@ function card(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'who' |
 /** The deposit an agent pays in the situations: within its signed limit, with Claude's second look. */
 const DEPOSIT_CENTS = 2000;
 
+/** The days a rule books on its own. */
+type BookingDays = NonNullable<RuleCard['hours']>['days'];
+const WEEKDAYS: BookingDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
+
+/**
+ * A business's words for the six situations setup tries (`situationsFor`), in their order, and for
+ * the rules its draft names them in. Only the words and the business's own booking days differ
+ * between businesses: what each situation tries, plans and gets is otherwise the same.
+ */
+interface SituationWords {
+  /**
+   * The days the bookings rule (card-2) books on its own, in the same hours. A business open on
+   * Saturdays books them too, so its Saturday visitor isn't after hours; the answers still planned
+   * Saturdays to ask first (card-3), which keeps that booking not what they planned.
+   */
+  bookingDays: BookingDays;
+  /** What the bookings rule says it does: its reason, and the reason of each booking it allows. */
+  bookings: string;
+  /** A booking on Tuesday afternoon, in the business's hours. */
+  weekday: string;
+  /** A discount the business doesn't offer. */
+  discount: string;
+  /** What an agent pays, named the same way in its situation and in the rule that lets agents pay. */
+  agentPays: string;
+  /** A verified customer's own document. */
+  document: string;
+  /** A booking on Saturday morning: the one the answers didn't plan for. */
+  saturday: string;
+  /** Someone else's private details. */
+  someoneElses: string;
+}
+
+/** Rivera Plumbing's words: the situations as the mock always told them. */
+const PLUMBER_WORDS: SituationWords = {
+  bookingDays: WEEKDAYS,
+  bookings: 'Books weekday visits in your hours.',
+  weekday: 'A visitor wants a drain cleared on Tuesday afternoon',
+  discount: 'A visitor asks for 10% off if they pay cash',
+  agentPays: 'the service call deposit',
+  document: 'A customer asks for their last invoice',
+  saturday: 'A visitor wants a Saturday morning visit for a slow drain',
+  someoneElses: "Someone asks for another customer's address",
+};
+
+/** Words for a business none of the starters describes: nothing in them names a kind of work. */
+const ANY_BUSINESS_WORDS: SituationWords = {
+  bookingDays: WEEKDAYS,
+  bookings: 'Books weekday times in your hours.',
+  weekday: 'A visitor wants to book a time on Tuesday afternoon',
+  discount: 'A visitor asks for 10% off if they pay cash',
+  agentPays: 'the deposit',
+  document: 'A customer asks for their last invoice',
+  saturday: 'A visitor wants to book a time on Saturday morning',
+  someoneElses: "Someone asks for another customer's address",
+};
+
+/** A CPA firm's description, as the consultant run tells one apart. */
+const CPA_FIRM = /\b(?:CPA|accountants?|tax returns?)\b/i;
+
+/**
+ * The starter businesses' words (`START_EXAMPLES`), each with what in a description says it is that
+ * business, in English or in the Spanish starter's words; the first that matches wins, a CPA firm
+ * first as the consultant run does. "Rentals" alone isn't one: bikes and cars are rented too. Each
+ * set keeps to what its starter's description says: the salon's cuts, color, balayage and color
+ * deposits; the apartments' viewings, tenants and application fees; the CPA firm's free consult,
+ * tax returns and retainer (`CPA_COPY`).
+ */
+const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWords][] = [
+  [
+    [CPA_FIRM, /\b(?:contab|contador|impuestos)/i],
+    {
+      bookingDays: WEEKDAYS,
+      bookings: 'Books weekday consults in your hours.',
+      weekday: 'A visitor wants a free consult on Tuesday afternoon',
+      discount: 'A visitor asks for 10% off their tax return',
+      agentPays: 'the retainer',
+      document: "A client asks for last year's return",
+      saturday: 'A visitor wants a free consult on Saturday morning',
+      someoneElses: "Someone asks for another client's tax return",
+    },
+  ],
+  [[/\b(?:plumb|plomer)/i], PLUMBER_WORDS],
+  [
+    // Whole words only: "hairline cracks" is no salon.
+    [/\b(?:salons?|hair|haircuts?|hairdress(?:er|ers|ing)|hairstylists?)\b/i, /\bpeluquer/i],
+    {
+      // Open Tuesday to Saturday, as its description says.
+      bookingDays: ['tue', 'wed', 'thu', 'fri', 'sat'],
+      bookings: 'Books appointments Tuesday to Saturday in your hours.',
+      weekday: 'A visitor wants a cut on Tuesday afternoon',
+      discount: 'A visitor asks for 10% off a cut and color',
+      agentPays: 'the color appointment deposit',
+      document: 'A client asks for their last receipt',
+      saturday: 'A visitor wants balayage on Saturday morning',
+      someoneElses: "Someone asks for another client's phone number",
+    },
+  ],
+  [
+    [/\b(?:apartments?|tenants?|landlords?|departamentos?|inquilinos?)\b/i],
+    {
+      bookingDays: WEEKDAYS,
+      bookings: 'Books weekday viewings in your hours.',
+      weekday: 'A visitor wants a viewing on Tuesday afternoon',
+      discount: "A visitor asks for 10% off the first month's rent",
+      agentPays: 'the application fee',
+      document: 'A tenant asks for a copy of their lease',
+      saturday: 'A visitor wants a Saturday morning viewing',
+      someoneElses: 'Someone asks which apartment another tenant lives in',
+    },
+  ],
+];
+
+/** The situations' words for the business a description names: a starter's own, else words that fit any business. */
+function situationWordsOf(description: string): SituationWords {
+  return STARTER_WORDS.find(([business]) => business.some((says) => says.test(description)))?.[1] ?? ANY_BUSINESS_WORDS;
+}
+
 /**
  * The cards setup drafts from the answers: "Ask me first"'s own, then the interview's (ids
- * `card-1`…). With a money limit that allows it, agents pay a deposit on their own after Claude's
- * second look.
+ * `card-1`…), in the business's words (`words`): bookings on its own days, and, with a money limit
+ * that allows it, agents paying a deposit on their own after Claude's second look, named as the
+ * business names it.
  */
-function setupCards(capCents: number): RuleCard[] {
+function setupCards(capCents: number, words: SituationWords): RuleCard[] {
   return [
     ...PRESETS.ask_first.map((c) => ({ ...c })),
     card({ card_id: 'card-1', applies_to: 'native.quote', mode: 'auto', who: 'anyone', reason: 'Quotes from your price list, at list price.' }),
@@ -368,8 +493,8 @@ function setupCards(capCents: number): RuleCard[] {
       applies_to: 'native.book',
       mode: 'auto',
       who: 'anyone',
-      hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' },
-      reason: 'Books weekday visits in your hours.',
+      hours: { days: [...words.bookingDays], start: '08:00:00', end: '18:00:00' },
+      reason: words.bookings,
     }),
     card({
       card_id: 'card-3',
@@ -391,7 +516,7 @@ function setupCards(capCents: number): RuleCard[] {
             who: 'anyone',
             max_amount_cents: DEPOSIT_CENTS,
             review: true,
-            reason: 'Agents pay the service call deposit within their signed limit, checked by the reviewer.',
+            reason: `Agents pay ${words.agentPays} within their signed limit, checked by the reviewer.`,
           }),
         ]
       : []),
@@ -428,21 +553,24 @@ function situationMatches(planned: Situation['expected'], r: ProbeResult, cards:
   return r.outcome === planned && !r.depends_on_review;
 }
 
-/** The six situations the check runs on the draft (`cards`), one of them not what the answers planned. */
-function situationsFor(cards: readonly RuleCard[]): SituationResult[] {
+/**
+ * The six situations the check runs on the draft (`cards`), one of them not what the answers
+ * planned, told in the business's words (`words`).
+ */
+function situationsFor(cards: readonly RuleCard[], words: SituationWords): SituationResult[] {
   const rows: [Situation, ProbeResult][] = [];
   const add = (title: string, who: Situation['who'], expected: Situation['expected'], p: Probe, r: ProbeResult) =>
     rows.push([{ title, who, probe: p, expected }, r]);
   const weekday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-03T14:00:00-08:00' });
-  add('A visitor wants a drain cleared on Tuesday afternoon', 'public', 'allow', weekday, result(weekday, 'allow', 'Books weekday visits in your hours.', { card_ids: ['card-2'] }));
+  add(words.weekday, 'public', 'allow', weekday, result(weekday, 'allow', words.bookings, { card_ids: ['card-2'] }));
   const discount = probe('native.quote', { actor: 'visitor', who: 'anyone', resource_kind: 'desk', call: { call_id: 'probe-discount', tool: 'native.quote', args: { requested_discount_bp: 1000 } } });
-  add('A visitor asks for 10% off if they pay cash', 'public', 'hold', discount, result(discount, 'hold', 'Discounts ask you first.'));
+  add(words.discount, 'public', 'hold', discount, result(discount, 'hold', 'Discounts ask you first.'));
   // Planned to happen after Claude's second look: the kernel holds it unless the reviewer agrees.
   // Without a rule for it (a money limit too low), it asks.
   const deposit = probe('native.charge_mandate', { actor: 'agent', who: 'agent', resource_kind: 'quote', agent_mandate_remaining_cents: DEPOSIT_CENTS, amount_cents: DEPOSIT_CENTS });
   const reviewed = cards.some((c) => c.card_id === 'card-7');
   add(
-    'An agent pays the service call deposit',
+    `An agent pays ${words.agentPays}`,
     'agent',
     reviewed ? 'allow_if_reviewed' : 'hold',
     deposit,
@@ -451,11 +579,13 @@ function situationsFor(cards: readonly RuleCard[]): SituationResult[] {
       : result(deposit, 'hold', 'Charges ask you first.'),
   );
   const invoice = probe('native.release_document', { actor: 'visitor', who: 'record_owner', resource_kind: 'document', resource_owner: 'caller' });
-  add('A customer asks for their last invoice', 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }));
+  add(words.document, 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }));
   const saturday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-07T10:00:00-08:00' });
-  add('A visitor wants a Saturday morning visit for a slow drain', 'after_hours', 'hold', saturday, result(saturday, 'allow', 'Books weekday visits in your hours.', { card_ids: ['card-2'] }));
+  // Open on Saturdays, a business's Saturday visitor isn't after hours.
+  const saturdayWho = words.bookingDays.includes('sat') ? 'public' : 'after_hours';
+  add(words.saturday, saturdayWho, 'hold', saturday, result(saturday, 'allow', words.bookings, { card_ids: ['card-2'] }));
   const address = probe('native.release_document', { actor: 'visitor', who: 'anyone', resource_kind: 'document', resource_owner: 'other' });
-  add("Someone asks for another customer's address", 'public', 'refuse', address, result(address, 'refuse', 'Private data only to its verified owner.'));
+  add(words.someoneElses, 'public', 'refuse', address, result(address, 'refuse', 'Private data only to its verified owner.'));
   return rows.map(([situation, r]) => ({ situation, result: r, matches: situationMatches(situation.expected, r, cards) }));
 }
 
@@ -674,8 +804,8 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
   }
   interview.state.question = null;
   interview.state.pending_card = null;
+  const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
   if (interview.consultant) {
-    const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
     const has = (kind: JobProposal['job']) => jobs.some(({ job }) => job === kind);
     const standard = ['schedule', 'intake', 'payment', 'status'].every((kind) => has(kind as JobProposal['job']))
       && jobs.filter(({ job }) => job === 'schedule' || job === 'intake').every(({ autonomy }) => autonomy === 'auto')
@@ -696,6 +826,7 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
     say(interview, 'claude', QUESTIONS_DONE);
   }
   moveTo(interview, 'tools');
+  if (interview.consultant) appendBusinessTools(world.desk(interview.state.desk_id), jobs);
   for (const { card } of interview.state.messages) {
     if (card) connectAcceptedProposal(world, interview, card);
   }
@@ -878,7 +1009,7 @@ function proved(draft: RulesDraft): boolean {
 function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDraft {
   const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
   if (open) return open.draft;
-  const cards = setupCards(interview.capCents).map((rule): RuleCard => {
+  const cards = setupCards(interview.capCents, interview.words).map((rule): RuleCard => {
     if (!interview.consultant && !interview.usedSuggestions) return rule;
     // An unanswered or skipped limit never inherits the scripted run's automatic permission.
     if (rule.applies_to === 'native.quote' && interview.answers.quote_limit === undefined) return { ...rule, mode: 'ask', reason: 'Quotes ask you first.' };
@@ -914,6 +1045,11 @@ function connectPayments(desk: DeskRecord): void {
   }
 }
 
+/** How Claude's first words thank the owner: by the name they gave, if any, with one stop after it ("Bob Smith Jr."). */
+export function thanksTo(ownerName: string | null): string {
+  return ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}${afterName(ownerName, '.')}`;
+}
+
 /** A new interview and its Desk, made with Answering off from the owner's description. */
 function newInterview(world: MockWorld, text: string, timezone: string): Interview {
   const business = businessNameOf(text);
@@ -930,9 +1066,10 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     suggestions: [],
   };
   world.desks.push(desk);
-  const greeting = ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}.`;
+  const greeting = thanksTo(ownerName);
   const interview: Interview = {
-    consultant: /\b(?:CPA|accountants?|tax returns?)\b/i.test(text),
+    consultant: CPA_FIRM.test(text),
+    words: situationWordsOf(text),
     cardsEnabled: false,
     proposals: consultantProposals(),
     moneyOptedIn: false,
@@ -1210,7 +1347,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
     if (!open) return CONFLICT;
     moveTo(interview, 'situations');
-    return ok(situationsFor(open.draft.cards));
+    return ok(situationsFor(open.draft.cards, interview.words));
   },
   setupSafetyCheck(sv, req) {
     const found = interviewOf(sv, req);
@@ -1266,19 +1403,31 @@ function interviewForDesk(world: MockWorld, deskId: string): Interview | undefin
   return [...interviewsOf(world).values()].find((interview) => interview.state.desk_id === deskId);
 }
 
+/** The unreviewed About for the owner's draft, kept even when the public scan refuses it. */
+export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
+  return interviewForDesk(world, desk.summary.desk_id)?.about ?? null;
+}
+
 /**
- * A Desk setup made, as its public page shows it: the business's own name and owner, and a line
- * about it from the description; null for any other Desk.
+ * A setup Desk's public page: its name, owner, confirmed hours and owner lines that pass the mock scan (the
+ * original About before its lines are seeded, also scanned); null for any other Desk.
  */
 export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: Language): PublicDesk | null {
   const interview = interviewForDesk(world, desk.summary.desk_id);
   if (!interview) return null;
+  const publicState = storedPublicState(world, interview.state.interview_id);
   return {
     business_name: interview.business,
     desk_name: desk.summary.name,
     owner_display_name: ownerOf(interview),
     brand: { ...BUSINESS.brand },
-    charter: interview.about === null ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })],
+    charter: publicState ? [
+      ...publicState.lines.filter(({ text, source, held }) => source === 'owner' && !held && !publicLineRefused(text)).map(({ key, text }) => cardBlock(key === 'contact' ? 'contact' : 'policy', { fact_id: `charter:${key}`, title: text })),
+      ...(publicState.hours?.source === 'owner' && publicState.hours.windows.length ? [cardBlock('hours', {
+        fact_id: 'charter:hours', title: formatHours(publicState.hours.windows[0]!), lines: publicState.hours.windows.slice(1).map(formatHours),
+      })] : []),
+    ]
+      : (interview.about === null || publicLineRefused(interview.about) ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })]),
     agent_card: [],
     starters: [],
     open_status: null,
