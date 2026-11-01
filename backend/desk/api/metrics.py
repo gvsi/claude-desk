@@ -34,7 +34,7 @@ PRICES_PER_MTOK: dict[str, tuple[Fraction, Fraction, Fraction, Fraction]] = {
 HIGHEST_PRICES = tuple(max(prices[i] for prices in PRICES_PER_MTOK.values()) for i in range(4))
 # Production's daily model spend, in US cents, shared by every copy (the owner may change it): it keeps the demo
 # inside the monthly limit that evals and the demo share.
-DAILY_MODEL_BUDGET_CENTS = 8000
+DAILY_MODEL_BUDGET_CENTS = 15000
 
 
 class Usage(Protocol):

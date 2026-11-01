@@ -1277,11 +1277,11 @@ async def test_paused_session_gets_the_handoff_without_a_model_call(api_conn, ca
 
 
 async def test_daily_budget_hands_off_without_model_calls(api_conn, kernel_http, fake, ro_schema, clock):
-    # today's spend: 5M output tokens of Opus at $20 per million, $100, past the $80 daily budget
+    # today's spend: 8M output tokens of Opus at $20 per million, $160, past the $150 daily budget
     await api_conn.execute(text(
         "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
         " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
-        " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+        " 'claude-opus-5-5', 0, 0, 0, 8000000, 900, 'end_turn', :at)"), {"at": clock()})
     await api_conn.commit()
 
     caller = await new_caller(kernel_http, fake, ro_schema)
@@ -1893,11 +1893,11 @@ async def test_a_turn_that_hands_off_without_claude_sends_its_message_first(api_
         "done")
     if stop == "paused":
         fake.set_mode(caller.session_id, "paused")             # the breaker's third strike
-    else:                                                      # $100 of Opus today, past the $80 daily budget
+    else:                                                      # $160 of Opus today, past the $150 daily budget
         await api_conn.execute(text(
             "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
             " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
-            " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+            " 'claude-opus-5-5', 0, 0, 0, 8000000, 900, 'end_turn', :at)"), {"at": clock()})
         await api_conn.commit()
     words = "¿Pueden venir mañana a revisar el desagüe?"
     await said(api_conn, caller, words)

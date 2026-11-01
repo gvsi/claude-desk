@@ -262,8 +262,8 @@ async def test_triage_failure_stores_nothing(app, browser, fake, kernel_http, mo
                                     clock=clock) is False
     db.execute("INSERT INTO app.model_calls (copy_id, session_id, route, model, input_tokens, cached_tokens,"
                " cache_write_tokens, output_tokens, latency_ms, stop_reason, created_at) VALUES"
-               " (%s, NULL, 'conversation', 'claude-opus-5-5', 0, 0, 0, 4000000, 1, 'end_turn', %s)",
-               (owner.copy_id, clock.now))                                 # $80 of output: the budget is spent
+               " (%s, NULL, 'conversation', 'claude-opus-5-5', 0, 0, 0, 7500000, 1, 'end_turn', %s)",
+               (owner.copy_id, clock.now))                                 # $150 of output: the budget is spent
     model.jobs["triage"].append(answer(REFUSAL_TRIAGE))
     assert await triage_attempt(engine, model, ids, refused.decision_id, "decision", ro_schema=ro_schema,
                                 production=True, clock=clock) is False

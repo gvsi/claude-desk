@@ -35,7 +35,7 @@ The input is hidden and stays out of shell history. `DESK_PASSCODE` takes preced
 | CloudFront, S3, Lambda, CloudWatch Logs, the image repository | estimate: a few dollars at demo traffic |
 | Total | estimate: about $90–100 |
 
-Model spend is separate. The organization's monthly Claude API limit is $1,000, shared by development, evals and the hosted demo, which has no API limit of its own. The hosted demo's daily model budget is $80 (a UTC day): past it, turns hand off with no model call. Since 31 × $80 is more than $1,000, the monthly limit is the one that binds first.
+Model spend is separate. The organization's monthly Claude API limit is $1,000, shared by development, evals and the hosted demo, which has no API limit of its own. The hosted demo's daily model budget is $150 (a UTC day), raised from $80 for submission review (owner, 2026-10-31): past it, turns hand off with no model call. Since 31 × $150 is more than $1,000, the monthly limit is the one that binds first.
 
 ## First deploy (owner's terminal)
 

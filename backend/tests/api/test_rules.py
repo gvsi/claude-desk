@@ -589,8 +589,8 @@ async def test_rules_chat_counts_on_owner_ai_and_the_model_budget(app, browser, 
     app.state.runtime.settings = production_settings(passcode_hash, api_database_url=api_settings.api_database_url,
                                                      kernel_ro_schema=api_settings.kernel_ro_schema,
                                                      trusted_proxy_hops=0)
-    async with app.state.runtime.engine.begin() as conn:      # $80 today: the budget is reached
-        await record_model_call(conn, "copy-budget", None, "setup", usage_row(4_000_000, clock()))
+    async with app.state.runtime.engine.begin() as conn:      # $150 today: the budget is reached
+        await record_model_call(conn, "copy-budget", None, "setup", usage_row(7_500_000, clock()))
     refused = await other.browser.post(rules_path(other, "chat"), json={"text": "What happens to quotes?"})
     assert (refused.status_code, refused.json()) == (503, {"error": "demo_budget"})
     assert (len(model.requests), len(fake.called("POST /policy/draft"))) == (asked, drafts)

@@ -713,8 +713,8 @@ async def test_agent_stops_once_the_daily_model_budget_is_spent(app, browser, fa
         runtime.agents = DemoAgents(runtime.model, a2a=a2a, engine=runtime.engine, clock=clock, production=True)
         slug = await new_slug(kernel_http, fake)
         client, _, _ = await open_session(app, browser, slug)
-        async with runtime.engine.begin() as conn:     # $79.98 spent today: just under the $80 budget
-            await record_model_call(conn, "copy-budget", None, "setup", usage_row(3_999_000, clock()))
+        async with runtime.engine.begin() as conn:     # $149.98 spent today: just under the $150 budget
+            await record_model_call(conn, "copy-budget", None, "setup", usage_row(7_499_000, clock()))
 
         # The run starts under the budget; its first step and the Desk's answer pass it, so no next step is taken.
         agent_model.add(step("Hello, I'd like the earliest visit for Alex Kim."), step("Is 9am free?"))

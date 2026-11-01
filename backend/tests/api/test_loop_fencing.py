@@ -1240,7 +1240,7 @@ async def test_a_handoff_that_leaves_the_message_waiting_runs_once(api_conn, eng
     await api_conn.execute(text(
         "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
         " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
-        " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+        " 'claude-opus-5-5', 0, 0, 0, 8000000, 900, 'end_turn', :at)"), {"at": clock()})
     await said(api_conn, caller, "Hello!")
     model, busy = ScriptedModel(), []
 
@@ -1267,7 +1267,7 @@ async def test_past_the_budget_reopening_the_stream_hands_off_once(api_conn, eng
     await api_conn.execute(text(
         "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
         " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
-        " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+        " 'claude-opus-5-5', 0, 0, 0, 8000000, 900, 'end_turn', :at)"), {"at": clock()})
     await said(api_conn, caller, "Hello!")
     model = ScriptedModel()
     runner = TurnRunner(model, engine=engine, lock_engine=locks, production=True, clock=clock)
