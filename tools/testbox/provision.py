@@ -13,6 +13,8 @@ import hashlib
 import uuid
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from desk_tools.testbox_client import cache_directory, control_path, open_connection  # noqa: E402
 INSTANCE_TYPE = "c8g.12xlarge"
 # Clients use the one running instance tagged ACTIVE. A replacement in the same region launches beside it as STANDBY,
 # which no client discovers unless asked (`tools/testbox/run --standby`); once proven, --promote tags the old one
@@ -31,13 +33,52 @@ SESSION_POLICY = {"Version": "2012-10-17", "Statement": [{"Sid": "SessionManager
     "ec2messages:GetMessages", "ec2messages:SendReply"], "Resource": "*"}]}
 
 
-def stop_warm_connection(region, instance):
-    """Stop this laptop's shared SSH connection to a retired machine taking new calls; calls already on it finish."""
-    sys.path.insert(0, str(HERE.parent))
-    from desk_tools.testbox_client import cache_directory, control_path
-    socket = control_path(cache_directory(), region, instance)
-    if socket.exists():
-        subprocess.run(["ssh", "-S", str(socket), "-O", "stop", "ubuntu@" + instance], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# How long promotion keeps closing reopened connections to retired machines. A call that chose the old machine just
+# before promotion can still open one: its connection setup waits at most three minutes for SSM.
+HANDOVER_SECONDS = 240
+
+
+def stop_connection(cache, region, instance) -> bool:
+    """Stop this laptop's shared SSH connection to a retired machine taking new calls; calls already on it finish.
+    True when none is left taking calls."""
+    socket = control_path(cache, region, instance)
+    if not socket.exists():
+        return True
+    host = "ubuntu@" + instance
+    subprocess.run(["ssh", "-S", str(socket), "-O", "stop", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return subprocess.run(["ssh", "-S", str(socket), "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
+
+
+def record_connection(shared, instance):
+    temporary = shared.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"instance": instance}))
+    temporary.replace(shared)   # clients never read half a record
+
+
+def handover(region, active, retired, api):
+    """Move this laptop's lanes to the active machine. Every lane's client, from any branch, reuses the connection the
+    shared record names while it is alive, so promotion opens one to the active machine and records it, then keeps
+    closing connections to retired machines and restoring the record for the handover window, which covers calls
+    that chose the old machine just before the switch and reopen its connection or record it."""
+    cache = cache_directory()
+    cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+    shared = cache / f"connection-{region}.json"
+    retired = set(retired)
+    open_connection(cache, region, active, api, remember=False)
+    for second in range(HANDOVER_SECONDS + 1):
+        try:
+            recorded = json.loads(shared.read_text()).get("instance")
+        except (FileNotFoundError, ValueError, AttributeError):
+            recorded = None
+        if recorded != active:
+            if recorded:
+                retired.add(recorded)   # whatever lanes used before, retired or not, stops taking calls
+            record_connection(shared, active)
+        stopped = [stop_connection(cache, region, instance) for instance in sorted(retired)]
+        if second < HANDOVER_SECONDS:
+            time.sleep(1)
+    if not all(stopped):
+        raise RuntimeError("This laptop's connection to a retired test box still takes calls; re-run --promote")
 
 
 def main():
@@ -190,10 +231,10 @@ def main():
             group = aws("ec2", "create-security-group", group_name=NAME, description="Disposable agent tests; SSM access only; no inbound", vpc_id=vpc,
                         tag_specifications=[{"ResourceType": "security-group", "Tags": TAGS}])["GroupId"]
             created.append("group")
-        def tagged(purpose):
+        def tagged(purpose, many=False):
             found = aws("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": [purpose]}, {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]}])
             instances = [i for r in found["Reservations"] for i in r["Instances"]]
-            if len(instances) > 1:
+            if len(instances) > 1 and not many:
                 raise RuntimeError(f"Multiple instances tagged {purpose} in region; refusing ambiguous setup")
             return instances
 
@@ -203,25 +244,51 @@ def main():
             if i.get("IamInstanceProfile", {}).get("Arn") != profile_info["Arn"]:
                 raise RuntimeError("Existing test box has an unexpected attached instance profile ARN")
 
-        if args.promote:
-            standby = tagged(STANDBY)
-            if not standby or standby[0]["State"]["Name"] != "running":
-                raise RuntimeError("No running standby to promote: provision one with --standby and prove it with tools/testbox/run --standby")
-            require_configured(standby[0])
-            active = tagged(ACTIVE)
+        def require_ready(instance):
+            # Every lane's next call lands here: refuse a standby whose setup is still running or failed.
+            command = aws("ssm", "send-command", instance_ids=[instance], document_name="AWS-RunShellScript", timeout_seconds=60,
+                          parameters={"commands": ["test -f /opt/testbox/ready && ! test -f /opt/testbox/bootstrap-failed"]})["Command"]["CommandId"]
+            for _ in range(60):
+                try:
+                    result = aws("ssm", "get-command-invocation", command_id=command, instance_id=instance)
+                except RuntimeError as exc:
+                    if "InvocationDoesNotExist" not in str(exc):
+                        raise
+                    result = {}
+                if result.get("Status") == "Success":
+                    return
+                if result.get("Status") in ("Failed", "TimedOut", "Cancelled"):
+                    raise RuntimeError("The standby isn't ready (its setup is running or failed); re-run --standby")
+                time.sleep(2)
+            raise RuntimeError("Could not confirm the standby is ready; re-run --promote")
 
-            def retag(i, value):
-                resources = [i["InstanceId"]] + [m["Ebs"]["VolumeId"] for m in i.get("BlockDeviceMappings", []) if "Ebs" in m]
-                resources += [n["NetworkInterfaceId"] for n in i.get("NetworkInterfaces", [])]
-                aws("ec2", "create-tags", resources=resources, tags=[{"Key": "Purpose", "Value": value}])
-            # Retire first: an interruption between the two leaves no active machine, which a re-run repairs, never two.
-            for old in active:
-                retag(old, RETIRED)
-            retag(standby[0], ACTIVE)
-            for old in active:
-                stop_warm_connection(args.region, old["InstanceId"])
-            retired = ", ".join(old["InstanceId"] for old in active) or "none"
-            print(f"Promoted {standby[0]['InstanceId']} ({args.region}) to the active test box; retired: {retired}. "
+        if args.promote:
+            # The tags record the handover, so a re-run after any interruption finishes it.
+            standby, active = tagged(STANDBY), tagged(ACTIVE)
+            if standby:
+                if standby[0]["State"]["Name"] != "running":
+                    raise RuntimeError("The standby isn't running; start it with --standby and prove it with tools/testbox/run --standby")
+                require_configured(standby[0])
+                require_ready(standby[0]["InstanceId"])
+
+                def retag(i, value):
+                    resources = [i["InstanceId"]] + [m["Ebs"]["VolumeId"] for m in i.get("BlockDeviceMappings", []) if "Ebs" in m]
+                    resources += [n["NetworkInterfaceId"] for n in i.get("NetworkInterfaces", [])]
+                    aws("ec2", "create-tags", resources=resources, tags=[{"Key": "Purpose", "Value": value}])
+                # Retire first: an interruption between the two leaves no active machine, which a re-run repairs, never two.
+                for old in active:
+                    retag(old, RETIRED)
+                retag(standby[0], ACTIVE)
+                active = standby
+            retired = [i["InstanceId"] for i in tagged(RETIRED, many=True)]
+            if not standby and not retired:
+                raise RuntimeError("No standby to promote: provision one with --standby and prove it with tools/testbox/run --standby")
+            if not active or active[0]["State"]["Name"] != "running":
+                raise RuntimeError("No running active test box to hand over to; re-run --promote once it runs")
+            require_configured(active[0])
+            print(f"Handing this laptop's lanes over to {active[0]['InstanceId']} ({args.region}) for {HANDOVER_SECONDS} seconds...", flush=True)
+            handover(args.region, active[0]["InstanceId"], retired, aws)
+            print(f"Promoted {active[0]['InstanceId']} ({args.region}) to the active test box; retired: {', '.join(retired) or 'none'}. "
                   "Lanes move on their next call; terminate a retired box once no call runs on it (docs/testbox.md).")
             return
         instances = tagged(purpose)

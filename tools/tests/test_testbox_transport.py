@@ -351,7 +351,7 @@ def test_only_a_standby_call_reaches_the_standby_and_it_never_moves_other_lanes(
         asked.append(next(f['Values'] for f in params['filters'] if f['Name'] == 'tag:Purpose'))
         return {'Reservations': [{'Instances': [{'InstanceId': 'i-0bbbbbbbbbbbbbbbb'}]}]}
     instance = client.choose_instance(tmp_path, 'us-east-1', api, standby)
-    client.remember_connection(tmp_path, 'us-east-1', instance, standby)
+    client.open_connection(tmp_path, 'us-east-1', instance, api, remember=not standby)   # its master is alive too
     remembered = json.loads((tmp_path / 'connection-us-east-1.json').read_text())['instance']
     if standby:
         assert (instance, asked, remembered) == ('i-0bbbbbbbbbbbbbbbb', [['agent-test-box-standby']], 'i-0aaaaaaaaaaaaaaaa')

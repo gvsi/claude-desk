@@ -303,10 +303,52 @@ def choose_instance(cache: Path, region: str, api, standby: bool) -> str:
     return instance
 
 
-def remember_connection(cache: Path, region: str, instance: str, standby: bool):
-    # Every lane on this laptop reads it, so only the active machine is remembered.
-    if not standby:
-        (cache / f"connection-{region}.json").write_text(json.dumps({"instance": instance}))
+def open_connection(cache: Path, region: str, instance: str, api, remember: bool, timing=None) -> list[str]:
+    """This laptop's shared SSH connection to the instance, opened over SSM unless one is alive; its options for ssh.
+    With `remember`, every lane's next call reuses it (the active machine only, never a standby)."""
+    aws = ["aws", "--region", region, "--no-cli-pager"]
+    # Reuse one encrypted SSM stream for SSH/rsync. No inbound port is opened.
+    with (cache / f"connection-{instance}.lock").open("w") as connection_lock:
+        fcntl.flock(connection_lock, fcntl.LOCK_EX)
+        if timing:
+            timing.mark("connection_lock")
+        key = cache / "id_ed25519"
+        if not key.exists():
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "desk-testbox-client", "-f", str(key)], check=True)
+        control = control_path(cache, region, instance)
+        proxy = shlex.join(aws + ["ssm", "start-session", "--target", instance, "--document-name", "AWS-StartSSHSession", "--parameters", "portNumber=%p"])
+        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-i", str(key)]
+        host = "ubuntu@" + instance
+        check = subprocess.run(["ssh", *ssh_opts, "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if check.returncode:
+            public = key.with_suffix(".pub").read_text().strip()
+            # Trust the host key delivered over authenticated SSM, never trust-on-first-use over IP.
+            script = "set -eu; install -d -o ubuntu -g ubuntu -m 700 /home/ubuntu/.ssh; "
+            script += f"grep -qxF {shlex.quote(public)} /home/ubuntu/.ssh/authorized_keys || echo {shlex.quote(public)} >> /home/ubuntu/.ssh/authorized_keys; "
+            script += "chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys; chmod 600 /home/ubuntu/.ssh/authorized_keys; cat /etc/ssh/ssh_host_ed25519_key.pub"
+            command = api("ssm", "send-command", instance_ids=[instance], document_name="AWS-RunShellScript", parameters={"commands": [script]})["Command"]["CommandId"]
+            deadline = time.monotonic() + 180
+            while True:
+                try:
+                    result = api("ssm", "get-command-invocation", command_id=command, instance_id=instance)
+                except (subprocess.CalledProcessError, RuntimeError):
+                    result = {}
+                if result.get("Status") == "Success":
+                    break
+                if result.get("Status") in {"Failed", "Cancelled", "TimedOut"} or time.monotonic() > deadline:
+                    raise RuntimeError("SSM could not authorize SSH: " + result.get("StandardErrorContent", "timeout"))
+                time.sleep(2)
+            host_key = result["StandardOutputContent"].strip().split()
+            if host_key[:1] != ["ssh-ed25519"] or len(host_key) < 2:
+                raise RuntimeError("SSM did not return the SSH host key")
+            replace_host_key(cache / "known_hosts", instance, host_key)
+            # A separate session prevents one caller's process-group cleanup killing other lanes.
+            subprocess.run(["ssh", *ssh_opts, "-MNf", host], check=True, start_new_session=True)
+        if remember:
+            (cache / f"connection-{region}.json").write_text(json.dumps({"instance": instance}))
+    return ssh_opts
+
+
 
 
 def create_bundle(root: Path, bundle: Path, previous: str) -> bool:
@@ -373,44 +415,8 @@ def run(args, root, lane, cache):
     instance = choose_instance(cache, args.region, api, args.standby)
     timing.mark("discovery")
     print(f"testbox: connecting in {args.region}; lane={lane}", file=sys.stderr, flush=True)
-    # Reuse one encrypted SSM stream for SSH/rsync. No inbound port is opened.
-    with (cache / f"connection-{instance}.lock").open("w") as connection_lock:
-        fcntl.flock(connection_lock, fcntl.LOCK_EX)
-        timing.mark("connection_lock")
-        key = cache / "id_ed25519"
-        if not key.exists():
-            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "desk-testbox-client", "-f", str(key)], check=True)
-        control = control_path(cache, args.region, instance)
-        proxy = shlex.join(aws + ["ssm", "start-session", "--target", instance, "--document-name", "AWS-StartSSHSession", "--parameters", "portNumber=%p"])
-        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-i", str(key)]
-        host = "ubuntu@" + instance
-        check = subprocess.run(["ssh", *ssh_opts, "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if check.returncode:
-            public = key.with_suffix(".pub").read_text().strip()
-            # Trust the host key delivered over authenticated SSM, never trust-on-first-use over IP.
-            script = "set -eu; install -d -o ubuntu -g ubuntu -m 700 /home/ubuntu/.ssh; "
-            script += f"grep -qxF {shlex.quote(public)} /home/ubuntu/.ssh/authorized_keys || echo {shlex.quote(public)} >> /home/ubuntu/.ssh/authorized_keys; "
-            script += "chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys; chmod 600 /home/ubuntu/.ssh/authorized_keys; cat /etc/ssh/ssh_host_ed25519_key.pub"
-            command = api("ssm", "send-command", instance_ids=[instance], document_name="AWS-RunShellScript", parameters={"commands": [script]})["Command"]["CommandId"]
-            deadline = time.monotonic() + 180
-            while True:
-                try:
-                    result = api("ssm", "get-command-invocation", command_id=command, instance_id=instance)
-                except subprocess.CalledProcessError:
-                    result = {}
-                if result.get("Status") == "Success":
-                    break
-                if result.get("Status") in {"Failed", "Cancelled", "TimedOut"} or time.monotonic() > deadline:
-                    raise RuntimeError("SSM could not authorize SSH: " + result.get("StandardErrorContent", "timeout"))
-                time.sleep(2)
-            host_key = result["StandardOutputContent"].strip().split()
-            if host_key[:1] != ["ssh-ed25519"] or len(host_key) < 2:
-                raise RuntimeError("SSM did not return the SSH host key")
-            replace_host_key(cache / "known_hosts", instance, host_key)
-        # A separate session prevents one caller's process-group cleanup killing other lanes.
-        if check.returncode:
-            subprocess.run(["ssh", *ssh_opts, "-MNf", host], check=True, start_new_session=True)
-        remember_connection(cache, args.region, instance, args.standby)
+    ssh_opts = open_connection(cache, args.region, instance, api, remember=not args.standby, timing=timing)
+    host = "ubuntu@" + instance
     ssh = ["ssh", *ssh_opts, host]
     timing.mark("connection")
     base = f"/srv/testbox/lanes/{lane}"
