@@ -39,7 +39,7 @@ async def test_business_card_titles_refuse_prices_dates_and_unaccepted_promises(
                      body={'tools': [{**intake(), 'title': title}]}, auth=desk.owner,
                      expect=Expect(status=422, fields={'code': 'invalid'}))
     if k.is_real:
-        assert not [row for row in await records.tools(desk.copy.copy_id) if row['source'] == 'business']
+        assert not [row for row in await records.tools(desk.copy.copy_id) if row['tool'] == TOOL]
     await put_intake(k, desk, {**intake(), 'title': 'Book a free intro consult'})
 
 
