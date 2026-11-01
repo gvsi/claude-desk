@@ -1831,6 +1831,12 @@ describe('setup', () => {
     await expect.element(waiting.getByText('Not connected', { exact: true })).toBeVisible();
     expect(waiting.element().querySelector('.cd-status-label .cd-status-dot--held')).not.toBeNull();
     expect(waiting.getByRole('listitem').elements()).toHaveLength(1);
+    // The row sits straight in the card, as the board draws it: no padding of its own over the
+    // card's 16 px, so the card is the row, its padding and its border.
+    const placeholder = waiting.getByRole('listitem').element();
+    expect([getComputedStyle(placeholder).paddingTop, getComputedStyle(placeholder).paddingBottom]).toEqual(['0px', '0px']);
+    const cardBox = waiting.element().getBoundingClientRect().height;
+    expect(Math.abs(cardBox - (placeholder.getBoundingClientRect().height + 2 * 16 + 2))).toBeLessThanOrEqual(1);
     await expect.element(screen.getByText('Stripe asks you to sign in. Then you review its tools here.', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Turn it on' }).elements()).toHaveLength(0);

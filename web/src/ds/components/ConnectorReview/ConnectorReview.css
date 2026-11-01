@@ -119,6 +119,11 @@
   border-top: 1px solid var(--line-hairline);
 }
 
+/* An app's one row before it is connected sits straight in the card, as the board draws it. */
+.cd-connector-review__tool--placeholder {
+  padding-block: 0;
+}
+
 .cd-connector-review__layout {
   display: flex;
   flex-wrap: wrap;

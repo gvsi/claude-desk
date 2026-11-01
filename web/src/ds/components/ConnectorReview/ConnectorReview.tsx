@@ -131,7 +131,7 @@ export function ConnectorReview({ connector, job, intro, connection, onConnect, 
         <ul role="list" className="cd-connector-review__tools">
           {/* Before the app is connected its tools can't be known: one row says so, and when they'll show. */}
           {app === 'not_connected' ? (
-            <li className="cd-connector-review__tool">
+            <li className="cd-connector-review__tool cd-connector-review__tool--placeholder">
               <div className="cd-connector-review__layout">
                 <div className="cd-connector-review__text">
                   <p className="cd-connector-review__name cd-type-body">{`${name}'s tools`}</p>
