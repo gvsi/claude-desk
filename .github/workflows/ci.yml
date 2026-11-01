@@ -30,7 +30,7 @@ defaults:
 jobs:
   backend:
     name: backend tests
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 5
     needs: [backend-1, backend-2, backend-3, backend-4]
     if: always()
@@ -45,7 +45,7 @@ jobs:
 
   backend-1:
     name: backend tests 1/4
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-1"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -92,7 +92,7 @@ jobs:
 
   backend-2:
     name: backend tests 2/4
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-2"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -139,7 +139,7 @@ jobs:
 
   backend-3:
     name: backend tests 3/4
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-3"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-3"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -186,7 +186,7 @@ jobs:
 
   backend-4:
     name: backend tests 4/4
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-4"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-backend-4"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -261,7 +261,7 @@ jobs:
 
   tier1:
     name: tier 1 evals
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 5
     needs: [tier1-1, tier1-2, tier1-3, tier1-4]
     if: always()
@@ -276,7 +276,7 @@ jobs:
 
   tier1-1:
     name: tier 1 evals 1/4
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-1"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-1"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -327,7 +327,7 @@ jobs:
 
   tier1-2:
     name: tier 1 evals 2/4
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-2"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-2"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -378,7 +378,7 @@ jobs:
 
   tier1-3:
     name: tier 1 evals 3/4
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-3"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-3"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
@@ -429,7 +429,7 @@ jobs:
 
   tier1-4:
     name: tier 1 evals 4/4
-    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-4"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier1-4"]', 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 40
     services:
       postgres:
