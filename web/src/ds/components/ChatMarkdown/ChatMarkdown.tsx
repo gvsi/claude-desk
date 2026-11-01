@@ -5,6 +5,7 @@ import { type Components, defaultRemarkPlugins, type ExtraProps, parseMarkdownIn
 
 import { everyTableCell } from './everyTableCell.ts';
 import { footnotesAsText } from './footnotesAsText.ts';
+import { taskItemsAsText } from './taskItemsAsText.ts';
 import { useReducedMotion } from './useReducedMotion.ts';
 import { useReveal } from './useReveal.ts';
 
@@ -31,10 +32,15 @@ const REHYPE_PLUGINS: StreamdownProps['rehypePlugins'] = [
 ];
 
 /**
- * Streamdown's own Markdown steps (GitHub Markdown and code fences), then footnotes back to their
- * words and every table cell kept.
+ * Streamdown's own Markdown steps (GitHub Markdown and code fences), then footnotes and task items
+ * back to their words, and every table cell kept.
  */
-const REMARK_PLUGINS: StreamdownProps['remarkPlugins'] = [...Object.values(defaultRemarkPlugins), footnotesAsText, everyTableCell];
+const REMARK_PLUGINS: StreamdownProps['remarkPlugins'] = [
+  ...Object.values(defaultRemarkPlugins),
+  footnotesAsText,
+  taskItemsAsText,
+  everyTableCell,
+];
 
 /** A reference definition, `[1]: https://…`, which may sit in its own paragraph. */
 const REFERENCE_DEFINITION = /^ {0,3}\[[^\]]+\]:/m;

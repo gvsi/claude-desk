@@ -236,6 +236,12 @@ it('growing_text_that_stops_mid_table_shows_no_pipes_or_broken_rows', () => {
   ]);
 });
 
+it('a_task_list_shows_its_marks_as_written_and_no_checkboxes', () => {
+  const md = reply(mount(<ChatMarkdown text={'- [x] Deposit sorted\n- [ ] Visit booked\n- [X] Photos sent'} />));
+  expect(md.querySelectorAll('input')).toHaveLength(0);
+  expect([...md.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['[x] Deposit sorted', '[ ] Visit booked', '[X] Photos sent']);
+});
+
 it('a_reference_link_keeps_its_address_from_another_paragraph', () => {
   // Streamdown renders each block alone, so a definition in its own paragraph vanished and the
   // link showed as "[Book][1]". The reply renders as one block when it defines a reference.
