@@ -147,6 +147,9 @@ describe('mock payloads', () => {
     for (const { decision } of mockStore.world.decisions.values()) checks.push(['Decision', decision]);
     for (const { entry } of mockStore.world.inbox) checks.push(['DemoInboxEntry', entry]);
     for (const { view } of mockStore.world.links.values()) checks.push(['PaymentLinkView', view]);
+    // What the owner tells a Desk: the stored item the kernel answers with.
+    const item = { item_id: 'note-1', source: 'setup', title: 'A note', text: 'A note for the Desk.', label: { readers: ['owner'] } };
+    checks.push(['KnowledgeItem', await body('addKnowledge', { params: { desk_id: RIVERA.deskId }, body: { item } })]);
 
     for (const desk of mockStore.world.desks) {
       const deskId = desk.summary.desk_id;

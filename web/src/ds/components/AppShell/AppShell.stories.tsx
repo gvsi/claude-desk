@@ -2,11 +2,14 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
+import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { Greeting } from '../Greeting/Greeting.tsx';
 import { ReviewerBar } from '../ReviewerBar/ReviewerBar.tsx';
 import { SectionHeader } from '../SectionHeader/SectionHeader.tsx';
+import { SidebarSkeleton } from '../Sidebar/SidebarSkeleton.tsx';
+import { ReviewerBarSkeleton } from '../ReviewerBar/ReviewerBarSkeleton.tsx';
 import { Sidebar, type SidebarHrefs, type SidebarLinkProps } from '../Sidebar/Sidebar.tsx';
 import { AppShell } from './AppShell.tsx';
 
@@ -166,6 +169,37 @@ export const OwnerToday: Story = {
     // At this width there is no top bar and no menu.
     await expect(canvas.queryByRole('button', { name: 'Menu' })).toBeNull();
     await expect(canvasElement.querySelector('dialog')).toBeNull();
+  },
+};
+
+export const SkipToContent: Story = {
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws Skip to content: the first Tab stop on every owner page, out of sight until the keyboard reaches it, then at the top left over the reviewer bar and the sidebar, on the raised surface with the standard focus ring.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    // skip_link_first_and_out_of_sight: nothing shows until the keyboard reaches it.
+    const skip = canvas.getByRole('link', { name: 'Skip to content' });
+    await expect(skip.getBoundingClientRect().width).toBeLessThanOrEqual(1);
+
+    // The first Tab, before Start over: at the top left, over the reviewer bar, with the ring.
+    await userEvent.tab();
+    await expect(skip).toHaveFocus();
+    expectComputed(skip, {
+      height: '32px',
+      paddingLeft: '12px',
+      borderTopLeftRadius: '8px',
+      backgroundColor: 'rgb(42, 41, 39)',
+      color: 'rgba(250, 249, 245, 0.92)',
+      outlineStyle: 'solid',
+      outlineWidth: '2px',
+      outlineColor: 'rgb(126, 174, 218)',
+    });
+    const box = skip.getBoundingClientRect();
+    await expect([box.left, box.top]).toEqual([8, 8]);
+    await expect(box.top).toBeLessThan(canvas.getByRole('note').getBoundingClientRect().bottom);
+    await expect(document.elementFromPoint(box.left + 4, box.top + 4)).toBe(skip);
   },
 };
 
@@ -449,5 +483,74 @@ export const ShortWindow: Story = {
     await expect(foot.getBoundingClientRect().top).toBe(footTop);
     await userEvent.tab();
     await expect(canvas.getByRole('switch', { name: 'Answering' })).toHaveFocus();
+  },
+};
+
+export const Skeleton: Story = {
+  beforeEach: loadWebFonts,
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'P12-01, UXC-P1201-After (#artboard-dec46cf506e4): the frame uses its real classes. The skeleton column and main area are divs, leaving the loading page one main landmark.',
+  },
+  render: (args) => (
+    <div>
+      <div data-real-frame>
+        <AppShell
+          {...args}
+          sidebar={<Sidebar {...sidebar.props} desks={[{ id: 'desk-rivera-main', name: rivera.business.deskName }]} about={ABOUT} />}
+        />
+      </div>
+      <div data-shaped-frame aria-hidden="true" ref={(element) => element?.setAttribute('inert', '')}>
+        <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={7} about={ABOUT.links.length} />}>
+          <div />
+        </AppShell>
+      </div>
+    </div>
+  ),
+  play: async ({ canvasElement, userEvent }) => {
+    const real = canvasElement.querySelector<HTMLElement>('[data-real-frame]')!;
+    const shapes = canvasElement.querySelector<HTMLElement>('[data-shaped-frame]')!;
+    // During the hand-off both shells are mounted, but only the real shell owns a skip target.
+    const main = real.querySelector('main')!;
+    const skip = real.querySelector<HTMLAnchorElement>('.cd-app-shell__skip')!;
+    await expect(canvasElement.querySelectorAll('.cd-app-shell__skip')).toHaveLength(1);
+    await expect(document.querySelectorAll(`#${CSS.escape(main.id)}`)).toHaveLength(1);
+    await expect(shapes.querySelector('.cd-app-shell__main')).not.toHaveAttribute('id');
+    await expect(shapes.querySelector('.cd-app-shell__main')).not.toHaveAttribute('tabindex');
+    await expect(skip).toHaveAttribute('href', `#${main.id}`);
+    await expect(document.getElementById(skip.hash.slice(1))).toBe(main);
+    skip.focus();
+    await userEvent.keyboard('{Enter}');
+    await expect(main).toHaveFocus();
+    await expect(shapes.querySelector('main, aside')).toBeNull();
+    await expect(shapes.querySelector('button, a[href]')).toBeNull();
+    for (const selector of ['.cd-reviewer-bar', '.cd-app-shell__column', '.cd-app-shell__main', '.cd-app-shell__topbar']) {
+      const a = real.querySelector(selector)?.getBoundingClientRect();
+      const b = shapes.querySelector(selector)?.getBoundingClientRect();
+      if (!a || !b) {
+        await expect(Boolean(a)).toBe(Boolean(b));
+        continue;
+      }
+      for (const [edge, delta] of [
+        ['top', real.getBoundingClientRect().top - shapes.getBoundingClientRect().top],
+        ['left', 0],
+        ['width', 0],
+        ['height', 0],
+      ] as const) {
+        await expect(Math.abs(a[edge] - b[edge] - delta), `${selector} ${edge}`).toBeLessThanOrEqual(2);
+      }
+    }
+  },
+};
+
+export const SkeletonPhone: Story = {
+  ...Skeleton,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'P12-01 phone, UXC-P1201-After-Phone (#artboard-1a93c5a1f31f): the compact frame follows the real top bar and keeps no extra main.',
   },
 };

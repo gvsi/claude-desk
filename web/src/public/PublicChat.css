@@ -37,11 +37,6 @@
   justify-content: center;
 }
 
-.cd-public-state__opening {
-  margin: 0;
-  color: var(--text-secondary);
-}
-
 @media (max-width: 639.98px) {
   .cd-public-state {
     padding: var(--space-16);

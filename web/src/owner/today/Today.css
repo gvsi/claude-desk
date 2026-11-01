@@ -398,6 +398,13 @@
   color: var(--text-secondary);
 }
 
+/* The visitor's words, as a held request's card quotes them. */
+.cd-callback__context {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .cd-callback__actions {
   display: flex;
   flex-wrap: wrap;
@@ -660,4 +667,18 @@
   .cd-briefing-row__words {
     grid-column: 1 / -1;
   }
+}
+
+/* Shapes share the page's layout and line boxes. */
+.cd-today-skeleton__link { flex: none; margin-top: var(--space-6); }
+.cd-today-skeleton__rule { flex: 1; min-width: 0; }
+.cd-today--skeleton .cd-greeting__text { flex-basis: 100%; }
+
+.cd-today-skeleton__presence { min-height: calc(var(--size-avatar) - var(--space-6)); }
+
+.cd-today-skeleton__phone-line { display: none; }
+@media (max-width: 639.98px) {
+  .cd-today-skeleton__phone-line { display: flex; }
+  .cd-today-skeleton__wide-line { display: none; }
+  .cd-today-skeleton__answer { min-height: calc(var(--size-control-main) + var(--space-4)); }
 }

@@ -11,7 +11,8 @@ from fastapi import APIRouter, Path, Request
 from sqlalchemy import select
 
 from desk.contracts import LedgerEvent, Principal, SessionCreated, SessionState
-from desk.db.models import Desk
+from desk.db.models import Desk, Handoff
+from desk.db.models import Fact as FactRow
 from desk.kernel_api import CreateSessionRequest, ModeRequest, WhoAmI
 from desk.kernel_service import agents, auth, ledger, repo
 from desk.kernel_service.auth import AuthError, Named, SessionRow
@@ -146,6 +147,46 @@ async def set_mode(session_id: Annotated[str, Path(alias="id")], body: ModeReque
         kind, summary = "breaker", {"resumed": True}
     else:
         kind, summary = "takeover", {"from": previous, "to": row.mode, "generation": row.generation}
+    # the owner taking the conversation over is the owner handling it: the card's handoff closes
+    closing = await close_card_handoffs(ctx, row) if row.mode == "owner" else []
     await ledger.append(ctx, copy_id=row.copy_id, desk_id=row.desk_id,
                         event=LedgerEvent(kind=kind, origin="kernel", session_id=row.session_id, summary=summary))
+    await ledger_card_handoffs_closed(ctx, row, closing, "takeover")
     return session_state(row)
+
+
+async def close_card_handoffs(ctx: KernelCtx, row: SessionRow) -> list[str]:
+    """Closes the session's open handoffs the handoff card opened, when the owner handles the
+    conversation (the owner's decision of 2026-10-31): the owner takes it over (`set_mode`) or
+    says something in it (`reply_check.owner_message`). Each goes `done` as the owner's mark of
+    done closes one, its `handoff:<id>` fact, if any, expired. A call-back stays open: it promises
+    the visitor a call, which neither keeps. The caller holds the session row; the handoffs are
+    taken `FOR UPDATE` in the order a call-back's closing takes them (newest first), then their
+    facts, before the caller appends to the ledger (`ledger_card_handoffs_closed`). Returns the
+    IDs it closed."""
+    rows = list(await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(
+        Handoff.desk_id == row.desk_id, Handoff.session_id == row.session_id, Handoff.status == "open",
+        Handoff.kind == "card").order_by(Handoff.created_at.desc().nulls_last(), Handoff.handoff_id)
+        .with_for_update())))
+    if not rows:
+        return []
+    for handoff in rows:
+        handoff.status = "done"
+    facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == row.desk_id, FactRow.fact_id.in_([f"handoff:{handoff.handoff_id}" for handoff in rows]))
+        .with_for_update()))
+    for fact in facts:
+        fact.status = "expired"
+    await ctx.db.flush()
+    return [handoff.handoff_id for handoff in rows]
+
+
+async def ledger_card_handoffs_closed(ctx: KernelCtx, row: SessionRow, handoff_ids: list[str],
+                                      closed_by: str) -> None:
+    """Ledgers each closing `close_card_handoffs` made, `desk_data` `{part: "handoffs", refs: [its
+    id], closed_by}` (`takeover` or `owner_message`), so the owner's history can tell it from the
+    owner's own mark of done."""
+    for handoff_id in handoff_ids:
+        await ledger.append(ctx, copy_id=row.copy_id, desk_id=row.desk_id, event=LedgerEvent(
+            kind="desk_data", origin="kernel", summary={"part": "handoffs", "refs": [handoff_id],
+                                                        "closed_by": closed_by}))

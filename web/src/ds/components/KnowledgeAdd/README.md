@@ -33,7 +33,7 @@
 ## Behavior
 
 - "Add a file" opens the browser's file picker for text and Markdown files (`accept=".txt,.md,text/plain,text/markdown"`). The file picked goes to `onAddFile`, and the picker is emptied, so picking the same file again is a new pick.
-- With `busy` set to an add, that add spins and the other waits (`aria-busy`, `aria-disabled`, focus kept), and neither calls back or opens the picker.
+- With `busy` set to an add, that add spins and the other waits (`aria-busy`, `aria-disabled`, focus kept), and neither calls back or opens the picker. The switch is also disabled (`aria-disabled`, presses ignored), without being announced as busy.
 - With `busy: 'switch'`, the switch waits (`Switch`'s `waiting`: `aria-busy`, `aria-disabled`, presses ignored) and both adds wait too, so nothing else is sent until the change lands.
 - The switch and the line above it show `added.readers` and nothing else: turning the switch calls `onPublicChange` and leaves both as they were until the screen passes back new readers.
 - Nothing here reads, checks, sizes or sends a file or a note.

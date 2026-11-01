@@ -414,6 +414,54 @@ async def test_immediate_handoff_ends_the_agent_turn(app, browser, fake, kernel_
     assert len(fake.called("POST /check_reply")) == 1 and len(model.requests) == 1
 
 
+def finals(fake, session_id: str) -> list[bool]:
+    """`CheckReplyRequest.final` of each of the session's reply checks, in order (absent means final)."""
+    return [call.body.get("final", True) for call in fake.called("/check_reply")
+            if call.body["draft"]["session_id"] == session_id]
+
+
+async def delivered_texts(engine, session_id: str) -> list[list[str | None]]:
+    """The block texts of each message delivered to the session, in order."""
+    async with engine.connect() as conn:
+        found = await conn.execute(text("SELECT blocks FROM app.messages WHERE session_id = :s AND kind = 'delivered'"
+                                        " ORDER BY n"), {"s": session_id})
+        return [[block.get("text") for block in blocks] for (blocks,) in found]
+
+
+async def test_a_first_reply_claude_can_rewrite_never_reaches_the_agent(app, browser, fake, kernel_http, model,
+                                                                         engine):
+    # One rule for every kind of session: an agent's first reply, blocked only for kinds a rewrite fixes while the
+    # turn has a model call left, is checked as not final and never returned, stored or shown; the rewrite is final.
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(say("It's $180."), say("Let me get you a quote card for that."))
+
+    answered = await agent.send("How much is a drain clearing?")
+
+    assert answered.status_code == 200, answered.text
+    assert [block["text"] for block in answered.json()["blocks"]] == ["Let me get you a quote card for that."]
+    assert finals(fake, agent.session_id) == [False, True]
+    assert await delivered_texts(engine, agent.session_id) == [["Let me get you a quote card for that."]]
+    assert "180" not in answered.text
+    assert [row for row in fake.handoffs.values() if row["session_id"] == agent.session_id] == []
+
+
+async def test_an_agents_first_reply_on_the_turns_last_call_is_final(app, browser, fake, kernel_http, model, engine):
+    # On the turn's last allowed model call there is no rewrite: the first reply is checked as final, and blocked, the
+    # handoff the kernel opened for the owner is what the agent gets, once.
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(loop.MAX_MODEL_CALLS - 1)),
+              say("It's $180."))
+
+    answered = await agent.send("Find me a slot, then tell me the price.")
+
+    assert answered.status_code == 200, answered.text
+    assert len(model.requests) == loop.MAX_MODEL_CALLS
+    assert [block["template"] for block in answered.json()["blocks"]] == ["handoff"]
+    assert finals(fake, agent.session_id) == [True]
+    assert [(row["kind"], row["status"]) for row in fake.handoffs.values()
+            if row["session_id"] == agent.session_id] == [("card", "open")]
+
+
 async def test_response_carries_blocks_and_signed_receipts(app, browser, fake, kernel_http, model, engine,
                                                            jobs_connector):
     agent = await new_agent(app, browser, fake, kernel_http)

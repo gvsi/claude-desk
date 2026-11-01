@@ -26,6 +26,46 @@
   color: var(--text-primary);
 }
 
+.cd-public-brand--skeleton {
+  --brand-field: var(--bg-panel);
+  --brand-accent: var(--line-hairline);
+}
+
+.cd-public-shell-skeleton__ask {
+  flex: none;
+}
+
+.cd-public-shell .cd-public-shell-skeleton__phone-line {
+  display: none;
+}
+
+.cd-public-shell .cd-public-shell-skeleton__beside-line {
+  display: none;
+}
+
+@container cd-public-shell (min-width: 900px) {
+  .cd-public-shell .cd-public-shell-skeleton__beside-line {
+    display: flex;
+  }
+}
+
+@container cd-public-shell (max-width: 639.98px) {
+  .cd-public-shell .cd-public-shell-skeleton__phone-line {
+    display: flex;
+  }
+}
+
+.cd-public-shell-skeleton__composer {
+  position: relative;
+}
+
+.cd-public-shell-skeleton__placeholder {
+  position: absolute;
+  top: 50%;
+  left: var(--space-16);
+  transform: translateY(-50%);
+}
+
 /* Inside an owner screen: the height of the panel that holds it. In a panel with a set height the
    conversation scrolls inside the shell; in a panel that grows with what it holds, the shell grows
    with the conversation. */

@@ -103,6 +103,7 @@ from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain,
                                  reference, render, review_thresholds, seed)
 from desk.kernel_service.adapters.base import Normalized
 from desk.kernel_service.auth import OwnerCtx, SessionRow
+from desk.kernel_service.baseline_reasons import BASELINE_RULE_PLAIN as BASELINE_REASONS
 from desk.kernel_service.decisions import Reviewed
 from desk.kernel_service.reference import RefSets
 from desk.kernel_service.repo import (KernelCtx, KernelFailure, KernelRuntime, copy_ids, desks_to_bring_up,
@@ -1934,17 +1935,6 @@ PROBE_REFUSED_PLAIN: dict[str, str] = {
     "version_unloadable": "These rules couldn't be loaded.",
     "evaluation_error": "These rules couldn't be checked for it.",
 }
-# The always-on rule behind a refusal (`cedar/baseline.cedar`, by `@id`), in the owner's words.
-# `auto_money_cap` has none: it forbids only what the owner hasn't approved, so it keeps a payment
-# above the cap from going ahead on its own but never decides a refusal.
-BASELINE_REASONS: dict[str, str] = {
-    "same_copy": "A conversation acts only on this Desk's own records.",
-    "private_data_record_owner": "Private records go only to the verified person they belong to.",
-    "recipient_owner_or_verified_contact": "Messages go only to you or to the verified contact on record.",
-    "no_agent_pay_out": "A visiting agent is never paid money.",
-    "agent_charge_within_mandate": "A visiting agent pays only within the limit it signed.",
-    "money_has_amount": f"A payment is always more than $0 and at most {explain.money(AUTO_MONEY_HARD_CAP_CENTS)}.",
-}
 PROBE_REVIEW_PLAIN = "It would go ahead on its own if the reviewer finds it within your rules."
 
 
@@ -2118,7 +2108,7 @@ class _Prober:
         reasons = [cards[card_id].reason for card_id in evaluation.card_ids if card_id in cards]
         if not reasons and evaluation.outcome == "refuse":
             reasons = [BASELINE_REASONS.get(policy_id.removeprefix("B."), decide.BASELINE_PLAIN)
-                       for policy_id in evaluation.policy_ids if policy_id.startswith("B.")] or [decide.BASELINE_PLAIN]
+                       for policy_id in evaluation.policy_ids if policy_id.startswith("B.")] or [decide.UNCOVERED_PLAIN]
         lines = [asked(), PROBE_OUTCOME_PLAIN[evaluation.outcome], *reasons]
         if evaluation.needed_review:
             lines.append(PROBE_REVIEW_PLAIN)

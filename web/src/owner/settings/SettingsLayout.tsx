@@ -6,6 +6,7 @@ import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { BillingPage } from './BillingPage.tsx';
 import { GeneralPage } from './GeneralPage.tsx';
+import { KnowledgePage } from './KnowledgePage.tsx';
 import { NotificationsPage } from './NotificationsPage.tsx';
 
 import './Settings.css';
@@ -30,7 +31,7 @@ export interface SettingsSection {
  */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { key: 'general', label: 'General', path: 'general', element: <GeneralPage /> },
-  // Knowledge goes here.
+  { key: 'knowledge', label: 'Knowledge', path: 'knowledge', element: <KnowledgePage /> },
   { key: 'notifications', label: 'Notifications', path: 'notifications', element: <NotificationsPage /> },
   // Channels goes here.
   { key: 'billing', label: 'Billing', path: 'billing', element: <BillingPage /> },

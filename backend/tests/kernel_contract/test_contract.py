@@ -89,6 +89,8 @@ from desk.kernel_api import (
     PublicDesk,
     SessionContext,
     ToolsConnectRequest,
+    ToolsConfirmRequest,
+    ToolPin,
     ToolsSimulateChangeRequest,
     TurnRequest,
     TurnStarted,
@@ -448,6 +450,31 @@ async def test_discounted_quote_holds_and_answers_once(kernel, ro_read):
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
     assert await refused(answer(owner, held.decision_id, "deny_once")) == (409, "conflict")
     assert (await read_decision(view, held.decision_id)).state == "executed"
+
+
+@pytest.mark.kernel_plan("01a")
+@pytest.mark.parametrize("choice", ["allow_once", "deny_once"])
+async def test_answer_includes_the_approved_snapshot_only_for_an_allow(kernel, ro_read, choice):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    held = await decide(view, session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    result = await answer(http.owner(copy.owner_token), held.decision_id, choice)
+    assert "approved" in result.model_dump(mode="json")
+    if choice == "deny_once":
+        assert result.approved is None and result.decision.state == "denied"
+        assert result.execution is None
+        return
+
+    assert result.approved is not None
+    assert (result.approved.decision_id, result.approved.state, result.approved.visitor_plain) == (
+        held.decision_id, "approved", "Maria Rivera approved this")
+    assert result.approved.signature and result.approved.signature != result.decision.signature
+    assert result.approved.ledger_seq < result.decision.ledger_seq
+    assert result.decision.state == "executed" and result.execution.state == "succeeded"
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1231,6 +1258,175 @@ async def test_handoff_done_closes_it_once(kernel, ro_read):
     assert closed == [{"part": "handoffs", "refs": [handoff_id]}]
 
 
+CARD_HANDOFF_REASON = "The Desk handed this to you."
+HANDED_TO_YOU = "A visitor is waiting in a conversation the Desk handed to you."
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_read):
+    """The handoff card opens a handoff the owner sees (#96). A reply the check blocks shows the visitor the handoff
+    card and opens one handoff on the session, which the owner's Needs you lists from `kernel_ro.handoffs`: kind
+    `card`, no call-back window and the kernel's reason, never the draft's words. The owner gets one alert naming no
+    decision and nothing of the draft. A second blocked reply in the same session shows the card again but opens none
+    and alerts nothing. Claude's own draft citing the card opens one too. The alert follows the Desk's notification
+    preferences, as every alert does: with `handoff` taken out of "now", a card still opens a handoff but alerts
+    nothing."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    seeded = {entry.entry_id for entry in await owner.call("GET /demo_inbox")}
+
+    def open_handoffs() -> list[tuple]:
+        """The Desk's open handoffs as Needs you reads them: (session, kind, call-back window, reason)."""
+        rows = ro_read(ro_schema, copy.copy_id, "SELECT session_id, kind, callback_window, reason FROM {ro}.handoffs"
+                                                " WHERE desk_id = %s AND status = 'open'", (desk_id,))
+        return sorted(tuple(row.values()) for row in rows)
+
+    async def alerts() -> list[DemoInboxEntry]:
+        return [entry for entry in await owner.call("GET /demo_inbox") if entry.entry_id not in seeded]
+
+    blocked = await new_visitor(http, slug)
+    for _ in range(2):
+        verdict = await check_reply(http.session(blocked.session_token), blocked.state.session_id, 0,
+                                    "It comes to $89 for the visit.")
+        assert not verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+        assert open_handoffs() == [(blocked.state.session_id, "card", None, CARD_HANDOFF_REASON)]
+        (alert,) = await alerts()
+        assert (alert.to, alert.kind, alert.decision_id, alert.body) == ("owner", "alert", None, HANDED_TO_YOU)
+
+    cited = await new_visitor(http, slug)
+    draft = ReplyDraft(session_id=cited.state.session_id, generation=0, prose="",
+                       clauses=[Clause(template="handoff")])
+    verdict = await http.session(cited.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+    assert verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+    assert open_handoffs() == sorted([(blocked.state.session_id, "card", None, CARD_HANDOFF_REASON),
+                                      (cited.state.session_id, "card", None, CARD_HANDOFF_REASON)])
+    assert [entry.body for entry in await alerts()] == [HANDED_TO_YOU] * 2
+
+    quiet = NotificationDefaults(now=["approval", "emergency", "breaker", "lockout"],
+                                 briefing=["lead", "callback", "booking"])
+    await owner.call("PUT /desks/{id}/notifications", DeskNotificationsRequest(notifications=quiet),
+                     path={"id": desk_id})
+    unalerted = await new_visitor(http, slug)
+    verdict = await check_reply(http.session(unalerted.session_token), unalerted.state.session_id, 0,
+                                "It comes to $89 for the visit.")
+    assert not verdict.ok and len(open_handoffs()) == 3
+    assert (unalerted.state.session_id, "card", None, CARD_HANDOFF_REASON) in open_handoffs()
+    assert len(await alerts()) == 2
+
+
+BLOCKED_PROSE = "It comes to $89 for the visit."           # a number in prose: a kind a rewrite fixes
+OTHER_LANGUAGE = "Bonjour, je peux vous aider."             # unsupported_language: no rewrite fixes it
+
+
+async def checked(http: KernelHttp, created: SessionCreated, prose: str, *, final: bool) -> ReplyVerdict:
+    draft = ReplyDraft(session_id=created.state.session_id, generation=0, prose=prose)
+    return await http.session(created.session_token).call("POST /check_reply",
+                                                          CheckReplyRequest(draft=draft, final=final))
+
+
+def session_handoffs(ro_read, ro_schema: str, copy: CopyCreated, session_id: str) -> list[tuple]:
+    """The session's handoffs as the owner's reads see them: (handoff ID, kind, status)."""
+    return [tuple(row.values()) for row in ro_read(
+        ro_schema, copy.copy_id, "SELECT handoff_id, kind, status FROM {ro}.handoffs WHERE session_id = %s"
+                                 " ORDER BY handoff_id", (session_id,))]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_only_a_handoff_card_the_session_sees_opens_an_owner_handoff(kernel, ro_read):
+    """The API checks a first draft it could still rewrite with `final` false (`CheckReplyRequest.final`). Blocked only
+    for kinds a rewrite fixes (`desk.rewrites`), it is never shown, so the kernel opens no owner handoff and alerts
+    nothing; the same draft checked as final opens one, and so does a non-final draft blocked for a kind no rewrite
+    fixes. Each reply entry records `final`. While the session has a held request awaiting the owner, whose own alert
+    and item the owner has, a final block opens none; once the owner has answered it, the next one does."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    seeded = {entry.entry_id for entry in await owner.call("GET /demo_inbox")}
+
+    async def handed_to_you() -> int:
+        return sum(entry.body == HANDED_TO_YOU for entry in await owner.call("GET /demo_inbox")
+                   if entry.entry_id not in seeded)
+
+    async def recorded_final(verdict: ReplyVerdict) -> bool:
+        (entry,) = [entry for entry in (await ledger_page(owner, desk_id)).entries if entry.seq == verdict.ledger_seq]
+        assert entry.event.kind == "reply"
+        return entry.event.summary["final"]
+
+    visitor = await new_visitor(http, slug)
+    rewritable = await checked(http, visitor, BLOCKED_PROSE, final=False)
+    assert not rewritable.ok and {violation.kind for violation in rewritable.violations} == {"number_in_prose"}
+    assert rewritable.blocks == []                          # never shown, so no handoff card is signed for it
+    assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == []
+    assert await handed_to_you() == 0 and await recorded_final(rewritable) is False
+    shown = await checked(http, visitor, BLOCKED_PROSE, final=True)
+    assert not shown.ok and await recorded_final(shown) is True
+    assert [block.template for block in shown.blocks] == ["handoff"]
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)] == ["card"]
+    assert await handed_to_you() == 1
+
+    stranger = await new_visitor(http, slug)
+    french = await checked(http, stranger, OTHER_LANGUAGE, final=False)
+    assert "unsupported_language" in {violation.kind for violation in french.violations}
+    assert [block.template for block in french.blocks] == ["handoff"]
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, stranger.state.session_id)] == ["card"]
+    assert await handed_to_you() == 2
+
+    asking = await new_visitor(http, slug)
+    held = await decide(http.session(asking.session_token), asking.state.session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    assert not (await checked(http, asking, BLOCKED_PROSE, final=True)).ok
+    assert session_handoffs(ro_read, ro_schema, copy, asking.state.session_id) == []
+    assert await handed_to_you() == 2                          # the owner has the held request's alert and item
+    await answer(owner, held.decision_id, "deny_once")
+    assert not (await checked(http, asking, BLOCKED_PROSE, final=True)).ok
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, asking.state.session_id)] == ["card"]
+    assert await handed_to_you() == 3
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_call_back_request_closes_the_card_handoff_and_opens_its_own(kernel, ro_read):
+    """A session holds one open handoff: a call-back request after the handoff card closes the card's handoff, as
+    the owner's mark of done closes one, and opens its own of kind `callback` under a new ID, so the owner keeps one
+    open item for the conversation. The closing is ledgered `desk_data` naming the card's handoff and, as
+    `replaced_by`, the call-back's, so the owner's history reads it as replaced rather than marked done. A row's kind
+    never changes, so the owner's stale mark of done on the card answers 409 and leaves the call-back open. The
+    owner's own preview of the Desk opens none."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    visitor = await new_visitor(http, slug)
+    assert not (await checked(http, visitor, BLOCKED_PROSE, final=True)).ok
+    ((card_id, kind, status),) = session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)
+    assert (kind, status) == ("card", "open")
+
+    view = http.session(visitor.session_token)
+    callback = await decide(view, visitor.state.session_id, 0, "call-1", "native.request_callback",
+                            {"name": "Dana Wells", "contact": "(503) 555-0142", "reason": "Leaking water heater"})
+    assert callback.state == "allowed" and (await execute(view, callback, 0)).state == "succeeded"
+    handoffs = {handoff_id: (kind, status)
+                for handoff_id, kind, status in session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)}
+    (callback_id,) = set(handoffs) - {card_id}
+    assert handoffs == {card_id: ("card", "done"), callback_id: ("callback", "open")}
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT reason FROM {ro}.handoffs WHERE handoff_id = %s",
+                     (callback_id,))
+    assert row["reason"] == "Dana Wells · (503) 555-0142 · Leaking water heater"
+    owner = http.owner(copy.owner_token)
+    closed = [entry.event.summary for entry in (await ledger_page(owner, copy.desk_ids[0])).entries
+              if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "handoffs"
+              and entry.event.summary.get("refs") == [card_id] and "kind" not in entry.event.summary]
+    assert closed == [{"part": "handoffs", "refs": [card_id], "replaced_by": callback_id}]   # replaced, not marked
+    assert await refused(owner.call("POST /handoffs/{id}/done", path={"id": card_id})) == (409, "conflict")
+    assert {handoff_id: (kind, status) for handoff_id, kind, status in session_handoffs(
+        ro_read, ro_schema, copy, visitor.state.session_id)} == handoffs           # the call-back is still open
+
+    previewing = await http.owner(copy.owner_token).call(
+        "POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor", preview=True))
+    assert not (await checked(http, previewing, BLOCKED_PROSE, final=True)).ok
+    assert session_handoffs(ro_read, ro_schema, copy, previewing.state.session_id) == []
+
+
 @pytest.mark.kernel_plan("01b")
 async def test_owner_demo_inbox_is_the_copys(kernel, ro_read):
     """The owner's Demo inbox holds the copy's entries: a hold alerts the owner there, under the entry its notice
@@ -1847,8 +2043,10 @@ async def test_refused_agent_signatures_are_ledgered(kernel, ro_read):
 
 @pytest.mark.kernel_plan("01c")
 async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
-    """A nonce's turn ends at a passing verdict, an immediate handoff or the second reply check; after that the same
-    request is 409 `replayed`, and any other reuse 401."""
+    """A nonce's turn ends at a passing verdict, an immediate handoff, a blocked check the API sent as final
+    (`CheckReplyRequest.final`) or the second reply check; after that the same request is 409 `replayed`, and any
+    other reuse 401. A first attempt sent with `final` false and blocked only for kinds a rewrite fixes leaves the
+    turn open for the rewrite."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -1870,6 +2068,9 @@ async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
         generation=0, text="When are you open?"), path={"session_id": session_id})) == (409, "replayed")
     handed_off = await turn("Parlez-vous français ?", "Bonjour, je peux vous aider.")   # unsupported_language
     assert await refused(handed_off.whoami(session_id)) == (409, "replayed")
+    final_block = await turn("What does it cost?")
+    await check_reply(final_block, session_id, 0, "It costs 40 dollars.", final=True)    # blocked, sent as final
+    assert await refused(final_block.whoami(session_id)) == (409, "replayed")
     twice = await turn("How much is it?", "It costs 50 dollars.")
     assert (await twice.whoami(session_id)).session.session_id == session_id      # one blocked check: still its turn
     await check_reply(twice, session_id, 0, "It costs 60 dollars.")
@@ -2243,7 +2444,7 @@ HOURS = [HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), en
 
 
 def active_version(ro_read, ro_schema: str, copy_id: str, desk_id: str) -> dict:
-    (active,) = ro_read(ro_schema, copy_id, "SELECT version, cards FROM {ro}.policy_versions"
+    (active,) = ro_read(ro_schema, copy_id, "SELECT version, cards, auto_money_cap_cents FROM {ro}.policy_versions"
                                             " WHERE desk_id = %s AND status = 'active'", (desk_id,))
     return active
 
@@ -2940,6 +3141,115 @@ async def test_connecting_payments_pins_its_tools_for_review(kernel, ro_read):
     assert not {"payments.list_charges", "payments.create_refund"} & given
 
 
+@pytest.mark.kernel_plan("01c")
+async def test_confirming_payments_drafts_enables_until_policy_confirmation(kernel, ro_read):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    configured = await owner.call("POST /policy/draft", PolicyDraftRequest(
+        desk_id=created.desk_id, cards=[*owner_cards(active), quote_card(max_amount_cents=1_000)],
+        expected_parent=active["version"], auto_money_cap_cents=2_300))
+    proved_or_skip(configured)
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id, version=configured.version))
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    body = ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles])
+    reviewed = await owner.call("POST /tools/confirm", body)
+    assert reviewed.profiles == profiles
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    assert reviewed.draft.parent_version == active["version"]
+    assert [card for card in reviewed.draft.cards if not card.is_default] == owner_cards(active)
+    assert reviewed.draft.auto_money_cap_cents == active["auto_money_cap_cents"]
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+    assert (await owner.call("POST /tools/confirm", body)).draft == reviewed.draft
+    probe = PolicyProbeRequest(desk_id=created.desk_id, probes=[Probe(
+        actor="visitor", who="record_owner", resource_kind="charge", resource_owner="caller",
+        call=ToolCall(call_id="review-charges", tool="payments.list_charges", args={}))])
+    result = await owner.call("POST /policy/{version}/probe", probe, path={"version": reviewed.draft.version})
+    assert result[0].outcome == "hold"
+    result = await owner.call("POST /policy/{version}/probe", probe, path={"version": active["version"]})
+    assert result[0].outcome == "refuse"
+
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    assert {row["tool"]: row["status"] for row in rows} == {profile.tool: "enabled" for profile in profiles}
+    assert (await owner.call("POST /tools/confirm", body)).draft is None
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_tool_review_refusals_and_disable_are_atomic(kernel, ro_read):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    unknown = ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool="payments.create_refund", definition_sha256="0" * 64)])
+    assert await refused(owner.call("POST /tools/confirm", unknown)) == (404, "not_found")
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    pins = [ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles]
+    for enable in (True, False):
+        stale = ToolsConfirmRequest(desk_id=created.desk_id, enable=enable, tools=[
+            pins[0], pins[1].model_copy(update={"definition_sha256": "0" * 64})])
+        assert await refused(owner.call("POST /tools/confirm", stale)) == (409, "conflict")
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    assert [row["status"] for row in rows] == ["needs_review", "needs_review"]
+    disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=False, tools=pins))
+    assert disabled.draft is None and all(profile.status == "disabled" for profile in disabled.profiles)
+    reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=True, tools=pins))
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    await owner.call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
+        desk_id=created.desk_id, tool=pins[-1].tool))
+    assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
+    rows = ro_read(ro_schema, copy.copy_id,
+                   "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    # a drift on a disabled tool leaves it disabled, its changed definition pending (`mcp_pins.check_pin`)
+    assert {row["tool"]: row["status"] for row in rows} == {
+        pins[0].tool: "disabled", pins[-1].tool: "disabled"}
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_a_tool_review_draft_is_refused_once_the_desks_tools_change(kernel, ro_read):
+    # The draft was proved against the tools enabled then plus its own enables; turning another tool off before it is
+    # confirmed changes what it would enable, so the confirm is refused and nothing it enables is turned on.
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(
+        desk_id=created.desk_id, server="mock_payments"))
+    reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=created.desk_id, enable=True, tools=[
+        ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256) for profile in profiles]))
+    assert reviewed.draft is not None
+    proved_or_skip(reviewed.draft)
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    (book,) = ro_read(ro_schema, copy.copy_id, "SELECT tool, definition_sha256 FROM {ro}.tools"
+                                               " WHERE desk_id = %s AND tool = 'native.book'", (created.desk_id,))
+    disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=created.desk_id, enable=False,
+        tools=[ToolPin(tool=book["tool"], definition_sha256=book["definition_sha256"])]))
+    assert disabled.draft is None and disabled.profiles[0].status == "disabled"
+    assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
+        desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+    rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s"
+                                            " AND (source = 'mcp' OR tool = 'native.book')", (created.desk_id,))
+    assert {row["tool"]: row["status"] for row in rows} == {
+        **{profile.tool: "needs_review" for profile in profiles}, "native.book": "disabled"}
+
+
 # The owner's knowledge, documents and tool changes (Plans 01b and 01c) ---------------------------------------
 
 
@@ -2978,6 +3288,44 @@ async def test_copy_starts_with_public_website_and_price_list_knowledge(kernel, 
 def knowledge_item(readers: list[str], text: str = "Street parking is free after 6 pm.") -> KnowledgeItem:
     return KnowledgeItem(item_id="upload-parking", source="upload", title="Parking", text=text,
                          label=Label(readers=readers))
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_knowledge_created_at_reads_in_kernel_order_and_survives_replacement(kernel, arrange, api_ro_conn):
+    """The API's reader exposes each stored first-added time, ordered by time then ID, even after replacement."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    reader = KernelRO(api_ro_conn, copy.copy_id, ro_schema, own_transactions=True)
+    for item_id in ("upload-z", "upload-a"):
+        item = knowledge_item(["owner"]).model_copy(update={"item_id": item_id})
+        await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=item))
+
+    async def read() -> list[dict]:
+        rows = await reader.rows("knowledge_items", desk_id=desk_id, order_by=("created_at", "item_id"))
+        recorded = arrange.recorded_knowledge_created_at(desk_id)
+        assert {row["item_id"]: row["created_at"] for row in rows} == recorded
+        assert all(isinstance(row["created_at"], datetime) and row["created_at"].tzinfo for row in rows)
+        assert [(row["created_at"], row["item_id"]) for row in rows] == sorted(
+            (at, item_id) for item_id, at in recorded.items())
+        return rows
+
+    first = await read()
+    first_times = {row["item_id"]: row["created_at"] for row in first}
+    # Fake time is fixed; move it so resetting created_at on replacement would fail on both kernels.
+    if state is not None:
+        state.now += timedelta(seconds=1)
+    later = knowledge_item(["owner"]).model_copy(update={"item_id": "upload-later"})
+    await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=later))
+    replacement = knowledge_item(["public"], text="Updated parking directions.").model_copy(
+        update={"item_id": "upload-z"})
+    await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=replacement))
+    after = await read()
+    assert {row["item_id"]: row["created_at"] for row in after if row["item_id"] in first_times} == first_times
+    updated = next(row for row in after if row["item_id"] == "upload-z")
+    assert (updated["text"], updated["readers"]) == (replacement.text, ["public"])
+    assert after[-1]["item_id"] == "upload-later"
+    assert after[-1]["created_at"] > max(first_times.values())
 
 
 @pytest.mark.kernel_plan("01b")

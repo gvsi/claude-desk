@@ -269,8 +269,8 @@ class _Messages:
         return await self._messages.create(**{**request, "system": self._system})
 
 
-class _WithSystem:
-    """The SDK client as `AnthropicDecisions` calls it, with `system` sent in place of the kernel's prompt."""
+class WithSystem:
+    """The SDK client with a system prompt override, also used by the reviewer runner."""
 
     def __init__(self, client: Any, system: str):
         self.messages = _Messages(client.messages, system)
@@ -322,10 +322,8 @@ def call_bound(system: str, data: SoftPromiseInput) -> float:
             + decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"]) / 1_000_000
 
 
-class _Meter:
-    """The run's spend against its cap: a call reserves its bound before it starts and is charged
-    its priced usage, else that bound, when it ends. `estimated_usd` is the part of the spend
-    charged at a bound, an estimate rather than a price."""
+class SpendMeter:
+    """Spend reservations and cap accounting, also used by the reviewer runner."""
 
     def __init__(self, cap: float):
         self.cap, self.spent, self.reserved, self.calls, self.estimated = cap, 0.0, 0.0, 0, 0
@@ -525,8 +523,8 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
     tallies = {case.id: CaseResult(id=case.id, group=case.group, language=case.language,
                                    input_sha256=input_sha256(inputs[case.id]), expected=case.expected,
                                    code_blocked=code_blocked(case), requested=config.samples) for case in cases}
-    checker = AnthropicDecisions(_WithSystem(deps.client(key), prompt.text))
-    meter = _Meter(config.max_usd)
+    checker = AnthropicDecisions(WithSystem(deps.client(key), prompt.text))
+    meter = SpendMeter(config.max_usd)
     bounds = {case.id: call_bound(prompt.text, inputs[case.id]) for case in cases}
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next
     position = 0

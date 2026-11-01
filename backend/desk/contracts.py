@@ -400,6 +400,8 @@ class ApprovalResult(BaseModel):
     decision: Decision
     execution: ExecResult | None          # allow_once / allow_person execute inside the answer call
     card_diff: list[RuleCard] | None      # allow_person / deny_always: cards the owner proves (/policy/draft) and confirms
+    approved: Decision | None = None     # signed approved state: "{owner} approved this" for an answer that runs
+                                         # None for a denial or an approval refused before execution
 
 # Replies: typed clauses plus guarded prose
 ClauseTemplate = Literal["quote", "booking_options", "booking_confirmed", "payment_link", "document_link",
