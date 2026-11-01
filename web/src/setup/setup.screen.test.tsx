@@ -3754,6 +3754,17 @@ describe('consultant setup', () => {
     expectNoHorizontalScroll();
   });
 
+  it.each(['7,5', '75 0', '1,50.00'] as const)('refuses_ambiguous_payment_grouping_%s_without_sending', async (dollars) => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Send a retainer link' });
+    const sent = requests('setupProposal').length;
+    await card.getByRole('textbox', { name: 'Amount', exact: true }).fill(dollars);
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    expect(requests('setupProposal')).toHaveLength(sent);
+    await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+  });
+
   it.each(['$1,500', '1500', '1,500.00', ' $ 1,500.00 '] as const)('accepts_payment_dollars_as_typed_%s', async (dollars) => {
     const state = await consultantAt('payment');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);

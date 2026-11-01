@@ -94,8 +94,9 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
   const rows = jobRows(job);
   const decide = (action: CardAction) => {
     if (disabled || !live || proposal.state !== 'proposed') return;
-    const dollars = amount.replace(/[$,\s]/g, '');
-    const cents = /^\d+(?:\.\d{1,2})?$/.test(dollars) ? Math.round(Number(dollars) * 100) : NaN;
+    const dollars = amount.trim().replace(/^\$/, '').trim();
+    const cents = /^(\d{1,3}(,\d{3})+|\d+)(\.\d{1,2})?$/.test(dollars)
+      ? Math.round(Number(dollars.replace(/,/g, '')) * 100) : NaN;
     const decision = decisionBody({ action, proposal, ...(payment && action === 'accept' ? { amount_cents: cents } : {}) });
     if (!decision.ok) { setError(copy.amountError); return; }
     onDecision({ proposal_id: proposal.proposal_id, action, body: decision.body });
