@@ -1060,7 +1060,7 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
             continue
         seen.add(draft.app)
         connector = ConnectorProposal(app=draft.app, label=CONNECTOR_LABELS[draft.app], why=draft.why,
-                                      connectable=draft.app == "stripe")
+                                      connectable=True)
         opening.planned.append(ProposalCard(
             proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None, connector=connector))
     interview.transcript.append(Entry(role="claude", text=answer.question.strip() or
@@ -1470,7 +1470,7 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             card = ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None,
                                 connector=ConnectorProposal(app=app, label=CONNECTOR_LABELS[app],
                                                             why=source.question.strip()[:200],
-                                                            connectable=app == "stripe"))
+                                                            connectable=True))
             reply.planned.append(card)
             available.append(card)
     asked = _next_ask(interview, source, available)

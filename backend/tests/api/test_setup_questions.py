@@ -807,7 +807,7 @@ async def test_cards_take_capabilities_and_never_an_amount(
         assert all(job["config"] is None for job in jobs)
     connectors = [card["connector"] for card in cards if card["connector"]]
     assert [(connector["app"], connector["connectable"]) for connector in connectors] == [
-        ("stripe", True), ("google_drive", False)]
+        ("stripe", True), ("google_drive", True)]
     from desk.api.prompts import PurposePaymentDraft, SetupUnderstanding
     assert "amount_cents" not in PurposePaymentDraft.model_fields
     assert set(SetupUnderstanding.model_fields) == {
@@ -3587,3 +3587,28 @@ async def test_a_turn_reads_the_setting_from_the_route(
     row = await stored(engine, interview_id)
     planned = [card for entry in row["transcript"] for card in entry.get("planned", [])]
     assert any(card["job"] and card["job"]["job"] == "payment" for card in planned) is enabled
+
+
+@pytest.mark.parametrize("app_key", ["google_calendar", "gmail", "google_drive", "quickbooks", "stripe", "square", "calendly"])
+@pytest.mark.parametrize("where", ["understanding", "next"])
+async def test_every_catalog_app_is_connectable(monkeypatch, app_key, where):
+    from desk.api.prompts import SetupNextStep
+    interview = runtime_interview()
+    interview.transcript[0].cards = True
+    if where == "understanding":
+        model = ScriptedModel([unparsed(understanding(jobs=[], connectors=[{"app": app_key, "why": "Save time"}]))])
+
+        async def record(response):
+            pass
+
+        monkeypatch.setattr(desk_setup, "recorder", lambda *_: record)
+        await desk_setup._after_consent(None, None, model, interview, [])
+        card, = interview.planned
+    else:
+        source = SetupNextStep(reply="", next={"kind": "connector", "connector": app_key},
+                               question="Use this app?", choices=[], skip=[], drop=[], add_jobs=[], plan="")
+        reply = desk_setup.Entry(role="claude", text="")
+        interview.transcript.append(reply)
+        await desk_setup._advance(None, None, None, interview, source, reply)
+        card = interview.latest_ask.card
+    assert card.connector.app == app_key and card.connector.connectable is True
