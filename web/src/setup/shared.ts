@@ -48,7 +48,8 @@ export function setupRulesQuery(id: string) {
  */
 export function aroundBusiness([before, after]: readonly [string, string] | readonly string[], business: string): ReactNode {
   const name = business === '' ? SETUP_COPY.yourBusiness : createElement('span', { 'data-copy': 'user' }, business);
-  return createElement(Fragment, null, before, name, after);
+  const suffix = /[.!?]$/.test(business.trimEnd()) && after?.startsWith('.') ? after.slice(1) : after;
+  return createElement(Fragment, null, before, name, suffix);
 }
 
 /**
