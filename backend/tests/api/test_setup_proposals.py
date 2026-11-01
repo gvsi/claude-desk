@@ -374,10 +374,28 @@ def test_owner_supports_off_topic_hours_only_as_stated_times(owner_text, support
     ("09:00", "17:00", "9-17 on weekdays", True),
     ("09:00", "17:00", "from 9 until 5", True),
     ("08:00", "18:00", "8am-6pm", True),
+    ("09:00", "17:00", "9 till 5", True),
+    ("09:00", "17:00", "9 til 5", True),
+    ("09:00", "17:00", "9 'til 5", True),
+    ("09:00", "17:00", "Open between 9 and 5", True),
+    ("09:00", "17:00", "between 9am and 5pm", True),
+    ("09:00", "17:00", "Abrimos de 9 a 5", True),
+    ("09:00", "17:00", "de 9:00 a 17:00", True),
+    ("08:30", "17:30", "8.30 to 5.30", True),
+    ("08:30", "17:30", "8.30am-5.30pm", True),
+    ("09:00", "17:00", "Crews of between 5 and 9 people", False),
+    ("09:00", "17:00", "Equipos de 5 a 9 personas", False),
+    ("09:00", "17:00", "5 till 9 days", False),
+    ("08:30", "17:30", "Parts cost $8.30 to $5.30", False),
 ])
 def test_off_topic_hour_ranges_run_from_start_to_end(start, end, owner_text, supported):
     window = [HoursAnswer(days=["mon"], start=start, end=end)]
     assert setup.owner_supports("hours", window, owner_text, stated=True) is supported
+
+
+def test_dotted_hour_ranges_are_the_owners_on_the_hours_question():
+    window = [HoursAnswer(days=["mon"], start="08:30", end="17:30")]
+    assert setup.owner_supports("hours", window, "Weekdays 8.30 to 5.30")
 
 
 @pytest.mark.parametrize("domain", ["attacker.example", "bobs-plumbing-booking.net"])

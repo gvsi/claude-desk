@@ -1682,12 +1682,15 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
             time = rf"{clock_forms}(?:\s*{matching_period}|{no_period})"
         return re.search(rf"(?<![\w:]){time}(?![\w:]|\.\d)", text) is not None
 
-    endpoint = r"(\d{1,2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?)"
-    ranges = [match.groups() for match in re.finditer(
-        rf"(?<![\w:.-]){endpoint}\s*(?:to\b|until\b|[-–—])\s*{endpoint}(?![\w:]|[-–—]\w)", folded)]
-    # A range backs a window only in order, its start before the separator and its end after it.
+    # A range ("9 to 5", "9 till 5", "between 9 and 5", "de 9 a 5", "8.30-5.30") backs a window only in order: its
+    # start before the separator and its end after it. Dotted minutes count only inside a range, never as prices.
+    endpoint = r"(\d{1,2}(?:[:.]\d{2})?(?:\s*[ap]\.?m\.?)?)"
+    ranges = [tuple(re.sub(r"(?<=\d)\.(?=\d)", ":", part) for part in match.groups()) for pattern in (
+        rf"(?<![\w:.$-]){endpoint}\s*(?:(?:to|until|till|['’]?til)\b|[-–—])\s*{endpoint}",
+        rf"\bbetween\s+{endpoint}\s+and\s+{endpoint}", rf"\bde\s+{endpoint}\s+a\s+{endpoint}",
+    ) for match in re.finditer(rf"{pattern}(?![\w:]|[-–—]\w|\.\d)", folded)]
     return all((has_time(window.start, folded, explicit=stated) and has_time(window.end, folded, explicit=stated))
-               or (stated and any(has_time(window.start, start) and has_time(window.end, end) for start, end in ranges))
+               or any(has_time(window.start, start) and has_time(window.end, end) for start, end in ranges)
                for window in cast(list[HoursAnswer], value))
 
 
