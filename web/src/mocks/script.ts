@@ -350,7 +350,7 @@ export const DECISIONS = {
     outcome: 'allow',
     executed: true,
     cardIds: ['rv-book-wk'],
-    reasonPlain: 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.',
+    reasonPlain: rivera.bookingReasonPlain,
     resource: { kind: 'slot', id: 'S-20261103-1400', owner_person_id: null },
   },
   paymentLink: {
