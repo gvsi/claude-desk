@@ -5,6 +5,30 @@ import { startTest, worker } from '../mocks/browser.ts';
 import { holdReads } from './holdReads.ts';
 import { mockDrain } from './mockDrain.ts';
 
+it.each(['CLIENT_CLOSED', 'KEEPALIVE_RESPONSE', 'INTEGRITY_CHECK_RESPONSE', 'MOCKING_ENABLED'])(
+  'acknowledges the worker message %s', async (type) => {
+    const channel = new MessageChannel();
+    try {
+      const reply = new Promise<unknown>((resolve, reject) => {
+        const deadline = setTimeout(() => reject(new Error(`no acknowledgement for ${type}`)), 200);
+        channel.port1.onmessage = (event) => {
+          clearTimeout(deadline);
+          resolve(event.data);
+        };
+      });
+      navigator.serviceWorker.dispatchEvent(new MessageEvent('message', {
+        data: { type },
+        ports: [channel.port2],
+        source: navigator.serviceWorker.controller,
+      }));
+      await expect(reply).resolves.toEqual({});
+    } finally {
+      channel.port1.close();
+      channel.port2.close();
+    }
+  },
+);
+
 it('drains an idle page after a short quiet period', async () => {
   const started = performance.now();
   await mockDrain.waitForIdle();
@@ -13,7 +37,7 @@ it('drains an idle page after a short quiet period', async () => {
 
 it('rejects at its deadline with the pending method and path', async () => {
   const held = holdReads('/api/health');
-  const response = fetch('/api/health?diagnostic=private');
+  const response = fetch('/api/health?diagnostic=private').catch((error: unknown) => error);
   await vi.waitFor(() => expect(held.held()).toBe(1));
   const draining = mockDrain.waitForIdle({ timeoutMs: 40 }).catch((error: unknown) => error);
   try {
@@ -21,6 +45,8 @@ it('rejects at its deadline with the pending method and path', async () => {
     expect(error).toEqual(expect.objectContaining({
       message: 'requests still with the mock API when the file ended: GET /api/health',
     }));
+    const outcome = await Promise.race([response, new Promise((resolve) => setTimeout(resolve, 200))]);
+    expect(outcome).toBeInstanceOf(TypeError);
   } finally {
     held.release();
     await response;

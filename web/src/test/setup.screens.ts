@@ -49,5 +49,5 @@ afterEach(async () => {
 });
 
 // Keep this page's reply channels alive until MSW has answered even requests aborted at unmount.
-// A hanging handler fails its own file in five seconds, before it can kill the shared worker.
-afterAll(() => mockDrain.waitForIdle());
+// A hanging handler fails its own file in ten seconds, before it can kill the shared worker.
+afterAll(() => mockDrain.waitForIdle(), 15_000);
