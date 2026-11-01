@@ -9,7 +9,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import rehypeRaw from 'rehype-raw';
 import { expect, it } from 'vitest';
+
+import noRawHtml from './noRawHtml.ts';
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -45,4 +48,11 @@ it('no_code_math_or_diagram_bundle_is_installed', () => {
   // It reads the lockfile that installs Streamdown, so it can't pass by reading nothing.
   expect(lock.packages['node_modules/streamdown']?.version).toBe('2.7.0');
   expect(heavyPackages(lock)).toEqual([]);
+});
+
+it('rehype_raw_resolves_to_the_do_nothing_stand_in', () => {
+  // vite.config.ts points rehype-raw, in every mode, at a stand-in that adds no step, so its HTML
+  // parser (hast-util-raw with parse5) never ships and nothing can parse raw HTML into elements.
+  // Tests resolve imports through the same config as the build.
+  expect(rehypeRaw).toBe(noRawHtml);
 });
