@@ -262,6 +262,18 @@ async def test_purpose_card_text_is_scanned_at_put(app, client, purpose, accepte
         assert event.summary == {'tools': [], 'refused': 'public_promise'}
 
 
+@pytest.mark.parametrize('field', ['title', 'purpose'])
+async def test_a_bidi_control_in_the_title_or_purpose_is_refused_at_put(app, client, field):
+    # Reversed text would read one way in the owner's form and another on the payment card and receipt.
+    copy = await rivera(app, client)
+    hidden = 'Deposit ‮deetnaraug‬'
+    response = await put(client, copy, [payment(purpose=hidden) if field == 'purpose' else {**payment(), 'title': hidden}])
+    assert response.status_code == 422, response.text
+    assert await business_rows(app, copy) == {}
+    event = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools'][-1]
+    assert event.summary == {'tools': [], 'refused': 'public_promise'}
+
+
 @pytest.mark.parametrize('landed', [True, False])
 async def test_timeout_reconciles_once_or_voids_without_a_quote(app, client, monkeypatch, landed):
     from desk.kernel_service import payments
