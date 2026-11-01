@@ -81,7 +81,8 @@ export interface ConversationSummary {
   /**
    * The newest message the visitor typed in this chat, its whitespace collapsed to single spaces
    * and cut to 199 characters and "…" past 200; null for an agent's or the owner's chat, the
-   * owner's preview, and before the visitor writes. Untrusted. Optional until the API sends it.
+   * owner's preview, and before the visitor writes. Untrusted. The API always sends it; a reply
+   * without it draws the row as before.
    */
   latest_visitor_text?: string | null;
 }
@@ -116,8 +117,8 @@ export interface Briefing {
   bookings: number;
   leads: number;
   /**
-   * The conversations Claude answered on its own: the `answer` items in the window. Optional until
-   * the API sends it; Today's one line waits for it rather than say less.
+   * The conversations Claude answered on its own: the `answer` items in the window. The API always
+   * sends it; without it, Today's one line waits rather than say less.
    */
   answers?: number;
   /** The requests the kernel refused. Claude's drafts the reply check stopped stay on Safety, out of the briefing. */
@@ -700,8 +701,8 @@ export interface AgentTurn {
   receipts: (EvReceipt | EvHeld | EvResolved)[];
   /**
    * An agent turn's request, as the agent sent it to the Desk; null for a Desk turn. Untrusted: on
-   * the hosted site these are a model's own words, at most 2,000 characters. Optional until the API
-   * sends it.
+   * the hosted site these are a model's own words, at most 2,000 characters. The API always sends
+   * it; without it, the request draws as before.
    */
   text?: string | null;
 }
