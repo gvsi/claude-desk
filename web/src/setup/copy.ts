@@ -225,7 +225,7 @@ export const SETUP_COPY = {
   situations: {
     title: 'Real situations',
     /** Around the business's name, which is the owner's own words. */
-    subtitle: ['How your draft rules handle things that really happen at ', '. Nothing here is real.'],
+    subtitle: ['How your rules will handle things that really happen at ', '. Nothing here is real.'],
     loading: 'Trying real situations on your draft rules',
     empty: 'No situations to show',
     emptyBody: 'Your draft rules are still checked against tricks people use in the next step.',

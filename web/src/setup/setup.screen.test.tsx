@@ -2011,7 +2011,7 @@ describe('setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Check real situations' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Real situations' })).toBeVisible();
-    await expect.element(screen.getByText('How your draft rules handle things that really happen at Rivera Plumbing. Nothing here is real.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('How your rules will handle things that really happen at Rivera Plumbing. Nothing here is real.', { exact: true })).toBeVisible();
 
     const rows = screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem');
     await expect.element(rows.first()).toBeVisible();

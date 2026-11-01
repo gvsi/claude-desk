@@ -6,15 +6,15 @@ import { aroundBusiness } from './shared.ts';
 
 it('avoids a second sentence stop after a business name while preserving the name and other copy', () => {
   const cases: readonly [string, readonly string[], string][] = [
-    ['Chen & Co.', SETUP_COPY.situations.subtitle, 'How your draft rules handle things that really happen at Chen & Co. Nothing here is real.'],
-    ['Acme!', SETUP_COPY.situations.subtitle, 'How your draft rules handle things that really happen at Acme! Nothing here is real.'],
-    ['Who?', SETUP_COPY.situations.subtitle, 'How your draft rules handle things that really happen at Who? Nothing here is real.'],
-    ['Chen & Co.  ', SETUP_COPY.situations.subtitle, 'How your draft rules handle things that really happen at Chen & Co.   Nothing here is real.'],
-    ['Rivera Plumbing', SETUP_COPY.situations.subtitle, 'How your draft rules handle things that really happen at Rivera Plumbing. Nothing here is real.'],
-    ['', SETUP_COPY.situations.subtitle, 'How your draft rules handle things that really happen at your business. Nothing here is real.'],
+    ['Chen & Co.', SETUP_COPY.situations.subtitle, 'How your rules will handle things that really happen at Chen & Co. Nothing here is real.'],
+    ['Acme!', SETUP_COPY.situations.subtitle, 'How your rules will handle things that really happen at Acme! Nothing here is real.'],
+    ['Who?', SETUP_COPY.situations.subtitle, 'How your rules will handle things that really happen at Who? Nothing here is real.'],
+    ['Chen & Co.  ', SETUP_COPY.situations.subtitle, 'How your rules will handle things that really happen at Chen & Co.   Nothing here is real.'],
+    ['Rivera Plumbing', SETUP_COPY.situations.subtitle, 'How your rules will handle things that really happen at Rivera Plumbing. Nothing here is real.'],
+    ['', SETUP_COPY.situations.subtitle, 'How your rules will handle things that really happen at your business. Nothing here is real.'],
     ['Chen & Co.', SETUP_COPY.tools.subtitle, `${SETUP_COPY.tools.subtitle[0]}Chen & Co.${SETUP_COPY.tools.subtitle[1]}`],
     ['Acme!', ['Before ', '.. After'], 'Before Acme!. After'],
-    ['<script>alert(1)</script>.', SETUP_COPY.situations.subtitle, 'How your draft rules handle things that really happen at <script>alert(1)</script>. Nothing here is real.'],
+    ['<script>alert(1)</script>.', SETUP_COPY.situations.subtitle, 'How your rules will handle things that really happen at <script>alert(1)</script>. Nothing here is real.'],
   ];
 
   for (const [business, copy, expected] of cases) {
