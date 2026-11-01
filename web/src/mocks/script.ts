@@ -645,6 +645,8 @@ export interface ScriptRule {
   words: readonly string[];
   /** A demo command: one of `words` picks the rule only as the whole message, never inside a question. */
   command?: true;
+  /** Whom a visitor asks for on the Desk (`askWords`) picks the rule too, found whole as `words` are. */
+  askFor?: true;
   /** The tools its turn calls, besides replying: whether the session has them decides whether it runs (`scriptedTurn`). */
   tools: readonly ToolName[];
   steps: readonly Step[];
@@ -830,7 +832,8 @@ export const SCRIPT: readonly ScriptRule[] = [
   },
   {
     name: 'talk',
-    words: ['maria', 'talk to', 'hablar'],
+    words: ['talk to', 'hablar'],
+    askFor: true,
     tools: [],
     steps: HANDOFF_STEPS,
   },
@@ -905,14 +908,21 @@ function ruleNamed(name: RuleName): ScriptRule {
   return rule;
 }
 
+/** Whom a visitor asks for on a Desk whose owner is `owner`, as lowercase words: the owner's first name. */
+function askWords(owner: DeskOwner): string[] {
+  return owner.name === null ? [] : [firstName(owner.name).toLowerCase()];
+}
+
 /**
- * The first rule with one of its words, whole, in the lowercased text, else the last rule. A
- * discount asked at 0% is a question about the list price (the price rule), and one over 100% is
- * no discount anyone can give (the last rule's plain answer).
+ * The first rule with one of its words, whole, in the lowercased text, else the last rule; on a
+ * Desk whose owner is `owner` (Rivera's unless given), asking for them is one of the talk rule's
+ * words. A discount asked at 0% is a question about the list price (the price rule), and one over
+ * 100% is no discount anyone can give (the last rule's plain answer).
  */
-export function matchRule(text: string): ScriptRule {
+export function matchRule(text: string, owner: DeskOwner = RIVERA_OWNER): ScriptRule {
   const lower = text.toLowerCase();
-  const rule = SCRIPT.find((r) => r.command ? r.words.includes(lower.trim()) : r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
+  const wordsOf = (r: ScriptRule) => (r.askFor ? [...r.words, ...askWords(owner)] : r.words);
+  const rule = SCRIPT.find((r) => r.command ? r.words.includes(lower.trim()) : wordsOf(r).some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
   if (rule.name !== 'discount') return rule;
   const asked = askedDiscountBp(text);
@@ -937,9 +947,9 @@ export function stepsWithTools(tools: readonly ToolName[], steps: readonly Step[
   return allTools || tools.every((tool) => TOOLS_WHILE_NOT_ANSWERING.has(tool)) ? steps : HANDOFF_STEPS;
 }
 
-/** The turn the visitor's words start: their rule's steps, as the session may run them. */
-export function scriptedTurn(text: string, allTools: boolean): readonly Step[] {
-  const rule = matchRule(text);
+/** The turn the visitor's words start on a Desk whose owner is `owner`: their rule's steps, as the session may run them. */
+export function scriptedTurn(text: string, allTools: boolean, owner: DeskOwner): readonly Step[] {
+  const rule = matchRule(text, owner);
   return stepsWithTools(rule.tools, rule.steps, allTools);
 }
 

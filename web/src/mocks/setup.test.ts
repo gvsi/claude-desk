@@ -1274,6 +1274,19 @@ describe('a Desk setup made, speaking for its own owner', () => {
     expect(await repliesTo(RIVERA.slug, PUBLIC_COPY.es.askForOwner('Maria Rivera'))).toEqual([rivera.blocks.handoff.es]);
   });
 
+  it('asking_for_the_owner_by_first_name_reaches_the_handoff', async () => {
+    // A visitor's own words, not only the page's button: Linda's first name reaches her on her
+    // Desk, and Maria's reaches Maria only on Rivera's.
+    const slug = await liveDesk(CPA);
+    const toLinda = { en: cardBlock('handoff', { fact_id: null, title: 'Let me check with Linda.', lines: ['Linda will reply here.'] }) };
+    expect(await repliesTo(slug, 'Can I speak with Linda?')).toEqual([toLinda.en]);
+    expect(await repliesTo(slug, '¿Está LINDA?')).toEqual([
+      cardBlock('handoff', { fact_id: null, title: 'Déjame consultarlo con Linda.', lines: ['Linda te responderá aquí.'] }),
+    ]);
+    expect(await repliesTo(slug, 'Can I speak with Maria?')).not.toContainEqual(toLinda.en);
+    expect(await repliesTo(RIVERA.slug, 'Can I speak with Maria?')).toEqual([rivera.blocks.handoff.en]);
+  });
+
   it('with_no_owner_name_the_handoff_names_the_business', async () => {
     // Setup's fallback, "Owner", is no one's name, and the page never shows it: what "Ask for a
     // person" sends is handed to the business, with one stop after a name that ends in one.
