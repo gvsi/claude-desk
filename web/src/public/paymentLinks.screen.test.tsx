@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { RenderResult } from 'vitest-browser-react';
 
 import { observeRequests, request, type RequestOutcome } from '../api/http.ts';
+import { payChatFor } from '../lib/payChats.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
@@ -275,5 +276,37 @@ describe.each(['desktop', 'phone'] as const)('payment link actions at %s size', 
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(reads()).toHaveLength(before);
     await unchanged(screen, words);
+  });
+});
+
+describe('the chat a payment link came from', () => {
+  /** This browser's record of each payment link's chat, as `storage.ts` keeps it. */
+  const PAY_CHATS = 'claude-desk.pay-chats';
+  const record = () => JSON.parse(localStorage.getItem(PAY_CHATS) ?? 'null') as unknown;
+
+  it('records the chat’s own path against the link it shows, and nothing else', async () => {
+    expect(record()).toBeNull();
+    const { token } = await issue('desktop');
+    // The card's token and the chat's path: no session, no words of the chat, no amount.
+    expect(record()).toEqual([[token, CHAT]]);
+    expect(payChatFor(token)).toBe(CHAT);
+
+    // The same chat drawn again (a reload) records nothing new.
+    const reload = await renderRoute(CHAT, { strict: true });
+    await expect.element(action(reload.screen)).toBeVisible();
+    expect(record()).toEqual([[token, CHAT]]);
+  });
+
+  it('an owner’s preview records the chat’s path without its query', async () => {
+    const preview = await renderRoute(`${CHAT}?preview=${RIVERA.deskId}`, { strict: true });
+    await expect.element(preview.screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeEnabled();
+    expect(mockStore.visitorSession(RIVERA.slug)?.ownerPreview).toBe(true);
+    await preview.screen.getByRole('textbox').fill('How do I pay the deposit?');
+    await preview.screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.element(action(preview.screen)).toBeVisible();
+    const token = (action(preview.screen).element().getAttribute('href') ?? '').slice('/pay/'.length);
+    // The chat the preview's cookie names is the one `/d/<slug>` opens, so its path alone leads back.
+    expect(record()).toEqual([[token, CHAT]]);
+    await settledReads(1);
   });
 });
