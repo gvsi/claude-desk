@@ -901,8 +901,15 @@ PUBLIC_POLICY_PATTERNS = (
      r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
      r"kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)\b"),
-    ("lex.en.promise", r"\b(?:free|discounts?|refunds?|guarantees?|no\s+charge)\b"),
-    ("lex.es.promise", r"\b(?:descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
+    ("lex.en.promise", r"\b(?:(?<!feel )free(?! to\b))\b"),
+    ("lex.en.promise", r"\b(?:(?<!feel )(?<!you['’]re )(?<!you are )(?<!you['’]ll be )(?<!you will be )free(?= to\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:all|any(?:one|body)?|every(?:one|body)?|each|both|some|most|several|many|no|unlimited)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:the|an?|this|that|these|those|our|your|my|his|her|its|their|you|them)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:new|existing|first[\s-]?time|current|returning|regular|local)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b))\b"),
+    ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b))\b"),
+    ("lex.en.promise", r"\b(?:discounts?|refunds?|guarantees?|no\s+charge)\b"),
+    ("lex.es.promise", r"\b(?:gratis|gratuit[oa]s?|descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
     ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
     ("lex.es.booking", r"\btu\s+cita\s+está\s+confirmada\b"),
 )

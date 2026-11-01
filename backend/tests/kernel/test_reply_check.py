@@ -1858,6 +1858,8 @@ def test_public_policy_language_checks_the_combined_rendering():
 
 PUBLIC_ALLOW_WORD_CASES = [
     ({"a:title": "Book a free intro consult"}, {}),
+    ({"a:title": "ƒree"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "frꬲꬲ"}, {"a:title": ["lex.en.promise"]}),
     ({"a:title": "Book a $0 intro consult"}, {"a:title": ["currency", "digit"]}),
     ({"a:title": "Free consult, 50% off"}, {"a:title": ["digit", "percent_sign"]}),
     ({"b:type": "free"}, {"b:type": ["lex.en.promise"]}),
@@ -1873,7 +1875,7 @@ PUBLIC_ALLOW_WORD_CASES = [
     ({"a:title": "Intro consult no", "b:type": "charge"},
      {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
     ({"a:title": "discount"}, {"a:title": ["lex.en.promise"]}),
-    ({"a:title": "frее"}, {"a:title": ["language", "mixed_script"]}),
+    ({"a:title": "frее"}, {"a:title": ["language", "lex.en.promise", "mixed_script"]}),
     ({"a:title": "free dollars"}, {"a:title": ["lex.en.money"]}),
     ({"a:title": "free Monday"}, {"a:title": ["lex.en.date"]}),
     ({"a:title": "free guarantee"}, {"a:title": ["lex.en.promise"]}),
@@ -1890,9 +1892,10 @@ def test_public_policy_allow_words_are_scoped_to_a_whole_hit_in_one_key(values, 
 
 @pytest.mark.parametrize("word", ["free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas",
                                   "FREE", "frée", "GRÁTUITA", "Ｆｒｅｅ"])
-def test_public_text_allows_only_explicit_owner_words_with_reply_folding(word):
+def test_public_text_allows_only_explicit_owner_words_with_case_width_and_accent_normalization(word):
     assert reply_check.FREE_WORDS == frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
     assert reply_check.scan_public_text(word, allow_words=reply_check.FREE_WORDS) == []
+    assert reply_check.scan_public_policies({"title": word}, allow_words={"title": reply_check.FREE_WORDS}) == {}
     assert reply_check.scan_public_text(word)  # default callers remain strict
 
 
@@ -1955,3 +1958,50 @@ def test_public_policy_other_commitments_do_not_scan_reply_prose_or_word_parts(m
     assert reply_check.scan_prose("Is it gratuit?") == []
     assert reply_check.policy_card_violations("Is it gratuit?", [RenderedBlock(
         kind="card", template="policy", fact_id="charter:policy:about", text="Ask about our services.")]) == []
+
+
+@pytest.mark.parametrize("text", [
+    "garanto", "garantimos", "garante", "garantem", "garantia",
+    "garantido", "garantida", "garantidos", "garantidas", "sem cobrança", "sem cobranças",
+])
+def test_public_policy_portuguese_commitments_are_whole_words(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    prose_rules = {v.rule_id for v in reply_check.scan_prose(text)}
+    assert reply_check.scan_public_text(text) == sorted(prose_rules | {"language"})
+    assert reply_check.scan_public_text("x" + text.replace(" ", "x") + "x") == []
+    assert "language" not in prose_rules  # policy-only vocabulary
+
+
+@pytest.mark.parametrize("text", ["Ask about our services.", "Consultas con cita previa.", "garantía"])
+def test_public_policy_portuguese_terms_preserve_english_and_spanish(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert "language" not in reply_check.scan_public_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Contact: info@example.com",
+    "Non-emergency plumbing",
+    "Consultas con cita previa en example.com",
+    "Contact: https://example.com/contact",
+    "Contact: www.example.com",
+    "Contact: info+help@example.com",
+    "Contact: EXAMPLE.COM",
+    "Non‐emergency plumbing",
+])
+def test_public_policy_language_ignores_addresses_and_english_non_compounds(text):
+    assert not lang.positive_other_language(text)
+    assert reply_check.scan_public_text(text) == []
+    assert reply_check.scan_public_policies({"policy:a": text, "policy:b": text}) == {}
+    # Policy evidence changes independently of the conservative reply language detector.
+    assert lang.detect(text) == ("en" if "+help@" in text else "other")
+
+
+@pytest.mark.parametrize(("text", "rules"), [
+    ("com carinho info@example.com", ["language"]),
+    ("non merci", ["language"]),
+    ("Contact: info@example.com free", ["lex.en.promise"]),
+    ("Non-free plumbing", ["lex.en.promise"]),
+    ("Garantimos o serviço. https://example.com", ["language"]),
+])
+def test_public_policy_language_address_exclusion_preserves_other_refusals(text, rules):
+    assert reply_check.scan_public_text(text) == rules

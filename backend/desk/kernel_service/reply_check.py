@@ -499,9 +499,10 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
 
 
 def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
-    """Only a whole promise match equal to an explicitly allowed folded word may pass."""
-    return (rule.startswith("lex.") and rule.endswith(".promise")
-            and _fold(text[start:end])[0].casefold() in allow_words)
+    """Allow real words across case, width and accents, without substituting lookalikes."""
+    word = "".join(char for char in unicodedata.normalize("NFKD", text[start:end])
+                   if unicodedata.category(char) not in ("Mn", "Me")).casefold()
+    return rule.startswith("lex.") and rule.endswith(".promise") and word in allow_words
 
 
 def scan_public_text(text: str, allow_words: frozenset[str] = frozenset()) -> list[str]:

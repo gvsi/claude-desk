@@ -435,6 +435,8 @@ async def test_policy_limits_accept_the_exact_maximum(app, client, create):
 
 
 @pytest.mark.parametrize("text", [
+    "Garantimos o serviço.",
+    "Consultas sem cobrança.",
     "Nos prestations : la visite, la pose, la réparation sont offertes.",
     "Une garantie pour la pose et la réparation.",
     "Consultas sem custo para todos os clientes.",
@@ -470,10 +472,15 @@ async def test_other_commitment_policy_refused_on_write_public_read_and_reply(ap
 
 
 @pytest.mark.parametrize("text", [
+    "Contact: info@example.com",
+    "Non-emergency plumbing",
+    "Consultas con cita previa en example.com",
     "Cash, card, Venmo accepted",
     "Service area: Portland, Beaverton, Hillsboro, Tigard",
     "Pour-over coffee available",
     "Les ofrecemos envío a domicilio",
+    "Ask about our services.",
+    "Consultas con cita previa.",
     "Garage parking available",
     "Offering estimates by appointment",
 ])
