@@ -3239,6 +3239,83 @@ describe('a waiting request stays findable', () => {
     }
   }, 40_000);
 
+  it('waiting_line_never_switches_a_short_window_back_and_forth', async () => {
+    // How many times, over `count` frames, the shell switches between short and tall or a waiting
+    // line comes or goes: every change, even two in one frame.
+    async function changesOver(count: number): Promise<number> {
+      const shell = document.querySelector('.cd-public-shell');
+      const area = document.querySelector('.cd-public-shell__composer');
+      if (!shell || !area) throw new Error('the shell and its composer area are drawn');
+      let short = shell.classList.contains('cd-public-shell--short');
+      let changes = 0;
+      const watch = new MutationObserver((records) => {
+        for (const record of records) {
+          if (record.type === 'attributes' && shell.classList.contains('cd-public-shell--short') !== short) {
+            short = !short;
+            changes += 1;
+          }
+          const lines = [...record.addedNodes, ...record.removedNodes].filter((node) => node instanceof Element && node.matches('.cd-public-chat__waiting, .cd-public-chat__waiting-row'));
+          changes += lines.length;
+        }
+      });
+      watch.observe(shell, { attributes: true, attributeFilter: ['class'] });
+      watch.observe(area, { childList: true, subtree: true });
+      await frames(count);
+      watch.disconnect();
+      return changes;
+    }
+
+    // On a window a little over the short shell's height, a held request and one question after it
+    // are enough to scroll the request away; on a phone, the board's conversation.
+    const windows = [
+      { width: 390, height: 530, after: ['How much is drain clearing?'] },
+      { ...VIEWPORTS.phone, after: MORE },
+    ];
+    for (const { width, height, after } of windows) {
+      const where = `${width}x${height}`;
+      // A held request and what follows it, then the window turns small.
+      const { screen } = await renderRoute(PAGE, { viewport: 'desktop', seed: 'rivera' });
+      await ready(screen);
+      await say(screen, HELD);
+      for (const text of after) await say(screen, text);
+      await page.viewport(width, height);
+      await vi.waitFor(() => expect(innerHeight).toBe(height));
+      await vi.waitFor(() => expect(waitingLines(), where).toEqual([waitingOn()]), { timeout: 1_000 });
+      // Left alone, nothing moves.
+      expect(await changesOver(30), `${where}: at rest`).toBe(0);
+
+      // View request: the request's cancel is in view above the composer, with focus, and stays so.
+      await screen.getByRole('button', { name: 'View request' }).click();
+      const cancel = screen.getByRole('button', { name: 'Cancel this request' }).element();
+      const cancelShown = () => {
+        const box = cancel.getBoundingClientRect();
+        const head = document.querySelector('.cd-public-shell__chat-head')?.getBoundingClientRect().bottom ?? 0;
+        const composer = document.querySelector('.cd-public-shell__composer')?.getBoundingClientRect().top ?? 0;
+        return box.top >= head && box.bottom <= composer;
+      };
+      await vi.waitFor(() => expect(waitingLines(), where).toEqual([]), { timeout: 1_000 });
+      expect(await changesOver(30), `${where}: after View request`).toBe(0);
+      expect(cancelShown(), `${where}: Cancel above the composer`).toBe(true);
+      expect(document.activeElement, where).toBe(cancel);
+
+      // A small scroll up settles at once: at most the one change it causes, then nothing.
+      chatScroller().scrollBy({ top: -20, behavior: 'instant' });
+      expect(await changesOver(60), `${where}: after a small scroll`).toBeLessThanOrEqual(1);
+      expect(await changesOver(30), `${where}: settled`).toBe(0);
+      expect(cancelShown(), `${where}: Cancel still above the composer`).toBe(true);
+
+      // Reading back up 10 px at a time takes the receipt down past the composer: wherever it is,
+      // each step settles, the line coming once at most, and nothing moves after the last.
+      const steps: number[] = [];
+      for (let step = 0; step < 30; step += 1) {
+        chatScroller().scrollBy({ top: -10, behavior: 'instant' });
+        steps.push(await changesOver(6));
+      }
+      expect(steps.filter((changes) => changes > 1), `${where}: steps that didn't settle`).toEqual([]);
+      expect(await changesOver(30), `${where}: settled after reading back`).toBe(0);
+    }
+  }, 60_000);
+
   it('waiting_line_passes_the_screen_checks_in_english_and_spanish', async () => {
     const es = await renderRoute(PAGE, { language: 'es-MX', viewport: 'phone', seed: 'rivera' });
     await ready(es.screen);

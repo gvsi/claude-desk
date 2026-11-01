@@ -891,6 +891,10 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
         // session mode, as it is: nothing on the page decides it.
         ownerInChat={chat.ownerInChat}
+        // While a request is open, its waiting line can come and go above the composer: the shell keeps
+        // the room it takes, so the line can't switch the shell between tall and short and the move
+        // that switch makes can't bring the line back.
+        keepComposerRoom={ready && state.openHolds.length > 0}
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}
