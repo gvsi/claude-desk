@@ -543,3 +543,27 @@ def test_promote_refuses_a_standby_that_is_missing_stopped_or_misconfigured(monk
     with pytest.raises(RuntimeError):
         invoke(monkeypatch, fixture, '--promote')
     assert fixture.tagged == []
+
+
+def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessions(tmp_path):
+    """Lanes on a laptop share one SSH connection; sshd's default of 10 sessions on it refused new calls once a
+    dozen lanes ran at once. The bootstrap raises it, reloading sshd only when the setting changes: a reload keeps
+    open connections, and each new one gets the new limit."""
+    import os
+    import re
+    import subprocess
+    script = (Path(__file__).parents[1] / 'testbox/bootstrap.sh').read_text()
+    block = script[script.index('# Every lane on a laptop shares one SSH connection'):script.index('# This server holds only disposable test data')]
+    assert int(re.search(r'MaxSessions (\d+)', block).group(1)) >= 256
+    (tmp_path / 'bin').mkdir()
+    log = tmp_path / 'services'
+    for tool in ('systemctl', 'sshd'):
+        (tmp_path / 'bin' / tool).write_text('#!/bin/sh\necho "' + tool + ' $*" >> ' + str(log) + '\n')
+        (tmp_path / 'bin' / tool).chmod(0o755)
+    config = tmp_path / 'sshd_config.d'
+    config.mkdir()
+    commands = block.replace('/etc/ssh/sshd_config.d', str(config)).replace('/tmp/desk-testbox-sshd.conf', str(tmp_path / 'desired.conf'))
+    env = {**os.environ, 'PATH': str(tmp_path / 'bin') + ':' + os.environ['PATH']}
+    for _ in range(2):
+        subprocess.run(['bash', '-e', '-c', commands], check=True, env=env)
+    assert log.read_text().splitlines() == ['sshd -t', 'systemctl try-reload-or-restart ssh.service']

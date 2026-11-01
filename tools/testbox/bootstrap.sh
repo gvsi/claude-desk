@@ -17,6 +17,18 @@ apt-get update
 apt-get install -y build-essential pkg-config libssl-dev curl unzip git rsync openssh-server postgresql-16 postgresql-client-16 python3 acl iproute2 iptables socat fonts-liberation
 install -d -o ubuntu -g ubuntu /srv/testbox /srv/testbox/lanes /srv/testbox/cache
 install -d -o root -g root /opt/testbox
+# Every lane on a laptop shares one SSH connection, and sshd allows 10 sessions on a connection by default, so with
+# a dozen lanes at once new calls were refused ("no more sessions"). Reload only when the setting changes: a reload
+# keeps open connections, and each new connection gets the new limits.
+cat > /tmp/desk-testbox-sshd.conf <<'SSHD'
+MaxSessions 512
+MaxStartups 200:30:400
+SSHD
+if ! cmp -s /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf; then
+  install -m 644 /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf
+  sshd -t
+  systemctl try-reload-or-restart ssh.service
+fi
 # This server holds only disposable test data. Never apply these settings elsewhere.
 pg_changed=0
 cat > /tmp/desk-testbox-postgres.conf <<'PG'
