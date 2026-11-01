@@ -1758,48 +1758,56 @@ async def test_homework_decides_every_read_before_any_execution(
     state = await begin(owner, model, website=WEBSITE, search_queries=queries)
     kernel = app.state.runtime.kernel
     send = kernel._client.send
-    session = asyncio.Condition()
-    active_executions = 0
-    contexts = 0
+    decisions_done = asyncio.Event()
+    executions_started = asyncio.Event()
+    release_executions = asyncio.Event()
     call_order = []
     completed_searches = []
+    decisions = 0
+    executions = 0
 
-    async def locked(request, **kwargs):
-        nonlocal active_executions, contexts
+    async def ordered(request, **kwargs):
+        nonlocal decisions, executions
         route = request.url.path
-        if route.startswith("/context/"):
-            contexts += 1
-            if contexts == 4:
-                # A later context arrives while the earlier search would already be executing.
-                await asyncio.sleep(0.01)
         if route == "/decide":
+            assert executions == 0, "a decision started while an execution held the session lock"
             call_order.append(route)
-            # Real decisions take an exclusive session lock, conflicting with running executes.
-            async with session:
-                await session.wait_for(lambda: active_executions == 0)
-                return await send(request, **kwargs)
+            result = await send(request, **kwargs)
+            decisions += 1
+            if decisions == 4:
+                decisions_done.set()
+            return result
         if route == "/execute":
+            assert decisions_done.is_set(), "execution started before every read had a decision"
             call_order.append(route)
+            executions += 1
+            if executions == 4:
+                executions_started.set()
+            await release_executions.wait()
             record = fake.decisions[json.loads(request.content)["decision_id"]]
-            async with session:
-                active_executions += 1
-            try:
-                if record.tool == "native.web_search":
-                    # Scaled 12 s search > 6 s decision timeout, but inside the homework budget.
-                    await asyncio.sleep(0.12)
-                    completed_searches.append(record.decision.decision_id)
-                return await send(request, **kwargs)
-            finally:
-                async with session:
-                    active_executions -= 1
-                    session.notify_all()
+            result = await send(request, **kwargs)
+            if record.tool == "native.web_search":
+                completed_searches.append(record.decision.decision_id)
+            return result
         return await send(request, **kwargs)
 
-    monkeypatch.setattr(kernel, "_timeout_s", 0.06)
-    monkeypatch.setattr(kernel._client, "send", locked)
-    monkeypatch.setattr(desk_setup, "WEB_SEARCH_EXECUTE_TIMEOUT_S", 0.3)
-    monkeypatch.setattr(desk_setup, "HOMEWORK_BUDGET_S", 0.5)
-    state = await consent(owner, state["interview_id"], True, model)
+    async def release_when_concurrent():
+        await executions_started.wait()
+        assert decisions_done.is_set()
+        release_executions.set()
+
+    monkeypatch.setattr(kernel, "_timeout_s", 30)
+    monkeypatch.setattr(kernel._client, "send", ordered)
+    monkeypatch.setattr(desk_setup, "WEB_SEARCH_EXECUTE_TIMEOUT_S", 30)
+    monkeypatch.setattr(desk_setup, "HOMEWORK_BUDGET_S", 30)
+    monkeypatch.setattr(desk_setup, "TURN_RUN_TIMEOUT_S", 60)
+    monkeypatch.setattr(desk_setup, "TURN_WAIT_S", 30)
+    # Event barriers prove all decisions precede any execution and all executions can start together.
+    # Deadlines only guard a broken test from hanging; dedicated budget tests assert cancellation timing.
+    async with asyncio.timeout(30), asyncio.TaskGroup() as group:
+        result = group.create_task(consent(owner, state["interview_id"], True, model))
+        group.create_task(release_when_concurrent())
+    state = result.result()
 
     assert call_order == ["/decide"] * 4 + ["/execute"] * 4
     assert len(set(completed_searches)) == len(queries)
