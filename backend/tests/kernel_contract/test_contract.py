@@ -1070,6 +1070,26 @@ async def test_owner_charter_write_naming_a_starter_is_refused(kernel, ro_read):
     assert (await public_page(http, slug, "es")).starters == RIVERA_STARTERS["es"]
 
 
+@pytest.mark.kernel_plan("01b")
+async def test_new_desk_naming_a_starter_is_refused(kernel, ro_read):
+    """A new Desk's charter can't name a starter either: `POST /desks` with one is 422 `invalid`, naming the key, and
+    makes no Desk."""
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    query = "SELECT desk_id FROM {ro}.desks ORDER BY desk_id"
+    before = ro_read(schema, copy.copy_id, query)
+    body = a_new_desk()
+    body.desk.charter = [Claim(key="contact", kind="text", value="(212) 555-0187"),
+                         Claim(key="starter:1", kind="text", value="Is the first visit free today?")]
+    with pytest.raises(KernelFailed) as failure:
+        await owner.call("POST /desks", body)
+    assert (failure.value.status, failure.value.code, failure.value.detail) == (
+        422, "invalid", {"starter:1": ["starter_seed_only"]})
+    assert ro_read(schema, copy.copy_id, query) == before
+    assert (await owner.whoami()).desk_ids == copy.desk_ids
+
+
 RIVERA_TIME = ZoneInfo("America/Los_Angeles")
 # The Rivera seed's hours, by weekday (Monday 0): weekdays 8:00 am to 6:00 pm, Saturday 9:00 am to 1:00 pm.
 RIVERA_OPEN = {**{day: (time(8), time(18)) for day in range(5)}, 5: (time(9), time(13))}
