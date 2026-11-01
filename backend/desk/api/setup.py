@@ -2560,7 +2560,8 @@ def finish(interview: Interview) -> None:
 
 
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
-    """Publish accepted configurations as one batch for the owner's tool review."""
+    """Publish accepted configurations as one batch for the owner's tool review. When the kernel refuses the batch
+    and names some of its tools, publish it once more without them; any other refusal is raised."""
     tools = []
     used = set()
     configured = [job for job in accepted_jobs if job.config is not None]
@@ -2580,9 +2581,21 @@ async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list
         tools.append({"tool": f"desk.{name}", "title": job.title[:60],
                       "description": " ".join(job.how.split())[:300],
                       "config": job.config.model_dump(mode="json")})
-    if tools:
+    if not tools:
+        return
+    try:
         await owner.kernel.call("PUT /desks/{id}/business_tools",
                                 BusinessToolsRequest.model_validate({"tools": tools}), path={"id": desk_id})
+    except KernelFailed as failed:
+        # A refusal's detail is keyed "<tool>.<field>", and a tool's name has dots of its own.
+        refused = {tool["tool"] for tool in tools if failed.status == 422
+                   and any(key.startswith(tool["tool"] + ".") for key in failed.detail or {})}
+        if not refused or len(refused) == len(tools):
+            raise
+        logger.warning("%s setup business tools were refused; retrying without them", len(refused))
+        kept = [tool for tool in tools if tool["tool"] not in refused]
+        await owner.kernel.call("PUT /desks/{id}/business_tools",
+                                BusinessToolsRequest.model_validate({"tools": kept}), path={"id": desk_id})
 
 
 def _claim_connector_connect(interview: Interview, proposal_id: str | None = None) -> bool:

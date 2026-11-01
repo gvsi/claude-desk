@@ -444,6 +444,69 @@ async def test_other_business_tool_refusals_log_status_and_code(caplog):
     assert job.title not in caplog.text and job.how not in caplog.text
 
 
+async def finish_against(*answers: KernelFailed | None) -> tuple[list[list[dict]], list[JobProposal]]:
+    """Run after_finish for two accepted jobs with the same title, against a kernel that answers each business tools
+    write in turn (a refusal to raise, or None to accept). The batches it was sent, and the jobs."""
+    batches = []
+    queued = iter(answers)
+
+    async def call(route, body, **kwargs):
+        batches.append(body.model_dump(mode="json")["tools"])
+        answer = next(queued)
+        if answer is not None:
+            raise answer
+
+    jobs = [JobProposal(job="intake", title="Repair requests", how=f"Private details {index}", why="Help visitors",
+                        autonomy="ask", can_do_today=True,
+                        config={"block": "intake", "questions": [f"What needs repair {index}?"]})
+            for index in range(2)]
+    interview = SimpleNamespace(business_tools_enabled=True, desk_id="desk-1")
+    owner = SimpleNamespace(desk=lambda desk_id: desk_id, kernel=SimpleNamespace(call=call))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(desk_setup, "accepted_jobs", lambda _: jobs)
+        await desk_setup.after_finish(owner, interview)
+    return batches, jobs
+
+
+async def test_a_refused_batch_is_written_once_more_without_the_tools_it_names(caplog):
+    # The second tool's name starts with the first's: only a key under "desk.repair-requests-2." names it.
+    refused = KernelFailed(422, "invalid", detail={"desk.repair-requests-2.title": ["public_promise"],
+                                                   "desk.repair-requests-2.purpose": ["format_control"]})
+    batches, jobs = await finish_against(refused, None)
+    assert [[tool["tool"] for tool in batch] for batch in batches] == [
+        ["desk.repair-requests", "desk.repair-requests-2"], ["desk.repair-requests"]]
+    assert batches[1] == batches[0][:1]
+    assert "1 setup business tools were refused; retrying without them" in caplog.text
+    assert "keeping words only" not in caplog.text
+    assert "public_promise" not in caplog.text and "format_control" not in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+@pytest.mark.parametrize("refused", [
+    KernelFailed(422, "invalid"),                                                     # names nothing
+    KernelFailed(422, "invalid", detail={"desk.repair-requests.title": ["public_promise"],
+                                         "desk.repair-requests-2.title": ["public_promise"]}),   # every tool
+    KernelFailed(422, "invalid", detail={"desk.repair.title": ["public_promise"]}),   # no tool in the batch
+    KernelFailed(409, "conflict", detail={"desk.repair-requests.title": ["public_promise"]}),
+], ids=["no-detail", "every-tool", "no-tool-in-batch", "not-422"])
+async def test_a_refusal_naming_no_tool_to_leave_out_is_written_once(caplog, refused):
+    batches, _ = await finish_against(refused)
+    assert len(batches) == 1
+    assert "retrying" not in caplog.text
+    assert refused.code in caplog.text
+    assert ("keeping words only" in caplog.text) is (refused.status == 422)
+
+
+async def test_a_refused_retry_keeps_words_only(caplog):
+    first = KernelFailed(422, "invalid", detail={"desk.repair-requests.title": ["public_promise"]})
+    again = KernelFailed(422, "invalid", detail={"desk.repair-requests-2.title": ["public_promise"]})
+    batches, jobs = await finish_against(first, again)
+    assert [[tool["tool"] for tool in batch] for batch in batches] == [
+        ["desk.repair-requests", "desk.repair-requests-2"], ["desk.repair-requests-2"]]
+    assert "the setup business tools batch was refused (invalid); keeping words only" in caplog.text
+    assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
 async def test_business_tools_are_not_written_while_disabled(app, browser, kernel_http, model, engine, fake):
     owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine, enabled=False)
     # A stored interview can retain configs from when the setting was on. The runtime gate still wins.
