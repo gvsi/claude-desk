@@ -37,7 +37,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 - **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
   their Claude memory (`native.read_memory`), reads the named website (`native.fetch_website`) and runs up to three
   keyword web searches (`native.web_search`) on yes. Decisions finish sequentially before concurrent executions;
-  both phases share `HOMEWORK_BUDGET_S`. On no it skips every
+  both phases share `HOMEWORK_BUDGET_S` (35 seconds), and a search's execution waits up to
+  `WEB_SEARCH_EXECUTE_TIMEOUT_S` (32 seconds), past the kernel's own 30 s search deadline. On no it skips every
   read. `_after_consent` appends the consultant
   opening and first fact question; the labels and reply are saved together. Web search content reaches only that
   opening's understanding call. A website the owner names later after no is kept as text. The owner's display
@@ -70,13 +71,14 @@ admission it stores staged entries with a fresh pending run ID. Any pending entr
 request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
 fails in time, or 202 with the stored busy state. Consent doesn't wait: it answers 202 with the busy state once it is
 stored. Cancelling the request leaves the task working on its own connections. Any turn while busy returns that state without running or counting on the limits.
-The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (100
-seconds). An optional `after` hook runs outside that deadline, with no transaction open and its own
+The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (110
+seconds: consent's reads, Claude's whole understanding call, then ten seconds to finish and five for a retry). An
+optional `after` hook runs outside that deadline, with no transaction open and its own
 `TURN_AFTER_TIMEOUT_S` bound (30 seconds); its failures are logged by type only and return the landed state.
 Failure, deadline or shutdown before the final commit removes only entries marked by that run. Shutdown after
 the final commit ends the task without rollback. Removing a pending answer immediately
 after Claude's consent question also reopens consent. GET and every turn recover all pending entries older than
-`TURN_ABANDONED_S` (120 seconds) when this process holds no run for the interview.
+`TURN_ABANDONED_S` (130 seconds) when this process holds no run for the interview.
 
 Each setup tool call is an owner call on the new Desk (`decide_setup_tool`, `execute_setup_tool`, composed by
 `run_setup_tool`): the tool must be in the owner's `/context`,
@@ -330,13 +332,22 @@ TURN_MAX_TOKENS = 4096
 SETUP_TIMEOUT_S = 60.0
 UNDERSTAND_TIMEOUT_S = 60.0
 UNDERSTAND_MAX_TOKENS = 8192
-HOMEWORK_BUDGET_S = 25       # all consent reads share this budget, leaving time for understanding and commit
-WEB_SEARCH_EXECUTE_TIMEOUT_S = 22  # the kernel's 20 s search deadline plus transport slack
+TURN_FINISH_S = 10           # the understanding call ends this long before the run's deadline, for the turn to save
+UNDERSTAND_RETRY_MIN_S = 5   # the least time left worth the understanding call's one retry
+# A consent turn's deadlines nest, each outlasting what it waits for. A search's `POST /execute` waits 2 s past the
+# kernel's 30 s search deadline (`decisions.WEB_SEARCH_TIMEOUT_S`, which this process can't import), so the kernel's
+# fail-closed answer arrives first. All the reads share one budget, 3 s more, for the owner's context and the
+# decisions that come before them. The run then keeps the whole understanding call and its finish and retry time,
+# and stays below abandonment, including during a deploy's overlap.
+WEB_SEARCH_EXECUTE_TIMEOUT_S = 32
+HOMEWORK_BUDGET_S = WEB_SEARCH_EXECUTE_TIMEOUT_S + 3
 TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
-TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
+TURN_RUN_TIMEOUT_S = HOMEWORK_BUDGET_S + UNDERSTAND_TIMEOUT_S + TURN_FINISH_S + UNDERSTAND_RETRY_MIN_S   # 110 s
 TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
 TURN_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
-TURN_ABANDONED_S = 120       # recover only when this process holds no run
+# Recover only when this process holds no run, and only once a run and its cleanup have ended, with 10 s to spare
+# for the clocks of a deploy's two tasks and the database's (`updated_at` is the database's time): 130 s.
+TURN_ABANDONED_S = TURN_RUN_TIMEOUT_S + TURN_ROLLBACK_TIMEOUT_S + 10
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
@@ -1535,13 +1546,15 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
     def time_left() -> float:
         if interview.turn_deadline is None:
             return UNDERSTAND_TIMEOUT_S
-        return min(UNDERSTAND_TIMEOUT_S, interview.turn_deadline - asyncio.get_running_loop().time() - 10)
+        return min(UNDERSTAND_TIMEOUT_S,
+                   interview.turn_deadline - asyncio.get_running_loop().time() - TURN_FINISH_S)
 
     try:
         answer = await _ask_drafts(model, recorder(engine, owner), SETUP_UNDERSTAND_SYSTEM,
                                  [_understanding_message(interview, entries)], SetupUnderstanding,
                                  # Fifteen seconds left on the turn: ten to finish, five for a retry.
-                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=time_left, retry_min_s=5)
+                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=time_left,
+                                 retry_min_s=UNDERSTAND_RETRY_MIN_S)
     except ApiProblem as failed:
         if failed.status != 503 or failed.error != "model_unavailable":
             raise
