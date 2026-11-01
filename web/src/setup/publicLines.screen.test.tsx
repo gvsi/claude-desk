@@ -134,6 +134,25 @@ it('opens the first held row in display order, preserves canceled holds and conf
   } });
 });
 
+it('skips a read-only held row on load and opens the first editable held row', async () => {
+  const state = await atSituations();
+  const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  if ('network' in read) throw new Error('read failed');
+  storePublicLines(mockStore.world, state.interview_id, (read.body as SetupPublicLines).lines.map((line) =>
+    line.key === 'policy:about' ? { ...line, held: true, editable: false }
+      : line.key === 'policy:pricing' ? { ...line, held: true } : line,
+  ));
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.element(screen.getByRole('textbox', { name: 'Pricing', exact: true })).toHaveValue('We price each engagement after the intro consult, and new work starts with a retainer.');
+  await expect.element(screen.getByText(REFUSED_COPY, { exact: true })).toBeVisible();
+  expect(screen.getByRole('textbox').elements()).toHaveLength(1);
+  const about = screen.container.querySelector('.cd-public-lines__row')!;
+  expect(about.querySelector('textarea')).toBeNull();
+  expect(about.querySelector('button')).toBeNull();
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLine')).toHaveLength(0);
+});
+
 it('holds a malformed held flag instead of confirming the line', async () => {
   const state = await atSituations();
   const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });

@@ -84,7 +84,7 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     const current = lines.data;
     if (!current || openedHeldOnLoad.current) return;
     openedHeldOnLoad.current = true;
-    const held = PUBLIC_LINE_KEYS.map((key) => current.lines.find((line) => line.key === key)).find((line) => line?.held);
+    const held = PUBLIC_LINE_KEYS.map((key) => current.lines.find((line) => line.key === key)).find((line) => line?.held && canEdit(line));
     if (held) {
       setEditingKey(held.key);
       setText(held.text);
