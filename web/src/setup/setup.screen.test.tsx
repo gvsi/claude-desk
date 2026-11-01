@@ -2006,6 +2006,28 @@ describe('setup', () => {
     expect(reviewOutcomes(screen)).toEqual(asRules(['Share a document']));
   });
 
+  it('a_failed_connect_then_a_retry_that_works_leaves_no_failure_notice', async () => {
+    const state = await interviewAtTools();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(screen.getByText('Not connected', { exact: true })).toBeVisible();
+    const mark = mockStore.requests.length;
+
+    // The connect fails: the screen says so, still not connected, and "Connect Stripe" works again.
+    mockStore.inject({ route: 'setupConnect', status: 503 });
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    const review = () => screen.container.querySelector('.cd-connector-review') as HTMLElement;
+    await expect.poll(() => review().querySelector('.cd-notice')).not.toBeNull();
+    await expect.element(screen.getByText('Not connected', { exact: true })).toBeVisible();
+
+    // The retry connects it: its tools show for review, with no notice left from the failure.
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(screen.getByText("Connected to Stripe's test account. Nothing runs until you turn it on.", { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Turn it on' })).toBeVisible();
+    expect(review().querySelector('.cd-notice')).toBeNull();
+    expect(requests('setupConnect', mark)).toHaveLength(2);
+  });
+
   it('tool_confirm_conflicts_fail_closed', async () => {
     const state = await interviewAtTools();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);

@@ -139,9 +139,12 @@ export function useConnectorFlow({ interviewId, deskId, tools }: { interviewId: 
 
   /**
    * Connects the mock payments server; false when it failed, with the error set where the owner
-   * pressed: the list's, or the open connector's.
+   * pressed: the list's, or the open connector's. Each try clears the last one's error there first,
+   * so a retry that works shows none.
    */
   const connect = async (): Promise<boolean> => {
+    if (view.kind === 'list') setListError(null);
+    else setReviewError(undefined);
     setConnecting(true);
     try {
       await connectApp(calls);
