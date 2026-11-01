@@ -1,5 +1,5 @@
 import type { BusinessToolDef } from '../../api/views.ts';
-import type { RuleMode } from '../../ds/components/OutcomeMenu/outcomeWords.ts';
+import type { RuleMode } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
 
 /** The signed words for the Desk's own jobs, shared by setup and Rules. */

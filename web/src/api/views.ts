@@ -346,8 +346,9 @@ export interface PeopleOut {
 export type ToolReviewReason = 'new' | 'changed' | 'delisted';
 
 /**
- * Business tool definitions, typed here until #350's generated types land, then imported from
- * `contracts.ts`. The owner's title, description and configuration are untrusted text.
+ * Business tool definitions, typed here until the kernel's business tools change (branch
+ * `plan/09-blocks-core`) regenerates their types, then imported from `contracts.ts`.
+ * The owner's title, description and configuration are untrusted text.
  */
 export interface BusinessToolDef {
   title: string;
