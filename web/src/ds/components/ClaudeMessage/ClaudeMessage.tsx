@@ -14,7 +14,7 @@ import './ClaudeMessage.css';
  * text, then its address, and opens nothing. This flips to 'open' once the kernel's Markdown link
  * check is on main.
  */
-const PROSE_LINKS = 'inert' as const;
+export const PROSE_LINKS = 'inert' as const;
 
 export interface ClaudeMessageProps {
   /** The delivered message's blocks (`EvMessage.blocks`), in order, exactly as they arrived. */

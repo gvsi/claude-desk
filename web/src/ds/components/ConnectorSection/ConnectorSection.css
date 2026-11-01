@@ -129,7 +129,7 @@
 }
 
 .cd-connector-section__tool-link:focus-visible::after {
-  outline: 2px solid var(--accent-blue);
+  outline: 2px solid var(--ring-focus);
   outline-offset: -2px;
 }
 

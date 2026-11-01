@@ -99,6 +99,76 @@ afterEach(() => {
 });
 
 describe('the scripted Desk', () => {
+  it.each(['agent_text', 'visitor_text', 'whisper', 'turn_end', 'ended_agent_text'] as const)(
+    'agent_summary_does_not_reuse_receipts_across_turns_%s', async (boundary) => {
+      const world = mockStore.world;
+      const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+      const ctx = world.context(agent, 'en', 'Book a visit');
+      world.emit(agent, ctx.status('receipt', ctx.decide(DECISIONS.book)));
+      if (boundary === 'turn_end' || boundary === 'ended_agent_text') world.emit(agent, { type: 'turn_end' });
+      if (boundary === 'agent_text' || boundary === 'ended_agent_text') world.agentText(agent, 'New request');
+      else if (boundary === 'visitor_text') world.visitorText(agent, 'New request');
+      else if (boundary === 'whisper') world.whisper(agent, 'New request');
+      world.emit(agent, ctx.reply([rivera.blocks.booking_confirmed.en]));
+      const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+      expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBeNull();
+    },
+  );
+
+  it.each([
+    [false, false], [false, true], [true, false], [true, true],
+  ])('agent_summary_uses_ledger_order_with_newer_refusal_%s_and_reverse_publication_%s', async (newerRefusal, reversePublication) => {
+    const world = mockStore.world;
+    const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+    const ctx = world.context(agent, 'en', 'Book a visit');
+    const refuse = () => ctx.decide({ ...DECISIONS.quote, outcome: 'refuse', executed: false });
+    world.emit(agent, { type: 'turn_end' });
+    world.agentText(agent, 'Book a visit');
+    // Fake time stays fixed: ledger sequence alone decides which result is newer.
+    const decisions = newerRefusal ? [ctx.decide(DECISIONS.book), refuse()] : [refuse(), ctx.decide(DECISIONS.book)];
+    const published = reversePublication ? [...decisions].reverse() : decisions;
+    for (const decision of published) world.emit(agent, ctx.status('receipt', decision));
+    world.emit(agent, ctx.reply([rivera.blocks.booking_confirmed.en]));
+    world.emit(agent, { type: 'turn_end' });
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome)
+      .toBe(newerRefusal ? 'turned_down' : 'visit_booked');
+  });
+
+  it.each([
+    ['book_visit', 'visit_booked'],
+    ['quote_and_deposit', 'deposit_paid'],
+    ['push_the_limit', 'turned_down'],
+  ])('agent_summary_records_%s', async (task, expected) => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task, idempotency_key: task } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBe(expected);
+  });
+
+  it('agent_summary_does_not_restore_success_after_a_hold_is_answered', async () => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'outcome-answered' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    const held = mockStore.world.context(agent, 'en', 'Ask Maria').decide({ ...DECISIONS.quote, outcome: 'hold', executed: false });
+    mockStore.world.answer(mockStore.world.decisions.get(held.decision_id)!, 'allow_once');
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBeNull();
+  });
+
+  it('agent_summary_clears_success_after_a_handoff', async () => {
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'outcome-handoff' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 5);
+    const agent = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1)!;
+    mockStore.world.reply(agent, [rivera.blocks.handoff.en], 'en');
+    const summaries = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(summaries.find((s) => s.session_id === agent.state.session_id)?.latest_outcome).toBeNull();
+  });
+
   it('answers_each_first_view_starter_in_its_language', () => {
     const cases = [
       ['How much is drain clearing?', 'price', 'en'],

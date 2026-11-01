@@ -139,7 +139,7 @@ database() {
   printf '%s\n' "DESK_ENV=production" "DESK_DB_URLS=API" "API_DB_USER=desk_api"
   database
   printf '%s\n' "KERNEL_URL=http://127.0.0.1:8701" "PUBLIC_ORIGIN=https://localhost.invalid" "TRUSTED_PROXY_HOPS=0" \
-    "API_DB_PASSWORD=$API_ROLE_PASSWORD" "ANTHROPIC_API_KEY=not-a-key" "PASSCODE_HASH=$passcode_hash"
+    "BUSINESS_TOOLS_ENABLED=1" "API_DB_PASSWORD=$API_ROLE_PASSWORD" "ANTHROPIC_API_KEY=not-a-key" "PASSCODE_HASH=$passcode_hash"
 } >"$api_env"
 
 say "admin task: migrations and role passwords on $DB_NAME"

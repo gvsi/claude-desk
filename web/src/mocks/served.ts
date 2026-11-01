@@ -64,11 +64,13 @@ import {
   SETUP_ROUTES,
   setupPublicDesk,
   setupTaskSet,
+  stopSetupRuns,
   withSetupBusinesses,
   withSetupBusinessName,
   withSetupDesks,
   withSetupGreeting,
 } from './setup.ts';
+import { TEST_PACE, type OwnerStreamPlan, type StreamSettings } from './ownerStreams.ts';
 import { PUBLIC_LINES_ROUTES } from './publicLines.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
@@ -278,6 +280,9 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
+/** The owner-chat streams a test can plan: Ask Claude's answer, or a setup turn. */
+export type OwnerStreamKind = 'ruleChat' | 'setup';
+
 /**
  * How a store numbers its copies and names their payment and document links: the screen tests'
  * one copy from 1, so its ids are the seed's, and the dev server's at random, so each copy's are
@@ -297,13 +302,35 @@ export class Server {
   world: MockWorld;
   /** The built-in agent's runs in this copy. */
   readonly agents = new AgentRuns();
+  /** How this copy's owner-chat streams are written; a test may change whether setup's turns stream. */
+  readonly streams: StreamSettings;
+  /** Streams a test planned, each taken by the next stream of its kind. */
+  private readonly plans: Record<OwnerStreamKind, OwnerStreamPlan[]> = { ruleChat: [], setup: [] };
+  /**
+   * Claude's answer to the last rule chat, kept when the change it drafted is refused for the
+   * payment limit: as on the API, a streamed chat has written the answer by then, and the refusal
+   * follows it.
+   */
+  refusedAnswer: string | null = null;
   private readonly turns = new Map<string, { queue: Scheduled[]; timer: ReturnType<typeof setTimeout> | null }>();
 
   constructor(
     readonly seed: MockSeed,
     private readonly naming: CopyNaming,
+    streams: StreamSettings = TEST_PACE,
   ) {
+    this.streams = { ...streams };
     this.world = this.freshWorld();
+  }
+
+  /** Plans the next stream of `kind`: Ask Claude's answer, or a setup turn. */
+  planStream(kind: OwnerStreamKind, plan: OwnerStreamPlan): void {
+    this.plans[kind].push(plan);
+  }
+
+  /** The plan for this stream of `kind`, if a test made one. */
+  takePlan(kind: OwnerStreamKind): OwnerStreamPlan | null {
+    return this.plans[kind].shift() ?? null;
   }
 
   private freshWorld(seed: MockSeed = this.seed): MockWorld {
@@ -322,6 +349,7 @@ export class Server {
     for (const turn of this.turns.values()) if (turn.timer !== null) clearTimeout(turn.timer);
     this.turns.clear();
     this.agents.stop();
+    stopSetupRuns(this.world);
   }
 
   /**
@@ -651,6 +679,8 @@ const SERVED: ServedRoutes = {
     return isFailure(desk) ? desk : ok(rulesView(desk));
   },
   ruleChat(sv, req) {
+    // Only this chat's own refusal may stream its answer: whatever an earlier chat kept goes now.
+    sv.refusedAnswer = null;
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     if (isFailure(desk)) return desk;
     const text = isRecord(req.body) ? req.body.text : undefined;
@@ -669,7 +699,10 @@ const SERVED: ServedRoutes = {
       .reverse();
     const reply = ruleChatReply(text, desk.policy.cards, held);
     if (reply.add.length === 0) return ok({ answer: reply.answer, draft: null } satisfies RuleChatOut);
-    return aboveMoneyCap(desk, reply.add) ?? ok({ answer: reply.answer, draft: sv.world.draft(desk, reply.add) } satisfies RuleChatOut);
+    const refused = aboveMoneyCap(desk, reply.add);
+    if (refused === null) return ok({ answer: reply.answer, draft: sv.world.draft(desk, reply.add) } satisfies RuleChatOut);
+    sv.refusedAnswer = reply.answer;
+    return refused;
   },
   suggestions(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);

@@ -17,6 +17,7 @@ import {
   type RouteResponse,
   type RouteSpec,
 } from './routes.ts';
+import { SseParser } from './sse.ts';
 import type { CancelReason, RulesDraft } from './views.ts';
 
 /** How long one request may take: a Claude turn longer, a proving route past the API's 25 s hold. */
@@ -189,13 +190,16 @@ function notify(outcome: RequestOutcome): void {
 
 type HasKeys<T> = keyof T extends never ? false : true;
 
-/** Path params, bodies and required query values are typed by the route. */
+/** Path params, bodies and required query values are typed by the route; `signal` closes the request. */
 export type RequestOptions<K extends RouteKey> = ({} extends RouteQuery<K>
   ? { query?: RouteQuery<K> }
   : { query: RouteQuery<K> }) & (HasKeys<RouteParams<K>> extends true
   ? { params: RouteParams<K> }
   : { params?: undefined }) &
-  (RouteBody<K> extends undefined ? { body?: undefined } : { body: RouteBody<K> });
+  (RouteBody<K> extends undefined ? { body?: undefined } : { body: RouteBody<K> }) & {
+    /** Closes the request, its retries included: it then rejects with an `AbortError`. */
+    signal?: AbortSignal;
+  };
 
 type RequestArgs<K extends RouteKey> = Record<string, never> extends RequestOptions<K>
   ? [opts?: RequestOptions<K>]
@@ -289,31 +293,53 @@ function errorFrom(key: RouteKey, method: HttpMethod, answer: Answer): ApiError 
   });
 }
 
-/** One fetch with its own timeout; a failure to get any answer is `network`. */
-async function send(key: RouteKey, method: HttpMethod, path: string, body: unknown, timeoutMs: number): Promise<Answer> {
+/** A response's status and its body read as JSON. */
+async function readAnswer(res: Response): Promise<Answer> {
+  const text = await res.text();
+  if (text === '') return { status: res.status, body: undefined, unreadable: false };
+  try {
+    return { status: res.status, body: JSON.parse(text) as unknown, unreadable: false };
+  } catch {
+    return { status: res.status, body: undefined, unreadable: true };
+  }
+}
+
+/** The headers of a request that may carry a JSON body, asking for `accept`. */
+function headersFor(body: unknown, accept: string): Record<string, string> {
+  const headers: Record<string, string> = { Accept: accept };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  return headers;
+}
+
+function abortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+/**
+ * One fetch with its own timeout; a failure to get any answer is `network`. Closed by `signal`, it
+ * rejects with an `AbortError`.
+ */
+async function send(key: RouteKey, method: HttpMethod, path: string, body: unknown, timeoutMs: number, signal?: AbortSignal): Promise<Answer> {
+  if (signal?.aborted) throw abortError();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(0, timeoutMs));
+  const close = () => controller.abort();
+  signal?.addEventListener('abort', close);
   try {
-    const headers: Record<string, string> = { Accept: 'application/json' };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
     const res = await fetch(path, {
       method,
-      headers,
+      headers: headersFor(body, 'application/json'),
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: 'same-origin',
       signal: controller.signal,
     });
-    const text = await res.text();
-    if (text === '') return { status: res.status, body: undefined, unreadable: false };
-    try {
-      return { status: res.status, body: JSON.parse(text) as unknown, unreadable: false };
-    } catch {
-      return { status: res.status, body: undefined, unreadable: true };
-    }
+    return await readAnswer(res);
   } catch {
+    if (signal?.aborted) throw abortError();
     throw new ApiError('network', { route: key, method, status: null });
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', close);
   }
 }
 
@@ -337,15 +363,30 @@ function provingRetryPath(value: unknown): string | null {
   return `${url.pathname}${url.search}`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Waits `ms`, or rejects with an `AbortError` as soon as `signal` closes. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', stop);
+      resolve();
+    }, ms);
+    const stop = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
+    signal?.addEventListener('abort', stop, { once: true });
+  });
 }
 
 /**
  * A proving route answered 202: post the retry's body to its path every 3 s until something other
  * than a 202 comes back, and give up as `rules_cannot_be_checked` a minute after the first send.
  */
-async function followRetry(key: RouteKey, first: Answer, startedAt: number): Promise<Answer> {
+async function followRetry(key: RouteKey, first: Answer, startedAt: number, signal?: AbortSignal): Promise<Answer> {
   const deadline = startedAt + PROVING_GIVE_UP_MS;
   const giveUp = () => new ApiError('unavailable', { route: key, method: 'POST', status: null, code: 'rules_cannot_be_checked' });
   let answer = first;
@@ -354,11 +395,12 @@ async function followRetry(key: RouteKey, first: Answer, startedAt: number): Pro
     const path = retry ? provingRetryPath(retry.path) : null;
     if (retry === null || path === null) throw new ApiError('unavailable', { route: key, method: 'POST', status: 202 });
     const wait = Math.min(PROVING_RETRY_MS, deadline - Date.now());
-    if (wait > 0) await sleep(wait);
+    if (wait > 0) await sleep(wait, signal);
     if (Date.now() >= deadline) throw giveUp();
     try {
-      answer = await send(key, 'POST', path, retry.body, Math.min(TIMEOUT_MS.proving, deadline - Date.now()));
+      answer = await send(key, 'POST', path, retry.body, Math.min(TIMEOUT_MS.proving, deadline - Date.now()), signal);
     } catch (err) {
+      if (signal?.aborted) throw err;
       if (Date.now() >= deadline) throw giveUp();
       throw err;
     }
@@ -372,21 +414,161 @@ async function followRetry(key: RouteKey, first: Answer, startedAt: number): Pro
  */
 export async function request<K extends RouteKey>(key: K, ...[opts]: RequestArgs<K>): Promise<RouteResponse<K>> {
   const route: RouteSpec = ROUTES[key];
-  const options = (opts ?? {}) as { params?: RouteParams<K>; query?: RouteQuery; body?: unknown };
+  const options = (opts ?? {}) as { params?: RouteParams<K>; query?: RouteQuery; body?: unknown; signal?: AbortSignal };
   try {
     const query = SETUP_CARD_ROUTES.has(key) ? { ...options.query, cards: 1 } : options.query;
     const path = apiPath(key, options.params ?? ({} as RouteParams<K>), query);
     const startedAt = Date.now();
-    let answer = await send(key, route.method, path, options.body, timeoutFor(route));
-    if (answer.status === 202 && route.proving) answer = await followRetry(key, answer, startedAt);
-    if (answer.status < 200 || answer.status > 299) throw errorFrom(key, route.method, answer);
-    // Setup turns always carry an interview, including background work answered 202.
-    const empty = answer.body === undefined && (['setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions'].includes(key) || (answer.status !== 202 && answer.status !== 204));
-    if (answer.unreadable || empty) throw new ApiError('unavailable', { route: key, method: route.method, status: answer.status });
-    notify({ key, ok: true });
-    return answer.body as RouteResponse<K>;
+    return await settle(key, route, await send(key, route.method, path, options.body, timeoutFor(route), options.signal), startedAt, options.signal);
   } catch (err) {
     if (err instanceof ApiError) notify({ key, ok: false, error: err });
     throw err;
+  }
+}
+
+/**
+ * `key`'s answer as `request` reads it: a proving route's 202 followed, any other status but a 2xx
+ * an `ApiError`, a body that isn't JSON (or an empty one where an answer must have one) unavailable.
+ * Notifies the observers of a success; the caller notifies them of a failure.
+ */
+async function settle<K extends RouteKey>(key: K, route: RouteSpec, first: Answer, startedAt: number, signal?: AbortSignal): Promise<RouteResponse<K>> {
+  let answer = first;
+  if (answer.status === 202 && route.proving) answer = await followRetry(key, answer, startedAt, signal);
+  if (answer.status < 200 || answer.status > 299) throw errorFrom(key, route.method, answer);
+  // Setup turns always carry an interview, including background work answered 202.
+  const empty = answer.body === undefined && (['setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions'].includes(key) || (answer.status !== 202 && answer.status !== 204));
+  if (answer.unreadable || empty) throw new ApiError('unavailable', { route: key, method: route.method, status: answer.status });
+  notify({ key, ok: true });
+  return answer.body as RouteResponse<K>;
+}
+
+// Event streams: an answer that grows, posted with `Accept: text/event-stream`.
+
+/**
+ * The stream couldn't be read to its end: it didn't open, broke off, ended before its last event
+ * or went quiet past its keepalives. Nothing it said is an answer; the JSON request is the way round.
+ */
+export class StreamBroken extends Error {
+  constructor() {
+    super('stream_broken');
+    this.name = 'StreamBroken';
+  }
+}
+
+/** Whether this browser can read a response's body as it arrives. */
+export function canReadStreams(): boolean {
+  return typeof ReadableStream === 'function' && typeof TextDecoder === 'function' && typeof Response === 'function' && 'body' in Response.prototype;
+}
+
+/**
+ * The `ApiError` an `error` event names: `{status, error}` and any field the JSON route's refusal
+ * carries (a 422's `cap_cents`), read as that refusal would be. A status that isn't an HTTP error
+ * reads as unavailable.
+ */
+export function streamedError(key: RouteKey, payload: Record<string, unknown>): ApiError {
+  const { status } = payload;
+  const known = typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599;
+  return errorFrom(key, ROUTES[key].method, { status: known ? status : 503, body: payload, unreadable: false });
+}
+
+/** What reads a stream's events: each event's name and data, with the stream's last answer once it comes. */
+export interface EventsCall<T> {
+  /** Returns the stream's answer to end it, or undefined to read on; throws an `ApiError` to end it failed. */
+  onEvent(name: string, data: string): T | undefined;
+  /** Closes the stream: the request rejects with an `AbortError`. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Sends `key`'s request asking for an event stream and reads its events with `call` until one is
+ * the answer. A refusal answered as JSON before any stream (a 401, 404, 422, 429 or 503) is read as
+ * `request` reads it, as is a JSON answer from a server that streams nothing. Rejects with the
+ * `ApiError` of a refusal or of the event that failed it, with `StreamBroken` when the stream can't
+ * be read to its answer (the caller asks again as JSON), and with an `AbortError` once `signal`
+ * closes it. Between pieces the stream may go quiet for `TIMEOUT_MS.model` (its keepalives come
+ * every 15 seconds), and it may run `PROVING_GIVE_UP_MS` in all: keepalives alone never hold it open.
+ */
+export async function requestEvents<K extends RouteKey, T>(
+  key: K,
+  opts: RequestOptions<K>,
+  call: EventsCall<T>,
+): Promise<{ streamed: true; value: T } | { streamed: false; value: RouteResponse<K> }> {
+  const route: RouteSpec = ROUTES[key];
+  const options = opts as { params?: RouteParams<K>; query?: RouteQuery; body?: unknown };
+  const path = apiPath(key, options.params ?? ({} as RouteParams<K>), options.query);
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const closed = () => call.signal?.aborted === true;
+  const close = () => controller.abort();
+  if (closed()) throw abortError();
+  call.signal?.addEventListener('abort', close);
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+  const heard = () => {
+    clearTimeout(quiet);
+    quiet = setTimeout(close, TIMEOUT_MS.model);
+  };
+  heard();
+  const deadline = setTimeout(close, PROVING_GIVE_UP_MS);
+  try {
+    let res: Response;
+    try {
+      res = await fetch(path, {
+        method: route.method,
+        headers: headersFor(options.body, 'text/event-stream'),
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        credentials: 'same-origin',
+        signal: controller.signal,
+      });
+    } catch {
+      if (closed()) throw abortError();
+      throw new StreamBroken();
+    }
+    if (res.status !== 200 || !/^text\/event-stream\b/i.test(res.headers.get('content-type') ?? '') || res.body === null) {
+      let answer: Answer;
+      try {
+        answer = await readAnswer(res);
+      } catch {
+        if (closed()) throw abortError();
+        throw new ApiError('network', { route: key, method: route.method, status: null });
+      }
+      clearTimeout(quiet);
+      return { streamed: false, value: await settle(key, route, answer, startedAt, call.signal) };
+    }
+    const reader = res.body.getReader();
+    const stop = () => void reader.cancel().catch(() => undefined);
+    controller.signal.addEventListener('abort', stop);
+    const decoder = new TextDecoder();
+    const parser = new SseParser();
+    try {
+      for (;;) {
+        let piece: ReadableStreamReadResult<Uint8Array>;
+        try {
+          piece = await reader.read();
+        } catch {
+          if (closed()) throw abortError();
+          throw new StreamBroken();
+        }
+        if (closed()) throw abortError();
+        if (piece.done) throw new StreamBroken();
+        heard();
+        for (const message of parser.push(decoder.decode(piece.value, { stream: true }))) {
+          const value = call.onEvent(message.event, message.data);
+          if (value !== undefined) {
+            notify({ key, ok: true });
+            return { streamed: true, value };
+          }
+        }
+      }
+    } finally {
+      controller.signal.removeEventListener('abort', stop);
+      stop();
+    }
+  } catch (err) {
+    if (err instanceof ApiError) notify({ key, ok: false, error: err });
+    throw err;
+  } finally {
+    clearTimeout(quiet);
+    clearTimeout(deadline);
+    call.signal?.removeEventListener('abort', close);
   }
 }

@@ -28,6 +28,7 @@ import {
   turnedDownHeadline,
 } from './copy.ts';
 import { attemptsQuery, ledgerQuery } from './queries.ts';
+import { SIDE_BY_SIDE } from './focusTrace.ts';
 import { RecordList } from './RecordList.tsx';
 
 import { SafetySkeleton } from './SafetySkeleton.tsx';
@@ -169,7 +170,7 @@ function Filters({ chosen, onChoose }: { chosen: string; onChoose: (filter: stri
 }
 
 /** From this width the open attempt sits beside the list (Safety.css); under it, under the list. */
-const BESIDE = '(min-width: 1280px)';
+const BESIDE = SIDE_BY_SIDE;
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
 /**

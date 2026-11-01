@@ -4,7 +4,7 @@
  * shared contracts.
  */
 import { effectiveBrand } from './brand.ts';
-import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
+import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, SseEvent, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -121,6 +121,82 @@ function fromTheVisitor(session: SessionRecord | undefined): string | null {
   return lines.length > 0 ? lines.join(' · ') : null;
 }
 
+/** The API's agent-only outcome: matched executed receipts/cards, with later decisive events first. */
+function latestAgentOutcome(world: MockWorld, session: SessionRecord): ConversationSummary['latest_outcome'] {
+  if (session.state.kind !== 'agent') return null;
+  const records = [...world.decisions.values()].filter((d) => d.decision.session_id === session.state.session_id);
+  const decisions = new Map(records.map((d) => [d.decision.decision_id, d.decision]));
+  const desk = world.desk(session.deskId);
+  const atDecision = (decision: Decision) => Date.parse(desk?.ledger[decision.ledger_seq - 1]?.created_at ?? '') ||
+    records.find((r) => r.decision.decision_id === decision.decision_id)?.createdAt || 0;
+  type Outcome = ConversationSummary['latest_outcome'];
+  const events: { at: number; seq: number; priority: number; n: number; outcome: Outcome }[] = [];
+  for (const { decision } of records) {
+    const { state, action } = decision;
+    if (decision.outcome === 'hold' || ['refused', 'refused_at_execution', 'held', 'denied', 'expired', 'cancelled'].includes(state) ||
+      (state === 'executed' && ['native.book', 'native.charge_mandate', 'native.request_callback'].includes(action?.tool ?? ''))) {
+      events.push({ at: atDecision(decision), seq: decision.ledger_seq, priority: 0, n: 0,
+        outcome: state === 'refused' || state === 'refused_at_execution' ? 'turned_down' : null });
+    }
+  }
+  for (const handoff of world.handoffs.values()) {
+    if (handoff.handoff.session_id === session.state.session_id) {
+      const entry = desk?.ledger.find((e) => e.event.kind === 'desk_data' && e.event.summary.kind !== undefined &&
+        Array.isArray(e.event.summary.refs) && e.event.summary.refs.includes(handoff.handoff.handoff_id));
+      events.push({ at: handoff.createdAt, seq: entry?.seq ?? 0, priority: 2, n: 0, outcome: null });
+    }
+  }
+  const done: Partial<Record<string, { tool: string; outcome: Outcome }>> = {
+    booking_confirmed: { tool: 'native.book', outcome: 'visit_booked' },
+    charge_confirmed: { tool: 'native.charge_mandate', outcome: 'deposit_paid' },
+  };
+  // Turn ends live in the stream rather than the transcript. Tag each event with its last end,
+  // just as the API does, so an undelivered turn cannot lend its receipt to a later card.
+  const turnEnds = new Map<SseEvent, number>();
+  let lastEnd = 0;
+  for (const { seq, ev } of session.events) {
+    if (ev.type === 'turn_end') lastEnd = seq;
+    turnEnds.set(ev, lastEnd);
+  }
+  let pending: Decision[] = [];
+  let previousEnd = 0;
+  for (const item of [...session.items].sort((a, b) => a.n - b.n)) {
+    const event = item.event;
+    if (['visitor_text', 'agent_text', 'whisper'].includes(item.kind)) pending = [];
+    if (event && (item.kind === 'status' || item.kind === 'delivered')) {
+      const end = turnEnds.get(event) ?? 0;
+      if (end !== previousEnd) pending = [];
+      previousEnd = end;
+    }
+    if (item.kind === 'status') {
+      const decision = event && 'decision_id' in event ? decisions.get(event.decision_id) : undefined;
+      if (event && 'state' in event && event.state === 'executed' && decision?.state === 'executed') pending.push(decision);
+      continue;
+    }
+    if (item.kind !== 'delivered' || event?.type !== 'message') continue;
+    const receipts = pending;
+    pending = [];
+    const cards = event.blocks.filter((b) => b.kind === 'card').map((b) => b.template ?? '');
+    if (event.handoff || cards.includes('handoff')) {
+      events.push({ at: Date.parse(item.created_at), seq: event.ledger_seq, priority: 2, n: item.n, outcome: null });
+      continue;
+    }
+    for (const card of cards.reverse()) {
+      if (card === 'payment_confirmed' && event.author === 'desk') {
+        events.push({ at: Date.parse(item.created_at), seq: event.ledger_seq, priority: 1, n: item.n, outcome: 'deposit_paid' });
+        break;
+      }
+      const result = done[card];
+      if (!result) continue;
+      const decision = receipts.filter((d) => d.action?.tool === result.tool).sort((a, b) => b.ledger_seq - a.ledger_seq)[0];
+      if (decision) events.push({ at: atDecision(decision), seq: decision.ledger_seq, priority: 1, n: item.n, outcome: result.outcome });
+      break;
+    }
+  }
+  events.sort((a, b) => a.at - b.at || a.seq - b.seq || a.priority - b.priority || a.n - b.n);
+  return events.at(-1)?.outcome ?? null;
+}
+
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {
   const counts: Partial<Record<DecisionState, number>> = {};
   for (const { decision } of world.decisions.values()) {
@@ -136,6 +212,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
     latest_visitor_text: latestVisitorText(session),
+    latest_outcome: latestAgentOutcome(world, session),
   };
 }
 

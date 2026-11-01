@@ -193,11 +193,11 @@ async function served<T>(key: 'conversations' | 'conversation' | 'needsYou', par
  * Alex Kim's assistant books the earliest visit, as the agents page sends it from a visitor's chat:
  * the agent's chat once its run is done.
  */
-async function bookTheEarliestVisit(): Promise<string> {
+async function bookTheEarliestVisit(task = 'book_visit'): Promise<string> {
   const slug = RIVERA.slug;
   const opened = await mockStore.dispatch('openSession', { params: { slug } });
   if ('network' in opened || opened.status !== 200) throw new Error("the visitor's chat opens");
-  const sent = await mockStore.dispatch('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'book-the-earliest-visit' } });
+  const sent = await mockStore.dispatch('sendAgent', { params: { slug }, body: { task, idempotency_key: task } });
   if ('network' in sent || sent.status !== 202) throw new Error('the agent is sent');
   const runId = (sent.body as { run_id: string }).run_id;
   const runState = async () => {
@@ -546,6 +546,40 @@ describe('Conversations', () => {
       transcript: true,
       tabStops: [...rows, ...(receipts.elements() as HTMLElement[]), takeOver.element() as HTMLElement],
     });
+  });
+
+  it('unnamed_agent_row_shows_its_confirmed_outcome', async () => {
+    const booked = await bookTheEarliestVisit();
+    const agent = session(booked);
+    agent.displayName = null;
+    agent.state = { ...agent.state, verified: false };
+    const { screen } = await renderRoute(LIST);
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Agent/ });
+    await expect.element(row.getByText('Agent · Visit booked', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--info')).not.toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('agent_rows_show_confirmed_outcomes_and_attention_first', async () => {
+    const booked = await bookTheEarliestVisit();
+    const paid = await bookTheEarliestVisit('quote_and_deposit');
+    const refused = await bookTheEarliestVisit('push_the_limit');
+    const desk = mockStore.world.desk(RIVERA.deskId)!;
+    const quiet = mockStore.world.addSession(desk, { agent: "Alex Kim's assistant" });
+    mockStore.world.visitorText(quiet, 'Hello');
+    const { screen } = await renderRoute(LIST);
+    const status = (id: string) => document.querySelector(`a[href="${conversation(id)}"] .cd-conversation-item__status-text`)?.textContent;
+    await expect.poll(() => status(booked)).toBe('Agent · Visit booked');
+    expect(status(paid)).toBe('Agent · Deposit paid');
+    expect(status(refused)).toBe('Agent · Turned down');
+    expect(status(quiet.state.session_id)).toBe('Agent');
+
+    const ctx = mockStore.world.context(session(booked), 'en', 'Ask Maria');
+    ctx.decide({ ...DECISIONS.quote, outcome: 'hold', executed: false });
+    mockStore.world.reply(session(paid), [rivera.blocks.handoff.en], 'en');
+    await expect.poll(() => status(booked)).toBe('Needs you');
+    await expect.poll(() => status(paid)).toBe('Wants you');
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it('list_and_detail', async () => {

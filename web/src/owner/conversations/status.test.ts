@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ConversationSummary } from '../../api/views.ts';
-import { attentionStatus, conversationStatus, whoLabel } from './status.ts';
+import { attentionStatus, conversationListStatus, conversationStatus, whoLabel } from './status.ts';
 
 function summary(fields: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
@@ -77,5 +77,40 @@ describe('conversationStatus', () => {
     expect(whoLabel(summary({ verified: true }))).toBe('Verified customer');
     expect(whoLabel(summary())).toBe('Visitor');
     expect(whoLabel(summary({ display_name: '   ' }))).toBe('Visitor');
+  });
+});
+
+
+describe('conversationListStatus', () => {
+  it.each([null, '   '])('shows_an_unnamed_agents_outcome_with_display_name_%s', (display_name) => {
+    const agent = summary({ kind: 'agent', display_name });
+    for (const [latest_outcome, words] of [
+      ['visit_booked', 'Visit booked'], ['deposit_paid', 'Deposit paid'], ['turned_down', 'Turned down'],
+    ] as const) {
+      const done = { ...agent, latest_outcome };
+      expect(conversationListStatus(done, 0)).toEqual({ tone: 'info', text: `Agent · ${words}` });
+      expect(conversationStatus(done, 0)).toBeNull();
+      expect(conversationListStatus(done, 1, true)?.text).toBe('Needs you');
+      expect(conversationListStatus({ ...done, mode: 'paused' }, 0, true)?.text).toBe('Paused after blocked attempts');
+      expect(conversationListStatus(done, 0, true)?.text).toBe('Wants you');
+      expect(conversationListStatus({ ...done, mode: 'owner' }, 0)?.text).toBe("You're in this chat");
+    }
+    expect(conversationListStatus({ ...agent, latest_outcome: null }, 0)).toBeNull();
+  });
+
+  it('adds_confirmed_agent_outcomes_only_to_the_conversations_list', () => {
+    const agent = summary({ kind: 'agent', display_name: "Alex Kim's assistant" });
+    for (const [latest_outcome, words] of [
+      ['visit_booked', 'Visit booked'], ['deposit_paid', 'Deposit paid'], ['turned_down', 'Turned down'],
+    ] as const) {
+      const done = { ...agent, latest_outcome };
+      expect(conversationListStatus(done, 0)).toEqual({ tone: 'info', text: `Agent · ${words}` });
+      expect(conversationStatus(done, 0)).toEqual({ tone: 'info', text: 'Agent' });
+      expect(conversationListStatus(done, 1, true)?.text).toBe('Needs you');
+      expect(conversationListStatus({ ...done, mode: 'paused' }, 0, true)?.text).toBe('Paused after blocked attempts');
+      expect(conversationListStatus(done, 0, true)?.text).toBe('Wants you');
+      expect(conversationListStatus({ ...done, mode: 'owner' }, 0)?.text).toBe("You're in this chat");
+    }
+    expect(conversationListStatus({ ...agent, latest_outcome: null }, 0)?.text).toBe('Agent');
   });
 });
