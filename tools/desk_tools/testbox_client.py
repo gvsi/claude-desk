@@ -201,8 +201,10 @@ def prepare_script(base: str) -> str:
     """Remote shell prefix: admit a run only on a ready machine, holding the bootstrap lock shared for its whole life.
     The transaction script follows, quoted, after `python3 -c`. Bash carries on after a failed `exec` redirection,
     so each step fails closed explicitly: without the lock, bootstrap could change the machine under the run."""
-    return (f"test -f /opt/testbox/ready || exit 75; exec 8</opt/testbox/bootstrap.lock || exit 75; flock -s -w 30 8 || exit 75; "
-            f"test -f /opt/testbox/ready || exit 75; mkdir -p {base}/repo {base}/transfer; exec python3 -c ")
+    # Not ready: 78 when the last setup failed or was cut short, 75 while one may still be running.
+    ready = "test -f /opt/testbox/ready || { test -f /opt/testbox/bootstrap-failed && exit 78; exit 75; }; "
+    return (ready + "exec 8</opt/testbox/bootstrap.lock || exit 75; flock -s -w 30 8 || exit 75; "
+            + ready + f"mkdir -p {base}/repo {base}/transfer; exec python3 -c ")
 
 
 def replace_host_key(known_hosts: Path, instance: str, host_key: list[str]):
@@ -251,12 +253,18 @@ def release(holder, started):
     holder.wait()
 
 
+NOT_READY = {75: "the test machine is bootstrapping, retry shortly",
+             78: "the test machine's setup failed: re-run tools/testbox/provision.sh"}
+
+
 def read_remote_state(holder):
+    """The lane's state, or None when the machine isn't ready for runs; holder.wait() then gives the exit code."""
     line = holder.stdout.readline()
     if line:
         return json.loads(line)
-    if holder.wait() == 75:
-        print("testbox: the test machine is bootstrapping, retry shortly", file=sys.stderr)
+    code = holder.wait()
+    if code in NOT_READY:
+        print("testbox: " + NOT_READY[code], file=sys.stderr)
         return None
     raise RuntimeError("Could not lock the remote lane")
 
@@ -397,7 +405,7 @@ def run(args, root, lane, cache):
         holder = start_holder(ssh + [prepare_script(base) + shlex.quote(transaction)])
         remote = read_remote_state(holder)
         if remote is None:
-            return 75
+            return holder.wait()
         timing.mark("remote_lock")
         with tempfile.TemporaryDirectory(prefix="desk-testbox-") as tmp:
             tmp = Path(tmp)

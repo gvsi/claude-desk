@@ -171,8 +171,8 @@ def test_fresh_instance_bootstraps_once_with_small_user_data(monkeypatch):
     assert len(requests['user_data'].encode()) < 1024
     assert 'bash /opt/testbox/bootstrap.sh' not in requests['user_data']
     payload = requests['payload']
-    assert payload.index('rm -f /opt/testbox/ready') < payload.index('flock -x 9')
-    assert payload.index('flock -x 9') < payload.index('base64 -d')
+    assert payload.index('rm -f /opt/testbox/ready') < payload.index('flock -x -w 1500 9')
+    assert payload.index('flock -x -w 1500 9') < payload.index('base64 -d')
     assert 'bootstrap-version' in payload
 
 
@@ -262,3 +262,75 @@ def test_rolling_back_a_created_role_removes_the_accounts_policy_before_deleting
         invoke(monkeypatch, fixture)
     assert ACCOUNT_DENY in fixture.deleted_policies
     assert fixture.calls.index("delete-role") > max(i for i, op in enumerate(fixture.calls) if op == "delete-role-policy")
+
+
+def fake_tools(tmp_path, **statuses):
+    """A bin directory whose commands record their arguments and exit with the given status."""
+    tools = tmp_path / 'bin'
+    tools.mkdir(exist_ok=True)
+    for name, status in statuses.items():
+        (tools / name).write_text(f'#!/bin/sh\necho "$@" >> {tmp_path / (name + "-args")}\nexit {status}\n')
+        (tools / name).chmod(0o755)
+    return tools
+
+
+def bootstrap_header(tmp_path):
+    """bootstrap.sh up to its first package step, pointed at a stand-in /opt/testbox and log."""
+    script = (Path(__file__).parents[1] / 'testbox/bootstrap.sh').read_text()
+    header = script[:script.index('export DEBIAN_FRONTEND')]
+    (tmp_path / 'opt').mkdir()
+    (tmp_path / 'opt/ready').write_text('ready\n')
+    return header.replace('/var/log/desk-testbox-bootstrap.log', str(tmp_path / 'log')).replace('/opt/testbox', str(tmp_path / 'opt'))
+
+
+@pytest.mark.parametrize('failure', ['step', 'drain'])
+def test_a_bootstrap_that_ends_without_readiness_records_a_failed_setup(tmp_path, failure):
+    """A failed step, or a drain of running lanes that runs out of time, leaves a marker, so runs stop reporting
+    "bootstrapping, retry shortly" for a setup that is no longer running."""
+    import os
+    import subprocess
+    tools = fake_tools(tmp_path, flock=1)
+    script = bootstrap_header(tmp_path) + ('false\n' if failure == 'step' else '')
+    env = {**os.environ, 'PATH': f'{tools}:{os.environ["PATH"]}', 'TESTBOX_BOOTSTRAP_LOCKED': '1' if failure == 'step' else '0'}
+    result = subprocess.run(['bash', '-c', script], env=env, capture_output=True)
+    assert result.returncode != 0
+    assert not (tmp_path / 'opt/ready').exists()
+    assert (tmp_path / 'opt/bootstrap-failed').exists()
+    if failure == 'drain':
+        assert (tmp_path / 'flock-args').read_text().split() == ['-x', '-w', '1500', '9']
+
+
+def test_a_successful_bootstrap_clears_a_failed_setup_before_admitting_runs():
+    script = (Path(__file__).parents[1] / 'testbox/bootstrap.sh').read_text()
+    assert script.rstrip().splitlines()[-2:] == ['rm -f /opt/testbox/bootstrap-failed', "printf 'ready\\n' > /opt/testbox/ready"]
+
+
+def bootstrap_payload(monkeypatch):
+    payload = {}
+    fixture = AWS()
+    fixture.instance["State"]["Name"] = "running"
+    def record(command, **kwargs):
+        if command[4] == 'send-command':
+            payload['text'] = json.loads(command[command.index('--parameters') + 1])['commands'][0]
+        return fixture(command, **kwargs)
+    invoke(monkeypatch, record)
+    return payload['text']
+
+
+def test_a_reprovision_that_cannot_drain_running_lanes_in_time_records_a_failed_setup(monkeypatch, tmp_path):
+    """Running lanes can hold the machine lock for their whole run. The payload stops waiting within SSM's
+    30-minute limit and leaves the failed-setup marker instead of an endless "bootstrapping"."""
+    import os
+    import subprocess
+    tools = fake_tools(tmp_path, flock=1, **{'cloud-init': 0})
+    opt = tmp_path / 'opt'
+    opt.mkdir()
+    (opt / 'ready').write_text('ready\n')
+    run = subprocess.run   # invoke() patches subprocess.run for the provisioning fixture
+    payload = bootstrap_payload(monkeypatch).replace('/opt/testbox', str(opt))
+    result = run(['sh', '-c', payload], env={**os.environ, 'PATH': f'{tools}:{os.environ["PATH"]}'}, capture_output=True)
+    assert result.returncode != 0
+    assert (tmp_path / 'flock-args').read_text().split() == ['-x', '-w', '1500', '9']
+    assert not (opt / 'ready').exists()
+    assert (opt / 'bootstrap-failed').exists()
+    assert not (opt / 'bootstrap.sh').exists()

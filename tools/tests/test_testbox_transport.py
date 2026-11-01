@@ -265,16 +265,20 @@ def test_next_sync_removes_remote_created_sources_but_keeps_ignored_builds(tmp_p
     assert (repo / '.env').exists()
 
 
-def test_not_ready_status_reaches_the_caller_as_retryable_75(capsys):
+@pytest.mark.parametrize('code, message', [
+    (75, 'the test machine is bootstrapping, retry shortly'),
+    (78, "the test machine's setup failed: re-run tools/testbox/provision.sh"),
+])
+def test_not_ready_status_reaches_the_caller_with_its_own_exit_code(capsys, code, message):
     import io
     from types import SimpleNamespace
     from desk_tools.testbox_client import read_remote_state
 
-    holder = SimpleNamespace(stdout=io.StringIO(''), wait=lambda: 75)
+    holder = SimpleNamespace(stdout=io.BytesIO(b''), wait=lambda: code)
     assert read_remote_state(holder) is None
     output = capsys.readouterr()
     assert output.out == ''
-    assert 'the test machine is bootstrapping, retry shortly' in output.err
+    assert message in output.err
 
 
 def test_authenticated_host_key_replaces_all_old_entries_for_the_instance(tmp_path):
@@ -286,7 +290,7 @@ def test_authenticated_host_key_replaces_all_old_entries_for_the_instance(tmp_pa
     assert known.read_text().splitlines() == ['i-other ssh-ed25519 keep', 'i-test ssh-ed25519 new']
 
 
-def run_prepare(tmp_path, *, lock=True, flock_status=0, ready=True):
+def run_prepare(tmp_path, *, lock=True, flock_status=0, ready=True, failed=False):
     """Run the client's remote shell prefix against a stand-in /opt/testbox; flock is replaced by a recorder."""
     import os
     import shlex
@@ -299,6 +303,8 @@ def run_prepare(tmp_path, *, lock=True, flock_status=0, ready=True):
         (opt / 'ready').write_text('ready\n')
     if lock:
         (opt / 'bootstrap.lock').touch()
+    if failed:
+        (opt / 'bootstrap-failed').touch()
     (tools / 'flock').write_text(f'#!/bin/sh\necho "$@" >> {tmp_path / "flock-args"}\nexit {flock_status}\n')
     (tools / 'flock').chmod(0o755)
     script = prepare_script(str(tmp_path / 'lane')).replace('/opt/testbox', str(opt)) + shlex.quote('print("continued")')
@@ -318,4 +324,11 @@ def test_a_run_never_starts_without_the_shared_bootstrap_lock(tmp_path, failure)
     # A missing lock file must stop the run on its own, even where flock itself would succeed.
     result = run_prepare(tmp_path, lock=failure != 'missing-lock', flock_status=0 if failure == 'missing-lock' else 1)
     assert result.returncode == 75
+    assert 'continued' not in result.stdout
+
+
+@pytest.mark.parametrize('failed, code', [(False, 75), (True, 78)])
+def test_a_machine_that_is_not_ready_says_whether_its_setup_is_running_or_failed(tmp_path, failed, code):
+    result = run_prepare(tmp_path, ready=False, failed=failed)
+    assert result.returncode == code
     assert 'continued' not in result.stdout

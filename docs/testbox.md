@@ -99,7 +99,8 @@ The client transfers its own worker and helper modules separately from the selec
 another checkout's client works with `--lane` even on a branch without `tools/testbox`.
 The launcher accepts the current and previous protocol versions; older clients must update
 their branch's tools or re-provision. Runner diagnostics go to stderr; set `TESTBOX_TIMING=1`
-for phase timings. Exit 75 means the test machine is bootstrapping: retry shortly.
+for phase timings. Exit 75 means the test machine is bootstrapping: retry shortly. Exit 78
+means its last setup failed or was cut short: re-run `tools/testbox/provision.sh`.
 Do merges, rebases, fetches and commits locally: the remote copy is disposable and nothing comes back.
 Remote test reports remain in the lane; source files are never copied back automatically.
 
@@ -133,7 +134,9 @@ preserved. Bootstrap runs once through SSM after cloud-init; provisioning waits 
 an interrupted or changed bootstrap through SSM, with its log at
 `/var/log/desk-testbox-bootstrap.log` and readiness marker `/opt/testbox/ready`.
 Re-bootstrap removes readiness first and takes an exclusive machine lock, draining running
-lanes that hold shared locks. Postgres restarts only when its configuration changed.
+lanes that hold shared locks. Running lanes can delay re-provisioning by up to 25 minutes; if
+they still hold the lock then, or a setup step fails, provisioning reports the failure and
+runs exit 78 until a re-run succeeds. Postgres restarts only when its configuration changed.
 Allow about ten minutes for a fresh bootstrap; provisioning waits up to thirty minutes.
 
 The replacement is independent: no data migration is needed. After testing it, retire the

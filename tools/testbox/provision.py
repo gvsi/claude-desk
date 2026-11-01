@@ -65,8 +65,12 @@ def main():
         assets["cvc5.sha256"] = (HERE.parent / "cvc5.sha256").read_bytes()
         version = hashlib.sha256(b"".join(assets.values())).hexdigest()
         payload += f"if test -f /opt/testbox/ready && test \"$(cat /opt/testbox/bootstrap-version 2>/dev/null)\" = {version}; then exit 0; fi\n"
-        # Stop admitting new runs, drain existing shared leases, then replace assets.
-        payload += "rm -f /opt/testbox/ready\nexec 9>/opt/testbox/bootstrap.lock\nflock -x 9\n"
+        # Stop admitting new runs, drain existing shared leases, then replace assets. Running lanes hold their
+        # shared lease until they finish, so the drain gives up in time to report a failed setup within SSM's
+        # 30-minute limit: leaving without readiness records one, and runs then exit 78 instead of 75.
+        payload += "rm -f /opt/testbox/ready\n"
+        payload += "trap 'test -f /opt/testbox/ready || touch /opt/testbox/bootstrap-failed' EXIT\n"
+        payload += "exec 9>/opt/testbox/bootstrap.lock\nflock -x -w 1500 9\n"
         for name, data in assets.items():
             encoded = base64.b64encode(data).decode()
             payload += f"echo '{encoded}' | base64 -d > /opt/testbox/{name}\n"

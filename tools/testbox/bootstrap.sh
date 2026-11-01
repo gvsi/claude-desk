@@ -3,11 +3,14 @@
 set -euo pipefail
 exec > >(tee -a /var/log/desk-testbox-bootstrap.log) 2>&1
 trap 'echo "testbox bootstrap failed at line $LINENO"' ERR
+# Ending without readiness (a failed step, a drain that ran out of time, an interruption) records a failed
+# setup, so runs report it instead of asking callers to retry. Only a bootstrap that completes clears it.
+trap 'test -f /opt/testbox/ready || touch /opt/testbox/bootstrap-failed' EXIT
 # Direct runs and provisioning both drain shared run leases before mutation.
 rm -f /opt/testbox/ready
 if [ "${TESTBOX_BOOTSTRAP_LOCKED:-0}" != 1 ]; then
   exec 9>/opt/testbox/bootstrap.lock
-  flock -x 9
+  flock -x -w 1500 9
 fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -137,4 +140,5 @@ sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 printf 'kernel.apparmor_restrict_unprivileged_userns=0\n' > /etc/sysctl.d/60-testbox.conf
 chown root:root /opt/testbox/lane-exec.py
 chmod 755 /opt/testbox/lane-exec.py
+rm -f /opt/testbox/bootstrap-failed
 printf 'ready\n' > /opt/testbox/ready
