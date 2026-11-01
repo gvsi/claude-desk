@@ -29,6 +29,7 @@ import {
 } from '../api/contracts.ts';
 import { RIVERA_MONEY_CAP_CENTS, cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine, type ExecutedTool } from '../ds/fixtures/receipts.ts';
+import { afterName } from '../lib/names.ts';
 
 export type Language = 'en' | 'es';
 
@@ -218,7 +219,7 @@ export const HELD_PROSE: Record<Language, string> = {
  */
 export const LINK_CANCELLED: Record<Language, string> = {
   en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
-  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pídelo de nuevo si todavía quieres pagar.`,
+  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}${afterName(OWNER, '. Pídelo de nuevo si todavía quieres pagar.')}`,
 };
 
 /**
