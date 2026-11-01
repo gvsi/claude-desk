@@ -595,8 +595,6 @@ before you price any work. Tax season must turn your inbox into a queue of the s
 
 {_JOBS}
 
-{_NEXT}
-
 {_SAFETY}
 
 {_WRITING}"""

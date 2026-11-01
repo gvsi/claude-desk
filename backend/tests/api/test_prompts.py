@@ -160,6 +160,14 @@ def test_setup_start_prompt_names_only_its_output_fields():
     assert named_fields == set(SetupStart.model_fields)
 
 
+def test_the_opening_prompt_asks_only_for_its_own_fields():
+    system = prompts.SETUP_UNDERSTAND_SYSTEM
+    assert prompts._NEXT not in system
+    named_fields = set(re.findall(r"\b([a-z_]+):", system))
+    assert named_fields.isdisjoint({"skip", "drop", "add_jobs", "plan"})
+    assert "<answers_so_far>" not in system
+
+
 def test_setup_planning_prompts_ask_prerequisites_before_proposing_jobs():
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
         assert "bookings need the opening hours, quotes need the business's prices" in system
