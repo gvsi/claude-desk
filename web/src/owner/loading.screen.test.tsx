@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, expect, it, onTestFinished, vi } from 'vitest';
+import { beforeAll, expect, it, onTestFinished, vi } from 'vitest';
 import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
@@ -31,14 +31,6 @@ import { settled } from '../ds/test/settled.ts';
 import { TodaySkeleton } from './today/TodaySkeleton.tsx';
 
 beforeAll(loadWebFonts);
-
-// Rivera's Desk without its own jobs (its Emergency callback). Rules' loading shapes draw no "Your
-// Desk's jobs" section yet (#620), so these checks of each page's shapes against the landed page run
-// on a Desk without one, as Rivera's was when they were written. Pages other than Rules show no jobs.
-beforeEach(() => {
-  const desk = mockStore.world.desk(RIVERA.deskId)!;
-  desk.tools = desk.tools.filter((row) => row.source !== 'business');
-});
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 
@@ -1632,6 +1624,16 @@ const APPROVED_REFUND_SUGGESTION: Suggestion = {
 };
 
 const RULES_ANCHORS: readonly SkeletonAnchor[] = [
+  { name: 'rules-jobs-title', page: '.cd-business-jobs__title', size: true },
+  { name: 'rules-job', page: '.cd-business-jobs > .cd-card', size: true },
+  ...[
+    ['rules-job-name', '.cd-tool-rules__tool-name'],
+    ['rules-job-description', '.cd-tool-rules__tool-description'],
+    ['rules-job-reason', '.cd-rule-row__reason'],
+    ['rules-job-words', '.cd-rule-row__words'],
+    ['rules-job-outcome', '.cd-outcome'],
+    ['rules-job-fallback', '.cd-tool-rules__fallback-line'],
+  ].map(([name, selector]) => ({ name: name!, page: `.cd-business-jobs ${selector}`, size: true })),
   ...rivera.connectors.sections.flatMap(({ tools }, i) => [
     { name: `rules-connector-${i}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__header`, dimensions: ['bottom', 'height'] as const },
     ...tools.map((_, j) => ({ name: `rules-tool-${i}-${j}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__tool:nth-child(${j + 1})`, size: true, dimensions: ['bottom'] as const })),
@@ -2221,4 +2223,38 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
     },
     release: held.release,
   });
+});
+
+it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', async (viewport) => {
+  // Decision 15: a fresh Rivera copy has an Emergency callback. A Desk without jobs, such as
+  // Acme, loses that section once when its reads settle; its connectors then stay in place.
+  const desk = mockStore.world.desk(RIVERA.deskId)!;
+  desk.summary.business_name = 'Acme Accounting';
+  desk.tools = desk.tools.filter((row) => row.source !== 'business');
+  // Isolate the absent jobs section from Acme's data-dependent question about a held quote.
+  const held = [...mockStore.world.decisions.values()].find((item) => item.decision.reason_plain === rivera.decisions.held.reason_plain)!;
+  await mockStore.dispatch('answer', { params: { decision_id: held.decision.decision_id }, body: { answer: 'deny_once' } });
+  const { screen, router } = await openToday(viewport);
+  const read = holdReads(RULES_READ);
+  await router.navigate(RULES);
+  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  const jobs = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-business-jobs')!;
+  expect(jobs.textContent).toBe('');
+  const height = jobs.getBoundingClientRect().height;
+  const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region > .cd-skeleton-screen__body')!).rowGap);
+  const tops = watchTop(() => {
+    const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
+    return layer && layer.getAttribute('data-state') !== 'leaving'
+      ? layer.querySelector('[data-skeleton-anchor="rules-connector-0"]')
+      : landedElement('.cd-connector-section__header');
+  });
+  read.release();
+  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(landedElement('.cd-business-jobs')).toBeNull();
+  expect(tops()).toHaveLength(2);
+  expect(tops()[1]! - tops()[0]!, 'one upward move, explained by the absent jobs section').toBe(-Math.round(height + gap));
+  for (let frame = 0; frame < 10; frame += 1) await nextFrames();
+  expect(tops()).toHaveLength(2);
+  expectNoHorizontalScroll();
 });
