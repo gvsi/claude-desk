@@ -112,4 +112,4 @@ Three calls I made against what the agents or reviewers pushed for: a Desk resol
 
 ---
 
-Concept prototype by Giovanni Alcantara, not an Anthropic product
+Concept prototype by [Giovanni Alcantara](https://www.linkedin.com/in/giovannialcantara/), not an Anthropic product
