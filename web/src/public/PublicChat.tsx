@@ -180,13 +180,14 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, payment
     );
   }
   const { ev } = item;
-  // A reply that arrived on the stream lands, its receipts one by one.
+  // A reply that arrived on the stream lands, its receipts one by one; Claude's is revealed, its
+  // words first, then its cards and receipts.
   return (
     <TranscriptRow margin={receipts} live={row.live}>
       {ev.author === 'owner' ? (
         <PersonMessage name={ownerName} blocks={ev.blocks} language={ev.language} />
       ) : (
-        <ClaudeMessage blocks={ev.blocks.map(paymentBlock)} language={ev.language} ownerName={ownerName} />
+        <ClaudeMessage blocks={ev.blocks.map(paymentBlock)} language={ev.language} ownerName={ownerName} reveal={row.live === true} />
       )}
     </TranscriptRow>
   );
@@ -390,16 +391,18 @@ function useNewestInView(
 
   // The page changing size moves the end without a render: the shell rewraps when the window or
   // the panel around it resizes, and the composer area grows with what is typed. So does the shell
-  // switching which of its parts scrolls the conversation, which it says with its own event. Watched
-  // while the shell is `shown`.
+  // switching which of its parts scrolls the conversation, which it says with its own event, and the
+  // conversation growing as a reply's words are revealed. Watched while the shell is `shown`.
   useEffect(() => {
     const shell = shown ? end.current?.closest(SHELL) : null;
     const area = composer.current?.closest(COMPOSER_AREA);
+    const conversation = end.current?.parentElement;
     if (!shell) return undefined;
     shell.addEventListener(PUBLIC_SHELL_SCROLLER_EVENT, pin);
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(pin);
     observer?.observe(shell);
     if (area) observer?.observe(area);
+    if (conversation) observer?.observe(conversation);
     return () => {
       shell.removeEventListener(PUBLIC_SHELL_SCROLLER_EVENT, pin);
       observer?.disconnect();
