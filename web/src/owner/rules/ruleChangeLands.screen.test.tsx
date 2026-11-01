@@ -11,9 +11,10 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { cdp, userEvent, type Locator } from 'vitest/browser';
 
 import type { RuleCard } from '../../api/contracts.ts';
-import { apiPath } from '../../api/routes.ts';
+import { apiPath, ROUTES } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { worker } from '../../mocks/browser.ts';
+import { businessOut } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
@@ -60,6 +61,12 @@ function desk(): DeskRecord {
   const found = mockStore.world.desk(RIVERA.deskId);
   if (!found) throw new Error('the mock has the main Desk');
   return found;
+}
+
+/** Renames both the business read and its Desk summary, as the API keeps them together. */
+function renameBusiness(name: string): void {
+  desk().summary.business_name = name;
+  worker.use(http.get(ROUTES.desks.path, () => HttpResponse.json([{ ...businessOut(mockStore.world), name }])));
 }
 
 /** The receipt's words for `version`. */
@@ -331,6 +338,27 @@ function holdNextConfirm(): { arrived: () => boolean; release: () => void } {
   return { arrived: () => arrived, release };
 }
 
+/** The main Desk's Needs you, as the app reads it. */
+const NEEDS_YOU_PATH = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
+
+/** Holds every read of the main Desk's Needs you until `release()` lets them through to the mock. */
+function holdNeedsYou(): { held: () => number; release: () => void } {
+  let waiting = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.get(NEEDS_YOU_PATH, async () => {
+      waiting += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => waiting, release };
+}
+
 /** Text that starts with `words`, whatever follows them. */
 const startingWith = (words: string) => new RegExp(`^${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
@@ -388,6 +416,65 @@ describe('a preset or a new payment limit', () => {
     await pause(300);
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+  });
+
+  it.each(['Rivera Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', async (business) => {
+    // Acme has none of the sample's suggestions, so Rules waits for its first reads before drawing.
+    // A short window, so Payments can be wholly out of view above Stripe.
+    renameBusiness(business);
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    const root = screen.container;
+    const stripe = screen.getByRole('region', { name: 'Stripe' });
+    await expect.element(stripe.getByRole('button', { name: 'Change' })).toBeVisible();
+    // The shell's main area, once the Desk has opened, which scrolls on its own.
+    const main = screen.getByRole('main').element();
+    // Stripe at the top of what shows, Payments above it out of view.
+    stripe.element().scrollIntoView({ block: 'start' });
+    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    const paymentsLimit = () => screen.getByRole('region', { name: 'Payments' }).element().querySelector('.cd-money-limit') as HTMLElement;
+    expect(inView(paymentsLimit(), main)).toBe(false);
+
+    // A lower limit from Stripe's line, confirmed on its review.
+    await stripe.getByRole('button', { name: 'Change' }).click();
+    await stripe.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('100');
+    await stripe.getByRole('button', { name: 'Review change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    // Back on Acme's Rules, its first Needs you read is held, so the new rules arrive while Rules
+    // still shows its loading line; the sample's Rules doesn't wait for it.
+    const needsYou = business === 'Acme Accounting' ? holdNeedsYou() : null;
+    const version = desk().lastVersion;
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    if (needsYou !== null) {
+      await expect.poll(needsYou.held).toBeGreaterThan(0);
+      await expect.poll(() => desk().policy.version).toBe(version);
+      await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+      await pause(300);
+      needsYou.release();
+    }
+
+    // The first row it changed, Payments' limit, comes into view and says so; the rule it lowered
+    // lights up.
+    await expect.poll(() => paymentsLimit()?.querySelector('.cd-pill')?.textContent).toBe('Updated');
+    await expect.poll(() => inView(paymentsLimit(), main)).toBe(true);
+    await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
+    expect(fillOf(toolRow(root, 'Payment link'))).not.toBe('none');
+    // Once it has come to rest, that is the owner's place: All rules, then Back, returns to it, on a
+    // new visit with nothing updated.
+    let place = -1;
+    await expect.poll(async () => {
+      const before = main.scrollTop;
+      await pause(150);
+      place = main.scrollTop;
+      return place === before;
+    }).toBe(true);
+    // (Navigated to directly: clicking a link would first scroll it into view, moving the place.)
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.poll(() => main.scrollTop).toBe(place);
+    expect(updatedRows(root)).toEqual([]);
   });
 
   it('a_new_limit_lands_on_its_line_and_the_rule_it_lowered', async () => {

@@ -202,14 +202,14 @@ export function RulesPage() {
   const chips = question === null || (fixedChips.length === 0 && (!rules.isFetched || waitingForOpening)) ? fixedChips : [...fixedChips, question];
 
   // A change the owner confirmed (in Ask Claude, or on its own review page) lands on the rows it
-  // changed once Rules shows the version it made, so its words cross-fade as the row lights up;
-  // while Ask Claude is a sheet over the page, once the sheet closes. Each row keeps "Updated"
+  // changed once Rules is drawn with the version it made, so its words cross-fade as the row lights
+  // up; while Ask Claude is a sheet over the page, once the sheet closes. Each row keeps "Updated"
   // until the owner leaves Rules.
   const landing = useLanding(deskId);
   const [kept, setKept] = useState<Landed>(NOTHING_LANDED);
   const [toReveal, setToReveal] = useState<Landing | null>(null);
   const sheetOver = asking && window.matchMedia(ASK_CLAUDE_SHEET).matches;
-  const ready = landing !== null && active !== undefined && active.version >= landing.version && !sheetOver;
+  const ready = landing !== null && drawn && active !== undefined && active.version >= landing.version && !sheetOver;
   const landed = ready ? withLanding(kept, landing) : kept;
   useEffect(() => {
     if (!ready || landing === null) return;
@@ -217,9 +217,10 @@ export function RulesPage() {
     setToReveal(landing);
     takeLanding(landing);
   }, [ready, landing]);
-  // The first row it changed, if it is out of view, scrolls to the middle: after the frame in which
-  // a closing sheet gives focus back to what opened it, so that doesn't scroll the page back. Once
-  // per landing, at the rules it landed on.
+  // The first row it changed, if it is out of view, scrolls to the middle: after the owner's place
+  // is restored once Rules is drawn (`reachPlace`), so a landed row takes over from it, and after the
+  // frame in which a closing sheet gives focus back to what opened it, so that doesn't scroll the
+  // page back. With nothing landed, the place stays. Once per landing, at the rules it landed on.
   const page = useRef<HTMLDivElement>(null);
   const shown = rules.data;
   useEffect(() => {
