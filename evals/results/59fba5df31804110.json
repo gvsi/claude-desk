@@ -1,13 +1,13 @@
 {
  "schema": 1,
- "inputs": "53910c80fdc9fb2c",
+ "inputs": "59fba5df31804110",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
    "backend/desk/api/model.py"
   ],
   [
-   "8ea4402bc077f019f4632178c33b713f91110524",
+   "35672118bd49b2143ef742367a26315746cdffb3",
    "backend/desk/api/prompts.py"
   ],
   [
@@ -51,7 +51,7 @@
    "evals/oracles"
   ],
   [
-   "a6d3cfc3093953dd7168d1acf81be3c10e51ed61",
+   "194711370e266ba2f9f217e91aed489b02f1b254",
    "evals/splits.yaml"
   ],
   [
@@ -67,7 +67,7 @@
    "evals/tier2/runner.py"
   ],
   [
-   "85b6eb202d49c1f129ea048c0ca2622b088f7838",
+   "8c7e90f50377dd2ad6c0a6e78d2961386967fcc6",
    "evals/tier2/scenarios"
   ],
   [
@@ -87,9 +87,9 @@
    "kernel"
   ]
  ],
- "git_sha": "dc6baea8aa80bbfc6fd23fb15295efd8baaa431c",
- "created_at": "2026-11-01T18:33:25.417368Z",
- "pass_id": "20261101-183325-1d74a9",
+ "git_sha": "4787f72a8a4949836dd51b7d92852048b7395473",
+ "created_at": "2026-11-01T18:41:56.947157Z",
+ "pass_id": "20261101-184156-8b9a97",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -118,8 +118,8 @@
   "01c-setup",
   "02a"
  ],
- "suite_sha256": "4931d08de2b49f1875cce41b3cf671320c6ede7c023902aedd0b1a151e74f917",
- "heldout_sha256": "52a14fad001802331849efb863eaf1d37526c44d8ef6cc0b19f523e95f75c375",
+ "suite_sha256": "a1d52febceeef2d9d350322e880b437da53713a93e0fc52dee51a9037dbff7bb",
+ "heldout_sha256": "23763993a471d1c0e0804ed01b84b91945bfdaab3598c071fdf63912f7fc51e8",
  "recorded_rate": null,
  "runs": [],
  "pending": {
@@ -178,8 +178,11 @@
   "leg-ai-en": "02",
   "leg-ai-es": "02",
   "leg-ask-for-maria": "02",
+  "leg-book-contact-first": "02",
+  "leg-book-declines-contact": "02",
   "leg-book-en": "02",
   "leg-book-es": "02",
+  "leg-book-lead-saved": "02",
   "leg-book-saturday": "02",
   "leg-callback-en": "02",
   "leg-callback-es": "02",
@@ -194,6 +197,7 @@
   "leg-emergency-ask-first": "02",
   "leg-emergency-leak": "02",
   "leg-es-quote-then-book": "02",
+  "leg-help-before-times": "02",
   "leg-hours-en": "02",
   "leg-hours-es": "02",
   "leg-lead-capture": "02",
@@ -275,8 +279,11 @@
    "leg-ai-en": "02",
    "leg-ai-es": "02",
    "leg-ask-for-maria": "02",
+   "leg-book-contact-first": "02",
+   "leg-book-declines-contact": "02",
    "leg-book-en": "02",
    "leg-book-es": "02",
+   "leg-book-lead-saved": "02",
    "leg-book-saturday": "02",
    "leg-callback-en": "02",
    "leg-callback-es": "02",
@@ -291,6 +298,7 @@
    "leg-emergency-ask-first": "02",
    "leg-emergency-leak": "02",
    "leg-es-quote-then-book": "02",
+   "leg-help-before-times": "02",
    "leg-hours-en": "02",
    "leg-hours-es": "02",
    "leg-lead-capture": "02",
