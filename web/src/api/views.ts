@@ -576,6 +576,9 @@ export interface SetupTools {
   connectable: 'mock_payments'[];
 }
 
+/** Line keys understood by setup's public-lines review, shared without importing UI code. */
+export const SETUP_PUBLIC_LINE_KEYS = ['policy:about', 'contact', 'policy:pricing', 'policy:intake', 'policy:after_hours', 'policy:urgent', 'policy:service_area', 'policy:how_we_help'] as const;
+
 /** The public charter lines the owner reviews before the safety check. */
 export interface SetupPublicLine {
   key: string;
@@ -584,8 +587,31 @@ export interface SetupPublicLine {
   editable: boolean;
 }
 
+export interface SetupPublicHours {
+  source: 'owner' | 'suggested';
+  windows: HoursWindow[];
+}
+
+export interface SetupPublicPriceItem {
+  title: string;
+  unit_cents: number;
+}
+
+export interface SetupPublicPrices {
+  source: 'owner' | 'suggested';
+  items: SetupPublicPriceItem[];
+}
+
 export interface SetupPublicLines {
   lines: SetupPublicLine[];
+  hours: SetupPublicHours | null;
+  prices: SetupPublicPrices | null;
+  revision: string;
+}
+
+export interface SetupPublicLinesConfirmIn {
+  keys: string[];
+  revision: string;
 }
 
 export interface SetupPublicLineIn {

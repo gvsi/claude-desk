@@ -14,7 +14,10 @@ const copy = SETUP_COPY.publicLines;
 /** A malformed answer holds this step, including a 200 that cannot confirm what was checked. */
 function checkedLines(value: SetupPublicLines): SetupPublicLines {
   if (
-    !value || !Array.isArray(value.lines) || value.lines.some((line) =>
+    !value || typeof value.revision !== 'string' || value.revision.trim() === ''
+    || (value.hours !== null && (!value.hours || !['owner', 'suggested'].includes(value.hours.source) || !Array.isArray(value.hours.windows)))
+    || (value.prices !== null && (!value.prices || !['owner', 'suggested'].includes(value.prices.source) || !Array.isArray(value.prices.items)))
+    || !Array.isArray(value.lines) || value.lines.some((line) =>
       !line || typeof line.key !== 'string' || typeof line.text !== 'string' || !line.text.trim()
       || typeof line.editable !== 'boolean' || (line.source !== 'owner' && line.source !== 'suggested'),
     ) || new Set(value.lines.map((line) => line.key)).size !== value.lines.length
@@ -111,11 +114,12 @@ export function PublicLinesStep({ state, onNext, reread }: PublicLinesStepProps)
     }
   };
   const confirm = async () => {
-    if (editingKey !== null || busy !== null || lines.data === undefined || unknown) return;
+    if (editingKey !== null || busy !== null || lines.data === undefined || shown.length === 0 || unknown) return;
     setBusy('confirm');
     setError(null);
     try {
-      const confirmed = checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: {} }));
+      const confirmed = checkedLines(await request('setupPublicLinesConfirm', { params: { id }, body: { keys: shown.map((line) => line.key), revision: lines.data.revision } }));
+      queryClient.setQueryData(queryKey, confirmed);
       if (confirmed.lines.some((line) => !knownKey(line.key))) throw new Error('unknown public line');
       onNext('safety_check');
     } catch (err) {

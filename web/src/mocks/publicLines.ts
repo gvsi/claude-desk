@@ -1,10 +1,11 @@
 /** Setup's public lines, scoped to the mock copy and interview. The real API uses the kernel scan. */
-import type { SetupPublicLine, SetupState } from '../api/views.ts';
+import type { SetupPublicLine, SetupPublicLines, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
 import { SETUP_QUESTIONS, SETUP_ROUTES, setupAbout } from './setup.ts';
-import { storedPublicLines, storePublicLines } from './publicLineStore.ts';
+import { storedPublicState, storePublicState } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import { publicLineLimit } from '../setup/publicLineLimit.ts';
+import { SETUP_PUBLIC_LINE_KEYS } from '../api/views.ts';
 
 /** The signed Chen & Co. starter lines, including the approved public-text revisions. */
 const CPA_LINES = [
@@ -52,17 +53,25 @@ function seed(sv: Server, state: SetupState): SetupPublicLine[] {
     ? [{ key: `policy:${key}`, text, source: 'owner', editable: true }] : []);
 }
 
-function read(sv: Server, req: Req): { lines: SetupPublicLine[] } | Failure {
+function read(sv: Server, req: Req): SetupPublicLines | Failure {
   const found = SETUP_ROUTES.setup!(sv, req);
   if (found.status !== 200) return found as Failure;
   const state = found.body as SetupState;
   if (state.step !== 'rules' && state.step !== 'situations') return { status: 409, body: { error: 'conflict' } };
-  let lines = storedPublicLines(sv.world, state.interview_id);
-  if (!lines) {
-    lines = seed(sv, state);
-    storePublicLines(sv.world, state.interview_id, lines);
+  let saved = storedPublicState(sv.world, state.interview_id);
+  if (!saved) {
+    const cpa = /^Chen & Co\.?(?: CPA)?$/i.test(sv.world.desk(state.desk_id)?.summary.business_name ?? '');
+    saved = storePublicState(sv.world, state.interview_id, {
+      lines: seed(sv, state),
+      hours: cpa ? { source: 'suggested', windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '18:00' }] } : null,
+      prices: cpa ? { source: 'suggested', items: [
+        { title: 'Tax return review', unit_cents: 25000 },
+        { title: 'Business tax return', unit_cents: 60000 },
+        { title: 'Monthly bookkeeping', unit_cents: 15000 },
+      ] } : null,
+    });
   }
-  return { lines };
+  return saved;
 }
 
 export const PUBLIC_LINES_ROUTES = {
@@ -86,17 +95,21 @@ export const PUBLIC_LINES_ROUTES = {
     if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: ['mock_scan'] } };
     line.text = text.trim();
     line.source = 'owner';
-    return { status: 200, body: structuredClone(found) };
+    return { status: 200, body: structuredClone(storePublicState(sv.world, req.params.id!, found)) };
   },
   setupPublicLinesConfirm(sv, req) {
     const found = read(sv, req);
     if ('status' in found) return found;
-    if (req.malformed || typeof req.body !== 'object' || req.body === null || Array.isArray(req.body) || Object.keys(req.body).length !== 0) {
+    const body = typeof req.body === 'object' && req.body !== null ? req.body as Record<string, unknown> : {};
+    const { keys, revision } = body;
+    if (req.malformed || !Array.isArray(keys) || keys.length === 0 || typeof revision !== 'string' || revision.length === 0
+      || keys.some((key) => typeof key !== 'string' || !SETUP_PUBLIC_LINE_KEYS.some((known) => known === key) || !found.lines.some((line) => line.key === key))) {
       return { status: 422, body: { error: 'invalid' } };
     }
-    const refused = found.lines.find((line) => publicLineRefused(line.text));
+    if (revision !== found.revision) return { status: 409, body: { error: 'conflict' } };
+    const refused = found.lines.find((line) => (line.source === 'owner' || keys.includes(line.key)) && publicLineRefused(line.text));
     if (refused) return { status: 422, body: { error: 'line_refused', key: refused.key, reason: ['mock_scan'] } };
-    for (const line of found.lines) line.source = 'owner';
-    return { status: 200, body: structuredClone(found) };
+    for (const line of found.lines) if (keys.includes(line.key)) line.source = 'owner';
+    return { status: 200, body: structuredClone(storePublicState(sv.world, req.params.id!, found)) };
   },
 } satisfies ServedRoutes;

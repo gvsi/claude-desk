@@ -54,6 +54,7 @@ import type {
   PeopleOut,
   SetupPublicLines,
   SetupPublicLineIn,
+  SetupPublicLinesConfirmIn,
   PolicyVersionOut,
   PresetBody,
   Reports,
@@ -246,7 +247,7 @@ interface RouteShapes {
   setupConnect: { body: ConnectBody; response: ToolRow[] };
   setupPublicLines: { body: undefined; response: SetupPublicLines };
   setupPublicLine: { body: SetupPublicLineIn; response: SetupPublicLines };
-  setupPublicLinesConfirm: { body: Record<string, never>; response: SetupPublicLines };
+  setupPublicLinesConfirm: { body: SetupPublicLinesConfirmIn; response: SetupPublicLines };
 
   publicDesk: { body: undefined; response: PublicDesk };
   openSession: { body: undefined; response: VisitorSession };

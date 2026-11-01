@@ -2,15 +2,17 @@ import { http } from 'msw';
 import { userEvent } from 'vitest/browser';
 import { expect, it, onTestFinished, vi } from 'vitest';
 
-import type { SetupPublicLines, SetupState } from '../api/views.ts';
+import type { SetupPublicLine, SetupPublicLines, SetupState } from '../api/views.ts';
 import { OWNER_ERROR_COPY } from '../api/http.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
-import { storePublicLines } from '../mocks/publicLineStore.ts';
+import { storedPublicState, storePublicLines } from '../mocks/publicLineStore.ts';
 import { worker } from '../mocks/browser.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 import { START_EXAMPLES } from './copy.ts';
+
+const publicState = (lines: SetupPublicLine[]): SetupPublicLines => ({ lines, hours: null, prices: null, revision: 'fixture-revision' });
 
 const REFUSED_COPY = "This line can't state a price, a time or a promise. Prices come from your price list, and times from your opening hours.";
 
@@ -122,8 +124,9 @@ it('keeps refused words in the open row with only the signed error at both width
   }
 });
 
-it('confirms with an empty object and advances to Safety check only after success', async () => {
-  const { screen } = await openLines();
+it('confirms displayed keys and revision and advances to Safety check only after success', async () => {
+  const { screen, state } = await openLines();
+  const before = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
   let release = () => {};
   const gate = new Promise<void>((resolve) => { release = resolve; });
   onTestFinished(release);
@@ -137,7 +140,7 @@ it('confirms with an empty object and advances to Safety check only after succes
   }
   release();
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
-  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({});
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm').at(-1)?.body).toEqual({ keys: before.lines.map((line) => line.key), revision: before.revision });
   expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(1);
 });
 
@@ -178,7 +181,7 @@ it.each(['get', 'put', 'confirm'] as const)('rereads the interview on a 409 from
 
 it('skips directly to Safety check when GET returns no lines without sending a confirm', async () => {
   const state = await atSituations();
-  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { lines: [] } });
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: publicState([]) });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
@@ -271,7 +274,7 @@ it.each([
 ] as const)('keeps an over-limit %s draft intact when one character is deleted', async (key, label, limit) => {
   const state = await atSituations();
   const text = '😀' + 'x'.repeat(limit);
-  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { lines: [{ key, text, editable: true, source: 'owner' }] } });
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: publicState([{ key, text, editable: true, source: 'owner' }]) });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await screen.getByRole('button', { name: 'Edit', exact: true }).click();
@@ -309,9 +312,9 @@ it('disables Save for empty and whitespace-only text without sending a write', a
 
 it.each([true, false])('holds unknown public-line keys without confirming, alongside known rows: %s', async (withKnown) => {
   const state = await atSituations();
-  const unknown = { key: 'policy:unknown', text: 'Hidden text.', editable: true, source: 'suggested' };
-  const known = { key: 'policy:about', text: 'We help local businesses.', editable: true, source: 'owner' };
-  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { lines: withKnown ? [known, unknown] : [unknown] } });
+  const unknown: SetupPublicLine = { key: 'policy:unknown', text: 'Hidden text.', editable: true, source: 'suggested' };
+  const known: SetupPublicLine = { key: 'policy:about', text: 'We help local businesses.', editable: true, source: 'owner' };
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: publicState(withKnown ? [known, unknown] : [unknown]) });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await expect.element(screen.getByRole('heading', { name: 'What customers will read', exact: true })).toBeVisible();
@@ -323,10 +326,10 @@ it.each([true, false])('holds unknown public-line keys without confirming, along
 
 it('keeps a signed refusal visible while an unknown claim also holds confirmation', async () => {
   const state = await atSituations();
-  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { lines: [
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: publicState([
     { key: 'policy:about', text: 'We help local businesses.', source: 'owner', editable: true },
     { key: 'policy:unknown', text: 'Hidden text.', source: 'suggested', editable: true },
-  ] } });
+  ]) });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('button', { name: 'Looks right' }).click();
   await screen.getByRole('button', { name: 'Edit', exact: true }).click();
@@ -397,4 +400,50 @@ it('scrolls a cross-line refusal Notice into view from a low open row on a phone
   await expect.element(field).toHaveValue('Clients can reach our team.');
   expect(screen.container.textContent).not.toContain('INTERNAL refusal');
   expect(mockStore.requests.filter((r) => r.key === 'setupSafetyCheck')).toHaveLength(0);
+});
+
+
+it.each([true, false])('confirms only rendered line keys or skips, with suggested hours/prices and a shown line: %s', async (withLine) => {
+  const state = await atSituations();
+  const params = { id: state.interview_id };
+  await mockStore.dispatch('setupPublicLines', { params });
+  storePublicLines(mockStore.world, state.interview_id, withLine ? [{ key: 'contact', text: 'office@example.com', source: 'suggested', editable: true }] : []);
+  const before = structuredClone(storedPublicState(mockStore.world, state.interview_id)!);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  if (withLine) {
+    await expect.element(screen.getByText('office@example.com', { exact: true })).toBeVisible();
+    expect(screen.getByText('Tax return review', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Hours', { exact: true }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    await expect.poll(() => mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')).toBeDefined();
+    expect(mockStore.requests.find((r) => r.key === 'setupPublicLinesConfirm')?.body).toEqual({ keys: ['contact'], revision: before.revision });
+  }
+  await expect.element(screen.getByRole('heading', { name: 'Safety check', exact: true })).toBeVisible();
+  const after = storedPublicState(mockStore.world, state.interview_id)!;
+  expect(after.hours).toEqual(before.hours);
+  expect(after.prices).toEqual(before.prices);
+  expect(after.hours?.source).toBe('suggested');
+  expect(after.prices?.source).toBe('suggested');
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm')).toHaveLength(withLine ? 1 : 0);
+  expect(await mockStore.dispatch('publicDesk', { params: { slug: state.slug } })).toMatchObject({
+    status: 200, body: { charter: withLine ? [expect.objectContaining({ fact_id: 'charter:contact', title: 'office@example.com' })] : [] },
+  });
+  if (!withLine) expect(after.revision).toBe(before.revision);
+});
+
+
+it.each([undefined, '', null, 7])('holds a public-lines response without a usable revision: %s', async (revision) => {
+  const state = await atSituations();
+  const read = await mockStore.dispatch('setupPublicLines', { params: { id: state.interview_id } });
+  if ('network' in read) throw new Error('read failed');
+  mockStore.inject({ route: 'setupPublicLines', status: 200, body: { ...(read.body as SetupPublicLines), revision } });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Looks right' }).click();
+  await expect.poll(() => screen.getByRole('button', { name: 'Edit', exact: true }).elements().length > 0 || screen.getByRole('alert').elements().length > 0).toBe(true);
+  expect(screen.getByRole('alert').elements()).toHaveLength(1);
+  await expect.element(screen.getByRole('alert').getByText(OWNER_ERROR_COPY.unavailable, { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Looks right' }).elements()).toHaveLength(0);
+  expect(mockStore.requests.filter((r) => r.key === 'setupPublicLinesConfirm' || r.key === 'setupSafetyCheck')).toHaveLength(0);
 });
