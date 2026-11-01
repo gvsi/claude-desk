@@ -3762,6 +3762,9 @@ async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *
             and any(job.config is not None for job in accepted_jobs(interview))
             and not await owner.ro.rows("tools", desk_id=desk_id, source="business")):
         interview.business_tools_enabled = business_tools_enabled
+        # End the read's transaction before waiting on the kernel; the reads below set the copy again on their own.
+        if owner.ro.conn.in_transaction():
+            await owner.ro.conn.rollback()
         await after_finish(owner, interview)
     rows = await tool_rows(owner, desk_id, version_from_row(await active_row(owner, desk_id)).cards)
     connected = any(row.tool in MCP_TOOLS for row in rows)

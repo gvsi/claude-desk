@@ -102,6 +102,7 @@ from tests.api.test_setup_questions import (
     next_step,
     structured,
     turn,
+    until,
 )
 from tests.kernel_contract import fake_kernel
 from tests.kernel_contract.fake_kernel import changes_always_on, fake_kernel_app, tool_profile
@@ -342,6 +343,25 @@ async def test_tools_step_still_lists_tools_when_the_retry_fails(
     assert len(fake.called("PUT /desks/{id}/business_tools")) == 2
     assert "setup business tools" in caplog.text
     assert all(job.title not in caplog.text and job.how not in caplog.text for job in jobs)
+
+
+async def test_the_tools_step_holds_no_transaction_while_it_retries_business_tools(
+    app, browser, kernel_http, model, engine, fake, db,
+):
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine)
+    fake.fail("PUT /desks/{id}/business_tools", "422", times=1)
+    await finish_business_jobs(owner, state, model)
+    release = fake.gate("PUT /desks/{id}/business_tools")
+    reply = asyncio.create_task(owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools"))
+    try:
+        await until(lambda: len(fake.called("PUT /desks/{id}/business_tools")) == 2)
+        assert idle_in_transaction(db) == 0
+    finally:
+        release.set()
+    reply = await asyncio.wait_for(reply, 10)
+    assert reply.status_code == 200, reply.text
+    assert {row["tool"] for row in reply.json()["tools"] if row["source"] == "business"} == {
+        "desk.take-repair-requests", "desk.flag-urgent-help"}
 
 
 @pytest.mark.parametrize("unfinished", [True, False])
