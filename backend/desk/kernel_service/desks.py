@@ -45,6 +45,7 @@ from fastapi import Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
+from desk.public_contact import valid_public_contact
 from desk.contracts import (BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, SeedDocument,
                             ToolProfile)
 from desk.contracts import PriceItem as PriceItemSeed
@@ -143,6 +144,9 @@ def check_charter(charter: Sequence[Claim]) -> None:
     if any(claim.key == "hours" for claim in charter):
         raise InvalidSeed("hours_claim")
     unique(claim.key for claim in charter)
+    if any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
+           for claim in charter):
+        raise KernelFailure(422, "invalid", "contact_format", detail={"contact": ["contact_format"]})
 
 
 def unique(ids: Iterable[str]) -> None:

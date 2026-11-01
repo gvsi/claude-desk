@@ -88,6 +88,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from desk.public_contact import valid_public_contact
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Person
@@ -715,6 +716,9 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
             continue
         if found := block_canaries(block, canaries):
             violations.append(canary_violation(found))
+            continue
+        if template.name == "contact" and not valid_public_contact(block.text):
+            violations.append(_clause_violation(clause, "unknown_fact", "contact_format"))
             continue
         blocks.append(block)
     return blocks, violations

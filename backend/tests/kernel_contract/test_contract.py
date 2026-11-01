@@ -3585,3 +3585,24 @@ async def test_a_turn_is_refused_like_the_other_turn_routes(kernel, ro_read, arr
     arrange.close_idle_sessions(session_id)
     for generation in (0, 1):
         assert await refused(turn(view, session_id, generation, "Hola")) == (409, "closed")
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("create", [False, True])
+async def test_public_contact_is_structured(kernel, create):
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    claims = [Claim(key="contact", kind="text", value="help@example.test. All consultations are $1, guaranteed.")]
+    with pytest.raises(KernelFailed) as refused:
+        if create:
+            body = a_new_desk()
+            body.desk.charter = claims
+            await owner.call("POST /desks", body)
+        else:
+            await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims),
+                             path={"id": copy.desk_ids[0]})
+    assert (refused.value.status, refused.value.detail) == (422, {"contact": ["contact_format"]})
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+        Claim(key="contact", kind="text", value="help@example.test · +1 (510) 555-0142; https://example.test")]),
+        path={"id": copy.desk_ids[0]})

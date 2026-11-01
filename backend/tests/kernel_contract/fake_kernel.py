@@ -138,6 +138,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route, Router
 
+from desk.public_contact import valid_public_contact
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     ITEM_ID_PATTERN,
@@ -2125,7 +2126,9 @@ class FakeKernelState:
                 named = fact_id == key if template != "policy" else fact_id.startswith(key)
                 if (named and fact.kind == "charter" and "public" in fact.label.readers and self._current(fact)
                         and (template != "hours" or desk.hours)):
-                    charter.append(self._render(desk, template, fact, language))
+                    block = self._render(desk, template, fact, language)
+                    if template != "contact" or valid_public_contact(block.text):
+                        charter.append(block)
         # Scan the final rendered group: filtering can bring separate promise fragments together.
         policies = [(block.fact_id, block.text) for block in charter if block.template == "policy"]
         if public_policy_fields(policies):
@@ -2967,7 +2970,10 @@ class FakeKernelState:
             return refuse("stale_fact", "stale_fact")
         if not self._readable(session, fact):
             return refuse("unentitled_fact", "unentitled_fact")
-        return self._render(desk, template, fact, language)
+        block = self._render(desk, template, fact, language)
+        if template == "contact" and not valid_public_contact(block.text):
+            return refuse("unknown_fact", "contact_format")
+        return block
 
     def _render(self, desk: Desk, template: str, fact: Fact, language: str) -> RenderedBlock:
         """A card from the fact's claims (the kernel renders en/es templates; the fake keeps it plain)."""
@@ -3235,6 +3241,9 @@ class FakeKernelState:
         keys = [claim.key for claim in charter]
         if len(set(keys)) != len(keys):
             raise Refusal(422, "invalid")
+        if any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
+               for claim in charter):
+            raise Refusal(422, "invalid", {"contact": ["contact_format"]})
         values = {claim.key: claim.value for claim in charter
                   if claim.key.startswith("policy:") and claim.kind == "text"}
         if len(values) > 40:
