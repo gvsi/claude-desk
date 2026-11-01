@@ -37,12 +37,26 @@ REQUIRED_CHECKS = [
 SUITES = {"backend": "backend tests", "tier1": "tier 1 evals"}
 SHARD_JOBS = {f"{suite}-{shard}": f"{name} {shard}/4" for suite, name in SUITES.items() for shard in range(1, 5)}
 CHECK_JOBS = {suite: [f"{suite}-{shard}" for shard in range(1, 5)] for suite in SUITES}
-SCOPED_JOBS = {**dict.fromkeys([*SHARD_JOBS, "kernel", "proofs", "tier2", "infra"], "backend"), "web": "web"}
+# The web suite runs its unit and browser tests in four shards, each with fewer workers than the runner's
+# vCPUs (timing-sensitive screen tests flaked on a fully busy 4-vCPU runner), and its build and mocked
+# end-to-end test in a job of its own.
+WEB_SHARD_JOBS = {f"web-{shard}": f"web tests {shard}/4" for shard in range(1, 5)}
+WEB_E2E_JOB = {"web-e2e": "web tests e2e"}
+WEB_TEST_ARGS = "--shard={}/4 --maxWorkers=2"
+WEB_CHECK_PARTS = {**{f"SHARD_{shard}": f"web-{shard}" for shard in range(1, 5)}, "E2E": "web-e2e"}
+SCOPED_JOBS = {
+    **dict.fromkeys([*SHARD_JOBS, "kernel", "proofs", "tier2", "infra"], "backend"),
+    **dict.fromkeys([*WEB_SHARD_JOBS, *WEB_E2E_JOB], "web"),
+}
 SCOPE_COMMAND = "PYTHONPATH=tools python3 -m desk_tools.changed_paths"
 SHARD_CHECK = '''if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped; then
   exit 0
 fi
 test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success'''
+WEB_CHECK = '''if [ "$NEEDED" = false ] && test "$SHARD_1" = skipped && test "$SHARD_2" = skipped && test "$SHARD_3" = skipped && test "$SHARD_4" = skipped && test "$E2E" = skipped; then
+  exit 0
+fi
+test "$SHARD_1" = success && test "$SHARD_2" = success && test "$SHARD_3" = success && test "$SHARD_4" = success && test "$E2E" = success'''
 SHARD_TEST_STEPS = {
     f"{suite}-{shard}": steps
     for suite, steps in {
@@ -86,6 +100,55 @@ def test_suites_run_as_four_shards_with_options_only_on_test_steps(job_id, name)
             shard = other_id.rsplit("-", 1)[-1]
             assert options == (f"--shard={shard}/4" if is_test else None)
     assert {step["name"] for step in job["steps"] if "PYTEST_ADDOPTS" in step.get("env", {})} == SHARD_TEST_STEPS[job_id]
+
+
+def test_web_shards_are_identical_except_their_shard():
+    workflow_jobs = load(WORKFLOW)["jobs"]
+    normalized = []
+    for shard in range(1, 5):
+        job = deepcopy(workflow_jobs[f"web-{shard}"])
+        assert job.pop("name") == f"web tests {shard}/4"
+        assert job.pop("runs-on") == RUNS_ON.replace("<suffix>", f"web-{shard}")
+        [test] = [step for step in job["steps"] if "WEB_TEST_ARGS" in step.get("env", {})]
+        assert test["name"] == "Run the web type check and unit tests"
+        assert test["env"] == {"WEB_TEST_ARGS": WEB_TEST_ARGS.format(shard)}
+        test["env"]["WEB_TEST_ARGS"] = WEB_TEST_ARGS.format(1)
+        normalized.append(job)
+    assert all(job == normalized[0] for job in normalized)
+    # Only the web shards' test steps pass test arguments, and `make web-test` hands them to the test run.
+    for job_id, job in workflow_jobs.items():
+        assert "WEB_TEST_ARGS" not in job.get("env", {})
+        for step in job["steps"]:
+            assert ("WEB_TEST_ARGS" in step.get("env", {})) == (job_id in WEB_SHARD_JOBS and step.get("name") == "Run the web type check and unit tests")
+    makefile = (ROOT / "Makefile").read_text()
+    recipe = makefile.split("\nweb-test: web-deps\n", 1)[1].split("\n\n", 1)[0]
+    assert recipe.strip() == "cd web && npm run typecheck && npm test -- $(WEB_TEST_ARGS)"
+
+
+@pytest.mark.parametrize("needed", ["true", "", "false"])
+@pytest.mark.parametrize("part", WEB_CHECK_PARTS)
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
+def test_the_required_web_check_fails_unless_every_shard_and_the_end_to_end_test_succeeded(tmp_path, needed, part, result):
+    job = load(WORKFLOW)["jobs"]["web"]
+    assert job["name"] == "web tests"
+    assert job["needs"] == ["changes", *WEB_CHECK_PARTS.values()]
+    assert job["if"] == "always()"
+    assert set(job) == {"name", "runs-on", "timeout-minutes", "needs", "if", "steps"}
+    [step] = job["steps"]
+    assert step["env"] == {"NEEDED": "${{ needs.changes.outputs.web }}",
+                           **{name: "${{ needs." + job_id + ".result }}" for name, job_id in WEB_CHECK_PARTS.items()}}
+    assert step["run"].strip() == WEB_CHECK
+    expected = "skipped" if needed == "false" else "success"
+    results = dict.fromkeys(WEB_CHECK_PARTS, expected)
+    results[part] = result
+    executed, _ = Runner(tmp_path).run(step, "ARM64", NEEDED=needed, **results)
+    assert executed.returncode == (0 if result == expected else 1), executed.stderr
+
+
+def test_the_required_web_check_accepts_every_success_even_if_the_suite_was_ruled_out(tmp_path):
+    [step] = load(WORKFLOW)["jobs"]["web"]["steps"]
+    executed, _ = Runner(tmp_path).run(step, "ARM64", NEEDED="false", **dict.fromkeys(WEB_CHECK_PARTS, "success"))
+    assert executed.returncode == 0, executed.stderr
 
 
 @pytest.mark.parametrize("job_id, shard_ids", CHECK_JOBS.items())
@@ -340,7 +403,7 @@ def test_ci_has_no_secrets_and_reads_only():
         # A job may only narrow the workflow's rights.
         assert job.get("permissions", {}) in ({}, {"contents": "read"}, {"contents": "none"}), job["name"]
         # Every job that runs repository code starts from a checkout with no token left in git.
-        if job["name"] not in {"backend tests", "tier 1 evals"}:
+        if job["name"] not in {"backend tests", "tier 1 evals", "web tests"}:
             assert is_checkout(job["steps"][0]), job["name"]
     assert "pull_request_target" not in triggers(workflow)
     for path in [WORKFLOW, *ACTIONS]:
@@ -364,15 +427,17 @@ def documented_checks() -> list[str]:
 def test_job_names_are_the_required_checks():
     workflow_jobs = jobs(load(WORKFLOW))
 
-    assert [job["name"] for job in workflow_jobs if job["name"] not in [*SHARD_JOBS.values(), "changed paths"]] == REQUIRED_CHECKS
-    assert len(workflow_jobs) == len(REQUIRED_CHECKS) + len(SHARD_JOBS) + 1
+    helpers = [*SHARD_JOBS.values(), *WEB_SHARD_JOBS.values(), *WEB_E2E_JOB.values(), "changed paths"]
+    assert [job["name"] for job in workflow_jobs if job["name"] not in helpers] == REQUIRED_CHECKS
+    assert len(workflow_jobs) == len(REQUIRED_CHECKS) + len(helpers)
     assert documented_checks() == REQUIRED_CHECKS
     for job in workflow_jobs:
         assert job["timeout-minutes"] == JOB_TIMEOUTS.get(job["name"], 25), job["name"]
 
 
 # Suite shards retain their time limit; their required checks inspect each shard's own result.
-JOB_TIMEOUTS = {**dict.fromkeys(SHARD_JOBS.values(), 40), "backend tests": 5, "tier 1 evals": 5, "changed paths": 5}
+JOB_TIMEOUTS = {**dict.fromkeys([*SHARD_JOBS.values(), *WEB_SHARD_JOBS.values()], 40),
+                "backend tests": 5, "tier 1 evals": 5, "web tests": 5, "changed paths": 5}
 
 
 # The runner switch: on when the repository variable CI_RUNNER_MODE is "ec2", except for a pull
@@ -405,8 +470,9 @@ def test_jobs_run_on_hosted_runners_unless_switched_to_ec2():
         assert "strategy" not in job, job["name"]
         assert "container" not in job, job["name"]
     # Each label is unique within the run and in the launcher's form.
-    assert len(suffixes) == len(set(suffixes)) == len(REQUIRED_CHECKS) + 8 + 1
-    assert set(suffixes) == RUNNER_SUFFIXES | {f"{suite}-{shard}" for suite in CHECK_JOBS for shard in range(1, 5)}
+    shard_suffixes = {f"{suite}-{shard}" for suite in [*CHECK_JOBS, "web"] for shard in range(1, 5)} | set(WEB_E2E_JOB)
+    assert len(suffixes) == len(set(suffixes)) == len(RUNNER_SUFFIXES) + len(shard_suffixes)
+    assert set(suffixes) == RUNNER_SUFFIXES | shard_suffixes
     for suffix in suffixes:
         assert re.fullmatch(r"[a-z][a-z0-9-]{0,31}", suffix), suffix
     # Hosted stays the default with the variable unset, or for a fork's pull request.
@@ -534,13 +600,14 @@ CHECKS = {
     ]),
     # The same gate arguments as test_gate, with a base selected for the workflow event.
     "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE", "HISTORY_SINCE=$HISTORY_SINCE"]],
-    "web tests": [
-        ["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"],
+    "web tests": [WEB_CHECK],
+    **dict.fromkeys(WEB_SHARD_JOBS.values(), [["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"]]),
+    "web tests e2e": [
         [
             "--name", "web-e2e",
             "--run-if", "web/playwright.config.ts",
             "--required-if", "web/e2e",
-            "--", "make", "web-e2e",
+            "--", "make", "web-deps", "web-e2e",
         ],
     ],
     "infra synth": [["--name", "infra", "--run-if", "infra/cdk.json", "--", "make", "infra-check"]],
@@ -1086,7 +1153,7 @@ def runner_label_problems(file: str, workflow: dict) -> list[str]:
                 problems.append(f"{key}: has no runs-on")
             continue
         runs_on = job["runs-on"]
-        allowed = file == "ci.yml" and key in RUNNER_SUFFIXES | SHARD_JOBS.keys()
+        allowed = file == "ci.yml" and key in RUNNER_SUFFIXES | SHARD_JOBS.keys() | WEB_SHARD_JOBS.keys() | WEB_E2E_JOB.keys()
         if isinstance(runs_on, str) and HOSTED_IMAGE.fullmatch(runs_on):
             continue
         if allowed and runs_on == own_desk(key):
