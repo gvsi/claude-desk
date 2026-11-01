@@ -14,7 +14,7 @@ interface WritingIndicatorBase {
   language: CopyLanguage;
 }
 
-/** One line of words: "Claude is writing", or "Dana is typing" with a name. */
+/** One reply line of dots for Claude, or "Dana is typing" with a name. */
 export interface WritingLineProps extends WritingIndicatorBase {
   variant?: 'line';
   /** A person's name when they are the one typing ("Dana"); Claude when absent. */
@@ -57,7 +57,10 @@ function personTyping(person: string, language: CopyLanguage) {
   );
 }
 
-/** Three dots, drawn only: the pulse is the stylesheet's, so the live region never changes. */
+/**
+ * Claude's writing dots, or a person's typing dots, show with the words for screen readers.
+ * The stylesheet animates them, so the live region never changes.
+ */
 function Dots() {
   return (
     <>
@@ -69,10 +72,10 @@ function Dots() {
 }
 
 /**
- * Says that someone is writing: "Claude is writing" or "Dana is typing" as a line; a visitor's
- * three dots in a bubble on their side; or a person's initials, name and three dots on theirs,
- * with "{name} is typing" for screen readers. It takes no message text, so a draft never shows
- * before the kernel has checked and delivered the reply.
+ * Shows Claude writing as three dots with the words for screen readers, or "Dana is typing" as
+ * a line; a visitor's three dots in a bubble on their side; or a person's initials, name and three
+ * dots on theirs, with "{name} is typing" for screen readers. It takes no message text, so a draft
+ * never shows before the kernel has checked and delivered the reply.
  */
 export function WritingIndicator(props: WritingIndicatorProps) {
   const { language, who } = props;
@@ -118,9 +121,18 @@ export function WritingIndicator(props: WritingIndicatorProps) {
     );
   }
 
+  if (person === null) {
+    return (
+      <p className="cd-writing-indicator cd-writing-indicator--claude cd-type-reply" role="status" lang={language}>
+        <span className="cd-writing-indicator__dots" aria-hidden="true"><Dots /></span>
+        <span className="cd-sr-only">{inLanguage(CLAUDE_WRITING_COPY, language)}</span>
+      </p>
+    );
+  }
+
   return (
     <p className="cd-writing-indicator cd-writing-indicator--line cd-type-meta" role="status" lang={language}>
-      {person === null ? inLanguage(CLAUDE_WRITING_COPY, language) : personTyping(person, language)}
+      {personTyping(person, language)}
     </p>
   );
 }

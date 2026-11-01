@@ -4,7 +4,7 @@
  * Connectors boards). Rules, Connectors, Today and setup group tools only through it.
  */
 import type { ToolName, ToolProfile } from '../../api/contracts.ts';
-import type { ToolRow } from '../../api/views.ts';
+import type { BusinessToolDef, ToolRow } from '../../api/views.ts';
 import type { ConnectorIconName, ConnectorView } from '../../ds/index.ts';
 
 /** A connector's key: the design system's connector id. */
@@ -122,6 +122,39 @@ export const TOOL_NAMES = {
   'native.read_memory': { name: 'Memory reading', line: 'Reads the notes you brought in to learn about your business.' },
 } as const satisfies Record<ToolName, ToolWords>;
 
+/** Whether a tool has the kernel's name for a Desk's own business tool. */
+export function isBusinessToolName(tool: string): tool is `desk.${string}` {
+  return /^desk\.[a-z][a-z0-9-]{0,39}$/.test(tool);
+}
+
+/** Whether the static catalog has this tool's words, including the setup interview's own tools. */
+export function isCatalogTool(tool: string): tool is ToolName {
+  return Object.hasOwn(TOOL_NAMES, tool);
+}
+
+/** The listed business definitions whose titles can name a tool on the owner's screens. */
+export type BusinessTools = ReadonlyMap<string, BusinessToolDef>;
+
+/** No business tool rows were read: unknown names keep the existing fallback words. */
+export const NO_BUSINESS_TOOLS: BusinessTools = Object.freeze(new Map<string, BusinessToolDef>());
+
+/** Only a business row with the kernel's name and a nonblank title can name a business tool. */
+export function businessTools(rows: readonly Pick<ToolRow, 'tool' | 'source' | 'business'>[]): BusinessTools {
+  const business = new Map<string, BusinessToolDef>();
+  for (const row of rows) {
+    if (row.source === 'business' && isBusinessToolName(row.tool) && row.business != null && typeof row.business.title === 'string' && row.business.title.trim() !== '') {
+      business.set(row.tool, row.business);
+    }
+  }
+  return business;
+}
+
+/** A listed business tool's title, else the catalog's name; unknown tools have no display name. */
+export function toolDisplayName(tool: string, business: BusinessTools): string | null {
+  if (isBusinessToolName(tool)) return business.get(tool)?.title ?? null;
+  return isCatalogTool(tool) ? TOOL_NAMES[tool].name : null;
+}
+
 /**
  * Each tool's request as one thing the owner names after "this", plain and lowercase, as Rules asks
  * Claude about a held one ("Why was this refund held?"): the API's words for each tool's requests
@@ -200,7 +233,7 @@ export function connectorByKey(key: string): CatalogConnector | null {
 
 /** The tool's words, or null for a tool the catalog doesn't know (a name the contracts don't have). */
 export function toolWords(tool: string): ToolWords | null {
-  return Object.hasOwn(TOOL_NAMES, tool) ? TOOL_NAMES[tool as ToolName] : null;
+  return isCatalogTool(tool) ? TOOL_NAMES[tool] : null;
 }
 
 /**
@@ -229,5 +262,5 @@ export function toolState(row: Pick<ToolRow, 'status' | 'review_reason'>): ToolS
 
 /** A connector is on while any of its tools is on or changed (listed in `rows`), else off. */
 export function connectorOn(connector: CatalogConnector, rows: readonly Pick<ToolRow, 'tool' | 'status' | 'review_reason'>[]): boolean {
-  return rows.some((row) => connector.tools.includes(row.tool) && (toolState(row) === 'on' || toolState(row) === 'changed'));
+  return rows.some((row) => isCatalogTool(row.tool) && connector.tools.includes(row.tool) && (toolState(row) === 'on' || toolState(row) === 'changed'));
 }

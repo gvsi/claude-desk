@@ -86,7 +86,8 @@ contract test, before the task that first uses them.
   its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy; its
   call-back writes its handoff already `done`, keeping its fact but leaving no Needs-you item. An owner
   session is given the setup tools alone, on any Desk of its copy, and executes its own setup decisions:
-  `native.read_memory` answers from `MEMORY_ITEMS` (the simulated memory) and `native.fetch_website` reads any
+  `native.read_memory` answers from the Desk's stored simulated memory (only the Rivera seed falls back to
+  `MEMORY_ITEMS`; other unwritten Desks read nothing) and `native.fetch_website` reads any
   `.example` site as `WEBSITE_TEXT` (the fetch guard refuses every other address, so the call fails), each storing
   owner-only knowledge; `/context` serves the knowledge a session's labels read.
 - Setup's rules (Plans 01a, 01b and 01c): `PUT /desks/{id}/charter`, `hours`, `prices`, `calendar` and
@@ -210,6 +211,7 @@ from desk.kernel_api import (
     DeskCharterRequest,
     DeskCreated,
     DeskHoursRequest,
+    DeskMemoryRequest,
     DeskNotificationsRequest,
     DeskPeopleRequest,
     DeskPricesRequest,
@@ -321,12 +323,18 @@ RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
 NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout", "handoff"],
                  "briefing": ["lead", "callback", "booking"]}
-# The owner's simulated Claude memory (the kernel's fixtures/memory.json, Plan 01c): (title, text).
-MEMORY_ITEMS = [("Business", "Rivera Plumbing, run by Maria Rivera."),
-                ("Trade", "Plumbing: leaks, drains and water heaters."),
-                ("Service area", "Oakland, Berkeley, Alameda and Emeryville."),
-                ("Hours", "Weekdays 8 to 6, Saturday mornings."),
-                ("Website", "rivera-plumbing.example")]
+# The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
+MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Rivera notes.", "items": [
+    {"id": "business", "title": "Business", "topics": ["business", "name", "owner", "company"],
+     "text": "Maria Rivera owns Rivera Plumbing in Oakland, California, and answers its phone herself between jobs."},
+    {"id": "trade", "title": "Trade", "topics": ["trade", "services", "work", "plumbing"],
+     "text": "Rivera Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."},
+    {"id": "service-area", "title": "Service area", "topics": ["area", "cities", "where"],
+     "text": "Rivera Plumbing works in Oakland, Berkeley, Alameda and Emeryville."},
+    {"id": "hours", "title": "Hours", "topics": ["hours", "open", "opening", "schedule", "when"],
+     "text": "Open Monday to Friday, 8 am to 6 pm, and Saturday, 9 am to 1 pm. Closed on Sundays."},
+    {"id": "website", "title": "Website", "topics": ["website", "site", "web", "online"],
+     "text": "The business's website is https://rivera-plumbing.example."}]})
 OWNER_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")   # Plan 01a's owner_display_name pattern
 # A fetched page (the kernel's fetch guard reads the real one): here any `.example` site reads as this, and any
 # other address is refused.
@@ -441,6 +449,12 @@ STATUS_TEXT = {
            "denied": "{owner} decidió no seguir adelante", "expired": "Esta solicitud venció", "cancelled": "Cancelado",
            "executed": "Hecho", "failed": "No se pudo completar", "unknown": "Todavía lo estamos confirmando",
            "refused_at_execution": "Las reglas cambiaron, así que no se hizo"},
+}
+# Owner-only refusal lines for the fake's two refusal paths: a changed policy and exhausted mandate.
+# The owner has no language setting yet, so these stay English whatever the session's language.
+OWNER_REFUSAL_TEXT = {
+    "rules_changed": "Your rules changed before this ran, so it wasn't done.",
+    "fallback": "This couldn't run, so it wasn't done.",
 }
 # What a visitor's or an agent's executed action did, by tool (the kernel's `render.en.EXECUTED` and
 # `render.es.EXECUTED`, Plans 01b and 01c), in place of the generic executed line.
@@ -736,6 +750,15 @@ def in_hours(moment: datetime, windows: list[HoursWindow], tz: ZoneInfo = RIVERA
 
 
 _JSON_TYPES = {"object": dict, "array": list, "string": str, "null": type(None)}
+
+
+def storable(text: str) -> bool:
+    """Mirror repo.storable: Postgres text and JSONB require valid UTF-8 without NUL."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return "\0" not in text
 
 
 def matches(schema: dict, value: Any) -> bool:
@@ -1078,6 +1101,8 @@ class Desk:
     timezone: str = RIVERA_TZ.key                                     # the business's
     answering: bool = True
     deleted_at: datetime | None = None                                # `DELETE /desks/{id}`: its routes are closed
+    simulated_memory: DeskMemoryRequest | None = None                 # private; never mirrored in fake_kernel_ro
+    rivera_seed: bool = False                                         # set only when the original seed is created
     people: dict[str, Person] = field(default_factory=dict)          # by person_id
     documents: dict[str, Document] = field(default_factory=dict)     # by document_id
     prices: dict[str, PriceItem] = field(default_factory=dict)
@@ -1591,6 +1616,7 @@ class FakeKernelState:
             notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
+        desk.rivera_seed = True
         for index, item in enumerate(RIVERA_KNOWLEDGE):
             # Preserve insertion order without moving the shared clock used by other fake activity.
             self._store_knowledge(desk, item.model_copy(deep=True),
@@ -2201,7 +2227,7 @@ class FakeKernelState:
             record = self.decisions[known]
             if record.call_sha256 != digest:
                 raise Refusal(409, "conflict")
-            return self._refresh(record)
+            return self._refresh(record).model_copy(update={"owner_plain": None})
         if session.mode == "paused":
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="paused")
         if call.tool not in TOOL_NAMES:
@@ -2437,8 +2463,13 @@ class FakeKernelState:
                             session_id=decision.session_id, ref_id=decision.decision_id)
         line = status_line(state, tool=record.tool, session_kind=session.kind, language=session.last_language,
                            owner=desk.owner_display_name)
+        owner_plain = None
+        if state == "refused_at_execution":
+            owner_plain = OWNER_REFUSAL_TEXT[
+                "rules_changed" if summary.get("reason") == "rules_changed"
+                and summary.get("check") in {"tool", "profile", "pin", "policy"} else "fallback"]
         record.decision = self._signed(decision.model_copy(update={
-            "state": state, "visitor_plain": line,
+            "state": state, "visitor_plain": line, "owner_plain": owner_plain,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))
         self._put_decision(record)
         return record.decision
@@ -2495,7 +2526,7 @@ class FakeKernelState:
                 raise Refusal(404, "not_found")
             return self._refresh(record)
         _, record = self._own_decision(request, None, decision_id)
-        return self._refresh(record)
+        return self._refresh(record).model_copy(update={"owner_plain": None})
 
     def execute(self, request: Request, body: ExecuteRequest) -> ExecResult:
         session, record = self._own_decision(request, body.session_id, body.decision_id)
@@ -2525,7 +2556,9 @@ class FakeKernelState:
             record.running = True
             raise Refusal(409, "conflict")
         if decision.action.tool == "native.charge_mandate" and not self._room_for(session, decision.action):
-            self._transition(record, "refused_at_execution", kind="execute", reason="mandate_exhausted")
+            desk = self.desks[record.desk_id]
+            check = "conditions" if desk.policy_version == decision.policy_version else "policy"
+            self._transition(record, "refused_at_execution", kind="execute", reason="rules_changed", check=check)
             raise Refusal(409, "conflict")           # the reservation failed: nothing was charged
         return self._run(record, session)
 
@@ -2697,13 +2730,16 @@ class FakeKernelState:
         elif tool == "payments.list_charges":
             view = {"charges": []}
         elif tool == "native.read_memory":
-            words = set(re.findall(r"[a-z]+", args["query"].lower()))
-            found = [(title, text) for title, text in MEMORY_ITEMS
-                     if words & set(re.findall(r"[a-z]+", f"{title} {text}".lower()))]
-            for title, text in found:
-                self._store_knowledge(desk, KnowledgeItem(item_id=f"memory:{slugify(title)}", source="memory_import",
-                                                          title=title, text=text, label=Label(readers=["owner"])))
-            view = {"items": [{"title": title, "text": text} for title, text in found], "simulated": True}
+            words = {word.casefold() for word in re.findall(r"\w+", args["query"])}
+            memory = desk.simulated_memory if desk.simulated_memory is not None else (
+                MEMORY_ITEMS if desk.rivera_seed else None)
+            found = [item for item in (memory.items if memory is not None else []) if words & (
+                {word.casefold() for word in re.findall(r"\w+", item.title)} |
+                {topic.casefold() for topic in item.topics})]
+            for item in found:
+                self._store_knowledge(desk, KnowledgeItem(item_id=f"mem-{item.id}", source="memory_import",
+                    title=item.title, text=item.text, label=Label(readers=["owner"])))
+            view = {"items": [{"title": item.title, "text": item.text} for item in found], "simulated": True}
         elif tool == "native.fetch_website":
             host = (urlsplit(args["url"]).hostname or "")
             if urlsplit(args["url"]).scheme not in ("http", "https") or not host.endswith(".example"):
@@ -2756,9 +2792,10 @@ class FakeKernelState:
         approved = None
         if body.answer in ("allow_once", "allow_person") and (self._never(desk, action.tool) or (
                 action.tool == "native.charge_mandate" and not self._room_for(session, action))):
-            # the re-check at execution (step 6): the rules in force no longer let the owner approve it
+            # Step 6: distinguish changed rules from changed inputs under the decision's own rules.
+            check = "conditions" if desk.policy_version == decision.policy_version else "policy"
             self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
-                             approval_id=approval_id, reason="rules changed")
+                             approval_id=approval_id, reason="rules_changed", check=check)
         elif body.answer in ("allow_once", "allow_person"):
             approved = self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
             execution = self._run(record, session)
@@ -3143,6 +3180,32 @@ class FakeKernelState:
             self._put_fact(desk, Fact(fact_id=f"charter:{claim.key}", kind="charter", status="available",
                                       source="kernel", claims=[claim], label=Label(readers=["public"])))
         return self._part_updated(desk, "charter")
+
+    def _memory_desk(self, request: Request) -> Desk:
+        if "x-session-token" in request.headers:
+            raise Refusal(401, "auth")
+        return self._owners_desk(request, request.path_params["id"])
+
+    def desk_memory(self, request: Request, body: DeskMemoryRequest) -> DeskUpdated:
+        desk = self._memory_desk(request)
+        values = {"about": body.about, "items": " ".join(
+            value for item in body.items for value in (item.id, item.title, *item.topics, item.text))}
+        if not all(storable(value) for value in values.values()):
+            self.append(desk, "desk_data", {"part": "memory", "refused": "invalid"})
+            raise Refusal(422, "invalid")
+        canaries = self._canaries(desk.copy_id)
+        fields = [name for name, value in values.items() if canary_spans(value, canaries)]
+        rest = " ".join(value for name, value in values.items() if name not in fields)
+        if canary_spans(rest, canaries):
+            fields = list(values)
+        if fields:
+            found = {document_id for document_id, _, _ in canary_spans(" ".join(values.values()), canaries)}
+            self.append(desk, "desk_data", {"part": "memory", "refused": "canary", "fields": fields,
+                                            "fact_ids": [f"document:{key}" for key in sorted(found)]})
+            raise Refusal(422, "invalid")
+        desk.simulated_memory = body.model_copy(deep=True)
+        self.append(desk, "desk_data", {"part": "memory", "refs": [item.id for item in body.items]})
+        return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
     def desk_hours(self, request: Request, body: DeskHoursRequest) -> DeskUpdated:
         """The opening hours, and the `charter:hours` fact written again from them."""
@@ -3880,7 +3943,7 @@ class FakeKernelState:
         known = self._by_call.get((session_id, generation, self._query(request, "call_id")))
         if known is None:
             raise Refusal(404, "not_found")
-        return self._refresh(self.decisions[known])
+        return self._refresh(self.decisions[known]).model_copy(update={"owner_plain": None})
 
 
 def first_bad_seq(entries: list[LedgerEntry]) -> int | None:
@@ -3955,6 +4018,7 @@ FAKE_ROUTES: dict[str, str] = {
     "PUT /desks/{id}/business": "put_business",
     "PUT /desks/{id}/answering": "answering",
     "PUT /desks/{id}/charter": "desk_charter",
+    "PUT /desks/{id}/memory": "desk_memory",
     "PUT /desks/{id}/hours": "desk_hours",
     "PUT /desks/{id}/prices": "desk_prices",
     "PUT /desks/{id}/calendar": "desk_calendar",

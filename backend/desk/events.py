@@ -30,7 +30,7 @@ class EvMessage(BaseModel):               # a checked reply, delivered through d
 class EvTurnEnd(BaseModel):               # every turn end, silent ones included
     type: Literal["turn_end"]
 
-class EvReceipt(BaseModel):               # an action's outcome
+class EvReceipt(BaseModel):               # an action's outcome, or a held action's signed approval before its outcome
     type: Literal["receipt"]
     decision_id: str
     state: DecisionState

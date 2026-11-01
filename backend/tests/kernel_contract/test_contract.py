@@ -473,6 +473,7 @@ async def test_answer_includes_the_approved_snapshot_only_for_an_allow(kernel, r
     assert (result.approved.decision_id, result.approved.state, result.approved.visitor_plain) == (
         held.decision_id, "approved", "Maria Rivera approved this")
     assert result.approved.signature and result.approved.signature != result.decision.signature
+    assert result.approved.owner_plain is None
     assert result.approved.ledger_seq < result.decision.ledger_seq
     assert result.decision.state == "executed" and result.execution.state == "succeeded"
 
@@ -568,9 +569,15 @@ async def test_approving_after_the_rules_changed_runs_nothing(kernel, ro_read, a
 
     result = await answer(owner, held.decision_id, "allow_once")
     assert (result.decision.decision_id, result.decision.state) == (held.decision_id, "refused_at_execution")
-    assert result.execution is None and result.card_diff is None
+    assert result.execution is None and result.card_diff is None and result.approved is None
     assert result.decision.ledger_seq > held.ledger_seq and result.decision.answers == []
-    assert await read_decision(view, held.decision_id) == result.decision
+    owner_line = "Your rules changed before this ran, so it wasn't done."
+    assert result.decision.owner_plain == owner_line
+    assert await read_decision(owner, held.decision_id) == result.decision
+    # the session reads the owner's answer without the owner's line (`owner_plain`), which only the owner's reads carry
+    read = await read_decision(view, held.decision_id)
+    assert read.owner_plain is None
+    assert read.model_copy(update={"owner_plain": owner_line}) == result.decision
     assert ro_read(ro_schema, copy.copy_id, "SELECT count(*) AS n FROM {ro}.quotes WHERE session_id = %s",
                    (session_id,)) == [{"n": 0}]
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
@@ -2222,7 +2229,51 @@ async def test_charge_mandate_bounds_and_commits(kernel, ro_read):
     assert mandate == {"committed_cents": 10_000, "reserved_cents": 0}
 
 
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize("path", ["allow", "approval"])
+async def test_expired_mandate_at_execution_names_no_rule_change(kernel, ro_read, arrange, path):
+    """Expiry changes the mandate's authority, not the owner's rules: both kernels ledger `conditions`,
+    charge nothing and give the owner the fallback, on allow and `allow_once` paths alike."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    if path == "approval":
+        await arrange.ask(owner, ro_read, ro_schema, copy, "native.charge_mandate")
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, issued, slug)
+    session_id = created.state.session_id
+    view = turn_view(http, issued, slug, session_id, "Please charge the deposit")
+    deposit = item_id(ro_read, ro_schema, copy, "Service call deposit")
+    quoted = await execute(view, await decide(view, session_id, 0, "call-quote", "native.quote",
+                                              quote_args(deposit)), 0)
+    decision = await decide(view, session_id, 0, "call-charge", "native.charge_mandate",
+                            {"quote_id": quoted.model_view["quote_id"]})
+    assert decision.outcome == ("allow" if path == "allow" else "hold")
+    arrange.expire_mandate(issued.mandate.mandate_id)
+
+    if path == "allow":
+        assert await refused(execute(view, decision, 0)) == (409, "conflict")
+    else:
+        result = await answer(owner, decision.decision_id, "allow_once")
+        assert result.execution is None
+
+    read = await read_decision(owner, decision.decision_id)
+    assert read.state == "refused_at_execution"
+    page = await ledger_page(owner, copy.desk_ids[0])
+    entries = [entry.event.summary for entry in page.entries
+               if entry.event.ref_id == decision.decision_id
+               and entry.event.kind == ("execute" if path == "allow" else "approval")]
+    assert entries[-1]["check"] == "conditions"
+    assert read.owner_plain == "This couldn't run, so it wasn't done."
+    assert (await read_decision(view, decision.decision_id)).owner_plain is None
+    (mandate,) = ro_read(ro_schema, copy.copy_id, "SELECT committed_cents, reserved_cents FROM {ro}.mandates"
+                                                  " WHERE mandate_id = %s", (issued.mandate.mandate_id,))
+    assert mandate == {"committed_cents": 0, "reserved_cents": 0}
+
+
 # Setup: a new Desk and the owner's setup tools (Plans 01b and 01c) ---------------------------------------------------
+
 
 SETUP_TOOLS = {"native.fetch_website", "native.read_memory"}
 # `PRESETS["ask_first"]`: auto for anyone on these, everything else asks (Plan 01a).
@@ -2410,6 +2461,18 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     session = (await owner.whoami()).session
     assert tools(await context(owner, session.session_id, created.desk_id)) == (SETUP_TOOLS, SETUP_TOOLS)
 
+    from desk.kernel_api import DeskMemoryRequest
+
+    empty = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="empty-memory", tool="native.read_memory", args={"query": "business hours"})))
+    assert (await execute(owner, empty, session.generation)).model_view == {"simulated": True, "items": []}
+
+    memory = DeskMemoryRequest.model_validate({"about": "Simulated CPA notes.", "items": [
+        {"id": "business", "title": "Chen CPA", "topics": ["business"], "text": "Chen CPA prepares tax returns."}]})
+    updated = await owner.call("PUT /desks/{id}/memory", memory, path={"id": created.desk_id})
+    assert isinstance(updated, DeskUpdated) and updated.desk_id == created.desk_id
+
     call = ToolCall(call_id="setup-memory", tool="native.read_memory", args={"query": "business hours"})
     decision = await owner.call("POST /decide", DecideRequest(session_id=session.session_id,
                                                               generation=session.generation, call=call,
@@ -2417,7 +2480,8 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     assert decision.outcome == "allow" and decision.session_id == session.session_id
     assert decision.action.desk_id == created.desk_id and decision.action.resource.kind == "desk"
     result = await execute(owner, decision, session.generation)
-    assert result.state == "succeeded" and result.model_view["simulated"] is True and result.model_view["items"]
+    assert result.state == "succeeded" and result.model_view == {"simulated": True, "items": [
+        {"title": "Chen CPA", "text": "Chen CPA prepares tax returns."}]}
     knowledge = ro_read(ro_schema, copy.copy_id, "SELECT source, readers FROM {ro}.knowledge_items"
                                                  " WHERE desk_id = %s", (created.desk_id,))
     assert knowledge and all(row == {"source": "memory_import", "readers": ["owner"]} for row in knowledge)
@@ -2436,6 +2500,29 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     elsewhere = stranger.call("POST /decide", DecideRequest(session_id=theirs.session_id, generation=theirs.generation,
                                                             call=call, desk_id=created.desk_id))
     assert await refused(elsewhere) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_memory_nul_item_is_refused(kernel):
+    from desk.kernel_api import DeskMemoryRequest
+
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    memory = DeskMemoryRequest.model_validate({"about": "Simulated CPA notes.", "items": [
+        {"id": "business", "title": "Chen CPA", "topics": ["business"], "text": "before\0after"}]})
+    start = (await ledger_page(owner, created.desk_id)).entries[-1].seq
+    assert await refused(owner.call("PUT /desks/{id}/memory", memory, path={"id": created.desk_id})) == (
+        422, "invalid")
+    assert [(entry.event.kind, entry.event.summary)
+            for entry in (await ledger_page(owner, created.desk_id)).entries if entry.seq > start] == [
+        ("desk_data", {"part": "memory", "refused": "invalid"})]
+    session = (await owner.whoami()).session
+    decision = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="refused-memory", tool="native.read_memory", args={"query": "business"})))
+    assert (await execute(owner, decision, session.generation)).model_view == {"simulated": True, "items": []}
 
 
 # Setup: a new Desk's parts, rules drafts, probes and connected tools (Plans 01a, 01b and 01c) -------------------------

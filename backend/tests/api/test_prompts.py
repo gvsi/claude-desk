@@ -73,7 +73,7 @@ def test_system_prompt_is_stable():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.4"                     # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.5"                     # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     for rule in (
         "You are Claude, an AI",                                  # who is answering

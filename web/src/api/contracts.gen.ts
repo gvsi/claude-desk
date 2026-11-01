@@ -181,6 +181,7 @@ export interface Decision {
   card_ids: string[];
   review?: Review | null;
   reason_plain: string;
+  owner_plain?: string | null;
   visitor_plain: string;
   answers?: ("allow_once" | "deny_once" | "allow_person" | "deny_always")[];
   expires_at: string;
@@ -501,6 +502,233 @@ export interface DeskCreated {
 }
 export interface DeskHoursRequest {
   hours: HoursWindow[];
+}
+export interface DeskMemoryRequest {
+  about: string;
+  /**
+   * @maxItems 20
+   */
+  items:
+    | []
+    | [MemoryItem]
+    | [MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem, MemoryItem]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ]
+    | [
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem,
+        MemoryItem
+      ];
+}
+/**
+ * An untrusted simulated owner note, shared by the write contract and memory reader.
+ */
+export interface MemoryItem {
+  id: string;
+  title: string;
+  /**
+   * @maxItems 10
+   */
+  topics:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string];
+  text: string;
 }
 export interface DeskNotificationsRequest {
   notifications: NotificationDefaults;

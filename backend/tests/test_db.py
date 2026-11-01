@@ -963,6 +963,39 @@ class StatementsOn:
         self.conn.execute(statement)
 
 
+def test_desk_memory_migration_goes_down_and_up_as_non_superuser(scratch, monkeypatch):
+    script = ScriptDirectory.from_config(alembic_config())
+    module = script.get_revision("desk_simulated_memory").module
+    assert module.down_revision == "0013_decision_owner_plain"
+    admin = scratch.conn
+    assert "simulated_memory" in columns(admin, "kernel", "desks")
+    assert "simulated_memory" not in columns(admin, "kernel_ro", "desks")
+    assert not admin.execute("SELECT has_column_privilege('desk_ro_owner', 'kernel.desks',"
+                            " 'simulated_memory', 'SELECT')").fetchone()[0]
+    scratch.migrate(command.downgrade, module.down_revision)
+    try:
+        assert "simulated_memory" not in columns(admin, "kernel", "desks")
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    monkeypatch.setattr(module, "op", StatementsOn(admin))
+    with admin.transaction(force_rollback=True):
+        admin.execute("INSERT INTO kernel.desks (desk_id, copy_id, business_id, name, slug)"
+                      " VALUES ('desk-memory', 'copy-memory', 'biz', 'CPA', 'memory-migrate')")
+        assert admin.execute("SELECT simulated_memory FROM kernel.desks WHERE desk_id = 'desk-memory'").fetchone() == (None,)
+        admin.execute("CREATE ROLE desk_memory_migrator NOLOGIN NOSUPERUSER NOBYPASSRLS")
+        admin.execute("GRANT USAGE, CREATE ON SCHEMA kernel TO desk_memory_migrator")
+        admin.execute("ALTER TABLE kernel.desks OWNER TO desk_memory_migrator")
+        admin.execute("SET LOCAL ROLE desk_memory_migrator")
+        assert admin.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user").fetchone() == (False, False)
+        module.downgrade()
+        assert "simulated_memory" not in columns(admin, "kernel", "desks")
+        module.upgrade()
+        module.upgrade()  # safe to run over its own column, like the recent revisions
+        assert "simulated_memory" in columns(admin, "kernel", "desks")
+        admin.execute("RESET ROLE")
+        assert admin.execute("SELECT simulated_memory FROM kernel.desks WHERE desk_id = 'desk-memory'").fetchone() == (None,)
+
+
 def test_agent_tables_go_down_and_up_under_an_owner_bound_by_row_security(scratch, monkeypatch):
     """The agents and mandate reservations revisions go down and up again over populated tables
     when their owner is bound by row security, as on a managed Postgres: the owner sees none of the
@@ -1291,6 +1324,41 @@ def test_inbox_decision_id_migration_goes_down_and_up(admin, scratch_database):
     scratch_database.migrate(command.upgrade, "head")
     assert migrated(scratch) == (True, True)
     assert nullable_columns(scratch, "kernel", "demo_inbox")["decision_id"] is True
+
+
+OWNER_PLAIN_REVISION = "0013_decision_owner_plain"
+
+
+def test_a_decision_from_before_the_owner_plain_revision_has_no_owner_line(admin, api, monkeypatch):
+    """A decision written before the revision reads with no owner line (NULL), as every state but a
+    refusal at execution does; the column stays nullable, joins no kernel_ro view (the API reads it
+    only through the owner's kernel reads), and the revision runs again over what it added."""
+    revision = ScriptDirectory.from_config(alembic_config()).get_revision(OWNER_PLAIN_REVISION).module
+    # Exercise the revision's SQL in a rolled-back transaction on this suite's database alone.
+    # No scratch database is needed for this column-only migration.
+    monkeypatch.setattr(revision.op, "execute", admin.execute)
+    with admin.transaction(force_rollback=True):
+        admin.execute("SET LOCAL lock_timeout = '5s'")
+        revision.downgrade()
+        assert "owner_plain" not in columns(admin, "kernel", "decisions")
+        admin.execute(
+            "INSERT INTO kernel.decisions (decision_id, copy_id, desk_id, session_id, generation, call_id, call_sha256,"
+            " tool, outcome, state, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
+            " VALUES ('dec-before-owner-plain', 'copy-owner-plain', 'desk-owner-plain', 'session-owner-plain', 0,"
+            " 'call-1', 'c', 'native.quote', 'hold', 'refused_at_execution', 1, 'r', 'v', now(), 1)")
+        revision.upgrade()
+        assert admin.execute("SELECT owner_plain FROM kernel.decisions"
+                             " WHERE decision_id = 'dec-before-owner-plain'").fetchone() == (None,)
+        assert nullable_columns(admin, "kernel", "decisions")["owner_plain"] is True
+        assert "owner_plain" not in columns(admin, "kernel_ro", "decisions")
+        revision.upgrade()                                # the revision runs again over what it added
+        assert columns(admin, "kernel", "decisions").count("owner_plain") == 1
+    readable = columns(api, "kernel_ro", "decisions")
+    assert "owner_plain" not in readable
+    assert set(readable) == set(KERNEL_RO_COLUMNS["decisions"])
+    api.execute("SELECT " + ", ".join(KERNEL_RO_COLUMNS["decisions"]) + " FROM kernel_ro.decisions LIMIT 0")
+    with pytest.raises(psycopg.errors.InsufficientPrivilege, match="permission denied"):
+        api.execute("SELECT kernel.decisions.owner_plain FROM kernel.decisions LIMIT 0")
 
 
 def assert_refused_before_the_database(session: Session, row: Base) -> None:

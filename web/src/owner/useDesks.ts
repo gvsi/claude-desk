@@ -288,6 +288,11 @@ export function findDesk(businesses: readonly BusinessOut[], deskId: string): { 
   return null;
 }
 
+/** Whether a Desk is live: its setup is null, or absent from an API from before setup. Answering is separate. */
+export function isLive(desk: DeskSummary): boolean {
+  return (desk.setup ?? null) === null;
+}
+
 /** The same Desks with this Desk's Answering set to `on`; the same list when it doesn't hold the Desk. */
 export function withAnswering(businesses: BusinessOut[] | undefined, deskId: string, on: boolean): BusinessOut[] | undefined {
   if (businesses === undefined || findDesk(businesses, deskId) === null) return businesses;

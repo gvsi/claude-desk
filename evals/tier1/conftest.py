@@ -18,9 +18,10 @@ Tier 1 makes no model calls: before any case imports a client, the process drops
 server that scripts nothing, so a client made outside a target fails the run instead of calling out.
 
 The fixtures a case uses: `k`, what it calls (the contract stub on `--target stub`, else a fresh
-`KernelTarget` on the travelling clock); `fake`, the model server `k` calls (on the stub, one no
-call ever reaches); `records`, what `k` left in the database (on the stub, none); `api`, the API
-over `k` (Plan 02a's `make_api_target`), for the cases that require 02a or 02.
+`KernelTarget` on the travelling clock, started on a database `empty_database` emptied); `fake`,
+the model server `k` calls (on the stub, one no call ever reaches); `records`, what `k` left in the
+database (on the stub, none); `api`, the API over `k` (Plan 02a's `make_api_target`), for the cases
+that require 02a or 02.
 """
 
 import functools
@@ -55,6 +56,7 @@ from evals.tier1.targets import (
     ApiTarget,
     KernelTarget,
     TargetError,
+    empty_database,
     load_api_target,
     refuse_real_models,
 )
@@ -129,10 +131,11 @@ def unscripted_model_server(loopback_only: None) -> Iterator[FakeAnthropic]:
 
 @pytest.fixture
 async def k(request: pytest.FixtureRequest) -> AsyncIterator[KernelHarness]:
-    """What the case calls: the contract stub, or a fresh real kernel in-process."""
+    """What the case calls: the contract stub, or a fresh real kernel in-process on an empty database."""
     if request.config.getoption("--target") == "stub":
         yield ContractStub()
         return
+    empty_database()
     target = await KernelTarget(models="fake", allow_bounded=request.config.getoption("--allow-bounded")).start()
     try:
         yield target
