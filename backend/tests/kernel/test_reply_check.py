@@ -494,9 +494,9 @@ async def test_only_the_desks_own_names_may_mix_scripts(app, client):
 def test_a_long_draft_is_scanned_in_one_pass(prose, names):
     """Letters shaped like 0 or 1 that make no number are passed over once, not once per letter,
     and each mixed-script word is looked up once among the Desk's names, not once per mention."""
-    started = time.perf_counter()
+    started = time.process_time()      # CPU time: the scan is pure computation, and wall time varies with load
     reply_check.scan_prose(prose, names=names)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
 
 
 def test_the_lookalike_table_is_what_its_script_makes():
@@ -1870,9 +1870,9 @@ def test_a_long_draft_of_booking_claims_is_scanned_in_one_pass():
     """Thousands of booking claims, conditioned or not and each holding a shorter one, are read in
     one pass: a condition is looked for just before each claim, and claims inside others drop out
     in one sweep."""
-    started = time.perf_counter()
+    started = time.process_time()
     found = reply_check.scan_prose("si ya está confirmada " * 4_000 + "tu cita está confirmada " * 4_000)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
     assert {(v.rule_id, v.span) for v in found} == {("lex.es.booking", "tu cita está confirmada")}
     assert len(found) == 4_000
 
@@ -2115,10 +2115,10 @@ def test_a_long_draft_of_dotted_runs_passes_the_scan_in_one_pass():
     before the owner's decision of 2026-10-30 removed it, are read in one pass by the lexicons'
     readings and hold no violation, so a lexicon line with dots ("a.m.", "p.ej.") can't backtrack
     on them unnoticed."""
-    started = time.perf_counter()
+    started = time.process_time()
     found = reply_check.scan_prose("x" * 40_000 + " " + "a." * 20_000 + " " + "rivera.pay.section " * 2_000
                                    + "a.b/" * 10_000)
-    assert time.perf_counter() - started < 2
+    assert time.process_time() - started < 2
     assert found == []
 
 
