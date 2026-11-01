@@ -1014,3 +1014,41 @@ async def test_cancelled_work_ends_its_streams_with_an_error():
     await asyncio.wait_for(started.wait(), 1)
     await proving.close()
     assert await asyncio.wait_for(anext(events), 1) == {"event": "error", "data": '{"status":500,"error":"internal"}'}
+
+
+async def test_a_stream_opened_while_the_answer_request_waits_gets_the_same_events(
+        app, browser, kernel_http, model):
+    owner, initial, path = await question_ready(app, browser, kernel_http, model)
+    assert setup.TURN_WAIT_S == 25                      # the answer request is still waiting for its turn
+    reply = "Got it: leaks and blocked drains. Do you take emergency calls"
+    raw = answer_turn(setup.SETUP_TURNS["what_you_do"], reply, step_done=False).model_dump_json()
+    prefix, rest = raw.split('"reply":"Got', 1)
+    pieces = [prefix + '"reply":"Got', rest]
+    gates = [asyncio.Event() for _ in pieces]
+    entered = asyncio.Event()
+    model.add(streaming(raw, pieces, gates, entered))
+    request = asyncio.create_task(owner.browser.post(path + "/answer?cards=1", json={
+        "question": "what_you_do", "text": "We fix leaks and blocked drains"}))
+    live = None
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        assert not request.done()
+        live = LiveEvents(app, browser, owner).open(path + "/events")
+        name, data = await live.next()
+        run = data["run"]
+        assert (name, data) == ("delta", {"run": run, "text": "Got"})
+        gates[0].set()
+        assert await live.next() == ("delta", {"run": run, "text": reply})
+        gates[1].set()
+        assert await live.next() == ("done", {"run": run})
+        answered = await asyncio.wait_for(request, 5)
+        assert answered.status_code == 200 and answered.json()["busy"] is False
+        assert answered.json() == (await owner.browser.get(path + "?cards=1")).json()
+        assert reply in [message["text"] for message in answered.json()["messages"]]
+    finally:
+        for gate in gates:
+            gate.set()
+        if live is not None:
+            await live.close()
+        await asyncio.gather(request, return_exceptions=True)
+        await app.state.runtime.turn_runs.wait(initial["interview_id"])
