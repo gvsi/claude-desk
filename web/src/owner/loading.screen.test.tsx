@@ -374,8 +374,10 @@ it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
       await renderRoute(TODAY, { pollScale: 100 });
       await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
       await page.viewport(620, 900);
+      await nextFrames();
       // Text rewrapping can move shapes after the resize's first band placement.
       await vi.waitFor(() => {
+        expect(window.innerWidth).toBe(620);
         const layer = document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]');
         expect(layer).not.toBeNull();
         const painted = [...layer!.querySelectorAll<HTMLElement>('.cd-skeleton')].filter((el) => el.getClientRects().length > 0);
