@@ -1699,21 +1699,26 @@ def owner_supports(field: Literal["public_contact", "price_items", "hours"],
                for window in cast(list[HoursAnswer], value))
 
 
-# Each fact a turn can set that `FIELD_TURNS` doesn't scope, with the one question that asks for it. A fact is on
-# topic on every question that asks for it (`_on_topic`): there a turn's value is the owner's, and on any other question
-# it is a suggestion, held from the Desk until the owner confirms it. Names are handled on their own (`merged`,
-# `_rename`).
-FACT_TOPICS: dict[str, QuestionKey] = {
-    "summary": "what_you_do", "service_area": "hours_and_area",
-    "public_contact": "contact_and_after_hours", "price_items": "quote_limit",
+# Each free-text fact a turn can set that `FIELD_TURNS` doesn't scope, with the one question that asks for it. A fact
+# is on topic there (`_on_topic`): a turn's value is the owner's, and on any other question it is a suggestion, held
+# from the Desk until the owner confirms it. Names are handled on their own (`merged`, `_rename`).
+FACT_TOPICS: dict[str, QuestionKey] = {"summary": "what_you_do", "service_area": "hours_and_area"}
+# Each structured fact, a value code checks against the owner's words (`owner_supports`), with its home question: on
+# topic only there, whichever other turns have its field. On any other question it follows the off-topic rules: backed
+# only by a stated value in that answer or a removal, never replacing or refilling the owner's, else held. Those turns
+# read the website and memory, where a bare count could otherwise back hours.
+FACT_HOMES: dict[str, QuestionKey] = {
+    "hours": "hours_and_area", "price_items": "quote_limit", "public_contact": "contact_and_after_hours",
 }
 
 
 def _on_topic(name: str, key: QuestionKey) -> bool:
-    """Whether fact `name` is on topic on the turn answering `key`: on every question that asks for it, the ones
-    `FIELD_TURNS` lists for it (read at each call) or else its one question in `FACT_TOPICS`, and on the quote question
-    for a fact that question records (`LIMIT_TURN_FACTS`)."""
-    return key in FIELD_TURNS.get(name, (FACT_TOPICS.get(name),)) or LIMIT_TURN_FACTS.get(name) == key
+    """Whether fact `name` is on topic on the turn answering `key`: a structured fact only on its home question
+    (`FACT_HOMES`), a free-text one on every question that asks for it, the ones `FIELD_TURNS` lists for it (read at
+    each call) or else its one question in `FACT_TOPICS`, and either on the quote question when that question
+    records it (`LIMIT_TURN_FACTS`)."""
+    topics = (FACT_HOMES[name],) if name in FACT_HOMES else FIELD_TURNS.get(name, (FACT_TOPICS.get(name),))
+    return key in topics or LIMIT_TURN_FACTS.get(name) == key
 
 
 def _is_fact(name: str) -> bool:
@@ -1742,10 +1747,10 @@ def _only_removes_hours(before: SetupAnswers, named: list[HoursAnswer]) -> bool:
 
 
 def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: SetupAnswers | None = None) -> set[str]:
-    """The facts this turn gave off the questions that ask for them (`_on_topic`) that the owner's own words this turn
-    (`said`) back: a list they said to clear (`CLEARABLE`), a removal from stored owner hours, or a structured value
-    `owner_supports` finds in `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained suggested
-    item does. Such a turn reads the website and memory, so prices and times need explicit syntax."""
+    """The facts this turn gave off their topic (`_on_topic`) that the owner's own words this turn (`said`) back: a
+    list they said to clear (`CLEARABLE`), a removal from stored owner hours, or a structured value `owner_supports`
+    finds in `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained
+    suggested item does. Such a turn reads the website and memory, so prices and times need explicit syntax."""
     backed = set()
     for name in _fact_patch_fields(patch, key):
         if not _is_fact(name) or _on_topic(name, key):

@@ -617,10 +617,41 @@ async def test_owner_hours_demoted_by_unchanged_reemission(proposals, model, eng
     assert "hours" not in answers.suggested_fields
     assert answers.hours == [HoursAnswer(**window).window() for window in hours]
     said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
-    # The contact question asks for hours too (FIELD_TURNS), so the owner's own hours stay theirs there.
-    assert "hours" in said.get("owner_fields", [])
+    assert "hours" not in said.get("owner_fields", [])
     parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
     assert parts.hours == answers.hours and parts.calendar
+
+
+async def test_off_topic_hours_never_refill_hours_the_owner_cleared(proposals, model, engine, caplog):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    hours = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}]
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "9am to 5pm weekdays.", turn(hours=hours), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "Remove our hours, we're by appointment only now.",
+                         turn(clear_hours=True), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    assert record["answers"]["hours"] == []
+    assert "hours" in [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]["owner_fields"]
+    # The contact turn has an hours field (FIELD_TURNS), but hours are at home only on the hours question.
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    caplog.clear()
+    reply = await answer(owner, model, interview_id, "Call 415-555-0118.",
+                         turn(public_contact="415-555-0118", hours=hours), question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    assert answers.hours == []
+    assert "hours" not in answers.suggested_fields
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert said["owner_fields"] == ["public_contact"]
+    logs = [record.getMessage() for record in caplog.records if record.name == "desk.api.setup"]
+    assert logs == ["setup dropped off-topic field hours"]
 
 
 async def test_off_topic_prices_never_refill_prices_the_owner_cleared(proposals, model, engine, caplog):
@@ -692,8 +723,9 @@ async def test_owner_hours_correction_on_another_question_is_the_owners(proposal
 def test_off_topic_hours_removals_never_add_days_or_change_times(days, start, end, held, supported):
     before = SetupAnswers(summary="Plumbing", hours=[HoursAnswer(days=["mon", "tue"], start="09:00", end="17:00").window()],
                           suggested_fields=["hours"] if held else [])
-    # No turn now carries hours off their topic (FIELD_TURNS), so the removal check is pinned on its own.
-    assert setup._only_removes_hours(before, [HoursAnswer(days=days, start=start, end=end)]) is supported
+    patch = setup.SetupPatch(hours=[HoursAnswer(days=days, start=start, end=end)])
+    backed = setup._backed_off_topic(patch, "contact_and_after_hours", "Call 415-555-0118. Closed Tuesdays now.", before)
+    assert ("hours" in backed) is supported
 
 
 async def test_owner_price_clear_on_another_question_is_the_owners(proposals, model, engine):
@@ -889,6 +921,8 @@ async def test_off_topic_price_titles_must_be_in_the_owners_words(proposals, mod
 @pytest.mark.parametrize("field,topic,text,value", [
     ("public_contact", "hours_and_area", "9am to 5pm weekdays.", "Website: bobs-booking.net"),
     ("service_area", "contact_and_after_hours", "Call 415-555-0118.", "All of California"),
+    ("hours", "contact_and_after_hours", "Call 415-555-0118.",
+     [{"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "start": "08:00", "end": "20:00"}]),
 ])
 async def test_off_topic_website_values_never_replace_owner_facts(proposals, model, engine, field, topic, text, value):
     from tests.api.test_setup_questions import answer, turn
@@ -1003,19 +1037,23 @@ async def test_fact_turn_owns_only_supported_fields(proposals, model, engine, to
 def test_a_fact_is_on_topic_on_every_question_that_asks_for_it():
     from desk.api.prompts import FIELD_TURNS, LIMIT_TURN_FACTS, QUESTION_KEYS
 
-    # A field the turns are scoped for (FIELD_TURNS) is on topic on each of them; any other fact on its own question,
-    # and a fact the quote question records on that question too.
-    expected = {name: set(FIELD_TURNS.get(name, {setup.FACT_TOPICS.get(name)})) - {None}
+    # A structured fact (a value code checks against the owner's words) is on topic only on its home question,
+    # whichever other turns have its field. A free-text field the turns are scoped for (FIELD_TURNS) is on topic on
+    # each of them, any other on its own question, and a fact the quote question records on that question too.
+    homes = {"hours": {"hours_and_area"}, "price_items": {"quote_limit"}, "public_contact": {"contact_and_after_hours"}}
+    expected = {name: homes.get(name) or set(FIELD_TURNS.get(name, {setup.FACT_TOPICS.get(name)})) - {None}
                 for name in setup.SetupPatch.model_fields}
     for name, key in LIMIT_TURN_FACTS.items():
-        expected[name].add(key)
+        expected[name] = expected[name] | {key}
     assert {name: {key for key in QUESTION_KEYS if setup._on_topic(name, key)}
             for name in setup.SetupPatch.model_fields} == expected
     assert {name for name, keys in expected.items() if keys} == {
         "summary", "service_area", "public_contact", "price_items", "pricing", "intake", "urgent", "after_hours", "hours"}
-    # The fixed cases: owner pricing on the quote question, urgent on what_you_do, hours on the contact question.
+    # The fixed cases: owner pricing on the quote question, urgent on what_you_do, and hours at home on the hours
+    # question only, though the contact turn has an hours field too.
     assert setup._on_topic("pricing", "quote_limit") and setup._on_topic("urgent", "what_you_do")
-    assert setup._on_topic("hours", "contact_and_after_hours") and not setup._on_topic("pricing", "hours_and_area")
+    assert not setup._on_topic("pricing", "hours_and_area")
+    assert "contact_and_after_hours" in FIELD_TURNS["hours"] and not setup._on_topic("hours", "contact_and_after_hours")
 
 
 def _policy_turns():
@@ -1082,12 +1120,13 @@ async def test_policy_text_in_a_patch_on_hours_and_area_stays_suggested(
 
 
 @pytest.mark.parametrize("described,text,owned", [
-    ("", "Call 415-555-0118. We're open 9am to 5pm weekdays.", True),
+    ("", "Call 415-555-0118, we're open 9am to 5pm weekdays.", True),
     ("", "Call 415-555-0118. Weekdays 9 to 5.", True),
-    (" We're open 9am to 5pm weekdays.", "Call 415-555-0118.", True),
+    ("", "We're a 9-person team with 5 vans, call 415-555-0118.", False),
+    (" We're open 9am to 5pm weekdays.", "Call 415-555-0118.", False),
     ("", "Call 415-555-0118.", False),
 ])
-async def test_hours_on_the_contact_question_are_the_owners_when_they_state_them(
+async def test_hours_on_the_contact_question_need_a_stated_time_in_that_answer(
         proposals, model, engine, described, text, owned):
     from tests.api.test_setup_questions import answer, turn
 
@@ -1111,6 +1150,29 @@ async def test_hours_on_the_contact_question_are_the_owners_when_they_state_them
     assert ("hours" in answers.suggested_fields) is not owned
     parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
     assert bool(parts.hours) is owned and bool(parts.calendar) is owned
+
+
+async def test_counts_on_the_contact_question_never_replace_the_owners_hours(proposals, model, engine):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, _ = proposals
+    interview_id = state["interview_id"]
+    owned = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "10:00", "end": "18:00"}]
+    await ask_topic(owner, engine, interview_id, "hours_and_area")
+    reply = await answer(owner, model, interview_id, "10am to 6pm weekdays.", turn(hours=owned), question="hours_and_area")
+    assert reply.status_code == 200, reply.text
+    await ask_topic(owner, engine, interview_id, "contact_and_after_hours")
+    website = [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"}]
+    reply = await answer(owner, model, interview_id, "We're a 9-person team with 5 vans, call 415-555-0118.",
+                         turn(public_contact="415-555-0118", hours=website), question="contact_and_after_hours")
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    answers = SetupAnswers.model_validate(record["answers"])
+    said = [entry for entry in record["transcript"] if entry["role"] == "owner"][-1]
+    assert answers.hours == [HoursAnswer(**window).window() for window in owned]
+    assert "hours" not in answers.suggested_fields and "hours" not in said.get("owner_fields", [])
+    parts = setup.seed_parts(answers, "America/Los_Angeles", business_type="trade", today=date(2026, 11, 2))
+    assert parts.hours == answers.hours
 
 
 @pytest.mark.parametrize("source,supported", [("description", True), ("owner", True), ("claude", False),
