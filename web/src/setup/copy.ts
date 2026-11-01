@@ -253,7 +253,9 @@ export const SETUP_COPY = {
 
   live: {
     previewTitle: 'Try it as a customer before anyone else can',
-    previewSubtitle: 'Answering stays off until you go live. Only you can see this preview.',
+    /** The launch bar's two lines under the preview, the first after an info dot. */
+    previewAnsweringOff: 'Answering stays off until you go live.',
+    previewOnlyYou: 'Only you can see this preview.',
     goLive: 'Go live',
     /** After the business's name. */
     isLive: ' is live',

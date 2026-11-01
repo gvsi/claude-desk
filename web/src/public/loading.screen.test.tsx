@@ -127,7 +127,8 @@ it('public_chat_opens_in_spanish_desktop', async () => {
   await expectScreenBasics(document.body, { owner: false });
 });
 
-it('setup_preview_opens_in_place', async () => {
+/** A confirmed setup at its preview step, the Desk's public page not yet read. */
+async function setupAtPreview(): Promise<SetupState> {
   const started = await mockStore.dispatch('startSetup', { body: {
     description: "Rivera Plumbing. I'm Maria, a plumber in Oakland.",
     timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey(),
@@ -143,17 +144,44 @@ it('setup_preview_opens_in_place', async () => {
   await mockStore.dispatch('setupSituations', { params });
   await mockStore.dispatch('setupSafetyCheck', { params });
   await mockStore.dispatch('setupConfirm', { params });
+  return state;
+}
+
+/**
+ * The shapes setup's preview lands on: the interview's owner-name change to "Ask for the owner" is
+ * recorded in setup_preview_ask_moves_once_for_the_owner_name.
+ */
+const PREVIEW_ANCHORS = CHAT_ANCHORS.filter((anchor) => anchor.name !== 'ask-owner');
+
+it.each([
+  ['desktop', PREVIEW_ANCHORS],
+  // On a phone the skeleton's brand header keeps a row for opening hours, which a Desk fresh from
+  // setup doesn't have yet, so the header and the chat's head land 16 px higher than their shapes.
+  // The skeleton draws that row for every Desk; until it doesn't, the phone compares the composer,
+  // which the frame's foot holds in place.
+  ['phone', FIRST_VIEW_ANCHORS.filter((anchor) => anchor.name === 'composer')],
+] as const)('setup_preview_opens_in_place_%s', async (viewport, anchors) => {
+  // The preview's shapes fill its frame, inside the frame's 1 px border, as the page that replaces
+  // them does: on a laptop and on a phone, where the preview is a full-height chat too.
+  const state = await setupAtPreview();
   const read = holdReads(ROUTES.publicDesk.path.replace('{slug}', state.slug));
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    // The interview's owner-name change is recorded in setup_preview_ask_moves_once_for_the_owner_name.
-    anchors: CHAT_ANCHORS.filter((anchor) => anchor.name !== 'ask-owner'),
+    anchors,
     open: async () => {
-      await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100 });
+      await renderRoute(`/app/setup/${state.interview_id}`, { viewport, pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
-      const preview = document.querySelector('.cd-setup-live__preview')!;
-      expect(preview.querySelector('.cd-public-shell--skeleton')).not.toBeNull();
+      const preview = document.querySelector<HTMLElement>('.cd-setup-live__preview')!;
+      const shapes = preview.querySelector<HTMLElement>('.cd-public-shell--skeleton');
+      expect(shapes).not.toBeNull();
       expect(preview.querySelector('.cd-concept-footer')).toBeNull();
+      const frame = preview.getBoundingClientRect();
+      const border = parseFloat(getComputedStyle(preview).borderTopWidth);
+      const filled = shapes!.getBoundingClientRect();
+      expect(Math.abs(filled.top - (frame.top + border))).toBeLessThanOrEqual(1);
+      expect(Math.abs(filled.bottom - (frame.bottom - border))).toBeLessThanOrEqual(1);
+      expect(Math.abs(filled.left - (frame.left + border))).toBeLessThanOrEqual(1);
+      expect(Math.abs(filled.right - (frame.right - border))).toBeLessThanOrEqual(1);
     },
     release: read.release,
   });
