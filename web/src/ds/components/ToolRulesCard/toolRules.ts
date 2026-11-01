@@ -1,8 +1,9 @@
-import type { Effect, RuleCard, ToolName } from '../../../api/contracts.ts';
+import type { Effect, RuleCard } from '../../../api/contracts.ts';
+import type { AnyToolName } from '../../../api/views.ts';
 
 /** A tool as `rulesForTool` reads it: its name and its effects, from its profile or tool row. */
 export interface RulesTool {
-  tool: ToolName;
+  tool: AnyToolName;
   effects: readonly Effect[];
 }
 

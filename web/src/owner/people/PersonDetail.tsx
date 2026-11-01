@@ -15,6 +15,7 @@ import { pollMs } from '../../app/poll.ts';
 import { Breadcrumb, Card, LoadingLine, PageHeader, PersonRules, type PersonRuleView } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { NO_BUSINESS_TOOLS, businessTools, type BusinessTools } from '../connectors/catalog.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { rulesQuery } from '../rules/RuleDraftReview.tsx';
@@ -30,14 +31,14 @@ const rulesPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/rules`
  * The active cards just for `personId`, in card order, as the person's page lists them: what each
  * is on, its reason, what it enforces in the rules' words, its outcome and an auto card's amount.
  */
-export function personRules(cards: readonly RuleCard[], personId: string, people: PeopleOut): PersonRuleView[] {
+export function personRules(cards: readonly RuleCard[], personId: string, people: PeopleOut, business: BusinessTools = NO_BUSINESS_TOOLS): PersonRuleView[] {
   return cards
     .filter((card) => card.who === 'person' && card.person_id === personId)
     .map((card) => {
       const limit = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
       return {
         key: card.card_id,
-        title: targetWords(card.applies_to),
+        title: targetWords(card.applies_to, business),
         rule: { card_id: card.card_id, mode: card.mode, reason: card.reason },
         words: ruleWords(card, people),
         ...(limit === undefined ? {} : { limit }),
@@ -55,7 +56,7 @@ function TheirRules({ deskId, personId, name, people }: { deskId: string; person
   return (
     <>
       <ReadFailed failure={failure} />
-      <PersonRules name={name} rules={personRules(rules.data.active.cards, personId, people)} rulesHref={rulesPath(deskId)} linkComponent={RouterLink} />
+      <PersonRules name={name} rules={personRules(rules.data.active.cards, personId, people, businessTools(rules.data.tools))} rulesHref={rulesPath(deskId)} linkComponent={RouterLink} />
     </>
   );
 }

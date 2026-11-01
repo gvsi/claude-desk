@@ -29,6 +29,7 @@ import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { deskPath, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
+import { BusinessJobs } from './BusinessJobs.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
 import { holdQuestion, hubSections, parseLimit } from './hub.ts';
 import { draftFailure } from './RuleChat.tsx';
@@ -178,6 +179,7 @@ export function RulesPage() {
             {failure.line}
           </Notice>
         )}
+        <BusinessJobs view={rules.data} people={people.data ?? null} />
         <ConnectorList summary={`Version ${active.version} of your rules, checked against the always-on rules`}>
           {sections.map((section) => {
             const editing = limit !== null && limit.group === section.connector.id ? limit : null;

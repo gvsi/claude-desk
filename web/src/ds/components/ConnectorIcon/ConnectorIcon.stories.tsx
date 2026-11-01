@@ -106,3 +106,6 @@ export const Brands: Story = {
     await expect(expectMockBesideExternalNames(canvasElement)).toBe(2);
   },
 };
+
+/** Setup jobs can reuse the tile for a built-in interface glyph. */
+export const Glyph: Story = { args: { icon: 'quotes', glyph: 'conversations', size: 'section' } };
