@@ -84,8 +84,7 @@ finished (`max_tokens`, say), or a call that ran out of time, is 503 at once, wh
 No transaction waits on the model, a read or the kernel. Consent saves its busy state first; its final write and an
 answer lock the row only to check that nothing changed since the snapshot and save (409 `conflict` when something
 did, with nothing saved); every row lock is waited for at most `LOCK_TIMEOUT`, then 409 too. While a turn runs,
-another turn returns the busy state with 202 at once in this process, before taking the guard. A simultaneous fresh
-consent before its first pending commit is still 409.
+another turn is 409 at once in this process, except a busy consent repeat, which answers 202 before taking the guard.
 Another process's changed snapshot is caught when it saves.
 An answer names the question it answers (409 when another is waiting), so two answers can't both answer one question
 and an answer sent twice can't answer the next.
@@ -1377,8 +1376,8 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     """
     interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
-    if interview.busy or (interview.consent is not None and interview_id in _RUNNING):
-        return render(interview, await _slug(owner, desk_id)).model_copy(update={"busy": True})
+    if interview.busy:
+        return render(interview, await _slug(owner, desk_id))
     seen = _stored(interview)
     check(interview)
     guard = contextlib.ExitStack()

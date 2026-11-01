@@ -559,6 +559,51 @@ async def test_accepting_stripe_connects_after_the_decision_commit(proposals, en
     assert [app.model_dump() for app in saved.connected] == [{"app": "stripe", "simulated": False}]
 
 
+async def test_answer_during_post_commit_hook_is_conflict_and_can_be_retried(
+        proposals, app, model, engine, monkeypatch):
+    import asyncio
+    from tests.api.test_setup_questions import turn
+
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    await show_card(engine, interview_id, ids[2])
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def connect(ctx, desk_id):
+        entered.set()
+        await release.wait()
+        return []
+
+    monkeypatch.setattr(setup, "connect_payments", connect)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0.01)
+    model.add(card_answer("accept", next=next_ask("what_you_do")))
+    try:
+        response = await owner.browser.post(path + "/answer?cards=1", json={"card": ids[2], "text": "Yes"})
+        assert response.status_code == 202, response.text
+        await asyncio.wait_for(entered.wait(), 5)
+        visible = await owner.browser.get(path + "?cards=1")
+        assert visible.json()["question"] == "what_you_do"
+        assert visible.json()["busy"] is False
+        before = await stored(engine, interview_id)
+        body = {"question": "what_you_do", "text": "We advise local shops."}
+        rejected = await owner.browser.post(path + "/answer?cards=1", json=body)
+        poll = await owner.browser.get(path + "?cards=1")
+        assert poll.json() == visible.json()
+        assert await stored(engine, interview_id) == before
+        assert (rejected.status_code, rejected.json()) == (409, {"error": "conflict"})
+    finally:
+        release.set()
+        await app.state.runtime.turn_runs.wait(interview_id)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 25)
+    model.add(turn(summary="We advise local shops.", next=next_ask("hours_and_area")))
+    accepted = await owner.browser.post(path + "/answer?cards=1", json=body)
+    assert accepted.status_code == 200, accepted.text
+    saved = await stored(engine, interview_id)
+    assert saved["answers"]["summary"] == "We advise local shops."
+    assert [entry["text"] for entry in saved["transcript"] if entry["role"] == "owner"].count(body["text"]) == 1
+
+
 async def test_typing_accept_connects_stripe_after_the_commit(proposals, model, engine, monkeypatch):
     owner, state, ids = proposals
     interview_id = state["interview_id"]
@@ -926,7 +971,7 @@ async def test_a_connector_without_an_accept_does_not_connect(proposals, model, 
 
 @pytest.mark.parametrize("action", ["decision", "typed", "suggestions"])
 @pytest.mark.parametrize("busy_source", ["pending", "guard"])
-async def test_a_decision_while_busy_is_202(proposals, engine, action, busy_source):
+async def test_pending_turn_is_202_but_guard_contention_is_409(proposals, engine, action, busy_source):
     owner, state, ids = proposals
     path = f"/api/owner/setup/{state['interview_id']}"
     suffix, body = {
@@ -939,7 +984,7 @@ async def test_a_decision_while_busy_is_202(proposals, engine, action, busy_sour
         assert not any(entry.get("pending") for entry in before["transcript"])
         with setup._turn(state["interview_id"]):
             reply = await owner.browser.post(path + suffix, json=body)
-            assert reply.status_code == 202, reply.text
+            assert (reply.status_code, reply.json()) == (409, {"error": "conflict"})
         assert await stored(engine, state["interview_id"]) == before
         return
     row = before
