@@ -232,6 +232,51 @@ async def test_two_pending_starts_claim_distinct_desks_in_created_order(app, bro
     assert await setups(owner) == expected
 
 
+async def test_deleting_an_uncertain_starts_claimed_desk_does_not_claim_the_next_desk(
+        app, browser, kernel_http, model, fake, db):
+    owner = await new_owner(app, browser, kernel_http)
+    seeded = await setups(owner)
+    model.add(started())
+    fake.fail("POST /desks", "timeout", times=1)
+    failed = await owner.browser.post("/api/owner/setup", json=start_body())
+    assert failed.status_code == 503, failed.text
+    ((interview_id,),) = db.execute(
+        "SELECT interview_id FROM app.setup_interviews WHERE copy_id = %s", (owner.copy_id,)).fetchall()
+
+    for number, name in enumerate(("First", "Second", "Third")):
+        fake.now += timedelta(seconds=1)
+        made = await owner.browser.post("/api/owner/desks", json=new_desk(name))
+        assert made.status_code == 201, made.text
+        desk_id = made.json()["desk_id"]
+        expected = {"interview_id": interview_id, "step": "questions"} if number == 0 else None
+        assert await setups(owner) == {**seeded, desk_id: expected}
+        deleted = await owner.browser.delete(f"/api/owner/desks/{desk_id}")
+        assert deleted.status_code == 204, deleted.text
+        assert await setups(owner) == seeded
+
+
+async def test_a_deleted_desks_linked_interview_keeps_it_out_of_pending_claims(
+        app, browser, kernel_http, model, fake, db):
+    owner = await new_owner(app, browser, kernel_http)
+    seeded = await setups(owner)
+    model.add(started())
+    fake.fail("POST /desks", "timeout", times=1)
+    failed = await owner.browser.post("/api/owner/setup", json=start_body())
+    assert failed.status_code == 503, failed.text
+    ((interview_id,),) = db.execute(
+        "SELECT interview_id FROM app.setup_interviews WHERE copy_id = %s", (owner.copy_id,)).fetchall()
+
+    fake.now += timedelta(seconds=1)
+    linked = await begin(owner, model)
+    deleted = await owner.browser.delete(f"/api/owner/desks/{linked['desk_id']}")
+    assert deleted.status_code == 204, deleted.text
+    fake.now += timedelta(seconds=1)
+    made = await owner.browser.post("/api/owner/desks", json=new_desk("Outside setup"))
+    assert made.status_code == 201, made.text
+    assert await setups(owner) == {
+        **seeded, made.json()["desk_id"]: {"interview_id": interview_id, "step": "questions"}}
+
+
 async def test_a_desk_without_an_interview_stays_live_during_another_start(app, browser, kernel_http, model, fake, db,
                                                                          monkeypatch):
     owner = await new_owner(app, browser, kernel_http)

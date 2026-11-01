@@ -827,7 +827,7 @@ async def unfinished_setups(ctx: OwnerCtx, desks: list[dict]) -> dict[str, DeskS
         select(INTERVIEWS.c.desk_id, INTERVIEWS.c.interview_id, INTERVIEWS.c.step,
                INTERVIEWS.c.idempotency_key, INTERVIEWS.c.desk_requested_at, INTERVIEWS.c.start_error)
         .where(INTERVIEWS.c.copy_id == ctx.copy_id,
-               INTERVIEWS.c.desk_id.in_(sorted(ctx.desk_ids)) | (
+               INTERVIEWS.c.desk_id.in_([desk["desk_id"] for desk in desks]) | (
                    INTERVIEWS.c.desk_id.is_(None) & INTERVIEWS.c.idempotency_key.is_not(None)
                    & INTERVIEWS.c.desk_requested_at.is_not(None)))
         .order_by(INTERVIEWS.c.created_at, INTERVIEWS.c.interview_id))
@@ -848,4 +848,4 @@ async def unfinished_setups(ctx: OwnerCtx, desks: list[dict]) -> dict[str, DeskS
                 # stays in setup indefinitely. Desks created before the request keep their live status.
                 found[desk["desk_id"]] = DeskSetup(interview_id=row["interview_id"], step="questions")
                 break
-    return found
+    return {desk_id: setup for desk_id, setup in found.items() if desk_id in ctx.desk_ids}
