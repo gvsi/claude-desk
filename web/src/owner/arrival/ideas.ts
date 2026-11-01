@@ -1,7 +1,7 @@
 /**
  * What the demo suggests trying: the four things the intro dialog lists (and Today's own list
- * titles, with the line each row says once it's done). "Show me ideas" offers `BREAK_IT_IDEAS`
- * (`web/src/lib/breakItIdeas.ts`), which the public page shares.
+ * titles, with the line each row says once it's done). "Show me ideas" offers `breakItIdeas`
+ * (`web/src/lib/breakItIdeas.ts`), in the Desk's own owner's name, which the public page shares.
  */
 import type { IconName } from '../../ds/index.ts';
 import type { UncountedAnswer } from './doneSignals.ts';
