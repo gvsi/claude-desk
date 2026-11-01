@@ -203,10 +203,15 @@ function presenceLine(id: string, ev: EvOwnerJoined | EvOwnerLeft): RowPart<Chat
   return { kind: 'line', row: { kind: 'system', id, ev } };
 }
 
+/** Approval or a resolved outcome ends the visitor's chance to cancel a held request. */
+export function closesHold(ev: SseEvent | null | undefined): ev is StatusEvent {
+  return ev?.type === 'resolved' || (ev?.type === 'receipt' && ev.state === 'approved');
+}
+
 /** A held request can be cancelled until approval or its resolution arrives. */
 function withHolds(openHolds: string[], ev: StatusEvent): string[] {
   if (ev.type === 'held') return openHolds.includes(ev.decision_id) ? openHolds : [...openHolds, ev.decision_id];
-  if (ev.type === 'resolved' || (ev.type === 'receipt' && ev.state === 'approved')) {
+  if (closesHold(ev)) {
     return openHolds.filter((id) => id !== ev.decision_id);
   }
   return openHolds;

@@ -22,7 +22,8 @@ import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../test/screen.ts';
-import { CAUGHT_UP_AFTER_MS } from './PublicChatProvider.tsx';
+import { CAUGHT_UP_AFTER_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
+import { PublicPage } from './PublicPage.tsx';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -534,6 +535,41 @@ describe('public chat page', () => {
     );
     const states = chatEvents().flatMap(({ ev }) => (ev.type === 'resolved' ? [[ev.decision_id, ev.state]] : []));
     expect(states).toEqual(holds.map((id) => [id, 'cancelled']));
+  });
+
+  it('uncertain_cancel_sets_no_failure_when_the_transcript_holds_approval', async () => {
+    let chat: VisitorChatView | undefined;
+    function ObservedPage() {
+      chat = useVisitorChat(RIVERA.slug);
+      return <PublicPage />;
+    }
+    const { screen } = await renderRoute(PAGE, { routes: [{ path: '/d/:slug', Component: ObservedPage }] });
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    const session = mockStore.visitorSession(RIVERA.slug);
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    const record = held?.type === 'held' ? mockStore.world.decisions.get(held.decision_id) : undefined;
+    if (!session || !record) throw new Error('the discount was held');
+
+    let release = () => {};
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'cancelRequest', status: 'network', until });
+    await screen.getByRole('button', { name: 'Cancel this request' }).click();
+    await vi.waitFor(() => expect(requests('cancelRequest')).toHaveLength(1));
+    mockStore.world.answer(record, 'allow_once');
+    const approved = record.approved;
+    if (!approved) throw new Error('the owner approved the discount');
+    mockStore.world.emit(session, mockStore.world.context(session, 'en', '').status('receipt', approved));
+    await expect.element(screen.getByText(approved.visitor_plain, { exact: true })).toBeVisible();
+    expect(chatEvents().some(({ ev }) => ev.type === 'resolved')).toBe(false);
+
+    const reads = requests('visitorSession').length;
+    release();
+    await vi.waitFor(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await vi.waitFor(() => expect(chat?.cancelling).toBeNull());
+    expect(chat?.cancelFailed).toBeNull();
+    expect(chat?.state.openHolds).toEqual([]);
   });
 
   it('error_event_shows_static_copy', async () => {
