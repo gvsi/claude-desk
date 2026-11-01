@@ -56,6 +56,9 @@ function watchLoad(load: SkeletonLoad) {
   let firstBusy: string | null = null;
   let leaving: { style: { name: string; duration: string; pointer: string }; anchors: (DOMRect | undefined)[] } | undefined;
   let replaced: (DOMRect | undefined)[] | undefined;
+  let replacementFrame = 0;
+  let replacementPaint: Promise<void> | undefined;
+  let replacementPainted = false;
   // Several regions can load together. Keep each mount's history until its status identifies it.
   const candidates = new Map<
     HTMLElement,
@@ -110,14 +113,24 @@ function watchLoad(load: SkeletonLoad) {
         anchors: load.anchors.map(() => undefined),
       };
     }
-    if (state === 'gone') replaced ??= load.anchors.map(() => undefined);
+    if (state === 'gone' && !replaced) {
+      replaced = load.anchors.map(() => undefined);
+      replacementPaint = new Promise<void>((resolve) => {
+        replacementFrame = requestAnimationFrame(() => {
+          // Include commits before the replacement's first paint, then freeze missing slots too.
+          read();
+          replacementPainted = true;
+          resolve();
+        });
+      });
+    }
     if (state === 'leaving' || state === 'gone') {
-      // A page can commit its anchors separately. Keep each first landing, even if the fade
-      // has already ended, and retry missing anchors on later mutations of the same state.
+      // A page can commit its anchors separately during the fade. Never backfill a leaving
+      // position from a later commit after the layer has gone.
       load.anchors.forEach((anchor, i) => {
         const rect = findLanded(anchor.page)?.getBoundingClientRect();
-        if (leaving) leaving.anchors[i] ??= rect;
-        if (replaced) replaced[i] ??= rect;
+        if (state === 'leaving' && leaving) leaving.anchors[i] ??= rect;
+        if (replaced && !replacementPainted) replaced[i] ??= rect;
       });
     }
   };
@@ -129,7 +142,11 @@ function watchLoad(load: SkeletonLoad) {
     attributes: true,
     attributeFilter: ['data-state', 'aria-busy'],
   });
-  onTestFinished(() => observer.disconnect());
+  const stop = () => {
+    observer.disconnect();
+    cancelAnimationFrame(replacementFrame);
+  };
+  onTestFinished(stop);
   return {
     states,
     appeared: () => appeared,
@@ -143,7 +160,8 @@ function watchLoad(load: SkeletonLoad) {
     },
     leaving: () => leaving,
     replaced: () => replaced,
-    stop: () => observer.disconnect(),
+    replacementPaint: () => replacementPaint,
+    stop,
   };
 }
 
@@ -215,12 +233,20 @@ async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: Retur
   const stays = (load.stays ?? []).map((selector) => landed(selector).getBoundingClientRect());
   load.release();
   await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'gone')).toBe(true));
+  await watch.replacementPaint();
+  if (!still) expect(watch.leaving(), 'the layer never started leaving').toBeDefined();
+  for (const [i, anchor] of load.anchors.entries()) {
+    const label = `${anchor.name} (${anchor.page})`;
+    if (!still) expect(watch.leaving()?.anchors[i], `${label} was not on the page while the layer faded`).toBeDefined();
+    expect(watch.replaced()?.[i], `${label} was not on the page at the first paint after replacement`).toBeDefined();
+  }
+  let final: DOMRect[] = [];
   await vi.waitFor(() => {
-    for (const [i, anchor] of load.anchors.entries()) {
-      const missing = `${anchor.name} (${anchor.page}) never landed within 2000 ms`;
-      if (!still) expect(watch.leaving()?.anchors[i], `${missing} after the layer started leaving`).toBeDefined();
-      expect(watch.replaced()?.[i], `${missing} after the layer was gone`).toBeDefined();
-    }
+    final = load.anchors.map((anchor) => {
+      const element = findLanded(anchor.page);
+      expect(element, `${anchor.name} (${anchor.page}) never landed within 2 s of the layer being gone`).toBeDefined();
+      return element!.getBoundingClientRect();
+    });
   }, { timeout: 2_000 });
   if (still) {
     expect(watch.states.some(({ state }) => state === 'leaving')).toBe(false);
@@ -233,8 +259,8 @@ async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: Retur
     const moment = still ? watch.replaced() : watch.leaving()?.anchors;
     compare(anchors[i]!, moment![i]!, anchor.name, anchor.size, anchor.dimensions);
     compare(anchors[i]!, watch.replaced()![i]!, anchor.name, anchor.size, anchor.dimensions);
-    compare(watch.replaced()![i]!, landed(anchor.page).getBoundingClientRect(), `${anchor.name} after gone`, true);
-    compare(anchors[i]!, landed(anchor.page).getBoundingClientRect(), anchor.name, anchor.size, anchor.dimensions);
+    compare(watch.replaced()![i]!, final[i]!, `${anchor.name} after gone`, true);
+    compare(anchors[i]!, final[i]!, anchor.name, anchor.size, anchor.dimensions);
   }
   (load.stays ?? []).forEach((selector, i) => compare(stays[i]!, landed(selector).getBoundingClientRect(), selector, true));
   expect(watch.parts().body.hasAttribute('aria-busy')).toBe(false);
