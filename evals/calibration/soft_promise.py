@@ -102,6 +102,7 @@ from desk.kernel_service import decisions, reply_check
 from desk.kernel_service.decisions import AnthropicDecisions, CallUsage, SoftPromiseInput, SoftPromiseVerdict
 from desk.next_steps import BUSINESS_BLOCK_STEPS, NEXT_STEPS
 from evals import results
+from evals.pricing import PRICES as MODEL_PRICES, NoPrice, cost_usd, price_of
 from evals.tier2.passes import (
     CALIBRATION_PREFIX,
     PassRefused,
@@ -124,9 +125,22 @@ CHARS_PER_TOKEN = 2
 REQUEST_TOKENS = 1_000
 # List prices in US dollars per million tokens, by model: input, cache read, 5-minute cache write and
 # output (the master plan's "Model cost and latency budget").
-PRICES: dict[str, dict[str, float]] = {
-    "claude-haiku-5-5": {"input": 0.10, "cache_read": 0.01, "cache_write": 0.125, "output": 0.50},
-}
+PRICES = {model: {kind: float(getattr(price, kind))
+                  for kind in ("input", "cache_read", "cache_write", "output")}
+          for model, price in MODEL_PRICES["anthropic"].items()}
+SONNET_MODEL = "claude-sonnet-5-5"
+Candidate = Literal["haiku", "sonnet"]
+
+
+def candidate_model(candidate: Candidate) -> str:
+    return SONNET_MODEL if candidate == "sonnet" else decisions.SOFT_PROMISE_MODEL
+
+
+def per_call_usd(candidate: Candidate) -> float:
+    # Keep the existing Haiku token allowance, scaled by the candidate's list prices.
+    base = price_of(decisions.SOFT_PROMISE_MODEL, "anthropic")
+    price = price_of(candidate_model(candidate), "anthropic")
+    return PER_CALL_USD * float(max(price.input / base.input, price.output / base.output))
 VERDICTS = ("pass", "flag", "flag_ai", "flag_both", "error")
 # A sample meets `flag` when promises_beyond_cards is set and `flag_ai` when denies_being_ai is,
 # whatever the other flag says: either one blocks the reply, so `flag_both` meets both.
@@ -308,12 +322,25 @@ def anthropic_client(key: str) -> Any:
 def priced(usage: CallUsage | None) -> float | None:
     """A call's cost at its model's list prices, or None when it can't be priced: no usage, no
     tokens, or a model `PRICES` doesn't hold."""
-    if usage is None or (rates := PRICES.get(usage.model)) is None:
+    if usage is None:
         return None
     if not (usage.input_tokens or usage.cached_tokens or usage.cache_write_tokens or usage.output_tokens):
         return None
-    return (usage.input_tokens * rates["input"] + usage.cached_tokens * rates["cache_read"]
-            + usage.cache_write_tokens * rates["cache_write"] + usage.output_tokens * rates["output"]) / 1_000_000
+    try:
+        # SDK output_tokens already includes thinking; never add thinking_tokens again.
+        return cost_usd(usage.model_dump(), usage.model, "anthropic")
+    except NoPrice:
+        return None
+
+
+class SonnetSoftPromise(AnthropicDecisions):
+    """Experiment-only candidate; production's soft check continues to use Haiku."""
+
+    async def soft_promise(self, data: BaseModel) -> tuple[SoftPromiseVerdict | None, CallUsage]:
+        return await self._ask(
+            SoftPromiseVerdict, data, model=SONNET_MODEL, max_tokens=decisions.SOFT_PROMISE_MAX_TOKENS,
+            system=decisions.SOFT_PROMISE_SYSTEM, schema=decisions.SOFT_PROMISE_SCHEMA,
+            thinking={"type": "adaptive"}, timeout_s=6.0, failed="soft_promise_failed")
 
 
 class OldSoftPromiseInput(BaseModel):
@@ -342,14 +369,14 @@ def input_sha256(data: SoftPromiseInput | OldSoftPromiseInput) -> str:
     return hashlib.sha256(request_message(data).encode()).hexdigest()
 
 
-def call_bound(system: str, data: SoftPromiseInput | OldSoftPromiseInput) -> float:
+def call_bound(system: str, data: SoftPromiseInput | OldSoftPromiseInput, candidate: Candidate = "haiku") -> float:
     """An upper bound on one call's cost, in dollars: at most one input token for every
     `CHARS_PER_TOKEN` characters of the system prompt and of the request's one message (`data` as
     the kernel sends it), plus `REQUEST_TOKENS`, all at the higher of the input and cache-write
     prices, and the most the check may answer, `SOFT_PROMISE_MAX_TOKENS` at the output price."""
     message = request_message(data)
     input_tokens = math.ceil((len(system) + len(message)) / CHARS_PER_TOKEN) + REQUEST_TOKENS
-    rates = PRICES[decisions.SOFT_PROMISE_MODEL]
+    rates = PRICES[candidate_model(candidate)]
     return (input_tokens * max(rates["input"], rates["cache_write"])
             + decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"]) / 1_000_000
 
@@ -362,6 +389,7 @@ class _Meter:
     def __init__(self, cap: float):
         self.cap, self.spent, self.reserved, self.calls, self.estimated = cap, 0.0, 0.0, 0, 0
         self.estimated_usd = 0.0
+        self.usage: list[CallUsage] = []
 
     def start(self, bound: float) -> bool:
         """Whether a call with this bound may start: the spend so far, the bounds of the calls in
@@ -375,6 +403,8 @@ class _Meter:
 
     def end(self, bound: float, usage: CallUsage | None) -> None:
         self.reserved -= bound
+        if usage is not None:
+            self.usage.append(usage)
         usd = priced(usage)
         if usd is None:
             usd, self.estimated = bound, self.estimated + 1
@@ -471,6 +501,7 @@ class RunResult(BaseModel):
     spend_row: str
     cases: list[CaseResult]
     input_shape: Literal["old", "new"] = "old"
+    call_usage: list[CallUsage] = Field(default_factory=list)
 
 
 class Config(BaseModel):
@@ -484,6 +515,7 @@ class Config(BaseModel):
     label: str | None = None
     concurrency: int = Field(4, ge=1)
     input_shape: Literal["old", "new"] = "new"
+    candidate: Candidate = "haiku"
 
 
 @dataclass
@@ -546,10 +578,11 @@ async def run(config: Config, deps: Deps, *, cases: tuple[Case, ...] | None = No
     if not LABEL.fullmatch(label):
         raise Refused("--label is up to 64 letters, digits, '.', '_' and '-', starting with a letter or digit")
     planned = len(cases) * config.samples
-    estimate = round(planned * PER_CALL_USD, 6)
+    unit_estimate = per_call_usd(config.candidate)
+    estimate = round(planned * unit_estimate, 6)
     if estimate > config.max_usd + EPSILON:
         raise Refused(f"the estimate ${estimate:.4f} for {planned} calls ({len(cases)} cases, {config.samples} "
-                      f"samples each, at ${PER_CALL_USD:.4f} a call) is over --max-usd ${config.max_usd:.4f}")
+                      f"samples each, at ${unit_estimate:.4f} a call) is over --max-usd ${config.max_usd:.4f}")
     spend_file = deps.spend_file or shared_spend_file(deps.root)
     month_guard(deps, spend_file, estimate)
     key = api_key()
@@ -566,9 +599,9 @@ async def run(config: Config, deps: Deps, *, cases: tuple[Case, ...] | None = No
                                    code_blocked=code_blocked(case), majority_required=case.majority_required,
                                    requested=config.samples) for case in cases}
     wire_client = _WithSystem(deps.client(key), prompt.text, request_hashes)
-    checker = AnthropicDecisions(wire_client)
+    checker = (SonnetSoftPromise if config.candidate == "sonnet" else AnthropicDecisions)(wire_client)
     meter = _Meter(config.max_usd)
-    bounds = {case.id: call_bound(prompt.text, inputs[case.id]) for case in cases}
+    bounds = {case.id: call_bound(prompt.text, inputs[case.id], config.candidate) for case in cases}
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next
     position = 0
 
@@ -604,12 +637,12 @@ async def run(config: Config, deps: Deps, *, cases: tuple[Case, ...] | None = No
     outcome = RunResult(
         label=label, created_at=now, git_sha=git_sha,
         prompt=PromptRecord(source=prompt.source, sha256=prompt.sha256, text=prompt.text),
-        model=decisions.SOFT_PROMISE_MODEL, samples=config.samples, concurrency=config.concurrency,
-        max_usd=config.max_usd, per_call_usd=PER_CALL_USD, estimate_usd=estimate, spend_usd=round(meter.spent, 6),
+        model=candidate_model(config.candidate), samples=config.samples, concurrency=config.concurrency,
+        max_usd=config.max_usd, per_call_usd=unit_estimate, estimate_usd=estimate, spend_usd=round(meter.spent, 6),
         calls=meter.calls, estimated_calls=meter.estimated, stopped_by_cap=meter.calls < len(jobs),
         over_cap=meter.over, spend_row=row_id + ("-estimated" if meter.estimated else ""),
         cases=list(tallies.values()),
-        input_shape=config.input_shape,
+        input_shape=config.input_shape, call_usage=meter.usage,
     )
     deps.out_dir.mkdir(parents=True, exist_ok=True)
     path = deps.out_dir / f"{label}-{stamp}.json"

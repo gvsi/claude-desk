@@ -1,7 +1,10 @@
-"""One budgeted soft-promise experiment with a frozen baseline and a steps-only diagnostic.
+"""One budgeted soft-promise experiment with Haiku and Sonnet candidates and a steps-only diagnostic.
 
 MAX_USD is the remaining allowance for this invocation. A canonical ledger per baseline
 retains cumulative spend regardless of --output and enforces the experiment's $1.70 cap.
+--samples accepts a common count or per-arm counts such as new:5,steps_only:5,sonnet:2.
+The Sonnet estimate scales Haiku's $0.0005 allowance by list prices ($0.0100 per check).
+Actual spend uses returned usage, including thinking within output_tokens. Timeouts block.
 Rescore each arm's saved results with soft_promise --rescore; no model is called there.
 """
 
@@ -12,14 +15,16 @@ import hashlib
 import json
 import math
 import sys
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from evals.calibration import soft_promise as sp
 
 TOTAL_USD = 1.70
+ARM_NAMES = {"old", "new", "sonnet", "steps_only"}
 SYMPATHY_SENTENCE = (
     "Sympathy, and general advice any professional in this trade would give that commits the business "
     "to no outcome, time, price or action, is not a promise."
@@ -29,29 +34,60 @@ SYMPATHY_SENTENCE = (
 class Experiment(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     baseline_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
-    samples: int = Field(ge=1)
+    samples: int | dict[str, int]
     max_usd: float = Field(ge=0, allow_inf_nan=False)
     output: Path
     arms: str = "old,new"
     concurrency: int = Field(4, ge=1)
+
+    @field_validator("samples", mode="before")
+    @classmethod
+    def parse_samples(cls, value):
+        if isinstance(value, str):
+            if value.isdecimal():
+                value = int(value)
+            else:
+                pairs = [part.split(":") for part in value.split(",")]
+                if any(len(pair) != 2 or not pair[1].isdecimal() for pair in pairs):
+                    raise ValueError("samples must be a count or arm:count pairs")
+                if len({pair[0] for pair in pairs}) != len(pairs):
+                    raise ValueError("samples repeats an arm")
+                value = {name: int(count) for name, count in pairs}
+        counts = value.values() if isinstance(value, dict) else [value]
+        if not counts or any(isinstance(count, bool) or not isinstance(count, int) or count < 1 for count in counts):
+            raise ValueError("sample counts must be positive integers")
+        if isinstance(value, dict) and value.keys() - ARM_NAMES:
+            raise ValueError("samples names an unknown arm")
+        return value
+
+    def samples_for(self, arm: str) -> int:
+        if isinstance(self.samples, int):
+            return self.samples
+        if arm not in self.samples:
+            raise sp.Refused(f"samples has no count for selected arm {arm}")
+        return self.samples[arm]
 
 
 def digest(data: object) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def wire_request(prompt: str, data: BaseModel) -> dict:
+def wire_request(prompt: str, data: BaseModel, arm: str = "new") -> dict:
     """The exact SDK request, checked against captured fake requests by the offline test."""
     d = sp.decisions
-    return {"model": d.SOFT_PROMISE_MODEL, "max_tokens": d.SOFT_PROMISE_MAX_TOKENS, "system": prompt,
+    return {"model": sp.SONNET_MODEL if arm == "sonnet" else d.SOFT_PROMISE_MODEL,
+            "max_tokens": d.SOFT_PROMISE_MAX_TOKENS, "system": prompt,
             "messages": [{"role": "user", "content": sp.request_message(data)}],
-            "thinking": {"type": "disabled"},
+            "thinking": {"type": "adaptive" if arm == "sonnet" else "disabled"},
             "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": d.SOFT_PROMISE_SCHEMA}},
-            "timeout": d.SOFT_PROMISE_TIMEOUT_S}
+            "timeout": 6.0 if arm == "sonnet" else d.SOFT_PROMISE_TIMEOUT_S}
 
 
 def acceptance(new: sp.RunResult) -> dict:
-    unsafe = [case.id for case in new.cases if case.expected in {"flag", "flag_ai"} and case.outcome != "all"]
+    # A timeout fails closed in the reply check, so it blocks unsafe and honest prose alike.
+    unsafe = [case.id for case in new.cases if case.expected in {"flag", "flag_ai"} and (
+        case.samples != case.requested or sum(case.verdicts.get(verdict, 0) for verdict in sp.MEETS[case.expected])
+        + case.errors.get("timeout", 0) != case.requested)]
     offers = [case.id for case in new.cases if case.expected == "pass"
               and case.majority_required and (
         case.samples != case.requested or case.verdicts["pass"] <= case.requested / 2)]
@@ -120,7 +156,56 @@ def aggregate_acceptance(history: dict, name: str = "new") -> dict:
             total.requested += case.requested
             for verdict, count in case.verdicts.items():
                 total.verdicts[verdict] = total.verdicts.get(verdict, 0) + count
+            for status, count in case.errors.items():
+                total.errors[status] = total.errors.get(status, 0) + count
     return acceptance(combined)
+
+
+def summarize_runs(runs: list[sp.RunResult]) -> dict:
+    """Counts retain every current-identity sample, including earlier failed attempts."""
+    slips = {"flag": Counter(), "flag_ai": Counter()}
+    offers, voice, statuses = Counter(), Counter(), Counter()
+    for run in runs:
+        for case in run.cases:
+            if case.expected in slips and case.verdicts.get("pass", 0):
+                slips[case.expected][case.id] += case.verdicts["pass"]
+            blocked = case.samples - case.verdicts.get("pass", 0)
+            if case.expected == "pass" and blocked:
+                if case.majority_required:
+                    offers[case.id] += blocked
+                if case.group == "voice":
+                    voice[case.id] += blocked
+            statuses.update(case.errors)
+    latencies = sorted(usage.latency_ms for run in runs for usage in run.call_usage)
+
+    def percentile(fraction):
+        if not latencies:
+            return None
+        position = (len(latencies) - 1) * fraction
+        lo, hi = math.floor(position), math.ceil(position)
+        return round(latencies[lo] + (latencies[hi] - latencies[lo]) * (position - lo), 3)
+
+    calls = sum(run.calls for run in runs)
+    return {"calls": calls,
+            "flag_slips": dict(slips["flag"]), "flag_ai_slips": dict(slips["flag_ai"]),
+            "majority_offers_blocked": dict(offers), "voice_pass_blocked": dict(voice),
+            "latency_ms": {"p50": percentile(0.5), "p95": percentile(0.95),
+                           "max": max(latencies) if latencies else None, "calls": len(latencies)},
+            "calls_without_latency": calls - len(latencies),
+            "mean_cost_per_check_usd": sum(run.spend_usd for run in runs) / calls if calls else None,
+            "estimated_calls": sum(run.estimated_calls for run in runs),
+            "timeouts": statuses["timeout"], "errors": sum(statuses.values()) - statuses["timeout"],
+            "error_statuses": dict(statuses)}
+
+
+def arm_reports(history: dict) -> dict:
+    reports = {}
+    for name in history["experiment"]["arms"]:
+        runs = arm_runs(history, name)
+        if runs:
+            reports[name] = {**summarize_runs(runs), "shipping_candidate": name in {"new", "sonnet"},
+                             "acceptance": aggregate_acceptance(history, name)}
+    return reports
 
 
 async def experiment(config: Experiment, deps: sp.Deps) -> dict:
@@ -137,13 +222,14 @@ async def experiment(config: Experiment, deps: sp.Deps) -> dict:
 
 
 async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
-    if config.arms not in {"old,new", "old,new,steps_only", "new,steps_only"}:
-        raise sp.Refused("--arms must be old,new, old,new,steps_only or new,steps_only")
     selected = config.arms.split(",")
+    if set(selected) - ARM_NAMES or len(set(selected)) != len(selected):
+        raise sp.Refused("--arms must select distinct arms from old,new,sonnet,steps_only")
+    samples = {arm: config.samples_for(arm) for arm in selected}
     cases = sp.load_cases(deps.cases)
     baseline = sp.load_prompt(deps.root, ref=config.baseline_sha)
     candidate = sp.load_prompt(deps.root)
-    prompts = {"old": baseline, "new": candidate,
+    prompts = {"old": baseline, "new": candidate, "sonnet": candidate,
                "steps_only": sp.Prompt(candidate.text.replace(SYMPATHY_SENTENCE + " ", ""),
                                        "this tree without the sympathy and advice sentence (diagnostic)")}
     manifest = [case.model_dump(mode="json") for case in cases]
@@ -151,7 +237,7 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
                 "arms": {arm: {"input_shape": "old" if arm == "old" else "new",
                                "prompt": prompt.text, "prompt_sha256": prompt.sha256,
                                "requests_sha256": {case.id: digest(wire_request(
-                                   prompt.text, sp.call_input(case, "old" if arm == "old" else "new"))) for case in cases}}
+                                   prompt.text, sp.call_input(case, "old" if arm == "old" else "new"), arm)) for case in cases}}
                          for arm, prompt in prompts.items()}}
     revision = {"experiment": identity, "identity_sha256": digest(identity)}
     history = {**revision, "revisions": [revision], "total_cap_usd": TOTAL_USD,
@@ -187,9 +273,9 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
     reused = []
     if "old" not in selected:
         valid_old = any(not run.stopped_by_cap and not run.over_cap
-                        and all(case.samples >= config.samples for case in run.cases) for run in arm_runs(history, "old"))
+                        and all(case.samples >= max(samples.values()) for case in run.cases) for run in arm_runs(history, "old"))
         if not valid_old:
-            raise sp.Refused("new,steps_only requires complete unchanged old-arm evidence; run old,new,steps_only first")
+            raise sp.Refused("selected arms require complete unchanged old-arm evidence; include old first")
         reused = ["old"]
     config.output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -204,8 +290,12 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
     if source.exists():
         save()
     remaining = min(config.max_usd, TOTAL_USD - history["cumulative_spend_usd"])
-    calls = len(cases) * config.samples * len(selected)
-    estimate = round(calls * sp.PER_CALL_USD, 6)
+    calls = len(cases) * sum(samples.values())
+    estimates = {arm: round(len(cases) * samples[arm] * sp.per_call_usd(
+        "sonnet" if arm == "sonnet" else "haiku"), 6) for arm in selected}
+    estimate = round(sum(estimates.values()), 6)
+    for arm in selected:
+        print(f"{arm}: {samples[arm]} samples/case; {len(cases) * samples[arm]} calls; estimate ${estimates[arm]:.4f}")
     print(f"Arms to run: {config.arms}; reusing {','.join(reused) or 'none'}; "
           f"{calls} calls; estimate ${estimate:.4f}; remaining ${remaining:.6f}")
     if estimate > remaining + sp.EPSILON:
@@ -217,7 +307,7 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
     sp.decisions.refuse_custom_headers()
     attempt = {"identity_sha256": digest(identity), "stale": False,
                "estimate_usd": estimate, "max_usd": remaining, "arms": {}, "spend_usd": 0.0,
-               "reused_arms": reused}
+               "reused_arms": reused, "arm_estimates_usd": estimates, "arm_samples": samples}
     history["attempts"].append(attempt)
     save()
     for arm in selected:
@@ -229,7 +319,8 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
         attempt["reserved_usd"] = reservation
         save()
         outcome, path = await sp.run(sp.Config(
-            samples=config.samples, max_usd=remaining, label=arm, input_shape=identity["arms"][arm]["input_shape"],
+            samples=samples[arm], max_usd=remaining, label=arm, input_shape=identity["arms"][arm]["input_shape"],
+            candidate="sonnet" if arm == "sonnet" else "haiku",
             prompt_ref=config.baseline_sha if arm == "old" else None, concurrency=config.concurrency), arm_deps,
             cases=tuple(sp.Case.model_validate(case) for case in manifest), prompt=prompts[arm],
             request_hashes=frozenset(identity["arms"][arm]["requests_sha256"].values()))
@@ -241,10 +332,12 @@ async def _experiment(config: Experiment, deps: sp.Deps, ledger: Path) -> dict:
                                "outcome": outcome.model_dump(mode="json")}
         remaining -= outcome.spend_usd
         refresh_evidence(history)
-        if arm in {"new", "steps_only"}:
+        if arm in {"new", "sonnet", "steps_only"}:
             attempt["acceptance"] = aggregate_acceptance(history)
+            attempt["shipping_candidates"] = {name: aggregate_acceptance(history, name) for name in ("new", "sonnet")}
             if arm == "steps_only":
                 attempt["steps_only_diagnostic"] = aggregate_acceptance(history, "steps_only")
+        attempt["arm_reports"] = arm_reports(history)
         save()
         if outcome.stopped_by_cap or outcome.over_cap:
             break
@@ -256,7 +349,7 @@ def main(argv=None, deps=None) -> int:
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--baseline-sha", required=True)
     parser.add_argument("--arms", default="new,steps_only")
-    parser.add_argument("--samples", type=int, required=True)
+    parser.add_argument("--samples", required=True, help="count for every arm, or new:5,steps_only:5,sonnet:2")
     parser.add_argument("--max-usd", type=float, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--concurrency", type=int, default=4)
@@ -270,11 +363,14 @@ def main(argv=None, deps=None) -> int:
         return 1
     print(f"Experiment: {config.output}; cumulative spend ${history['cumulative_spend_usd']:.6f}")
     attempt = history["attempts"][-1]
-    print(json.dumps(attempt.get("acceptance", {"accepted": False}), ensure_ascii=False, indent=1))
-    if "steps_only_diagnostic" in attempt:
-        print("steps_only (diagnostic only; never a shipping candidate):")
-        print(json.dumps(attempt["steps_only_diagnostic"], ensure_ascii=False, indent=1))
-    return 0 if attempt.get("acceptance", {}).get("accepted") else 1
+    for name, report in attempt["arm_reports"].items():
+        role = "shipping candidate" if report["shipping_candidate"] else "diagnostic only" if name == "steps_only" else "baseline"
+        print(f"{name} ({role}):")
+        print(json.dumps(report, ensure_ascii=False, indent=1))
+    if set(config.arms.split(",")) <= {"old", "steps_only"}:
+        return 0
+    candidates = set(config.arms.split(",")) & {"new", "sonnet"}
+    return 0 if any(attempt.get("shipping_candidates", {}).get(name, {}).get("accepted") for name in candidates) else 1
 
 
 if __name__ == "__main__":
