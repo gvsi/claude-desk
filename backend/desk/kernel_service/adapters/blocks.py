@@ -10,7 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
 from desk.contracts import BusinessToolDef, Claim, Fact, Label, NormalizedAction, ResourceRef, ToolName, ToolProfile
-from desk.db.models import Quote, Tool
+from desk.db.models import Action as ActionRow
+from desk.db.models import PaymentLink, Quote, Tool
 from desk.kernel_service import demo_inbox, labels, render
 from desk.kernel_service.adapters import payment_link, profile_sha256, quote, request_callback
 from desk.kernel_service.adapters.base import (Adapter, AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown,
@@ -124,14 +125,16 @@ class UrgentAdapter(request_callback.RequestCallbackAdapter):
         return await request_callback.open_callback(xctx, action, args, alert=alert, scheduled=False)
 
 
-
 class PurposePaymentAdapter(payment_link.PaymentLinkAdapter):
-    """One owner-priced purpose, quoted and linked through the native payment machinery."""
+    """One owner-priced purpose, quoted and linked through the native payment machinery. Asked again in
+    the same session, it answers with the session's open link for the tool at the same purpose and
+    amount rather than make a second one the visitor could pay twice."""
 
     Args = PurposePaymentArgs
     free_text_fields = frozenset()
     model_view_keys = payment_link.PaymentLinkAdapter.model_view_keys
     releases_private_data = False
+    locks_session = True                  # one open link per tool in a session: the session row FOR UPDATE in T2
 
     def __init__(self, stored: ToolProfile):
         if stored.business is None or stored.business.config.block != "purpose_payment":
@@ -143,11 +146,16 @@ class PurposePaymentAdapter(payment_link.PaymentLinkAdapter):
         return Normalized(resource=ResourceRef(kind="desk", id=nctx.desk_row.desk_id, owner_person_id=None),
                           list_cents=amount, discount_bp=0, amount_cents=amount)
 
-    async def _quote(self, xctx: ExecCtx, action: NormalizedAction) -> tuple[Quote, Fact]:
+    def _priced(self, action: NormalizedAction) -> None:
+        """The configuration still prices the action, else `price_changed`, with nothing written."""
         config = self.profile.business.config
         if (config.amount_cents, 0, config.amount_cents) != (
                 action.list_cents, action.discount_bp, action.amount_cents):
             raise AdapterFailure("price_changed")
+
+    async def _quote(self, xctx: ExecCtx, action: NormalizedAction) -> tuple[Quote, Fact]:
+        self._priced(action)
+        config = self.profile.business.config
         return await quote.write_quote(xctx, action, [
             {"item_id": action.tool, "title": config.purpose, "qty": 1, "unit_cents": config.amount_cents}])
 
@@ -158,8 +166,35 @@ class PurposePaymentAdapter(payment_link.PaymentLinkAdapter):
         _, fact = found
         return result.model_copy(update={"facts": [fact, *result.facts]})
 
+    async def _open_link(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
+        """The session's newest open link from an earlier action of this tool, at this purpose and
+        amount, as payment_link's open-link answer gives it, under its quote's lock and check
+        (`payable_quote`): a quote being paid fails the call, and a paid or ended one answers nothing.
+        Executions in one session take turns (`locks_session`), so two calls make one link."""
+        ctx, session_id = xctx.ctx, xctx.session_row.session_id
+        found = (await ctx.db.execute(ctx.repo.scoped(select(
+            PaymentLink.quote_id, PaymentLink.created_at, PaymentLink.link_id).join(
+            ActionRow, ActionRow.action_id == PaymentLink.action_id).where(
+            PaymentLink.desk_id == action.desk_id, PaymentLink.session_id == session_id,
+            PaymentLink.state == "issued", PaymentLink.expires_at > ctx.clock.now(),
+            PaymentLink.amount_cents == action.amount_cents,
+            PaymentLink.title == self.profile.business.config.purpose, ActionRow.tool == action.tool)))).all()
+        if not found:
+            return None
+        newest = max(found, key=lambda row: (row.created_at, row.link_id))
+        payable = await payment_link.payable_quote(ctx, action.desk_id, newest.quote_id, session_id, lock=True,
+                                                   action_id=action.action_id)
+        if isinstance(payable, str):
+            if payable in (payment_link.NO_SUCH_QUOTE, "quote_paid"):
+                return None
+            raise AdapterFailure(payable)        # being paid: that payment settles before another link
+        return await payment_link.open_link_answer(ctx, action, payable[0])
+
     async def execute(self, xctx: ExecCtx, action: NormalizedAction, args: PurposePaymentArgs) -> AdapterResult:
         approved, version = await payment_link.execution_rules(xctx, action)
+        self._priced(action)
+        if (answer := await self._open_link(xctx, action)) is not None:
+            return answer
         row, _ = await self._quote(xctx, action)
         result = await payment_link.issue_for_quote(xctx, action, row.quote_id, approved=approved, version=version)
         return await self._with_quote(xctx, action, result)

@@ -222,6 +222,16 @@ async def execution_rules(xctx: ExecCtx, action: NormalizedAction) -> tuple[bool
     return approved, version
 
 
+async def open_link_answer(ctx: KernelCtx, action: NormalizedAction, quote_row: Quote) -> AdapterResult | None:
+    """The quote's open link (`payments.open_link_fact`) as this action's result, or None when it has
+    none: no second checkout or link, and nothing held for this action, since the open link holds what
+    it needs. The caller holds the quote's row `FOR UPDATE`."""
+    if (open_fact := await payments.open_link_fact(ctx, quote_row)) is None:
+        return None
+    await mandates.release(ctx, action.action_id)
+    return AdapterResult(facts=[open_fact], model_view=model_view(open_fact))
+
+
 async def issue_for_quote(xctx: ExecCtx, action: NormalizedAction, quote_id: str, *,
                           approved: bool, version: int | None) -> AdapterResult:
     """The shared locked quote, open-link, provider-idempotency and issue path."""
@@ -233,11 +243,8 @@ async def issue_for_quote(xctx: ExecCtx, action: NormalizedAction, quote_id: str
     if isinstance(found, str) or found[0].amount_cents != action.amount_cents:
         raise AdapterFailure("quote_changed")
     quote, quote_fact = found
-    if (open_fact := await payments.open_link_fact(ctx, quote)) is not None:
-        # the quote's open link answers for it: no second checkout or link, and nothing held for
-        # this action, since the open link holds what it needs
-        await mandates.release(ctx, action.action_id)
-        return AdapterResult(facts=[open_fact], model_view=model_view(open_fact))
+    if (answer := await open_link_answer(ctx, action, quote)) is not None:
+        return answer
     try:
         checkout_id = await payments.provider(ctx).create_checkout(
             idempotency_key=action.action_id, amount_cents=action.amount_cents, title=items_text(quote.items),

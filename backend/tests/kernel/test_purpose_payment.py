@@ -152,6 +152,11 @@ async def test_agents_need_mandate_room_and_failed_provider_releases_reservation
         raise payments.ProviderError('refused')
 
     monkeypatch.setattr(payments.ProviderClient, 'create_checkout', provider_refused)
+    # A session of its own (a mandate opens one session): asked again in the first one, the open link would answer
+    # without the provider.
+    second_agent = await mint(client, copy.owner, copy.desk_id)
+    reopened = await open_agent(client, copy.slug, second_agent, frozen_clock)
+    caller = turn(second_agent, copy.slug, reopened.state.session_id, frozen_clock)
     next_call = await decided(client, caller, TOOL, {}, call_id='provider-refuses')
     assert next_call.outcome == 'allow'
     failed = await executed(client, caller, next_call)
@@ -400,3 +405,93 @@ def test_adapter_refuses_a_profile_of_another_block(config):
         TOOL, BusinessToolDef(title=TITLE, description='Take details.', config=config)))
     with pytest.raises(ValueError, match='unsupported_block'):
         blocks.PurposePaymentAdapter(other)
+
+
+# Asking again: the session's open link for the tool answers -------------------------------------------------------
+
+async def test_asking_again_answers_with_the_sessions_open_link(app, client):
+    copy = await payment_desk(app, client)
+    visitor = await open_visitor(client, copy)
+    first = await executed(client, visitor, await decided(client, visitor, TOOL, {}))
+    again = await decided(client, visitor, TOOL, {}, call_id='again')
+    assert again.outcome == 'allow', again.reason_plain
+    second = await executed(client, visitor, again)
+    assert second.state == 'succeeded', second
+    assert second.model_view == first.model_view
+    assert [fact.fact_id for fact in second.facts] == [first.model_view['fact_id']]
+    assert len(await quotes_of(app, copy)) == len(await links_of(app, copy)) == len(checkouts(copy)) == 1
+
+
+async def test_two_calls_racing_make_one_quote_checkout_and_link(app, client):
+    import asyncio
+    from desk.contracts import ExecResult
+    from .test_execute import post_execute
+
+    copy = await payment_desk(app, client)
+    visitor = await open_visitor(client, copy)
+    decisions = [await decided(client, visitor, TOOL, {}, call_id=f'race-{n}') for n in range(2)]
+    answers = await asyncio.gather(*(post_execute(client, visitor, decision) for decision in decisions))
+    assert [response.status_code for response in answers] == [200, 200], [response.text for response in answers]
+    results = [ExecResult.model_validate(response.json()) for response in answers]
+    assert [result.state for result in results] == ['succeeded', 'succeeded']
+    assert results[0].model_view == results[1].model_view
+    assert len(await quotes_of(app, copy)) == len(await links_of(app, copy)) == len(checkouts(copy)) == 1
+
+
+async def test_an_agent_asking_again_releases_its_new_reservation(app, client, frozen_clock):
+    from .test_agent_auth import mint, open_agent, turn
+    from .test_mandates import reservation_of
+
+    copy = await payment_desk(app, client, amount=2000)
+    agent = await mint(client, copy.owner, copy.desk_id)
+    opened = await open_agent(client, copy.slug, agent, frozen_clock)
+    caller = turn(agent, copy.slug, opened.state.session_id, frozen_clock)
+    first = await decided(client, caller, TOOL, {})
+    issued = await executed(client, caller, first)
+    again = await decided(client, caller, TOOL, {}, call_id='again')
+    assert again.outcome == 'allow', again.reason_plain
+    answered = await executed(client, caller, again)
+    assert answered.state == 'succeeded' and answered.model_view == issued.model_view
+    assert await reservation_of(app, copy.copy_id, first.action.action_id) == (2000, 'reserved')
+    assert await reservation_of(app, copy.copy_id, again.action.action_id) == (2000, 'released')
+    assert len(await quotes_of(app, copy)) == len(await links_of(app, copy)) == len(checkouts(copy)) == 1
+
+
+@pytest.mark.parametrize('ended', ['paid', 'expired'])
+async def test_a_paid_or_expired_link_is_not_answered_again(app, client, ended):
+    from desk.db.models import PaymentLink
+
+    copy = await payment_desk(app, client)
+    visitor = await open_visitor(client, copy)
+    first = await executed(client, visitor, await decided(client, visitor, TOOL, {}))
+    [link] = await links_of(app, copy)
+    if ended == 'paid':
+        assert (await client.post(f'/payment_links/{link.token}/complete', json={})).status_code == 200
+    else:
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            row = (await ctx.db.scalars(ctx.repo.scoped(select(PaymentLink).where(
+                PaymentLink.link_id == link.link_id)))).one()
+            row.expires_at = ctx.clock.now()
+    second = await executed(client, visitor, await decided(client, visitor, TOOL, {}, call_id='again'))
+    assert second.state == 'succeeded', second
+    assert second.model_view['fact_id'] != first.model_view['fact_id']
+    assert len(await quotes_of(app, copy)) == len(await links_of(app, copy)) == len(checkouts(copy)) == 2
+
+
+async def test_a_repriced_tool_makes_a_new_link(app, client):
+    copy = await payment_desk(app, client)
+    visitor = await open_visitor(client, copy)
+    await executed(client, visitor, await decided(client, visitor, TOOL, {}))
+    assert (await put(client, copy, [payment(amount=AMOUNT + 100)])).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.tool == TOOL)))
+        row.status, row.review_reason = 'enabled', None
+        await activate_cards(ctx, copy.desk_id, [auto(AMOUNT + 100)], auto_money_cap_cents=50_000)
+    assert [link.state for link in await links_of(app, copy)] == ['issued']
+    repriced = await decided(client, visitor, TOOL, {}, call_id='repriced')
+    assert repriced.outcome == 'allow' and repriced.action.amount_cents == AMOUNT + 100, repriced.reason_plain
+    assert (await executed(client, visitor, repriced)).model_view['amount_cents'] == AMOUNT + 100
+    assert [link.amount_cents for link in await links_of(app, copy)] == [AMOUNT, AMOUNT + 100]
+    assert len(await quotes_of(app, copy)) == len(checkouts(copy)) == 2

@@ -3065,6 +3065,11 @@ class FakeKernelState:
             view = {"fact_id": fact_id, "slots": [
                 {"slot_id": slot.slot_id, "starts_at_local": slot.starts_at.astimezone(RIVERA_TZ).isoformat()}
                 for slot in open_slots]}
+        elif (self._business_block(desk, tool) == 'purpose_payment'
+              and (open_link := self._open_purpose_link(session, desk, action)) is not None):
+            # asked again in the session, its open link answers: no second quote, checkout or link
+            facts.append(desk.facts[f'payment_link:{open_link.link_id}'])
+            view = {'fact_id': facts[0].fact_id, 'title': open_link.title, 'amount_cents': open_link.amount_cents}
         elif self._business_block(desk, tool) == 'purpose_payment':
             config = desk.tools[tool].business.config
             if config.amount_cents != action.amount_cents:
@@ -4474,6 +4479,19 @@ class FakeKernelState:
         return PaymentLinkView(title=link.title, amount_cents=link.amount_cents, state=link.state,
                                language=session.last_language or "en", business_name=desk.business_name,
                                customer_name=customer, cancel_reason="rules_changed" if rules_changed else None)
+
+    def _open_purpose_link(self, session: Session, desk: Desk, action: NormalizedAction) -> PaymentLink | None:
+        """The session's newest open link from an earlier call of the purpose payment tool, at its purpose and
+        amount, on a quote still unpaid (the kernel's open-link answer for a repeated purpose payment)."""
+        config = desk.tools[action.tool].business.config
+        if config.amount_cents != action.amount_cents:
+            return None
+        return next((link for link in reversed(self.payment_links.values())
+                     if link.desk_id == desk.desk_id and link.session_id == session.session_id
+                     and link.title == config.purpose and link.amount_cents == action.amount_cents
+                     and self.quotes[link.quote_id]['items'][0]['item_id'] == action.tool
+                     and self.quotes[link.quote_id]['status'] == 'available'
+                     and self._open_link(link.quote_id) is link), None)
 
     def _open_link(self, quote_id: str) -> PaymentLink | None:
         """The quote's open link (issued and unexpired), if it has one."""
