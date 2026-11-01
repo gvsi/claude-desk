@@ -32,7 +32,7 @@ As the signed Markdown boards (N-MD-01 to N-MD-06) draw it, in the reply type (`
 
 - No images: `![alt](src)` renders its alt text, never an `<img>`.
 - No raw HTML: HTML in the text renders as text, never as elements. `rehype-raw` is left out of Streamdown's plugins.
-- Links only to whole `http:`, `https:` and `mailto:` URLs, opening in a new tab with `rel="noopener noreferrer"`. A link anywhere else, a path on this site included, renders as its link text, unlinked.
+- Links only to whole `http:`, `https:` and `mailto:` URLs, opening in a new tab with `rel="noopener noreferrer"`. A link anywhere else, a path on this site included, renders as its link text, unlinked. A bare `www.` address opens as https, as the reply check reads it, though GitHub Markdown would link it to http; a link that shows or was written with `http://` keeps it.
 - With `links="inert"`, a link renders as its text, then its URL in brackets, and nothing is clickable. A bare URL or email address shows once.
 - No code highlighting, math or diagrams: Streamdown's plugins for them aren't installed, so their bundles never ship.
 - No footnotes: `[^note]` and `[^note]: …` stay as the words written, in place. Rendered, a footnote would move its note to the end under a label and a back link the reply never had.

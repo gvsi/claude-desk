@@ -158,7 +158,23 @@ it('footnote_syntax_stays_as_its_own_words_in_place', () => {
 it('the_rest_of_github_markdown_still_renders', () => {
   const md = reply(mount(<ChatMarkdown text={'The ~~old~~ new tank, see www.example.com or https://example.com/tank.'} />));
   expect(md.querySelector('del')?.textContent).toBe('old');
-  expect([...md.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['http://www.example.com/', 'https://example.com/tank']);
+  expect([...md.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['https://www.example.com', 'https://example.com/tank']);
+});
+
+it('a_bare_www_address_opens_as_https', () => {
+  // GitHub Markdown links www.example.com to http; the reply check reads a visible www. address
+  // as https, so that is where it opens. A link that shows or was written with http keeps it.
+  const text = 'Visit www.example.com today, or www.example.com/hours?day=sat, [the old page](http://x.example) and http://y.example/a.';
+  const md = reply(mount(<ChatMarkdown text={text} />));
+  expect([...md.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+    ['www.example.com', 'https://www.example.com'],
+    ['www.example.com/hours?day=sat', 'https://www.example.com/hours?day=sat'],
+    ['the old page', 'http://x.example/'],
+    ['http://y.example/a', 'http://y.example/a'],
+  ]);
+  // In a stopped draft, a bare address already shows where it goes, so it shows once.
+  rerender(<ChatMarkdown text="Visit www.example.com today." links="inert" />);
+  expect(reply(mounted?.host as HTMLElement).textContent).toBe('Visit www.example.com today.');
 });
 
 it('a_hard_break_starts_one_new_line', () => {

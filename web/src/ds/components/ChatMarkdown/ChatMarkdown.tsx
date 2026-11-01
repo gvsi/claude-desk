@@ -87,9 +87,32 @@ function safeHref(href: unknown): string | null {
   }
 }
 
-/** A link shows its text only and opens in a new tab. Any other link is its text, unlinked. */
-function Link({ href, children }: ElementProps<'a'>) {
+/** The words inside a rendered element, as a reader sees them. */
+function textOf(node: ExtraProps['node']): string {
+  if (node === undefined) return '';
+  return node.children.map((child) => (child.type === 'text' ? child.value : child.type === 'element' ? textOf(child) : '')).join('');
+}
+
+/**
+ * Where a link goes: its safe `href`, except that a bare `www.` address opens as https. GitHub
+ * Markdown links `www.example.com` to http, but the reply check reads a visible `www.` address as
+ * https, so the visitor goes where it was checked. A link that shows http, or whose text is not
+ * its address, keeps the address it was written with.
+ */
+function linkTarget(href: unknown, label: string): string | null {
   const url = safeHref(href);
+  if (url === null || !/^www\./i.test(label)) return url;
+  try {
+    return new URL(url).href === new URL(`http://${label}`).href ? `https://${label}` : url;
+  } catch {
+    // The text isn't an address after all.
+    return url;
+  }
+}
+
+/** A link shows its text only and opens in a new tab. Any other link is its text, unlinked. */
+function Link({ node, href, children }: ElementProps<'a'>) {
+  const url = linkTarget(href, textOf(node));
   if (url === null) return <>{children}</>;
   return (
     <a href={url} target="_blank" rel="noopener noreferrer">
@@ -98,20 +121,14 @@ function Link({ href, children }: ElementProps<'a'>) {
   );
 }
 
-/** The words inside a rendered element, as a reader sees them. */
-function textOf(node: ExtraProps['node']): string {
-  if (node === undefined) return '';
-  return node.children.map((child) => (child.type === 'text' ? child.value : child.type === 'element' ? textOf(child) : '')).join('');
-}
-
 /**
  * For a stopped draft: the link text, then the URL in plain text, and nothing to click. A link
- * whose text is already its address (a bare URL or email) shows once.
+ * whose text is already its address (a bare URL, `www.` address or email) shows once.
  */
 function InertLink({ node, href, children }: ElementProps<'a'>) {
-  const url = safeHref(href);
   const label = textOf(node);
-  if (url === null || url === label || url === `mailto:${label}`) return <>{children}</>;
+  const url = linkTarget(href, label);
+  if (url === null || [label, `mailto:${label}`, `https://${label}`].includes(url)) return <>{children}</>;
   return (
     <>
       {children} ({url})
