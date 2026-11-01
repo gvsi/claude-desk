@@ -692,6 +692,36 @@ def test_every_number_has_a_source(tmp_path, row, accepted):
     assert "source column" in out
 
 
+@pytest.mark.parametrize("leading, trailing", [("", ""), ("|", ""), ("", "|"), ("|", "|")])
+@pytest.mark.parametrize("delimiter", ["-", "--", ":-:"])
+def test_mvp_short_delimiters_require_sources(tmp_path, leading, trailing, delimiter):
+    rows = ["Metric | Value | Source", " | ".join([delimiter] * 3), "Test | 42 ms | Unsourced"]
+    write(tmp_path, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n"
+          + "\n".join(f"{leading}{row}{trailing}" for row in rows) + "\n")
+
+    problems = check_docs.check_mvp_number_sources(tmp_path)
+
+    assert len(problems) == 1
+    assert problems[0].line == 5
+    assert "metric row needs" in problems[0].message
+
+
+@pytest.mark.parametrize("following", [
+    "# Next", "### Next", "> quote", "- item", "* item", "+ item", "1. item", "1) item",
+    "### Next | notes", "> quote | notes", "- item | notes", "* item | notes", "+ item | notes", "1. item | notes",
+    "Plain paragraph", "`code | pipe`", r"Escaped \| pipe",
+])
+def test_mvp_table_ends_at_a_new_block(tmp_path, following):
+    write(tmp_path, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n"
+          "Metric | Value | Source\n--- | --- | ---\n"
+          "Test | 42 ms | [PR](https://github.com/gvsi/claude-desk/pull/33)\n"
+          + following + "\n")
+
+    assert check_docs.check_mvp_number_sources(tmp_path) == []
+
+
 def test_mvp_table_without_boundary_pipes_requires_sources(tmp_path):
     write(tmp_path, "docs/path-to-mvp.md",
           "## Scaling and what breaks first\n\n"
@@ -729,7 +759,8 @@ def test_mvp_table_boundaries_and_literal_pipes(tmp_path, leading, trailing, met
 
 @pytest.mark.parametrize("table, message", [
     ("Metric | Value\n--- | ---\nTest | 42 ms\n", "source column"),
-    ("Metric | Value | Source\n--- | --- | ---\nMissing cells\n", "cell for every column"),
+    ("Metric | Value | Source\n--- | --- | ---\nMissing cells\n", None),
+    ("Metric | Value | Source\n--- | --- | ---\nMissing | cells\n", "cell for every column"),
     ("Metric | Value | Source\n--- | ---\nTest | 42 ms | Unsourced\n", None),
     ("Metric | Value | Source\nProse | without | a delimiter\n", None),
     ("```markdown\nMetric | Value | Source\n--- | --- | ---\nTest | 42 ms | Unsourced\n```\n", None),

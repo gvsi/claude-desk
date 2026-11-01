@@ -291,11 +291,13 @@ def _mvp_source(root: Path, source: str) -> bool:
     return False
 
 
-def _table_cells(line: str) -> list[str]:
-    """Split at pipes outside code spans and escapes; boundary pipes are optional."""
+def _table_cells(line: str) -> list[str] | None:
+    """Split at pipes outside code spans and escapes, or return None if there are none."""
     line = line.strip()
     masked = _CODE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
     pipes = [match.start() for match in re.finditer(r"\\.|\|", masked) if match.group(0) == "|"]
+    if not pipes:
+        return None
     bounds = [-1, *pipes, len(line)]
     cells = [line[left + 1:right].strip() for left, right in zip(bounds, bounds[1:])]
     if pipes and pipes[0] == 0:
@@ -326,11 +328,15 @@ def check_mvp_number_sources(root: Path) -> list[Problem]:
             header, candidate = None, None
             continue
         cells = _table_cells(line)
+        delimiter = cells is not None and all(re.fullmatch(r":?-+:?", cell) for cell in cells)
+        if cells is None or (not delimiter and re.match(r"^\s*(?:#{1,6}(?:\s|$)|>|[-*+]\s|\d+[.)]\s)", line)):
+            header, candidate = None, None
+            continue
         if header is None:
             # A table starts only when a header is followed by a matching delimiter row.
             if (candidate is not None and len(cells) == len(candidate[1])
                     and (len(cells) > 1 or line.lstrip().startswith("|"))
-                    and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)):
+                    and delimiter):
                 header = [cell.casefold() for cell in candidate[1]]
                 if "source" not in header:
                     problems.append(Problem(name, candidate[0], "metric table needs a source column"))
