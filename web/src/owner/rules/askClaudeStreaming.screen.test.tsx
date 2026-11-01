@@ -228,6 +228,46 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(inView(final.element())).toBe(true);
   });
 
+  it('shows_a_drafted_change_with_both_its_buttons_in_view', async () => {
+    const { panel } = await ask(viewport);
+    await expect.element(panel.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const log = panel.element().querySelector<HTMLElement>('[role="log"]')!;
+    const inLog = (el: Element) => {
+      const box = el.getBoundingClientRect();
+      const port = log.getBoundingClientRect();
+      return box.top >= port.top - 1 && box.bottom <= port.bottom + 1;
+    };
+    // The one action that applies the change is never left under the fold.
+    for (const name of ['Confirm change', 'Keep my rules']) expect(inLog(panel.getByRole('button', { name }).element()), name).toBe(true);
+    // The owner's words stay in view too when both fit; when they don't, the buttons win.
+    const words = panel.getByText(ASK, { exact: true }).element();
+    const keep = panel.getByRole('button', { name: 'Keep my rules' }).element();
+    if (keep.getBoundingClientRect().bottom - words.getBoundingClientRect().top <= log.clientHeight) expect(inLog(words)).toBe(true);
+  });
+
+  it('keeps_the_owners_place_when_they_scrolled_before_the_draft_landed', async () => {
+    // A first answer long enough that the conversation scrolls.
+    const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
+    mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
+    const { panel } = await ask(viewport, 'How do quotes work?');
+    await expect.element(panel.getByText(long, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    const log = panel.element().querySelector<HTMLElement>('[role="log"]')!;
+    // Then a change, which the owner scrolls away from while its answer is written.
+    const held = gate();
+    mockStore.planStream('ruleChat', { pauseAfter: 6, until: held.until });
+    await panel.getByRole('textbox', { name: 'Ask Claude' }).fill(ASK);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change: quotes stay");
+    log.scrollTop -= 150;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const read = log.scrollTop;
+    held.release();
+    await expect.element(panel.getByRole('button', { name: 'Confirm change' })).toBeInTheDocument();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
+  });
+
   it('closes_the_stream_with_the_panel', async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 2, until: held.until });

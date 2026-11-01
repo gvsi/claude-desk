@@ -128,9 +128,9 @@ function revealExchange(log: HTMLElement, lead: HTMLElement, turn: HTMLElement, 
  * Brings the newest exchange into view as each turn is added: from the owner's words that lead it
  * to the newest turn, and, for a change Claude drafted, to the review's buttons once they show (the
  * review may read the rules first). The owner's words come first, so a new turn opens with them
- * whole, never cut under the panel's header: when the whole exchange doesn't fit, "Confirm change"
- * and "Keep my rules" are a scroll away below them. Only a new turn scrolls, and only the
- * conversation: the owner's own scrolling is left alone.
+ * whole, never cut under the panel's header, except that a drafted change's "Confirm change" and
+ * "Keep my rules" always show whole: when the whole exchange doesn't fit, the buttons win. Only a
+ * new turn scrolls, and only the conversation: the owner's own scrolling is left alone.
  */
 function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonly ChatTurn[], follow: { current: Follow }): void {
   const last = turns.at(-1);
@@ -159,6 +159,13 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
       const end = buttons[buttons.length - 1];
       if (end === undefined) return false;
       reveal(end);
+      // The review's buttons are the one action that applies the change: when they and the owner's
+      // words don't both fit, the buttons win, wholly in view.
+      const short = end.getBoundingClientRect().bottom + scrollMargin(turn, 'bottom') - log.getBoundingClientRect().bottom;
+      if (short > 0) {
+        log.scrollTop += short;
+        follow.current.at = log.scrollTop;
+      }
       return true;
     };
     if (revealActions()) return undefined;
