@@ -19,6 +19,14 @@ SEEDED = "policy:service_area"
     ("policy:pricing", "Trabajamos con pequeños negocios y familias.", []),
     ("policy:pricing", "We offer \u202eeerf\u202c consultations.", ["format_control"]),
     ("policy:pricing", "Ofrecemos consultas \u202esitarg\u202c.", ["format_control"]),
+    ("policy:pricing", "You are chatting with a human.", ["policy.ai_denial"]),
+    ("policy:pricing", "Talk to a real person by phone.", []),
+    ("policy:pricing", "Las consultas no cuestan nada.", ["policy.free_price"]),
+    ("policy:pricing", "No cobramos por adelantado.", []),
+    ("policy:pricing", "Free parking.", []),
+    ("policy:pricing", "Consultations are complimentary.", ["lex.en.promise"]),
+    ("policy:pricing", "Free water heater flush.", ["lex.en.promise"]),
+    ("policy:pricing", "Free parking and drain clearing.", ["lex.en.promise"]),
     # A service area may name a distance and the days it works, but no fee
     ("policy:service_area", "Within 25 miles of Oakland.", []),
     ("policy:service_area", "Within a 25-mile radius of Oakland.", []),
@@ -83,3 +91,30 @@ async def test_split_policies_never_render_a_refused_promise(k: KernelHarness, r
         else:
             assert [block.text for block in verdict.blocks] == list(parts)
             assert [block.text for block in page.charter if block.template == "policy"] == list(parts)
+
+
+@pytest.mark.requires("01b")
+@pytest.mark.parametrize(("contact", "refused"), [
+    ("help@example.test. All consultations are $1, guaranteed.", True),
+    ("Call us at (510) 555-0142 ext. 2", False),
+])
+async def test_public_contact_is_contact_endpoints_only(k: KernelHarness, records, contact, refused):
+    desk = await golden_desk(k)
+    before = await records.facts(desk.copy.copy_id) if k.is_real else []
+    expect = (Expect(status=422, fields={"code": "invalid", "detail.contact": ["contact_format"]}) if refused
+              else Expect(fields={"desk_id": desk.desk_id}))
+    await k.call("PUT /desks/{id}/charter", path={"id": desk.desk_id}, auth=desk.owner,
+                 body={"charter": [{"key": "contact", "kind": "text", "value": contact}]}, expect=expect)
+    visitor = await open_caller(k, desk, "visitor")
+    # A refused contact leaves the Desk's contact on record, which a reply may still cite.
+    verdict = await check_reply(k, visitor, "", [{"template": "contact", "fact_id": "charter:contact"}],
+                                expect=passes(visitor, ["contact"]))
+    page = await k.call("GET /public/{desk_slug}", path={"desk_slug": desk.slug}, auth=Auth.none())
+    if k.is_real:
+        if refused:
+            assert contact not in verdict.model_dump_json()
+            assert contact not in page.model_dump_json()
+            assert await records.facts(desk.copy.copy_id) == before
+        else:
+            assert [block.text for block in verdict.blocks] == [contact]
+            assert [block.text for block in page.charter if block.template == "contact"] == [contact]

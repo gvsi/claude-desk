@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
+from tests import public_policy_cases as policy_cases
+
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
 from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
@@ -2546,6 +2548,85 @@ def quote_card(**limits) -> RuleCard:
 
 
 @pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("count", "length", "reason"), [
+    (41, 40, "policy_count_limit"), (40, 201, "policy_text_limit"), (400, 1, "policy_count_limit"),
+])
+async def test_charter_policy_caps_keep_a_refusal_record(kernel, count, length, reason):
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    seq = (await ledger_page(owner, desk_id)).entries[-1].seq
+    claims = [Claim(key=f"policy:{index:02d}", kind="text", value="x" * length) for index in range(count)]
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path={"id": desk_id})
+    assert (refused.value.status, refused.value.detail) == (422, {"charter": [reason]})
+    page = await ledger_page(owner, desk_id)
+    [entry] = [entry for entry in page.entries if entry.seq > seq]
+    assert page.chain_ok
+    assert entry.event.summary == {
+        "part": "charter", "refused": "promise", "fields": {"charter": [reason]},
+        "keys": sorted(claim.key for claim in claims)[:40], "policy_count": count,
+        "total_characters": count * length, "reason": reason,
+    }
+    assert "x" * length not in entry.event.model_dump_json()
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("text", "rule"), [
+    *policy_cases.COST_SERVICE_REFUSALS,
+    *policy_cases.AI_DENIAL_REFUSALS,
+    *policy_cases.AMENITY_REFUSALS,
+    ("You are chatting with a human receptionist.", "policy.ai_denial"),
+    ("Está hablando con una persona.", "policy.ai_denial"),
+    ("Consultations cost nothing.", "policy.free_price"),
+    ("La consulta no le cuesta nada.", "policy.free_price"),
+    ("Las consultas no cuestan nada.", "policy.free_price"),
+    ("No te cuesta nada.", "policy.free_price"),
+    ("No les cuesta nada.", "policy.free_price"),
+    ("No cobramos nada por la visita.", "policy.free_price"),
+    ("Estás hablando con una persona.", "policy.ai_denial"),
+    ("You are chatting with a human.", "policy.ai_denial"),
+    ("I'm not a bot.", "policy.ai_denial"),
+    ("This is not an AI.", "policy.ai_denial"),
+    ("Soy una persona real.", "policy.ai_denial"),
+    ("No soy un bot.", "policy.ai_denial"),
+    ("Consultations are complimentary.", "lex.en.promise"),
+    ("The first visit is complimentary.", "lex.en.promise"),
+    ("Free estimates.", "lex.en.promise"),
+    ("Consulta gratis.", "lex.es.promise"),
+])
+async def test_charter_refusal_detail_names_only_the_refused_policy_line(kernel, ro_read, arrange, text, rule):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    claims = [Claim(key=key, kind="text", value=value) for key, value in (
+        ("policy:about", "Human resources consulting"),
+        ("policy:custom", text),
+        ("policy:parking", "Complimentary parking"),
+        ("contact", "(510) 555-0199"),
+    )]
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path={"id": desk_id})
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (
+        422, "invalid", {"policy:custom": [rule]})
+    # Historical facts face the same check on public reads and policy-only replies.
+    arrange.stored_policy(copy, "arrival", text)
+    slug = desk_slug(ro_read, schema, copy)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
+    assert "charter:policy:arrival" not in [block.fact_id for block in page.charter]
+    visitor = await new_visitor(http, slug)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+        clauses=[Clause(template="policy", fact_id="charter:policy:arrival")])))
+    assert not verdict.ok and verdict.signature
+    assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("policy_combined", ["charter:policy:arrival"])]
+    # This is the setup pre-filter's contract: drop only named keys and keep all other lines.
+    kept = [claim for claim in claims if claim.key not in refused.value.detail]
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=kept), path={"id": desk_id})
+
+
+@pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("text", "rules"), [
     ("20% off for first-time clients", ["digit", "percent_sign"]),
     ("free consultation", ["lex.en.promise"]),
@@ -2705,6 +2786,11 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("parts", [
+    *[(text,) for text in policy_cases.PAYMENT_TIMING],
+    *[(text,) for text in policy_cases.COST_AMENITIES],
+    *[(text,) for text in policy_cases.HUMAN_OCCUPATIONS],
+    *[(text,) for text in policy_cases.AI_DENIAL_CONTROLS],
+    *[(text,) for text in policy_cases.AMENITY_ACCEPTED],
     ("Portland Beaverton", "Cash card"),
     ("Feel free to ask about our services.",),
     ("You are free to ask about our services.",),
@@ -2713,6 +2799,24 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
     ("Garage parking available", "Offering estimates by appointment"),
     ("Service area: Portland, Beaverton, Hillsboro, Tigard", "Cash, card, Venmo accepted",
      "Emergency service available"),
+    ("No cobramos por adelantado.", "No cobramos nada más que lo acordado."),
+    ("Talk to a real person by phone.",),
+    ("Call to speak with a live agent.",),
+    ("Call to speak with a live person.",),
+    ("This is an AI assistant, not a real person.",),
+    ("A real person will call back in the morning.",),
+    ("I'm a human resources consultant.",),
+    ("I am a human rights lawyer.",),
+    ("Our photos are not AI-generated.",),
+    ("Nothing to pay until the job is done.",),
+    ("Habla con una persona real por teléfono.",),
+    ("Una persona real le devolverá la llamada.",),
+    ("Nada que pagar hasta que el trabajo esté hecho.",),
+    ("Complimentary parking.",),
+    ("Free parking.",),
+    ("Free wi-fi while you wait.",),
+    ("Complimentary coffee while you wait.",),
+    ("Estacionamiento gratis.",),
 ])
 async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro_read, parts):
     http, schema, _ = kernel
@@ -3727,3 +3831,94 @@ async def test_a_turn_is_refused_like_the_other_turn_routes(kernel, ro_read, arr
     arrange.close_idle_sessions(session_id)
     for generation in (0, 1):
         assert await refused(turn(view, session_id, generation, "Hola")) == (409, "closed")
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("create", [False, True])
+async def test_public_contact_is_structured(kernel, create):
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    seq = (await ledger_page(owner, copy.desk_ids[0])).entries[-1].seq
+    claims = [Claim(key="contact", kind="text", value="help@example.test. All consultations are $1, guaranteed.")]
+    with pytest.raises(KernelFailed) as refused:
+        if create:
+            body = a_new_desk()
+            body.desk.charter = claims
+            await owner.call("POST /desks", body)
+        else:
+            await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims),
+                             path={"id": copy.desk_ids[0]})
+    assert (refused.value.status, refused.value.detail) == (422, {"contact": ["contact_format"]})
+    page = await ledger_page(owner, copy.desk_ids[0])
+    [entry] = [entry for entry in page.entries if entry.seq > seq]
+    assert page.chain_ok
+    assert (entry.event.kind, entry.event.summary) == ("desk_data", {
+        "part": "desk" if create else "charter", "refused": "contact", "fields": {"charter:contact": ["contact_format"]}})
+    assert "guaranteed" not in entry.event.model_dump_json()
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+        Claim(key="contact", kind="text", value="help@example.test · +1 (510) 555-0142; https://example.test")]),
+        path={"id": copy.desk_ids[0]})
+
+
+PUBLIC_CONTACTS = [*policy_cases.CONTACT_FORMS, "(510) 555-0142 ext. 2", "+1 (510) 555-0142 ext. 12", "Call us at (510) 555-0142",
+                   "Email: help@example.test · Llámanos al 555-0142",
+                   "https://example.test/book?services=drain,repair", "https://example.test/book;location=oakland",
+                   "maria@example.test or (510) 555-0142", "help@example.test / (510) 555-0142", "www.example.com",
+                   "example.com", "help@example.test\r\nother@example.test",
+                   "Call us at (510) 555-0142 or email hello@example.com",
+                   "(510) 555-0142 ext. 12, hello@example.com, example.com",
+                   "Phone: (510) 555-0142, Email: hello@example.com, Website: example.com",
+                   "Office: (510) 555-0142 ext. 12", "Call or text (510) 555-0142"]
+PUBLIC_CONTACT_PROSE = [*policy_cases.CONTACT_SCAN_INPUTS, "https://example.test/" + "a" * 481, "Call us at (510) 555-0142 for a free quote", "maria@example.test or call for a free quote",
+                        "https://example.test/book for a free quote", "Call us for a free quote",
+                        "Call us at (510) 555-0142 anytime"]
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("contact", "valid"), [*[(c, True) for c in PUBLIC_CONTACTS],
+                                                *[(c, False) for c in PUBLIC_CONTACT_PROSE]])
+async def test_public_contact_endpoint_shapes(kernel, ro_read, contact, valid):
+    """An honest contact is written, shown on the public page and cited alone in a reply; prose is refused."""
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    write = owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+        Claim(key="contact", kind="text", value=contact)]), path={"id": copy.desk_ids[0]})
+    if not valid:
+        with pytest.raises(KernelFailed) as refused:
+            await write
+        assert (refused.value.status, refused.value.detail) == (422, {"contact": ["contact_format"]})
+        return
+    await write
+    slug = desk_slug(ro_read, schema, copy)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
+    assert [block.text for block in page.charter if block.template == "contact"] == [contact]
+    visitor = await new_visitor(http, slug)
+    draft = ReplyDraft(session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+                       clauses=[Clause(template="contact", fact_id="charter:contact")])
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+    assert verdict.ok and verdict.violations == []
+    assert [block.text for block in verdict.blocks] == [contact]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_one_charter_refusal_names_the_contact_and_every_refused_policy(kernel):
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    seq = (await ledger_page(owner, desk_id)).entries[-1].seq
+    claims = [Claim(key=key, kind="text", value=value) for key, value in (
+        ("contact", "help@example.test. All consultations are $1, guaranteed."),
+        ("policy:about", "Ask about our services."), ("policy:custom", "You are chatting with a human."))]
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims), path={"id": desk_id})
+    assert (refused.value.status, refused.value.detail) == (422, {
+        "contact": ["contact_format"], "policy:custom": ["policy.ai_denial"]})
+    page = await ledger_page(owner, desk_id)
+    [entry] = [entry for entry in page.entries if entry.seq > seq]
+    assert page.chain_ok
+    assert entry.event.summary == {"part": "charter", "refused": "promise", "fields": {
+        "charter:contact": ["contact_format"], "policy:custom": ["policy.ai_denial"]}}
+    kept = [claim for claim in claims if claim.key not in refused.value.detail]
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=kept), path={"id": desk_id})

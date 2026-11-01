@@ -45,6 +45,7 @@ from fastapi import Request
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
+from desk.public_contact import valid_public_contact
 from desk.contracts import (BusinessSeed, Claim, DeskSeed, Fact, HoursWindow, Label, LedgerEvent, SeedDocument,
                             ToolProfile)
 from desk.contracts import PriceItem as PriceItemSeed
@@ -323,7 +324,7 @@ async def create_desk(ctx: KernelCtx, copy_id: str, business: BusinessSeed, desk
     await refuse_public_canaries(ctx, "desk", shown)
     validate_business(business)
     validate_desk(desk)
-    await refuse_public_promises(ctx, "desk", policy_values(desk.charter))
+    await refuse_public_charter(ctx, "desk", desk.charter)
     if existing is not None:
         business_id = existing.business_id
     else:
@@ -426,30 +427,56 @@ def policy_values(charter: Sequence[Claim]) -> dict[str, str]:
     return {claim.key: claim.value for claim in charter if claim.key.startswith("policy:") and claim.kind == "text"}
 
 
+async def _refusal_desk_ids(ctx: KernelCtx, desk_id: str | None) -> list[str]:
+    """Where a refused write is ledgered: its Desk, or for a Desk not yet created, the copy's Desks in ID order."""
+    if desk_id is not None:
+        return [desk_id]
+    return list(await ctx.db.scalars(ctx.repo.scoped(select(Desk.desk_id).order_by(Desk.desk_id))))
+
+
+async def refuse_public_charter(ctx: KernelCtx, part: str, charter: Sequence[Claim], desk_id: str | None = None) -> None:
+    """Refuse a charter whose public contact isn't a list of contact endpoints (`valid_public_contact`) or
+    whose text policies the reply check would reject, in one refusal naming every refused key, so the
+    owner's setup learns them all from one write (`refuse_public_promises`)."""
+    contact_format = any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
+                         for claim in charter)
+    await refuse_public_promises(ctx, part, policy_values(charter), desk_id, contact_format=contact_format)
+
+
 async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str, str],
                                 desk_id: str | None = None, *,
-                                allow_words: Mapping[str, frozenset[str]] = {}) -> None:
-    """Refuse public prose the reply check would reject, before writing any of it.
+                                allow_words: Mapping[str, frozenset[str]] = {}, contact_format: bool = False) -> None:
+    """Refuse public prose the reply check would reject, and with `contact_format` a contact that isn't a
+    list of contact endpoints, before writing any of it: 422 `invalid`.
 
-    Detail and the post-rollback ledger entry name only refused keys and sorted rule IDs.
+    Detail names only refused keys and sorted rule IDs, the contact as `{"contact": ["contact_format"]}`
+    beside every refused policy. The post-rollback ledger entry `{part, refused, fields}` names the same,
+    the contact by its fact ID `charter:contact`, since a ledger summary never carries a key named
+    `contact` (`ledger.check_summary`); `refused` is "contact" when only the contact was refused, else
+    "promise". For cap refusals it also records the first `PUBLIC_POLICY_MAX_COUNT` keys in order, the
+    count of all policies, their total characters and a reason. Never rejected text or the contact.
     A refused creation has no Desk chain yet. Record it on the copy's existing Desks, in ID
     order, so the owner can audit the attempt without creating a row for refused input.
     """
+    count, total_characters = len(values), sum(map(len, values.values()))
     limit = None
-    if len(values) > reply_check.PUBLIC_POLICY_MAX_COUNT:
+    if count > reply_check.PUBLIC_POLICY_MAX_COUNT:
         limit = "policy_count_limit"
-    elif sum(map(len, values.values())) > reply_check.PUBLIC_POLICY_MAX_CHARS:
+    elif total_characters > reply_check.PUBLIC_POLICY_MAX_CHARS:
         limit = "policy_text_limit"
-    if limit is not None:
-        raise KernelFailure(422, "invalid", limit, detail={"charter": [limit]})
-    fields = reply_check.scan_public_policies(values, allow_words=allow_words)
-    if not fields:
+    fields = {"charter": [limit]} if limit is not None else reply_check.scan_public_policies(values, allow_words=allow_words)
+    if not fields and not contact_format:
         return
-    desk_ids = [desk_id] if desk_id is not None else list(await ctx.db.scalars(ctx.repo.scoped(
-        select(Desk.desk_id).order_by(Desk.desk_id))))
-    summary = {"part": part, "refused": "promise", "fields": fields}
-    raise KernelFailure(422, "invalid", "public_promise", detail=fields, persist=partial(
-        _ledger_refusal, copy_id=ctx.copy_id, desk_ids=desk_ids, summary=summary))
+    contact = {"contact": ["contact_format"]} if contact_format else {}
+    summary = {"part": part, "refused": "promise" if fields else "contact",
+               "fields": fields | ({"charter:contact": ["contact_format"]} if contact_format else {})}
+    if limit is not None:
+        keys = sorted(values)[:reply_check.PUBLIC_POLICY_MAX_COUNT]
+        summary.update(keys=[ledger.safe_ref(key) for key in keys], policy_count=count,
+                       total_characters=total_characters, reason=limit)
+    reason = limit or ("public_promise" if fields else "contact_format")
+    raise KernelFailure(422, "invalid", reason, detail=contact | fields, persist=partial(
+        _ledger_refusal, copy_id=ctx.copy_id, desk_ids=await _refusal_desk_ids(ctx, desk_id), summary=summary))
 
 
 async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_ids: Sequence[str], summary: dict[str, Any]) -> None:
@@ -491,12 +518,12 @@ async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) 
     """The Desk's public `charter:<key>` facts, replaced; `charter:hours` comes only from its hours.
     The public page shows them, so a document's canary in a key or a value is refused first
     (`refuse_public_canaries`). Text policies render verbatim, so their values must also pass
-    the reply check's public prose scan (`refuse_public_promises`). Contact and structured
-    claims keep their own checks.
+    the reply check's public prose scan, and the contact must be a list of contact endpoints, both
+    refused together in one refusal (`refuse_public_charter`). Structured claims keep their own checks.
     """
     await refuse_public_canaries(ctx, "charter", {"charter": charter_shown(body.charter)}, desk_row.desk_id)
     check_charter(body.charter)
-    await refuse_public_promises(ctx, "charter", policy_values(body.charter), desk_row.desk_id)
+    await refuse_public_charter(ctx, "charter", body.charter, desk_row.desk_id)
     now = ctx.clock.now()
     rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == desk_row.desk_id, FactRow.kind == "charter", FactRow.fact_id != HOURS_FACT)))}

@@ -28,6 +28,8 @@ Talking Claude around can't make it act past the owner's rules, because the kern
 - Keeping secret what a verified session's model context already holds.
 - Within what the owner's rules allow, Claude can still be talked into the actions those rules permit, and into free text that is wrong or unflattering but carries no price, date or promise.
 - Promises without numbers or words like "guarantee" rely on a model check, which can miss.
+- Public policy text has no model check: on save, on public reads and in policy-only replies it gets the reply check's word lists plus policy-only phrase lists for common English and Spanish AI denials and implied free prices, so a paraphrase outside those lists isn't caught.
+- The public contact is checked for its shape, not its words: a URL path ("www.x.com/free-consultations") or a domain-shaped string ("free.consultations") can still carry words the policy scan would refuse.
 - Beside a booking card, the code check lets any booking claim through, since prose doesn't name which booking it means; a claim about another booking, or one that says more than the card, rests on the model check, which can miss.
 - That Claude never writes a look-alike link: links and email addresses in Claude's own replies rest on its prompt.
 - Which attempt of a reply is its last: the kernel trusts the API's `final` on each reply check, which decides whether a blocked draft opens an owner handoff and whether a visiting agent's turn ends there, and the ledger records it on each check.

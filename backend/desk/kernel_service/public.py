@@ -48,6 +48,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter
 from sqlalchemy import select
 
+from desk.public_contact import valid_public_contact
 from desk.contracts import Clause, Fact, HoursWindow, RenderedBlock
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as DemoInboxRow
@@ -163,6 +164,8 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
             try:
                 block = render.render_clause(Clause(template=name, fact_id=fact.fact_id), fact, lang, info)
             except render.NothingToShow:
+                continue
+            if name == "contact" and not valid_public_contact(block.text):
                 continue
             if not reply_check.carries(block, canaries):
                 charter.append(block)

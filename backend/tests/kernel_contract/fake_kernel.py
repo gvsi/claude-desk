@@ -139,6 +139,9 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route, Router
 
+from desk.public_amenity import offers_amenity
+from desk.public_person import future_person_direction
+from desk.public_contact import valid_public_contact
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     ITEM_ID_PATTERN,
@@ -899,7 +902,37 @@ def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
 
 
+# The kernel's policy-only phrase lists (`lexicon/policy_ai_denial.txt`, `lexicon/policy_free_price.txt`),
+# one entry per line, read on the accent-folded text.
+POLICY_AI_DENIAL = (
+    r"(?<!no\s)(?:hablaras?|vas?\s+a\s+hablar)\s+con\s+(?:una\s+persona(?:\s+real)?|un\s+(?:ser\s+)?humano)(?=\s*(?:[^\w\s-]|$)|\s+(?:y|tambien|aqui|que)\b)(?![^.!?]{0,40}\b(?:cuando|si)\s+(?:usted\s+)?(?:llam[ae]s?|visite?s?)\b|\s+por\s+telefono\b)",
+    r"you(?:['’]ll|\s+will)\s+be\s+(?:talking|chatting|speaking)\s+(?:to|with)\s+an?\s+(?:real\s+)?(?:human|person)(?=\s*(?:[^\w\s-]|$)|\s+(?:and|too|here|who)\b)(?![^.!?]{0,40}\b(?:when|if|once)\s+you\s+(?:call|phone|ring|visit)\b|\s+(?:by|on\s+the|over\s+the)\s+phone\b)",
+    r"you(?:\s+are|['’]re)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+an?\s+(?:(?:real|live|actual)\s+)?(?:human|person)",
+    r"you(?:\s+are\s+not|['’]re\s+not|\s+aren['’]t)\s+(?:chatting|talking|speaking)\s+(?:with|to)\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
+    r"(?:this\s+is|you(?:['’]ve|\s+have)\s+reached)\s+an?\s+(?:(?:human|real|live|actual)\s+(?:receptionist|agent|assistant|person|human)|human(?=\s*(?:[^\w\s-]|$)))",
+    r"I(?:\s+am|['’]m)\s+(?:a\s+(?:real|live|actual)\s+(?:person|human)|a\s+human\s+(?:receptionist|agent|assistant|representative|operator)\b|(?:a\s+)?human(?:\s+being)?(?=\s*(?:[^\w\s-]|$)|\s+(?:and|too|here|who)\b))",
+    r"(?:I(?:\s+am|['’]m)\s+not|this\s+(?:is\s+not|isn['’]t))\s+(?:a\s+(?:bot|robot|chatbot|machine)|an?\s+AI|AI)(?![\s-]*(?:generated|written|made|created|powered)\b)(?!-)",
+    r"(?<!no\s)esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con\s+(?:una\s+persona|un\s+(?:ser\s+)?humano|una?\s+(?:agente|asistente|recepcionista)\s+human[oa])",
+    r"no\s+(?:esta(?:s|is|n)?\s+(?:hablando|chateando|conversando)\s+con|soy)\s+(?:un\s+(?:bot|robot|chatbot)|una\s+(?:IA|maquina))(?!-)",
+    r"(?<!no\s)soy\s+(?:una\s+persona(?:\s+(?:real|de\s+verdad))?(?=\s*(?:[^\w\s-]|$)|\s+que\b)|un(?:a)?\s+(?:recepcionista|agente|asistente)\s+human[oa]|un\s+(?:ser\s+)?humano|human[oa])",
+    r"(?:esto|este\s+chat)\s+no\s+es\s+(?:un\s+(?:bot|robot|chatbot)|una\s+IA)(?!-)",
+    r"(?:este\s+(?:chat|asistente)|quien\s+(?:(?:le|te|les)\s+)?(?:responde|atiende|contesta|escribe))\s+es\s+(?:una\s+persona|un\s+(?:ser\s+)?humano)",
+)
+POLICY_FREE_PRICE = (
+    r"costs?\s+nothing",
+    r"at\s+no\s+cost",
+    r"no\s+cost\s+to\s+you",
+    r"nothing\s+to\s+pay(?!\s+(?:until|till|before|now|today|upfront|up\s+front|in\s+advance)\b)",
+    r"won['’]t\s+cost\s+you\s+anything",
+    r"cuestan?\s+nada(?!\s+(?:mas|hasta|antes|por\s+adelantado|ahora|hoy)\b)",
+    r"cobra(?:mos|n)?\s+nada(?!\s+(?:mas|hasta|antes|por\s+adelantado|ahora|hoy)\b)",
+    r"nada\s+que\s+pagar(?!\s+(?:hasta|antes|ahora|hoy|por\s+adelantado)\b)",
+)
+
+
 PUBLIC_POLICY_PATTERNS = (
+    ("policy.ai_denial", r"(?<!\w)(?:" + "|".join(POLICY_AI_DENIAL) + r")(?!\w)"),
+    ("policy.free_price", r"(?<!\w)(?:" + "|".join(POLICY_FREE_PRICE) + r")(?!\w)"),
     ("lex.en.number", r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
      r"(?:twen|thir|for|four|fif|six|seven|eigh|nine)ty|half|halves|hundreds?)\b"),
     ("lex.es.number", r"\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mil|miles|"
@@ -918,7 +951,7 @@ PUBLIC_POLICY_PATTERNS = (
     ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:new|existing|first[\s-]?time|current|returning|regular|local)\b))\b"),
     ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b))\b"),
     ("lex.en.promise", r"\b(?:free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b))\b"),
-    ("lex.en.promise", r"\b(?:discounts?|refunds?|guarantees?|no\s+charge)\b"),
+    ("lex.en.promise", r"\b(?:no[\s-]+costs?|complimentary|discounts?|refunds?|guarantees?|no\s+charge)\b"),
     ("lex.es.promise", r"\b(?:gratis|gratuit[oa]s?|descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
     ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
     ("lex.es.booking", r"\btu\s+cita\s+está\s+confirmada\b"),
@@ -1015,9 +1048,12 @@ def public_policy_rules(text: str, key: str | None = None) -> list[str]:
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     for rule, pattern in PUBLIC_POLICY_PATTERNS:
-        reading, origin = (public_commitment_reading(text) if rule == "language"
+        reading, origin = (public_commitment_reading(text) if rule == "language" or rule.startswith("policy.")
                            else (text, list(range(len(text)))))
-        if any(not allowed_service_area_hit(key, text, origin[match.start()], origin[match.end() - 1] + 1, rule)
+        if any(not ((rule == "policy.ai_denial" and future_person_direction(text, origin[match.start()]))
+                    or allowed_service_area_hit(key, text, origin[match.start()], origin[match.end() - 1] + 1, rule)
+                    or ((rule.endswith(".promise") or rule == "policy.free_price")
+                        and offers_amenity(text, origin[match.start()], origin[match.end() - 1] + 1)))
                for match in re.finditer(pattern, reading, re.IGNORECASE)):
             rules.add(rule)
     if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
@@ -1039,12 +1075,18 @@ def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[
         for key in fields:
             fields[key].add("language")
     for rule, pattern in (*PUBLIC_POLICY_PATTERNS, ("language", r"\bgrátis\b")):
-        reading, origin = (public_commitment_reading(combined) if rule == "language" and "grátis" not in pattern
+        reading, origin = (public_commitment_reading(combined)
+                           if (rule == "language" and "grátis" not in pattern) or rule.startswith("policy.")
                            else (combined, list(range(len(combined)))))
         for match in re.finditer(pattern, reading, re.IGNORECASE):
             start, end = origin[match.start()], origin[match.end() - 1] + 1
+            if rule == "policy.ai_denial" and future_person_direction(combined, start):
+                continue
+            # A service area's allowed number or a free amenity passes when its own card holds it ("Free parking.").
             if any(key is not None and low <= start and end <= high
-                   and allowed_service_area_hit(key, combined[low:high], start - low, end - low, rule)
+                   and (allowed_service_area_hit(key, combined[low:high], start - low, end - low, rule)
+                        or ((rule.endswith(".promise") or rule == "policy.free_price")
+                            and offers_amenity(combined[low:high], start - low, end - low)))
                    for key, low, high in ranges):
                 continue
             for key, low, high in ranges:
@@ -2230,7 +2272,9 @@ class FakeKernelState:
                 named = fact_id == key if template != "policy" else fact_id.startswith(key)
                 if (named and fact.kind == "charter" and "public" in fact.label.readers and self._current(fact)
                         and (template != "hours" or desk.hours)):
-                    charter.append(self._render(desk, template, fact, language))
+                    block = self._render(desk, template, fact, language)
+                    if template != "contact" or valid_public_contact(block.text):
+                        charter.append(block)
         # Scan the final rendered group: filtering can bring separate promise fragments together.
         refused = {key for block in charter if block.template == "policy"
                    for key in public_policy_fields([(block.fact_id, block.text)])}
@@ -3087,7 +3131,10 @@ class FakeKernelState:
             return refuse("stale_fact", "stale_fact")
         if not self._readable(session, fact):
             return refuse("unentitled_fact", "unentitled_fact")
-        return self._render(desk, template, fact, language)
+        block = self._render(desk, template, fact, language)
+        if template == "contact" and not valid_public_contact(block.text):
+            return refuse("unknown_fact", "contact_format")
+        return block
 
     def _render(self, desk: Desk, template: str, fact: Fact, language: str) -> RenderedBlock:
         """A card from the fact's claims (the kernel renders en/es templates; the fake keeps it plain)."""
@@ -3355,19 +3402,26 @@ class FakeKernelState:
         keys = [claim.key for claim in charter]
         if len(set(keys)) != len(keys):
             raise Refusal(422, "invalid")
+        targets = [desk] if desk is not None else sorted(
+            (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
+        contact_format = any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
+                             for claim in charter)
         values = {claim.key: claim.value for claim in charter
                   if claim.key.startswith("policy:") and claim.kind == "text"}
-        if len(values) > 40:
-            raise Refusal(422, "invalid", {"charter": ["policy_count_limit"]})
-        if sum(map(len, values.values())) > 8_000:
-            raise Refusal(422, "invalid", {"charter": ["policy_text_limit"]})
-        fields = public_policy_fields(sorted(values.items()))
-        if fields:
-            targets = [desk] if desk is not None else sorted(
-                (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
+        count, total_characters = len(values), sum(map(len, values.values()))
+        limit = "policy_count_limit" if count > 40 else "policy_text_limit" if total_characters > 8_000 else None
+        fields = {"charter": [limit]} if limit else public_policy_fields(sorted(values.items()))
+        if fields or contact_format:
+            # One refusal names the contact and every refused policy; the ledger names the contact by its fact ID.
+            contact = {"contact": ["contact_format"]} if contact_format else {}
+            summary = {"part": part, "refused": "promise" if fields else "contact",
+                       "fields": fields | ({"charter:contact": ["contact_format"]} if contact_format else {})}
+            if limit:
+                summary.update(keys=[safe_ref(key) for key in sorted(values)[:40]], policy_count=count,
+                               total_characters=total_characters, reason=limit)
             for target in targets:
-                self.append(target, "desk_data", {"part": part, "refused": "promise", "fields": fields})
-            raise Refusal(422, "invalid", fields)
+                self.append(target, "desk_data", summary)
+            raise Refusal(422, "invalid", contact | fields)
 
     def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
         """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
