@@ -47,9 +47,12 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   a field only of its own question's model, whose message leaves the memory and website out, and code drops it from
   any other turn's patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
   fact either (its turn reads none of the facts so far), and code drops a fact from a limit turn's patch too, but for
-  the quote question's prices, named from the owner's answer alone (the turn reads no price list): code updates the
-  item of each title or adds it, never removing one. A fact question clears the hours or the prices only by its
-  flag, since an empty list leaves them as they are. A new website is read only with consent; a new owner or business
+  the quote question's pricing text and price items, named from the owner's answer alone (the turn reads neither):
+  code replaces the pricing text and updates or adds price items by title, never removing one. Some fields (pricing,
+  intake, urgent, after_hours, hours and a website named) are only on the questions that ask for them
+  (`FIELD_TURNS`), and code drops one from any other turn's patch too, so each turn's schema stays small enough to
+  compile. A fact question clears the hours or the prices only by its flag, since an empty list leaves them as they
+  are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
   after its retry gets the fixed transition line instead.
@@ -106,9 +109,10 @@ import logging
 import re
 import secrets
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
 from functools import partial
 from time import monotonic
 from typing import Literal, TypeVar, cast, get_args
@@ -146,6 +150,7 @@ from desk.api.prompts import (
     CARD_ERROR_LINE,
     CARD_ERRORS,
     CARDS_REFUSED,
+    CLEARABLE,
     CONNECTOR_LABELS,
     DRAFT_RETRY,
     LIMIT_CHOICES,
@@ -156,6 +161,7 @@ from desk.api.prompts import (
     OWNER_ANSWER_TAG,
     OWNER_DECISION_TAG,
     OWNER_DESCRIPTION_TAG,
+    FIELD_TURNS,
     PRICE_ITEMS_MAX,
     PRICES_TAG,
     QUESTION_KEYS,
@@ -181,6 +187,7 @@ from desk.api.prompts import (
     SITUATION_PRICE_REQUIRED,
     SITUATION_TOOLS_BY_WHO,
     TOOLS_TAG,
+    BlockConfig,
     BusinessType,
     Choice,
     ConnectorProposal,
@@ -188,6 +195,7 @@ from desk.api.prompts import (
     DraftedRules,
     DraftedSituations,
     DraftOutput,
+    HoursAnswer,
     JobDraft,
     JobProposal,
     MemoryDraft,
@@ -196,8 +204,10 @@ from desk.api.prompts import (
     ProposalCard,
     SetupNextStep,
     SetupCardAnswer,
+    PurposePaymentProposalConfig,
     QuestionKey,
     RuleCardDraft,
+    SETUP_POLICY_CLAIMS,
     SetupAnswers,
     SetupPatch,
     SetupStart,
@@ -221,6 +231,7 @@ from desk.api.schemas import (
     SafetyCheck,
     SafetyRow,
     SetupMessage,
+    SetupProposalIn,
     SetupStartIn,
     SetupState,
     SetupStep,
@@ -328,6 +339,7 @@ WEBSITE_FAILED_LABEL = "Couldn't read {host}"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
+AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -418,7 +430,18 @@ class Entry(BaseModel):
     dropped: list[str] = []
     cards: bool | None = None
     pending: str | None = None
+    held_policy_keys: list[str] | None = None   # latest charter write's snapshot; [] clears an earlier hold
     connected_apps: list[ConnectorKey] | None = None
+    owner_fields: list[str] = []  # Fact fields this owner turn set or explicitly cleared.
+    owner_decided: bool = False
+    connector_connect_attempted: bool = False
+
+
+class ConnectedApp(BaseModel):
+    """An accepted app in the transcript; simulation grants no business capability."""
+
+    app: ConnectorKey
+    simulated: bool
 
 
 @dataclass
@@ -449,6 +472,11 @@ class Interview:
         if completed:
             # Persist on the next normal save, preserving the waiting question and every stored answer.
             self.latest_ask.covered = completed
+
+    @property
+    def owner_fields(self) -> set[str]:
+        """Owner fact decisions survive empty values and reloads through transcript metadata."""
+        return {name for entry in self.transcript if entry.role == "owner" for name in entry.owner_fields}
 
     @property
     def shows_cards(self) -> bool:
@@ -491,6 +519,17 @@ class Interview:
         return [shown.get(card.proposal_id, card) for entry in self.transcript for card in entry.planned]
 
     @property
+    def connected(self) -> list[ConnectedApp]:
+        """Derive connections from current accepted cards whose connection succeeded."""
+        cards = {card.proposal_id: card for card in self.planned}
+        cards.update((entry.card.proposal_id, entry.card) for entry in self.transcript if entry.card)
+        apps = dict.fromkeys(card.connector.app for card in cards.values()
+                             if card.state == "accepted" and card.connector is not None
+                             and card.connector.connected
+                             and card.superseded_by is None and card.proposal_id not in self.dropped)
+        return [ConnectedApp(app=app, simulated=app != "stripe") for app in apps]
+
+    @property
     def dropped(self) -> set[str]:
         return {proposal_id for entry in self.transcript for proposal_id in entry.dropped}
 
@@ -506,6 +545,15 @@ class Interview:
     @property
     def suggested(self) -> SuggestedFacts | None:
         return next((entry.suggested for entry in self.transcript if entry.suggested is not None), None)
+
+    @property
+    def held_policy_keys(self) -> list[str]:
+        return next((entry.held_policy_keys for entry in reversed(self.transcript)
+                     if entry.held_policy_keys is not None), [])
+
+    def hold_policies(self, keys: list[str]) -> None:
+        """Persist the latest charter outcome with the interview's other transcript metadata."""
+        self.transcript[-1].held_policy_keys = list(keys)
 
     @property
     def covered(self) -> set[QuestionKey]:
@@ -557,7 +605,9 @@ def _stored(interview: Interview) -> dict:
             # Omit only top-level nulls and empty additions; nested card nulls are part of its payload.
             "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
                                                                  if value is None or
-                                                                 (name in {"choices", "covered", "planned", "dropped", "cards"}
+                                                                 (name in {"choices", "covered", "planned", "dropped", "cards", "owner_fields",
+                                                                           "owner_decided",
+                                                                           "connector_connect_attempted"}
                                                                   and not value)})
                            for entry in interview.transcript],
             "draft_cards": [card.model_dump(mode="json") for card in interview.draft_cards],
@@ -583,6 +633,8 @@ async def _commit(engine: AsyncEngine, owner: OwnerCtx, interview: Interview, se
         current = await _load(conn, owner.copy_id, interview.interview_id, lock=True)
         if _stored(current) != seen:
             raise ApiProblem(409, "conflict")
+        if not interview.business_tools_enabled:
+            _clear_configs(interview)
         await _save(conn, interview)
 
 
@@ -602,14 +654,35 @@ def _turn(interview_id: str) -> Iterator[None]:
         _RUNNING.discard(interview_id)
 
 
-def setup_state(interview: Interview, slug: str, *, cards: bool = False) -> SetupState:
+def _clear_configs(interview: Interview) -> None:
+    accepted_payments = {card.proposal_id for card in interview.planned
+                         if card.state == "accepted" and card.job is not None and card.job.job == "payment"}
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if card.job is not None:
+                card.job.config = None
+                if card.job.job == "payment" and (card.state == "accepted" or card.proposal_id in accepted_payments):
+                    card.state = "declined"
+
+
+def setup_state(interview: Interview, slug: str, *, cards: bool = False,
+                 business_tools_enabled: bool = False) -> SetupState:
     """The interview as the owner sees it. Its messages leave out the transcript's first entry, the owner's own
     description (`start` puts it there), which the owner isn't shown back; the stored transcript, which later turns
     read, keeps it. Card messages appear only when requested by a client that can render them."""
+    def visible(entry: Entry) -> ProposalCard | None:
+        card = entry.card.model_copy(deep=True) if entry.card is not None else None
+        if card is not None and card.job is not None and not business_tools_enabled:
+            card.job.config = None
+            if card.job.job == "payment" and card.state == "accepted":
+                card.state = "declined"
+        return card
+
     return SetupState(interview_id=interview.interview_id, desk_id=interview.desk_id, slug=slug, step=interview.step,
                       consent=interview.consent, question=interview.question, busy=interview.busy,
                       pending_card=interview.pending_card,
-                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=entry.card)
+                      held_policy_keys=interview.held_policy_keys,
+                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry))
                                 for entry in interview.transcript[1:]
                                 if (entry.text or entry.choices or entry.card is not None) and
                                 (cards or entry.card is None) and (entry.role != "owner" or bool(entry.text))])
@@ -924,7 +997,7 @@ async def _desks_now(owner: OwnerCtx) -> OwnerCtx:
 
 
 async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartIn, *,
-                         cards: bool = False) -> SetupState | None:
+                         cards: bool = False, business_tools_enabled: bool = False) -> SetupState | None:
     """The interview a start with this key made in the copy, as it stands now; None when none holds the key. 409
     `conflict` when the key's start had another body, and 409 `key_spent` when it failed: its Desk was asked for and
     may exist, so the key can't start again. While the first is still starting, 409 `in_progress` at once, to be sent
@@ -957,7 +1030,8 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
     if row["desk_id"] not in owner.desk_ids:          # made after this request read the copy's Desks
         owner = await _desks_now(owner)
     interview = await _read(engine, owner, row["interview_id"])
-    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards)
+    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
+                       business_tools_enabled=business_tools_enabled)
 
 
 async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) -> bool:
@@ -974,20 +1048,23 @@ async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) 
 
 
 async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn, *,
-                admit: Callable[[], Awaitable[None]], cards: bool = False) -> SetupState:
+                admit: Callable[[], Awaitable[None]], cards: bool = False,
+                business_tools_enabled: bool = False) -> SetupState:
     """Read the owner's description, make the Desk with Answering off, and ask for consent, once `admit` (the route's
     limits) lets the start through. A repeat of the client's key is answered before `admit` counts it; otherwise the
     interview's row is written first, under the key's lock, and the start's outcome saved to it, its failure too
     (module docstring). A request another process admitted meanwhile is answered as a repeat."""
     key = body.idempotency_key
     async with ADMISSIONS.admitting(owner.copy_id, key):
-        repeat = await repeated_start(owner, engine, body, cards=cards)
+        repeat = await repeated_start(owner, engine, body, cards=cards,
+                                      business_tools_enabled=business_tools_enabled)
         if repeat is not None:
             return repeat
         await admit()
         interview_id = await _claim(engine, owner.copy_id, key, start_sha256(body))
     if interview_id is None:                        # another process took the key since this one looked
-        repeat = await repeated_start(owner, engine, body, cards=cards)
+        repeat = await repeated_start(owner, engine, body, cards=cards,
+                                      business_tools_enabled=business_tools_enabled)
         if repeat is None:                          # and has let it go again: this one is to be sent again
             raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
         return repeat
@@ -1023,7 +1100,7 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
         await _settle(engine, update(INTERVIEWS).where(*keyed).values(
             desk_id=created_desk_id, start_error=_failure_record(error), updated_at=func.now()))
         raise
-    return setup_state(interview, slug, cards=cards)
+    return setup_state(interview, slug, cards=cards, business_tools_enabled=business_tools_enabled)
 
 
 async def _asking_for_desk(owner: OwnerCtx, engine: AsyncEngine, keyed: tuple) -> None:
@@ -1067,9 +1144,103 @@ def _turn_abandoned(interview: Interview) -> bool:
             and (datetime.now(UTC) - interview.updated_at).total_seconds() > TURN_ABANDONED_S)
 
 
-async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: TurnRuns, cards: bool = False) -> SetupState:
+async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: TurnRuns, cards: bool = False,
+               business_tools_enabled: bool = False) -> SetupState:
     interview = await _recover_turn(owner, engine, interview_id, runs)
-    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards)
+    interview.business_tools_enabled = business_tools_enabled
+    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
+                       business_tools_enabled=interview.business_tools_enabled)
+
+
+def _empty_payment_config(title: str) -> PurposePaymentProposalConfig | None:
+    purpose = " ".join(title.split())[:60]
+    if not purpose:
+        return None
+    return PurposePaymentProposalConfig(block="purpose_payment", purpose=purpose, amount_cents=None)
+
+
+def _check_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn, *,
+                    configs: bool = True) -> tuple[ProposalCard, SetupProposalIn, BlockConfig | None]:
+    """Validate a waiting-card decision without changing the card or transcript."""
+    if interview.step != "questions":
+        raise ApiProblem(409, "conflict")
+    card = next((entry.card for entry in reversed(interview.transcript)
+                 if entry.card is not None and entry.card.proposal_id == proposal_id), None)
+    if card is None and not any(item.proposal_id == proposal_id for item in interview.planned):
+        raise ApiProblem(404, "not_found")
+    if interview.pending_card != proposal_id:
+        raise ApiProblem(409, "conflict")
+    # Revalidate even model_construct/assignment input before mutating any part of the card.
+    try:
+        decision = SetupProposalIn.model_validate(decision.model_dump(exclude_unset=True))
+    except ValidationError:
+        raise ApiProblem(422, "invalid") from None
+    if card.job is None and (decision.title is not None or decision.autonomy is not None):
+        raise ApiProblem(422, "invalid")
+    config = card.job.config if card.job is not None and configs else None
+    if configs and card.job is not None and card.job.job == "payment" and config is None:
+        config = _empty_payment_config(card.job.title)
+    if (decision.accept and card.job is not None and card.job.job == "payment"
+            and (not isinstance(config, PurposePaymentProposalConfig)
+                 or (decision.amount_cents if decision.amount_cents is not None
+                     else config.amount_cents or 0) < 1)):
+        raise ApiProblem(422, "amount_required")
+    if decision.amount_cents is not None and not isinstance(config, PurposePaymentProposalConfig):
+        raise ApiProblem(422, "invalid")
+    return card, decision, config
+
+
+def apply_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn) -> None:
+    """Validate an answer and change only the waiting card, without I/O or transcript additions."""
+    card, decision, config = _check_decision(interview, proposal_id, decision, configs=interview.business_tools_enabled)
+    card.state = "accepted" if decision.accept else "declined"
+    if card.connector is not None:
+        card.connector.connected = decision.accept and card.connector.app != "stripe"
+    if decision.amount_cents is not None:
+        config.amount_cents = decision.amount_cents
+    if card.job is not None:
+        if card.job.config is None:
+            card.job.config = config
+        if decision.title is not None:
+            card.job.title = decision.title
+        if decision.autonomy is not None:
+            card.job.autonomy = decision.autonomy
+
+
+async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
+                          interview_id: str, proposal_id: str, decision: SetupProposalIn, *,
+                          runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                          cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """Answer the pending card through the shared runner, without retaining its temporary owner marker."""
+    connect = False
+
+    def check(interview: Interview) -> None:
+        interview.business_tools_enabled = business_tools_enabled
+        _check_decision(interview, proposal_id, decision, configs=business_tools_enabled)
+
+    async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        nonlocal connect
+        interview.business_tools_enabled = business_tools_enabled
+        if not business_tools_enabled:
+            _clear_configs(interview)
+        apply_decision(interview, proposal_id, decision)
+        entry = next(entry for entry in reversed(interview.transcript)
+                     if entry.card is not None and entry.card.proposal_id == proposal_id)
+        entry.owner_decided = True
+        await card_turn(ctx, engine, model, interview, proposal_id)
+        connect = _claim_connector_connect(interview, None if interview.step == "tools" else proposal_id)
+
+    async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if connect:
+            await _connect_accepted_connector(ctx, engine, interview)
+        if interview.step == "tools":
+            await after_finish(ctx, interview)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=lambda interview: [Entry(role="owner", text="")], turn=turn,
+                          keep_staged=False, after=after,
+                          render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
+
 
 
 def _ask(interview: Interview, key: QuestionKey) -> Entry:
@@ -1250,6 +1421,7 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                     except ApiProblem:
                         busy = None          # rejected before storing; another run's snapshot is never ours
                         raise
+                    busy = _stored(interview)  # _commit may clear disabled card configs before saving.
                     pending = render(interview, slug)
                     busy_stored.set()
                     await turn(ctx, interview, staged)
@@ -1314,6 +1486,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
                   cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
     """Run consent and its reads through the shared turn runner; no reads run after no."""
     def check(interview: Interview) -> None:
+        interview.business_tools_enabled = business_tools_enabled
         if interview.consent is not None or interview.step != "questions":
             raise ApiProblem(409, "conflict")
 
@@ -1333,7 +1506,8 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         await _after_consent(ctx, engine, model, interview, entries)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
-                          check=check, stage=stage, turn=turn, render=partial(setup_state, cards=cards))
+                          check=check, stage=stage, turn=turn,
+                          render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
 def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: str | None = None) -> dict:
@@ -1348,7 +1522,7 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     entries never enter history: its current answer appears only in `owner_answer`."""
     transcript = _history(interview, run_id)
     limit_turn = key in LIMIT_QUESTIONS.values()
-    so_far = interview.answers.model_dump_json(exclude_defaults=True)
+    so_far = interview.answers.model_dump_json(exclude_defaults=True, exclude={"suggested_fields"})
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
     asked = next((entry.text for entry in reversed(transcript) if entry.question == key), "")
@@ -1388,14 +1562,28 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     return _user("\n\n".join(parts))
 
 
+def _singular(word: str) -> str:
+    """A word of four or more letters in one form for its singular and regular plural, so "class" and "classes" or
+    "case" and "cases" match: one ending in "ss" as it is, else without a plural "es" after s, x, z, ch or sh, a
+    plural "s", or a final "e" after s, z or ch."""
+    if len(word) < 4 or word.endswith("ss"):
+        return word
+    if re.search(r"(?:s|x|z|ch|sh)es$", word):
+        return word[:-2]
+    if word.endswith("s"):
+        return word[:-1]
+    return word[:-1] if re.search(r"(?:s|z|ch)e$", word) else word
+
+
 def _title(title: str) -> str:
-    return " ".join(title.split()).casefold()
+    """A price title's key: case, spacing and regular plurals ignored, as `owner_supports` backs titles."""
+    return re.sub(r"[^\W\d_]{4,}", lambda match: _singular(match.group()), " ".join(title.split()).casefold())
 
 
 def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> list[dict]:
     """The price list with the prices a limit turn named (`LIMIT_TURN_FACTS`): each updates the price of the item
-    listed with the same title (ignoring case and spacing), else is added at the end; no item is removed. A new item
-    past the list's `PRICE_ITEMS_MAX` is dropped and logged."""
+    listed with the same title (`_title`), else is added at the end; no item is removed. A new item past the list's
+    `PRICE_ITEMS_MAX` is dropped and logged."""
     prices = [dict(item) for item in listed]
     at = {_title(item["title"]): index for index, item in enumerate(prices)}
     for price in named:
@@ -1410,22 +1598,264 @@ def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> l
     return prices
 
 
-def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupAnswers:
+# The parts of a public contact (`PUBLIC_CONTACT_FORMAT`): emails and URLs with a scheme or www., then bare domains (a
+# hostname whose last label is letters), then phone numbers in what's left. Label words around them don't count.
+_CONTACT_ADDRESS = re.compile(r"(?:https?://|www\.)[^\s<>\"']+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_CONTACT_DOMAIN = re.compile(r"(?<![\w@.-])(?:[^\W_](?:[\w-]*[^\W_])?\.)+[^\W\d_]{2,63}(?![\w-]|\.[^\W_])"
+                             r"(?:/[^\s<>\"']*)?")
+_CONTACT_PHONE = re.compile(r"(?<!\w)\+?\d[\d\s().\-\u2010-\u2015\u2212]*\d(?!\w)")
+# The labels a public contact may carry: `PUBLIC_CONTACT_FORMAT`'s list (a test keeps the two in step), their Spanish
+# equivalents, an extension's "ext" and the words that join parts. Their words are never the owner's to type.
+_CONTACT_LABELS = (
+    "Call us at", "Call", "Call or text", "Text us at", "Text", "Email us at", "Email", "Phone", "Tel", "Mobile",
+    "Office", "Website", "Web", "Ll\u00e1manos al", "Escr\u00edbenos a", "Tel\u00e9fono", "Correo",
+    "Llama al", "M\u00f3vil", "Celular", "Oficina", "Sitio web", "P\u00e1gina web", "Correo electr\u00f3nico",
+    "ext", "Ask for", "Site", "or", "and", "o", "y",
+)
+_CONTACT_LABEL_WORDS = frozenset(re.findall(r"\w+", " ".join(_CONTACT_LABELS).casefold()))
+
+
+def _contact_parts(text: str) -> tuple[set[str], list[str]]:
+    """The addresses in `text` (emails, URLs and bare domains, in lower case and without a scheme, www. or a trailing
+    slash) and its phone numbers' digits (at least 7)."""
+    addresses = set()
+
+    def take(match: re.Match[str]) -> str:
+        found = match.group().rstrip(".,;:!?)]}")
+        addresses.add(re.sub(r"^(?:https?://)?(?:www\.)?", "", found).rstrip("/"))
+        return " "
+
+    rest = _CONTACT_DOMAIN.sub(take, _CONTACT_ADDRESS.sub(take, text.casefold()))
+    phones = [re.sub(r"\D", "", match.group()) for match in _CONTACT_PHONE.finditer(rest)]
+    return addresses, [digits for digits in phones if len(digits) >= 7]
+
+
+def _contact_words(text: str) -> set[str]:
+    """Words beyond recognized contact parts and their labels (`_CONTACT_LABELS`)."""
+    rest = _CONTACT_DOMAIN.sub(" ", _CONTACT_ADDRESS.sub(" ", text.casefold()))
+    rest = _CONTACT_PHONE.sub(lambda match: " " if len(re.sub(r"\D", "", match.group())) >= 7 else match.group(), rest)
+    return set(re.findall(r"\w+", rest)) - _CONTACT_LABEL_WORDS
+
+
+def owner_supports(field: Literal["public_contact", "price_items", "hours"],
+                   value: str | list[PriceAnswer] | list[HoursAnswer], owner_text: str, *,
+                   stated: bool = False) -> bool:
+    """Whether the owner's typed text contains every structured value, independent of model or read text. A contact
+    needs every part in it (`_contact_parts`): each address whole, and each phone's last 10 digits (all of them when
+    it has fewer) in one number the owner typed, plus any words beyond labels and separators. A contact with no part
+    needs its whole text. With `stated`, prices need a dollar sign, every title word of four or more letters and at
+    least one of three or more, ignoring regular plurals on both sides; hours need a meridiem, a clock time or a range
+    in order, never unrelated bare counts."""
+    if not value:
+        return True
+    folded = owner_text.casefold()
+    if field == "public_contact":
+        contact = cast(str, value).casefold()
+        addresses, phones = _contact_parts(contact)
+        if addresses or phones:
+            owner_addresses, owner_phones = _contact_parts(owner_text)
+            return addresses <= owner_addresses and all(
+                any(digits[-10:] in typed for typed in owner_phones) for digits in phones
+            ) and _contact_words(contact) <= set(re.findall(r"\w+", folded))
+        return contact in folded
+    if field == "price_items":
+        title_text = re.sub(r"[^\W\d_]{4,}", lambda match: _singular(match.group()), folded)
+        sign = r"\$\s?" if stated else r"\$?"
+        amounts = {int(Decimal(re.sub(r"[$,\s]", "", match.group(0))) * 100)
+                   for match in re.finditer(rf"(?<![\w.]){sign}\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?(?!\w|\.\d|,\d)",
+                                            owner_text)}
+
+        def named(title: str) -> bool:
+            # Short words such as "per", "for" or "fee" may be the model's; the longer ones must be the owner's.
+            words = {word: _singular(word) in title_text for word in re.findall(r"[^\W\d_]{3,}", title.casefold())}
+            return any(words.values()) and all(found for word, found in words.items() if len(word) >= 4)
+
+        return all(item.unit_cents in amounts and (not stated or named(item.title))
+                   for item in cast(list[PriceAnswer], value))
+
+    def has_time(clock: str, text: str, *, explicit: bool = False) -> bool:
+        hour, minute = map(int, clock.split(":"))
+        period = "am" if hour < 12 else "pm"
+        minutes = r"(?::00)?" if minute == 0 else f":{minute:02d}"
+        clock_forms = rf"(?:{re.escape(clock)}|(?:{hour}|{hour % 12 or 12}){minutes})"
+        matching_period = rf"{period[0]}\.?m\.?"
+        no_period = r"(?!\s*[ap]\.?m\.?(?!\w))"
+        if explicit:
+            clock_forms = rf"(?:{re.escape(clock)}|{hour % 12 or 12}:{minute:02d})"
+            time = rf"(?:{hour % 12 or 12}{minutes}\s*{matching_period}|{clock_forms}{no_period})"
+        else:
+            time = rf"{clock_forms}(?:\s*{matching_period}|{no_period})"
+        return re.search(rf"(?<![\w:]){time}(?![\w:]|\.\d)", text) is not None
+
+    # A range ("9 to 5", "9 till 5", "between 9 and 5", "de 9 a 5", "8.30-5.30") backs a window only in order: its
+    # start before the separator and its end after it. Dotted minutes count only inside a range, never as prices.
+    endpoint = r"(\d{1,2}(?:[:.]\d{2})?(?:\s*[ap]\.?m\.?)?)"
+    ranges = [tuple(re.sub(r"(?<=\d)\.(?=\d)", ":", part) for part in match.groups()) for pattern in (
+        rf"(?<![\w:.$-]){endpoint}\s*(?:(?:to|until|till|['’]?til)\b|[-–—])\s*{endpoint}",
+        rf"\bbetween\s+{endpoint}\s+and\s+{endpoint}", rf"\bde\s+{endpoint}\s+a\s+{endpoint}",
+    ) for match in re.finditer(rf"{pattern}(?![\w:]|[-–—]\w|\.\d)", folded)]
+    return all((has_time(window.start, folded, explicit=stated) and has_time(window.end, folded, explicit=stated))
+               or any(has_time(window.start, start) and has_time(window.end, end) for start, end in ranges)
+               for window in cast(list[HoursAnswer], value))
+
+
+# Each fact a turn can set, with its home question, the one that asks the owner for it: there a turn's value is the
+# owner's (`_on_topic`), and the quote question's for a fact it records (`LIMIT_TURN_FACTS`). Other turns may have the
+# field too (`FIELD_TURNS`) and read the website and memory, so there it follows the off-topic rules: free text is
+# held until the owner confirms it, and a structured value counts only when that answer states it or only removes
+# some of the owner's own (`_backed_off_topic`). Neither replaces nor refills the owner's own value. Names are handled
+# on their own (`merged`, `_rename`).
+FACT_HOMES: dict[str, QuestionKey] = {
+    "summary": "what_you_do", "pricing": "what_you_do", "intake": "what_you_do",
+    "service_area": "hours_and_area", "hours": "hours_and_area",
+    "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
+    "urgent": "contact_and_after_hours", "price_items": "quote_limit",
+}
+
+
+def _on_topic(name: str, key: QuestionKey) -> bool:
+    """Whether fact `name` is on topic on the turn answering `key`: on its home question (`FACT_HOMES`), and on the
+    quote question for a fact that question records (`LIMIT_TURN_FACTS`)."""
+    return FACT_HOMES.get(name) == key or LIMIT_TURN_FACTS.get(name) == key
+
+
+def _fact_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
+    """Only fact fields this question is allowed to merge, including explicit empty lists: never a field only other
+    questions' turns have (`FIELD_TURNS`, read at each call), which `merged` drops, so it never counts as given."""
+    return [name for name, value in patch
+            if name in SetupPatch.model_fields and name not in LIMIT_QUESTIONS
+            and value is not None and not (isinstance(value, str) and not value.strip())
+            and (name not in FIELD_TURNS or key in FIELD_TURNS[name])
+            and (key not in LIMIT_QUESTIONS.values() or LIMIT_TURN_FACTS.get(name) == key)]
+
+
+def _only_removes_hours(before: SetupAnswers, named: list[HoursAnswer]) -> bool:
+    """A strict subset of the stored owner days and windows, with every retained time unchanged."""
+    if "hours" in before.suggested_fields:
+        return False
+    stored = {(day, window.start, window.end) for window in before.hours for day in window.days}
+    remaining = {(day, window.start, window.end) for answer in named for window in [answer.window()]
+                 for day in window.days}
+    return remaining < stored
+
+
+# The words that name each day in an owner's answer, in English or Spanish, singular or plural ("weekdays" and
+# "weekends" name theirs, and a daily expression all seven): a day added to the owner's hours off their home question
+# is named in that answer.
+_DAILY = re.compile(r"(?<!\w)(?:daily|every\s+day|7\s+days\s+a\s+week|seven\s+days\s+a\s+week|todos\s+los\s+d[ií]as"
+                    r"|a\s+diario)(?!\w)")
+_DAY_NAMES: dict[str, tuple[str, ...]] = {
+    "mon": ("monday", "mon", "lunes", "weekday", "entre semana"),
+    "tue": ("tuesday", "tue", "tues", "martes", "weekday", "entre semana"),
+    "wed": ("wednesday", "wed", "miércoles", "miercoles", "weekday", "entre semana"),
+    "thu": ("thursday", "thu", "thur", "thurs", "jueves", "weekday", "entre semana"),
+    "fri": ("friday", "fri", "viernes", "weekday", "entre semana"),
+    "sat": ("saturday", "sat", "sábado", "sabado", "weekend", "fin de semana", "fines de semana"),
+    "sun": ("sunday", "sun", "domingo", "weekend", "fin de semana", "fines de semana"),
+}
+
+
+def _names_day(day: str, text: str) -> bool:
+    folded = text.casefold()
+    return (_DAILY.search(folded) is not None
+            or any(re.search(rf"(?<!\w){re.escape(word)}s?(?!\w)", folded) for word in _DAY_NAMES[day]))
+
+
+def _backed_off_topic(patch: SetupPatch, key: QuestionKey, said: str, before: SetupAnswers | None = None) -> set[str]:
+    """The facts this turn gave off their topic (`_on_topic`) that the owner's own words this turn (`said`) back: a
+    list they said to clear (`CLEARABLE`), a removal from stored owner hours, or a structured value `owner_supports`
+    finds in `said`. Price patches merge by title: unchanged owner items need no new backing, but every retained
+    suggested item does. Hours replace the stored list whole, so only a pure addition to the owner's hours, keeping
+    every stored day and time, is checked on its new windows alone, each on a day that answer names. Such a turn reads
+    the website and memory, so prices and times need explicit syntax. Free text is never backed off its topic."""
+    backed = set()
+    for name in _fact_patch_fields(patch, key):
+        if name not in FACT_HOMES or _on_topic(name, key):
+            continue
+        value = getattr(patch, name)
+        days_named = True
+        if name == "hours" and value and before is not None and name not in before.suggested_fields:
+            # Each window as one (day, start, end) per day, so days grouped with the same hours compare one by one.
+            stored = {(day, window.start, window.end) for window in before.hours for day in window.days}
+            patched = {(day, window.start, window.end): answer for answer in value for window in [answer.window()]
+                       for day in window.days}
+            added = [(day, answer) for (day, *times), answer in patched.items() if (day, *times) not in stored]
+            if added and stored <= set(patched):
+                # A pure addition: only its new days need stating, as only new or changed prices do.
+                value = [HoursAnswer(days=[day], start=answer.start, end=answer.end) for day, answer in added]
+                days_named = all(_names_day(day, said) for day, _ in added)
+        if name == "price_items" and value and before is not None:
+            if name in before.suggested_fields:
+                # A held list stays held until every retained item is backed, not just this turn's correction.
+                value = [PriceAnswer.model_validate(item)
+                         for item in _priced(before.model_dump()[name], value, key)]
+            else:
+                listed = {_title(item.title): item.unit_cents for item in before.price_items}
+                changed = [item for item in value if listed.get(_title(item.title)) != item.unit_cents]
+                value = changed or value
+        if ((name in CLEARABLE and value == [])
+                or (name == "hours" and before is not None and _only_removes_hours(before, patch.hours or []))
+                or (name in {"public_contact", "price_items", "hours"} and days_named
+                    and owner_supports(name, value, said, stated=True))):
+            backed.add(name)
+    return backed
+
+
+def _owner_patch_fields(patch: SetupPatch, key: QuestionKey, before: SetupAnswers,
+                        after: SetupAnswers, owner_text: str, *, backed: Collection[str] = frozenset()) -> list[str]:
+    """Keep explicit clears, topic-matched prose, owner-supported structured facts and the off-topic facts this
+    turn's own words back (`backed`) as owner answers. Prose held before and re-emitted unchanged stays held unless
+    the owner's own words contain it."""
+    fields = []
+    folded = " ".join(owner_text.split()).casefold()
+    for name in _fact_patch_fields(patch, key):
+        value = getattr(patch, name)
+        if name not in FACT_HOMES or name in backed or (value == [] and getattr(after, name) == []):
+            fields.append(name)
+            continue
+        if not _on_topic(name, key):
+            continue
+        if (name not in {"public_contact", "price_items", "hours"}
+                and name in before.suggested_fields and getattr(before, name) == getattr(after, name)
+                and " ".join(str(value).split()).casefold() not in folded):
+            continue
+        # A partial quote patch cannot take ownership of held items it never named.
+        if name == "price_items" and name in before.suggested_fields:
+            named = {_title(item.title) for item in value}
+            if any(_title(item.title) not in named for item in after.price_items):
+                continue
+        if name in {"public_contact", "price_items", "hours"} and not owner_supports(name, value, owner_text):
+            continue
+        fields.append(name)
+    return fields
+
+
+def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
+           owner_fields: Collection[str] = frozenset(), backed: Collection[str] = frozenset()) -> SetupAnswers:
     """`answers` with what the patch sets (a blank text sets nothing). Each limit is taken only on the turn answering
-    its own question (`LIMIT_QUESTIONS`), and a fact only on a turn answering a question that owns no limit, but for
-    the prices the quote question names, which only update or add items (`_priced`); anything else is dropped and
-    logged (by its label or field name, never its value). Names are reduced as the Desk takes them."""
+    its own question (`LIMIT_QUESTIONS`), a fact in `FIELD_TURNS` only on the turns it lists, and any other fact only
+    on a turn answering a question that owns no limit, but for the explicit facts in `LIMIT_TURN_FACTS`: the quote
+    question replaces pricing text and only updates or adds price items (`_priced`). Off-topic price patches also
+    update or add by title, except explicit clears. Anything else is dropped and logged (by its label or field name,
+    never its value). An off-topic fact replaces the stored one when the owner's own words this turn back it
+    (`backed`, from `_backed_off_topic`); any other cannot replace owner facts, nor refill a fact the owner set or
+    cleared (`owner_fields`). Names are reduced as the Desk takes them."""
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
     for name, value in patch:
+        if name not in SetupPatch.model_fields:
+            continue
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
         if name in LIMIT_QUESTIONS and key != LIMIT_QUESTIONS[name]:
             logger.warning("a setup turn answering %s carried %s; it was dropped", key, LIMIT_LABELS[name])
             continue
+        if name in FIELD_TURNS and key not in FIELD_TURNS[name]:
+            logger.warning("a setup turn answering %s carried %s; it was dropped", key, name)
+            continue
         if limit_turn and name not in LIMIT_QUESTIONS:
             if LIMIT_TURN_FACTS.get(name) == key:
-                values[name] = _priced(values[name], value, key)
+                values[name] = _priced(values[name], value, key) if name == "price_items" else value
             else:
                 logger.warning("a setup turn answering %s carried %s; it was dropped", key, name)
             continue
@@ -1435,8 +1865,13 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
             value = reduce_name(value) or None
         elif name == "business_name":
             value = " ".join(value.split()) or None
+        if (name in FACT_HOMES and not _on_topic(name, key) and name not in backed
+                and (name in owner_fields or (getattr(answers, name) and name not in answers.suggested_fields))):
+            if value != getattr(answers, name):
+                logger.warning("setup dropped off-topic field %s", name)
+            continue
         if value is not None:
-            values[name] = value
+            values[name] = _priced(values[name], value, key) if name == "price_items" and value else value
     return SetupAnswers.model_validate(values)
 
 
@@ -1461,7 +1896,13 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
     if draft.job == "payment" and not interview.business_tools_enabled:
         logger.warning("setup dropped an unavailable job of kind %s", draft.job)
         return None
+    payment_config = _empty_payment_config(draft.title) if draft.job == "payment" else None
+    if draft.job == "payment" and payment_config is None:
+        logger.warning("setup dropped a payment job with an empty purpose")
+        return None
     fields = draft.model_dump(mode="json")
+    if draft.job == "payment" and fields["config"] is None:
+        fields["config"] = payment_config.model_dump(mode="json")
     if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
         fields["config"]["amount_cents"] = None
     if not interview.business_tools_enabled:
@@ -1501,7 +1942,7 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
                                covered=", ".join(key for key in QUESTION_KEYS if closing or key in interview.covered),
                                uncovered="" if closing else ", ".join(key for key in QUESTION_KEYS
                                                                     if key not in interview.covered)),
-        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json()),
+        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json(exclude={"suggested_fields"})),
         wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)),
     ]
     if not interview.business_tools_enabled:
@@ -1662,8 +2103,8 @@ def _show_card(interview: Interview, card: ProposalCard) -> None:
     interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
     payment = bool((card.job and card.job.job == "payment") or
                    (card.connector and card.connector.app == "stripe"))
-    if payment and not interview.answers.auto_money_cap_cents and not any(
-            entry.role == "claude" and entry.text == PAYMENT_LINE for entry in interview.transcript):
+    if (payment and card.state in {"proposed", "accepted"} and not interview.answers.auto_money_cap_cents
+            and not any(entry.role == "claude" and entry.text == PAYMENT_LINE for entry in interview.transcript)):
         interview.transcript.append(Entry(role="claude", text=PAYMENT_LINE))
 
 
@@ -1678,14 +2119,17 @@ def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCar
 
 
 def _decide_typed(interview: Interview, proposal_id: str, accept: bool) -> bool:
-    """Decide only the waiting card, preserving its payload and the original planned item."""
-    if interview.pending_card != proposal_id:
-        return False
-    card = interview.latest_ask.card
-    if accept and card.job and card.job.config and card.job.config.block == "purpose_payment" and \
-            card.job.config.amount_cents is None:
-        return False
-    card.state = "accepted" if accept else "declined"
+    """Use the same validation as a card click; an unpriced payment still needs its amount."""
+    try:
+        apply_decision(interview, proposal_id, SetupProposalIn(accept=accept))
+    except ApiProblem as failed:
+        if failed.error == "amount_required":
+            return False
+        raise
+    if accept:
+        entry = next(entry for entry in reversed(interview.transcript)
+                     if entry.card is not None and entry.card.proposal_id == proposal_id)
+        entry.owner_decided = True
     return True
 
 
@@ -1737,8 +2181,11 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
                 interview.transcript.append(Entry(role="claude", text=following.question.strip()))
             _show_card(interview, replacement)
             return
-        if following.decision == "none" or not _decide_typed(interview, proposal_id,
-                                                            following.decision == "accept"):
+        if following.decision == "none":
+            return
+        if not _decide_typed(interview, proposal_id, following.decision == "accept"):
+            interview.transcript.pop()
+            interview.transcript.append(Entry(role="claude", text=AMOUNT_FIRST_LINE))
             return
     await _advance(owner, engine, model, interview, following, reply)
 
@@ -1750,7 +2197,10 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
     if (question is None) == (card is None):
         raise ApiProblem(422, "invalid_request")
 
+    connect = False
+
     def check(interview: Interview) -> None:
+        interview.business_tools_enabled = business_tools_enabled
         if card is not None:
             if card != interview.pending_card:
                 raise ApiProblem(409, "conflict")
@@ -1761,9 +2211,13 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         return [Entry(role="owner", text=text)]
 
     async def run(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        nonlocal connect
         interview.business_tools_enabled = business_tools_enabled
         if card is not None:
+            if not interview.business_tools_enabled:
+                _clear_configs(interview)
             await card_turn(ctx, engine, model, interview, card, text=text)
+            connect = _claim_connector_connect(interview, None if interview.step == "tools" else card)
             return
         since = len(interview.transcript)
         key = question
@@ -1784,14 +2238,27 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
         if reply.text:
             entries.append(reply)
-        site = website_url(turn.website)
+        site = website_url(getattr(turn, "website", ""))  # the contact question's model has none (`FIELD_TURNS`)
         if site is not None and site[0] not in interview.tried_websites():
             if interview.consent:
                 entries.append(await _read_website(ctx, desk_id, *site))
             else:
                 said.website = site[0]                   # kept as text: nothing is read without consent
         await _rename(ctx, desk_id, patch)
-        interview.answers = merged(interview.answers, patch, key)
+        backed = _backed_off_topic(patch, key, text, interview.answers)
+        updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields, backed=backed)
+        owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
+        said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
+        for name in _fact_patch_fields(patch, key):
+            if name not in FACT_HOMES:
+                continue
+            if name in said.owner_fields:
+                updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
+            elif getattr(interview.answers, name) == getattr(updated, name):
+                continue
+            elif name not in updated.suggested_fields:
+                updated.suggested_fields.append(name)
+        interview.answers = updated
         interview.transcript += entries
         if turn.step_done:
             interview.cover([key])
@@ -1811,20 +2278,45 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
                                  follow_up=turn if not turn.step_done else None)
 
+        if interview.step == "tools":
+            connect = _claim_connector_connect(interview)
+
     async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if connect:
+            await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
             await after_finish(ctx, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=stage, turn=run, after=after,
-                          render=partial(setup_state, cards=cards))
+                          render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
 # Finish ------------------------------------------------------------------------------------------------------
 
+def _unpriced_payment(job: JobProposal | None) -> bool:
+    return (job is not None and job.job == "payment"
+            and (not isinstance(job.config, PurposePaymentProposalConfig) or (job.config.amount_cents or 0) < 1))
+
+
 def settle_plan(interview: Interview) -> None:
-    # Leave changed cards and their superseded_by links intact; settle only their replacements.
-    pass
+    """Settle the remaining plan and emit each never-shown card once, without I/O."""
+    # Changed cards and their superseded_by links stay intact; only proposed replacements can settle.
+    pending = interview.pending_card
+    for card in interview.unshown:
+        card.state = "declined" if _unpriced_payment(card.job) else "accepted"
+        _show_card(interview, card)
+    if pending is not None:
+        card = next(entry.card for entry in reversed(interview.transcript)
+                    if entry.card is not None and entry.card.proposal_id == pending)
+        card.state = "declined" if _unpriced_payment(card.job) else "accepted"
+    # Stored interviews may contain earlier acceptances that bypassed the amount check.
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if card.state == "accepted" and _unpriced_payment(card.job):
+                card.state = "declined"
+            if card.state == "accepted" and card.connector is not None and card.connector.app != "stripe":
+                card.connector.connected = True
 
 
 async def close_setup(owner, engine, model, interview: Interview) -> None:
@@ -1850,13 +2342,164 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
     finish(interview)
 
 
+def accepted_jobs(interview: Interview) -> list[JobProposal]:
+    return [card.job for card in interview.planned
+            if card.state == "accepted" and card.job is not None and not _unpriced_payment(card.job)]
+
+
+def owner_job_answers(interview: Interview) -> list[dict[str, object]]:
+    """Only explicit card decisions supply job data to rules drafting."""
+    answers = []
+    for entry in interview.transcript:
+        card = entry.card
+        if (not entry.owner_decided or card is None or card.state != "accepted" or card.job is None
+                or _unpriced_payment(card.job)):
+            continue
+        job = card.job
+        answer = {"job": job.job, "title": job.title, "autonomy": job.autonomy}
+        if isinstance(job.config, PurposePaymentProposalConfig) and job.config.amount_cents is not None:
+            answer["amount_cents"] = job.config.amount_cents
+        answers.append(answer)
+    return answers
+
+
 def finish(interview: Interview) -> None:
-    interview.cover(QUESTION_KEYS)
+    """Project the settled plan and cover unanswered topics at safe defaults, without I/O."""
+    remaining = set(QUESTION_KEYS) - interview.covered
+    suggested = interview.suggested
+    if suggested is not None:
+        # A suggestion fills a fact still empty and never the owner's when a question that asks for it went unanswered,
+        # merged as the first such question's turn takes it (some facts are fields only of certain turns,
+        # `FIELD_TURNS`). Only a fact has a topic, so a limit a stored suggestion somehow carried never fills.
+        fills = {name: value for name, value in suggested
+                 if any(_on_topic(name, key) for key in remaining) and name not in interview.owner_fields
+                 and value and not getattr(interview.answers, name)}
+        suggested_fields = interview.answers.suggested_fields + sorted(fills)
+        for name, value in fills.items():
+            key = next(key for key in QUESTION_KEYS if key in remaining and _on_topic(name, key))
+            interview.answers = merged(interview.answers, SetupPatch.model_validate({name: value}), key)
+        interview.answers.suggested_fields = list(dict.fromkeys(suggested_fields))
+    interview.cover(remaining)
+    included = []
+    used = 0
+    seen = set()
+    skipped = 0
+    for job in accepted_jobs(interview):
+        if not job.can_do_today:
+            continue
+        how = " ".join(job.how.split())
+        if how in seen or re.search(r"\d|\bfree\b", how, re.IGNORECASE):
+            skipped += 1
+            continue
+        seen.add(how)
+        needed = len(how) + bool(included)
+        if how and used + needed <= 1500:
+            included.append(how)
+            used += needed
+    if skipped:
+        logger.warning("setup skipped %d job descriptions", skipped)
+    interview.answers.how_we_help = "\n".join(included) or None
     interview.step = "tools"
 
 
-async def after_finish(owner, interview) -> None:
-    pass
+async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
+    """A5 (19) supplies the kernel business-tool write after the blocks are deployed."""
+
+
+def _claim_connector_connect(interview: Interview, proposal_id: str | None = None) -> bool:
+    """Reserve one real Stripe attempt before committing; other accepted apps are simulated."""
+    if any(entry.connector_connect_attempted for entry in interview.transcript):
+        return False
+    seen = set()
+    for entry in reversed(interview.transcript):
+        card = entry.card
+        if card is None or card.proposal_id in seen:
+            continue
+        seen.add(card.proposal_id)
+        if ((proposal_id is None or card.proposal_id == proposal_id) and card.state == "accepted"
+                and card.connector is not None and card.connector.app == "stripe"
+                and card.superseded_by is None and card.proposal_id not in interview.dropped):
+            entry.connector_connect_attempted = True
+            return True
+    return False
+
+
+def _mark_stripe_connected(interview: Interview, proposal_ids: set[str]) -> None:
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if (card.proposal_id in proposal_ids and card.state == "accepted"
+                    and card.connector is not None and card.connector.app == "stripe"):
+                card.connector.connected = True
+
+
+async def _connect_accepted_connector(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
+    """Connect after the decision commit; failures leave the Tools step's Connect available."""
+    try:
+        await connect_payments(owner, owner.desk(interview.desk_id))
+    except Exception as failed:
+        logger.warning("a setup payments connection failed (%s)", type(failed).__name__)
+        return
+    for attempt in range(2):
+        try:
+            current = await _read(engine, owner, interview.interview_id)
+            seen = _stored(current)
+            current.business_tools_enabled = interview.business_tools_enabled
+            cards = {card.proposal_id: card for card in current.planned}
+            cards.update((entry.card.proposal_id, entry.card) for entry in current.transcript if entry.card)
+            accepted = {card.proposal_id for card in cards.values()
+                        if card.state == "accepted" and card.connector is not None
+                        and card.connector.app == "stripe" and card.superseded_by is None
+                        and card.proposal_id not in current.dropped}
+            _mark_stripe_connected(current, accepted)
+            await _commit(engine, owner, current, seen)
+        except Exception as failed:
+            if isinstance(failed, ApiProblem) and failed.status == 409 and failed.error == "conflict" and attempt == 0:
+                continue
+            logger.warning("a setup payments connection result couldn't be saved (%s)", type(failed).__name__)
+            return
+        _mark_stripe_connected(interview, accepted)
+        return
+
+
+async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
+    """Apply enabled business tools after the setup commit, without a database lock."""
+    if not interview.business_tools_enabled:
+        return
+    desk_id = owner.desk(interview.desk_id)
+    try:
+        await _put_business_tools(owner, desk_id, accepted_jobs(interview))
+    except Exception as failed:
+        logger.warning("a setup business tools write failed (%s)", type(failed).__name__)
+
+
+async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, *,
+                           runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                           cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """Finish questions through the shared runner, retaining the signed owner button label."""
+    connect = False
+
+    def check(interview: Interview) -> None:
+        interview.business_tools_enabled = business_tools_enabled
+        if interview.step != "questions" or interview.consent is None:
+            raise ApiProblem(409, "conflict")
+
+    async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        nonlocal connect
+        interview.business_tools_enabled = business_tools_enabled
+        if not business_tools_enabled:
+            _clear_configs(interview)
+        await close_setup(ctx, engine, model, interview)
+        connect = _claim_connector_connect(interview)
+
+    async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if connect:
+            await _connect_accepted_connector(ctx, engine, interview)
+        await after_finish(ctx, interview)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=lambda interview: [Entry(role="owner", text="Use your suggestions")],
+                          turn=turn, after=after,
+                          render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
 # Setup, part 2 (Task 7): the Desk's parts, rule cards, situations, the safety check and going live -----------------
@@ -1992,25 +2635,80 @@ def calendar_slots(hours: list[HoursWindow], timezone: str, today: date) -> list
     return sorted(slots.values(), key=lambda slot: slot.slot_id)
 
 
-def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date) -> SeedParts:
-    """The Desk's parts from the answers: the public charter (the contact and the service area; never hours, which
-    have their own part), the hours, the price list, the calendar and the notification defaults."""
+def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessType, today: date,
+               publish_policies: bool = True) -> SeedParts:
+    """The Desk's parts from the answers: the public charter (the contact and the business's policies, or the
+    contact alone when policies are switched off), the hours, the price list, the calendar and the notification
+    defaults. Nothing listed in `suggested_fields` is published: it stays in the owner's answers until the owner
+    confirms it, so suggested hours open no calendar slots either."""
+    held = set(answers.suggested_fields)
+    claim_fields = [("public_contact", "contact")]
+    if publish_policies:
+        claim_fields.extend(SETUP_POLICY_CLAIMS.items())
     charter = [Claim(key=key, kind="text", value=value.strip())
-               for key, value in (("contact", answers.public_contact), ("policy:service_area", answers.service_area))
-               if value and value.strip()]
-    return SeedParts(charter=charter, hours=list(answers.hours), prices=price_items(answers.price_items),
-                     calendar=calendar_slots(answers.hours, timezone, today),
+               for field, key in claim_fields
+               if field not in held and (value := getattr(answers, field)) and value.strip()]
+    hours = [] if "hours" in held else list(answers.hours)
+    prices = [] if "price_items" in held else price_items(answers.price_items)
+    return SeedParts(charter=charter, hours=hours, prices=prices,
+                     calendar=calendar_slots(hours, timezone, today),
                      notifications=default_notifications(business_type))
 
 
-async def _put_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts) -> None:
+CHARTER_CAPS = frozenset({"policy_count_limit", "policy_text_limit"})
+POLICY_RETRIES = 2
+
+
+async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> list[str]:
+    """Writes the charter, holding back what the kernel's public-text checks refuse, and returns the held keys in
+    the order they were dropped once a write succeeds.
+
+    A refusal (422 `invalid` naming keys) drops claims and the charter is sent again without them; nothing is ever
+    re-sent unchanged. The public contact is held like a policy line. The kernel checks the contact before any
+    policy line, so a refusal naming only the contact drops it without using up a policy retry. The first other
+    refusal drops just the claims it names; a cap refusal, one naming no claim sent, or a second one drops every
+    `policy:` claim left and any other claim it names. A cap refusal is one whose `charter` entry names a cap,
+    whatever other keys (such as the contact) come with it. That is at most four writes when the contact is refused
+    on its own and three otherwise. A refusal with nothing left to drop, a third, or any other failure propagates.
+    Each drop is logged by key and rule ids, never text.
+    """
+    held: list[str] = []
+    policy_refusals = 0
+    while True:
+        try:
+            await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter),
+                                    path={"id": desk_id})
+            return held
+        except KernelFailed as refused:
+            if refused.status != 422 or refused.code != "invalid" or not refused.detail:
+                raise
+            named = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
+            capped = not CHARTER_CAPS.isdisjoint(refused.detail.get("charter", ()))
+            if refused.detail.keys() == {"contact"} and named:
+                dropped = named
+            elif policy_refusals < POLICY_RETRIES:
+                targeted = policy_refusals == 0 and named and not capped
+                dropped = named if targeted else {claim.key: refused.detail.get(claim.key, []) for claim in charter
+                                                  if claim.key.startswith("policy:") or claim.key in named}
+                policy_refusals += 1
+            else:
+                raise
+            if not dropped:
+                raise
+            logger.warning("setup dropped refused charter claims: %s", dropped)
+            held.extend(dropped)
+            charter = [claim for claim in charter if claim.key not in dropped]
+
+
+async def _put_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts) -> list[str]:
     path = {"id": desk_id}
-    await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=parts.charter), path=path)
+    held = await _put_charter(owner, desk_id, parts.charter)
     await owner.kernel.call("PUT /desks/{id}/hours", DeskHoursRequest(hours=parts.hours), path=path)
     await owner.kernel.call("PUT /desks/{id}/prices", DeskPricesRequest(price_items=parts.prices), path=path)
     await owner.kernel.call("PUT /desks/{id}/calendar", DeskCalendarRequest(calendar_slots=parts.calendar), path=path)
     await owner.kernel.call("PUT /desks/{id}/notifications",
                             DeskNotificationsRequest(notifications=parts.notifications), path=path)
+    return held
 
 
 async def _business(owner: OwnerCtx, desk_id: str) -> dict:
@@ -2120,9 +2818,16 @@ def _card(index: int, draft: RuleCardDraft) -> RuleCard:
                     reason=draft.reason.strip())
 
 
+def owner_rule_answers(answers: SetupAnswers) -> SetupAnswers:
+    """One projection for rule inputs: suggested facts are unanswered, and summaries confer no job authority."""
+    return SetupAnswers.model_validate({"summary": "", **answers.model_dump(
+        exclude={"suggested_fields", "how_we_help", *answers.suggested_fields})})
+
+
 async def draft_cards(model: ModelClient, record: Record, business_type: BusinessType, answers: SetupAnswers,
                       tools: list[dict],
-                      post: Callable[[list[RuleCard]], Awaitable[PolicyVersion | None]]) -> PolicyVersion | None:
+                      post: Callable[[list[RuleCard]], Awaitable[PolicyVersion | None]], *,
+                      jobs: list[dict[str, object]] | None = None) -> PolicyVersion | None:
     """Claude's rule cards from the answers (route `card_draft`), ids `card-1`…, for the `tools` offered (every
     enabled tool but the utility cards' ones, as `{tool, effects}`) or an effect, as `post` drafts them on the kernel.
     A draft code can't use (no card, a target not offered, a card the contract refuses, a card against the owner's
@@ -2131,9 +2836,13 @@ async def draft_cards(model: ModelClient, record: Record, business_type: Busines
     kernel refused the set as invalid, which names no card), gets one retry with what is wrong: the one retry every
     draft gets, whichever found it. The version `post` drafted, or None when the retry can't be used either: the caller
     drafts the template cards."""
+    answers = owner_rule_answers(answers)
     cap = answers.auto_money_cap_cents
+    owner_answers = answers.model_dump(mode="json", exclude_defaults=True)
+    if jobs:
+        owner_answers["accepted_jobs"] = jobs
     message = _user("\n\n".join([card_draft_head(business_type, cap), wrap(TOOLS_TAG, json.dumps(tools)),
-                                 wrap(ANSWERS_TAG, answers.model_dump_json(exclude_defaults=True))]))
+                                 wrap(ANSWERS_TAG, json.dumps(owner_answers))]))
     posted: list[PolicyVersion] = []
 
     async def usable(drafted: DraftedRules) -> str | None:
@@ -2212,7 +2921,7 @@ async def _drafted(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, vers
 
 
 async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str,
-                now: datetime) -> RulesDraft:
+                now: datetime, *, setup_policy_claims_enabled: bool = True) -> RulesDraft:
     """The new Desk's parts and its first rules draft. The first time, the parts go to the kernel, then Claude
     drafts the cards, each set stored before the kernel drafts it; a set the kernel refuses as invalid gets Claude's
     one retry (`draft_cards`). Any later request re-posts the stored cards and never drafts again. A proof that is
@@ -2222,14 +2931,16 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
     _require_step(interview, RULE_STEPS)
-    answers, business_type = interview.answers, interview.business_type
+    answers, business_type = owner_rule_answers(interview.answers), interview.business_type
     cards = interview.draft_cards
     template = template_cards(business_type, answers)
     version: PolicyVersion | None
     if not cards:
         timezone = (await _business(owner, desk_id))["timezone"]
         today = now.astimezone(ZoneInfo(timezone)).date()
-        await _put_parts(owner, desk_id, seed_parts(answers, timezone, business_type=business_type, today=today))
+        held = await _put_parts(owner, desk_id, seed_parts(interview.answers, timezone, business_type=business_type,
+                                                         today=today, publish_policies=setup_policy_claims_enabled))
+        await _update(engine, owner, interview_id, lambda current: current.hold_policies(held))
 
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
             nonlocal cards                      # the first set keeps cards another request stored first
@@ -2237,7 +2948,7 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
             return await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
 
         version = await draft_cards(model, recorder(engine, owner, CARD_DRAFT_ROUTE), business_type, answers,
-                                    await _rule_tools(owner, desk_id), post)
+                                    await _rule_tools(owner, desk_id), post, jobs=owner_job_answers(interview))
     else:
         version = await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
     if (version is None or version.status == "rejected") and cards != template:
@@ -2391,6 +3102,7 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     cards = [card for card in drafted_cards if not card.is_default]
     prices = await _prices(owner, desk_id)
     timezone = (await _business(owner, desk_id))["timezone"]
+    answers = owner_rule_answers(interview.answers)
     enabled = {row["tool"] for row in await owner.ro.rows("tools", desk_id=desk_id, status="enabled")}
     tools = {who: sorted(given & enabled) for who, given in SITUATION_TOOLS_BY_WHO.items()}
     rules_text = json.dumps([card.model_dump(mode="json", exclude={"card_id", "person_id", "agent_key_id",
@@ -2398,7 +3110,7 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     message = _user("\n\n".join([SITUATIONS_HEAD.format(business_type=interview.business_type),
                                  wrap(RULES_TAG, rules_text), wrap(PRICES_TAG, json.dumps(prices)),
                                  wrap(TOOLS_TAG, json.dumps(tools)),
-                                 wrap(ANSWERS_TAG, interview.answers.model_dump_json(exclude_defaults=True))]))
+                                 wrap(ANSWERS_TAG, answers.model_dump_json(exclude_defaults=True))]))
 
     def usable(drafted: DraftedSituations) -> str | None:
         if any((draft.tool == "native.quote" or draft.tool in MONEY_TOOLS) and draft.item_id not in prices
@@ -2413,7 +3125,7 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
                               effort="medium", check=usable)
     if drafted is None:
         raise ApiProblem(503, "model_unavailable")
-    built = [situation(number, draft, prices, interview.answers.hours, timezone, now)
+    built = [situation(number, draft, prices, answers.hours, timezone, now)
              for number, draft in enumerate(drafted.situations, 1)]
     results = await _run_probes(owner, desk_id, version, [each.probe for each in built])
     await _update(engine, owner, interview_id, lambda found: setattr(found, "step", _later(found.step, "situations")))
@@ -2474,7 +3186,7 @@ async def safety_check(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
     listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
     prices = {row["item_id"]: row["unit_cents"] for row in listed}
     name = interview.answers.owner_display_name
-    built = safety_probes(interview.answers, prices)
+    built = safety_probes(owner_rule_answers(interview.answers), prices)
     started = monotonic()
     results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
     seconds = round(monotonic() - started, 1)
@@ -2516,7 +3228,7 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
         if refused.code != "conflict":
             raise
         version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
-                                              interview.answers.auto_money_cap_cents))
+                                              owner_rule_answers(interview.answers).auto_money_cap_cents))
         await _drafted(engine, owner, interview_id, version.version, "rules")
         raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
     await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))

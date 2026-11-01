@@ -1005,6 +1005,7 @@ export interface PublicDesk {
   charter: RenderedBlock[];
   agent_card: RenderedBlock[];
   open_status?: OpenStatus | null;
+  starters?: string[];
 }
 export interface ReviewThresholds {
   min_within_charter_bp: number;

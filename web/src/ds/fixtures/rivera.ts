@@ -1947,6 +1947,7 @@ const publicDesk = {
       }),
       cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Maria texts before she arrives.' }),
     ],
+    starters: ['How much is drain clearing?', 'Can someone come Tuesday?', 'Do you work in Alameda?'],
     agent_card: [],
   },
   es: {
@@ -1964,6 +1965,7 @@ const publicDesk = {
       }),
       cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Maria texts before she arrives.' }),
     ],
+    starters: ['¿Cuánto cuesta destapar un desagüe?', '¿Puede venir alguien el martes?', '¿Trabajan en Alameda?'],
     agent_card: [],
   },
 } satisfies Bilingual<PublicDesk>;

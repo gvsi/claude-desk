@@ -19,6 +19,7 @@ import re
 import secrets
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
+from datetime import date
 from typing import get_args, get_origin
 from unittest.mock import AsyncMock
 
@@ -34,6 +35,9 @@ from desk.api.kernel_client import KernelFailed
 from desk.api.main import create_app
 from desk.api.model import ModelRequest, ModelUnavailable, parse_structured
 from desk.api.prompts import (
+    FIELD_TURNS,
+    POLICY_FIELD_RULE,
+    HoursAnswer,
     QUESTION_KEYS,
     SETUP_START_SYSTEM,
     SETUP_TURN_SYSTEM,
@@ -170,10 +174,13 @@ def next_step(key: str, **fields) -> Callable[[ModelRequest], object]:
 def answer_turn(output: type[BaseModel], reply: str = "Got it.", *, step_done: bool = True, website: str = "",
                 **fields) -> BaseModel:
     """An answer turn in `output`: its reply, the fields it sets (every other one blank), a website named and whether
-    it's done. A field `output` doesn't have fails the test: that question's turn can't set it."""
+    it's done. A field `output` doesn't have fails the test: that question's turn can't set it (the contact
+    question's takes no website)."""
+    if website:
+        fields["website"] = website
     missing = sorted(set(fields) - set(output.model_fields))
     assert not missing, f"{output.__name__} has no {missing}"
-    return output(**{**blank(output), "reply": reply, "step_done": step_done, "website": website, **fields})
+    return output(**{**blank(output), "reply": reply, "step_done": step_done, **fields})
 
 
 def turn(reply: str = "Got it.", *, step_done: bool = True, website: str = "",
@@ -876,8 +883,8 @@ async def test_question_choices_keep_to_the_seams_bounds(app, browser, kernel_ht
 def test_the_seam_models_hold_their_bounds():
     from desk.api.prompts import (
         BLOCK_FOR_JOB, CAPABILITIES, CONNECTOR_LABELS, BlockConfig, Choice, ConnectorKey,
-        ConnectorProposal, IntakeConfig, JobKind, JobProposal, ProposalCard, PurposePaymentConfig,
-        TypedBookingConfig, UrgentConfig, new_proposal_id,
+        ConnectorProposal, IntakeProposalConfig, JobKind, JobProposal, ProposalCard, PurposePaymentProposalConfig,
+        TypedBookingProposalConfig, UrgentProposalConfig, new_proposal_id,
     )
 
     job = JobProposal(job="answer", title="Answer questions", why="Save time", how="Use business facts",
@@ -901,10 +908,10 @@ def test_the_seam_models_hold_their_bounds():
             Choice(text=value, recommended=False)
     configs = TypeAdapter(BlockConfig)
     for value, expected in (
-        ({"block": "intake", "questions": ["What do you need?"]}, IntakeConfig),
-        ({"block": "typed_booking", "appointment_type": "Intro", "minutes": 15}, TypedBookingConfig),
-        ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}, PurposePaymentConfig),
-        ({"block": "urgent", "urgent_when": "A burst pipe"}, UrgentConfig),
+        ({"block": "intake", "questions": ["What do you need?"]}, IntakeProposalConfig),
+        ({"block": "typed_booking", "appointment_type": "Intro", "minutes": 15}, TypedBookingProposalConfig),
+        ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}, PurposePaymentProposalConfig),
+        ({"block": "urgent", "urgent_when": "A burst pipe"}, UrgentProposalConfig),
     ):
         assert isinstance(configs.validate_python(value), expected)
     booking = {"block": "typed_booking", "appointment_type": "Intro", "minutes": 60}
@@ -914,10 +921,10 @@ def test_the_seam_models_hold_their_bounds():
             configs.validate_python({**booking, "minutes": minutes})
     for questions in ([], ["a"] * 6, [""], ["a" * 121]):
         with pytest.raises(ValidationError):
-            IntakeConfig(block="intake", questions=questions)
+            IntakeProposalConfig(block="intake", questions=questions)
     for amount in (-1, 1_000_001, 1.5):
         with pytest.raises(ValidationError):
-            PurposePaymentConfig(block="purpose_payment", purpose="Deposit", amount_cents=amount)
+            PurposePaymentProposalConfig(block="purpose_payment", purpose="Deposit", amount_cents=amount)
     with pytest.raises(ValidationError):
         JobProposal(**{**job.model_dump(), "job": "price", "config": {"block": "intake", "questions": ["Why?"]}})
     for model_type, values in ((Choice, {"text": "A", "recommended": False}),
@@ -958,13 +965,18 @@ def proposal_entries() -> list[dict]:
         {"role": "claude", "text": "", "card": {
             "proposal_id": "p-fedcba543210", "kind": "connector", "state": "proposed", "job": None,
             "superseded_by": None,
-            "connector": {"app": "stripe", "label": "Stripe", "why": "Take payments", "connectable": True}}},
+            "connector": {"app": "stripe", "label": "Stripe", "why": "Take payments", "connectable": True,
+                          "connected": False}}},
         {"role": "claude", "text": "Who do you help?", "question": "what_you_do",
          "choices": [{"text": "Individuals", "recommended": True}, {"text": "Businesses", "recommended": False}]},
     ]
 
 
-async def test_card_messages_reach_the_owner_only_with_cards_1(app, browser, kernel_http, model, engine):
+@pytest.mark.parametrize("business_tools_enabled", [False, True])
+async def test_card_messages_reach_the_owner_only_with_cards_1(
+    app, browser, kernel_http, model, engine, business_tools_enabled,
+):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=business_tools_enabled)
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
@@ -987,6 +999,9 @@ async def test_card_messages_reach_the_owner_only_with_cards_1(app, browser, ker
             ["p-012345abcdef", "p-fedcba543210"] if cards else [])
         assert all(message["role"] == "claude" and message["text"] == "" and message["choices"] == []
                    for message in shown)
+        if cards:
+            assert shown[0]["card"]["job"]["config"] == (proposal_entries()[1]["card"]["job"]["config"]
+                                                        if business_tools_enabled else None)
         if not cards:
             assert all(message["text"] for message in messages)
 
@@ -1895,6 +1910,150 @@ LIMITS = {"quote_auto_max_cents": 50_000, "discount_auto_max_bp": 10_000, "payme
 LIMIT_QUESTIONS = {"quote_limit": ("quote_auto_max_cents",), "discounts": ("discount_auto_max_bp",),
                    "documents_and_payments": ("documents",),
                    "money_limit": ("auto_money_cap_cents", "refunds", "payment_link_auto_max_cents")}
+
+
+def test_each_scoped_field_names_the_questions_that_ask_for_it():
+    # what_you_do, where the owner describes the business, takes how it prices, what new customers are asked and what
+    # counts as urgent, but no hours (hours_and_area always asks for them). The quote question takes pricing too,
+    # hours_and_area and contact_and_after_hours what happens after hours, and contact_and_after_hours what counts as
+    # urgent. Every question but the contact one takes a website the owner names: the address often comes later.
+    later = {"hours_and_area", "contact_and_after_hours"}
+    assert FIELD_TURNS == {"pricing": {"what_you_do", "quote_limit"}, "intake": {"what_you_do"},
+                           "urgent": {"what_you_do", "contact_and_after_hours"}, "after_hours": later,
+                           "website": set(QUESTION_KEYS) - {"contact_and_after_hours"},
+                           "hours": later, "clear_hours": later}
+
+
+@pytest.mark.parametrize(("name", "turns"), FIELD_TURNS.items())
+def test_a_scoped_field_is_recorded_only_on_the_questions_that_ask_for_it(name, turns, caplog):
+    # Only those questions' schemas have the field, so no other turn's grammar carries it, and code drops it from any
+    # other turn's patch too, logging the field's name, never its value.
+    for key in QUESTION_KEYS:
+        schema = SETUP_TURNS[key].model_json_schema()
+        if key in turns:
+            assert name in schema["properties"] and name in schema["required"], key
+        else:
+            assert name not in schema["properties"], key
+            value = {"hours": [{"days": ["mon"], "start": "08:00", "end": "17:00"}], "clear_hours": True}.get(
+                name, "Changed.")
+            with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+                SETUP_TURNS[key].model_validate({**blank(SETUP_TURNS[key]), name: value})
+    if name not in SetupPatch.model_fields:     # a website named and the clear flag are no patch fields
+        return
+    window = HoursAnswer(days=["mon"], start="08:00", end="17:00")
+    stored, changed = ([], [window]) if name == "hours" else ("Stored before.", "Changed.")
+    # Stored as a held suggestion, which any turn that has the field may replace: an owner's own value is replaced
+    # only on its home question (setup.FACT_HOMES).
+    answers = SetupAnswers(summary="Tax advice.", **{name: stored}, suggested_fields=[name])
+    for key in QUESTION_KEYS:
+        merged = desk_setup.merged(answers, SetupPatch(**{name: changed}), key)
+        if key in turns:
+            assert getattr(merged, name) == ([window.window()] if name == "hours" else changed), key
+        else:
+            assert merged == answers, key
+            assert f"{key} carried {name}; it was dropped" in caplog.text
+    assert "Changed." not in caplog.text
+
+
+def test_business_policy_facts_never_reach_limit_turns(caplog):
+    facts = {"pricing": "Per case after a consult.", "intake": "Ask about the business type.",
+             "urgent": "Take the filing notice and request a callback."}
+    answers = SetupAnswers(summary="Tax advice.", **facts)
+    patch = SetupPatch(**{name: "Changed by a limit turn." for name in facts})
+    interview = desk_setup.Interview(interview_id="setup-1", copy_id="copy-1", desk_id="desk-1",
+                                    business_type="office", step="questions", consent=True, answers=answers,
+                                    transcript=[])
+    for key in LIMIT_QUESTIONS:
+        message = desk_setup._turn_message(interview, key, "Always ask me first.")
+        (block,) = message["content"]
+        text = html.unescape(block["text"])
+        assert all(name not in text and value not in text for name, value in facts.items()), key
+        blocked = set(facts) - ({"pricing"} if key == "quote_limit" else set())
+        assert blocked.isdisjoint(SETUP_TURNS[key].model_fields), key
+        for name in blocked:
+            with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+                SETUP_TURNS[key].model_validate({**blank(SETUP_TURNS[key]), name: "Changed."})
+        expected = answers.model_copy(update={"pricing": patch.pricing}) if key == "quote_limit" else answers
+        assert desk_setup.merged(answers, patch, key) == expected
+        assert all(f"{key} carried {name}" in caplog.text for name in blocked)
+        assert desk_setup.merged(answers, SetupPatch(pricing=" \n "), key) == answers
+
+
+def test_turns_capture_business_policies_with_short_bounded_fields():
+    # A turn's schema compiles into a grammar of capped size, so each policy field's description is short: what it
+    # holds, and that it is customer copy in words without numbers. The turn's guidance holds the full rules
+    # (test_setup_prompt_keeps_policy_text_public_and_free_of_numbers).
+    assert POLICY_FIELD_RULE == ("Written to customers, in words: no amounts, percentages, times, days, numbers or "
+                                 "promise words.")
+    descriptions = {
+        "pricing": 'How the business prices (a fixed menu, "from" prices, or per case after a consult).',
+        "intake": "What new customers are asked or should have ready before the owner takes them on.",
+        "urgent": "What counts as urgent and what happens, with no promise of how soon.",
+        "after_hours": "What customers are told about reaching the business outside its hours.",
+    }
+    for name, description in descriptions.items():
+        for key in FIELD_TURNS[name]:
+            schema = SETUP_TURNS[key].model_json_schema()
+            assert schema["properties"][name]["description"] == f"{description} {POLICY_FIELD_RULE}", key
+            assert schema["properties"][name]["maxLength"] == 500
+            assert name in schema["required"]
+            patch = answer_turn(SETUP_TURNS[key], **{name: "x" * 500}).patch()
+            answers = desk_setup.merged(SetupAnswers(summary="Tax advice."), patch, key)
+            assert getattr(answers, name) == "x" * 500, key
+            with pytest.raises(ValidationError, match="at most 500 characters"):
+                answer_turn(SETUP_TURNS[key], **{name: "x" * 501})
+
+    for model in (SetupAnswers, SetupPatch):
+        assert model(summary="Tax advice.").model_dump(include=set(descriptions)) == {
+            name: None for name in descriptions}
+        for name in descriptions:
+            with pytest.raises(ValidationError, match="at most 500 characters"):
+                model(summary="Tax advice.", **{name: "x" * 501})
+    assert SetupAnswers(summary="Tax advice.", how_we_help="x" * 1500).how_we_help == "x" * 1500
+    with pytest.raises(ValidationError, match="at most 1500 characters"):
+        SetupAnswers(summary="Tax advice.", how_we_help="x" * 1501)
+    assert "how_we_help" not in SetupPatch.model_fields
+    assert all("how_we_help" not in output.model_fields for output in SETUP_TURNS.values())
+    assert ('pricing, intake and urgent record what the owner\'s answers and the business\'s own text say about '
+            'how it works, never limits.') in SETUP_TURN_SYSTEM
+
+
+def test_suggested_fields_are_stored_only_by_code():
+    answers = SetupAnswers(summary="Tax advice.")
+    assert answers.suggested_fields == []
+    answers.suggested_fields.append("pricing")
+    assert SetupAnswers(summary="Tax advice.").suggested_fields == []
+    assert SetupAnswers(summary="Tax advice.", suggested_fields=["summary", "pricing"]).suggested_fields == [
+        "summary", "pricing"]
+    assert "suggested_fields" not in SetupPatch.model_fields
+    assert all("suggested_fields" not in output.model_fields for output in SETUP_TURNS.values())
+    assert "suggested_fields" not in SetupStart.model_fields
+    schema = SetupAnswers.model_json_schema()["properties"]["suggested_fields"]
+    names = {*desk_setup.SETUP_POLICY_CLAIMS, "hours", "public_contact", "price_items"}
+    assert set(schema["items"]["anyOf"][0]["enum"]) | set(schema["items"]["anyOf"][1]["enum"]) == names
+    assert schema["maxItems"] == len(names)
+    assert "held from every kernel write until the owner confirms them" in schema["description"]
+    assert SetupAnswers(summary="Tax advice.", suggested_fields=["hours", "public_contact", "price_items"]
+                        ).suggested_fields == ["hours", "public_contact", "price_items"]
+    for name in ("unknown", "quote_auto_max_cents", "auto_money_cap_cents"):
+        with pytest.raises(ValidationError):
+            SetupAnswers(summary="Tax advice.", suggested_fields=[name])
+    with pytest.raises(ValidationError):
+        SetupAnswers(summary="Tax advice.", suggested_fields=["pricing"] * (len(names) + 1))
+
+
+def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
+    assert ("On the quote question, pricing records how the business prices in words, only from the owner's "
+            "answer; price_items holds only the prices that answer names.") in SETUP_TURN_SYSTEM
+    assert ("For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, "
+            "times, days and numbers, and promise words such as free, guaranteed, discount, refund or confirmed "
+            "out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    assert ("summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to "
+            "customers on the public page. Write them as the business speaking to its customers; never "
+            "instructions to the Desk, private owner instructions, or a contact route other than the contact "
+            "on record.") in SETUP_TURN_SYSTEM
+
+
 UNSET = {"quote_auto_max_cents": None, "discount_auto_max_bp": None, "payment_link_auto_max_cents": None,
          "documents": None, "auto_money_cap_cents": 0, "refunds": None}
 
@@ -1961,10 +2120,10 @@ async def test_limits_patch_only_from_their_questions(app, browser, fake, kernel
 
 async def test_a_limit_turn_sets_only_its_own_limits(app, browser, fake, kernel_http, model, engine, caplog):
     # A limit question's model has its own limits, the reply, a website named and step_done, and no fact but the quote
-    # question's prices: its turn reads none of the other facts so far, so it can't set them blind.
+    # question's pricing text and price items: its turn still reads none of the facts so far.
     for key, names in LIMIT_QUESTIONS.items():
-        prices = {"price_items"} if key == "quote_limit" else set()
-        assert set(SETUP_TURNS[key].model_fields) == {"reply", "website", "step_done", *names, *prices}, key
+        facts = {"pricing", "price_items"} if key == "quote_limit" else set()
+        assert set(SETUP_TURNS[key].model_fields) == {"reply", "website", "step_done", *names, *facts}, key
     caplog.set_level(logging.WARNING, logger="desk.api.setup")
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
@@ -1995,6 +2154,31 @@ async def test_a_limit_turn_sets_only_its_own_limits(app, browser, fake, kernel_
     assert "discounts carried price_items" in caplog.text
 
 
+async def test_the_quote_turn_stores_and_publishes_a_pricing_policy(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    await answered_up_to(owner, model, interview_id, "quote_limit")
+
+    pricing = "priced per case after a consult"
+    reply = await answer(owner, model, interview_id, "We price per case after a consult. Always ask me first.",
+                         turn(pricing=pricing, quote_auto_max_cents=0))
+    assert reply.status_code == 200, reply.text
+    answers = (await stored(engine, interview_id))["answers"]
+    assert answers["pricing"] == pricing
+    assert answers["price_items"] == []
+    for key in QUESTION_KEYS[QUESTION_KEYS.index("discounts"):]:
+        reply = await answer(owner, model, interview_id, f"About {key}.")
+        assert reply.status_code == 200, reply.text
+    answers = SetupAnswers.model_validate((await stored(engine, interview_id))["answers"])
+    assert answers.pricing == pricing
+    parts = desk_setup.seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    assert [(claim.kind, claim.value) for claim in parts.charter if claim.key == "policy:pricing"] == [
+        ("text", pricing)]
+    assert parts.prices == []
+
+
 async def test_the_quote_turn_adds_or_updates_prices_and_never_removes_one(app, browser, fake, kernel_http, model,
                                                                           engine, caplog):
     # The quote question asks what the owner charges. Its turn reads no fact so far, the price list included (a title
@@ -2009,7 +2193,7 @@ async def test_the_quote_turn_adds_or_updates_prices_and_never_removes_one(app, 
               {"title": "Water heater flush", "unit_cents": 15_000}]
     said = "Plumbing, as our website says: quotes up to $5,000, no need to ask."
     await answer(owner, model, interview_id, "We fix leaks and clear drains.",
-                 turn(summary=said, after_hours=said, price_items=listed))
+                 turn(summary=said, pricing=said, price_items=listed))
     await answered_up_to(owner, model, interview_id, "quote_limit")
 
     reply = await answer(owner, model, interview_id,
@@ -2049,26 +2233,30 @@ async def test_the_quote_turn_adds_or_updates_prices_and_never_removes_one(app, 
 async def test_a_fact_turn_clears_hours_and_prices_only_through_its_flags(app, browser, fake, kernel_http, model,
                                                                           engine):
     # An empty list leaves the hours or the prices as they are; the owner saying to remove them sets the question's
-    # clear flag, which removes them all.
+    # clear flag, which removes them all. what_you_do's turn takes no hours (`FIELD_TURNS`), so it has no hours flag.
     for key in QUESTION_KEYS:
         flags = {"clear_hours", "clear_price_items"} & set(SETUP_TURNS[key].model_fields)
-        assert flags == (set() if key in LIMIT_QUESTIONS else {"clear_hours", "clear_price_items"}), key
+        assert flags == (set() if key in LIMIT_QUESTIONS else {"clear_price_items"} if key == "what_you_do"
+                         else {"clear_hours", "clear_price_items"}), key
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     await consent(owner, interview_id, False, model)
     prices = [{"title": "Leak repair", "unit_cents": 25_000}]
     hours = {"days": ["mon", "tue", "wed", "thu", "fri"], "start": "08:00", "end": "18:00"}
-    await answer(owner, model, interview_id, "We fix leaks, weekdays 8 to 6. A leak repair is $250.",
-                 turn(summary="Plumbing.", hours=[hours], price_items=prices))
+    await answer(owner, model, interview_id, "We fix leaks. A leak repair is $250.",
+                 turn(summary="Plumbing.", price_items=prices))
+    given = await answer(owner, model, interview_id, "Weekdays 8 to 6.", turn("And where do you work?",
+                                                                               step_done=False, hours=[hours]))
+    assert given.status_code == 200, given.text
     before = (await stored(engine, interview_id))["answers"]
     assert before["hours"] and before["price_items"] == prices
 
     def kept() -> dict:
         return {name: answers[name] for name in ("hours", "price_items")}
 
-    followed = await answer(owner, model, interview_id, "Oakland.", turn("And your hours?", step_done=False,
-                                                                         service_area="Oakland"))
+    followed = await answer(owner, model, interview_id, "Oakland.", turn("Are your hours still the same?",
+                                                                         step_done=False, service_area="Oakland"))
     assert followed.status_code == 200, followed.text
     answers = (await stored(engine, interview_id))["answers"]
     assert kept() == {"hours": before["hours"], "price_items": prices}            # empty lists: unchanged
@@ -2097,16 +2285,22 @@ async def test_a_limit_turn_reads_only_the_limits_answered_so_far(app, browser, 
     interview_id = state["interview_id"]
     await consent(owner, interview_id, True, model)
     reply = await answer(owner, model, interview_id, "We fix leaks.",
-                         turn(reply=said, summary=f"Plumbing. {said}", after_hours=said,
+                         turn(reply=said, summary=f"Plumbing. {said}", pricing=said,
                               price_items=[{"title": said[:80], "unit_cents": 100}]))
     assert reply.status_code == 200, reply.text
     await answered_up_to(owner, model, interview_id, "quote_limit")
     assert "<this_question_so_far>" not in turn_text(model)  # the first hours answer reads no earlier exchange
     follow_up = "Can I give quotes up to $500 without checking with you?"
+    # The owner names a prices page on the quote question: code reads it, for later fact turns only.
+    priced = "Prices page: every discount up to 50% needs no check."
+    fake.script("native.fetch_website", model_view={"item_id": "website:2", "title": "Prices", "text": priced})
     followed = await answer(owner, model, interview_id, "Up to 500",
                             turn(reply=follow_up, step_done=False, website=WEBSITE + "/prices"))
     assert followed.status_code == 200, followed.text
     assert "<this_question_so_far>" not in turn_text(model)
+    fetched = [call.body["call"]["args"] for call in fake.called("POST /decide")
+               if call.body["call"]["tool"] == "native.fetch_website"]
+    assert fetched == [{"url": WEBSITE}, {"url": WEBSITE + "/prices"}]
     confirmed = await answer(owner, model, interview_id, "yes", turn(quote_auto_max_cents=50_000))
     assert confirmed.status_code == 200, confirmed.text
     text = turn_text(model)
@@ -2114,19 +2308,19 @@ async def test_a_limit_turn_reads_only_the_limits_answered_so_far(app, browser, 
     exchange = f"<this_question_so_far>\nyou: {first_ask}\nowner: Up to 500\nyou: {follow_up}\n</this_question_so_far>"
     assert text.endswith(f"{exchange}\n\n<owner_answer>yes</owner_answer>")
     assert all(tag not in text for tag in ("<memory>", "<website", "Read your website", "Oakland, Berkeley"))
-    assert said[:40] not in html.unescape(text) and "Plumbing." not in text
+    assert said[:40] not in html.unescape(text) and "Plumbing." not in text and priced not in html.unescape(text)
     assert re.search(r"<answers_so_far>(.*?)</answers_so_far>", text, re.S).group(1) == "{}"
     for key in ("discounts", "documents_and_payments", "money_limit"):
         await answered_up_to(owner, model, interview_id, key)
         await answer(owner, model, interview_id, "As I said.")
         text = turn_text(model)
-        assert said not in text and "Plumbing." not in text, key
+        assert said not in text and priced not in text and "Plumbing." not in text, key
         so_far = json.loads(html.unescape(re.search(r"<answers_so_far>(.*?)</answers_so_far>", text, re.S).group(1)))
         assert so_far == {"quote_auto_max_cents": 50_000,
                           **({"documents": "ask"} if key == "money_limit" else {})}, key
-    # The next turn, no limit's own, reads the business's text again.
+    # The next turn, no limit's own, reads the business's text again, the prices page included.
     await answer(owner, model, interview_id, "Call (510) 555-0142.")
-    assert said in html.unescape(turn_text(model))
+    assert said in html.unescape(turn_text(model)) and priced in html.unescape(turn_text(model))
 
 
 async def test_a_planted_price_title_never_reaches_a_limit_turn(app, browser, fake, kernel_http, model, engine):
@@ -3468,10 +3662,11 @@ async def test_a_client_without_cards_never_gets_a_card_ask(app, browser, kernel
     assert response.status_code == 200, response.text
     assert response.json()["step"] == "tools"
     row = await stored(engine, interview_id)
-    assert not any(entry.get("card") for entry in row["transcript"])
+    assert not any(message.get("card") for message in response.json()["messages"])
+    assert all(entry["card"]["state"] != "proposed" for entry in row["transcript"] if entry.get("card"))
     async with engine.connect() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)
-    assert not interview.shows_cards and interview.unshown
+    assert not interview.shows_cards and not interview.unshown
     assert proposal_id in model.requests[-1].messages[0]["content"][0]["text"]
 
 
@@ -3763,13 +3958,14 @@ async def test_typing_a_question_keeps_the_card_waiting(app, browser, kernel_htt
 
 
 async def test_typed_text_cant_accept_an_unpriced_payment(app, browser, kernel_http, model, engine):
-    from desk.api.prompts import JobProposal, PurposePaymentConfig
+    from desk.api.prompts import JobProposal, PurposePaymentProposalConfig
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
     async with engine.begin() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)
         interview.latest_ask.card.job = JobProposal(job="payment", title="Take a deposit", why="Reserve work",
             how="Send a secure link", autonomy="ask", can_do_today=True,
-            config=PurposePaymentConfig(block="purpose_payment", purpose="Deposit", amount_cents=None))
+            config=PurposePaymentProposalConfig(block="purpose_payment", purpose="Deposit", amount_cents=None))
         await desk_setup._save(conn, interview)
     model.add(card_answer("accept", reply="Enter the amount on the card before accepting it."))
     response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
@@ -3778,7 +3974,7 @@ async def test_typed_text_cant_accept_an_unpriced_payment(app, browser, kernel_h
     assert response.json()["pending_card"] == proposal_id
     card = next(message["card"] for message in response.json()["messages"] if message["card"])
     assert card["state"] == "proposed" and card["job"]["config"]["amount_cents"] is None
-    assert response.json()["messages"][-1]["text"] == "Enter the amount on the card before accepting it."
+    assert response.json()["messages"][-1]["text"] == desk_setup.AMOUNT_FIRST_LINE
 
 
 async def test_a_typed_answer_must_name_the_pending_card(app, browser, kernel_http, model, engine):
@@ -3873,7 +4069,7 @@ async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, 
     row = await stored(engine, interview_id)
     card = next(entry["card"] for entry in reversed(row["transcript"]) if entry.get("card"))
     assert card is not None and card["connector"] == {
-        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True}
+        "app": "stripe", "label": "Stripe", "why": "Use Stripe?", "connectable": True, "connected": False}
     assert response.json()["pending_card"] == card["proposal_id"]
     assert any(card["proposal_id"] == item["proposal_id"] for entry in row["transcript"]
                for item in entry.get("planned", []))

@@ -22,7 +22,7 @@ from desk.api.settings import Settings
 from tests.api.fakes import FakeMessagesApi
 
 VARIABLES = ("DESK_ENV", "API_DATABASE_URL", "ANTHROPIC_API_KEY", "PASSCODE_HASH", "KERNEL_URL", "PUBLIC_ORIGIN",
-             "TRUSTED_PROXY_HOPS", "ANTHROPIC_BASE_URL", "BUSINESS_TOOLS_ENABLED",
+             "TRUSTED_PROXY_HOPS", "ANTHROPIC_BASE_URL", "BUSINESS_TOOLS_ENABLED", "SETUP_POLICY_CLAIMS_ENABLED",
              # the provider's variables, and the SDK's own, which a developer's shell may export
              "MODEL_PROVIDER", "AWS_REGION", "BEDROCK_BEARER_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
              "ANTHROPIC_AWS_API_KEY", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE",
@@ -71,6 +71,15 @@ def test_business_tools_require_the_deployment_switch(environ):
     assert Settings.from_env().business_tools_enabled is True
     environ({"BUSINESS_TOOLS_ENABLED": "0"})
     assert Settings.from_env().business_tools_enabled is False
+
+
+@pytest.mark.parametrize("value,enabled", [(None, True), ("0", False), ("1", True), ("", True), ("false", True)])
+def test_setup_policy_claims_are_enabled_unless_switched_off(environ, value, enabled):
+    environ({"API_DATABASE_URL": DATABASE_URL})
+    assert Settings(api_database_url=DATABASE_URL).setup_policy_claims_enabled is True
+    if value is not None:
+        environ({"SETUP_POLICY_CLAIMS_ENABLED": value})
+    assert Settings.from_env().setup_policy_claims_enabled is enabled
 
 
 def test_production_reads_plan_06bs_variables(environ):

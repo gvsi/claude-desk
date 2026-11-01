@@ -13,7 +13,6 @@
 - External, with no tile (owner, 2026-10-30): `stripe` and `google_calendar`, each brand's real mark as inline SVG in its brand color token. Stripe's is white on the dark grounds (`connector-stripe`), as Stripe's guidelines allow; Google Calendar's keeps its own blue (`connector-google-blue`). Nothing is read on them, so their colors are in `DECORATIVE_COLORS`.
 - An icon this build doesn't know shows an empty built-in tile.
 
-| `glyph` | `IconName` (optional) | Draws a built-in tile with this glyph, overriding `icon`. |
 | `size` | Box | Mark | Where |
 | --- | --- | --- | --- |
 | `page` | 48 px | 26 px | A connector's page header. |
@@ -28,6 +27,7 @@ A built-in connector's tile fills the box at the 8 px `radius-control`; at `page
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `icon` | `ConnectorIconName` | One of the eight above. |
+| `glyph` | `IconName` (optional) | Draws a built-in tile with this glyph, overriding `icon`. |
 | `size` | `'page' \| 'section' \| 'inline'` | Required. |
 
 Brand marks: Simple Icons (https://simpleicons.org), CC0.

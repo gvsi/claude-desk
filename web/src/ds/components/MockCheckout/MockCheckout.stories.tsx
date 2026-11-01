@@ -426,6 +426,34 @@ export const Paid: Story = {
   },
 };
 
+/** The visitor's chat, as the page knows it from this browser: a public chat's own path. */
+const CHAT_HREF = '/d/rivera-plumbing';
+
+export const PaidBackToTheChat: Story = {
+  args: { state: 'paid', chatHref: CHAT_HREF },
+  parameters: {
+    canvasNote: `${BOARD}'s "Paid", as the #317 proposal boards (N-Nov1-317-After-1512 and its phone board) draw it when the page knows the visitor's chat: the same words, with "Go back to the chat" a text link in the sentence that opens the chat in the same tab.`,
+  },
+  play: async ({ canvasElement }) => {
+    const { state } = await expectFinal(canvasElement, 'Paid. Go back to the chat to see it there.', 'handled');
+    const links = state.querySelectorAll('a');
+    await expect(links).toHaveLength(1);
+    const back = links[0] as HTMLAnchorElement;
+    await expect(back).toHaveTextContent('Go back to the chat');
+    await expect(back).toHaveAttribute('href', CHAT_HREF);
+    await expect(back).not.toHaveAttribute('target');
+    // The design system's text link inside a sentence: accent blue, its quiet underline, and no
+    // hit area beyond its words.
+    await expect(back).toHaveClass('cd-text-link', 'cd-text-link--running-text');
+    expectComputed(back, { color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
+    // The link sits on the line's first line, with the words before and after it.
+    const words = state.querySelector('.cd-checkout__state-words');
+    if (!words) throw new globalThis.Error('no words on the paid line');
+    await expect(box(back).top).toBeGreaterThanOrEqual(box(words).top);
+    await expect(box(back).bottom).toBeLessThanOrEqual(box(words).top + 20);
+  },
+};
+
 export const Expired: Story = {
   args: { state: 'expired' },
   parameters: { canvasNote: `${BOARD}'s "Expired": the hollow info dot, and the chat as the place to go next.` },

@@ -269,7 +269,7 @@ describe('Safety', () => {
         if (state === 'empty') {
           await expect.element(screen.getByText(NONE_TURNED_DOWN, { exact: true })).toBeVisible();
         } else if (state === 'loading') {
-          await expect.element(screen.getByRole('status').filter({ hasText: /^Reading/ })).toBeVisible();
+          await expect.element(screen.getByRole('status').filter({ hasText: /^Reading/ })).toHaveClass('cd-sr-only');
         } else {
           await expect.element(screen.getByRole('list')).toBeVisible();
           if (state === 'chip with nothing') await screen.getByRole('button', { name: 'Verification codes', exact: true }).click();
@@ -284,13 +284,14 @@ describe('Safety', () => {
           ['aria-label', 'aria-description', 'aria-valuetext', 'title', 'alt'].map((name) => el.getAttribute(name) ?? ''),
         );
         expect(names.join(' '), 'accessible names and descriptions').not.toMatch(/attempt/i);
-        await expect.element(viewOption(screen, 'Stopped')).toHaveAttribute('aria-checked', 'true');
+        if (state !== 'loading') await expect.element(viewOption(screen, 'Stopped')).toHaveAttribute('aria-checked', 'true');
         if (state === 'empty') {
           await expect.element(screen.getByText(NOTHING, { exact: true })).toBeVisible();
           expect(screen.getByText('Nothing stopped this week', { exact: true }).elements()).toHaveLength(0);
           await expect.element(screen.getByRole('link', { name: 'Open your public page' })).toBeVisible();
         } else if (state === 'loading') {
-          await expect.element(screen.getByText('Reading what was stopped', { exact: true })).toBeVisible();
+          expect(screen.getByText('Reading the attempts', { exact: true }).elements()).toHaveLength(0);
+          await expect.element(screen.getByText('Reading what was stopped', { exact: true })).toHaveClass('cd-sr-only');
         } else {
           await expect.element(screen.getByRole('group', { name: 'Show by kind' })).toBeVisible();
           if (state === 'chip with nothing') {

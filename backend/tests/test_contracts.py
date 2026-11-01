@@ -549,6 +549,17 @@ def test_public_desk_open_status_is_optional():
     assert "open_status" not in export_schema()["$defs"]["PublicDesk"]["required"]   # optional in the web's types too
 
 
+def test_public_desk_starters_default_to_an_independent_empty_list():
+    first, second = (PublicDesk.model_validate(PUBLIC_DESK) for _ in range(2))
+    assert first.starters == second.starters == []
+    first.starters.append("Do you work in Alameda?")
+    assert second.starters == []
+    schema = export_schema()["$defs"]["PublicDesk"]
+    assert "starters" not in schema["required"]
+    assert schema["properties"]["starters"] == {
+        "default": [], "items": {"type": "string"}, "title": "Starters", "type": "array"}
+
+
 AS_OF = "2026-11-02T12:04:00-08:00"   # a Monday in the business's time zone, on the kernel's clock
 MIDNIGHT = "2026-11-03T00:00:00-08:00"   # the next local midnight
 OPEN_STATUSES = (   # open until a time, open all week, closed until later today, closed until tomorrow

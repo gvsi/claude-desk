@@ -507,7 +507,7 @@ export const writing: Step = () => ({ type: 'writing' });
 /** Ends every turn, a fenced one included: the visitor's "Claude is writing" clears even when nothing was shown. */
 export const turnEnd: Step = unfenced(() => ({ type: 'turn_end' }));
 
-export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'callback' | 'talk' | 'outage' | 'other';
+export type RuleName = 'discount' | 'invoice' | 'deposit' | 'booked' | 'book' | 'price' | 'area' | 'callback' | 'talk' | 'outage' | 'other';
 
 export interface ScriptRule {
   name: RuleName;
@@ -615,7 +615,7 @@ export const SCRIPT: readonly ScriptRule[] = [
   },
   {
     name: 'book',
-    words: ['book', 'tuesday', 'reservar'],
+    words: ['book', 'tuesday', 'reservar', 'martes'],
     tools: ['native.find_slots'],
     steps: [
       writing,
@@ -632,6 +632,12 @@ export const SCRIPT: readonly ScriptRule[] = [
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
       (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], blocks.quote[ctx.language]]),
     ],
+  },
+  {
+    name: 'area',
+    words: ['alameda'],
+    tools: [],
+    steps: [writing, (ctx) => ctx.reply([rivera.blocks.policy[ctx.language]])],
   },
   {
     name: 'callback',

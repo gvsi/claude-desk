@@ -2,9 +2,12 @@ import { Button } from '../Button/Button.tsx';
 
 import './ReviewerBar.css';
 
-/** Shared words for the visible bar and its wrapping measurement. */
+/** The demo seed's `owner_display_name`, the owner a reviewer plays unless told otherwise. */
+export const SEED_OWNER_NAME = 'Maria Rivera';
+
+/** Shared words for the visible bar and its loading shapes' measurement. */
 export function reviewerBarWords(ownerName: string) {
-  return { beforeName: "You're ", ownerName, afterName: ' today. ', disclosure: 'This is a concept prototype.' };
+  return { beforeName: "You're ", ownerName, afterName: ' today. ', disclosure: 'This is a concept prototype.', startOver: 'Start over' };
 }
 
 export interface ReviewerBarProps {
@@ -27,7 +30,7 @@ export function ReviewerBar({ ownerName, onStartOver }: ReviewerBarProps) {
         <span className="cd-reviewer-bar__quiet">{words.disclosure}</span>
       </p>
       <Button variant="ghost" onClick={onStartOver}>
-        Start over
+        {words.startOver}
       </Button>
     </div>
   );

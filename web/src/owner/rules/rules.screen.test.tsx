@@ -31,6 +31,11 @@ const DESK = `/app/${RIVERA.deskId}`;
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
+/** The loaded page's part, excluding the same layout classes inside a hidden loading layer. */
+function pagePart(selector: string, root: ParentNode = document): Element | null {
+  return [...root.querySelectorAll(selector)].find((element) => element.closest('.cd-skeleton-screen__layer') === null) ?? null;
+}
+
 /** Successful reads whose responses have completed, rather than requests only sent. */
 function finishedReads(): Set<string> {
   const finished = new Set<string>();
@@ -975,24 +980,24 @@ describe("Ask Claude's question about a hold", () => {
     const until = new Promise<void>((resolve) => { releaseSuggestions = resolve; });
     onTestFinished(() => releaseSuggestions());
     mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until, times: 10_000 });
-    const connectorTops = watchTop(() => document.querySelector('.cd-connector-list'));
+    const connectorTops = watchTop(() => pagePart('.cd-connector-list'));
     let bodyDrawnAt = 0;
     const observer = new MutationObserver(() => {
-      if (bodyDrawnAt === 0 && document.querySelector('.cd-connector-list') !== null) bodyDrawnAt = performance.now();
+      if (bodyDrawnAt === 0 && pagePart('.cd-connector-list') !== null) bodyDrawnAt = performance.now();
     });
     observer.observe(document.body, { childList: true, subtree: true });
     onTestFinished(() => observer.disconnect());
     const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: 'desktop', pollScale: 100 });
     await expect.poll(() => rulesReadAt > 0 && requests('suggestions').length > 0 && reads.held() > 0).toBe(true);
-    expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
+    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
     // Two waits in a row would take at least 6 s; the ceiling leaves a busy runner room under that.
     await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 5_000 }).toBeVisible();
     const elapsed = bodyDrawnAt - rulesReadAt;
     expect(elapsed, 'one three-second cap, measured from the Rules response').toBeGreaterThanOrEqual(2_900);
     expect(elapsed).toBeLessThan(5_000);
-    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
-    expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
-    expect(screen.container.querySelector('.cd-always-on')).not.toBeNull();
+    expect(pagePart('.cd-suggestion-chips', screen.container)).toBeNull();
+    expect(pagePart('.cd-rules__suggestions', screen.container)).toBeNull();
+    expect(pagePart('.cd-always-on', screen.container)).not.toBeNull();
     await settled(screen.container);
     const before = connectorTops();
     expect(before).toHaveLength(1);
@@ -1001,8 +1006,8 @@ describe("Ask Claude's question about a hold", () => {
     releaseSuggestions();
     await expect.poll(() => finished.has('needsYou') && finished.has('suggestions')).toBe(true);
     await settled(screen.container);
-    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
-    expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
+    expect(pagePart('.cd-suggestion-chips', screen.container)).toBeNull();
+    expect(pagePart('.cd-rules__suggestions', screen.container)).toBeNull();
     expect(connectorTops(), 'neither late read moves the connectors').toEqual(before);
 
     await router.navigate(`${DESK}/rules/all`);
@@ -1012,13 +1017,35 @@ describe("Ask Claude's question about a hold", () => {
     await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
   });
 
+  it('a_suggestions_failure_after_the_opening_cap_stays_silent_and_keeps_connectors_in_place', async () => {
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'suggestions', status: 503, until, times: 10_000 });
+    let failures = 0;
+    onTestFinished(observeRequests(({ key, ok }) => { if (key === 'suggestions' && !ok) failures += 1; }));
+    const tops = watchTop(() => pagePart('.cd-connector-list'));
+    const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'desktop', pollScale: 100, retryScale: 0 });
+    await expect.poll(() => requests('suggestions').length).toBeGreaterThan(0);
+    await expect.element(screen.getByRole('list', { name: 'Connectors' }), { timeout: 5_000 }).toBeVisible();
+    await settled(screen.container);
+    const before = tops();
+    expect(before).toHaveLength(1);
+    expect(screen.getByRole('alert').elements()).toHaveLength(0);
+    release();
+    await expect.poll(() => failures).toBe(2);
+    await settled(screen.container);
+    expect(screen.getByRole('alert').elements(), 'optional suggestions fail silently').toHaveLength(0);
+    expect(tops(), 'a late optional failure never moves landed connectors').toEqual(before);
+  });
+
   it.each(['desktop', 'phone'] as const)('suggested_rules_and_connectors_land_together_when_suggestions_are_held at %s', async (viewport) => {
     const finished = finishedReads();
     let release!: () => void;
     const until = new Promise<void>((resolve) => { release = resolve; });
     onTestFinished(() => release());
     mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until });
-    const connectorTops = watchTop(() => document.querySelector('.cd-connector-list'));
+    const connectorTops = watchTop(() => pagePart('.cd-connector-list'));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, viewport });
     await expect.poll(() => finished.has('needsYou')).toBe(true);
     await expect.poll(() => finished.has('rules')).toBe(true);
@@ -1040,7 +1067,7 @@ describe("Ask Claude's question about a hold", () => {
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
     await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
-    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
+    expect(pagePart('.cd-suggestion-chips', screen.container)).toBeNull();
   });
 
   it('a_failed_suggestions_read_settles_opening_without_waiting_for_the_cap', async () => {
@@ -1049,7 +1076,7 @@ describe("Ask Claude's question about a hold", () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
     await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 2_000 }).toBeVisible();
     expect(requests('suggestions').length).toBeGreaterThanOrEqual(2);
-    expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
+    expect(pagePart('.cd-rules__suggestions', screen.container)).toBeNull();
   });
 
   it('a_kept_rules_read_error_shows_while_needs_you_is_still_reading', async () => {
@@ -1063,7 +1090,7 @@ describe("Ask Claude's question about a hold", () => {
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
     await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
-    expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
+    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
   });
 
   it('a_rules_read_error_shows_while_needs_you_is_still_reading', async () => {
@@ -1075,7 +1102,7 @@ describe("Ask Claude's question about a hold", () => {
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
     await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
-    expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
+    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
   });
 
   it('another_business_keeps_the_hold_question_beside_a_failed_rules_read', async () => {
@@ -1098,7 +1125,7 @@ describe("Ask Claude's question about a hold", () => {
     }));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport: 'desktop' });
     await expect.poll(() => rulesRead && reads.held() > 0).toBe(true);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Draft this rule' }).elements()).toHaveLength(0);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
@@ -1106,14 +1133,14 @@ describe("Ask Claude's question about a hold", () => {
     // Observe every committed DOM state, so separate renders cannot pass merely by finishing fast.
     const mismatches: boolean[] = [];
     const observer = new MutationObserver(() => {
-      const body = screen.container.querySelector('.cd-connector-list') !== null;
-      const chip = screen.container.querySelector('.cd-suggestion-chips') !== null;
+      const body = pagePart('.cd-connector-list', screen.container) !== null;
+      const chip = pagePart('.cd-suggestion-chips', screen.container) !== null;
       if (body !== chip) mismatches.push(true);
     });
     observer.observe(screen.container, { childList: true, subtree: true });
     onTestFinished(() => observer.disconnect());
     reads.release();
-    await expect.poll(() => screen.container.querySelector('.cd-suggestion-chips')?.textContent).toContain('Why was this quote held?');
+    await expect.poll(() => pagePart('.cd-suggestion-chips', screen.container)?.textContent).toContain('Why was this quote held?');
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
     await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
@@ -1128,7 +1155,7 @@ describe("Ask Claude's question about a hold", () => {
     const reads = holdNeedsYou();
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
     reads.release();
     await expect.poll(() => failures.failed()).toBe(2);
     await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
@@ -1172,7 +1199,7 @@ describe("Ask Claude's question about a hold", () => {
     const reads = holdNeedsYou();
     const finished = finishedReads();
     mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS] });
-    const sectionTops = watchTop(() => document.querySelector('.cd-rules__suggestions'));
+    const sectionTops = watchTop(() => pagePart('.cd-rules__suggestions'));
     let releaseRules!: () => void;
     const rulesHeld = new Promise<void>((resolve) => { releaseRules = resolve; });
     onTestFinished(() => releaseRules());
@@ -1187,7 +1214,7 @@ describe("Ask Claude's question about a hold", () => {
     });
     const { screen, router } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     onTestFinished(() => { vi.useRealTimers(); });
     await vi.advanceTimersByTimeAsync(3_000);
@@ -1238,7 +1265,7 @@ describe("Ask Claude's question about a hold", () => {
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     await expect.poll(() => requests('needsYou').length).toBeGreaterThanOrEqual(2);
     await expect.element(screen.getByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
-    expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
+    expect(pagePart('.cd-suggestion-chips', screen.container)).toBeNull();
   });
 
   it('another_business_has_only_the_hold_question', async () => {

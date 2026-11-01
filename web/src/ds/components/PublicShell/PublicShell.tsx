@@ -7,10 +7,12 @@ import { Button } from '../Button/Button.tsx';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
+import { SuggestionChips } from '../SuggestionChips/SuggestionChips.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
 import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { aboutLinkHref } from './guards.ts';
 import { PublicBrandHeader } from './PublicBrandHeader.tsx';
+import { useFirstView } from './useFirstView.ts';
 
 import './PublicShell.css';
 
@@ -90,6 +92,10 @@ export interface PublicShellProps {
   footer?: boolean;
   /** The visitor's `Composer`, under the conversation. */
   composer: ReactNode;
+  /** Before the first message only. Omit for a conversation with any history. */
+  firstView?: boolean;
+  /** Localized business content. At most three; a pick uses the page's ordinary send path. */
+  starters?: { words: readonly string[]; onPick: (text: string) => void; disabled?: boolean };
   /**
    * A full-width line above the brand header, inside the window's height, such as the `VisionBar`
    * over a vision page. Left out, the brand header is the top of the page.
@@ -139,6 +145,9 @@ const COPY = {
     askFor: (owner: ReactNode | null) => (owner === null ? <>{ASK_OWNER_PREFIX.en}a person</> : <>{ASK_OWNER_PREFIX.en}{owner}</>),
     about: (name: ReactNode) => <>About {name}</>,
     forAgents: 'For AI agents',
+    greeting: (name: ReactNode) => <>How can {name} help?</>,
+    invitation: 'Try one of these, or ask in your own words.',
+    suggestions: 'Suggestions',
   },
   es: {
     chatWith: (name: ReactNode) => <>Chatea con {name}</>,
@@ -164,6 +173,9 @@ const COPY = {
     askFor: (owner: ReactNode | null) => (owner === null ? <>{ASK_OWNER_PREFIX.es}una persona</> : <>{ASK_OWNER_PREFIX.es}{owner}</>),
     about: (name: ReactNode) => <>Sobre {name}</>,
     forAgents: 'Para agentes de IA',
+    greeting: (name: ReactNode) => <>¿En qué te puede ayudar {name}?</>,
+    invitation: 'Prueba una de estas o pregunta con tus palabras.',
+    suggestions: 'Sugerencias',
   },
 } satisfies Record<CopyLanguage, unknown>;
 
@@ -578,6 +590,8 @@ export function PublicShell({
   aboutLinks,
   footer = true,
   composer,
+  firstView = false,
+  starters,
   banner,
   children,
 }: PublicShellProps) {
@@ -589,6 +603,7 @@ export function PublicShell({
   const aboutRef = useRef<HTMLElement>(null);
   useVisualViewportFit(shellRef, embedded);
   const aboutBeside = useShellLayout(shellRef);
+  const invitationShown = useFirstView(shellRef, firstView, aboutBeside, starters?.words.length ?? 0);
   // Beside the chat, a column that scrolls on its own is a stop in the tab order, so it scrolls from
   // the keyboard too; it is already named by its heading. It stays one while it has focus, so focus
   // doesn't drop to the page when the column stops scrolling under it.
@@ -679,7 +694,7 @@ export function PublicShell({
   return (
     <div
       ref={shellRef}
-      className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`}
+      className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}${firstView ? ' cd-public-shell--first-view' : ''}`}
       lang={language}
     >
       {banner ? <div className="cd-public-shell__banner">{banner}</div> : null}
@@ -711,15 +726,33 @@ export function PublicShell({
               the first message. A stop in the tab order, named by the chat's title, so a
               conversation with nothing to focus in it still scrolls from the keyboard. */}
           <div className="cd-public-shell__scroll" role="group" aria-labelledby={chatId} tabIndex={0}>
-            {aboutBeside ? null : aboutColumn}
-            <div className="cd-public-shell__conversation">{children}</div>
+            {aboutBeside || firstView ? null : aboutColumn}
+            <div className="cd-public-shell__conversation">
+              {invitationShown ? (
+                <div className="cd-public-shell__welcome" aria-hidden={!firstView || undefined}>
+                  <h2 className="cd-public-shell__greeting cd-type-greeting">{copy.greeting(name)}</h2>
+                  {starters && starters.words.length > 0 ? <p className="cd-public-shell__invitation cd-type-meta">{copy.invitation}</p> : null}
+                </div>
+              ) : null}
+              {children}
+            </div>
           </div>
-          <div className="cd-public-shell__composer">{composer}</div>
+          <div className="cd-public-shell__composer">
+            <div className="cd-public-shell__composer-group">
+              <div className="cd-public-shell__composer-lift">{composer}</div>
+              {invitationShown && starters && starters.words.length > 0 ? (
+                <div className="cd-public-shell__starters" data-copy="user" aria-hidden={!firstView || undefined}>
+                  <SuggestionChips label={copy.suggestions} suggestions={starters.words} onPick={starters.onPick} disabled={!firstView || starters.disabled} />
+                </div>
+              ) : null}
+            </div>
+          </div>
           {embedded ? null : (
             <div className="cd-public-shell__footer">
               <ConceptFooter poweredBy />
             </div>
           )}
+          {!aboutBeside && firstView ? aboutColumn : null}
         </Chat>
         {aboutBeside ? aboutColumn : null}
       </div>

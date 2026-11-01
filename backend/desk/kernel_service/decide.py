@@ -76,7 +76,7 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, mandates,
+from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, desks, explain, ledger, mandates,
                                  render, repo)
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, claudes_note, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
@@ -843,13 +843,14 @@ def _internal_error(named: Named, req: DecideRequest, exc: BaseException) -> Ker
 
 async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Reviewed:
     """Asks the reviewer about the call's action: the action as the adapter resolved it, the
-    pending cards, the Desk's public charter facts and the free-text arguments, never the
-    conversation. Only a normalized action is reviewed: without one this raises, and the call ends
-    with nothing stored."""
+    pending cards, the Desk's public charter facts but the seed-only starter questions
+    (`charter:starter:*`), and the free-text arguments, never the conversation. Only a normalized
+    action is reviewed: without one this raises, and the call ends with nothing stored."""
     if call.action is None:
         raise RuntimeError("review_without_action")
     facts = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-        FactRow.desk_id == call.action.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
+        FactRow.desk_id == call.action.desk_id, FactRow.kind == "charter",
+        desks.not_starter()).order_by(FactRow.fact_id)))
     data = ReviewInput(action=ReviewAction.of(call.action, tz=call.business.timezone),
                        cards=[ReviewCard.of(card) for card in pending],
                        facts=[ReviewFact(key=claim.key, value=claim.value) for fact in facts

@@ -312,8 +312,8 @@ RIVERA_KNOWLEDGE = [
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
                   text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
-                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. Each "
-                       "price is given in a quote from this list.",
+                       "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
+                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]
@@ -328,6 +328,18 @@ RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
                   Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
+RIVERA_STARTERS = {
+    "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
+    "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
+}
+STARTER_KEY = "starter:"   # a seed-only question's claim key is `starter:<n>:<lang>`, its fact `charter:<key>`
+
+
+def is_starter_fact(fact_id: str) -> bool:
+    """A seed-only starter question's fact: out of Claude's context, kept by a charter replace, never an owner's."""
+    return fact_id.startswith(f"charter:{STARTER_KEY}")
+
+
 NOTIFICATIONS = {"now": ["approval", "callback", "breaker", "lockout", "handoff"],
                  "briefing": ["lead", "booking"]}
 # The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
@@ -1819,6 +1831,12 @@ class FakeKernelState:
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
         desk.rivera_seed = True
+        for lang, questions in RIVERA_STARTERS.items():
+            for n, question in enumerate(questions, start=1):
+                key = f"{STARTER_KEY}{n}:{lang}"
+                self._put_fact(desk, Fact(fact_id=f"charter:{key}", kind="charter", status="available",
+                                          source="kernel", claims=[Claim(key=key, kind="text", value=question)],
+                                          label=Label(readers=["public"])))
         for index, item in enumerate(RIVERA_KNOWLEDGE):
             # Preserve insertion order without moving the shared clock used by other fake activity.
             self._store_knowledge(desk, item.model_copy(deep=True),
@@ -2286,7 +2304,24 @@ class FakeKernelState:
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
                           owner_display_name=desk.owner_display_name, brand=dict(desk.brand), charter=charter,
-                          agent_card=card, open_status=self._open_status(desk, language))
+                          agent_card=card, open_status=self._open_status(desk, language),
+                          starters=self._starters(desk, language))
+
+    def _starters(self, desk: Desk, language: str) -> list[str]:
+        canaries = self._canaries(desk.copy_id)
+        questions = []
+        for n in (1, 2, 3):
+            key = f"{STARTER_KEY}{n}:{language}"
+            fact = desk.facts.get(f"charter:{key}")
+            if (fact is None or "public" not in fact.label.readers or fact.status != "available"
+                    or not self._current(fact)):
+                continue
+            claim = next((claim for claim in fact.claims if claim.key == key and claim.kind == "text"), None)
+            if claim is not None:
+                text = claim.value.strip()
+                if 0 < len(text) <= 80 and not canary_spans(text, canaries):
+                    questions.append(text)
+        return questions
 
     def _agent_tools(self, desk: Desk) -> set[str]:
         """What an agent session may be given on the Desk now: its enabled tools an agent could ever be given, kept to
@@ -2412,7 +2447,8 @@ class FakeKernelState:
                                timezone=desk.timezone),
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
-            facts=[fact for fact in facts if self._readable(session, fact)],
+            facts=[fact for fact in facts if self._readable(session, fact)
+                   and not is_starter_fact(fact.fact_id)],
             knowledge=[item for item in desk.knowledge.values()
                        if self._readers(session) & set(item.label.readers)])
 
@@ -3408,6 +3444,9 @@ class FakeKernelState:
         keys = [claim.key for claim in charter]
         if len(set(keys)) != len(keys):
             raise Refusal(422, "invalid")
+        starters = {key: ["starter_seed_only"] for key in keys if is_starter_fact(f"charter:{key}")}
+        if starters:
+            raise Refusal(422, "invalid", starters)
         targets = [desk] if desk is not None else sorted(
             (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
         contact_format = any(claim.key == "contact" and (claim.kind != "text" or not valid_public_contact(claim.value))
@@ -3431,11 +3470,12 @@ class FakeKernelState:
 
     def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
         """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
-        stays, since the hours write it); a key given twice is 422."""
+        and seed-only starters stay); a key given twice or a `starter:` key is 422."""
         desk = self._owners_desk(request, request.path_params["id"])
         self._refuse_policy_promises(desk.copy_id, body.charter, "charter", desk)
         for fact_id in [fact_id for fact_id, fact in desk.facts.items()
-                        if fact.kind == "charter" and fact_id != "charter:hours"]:
+                        if fact.kind == "charter" and fact_id != "charter:hours"
+                        and not is_starter_fact(fact_id)]:
             del desk.facts[fact_id]
             self._drop("facts", (desk.desk_id, fact_id))
         for claim in body.charter:

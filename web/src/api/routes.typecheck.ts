@@ -84,6 +84,8 @@ export const ROUTE_MODELS = {
   setup: 'SetupState',
   setupConsent: 'SetupState',
   setupAnswer: 'SetupState',
+  setupProposal: 'SetupState',
+  setupSuggestions: 'SetupState',
   setupTools: 'SetupTools',
   setupConnect: 'ToolRow[]',
 

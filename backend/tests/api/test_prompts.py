@@ -53,6 +53,7 @@ from desk.api.prompts import (
     TriageCategory,
     conversation_system,
 )
+from desk.api.model import strict_schema
 from desk.api.store import DELIVERY_AUTHORS, ROW_KINDS
 from desk.contracts import ClauseTemplate
 
@@ -255,7 +256,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.15"                 # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.17"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -390,6 +391,34 @@ def test_the_opening_prompt_asks_only_for_its_own_fields():
     named_fields = set(re.findall(r"\b([a-z_]+):", system))
     assert named_fields.isdisjoint({"skip", "drop", "add_jobs", "plan"})
     assert "<answers_so_far>" not in system
+
+
+def test_setup_tells_the_consultant_the_public_contact_format_once_per_place():
+    """The kernel takes a public contact only as ways to reach the business, so each place setup's consultant writes
+    one says that format, in one sentence: the fact turn's guidance once, and the field's description in the
+    suggested facts and the patch code merges. A turn schema's field points to the guidance in a short line instead,
+    since every character of a turn's schema goes into the grammar the API compiles, which has a size cap."""
+    sentence = prompts.PUBLIC_CONTACT_FORMAT
+    for part in ('"ext. 12"', "an https URL or a bare domain", 'separated by commas or "or"', "at most one label",
+                 "with or without a colon", "only from this list", "no other words, such as offers or promises"):
+        assert part in sentence
+    # The labels the kernel accepts before a part, and no others: the sentence offers no open-ended example.
+    labels = ["Call us at", "Call", "Call or text", "Text us at", "Text", "Email us at", "Email", "Phone", "Tel",
+              "Mobile", "Office", "Website", "Web", "Llámanos al", "Escríbenos a", "Teléfono", "Correo"]
+    assert re.findall(r'"([^"]+)"', sentence) == ["ext. 12", "or", *labels]
+    assert SETUP_TURN_SYSTEM.count(sentence) == 1
+    for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert sentence not in system
+    turns = [turn for turn in SETUP_TURNS.values() if "public_contact" in turn.model_fields]
+    assert turns
+    assert prompts.TURN_CONTACT == ("The contact customers see, in the format your instructions give: phone numbers, "
+                                    "emails or websites, each with at most one listed label, and no other words.")
+    for model in turns:
+        assert model.model_fields["public_contact"].description == prompts.TURN_CONTACT, model.__name__
+        assert json.dumps(sentence)[1:-1] not in json.dumps(strict_schema(model)), model.__name__
+    for model in (prompts.SuggestedFacts, prompts.SetupPatch):
+        assert model.model_fields["public_contact"].description.count(sentence) == 1, model.__name__
+    assert json.dumps(strict_schema(prompts.SetupUnderstanding)).count(json.dumps(sentence)[1:-1]) == 1
 
 
 def test_setup_planning_prompts_ask_prerequisites_before_proposing_jobs():

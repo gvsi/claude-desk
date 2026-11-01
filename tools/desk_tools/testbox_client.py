@@ -141,6 +141,14 @@ print(json.dumps({'git': signature, 'sources': sources}), flush=True)
 """.replace('BASE', repr(base))
 
 
+def new_lane_notice(remote: dict) -> str | None:
+    """A lane with no repository on the machine yet sets everything up on this call, which takes minutes."""
+    if remote["git"]:
+        return None
+    return ("testbox: setting up this lane on the test machine (its first call here: full sync, environment, kernel "
+            "and database), about 5 minutes; it is reachable, so don't retry")
+
+
 def transaction_script(base: str, command: list[str], cancel: list[str]) -> str:
     """Hold the lane until execution AND cancellation finish, including on client EOF."""
     return """import fcntl, os, select, signal, subprocess, sys, time
@@ -269,6 +277,17 @@ def read_remote_state(holder):
     raise RuntimeError("Could not lock the remote lane")
 
 
+def use_local_bin():
+    local = str(Path.home() / ".local/bin")
+    if local not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = local + os.pathsep + os.environ.get("PATH", "")
+
+
+def cache_directory() -> Path:
+    """This laptop's SSH key, host keys and shared connections; never in the repository."""
+    return Path.home() / ".cache/desk-testbox"
+
+
 def control_path(cache: Path, region: str, instance: str) -> Path:
     return cache / (hashlib.sha256(("v2:" + region + instance).encode()).hexdigest()[:20] + ".sock")
 
@@ -282,6 +301,69 @@ def warm_instance(cache: Path, region: str) -> str | None:
         return None
     result = subprocess.run(["ssh", "-S", str(control_path(cache, region, instance)), "-O", "check", "ubuntu@" + instance], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return instance if result.returncode == 0 else None
+
+
+def choose_instance(cache: Path, region: str, api, standby: bool) -> str:
+    """The machine this call runs on: the remembered one while its connection is alive, else the one running instance
+    tagged active. A standby (a replacement being proven before lanes move to it) is reached only when asked for."""
+    instance = None if standby else warm_instance(cache, region)
+    if instance is None:
+        purpose = "agent-test-box-standby" if standby else "agent-test-box"
+        found = api("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": [purpose]}, {"Name": "instance-state-name", "Values": ["running"]}])
+        instances = [i for r in found["Reservations"] for i in r["Instances"]]
+        if len(instances) != 1:
+            raise RuntimeError(f"Expected one running {'standby ' if standby else ''}test box in {region}, found {len(instances)}")
+        instance = instances[0]["InstanceId"]
+    return instance
+
+
+def open_connection(cache: Path, region: str, instance: str, api, remember: bool, timing=None) -> list[str]:
+    """This laptop's shared SSH connection to the instance, opened over SSM unless one is alive; its options for ssh.
+    With `remember`, every lane's next call reuses it (the active machine only, never a standby)."""
+    aws = ["aws", "--region", region, "--no-cli-pager"]
+    use_local_bin()   # the Session Manager plugin may live there
+    # Reuse one encrypted SSM stream for SSH/rsync. No inbound port is opened.
+    with (cache / f"connection-{instance}.lock").open("w") as connection_lock:
+        fcntl.flock(connection_lock, fcntl.LOCK_EX)
+        if timing:
+            timing.mark("connection_lock")
+        key = cache / "id_ed25519"
+        if not key.exists():
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "desk-testbox-client", "-f", str(key)], check=True)
+        control = control_path(cache, region, instance)
+        proxy = shlex.join(aws + ["ssm", "start-session", "--target", instance, "--document-name", "AWS-StartSSHSession", "--parameters", "portNumber=%p"])
+        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-i", str(key)]
+        host = "ubuntu@" + instance
+        check = subprocess.run(["ssh", *ssh_opts, "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if check.returncode:
+            public = key.with_suffix(".pub").read_text().strip()
+            # Trust the host key delivered over authenticated SSM, never trust-on-first-use over IP.
+            script = "set -eu; install -d -o ubuntu -g ubuntu -m 700 /home/ubuntu/.ssh; "
+            script += f"grep -qxF {shlex.quote(public)} /home/ubuntu/.ssh/authorized_keys || echo {shlex.quote(public)} >> /home/ubuntu/.ssh/authorized_keys; "
+            script += "chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys; chmod 600 /home/ubuntu/.ssh/authorized_keys; cat /etc/ssh/ssh_host_ed25519_key.pub"
+            command = api("ssm", "send-command", instance_ids=[instance], document_name="AWS-RunShellScript", parameters={"commands": [script]})["Command"]["CommandId"]
+            deadline = time.monotonic() + 180
+            while True:
+                try:
+                    result = api("ssm", "get-command-invocation", command_id=command, instance_id=instance)
+                except (subprocess.CalledProcessError, RuntimeError):
+                    result = {}
+                if result.get("Status") == "Success":
+                    break
+                if result.get("Status") in {"Failed", "Cancelled", "TimedOut"} or time.monotonic() > deadline:
+                    raise RuntimeError("SSM could not authorize SSH: " + result.get("StandardErrorContent", "timeout"))
+                time.sleep(2)
+            host_key = result["StandardOutputContent"].strip().split()
+            if host_key[:1] != ["ssh-ed25519"] or len(host_key) < 2:
+                raise RuntimeError("SSM did not return the SSH host key")
+            replace_host_key(cache / "known_hosts", instance, host_key)
+            # A separate session prevents one caller's process-group cleanup killing other lanes.
+            subprocess.run(["ssh", *ssh_opts, "-MNf", host], check=True, start_new_session=True)
+        if remember:
+            (cache / f"connection-{region}.json").write_text(json.dumps({"instance": instance}))
+    return ssh_opts
+
+
 
 
 def create_bundle(root: Path, bundle: Path, previous: str) -> bool:
@@ -309,6 +391,7 @@ def main():
     parser.add_argument("--region", default=os.environ.get("TESTBOX_REGION", "us-east-1"))
     parser.add_argument("--ci", action="store_const", const="1", help="explicitly set CI on the remote run")
     parser.add_argument("--lane", help="scratch lane override; normally the worktree directory name")
+    parser.add_argument("--standby", action="store_true", help="run on the standby machine being proven (docs/testbox.md)")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command[:1] == ["--"]:
@@ -320,10 +403,10 @@ def main():
     words = re.findall(r"[A-Za-z0-9_-]+", " ".join(args.command))
     if forbidden.intersection(words) or "make dev" in " ".join(args.command):
         parser.error("model/secret-dependent jobs and make dev stay on the laptop")
-    os.environ["PATH"] = str(Path.home() / ".local/bin") + os.pathsep + os.environ["PATH"]
+    use_local_bin()
     root = Path(capture(["git", "rev-parse", "--show-toplevel"]))
     lane = lane_name(args.lane or str(root))
-    cache = Path.home() / ".cache/desk-testbox"
+    cache = cache_directory()
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache.chmod(0o700)
     # Serialize callers for the same lane before changing its worktree or database.
@@ -344,53 +427,11 @@ def run(args, root, lane, cache):
             cmd += ["--" + k.replace("_", "-"), json.dumps(v) if isinstance(v, (list, dict)) else str(v)]
         return json.loads(capture(cmd))
 
-    instance = warm_instance(cache, args.region)
-    if instance is None:
-        found = api("ec2", "describe-instances", filters=[{"Name": "tag:Project", "Values": ["claude-desk"]}, {"Name": "tag:Purpose", "Values": ["agent-test-box"]}, {"Name": "instance-state-name", "Values": ["running"]}])
-        instances = [i for r in found["Reservations"] for i in r["Instances"]]
-        if len(instances) != 1:
-            raise RuntimeError(f"Expected one running test box in {args.region}, found {len(instances)}")
-        instance = instances[0]["InstanceId"]
+    instance = choose_instance(cache, args.region, api, args.standby)
     timing.mark("discovery")
     print(f"testbox: connecting in {args.region}; lane={lane}", file=sys.stderr, flush=True)
-    # Reuse one encrypted SSM stream for SSH/rsync. No inbound port is opened.
-    with (cache / f"connection-{instance}.lock").open("w") as connection_lock:
-        fcntl.flock(connection_lock, fcntl.LOCK_EX)
-        timing.mark("connection_lock")
-        key = cache / "id_ed25519"
-        if not key.exists():
-            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "desk-testbox-client", "-f", str(key)], check=True)
-        control = control_path(cache, args.region, instance)
-        proxy = shlex.join(aws + ["ssm", "start-session", "--target", instance, "--document-name", "AWS-StartSSHSession", "--parameters", "portNumber=%p"])
-        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-i", str(key)]
-        host = "ubuntu@" + instance
-        check = subprocess.run(["ssh", *ssh_opts, "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if check.returncode:
-            public = key.with_suffix(".pub").read_text().strip()
-            # Trust the host key delivered over authenticated SSM, never trust-on-first-use over IP.
-            script = "set -eu; install -d -o ubuntu -g ubuntu -m 700 /home/ubuntu/.ssh; "
-            script += f"grep -qxF {shlex.quote(public)} /home/ubuntu/.ssh/authorized_keys || echo {shlex.quote(public)} >> /home/ubuntu/.ssh/authorized_keys; "
-            script += "chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys; chmod 600 /home/ubuntu/.ssh/authorized_keys; cat /etc/ssh/ssh_host_ed25519_key.pub"
-            command = api("ssm", "send-command", instance_ids=[instance], document_name="AWS-RunShellScript", parameters={"commands": [script]})["Command"]["CommandId"]
-            deadline = time.monotonic() + 180
-            while True:
-                try:
-                    result = api("ssm", "get-command-invocation", command_id=command, instance_id=instance)
-                except subprocess.CalledProcessError:
-                    result = {}
-                if result.get("Status") == "Success":
-                    break
-                if result.get("Status") in {"Failed", "Cancelled", "TimedOut"} or time.monotonic() > deadline:
-                    raise RuntimeError("SSM could not authorize SSH: " + result.get("StandardErrorContent", "timeout"))
-                time.sleep(2)
-            host_key = result["StandardOutputContent"].strip().split()
-            if host_key[:1] != ["ssh-ed25519"] or len(host_key) < 2:
-                raise RuntimeError("SSM did not return the SSH host key")
-            replace_host_key(cache / "known_hosts", instance, host_key)
-        # A separate session prevents one caller's process-group cleanup killing other lanes.
-        if check.returncode:
-            subprocess.run(["ssh", *ssh_opts, "-MNf", host], check=True, start_new_session=True)
-        (cache / f"connection-{args.region}.json").write_text(json.dumps({"instance": instance}))
+    ssh_opts = open_connection(cache, args.region, instance, api, remember=not args.standby, timing=timing)
+    host = "ubuntu@" + instance
     ssh = ["ssh", *ssh_opts, host]
     timing.mark("connection")
     base = f"/srv/testbox/lanes/{lane}"
@@ -407,6 +448,8 @@ def run(args, root, lane, cache):
         if remote is None:
             return holder.wait()
         timing.mark("remote_lock")
+        if notice := new_lane_notice(remote):
+            print(notice, file=sys.stderr, flush=True)
         with tempfile.TemporaryDirectory(prefix="desk-testbox-") as tmp:
             tmp = Path(tmp)
             stage_runner(tmp)

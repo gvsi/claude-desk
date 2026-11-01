@@ -307,6 +307,7 @@ export interface ConnectorProposal {
    */
   why: string;
   connectable: boolean;
+  connected?: boolean;
 }
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
@@ -426,7 +427,7 @@ export interface HealthOut {
   ok: boolean;
   kernel: Health | null;
 }
-export interface IntakeConfig {
+export interface IntakeProposalConfig {
   block: "intake";
   /**
    * 1 to 5 intake questions, each 1 to 120 characters.
@@ -463,9 +464,10 @@ export interface JobProposal {
   how: string;
   autonomy: "auto" | "ask";
   can_do_today: boolean;
-  config: (IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig) | null;
+  config:
+    (IntakeProposalConfig | TypedBookingProposalConfig | PurposePaymentProposalConfig | UrgentProposalConfig) | null;
 }
-export interface TypedBookingConfig {
+export interface TypedBookingProposalConfig {
   block: "typed_booking";
   /**
    * Appointment name, 1 to 60 characters.
@@ -476,7 +478,7 @@ export interface TypedBookingConfig {
    */
   minutes: number;
 }
-export interface PurposePaymentConfig {
+export interface PurposePaymentProposalConfig {
   block: "purpose_payment";
   /**
    * Payment purpose, 1 to 60 characters.
@@ -484,7 +486,7 @@ export interface PurposePaymentConfig {
   purpose: string;
   amount_cents: number | null;
 }
-export interface UrgentConfig {
+export interface UrgentProposalConfig {
   block: "urgent";
   /**
    * When a request is urgent, 1 to 300 characters.
@@ -843,6 +845,15 @@ export interface SetupMessage {
   card?: ProposalCard | null;
 }
 /**
+ * The owner's decision on a setup proposal, with optional changes when accepting it.
+ */
+export interface SetupProposalIn {
+  accept: boolean;
+  title?: string | null;
+  amount_cents?: number | null;
+  autonomy?: ("auto" | "ask") | null;
+}
+/**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
  * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
  * the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
@@ -881,8 +892,16 @@ export interface SetupState {
     | null;
   pending_card?: string | null;
   busy?: boolean;
+  /**
+   * Charter claim keys, such as a policy line or the public contact, withheld by the kernel's public-text checks; empty when nothing was held at the latest charter write.
+   */
+  held_policy_keys: string[];
   messages: SetupMessage[];
 }
+/**
+ * Finish setup questions with the current suggestions; no additional answers are supplied.
+ */
+export interface SetupSuggestionsIn {}
 /**
  * `GET /api/owner/setup/{id}/tools`: the new Desk's tools, and the connection it can still add (the
  * mock payments server, until it is connected).
@@ -1173,6 +1192,8 @@ export const API_OPERATIONS = {
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
+  "POST /api/owner/setup/{id}/proposals/{proposal_id}": { 200: "SetupState", 202: "SetupState" },
+  "POST /api/owner/setup/{id}/suggestions": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },

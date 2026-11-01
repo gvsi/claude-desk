@@ -3295,6 +3295,14 @@
             }
           ],
           "default": null
+        },
+        "starters": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Starters",
+          "type": "array"
         }
       },
       "required": [
