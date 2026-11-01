@@ -2199,6 +2199,29 @@ describe("Today's top band", () => {
     expectNoHorizontalScroll();
   });
 
+  it.each([
+    { width: 1440, height: 900 },
+    { width: 1512, height: 982 },
+  ])('column_titles_and_first_cards_line_up_at_$width', async (viewport) => {
+    // The right column opens with its own section title, "Last 7 days", as "Needs you" opens the left:
+    // the two titles share a top, and so do the two first cards under them, 12 px under each title.
+    const { screen } = await renderRoute(TODAY, { viewport });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const week = region(screen, 'Last 7 days');
+    await expect.element(week).toBeVisible();
+    const needsTitle = box(region(screen, 'Needs you').getByRole('heading', { level: 2, name: 'Needs you' }).element());
+    const weekTitle = box(week.getByRole('heading', { level: 2, name: 'Last 7 days' }).element());
+    expect(weekTitle.top).toBeCloseTo(needsTitle.top, 0);
+    const heldTop = box(heldCard(screen, SEEDED_REASON).element().closest('.cd-card') ?? heldCard(screen, SEEDED_REASON).element()).top;
+    const weekCard = week.element().querySelector(':scope > .cd-card');
+    if (!weekCard) throw new Error('the week is a card under its title');
+    expect(box(weekCard).top).toBeCloseTo(heldTop, 0);
+    expect(box(weekCard).top - weekTitle.bottom).toBeCloseTo(12, 0);
+    // The title is the section's, with no count; the card holds no heading of its own.
+    expect(week.element().querySelector('.cd-section-header .cd-count-pill')).toBeNull();
+    expect(weekCard.querySelector('h2')).toBeNull();
+  });
+
   it('phone_stacks_the_header_and_makes_each_thing_one_row', async () => {
     const { screen, router } = await renderRoute(TODAY, { viewport: 'phone' });
     const things = region(screen, 'Things to try');

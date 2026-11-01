@@ -266,7 +266,7 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
   { name: 'since-title', page: '.cd-today__main > .cd-today__section:last-child .cd-section-header__heading' },
   { name: 'since-card', page: '.cd-today__main > .cd-today__section:last-child > .cd-card', size: true },
-  { name: 'week-title', page: '.cd-week__heading' },
+  { name: 'week-title', page: '.cd-today-aside .cd-section-header__heading' },
   { name: 'week-bar-0', page: '.cd-week__bar' },
 ];
 const TODAY_CONTENT_ANCHORS = TODAY_ANCHORS.filter(({ name }) => name !== 'owner-footer');
@@ -277,7 +277,7 @@ const TODAY_WIDTH_ANCHORS: readonly SkeletonAnchor[] = [
   ...TODAY_ANCHORS,
   { name: 'live-title', page: '.cd-today__section:has(.cd-live) .cd-section-header__heading' },
   { name: 'week-bar-6', page: '.cd-week__day:last-child .cd-week__bar' },
-  { name: 'week-card', page: '.cd-today-aside > .cd-card:last-child', size: true },
+  { name: 'week-card', page: '.cd-today-aside .cd-today__section > .cd-card', size: true },
 ].map((anchor) => ({ ...anchor, dimensions: ['height', ...(anchor.dimensions ?? [])] as const }));
 
 it.each([320, 620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s', async (width) => {
@@ -419,7 +419,7 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
   });
   lines('.cd-things__vision .cd-skeleton-line', '.cd-things__vision', ['75%']);
-  for (const child of [1, 2, 3]) lines(`.cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
+  for (const child of [1, 2, 3]) lines(`.cd-today__main > .cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__main > .cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
   lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
   lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
@@ -432,12 +432,13 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   }
   lines('.cd-live .cd-skeleton-line--control', '.cd-conversation-item__top', ['55%']);
   lines('.cd-live .cd-skeleton-line--caption', '.cd-conversation-item__top', ['20%']);
-  lines('.cd-week__head .cd-skeleton-line', '.cd-week__head', [110]);
-  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--figure', '.cd-week__part:nth-child(2)', ['45%']);
-  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['70%']);
+  // "Last 7 days" is a section title, as Needs you's is.
+  lines('.cd-today-aside .cd-section-header .cd-skeleton-line--section', '.cd-today-aside .cd-section-header__title', [135]);
+  lines('.cd-week__part:nth-child(1) .cd-skeleton-line--figure', '.cd-week__part:nth-child(1)', ['45%']);
+  lines('.cd-week__part:nth-child(1) .cd-skeleton-line--meta', '.cd-week__part:nth-child(1)', ['70%']);
   for (let child = 1; child <= 7; child += 1) lines(`.cd-week__day:nth-child(${child}) .cd-skeleton-line`, `.cd-week__day:nth-child(${child})`, ['50%']);
-  lines('.cd-week__part:nth-child(3) .cd-skeleton-line--control', '.cd-week__part:nth-child(3)', ['70%']);
-  lines('.cd-week__part:nth-child(3) .cd-skeleton-line--meta', '.cd-week__part:nth-child(3)', ['100%']);
+  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--control', '.cd-week__part:nth-child(2)', ['70%']);
+  lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['100%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--meta', '.cd-week__part:last-child', ['65%', '30%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--control', '.cd-week__part:last-child', ['70%']);
 });

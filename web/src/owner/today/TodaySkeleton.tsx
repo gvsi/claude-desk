@@ -315,42 +315,42 @@ export function TodaySkeleton() {
         </div>
       </div>
       <div className="cd-today-aside">
-        <SkeletonCard padding={16} anchor="week-card">
-          <div className="cd-week">
-            <div className="cd-week__head">
-              <Skeleton shape="line" text="section" width={110} anchor="week-title" />
-            </div>
-            <div className="cd-week__part">
-              <Skeleton shape="line" text="figure" width="45%" />
-              <Skeleton shape="line" text="meta" width="70%" />
-              <div className="cd-week__bars">
-                {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-                  <div key={i} className="cd-week__day">
-                    <div className="cd-week__bar-room">
-                      <Skeleton
-                        shape="block"
-                        width="var(--space-24)"
-                        height={i === 6 ? 'calc(var(--space-40) + var(--space-16))' : 'var(--space-2)'}
-                        anchor={`week-bar-${i}`}
-                      />
+        <div className="cd-today__section">
+          <SectionTitle anchor="week-title" />
+          <SkeletonCard padding={16} anchor="week-card">
+            <div className="cd-week">
+              <div className="cd-week__part">
+                <Skeleton shape="line" text="figure" width="45%" />
+                <Skeleton shape="line" text="meta" width="70%" />
+                <div className="cd-week__bars">
+                  {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                    <div key={i} className="cd-week__day">
+                      <div className="cd-week__bar-room">
+                        <Skeleton
+                          shape="block"
+                          width="var(--space-24)"
+                          height={i === 6 ? 'calc(var(--space-40) + var(--space-16))' : 'var(--space-2)'}
+                          anchor={`week-bar-${i}`}
+                        />
+                      </div>
+                      <Skeleton shape="line" text="caption" width="50%" />
                     </div>
-                    <Skeleton shape="line" text="caption" width="50%" />
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+              <div className="cd-week__part">
+                <TextLines words={TODAY_COPY.handledTitle} text="control" className="cd-week__title" lineWidth="70%" lastWidth="70%" />
+                <Skeleton shape="block" height="var(--space-6)" />
+                <Legend />
+              </div>
+              <div className="cd-week__part">
+                <Skeleton shape="line" text="control" width="70%" />
+                <TextLines words={TODAY_COPY.turnedDownEmpty} className="cd-week__line" lineWidth="65%" lastWidth="65%" />
+                <Skeleton shape="line" text="meta" width="30%" />
               </div>
             </div>
-            <div className="cd-week__part">
-              <TextLines words={TODAY_COPY.handledTitle} text="control" className="cd-week__title" lineWidth="70%" lastWidth="70%" />
-              <Skeleton shape="block" height="var(--space-6)" />
-              <Legend />
-            </div>
-            <div className="cd-week__part">
-              <Skeleton shape="line" text="control" width="70%" />
-              <TextLines words={TODAY_COPY.turnedDownEmpty} className="cd-week__line" lineWidth="65%" lastWidth="65%" />
-              <Skeleton shape="line" text="meta" width="30%" />
-            </div>
-          </div>
-        </SkeletonCard>
+          </SkeletonCard>
+        </div>
       </div>
     </div>
   );

@@ -556,7 +556,8 @@
   max-width: var(--size-content);
 }
 
-/* Last 7 days: the heading and its caption, then three parts divided by hairlines. Bars are layout
+/* Last 7 days: its section title (in a `.cd-today__section`, as Needs you's), then one card of three
+   parts divided by hairlines. Bars are layout
    on tokens: each day's height is its share of the busiest day's, and a day with none keeps a flat
    stub, so the seven days are there before the first booking. Positioned, so its visually hidden
    words sit inside it: with no positioned ancestor they would sit against the window, and below
@@ -568,21 +569,12 @@
   gap: var(--space-16);
 }
 
-.cd-week__head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.cd-week__heading,
-.cd-week__caption,
 .cd-week__title,
 .cd-week__line,
 .cd-week__figure {
   margin: 0;
 }
 
-.cd-week__heading,
 .cd-week__title {
   color: var(--text-primary);
 }
