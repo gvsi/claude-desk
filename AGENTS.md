@@ -10,7 +10,7 @@ Claude Desk is a concept prototype: a public, always-on Claude for a person or s
 
 - **Spec:** `docs/specs/` (design, decisions, threat model).
 - **Plans:** `docs/plans/`. The master plan owns the architecture, shared contracts, kernel API and schedule; part plans consume them.
-- **Designs:** the Claude Desk design canvas (link in the spec).
+- **Designs:** the committed design system in [`web/src/ds/`](web/src/ds/), its [README](web/src/ds/README.md) and the [screen boards](web/src/ds/boards/).
 - **Constitution:** `.local/constitution.md` (local only, never committed) sets the quality bar every plan, build step and review is held to. Read it first when it exists, and never quote it in anything committed or published.
 
 ## Architecture (exact contracts in the master plan)
