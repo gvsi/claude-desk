@@ -11,11 +11,12 @@
  * read answers, or if it fails, it carries no reason and shows the event's `visitor_plain`.
  *
  * An execution refusal uses the transcript item's `owner_plain`, verbatim, when present; it falls
- * back to the event's `visitor_plain`. The signed event is unchanged. Every other receipt keeps
- * the event's `visitor_plain` and reads nothing: a first receipt that
- * reads `failed`, `unknown` or `refused_at_execution` (the reason it was allowed would contradict
- * what happened), every later one for the same decision (the reason is written once, at decide
- * time, so a hold's words never follow it to its outcome), and every reply's check.
+ * back to the event's `visitor_plain`. This owner-only exception never changes the signed event
+ * or a visitor surface. A first receipt that reads `failed`, `unknown` or `refused_at_execution`
+ * never fetches `reason_plain`: the reason it was allowed would contradict what happened.
+ * Later receipts for the same decision never fetch it either (a hold's words never follow it to
+ * its outcome). Apart from the execution refusal's owner annotation, those receipts and every
+ * reply check keep the event's `visitor_plain`.
  */
 import { useQuery } from '@tanstack/react-query';
 
