@@ -7,6 +7,7 @@ import { THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { publicLink } from '../customerLink.ts';
 import { handledCount, steppedInCount, TODAY_COPY } from './copy.ts';
+import { sinceLastNightLine } from './sinceLastNightLine.ts';
 
 import './Today.css';
 
@@ -20,6 +21,9 @@ const DETAILS = [
   `${TODAY_COPY.waiting} ${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`,
   TODAY_COPY.createDetail,
 ] as const;
+
+/** The fresh copy's night (Decision 15): three conversations, Dana's booking and the agent's answer. */
+const FRESH_NIGHT = sinceLastNightLine({ conversations: 3, bookings: 1, answers: 1, turned_down: 0 }) ?? '';
 
 /** Intrinsic grid/flex columns take the words' width in the real font, rather than a pill's width. */
 function useWordWidth(box: RefObject<HTMLElement | null>, words: string | readonly TextPart[], className: string, intrinsic: boolean) {
@@ -262,6 +266,7 @@ export function TodaySkeleton() {
         <div className="cd-today__section">
           <SectionTitle anchor="since-title" />
           <SkeletonCard anchor="since-card">
+            <TextLines words={FRESH_NIGHT} text="summary" className="cd-since__line" />
             <div className="cd-briefing">
               {['booking', 'answer'].map((kind) => (
                 <div key={kind} className="cd-briefing__item">

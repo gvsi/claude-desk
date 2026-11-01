@@ -109,6 +109,11 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
+  /**
+   * The conversations Claude answered on its own: the `answer` items in the window. Optional until
+   * the API sends it; Today's one line waits for it rather than say less.
+   */
+  answers?: number;
   /** The requests the kernel refused. Claude's drafts the reply check stopped stay on Safety, out of the briefing. */
   turned_down: number;
   /** The full list's length (`BriefingList.items`). */

@@ -436,6 +436,7 @@ function briefingOf(a: Activity): Briefing {
     conversations: conversationsIn(a, since, end).size,
     bookings: within(a.bookings, since, end).length,
     leads: within(a.leads, since, end).length,
+    answers: items.filter((i) => i.kind === 'answer').length,
     turned_down: items.filter((i) => i.kind === 'turned_down').length,
     total: items.length,
     newest: { turned_down: first('turned_down'), booking: first('booking'), lead_or_answer: leadOrAnswer },

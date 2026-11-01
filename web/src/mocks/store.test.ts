@@ -2258,6 +2258,7 @@ describe("Today's windows", () => {
       conversations: 0,
       bookings: 0,
       leads: 0,
+      answers: 0,
       turned_down: 0,
       total: 0,
       newest: { turned_down: null, booking: null, lead_or_answer: null },
@@ -2291,7 +2292,7 @@ describe("Today's windows", () => {
     const seeded = await read();
     expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 0 });
     expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 0 });
-    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, turned_down: 0, total: 2 });
+    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, answers: 1, turned_down: 0, total: 2 });
     expect(seeded.briefing.newest.turned_down).toBeNull();
     expect(seeded.briefing.newest.booking).toMatchObject({
       kind: 'booking',
@@ -2324,7 +2325,7 @@ describe("Today's windows", () => {
     await drain();
     const both = await read();
     expect(both.this_week).toMatchObject({ conversations: 5, stepped_in: 2, handled: 3 });
-    expect(both.briefing).toMatchObject({ conversations: 5, total: 4 });
+    expect(both.briefing).toMatchObject({ conversations: 5, answers: 3, total: 4 });
     expect(both.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', display_name: null });
 
     // And a visitor who asks for a callback is a lead, not an answer.
@@ -2333,7 +2334,7 @@ describe("Today's windows", () => {
     await send('Can you call me back?');
     await drain();
     const withLead = await read();
-    expect(withLead.briefing).toMatchObject({ leads: 1, total: 3 });
+    expect(withLead.briefing).toMatchObject({ leads: 1, answers: 1, total: 3 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
       display_name: 'Dana Whitfield',
@@ -2361,6 +2362,8 @@ describe("Today's windows", () => {
     const full = await list();
     expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'answer']);
     expect(full.items).toHaveLength(answered.briefing.total);
+    // The answers counted are the list's own.
+    expect(answered.briefing.answers).toBe(full.items.filter((item) => item.kind === 'answer').length);
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
   });
 

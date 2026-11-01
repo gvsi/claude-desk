@@ -839,6 +839,51 @@ describe('Today', () => {
     expect(screen.getByRole('heading', { name: 'Needs you' }).elements()).toHaveLength(0);
     expect(screen.getByRole('heading', { name: 'Live now' }).elements()).toHaveLength(0);
     expect(since.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
+    // A quiet night has no line of its own over "A quiet night".
+    expect(since.element().querySelector('.cd-type-summary')).toBeNull();
+  });
+
+  it('since_last_night_opens_with_its_line', async () => {
+    // The seed's night: Dana's chat booked a visit, the seeded visitor's request waits for Maria, and
+    // Alex Kim's assistant was answered on its own. The line is built from the briefing's counts.
+    const answer = await mockStore.dispatch('today', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Today');
+    const { conversations, bookings, answers, turned_down } = (answer.body as Today).briefing;
+    expect({ conversations, bookings, answers, turned_down }).toEqual({ conversations: 3, bookings: 1, answers: 1, turned_down: 0 });
+
+    const { screen } = await renderRoute(TODAY);
+    const since = region(screen, 'Since last night');
+    const line = since.getByText('3 conversations since last night, all inside your rules. I booked one visit and answered one question.', { exact: true });
+    await expect.element(line).toBeVisible();
+    // In Claude's voice, first in the card and over the rows: 14 px down to the first row's hairline,
+    // its words level with the rows' own.
+    const el = line.element();
+    expect(el.tagName).toBe('P');
+    expect(el).toHaveClass('cd-type-summary');
+    expectComputed(el, { fontSize: '18px', lineHeight: '27px', marginTop: '0px', marginBottom: '0px' });
+    expect(getComputedStyle(el).fontFamily).toContain('Source Serif 4');
+    const first = since.getByRole('listitem').first().element();
+    expect(el.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(Math.round(first.getBoundingClientRect().top - el.getBoundingClientRect().bottom)).toBe(14);
+    expectComputed(first, { borderTopWidth: '1px', borderTopStyle: 'solid' });
+    const words = document.createRange();
+    words.selectNodeContents(el);
+    const when = first.querySelector('.cd-briefing-row__when');
+    expect(Math.round(words.getBoundingClientRect().left)).toBe(Math.round(when?.getBoundingClientRect().left ?? -1));
+
+    // A server that doesn't send the answers yet shows no line rather than a partial one.
+    mockStore.reset('rivera');
+    await injectToday((t) => {
+      const briefing = { ...t.briefing };
+      delete briefing.answers;
+      return { ...t, briefing };
+    });
+    const older = await renderRoute(TODAY);
+    const rows = region(older.screen, 'Since last night');
+    await expect.element(rows.getByRole('listitem').first()).toBeVisible();
+    expect(rows.element().querySelector('.cd-type-summary')).toBeNull();
+    // Without the line, the first row has no hairline over it.
+    expectComputed(rows.getByRole('listitem').first().element(), { borderTopWidth: '0px' });
   });
 
   it('no_ask_claude_composer_on_today', async () => {
