@@ -897,6 +897,10 @@ def money(cents: int) -> str:
 
 
 PUBLIC_POLICY_PATTERNS = (
+    ("lex.en.number", r"\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b"),
+    ("lex.es.number", r"\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|mil|miles)\b"),
+    ("lex.en.date", r"\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekends?)\b"),
+    ("lex.es.date", r"\b(?:lunes|martes|miercoles|jueves|viernes|sabados?|domingos?|fin(?:es)?\s+de\s+semana)\b"),
     ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
      r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
      r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
@@ -934,19 +938,34 @@ def public_commitment_reading(text: str) -> tuple[str, list[int]]:
     return "".join(chars), origin
 
 
-def public_policy_rules(text: str) -> list[str]:
+def allowed_service_area_hit(key: str | None, text: str, start: int, end: int, rule: str) -> bool:
+    """Mirror the service-area allowance, contained in that policy's own text."""
+    if key not in {"policy:service_area", "charter:policy:service_area"}:
+        return False
+    return rule in {"lex.en.number", "lex.es.number", "lex.en.date", "lex.es.date"} or (rule == "digit" and (
+        re.fullmatch(r"[0-9]{4}", text[start:end]) is not None
+        or re.match(r"\s*(?:miles|mi|km|kilometers|kilómetros|millas)\b", text[end:], re.IGNORECASE) is not None))
+
+
+def public_policy_rules(text: str, key: str | None = None) -> list[str]:
     """Mirror the contract's numeric and English/Spanish promise examples, not the full scan.
 
     The real scan imports kernel-service modules; this API test fake stays outside that boundary.
     Exhaustive lexicon behavior is covered by the real kernel's own tests.
     """
-    rules = {"percent_sign" if hit.rule_id == "percent" else hit.rule_id for hit in scan_prose(text, {})}
+    text = unicodedata.normalize("NFKC", text)
+    rules = {"percent_sign" if hit.rule_id == "percent" else hit.rule_id
+             for hit in scan_prose(text, {}) if hit.rule_id != "digit"}
+    for match in re.finditer(r"\d+(?:[.,:]\d+)*", text):
+        if not allowed_service_area_hit(key, text, match.start(), match.end(), "digit"):
+            rules.add("digit")
     if unsupported_public_policy_language(text):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     for rule, pattern in PUBLIC_POLICY_PATTERNS:
-        if re.search(pattern, public_commitment_reading(text)[0] if rule == "language" else text, re.IGNORECASE):
+        if (re.search(pattern, public_commitment_reading(text)[0] if rule == "language" else text, re.IGNORECASE)
+                and not allowed_service_area_hit(key, text, 0, 0, rule)):
             rules.add(rule)
     if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
         rules.add("language")
@@ -955,7 +974,7 @@ def public_policy_rules(text: str) -> list[str]:
 
 def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[str]]:
     """Attribute the contract's policy examples in the actual public or reply order."""
-    fields = {key: set(public_policy_rules(value)) for key, value in parts if key is not None}
+    fields = {key: set(public_policy_rules(value, key)) for key, value in parts if key is not None}
     ranges, pieces, offset = [], [], 0
     for key, value in parts:
         value = unicodedata.normalize("NFKC", value)
@@ -971,6 +990,10 @@ def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[
                            else (combined, list(range(len(combined)))))
         for match in re.finditer(pattern, reading, re.IGNORECASE):
             start, end = origin[match.start()], origin[match.end() - 1] + 1
+            if any(key is not None and low <= start and end <= high
+                   and allowed_service_area_hit(key, combined[low:high], start - low, end - low, rule)
+                   for key, low, high in ranges):
+                continue
             for key, low, high in ranges:
                 if key is not None and low < end and start < high:
                     fields[key].add(rule)
@@ -2156,9 +2179,12 @@ class FakeKernelState:
                         and (template != "hours" or desk.hours)):
                     charter.append(self._render(desk, template, fact, language))
         # Scan the final rendered group: filtering can bring separate promise fragments together.
-        policies = [(block.fact_id, block.text) for block in charter if block.template == "policy"]
-        if public_policy_fields(policies):
-            charter = [block for block in charter if block.template != "policy"]
+        refused = {key for block in charter if block.template == "policy"
+                   for key in public_policy_fields([(block.fact_id, block.text)])}
+        charter = [block for block in charter if block.fact_id not in refused]
+        while refused := public_policy_fields([
+                (block.fact_id, block.text) for block in charter if block.template == "policy"]):
+            charter = [block for block in charter if block.fact_id not in refused]
         card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,

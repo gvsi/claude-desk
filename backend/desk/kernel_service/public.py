@@ -28,6 +28,10 @@ or disguised (`labels.canary_fields`), is withheld: the page shows the field's f
 name, the default brand) and the owner is alerted in the Demo inbox, whatever their notification
 defaults, at most once an hour per Desk.
 
+A stored policy line that fails the public-text scan is withheld individually. The remaining
+policies are rescanned in display order after each removal. The same hourly alert names only
+the withheld policy keys, never their text.
+
 The slug is the only key, found through the copy resolver (`repo.copy_of_desk_slug`); a slug no
 Desk could have, an unknown one or a deleted Desk's is 404 `not_found`. The read writes nothing
 but that alert, so it has no ledger entry.
@@ -86,7 +90,8 @@ def header_of(desk: Desk, business: Business, canaries: Mapping[str, str]) -> tu
     return header | {field: deepcopy(HEADER_FALLBACKS[field]) for field in withheld}, withheld
 
 
-async def _alert_withheld(ctx: KernelCtx, desk_id: str, fields: Sequence[str]) -> None:
+async def _alert_withheld(ctx: KernelCtx, desk_id: str, fields: Sequence[str],
+                          policy_keys: Sequence[str] = ()) -> None:
     """Tells the owner the page left out `fields`, unless it did within the hour."""
     preview, now = render.owner_preview("public_page"), ctx.clock.now()
     recent = await ctx.db.scalars(ctx.repo.scoped(select(DemoInboxRow.entry_id).where(
@@ -94,8 +99,12 @@ async def _alert_withheld(ctx: KernelCtx, desk_id: str, fields: Sequence[str]) -
         DemoInboxRow.created_at > now - WITHHELD_ALERT_EVERY).limit(1)))
     if recent.first() is not None:
         return
+    body = [withheld_alert(fields)] if fields else []
+    if policy_keys:
+        body.append(f"Your public page withholds these policy lines: {', '.join(policy_keys)}. "
+                    "Change them to show them again.")
     await demo_inbox.deliver(ctx, copy_id=ctx.copy_id, desk_id=desk_id, to="owner", person_id=None, kind="alert",
-                             body=withheld_alert(fields), preview=preview)
+                             body=" ".join(body), preview=preview)
 
 
 def open_status(hours: Sequence[HoursWindow], timezone: str, now: datetime, lang: render.Language) -> OpenStatus | None:
@@ -146,8 +155,6 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
     facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)]
     canaries = await labels.copy_canaries(ctx)
     header, withheld = header_of(desk, business, canaries)
-    if withheld:
-        await _alert_withheld(ctx, desk.desk_id, withheld)
     info = DeskInfo(owner_display_name=header["owner_display_name"], timezone=business.timezone)
     now = ctx.clock.now()
     charter: list[RenderedBlock] = []
@@ -163,10 +170,20 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
             if not reply_check.carries(block, canaries):
                 charter.append(block)
     # Scan only the policies that survived visibility, currentness and canary filtering,
-    # in the order the visitor receives them. Drop the entire group on refusal so removing
-    # one card cannot create an unchecked promise between its former neighbors.
-    if reply_check.policy_card_violations("", charter):
-        charter = [block for block in charter if block.template != "policy"]
+    # in the order the visitor receives them. Remove only contributing lines, then rescan:
+    # removing one line can bring formerly separated promise fragments together.
+    # Remove individual failures first, so their language evidence cannot withhold honest neighbors.
+    withheld_policies = {fact_id for block in charter
+                         for violation in reply_check.policy_card_violations("", [block])
+                         for fact_id in violation.fact_ids}
+    charter = [block for block in charter if block.fact_id not in withheld_policies]
+    while violations := reply_check.policy_card_violations("", charter):
+        refused = {fact_id for violation in violations for fact_id in violation.fact_ids}
+        withheld_policies.update(refused)
+        charter = [block for block in charter if block.fact_id not in refused]
+    if withheld or withheld_policies:
+        await _alert_withheld(ctx, desk.desk_id, withheld,
+                              sorted(key.removeprefix("charter:") for key in withheld_policies))
     tools = set(await decide.enabled_tools(ctx, desk.desk_id)) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
     if not desk.answering:
         tools &= decide.ANSWERING_OFF_TOOLS

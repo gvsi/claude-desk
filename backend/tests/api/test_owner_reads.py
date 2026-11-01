@@ -1322,6 +1322,12 @@ async def test_a_stopped_soft_check_gives_its_actual_cause(scene, clock, rule_id
     assert await stopped_reason(scene, ["soft_promise"], [rule_id]) == f"{STOPPED}{why}."
 
 
+async def test_a_stopped_policy_citation_names_the_withheld_line_cause(scene, clock):
+    clock.now = local(2026, 10, 30, 9)
+    assert await stopped_reason(scene, ["unknown_fact"], ["policy_combined"]) == (
+        f"{STOPPED}it cited a policy line the checkpoint now withholds.")
+
+
 @pytest.mark.parametrize("rule_id", ["lex.en.booking", "lex.es.booking"])
 async def test_a_stopped_booking_claim_says_so(scene, clock, rule_id):
     clock.now = local(2026, 10, 30, 9)

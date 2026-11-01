@@ -2549,6 +2549,9 @@ def quote_card(**limits) -> RuleCard:
 @pytest.mark.parametrize(("text", "rules"), [
     ("20% off for first-time clients", ["digit", "percent_sign"]),
     ("free consultation", ["lex.en.promise"]),
+    ("The East Bay, seven days a week.", ["lex.en.number"]),
+    ("Monday to Friday.", ["lex.en.date"]),
+    ("a few miles past Oakland.", ["lex.es.number"]),
     *[(f"Consulta {word}.", ["lex.es.promise"]) for word in
       ("gratis", "gratuito", "gratuita", "gratuitos", "gratuitas")],
     ("Feel free to all clients.", ["lex.en.promise"]),
@@ -2729,8 +2732,42 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
 
 
 @pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("text", "rules"), [
+    ("Within 25 miles of Oakland.", []),
+    ("We drive a few miles past Oakland.", []),
+    ("The East Bay, seven days a week.", []),
+    ("Serving the East Bay since 1998.", []),
+    ("We do evenings and weekends.", []),
+    ("Trabajamos fines de semana.", []),
+    ("Within 25 miles, $50 trip fee.", ["currency", "digit"]),
+])
+async def test_service_area_policy_contract(kernel, ro_read, text, rules):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    claims = [Claim(key="policy:service_area", kind="text", value=text)]
+    if rules:
+        with pytest.raises(KernelFailed) as refused:
+            await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims),
+                             path={"id": copy.desk_ids[0]})
+        assert (refused.value.code, refused.value.detail) == ("invalid", {"policy:service_area": rules})
+        return
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=claims),
+                     path={"id": copy.desk_ids[0]})
+    slug = desk_slug(ro_read, schema, copy)
+    page = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
+    assert [block.text for block in page.charter if block.template == "policy"] == [text]
+    visitor = await new_visitor(http, slug)
+    verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+        clauses=[Clause(template="policy", fact_id="charter:policy:service_area")])))
+    assert verdict.ok and verdict.violations == [] and verdict.signature
+    assert [block.text for block in verdict.blocks] == [text]
+
+
+@pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("stored", ["discount", "other_commitment", "private", "expired"])
-async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read, arrange, stored):
+async def test_public_read_withholds_only_unsafe_stored_policy_lines(kernel, ro_read, arrange, stored):
     http, schema, _ = kernel
     copy = await new_copy(http)
     path = {"desk_slug": desk_slug(ro_read, schema, copy)}
@@ -2750,7 +2787,9 @@ async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read,
                               expired=stored == "expired")
     for language in ("en", "es"):
         page = await http.public().call("GET /public/{desk_slug}", path=path, query={"lang": language})
-        assert all(block.template != "policy" for block in page.charter)
+        kept = ["charter:policy:first_visit", "charter:policy:service_area"] if stored in (
+            "discount", "other_commitment") else []
+        assert [block.fact_id for block in page.charter if block.template == "policy"] == kept
         assert {"hours", "contact"} <= {block.template for block in page.charter}
     if stored == "other_commitment":
         visitor = await new_visitor(http, path["desk_slug"])
