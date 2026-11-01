@@ -138,14 +138,26 @@ tools/testbox/provision.sh --region us-east-1 --promote    # every lane moves on
 
 Clients only discover the one running instance tagged `Purpose=agent-test-box`, so the standby
 (`agent-test-box-standby`) is reached only with `--standby`, which never changes the connection
-other lanes share. Promotion re-tags the old machine `agent-test-box-retired` before tagging the
-standby active, so an interruption leaves no active machine, which re-running `--promote` repairs,
-never two. It then stops this laptop's shared connection to the old machine taking new calls:
-calls already running there finish, and the next call in each lane connects to the new machine
-and sets the lane up again there (about 5 minutes the first time, as for any new lane). Once no
-call runs on the retired machine (`systemctl list-units 'desk-testbox-run-*'` there is empty),
-lift its termination protection and terminate it, with the owner's approval. Anything scheduled
-against the old instance, such as a planned stand-down, must be pointed at the new one.
+other lanes share. Promotion refuses a standby whose setup is still running or failed, then
+re-tags the old machine `agent-test-box-retired` before tagging the standby active, so an
+interruption leaves no active machine, never two; re-running `--promote` finishes it from the tags.
+
+Every lane's client, from any branch, reuses the laptop's shared connection while it is alive and
+the machine recorded in `~/.cache/desk-testbox/connection-<region>.json`. Promotion opens a
+connection to the new machine, records it, and stops the shared connection to the old one taking
+new calls. For four minutes it keeps closing old connections and restoring the record, since a
+call that chose the old machine just before the switch can reopen or record it. Calls already
+running there finish. Each lane's next call runs on the new machine and sets the lane up again
+there (about 5 minutes the first time, as for any new lane). This moves the lanes of the laptop
+that promotes; another laptop's lanes move once its connection to the old machine closes.
+
+Once no call runs on the retired machine, lift its termination protection and terminate it, with
+the owner's approval. To check, open a shell with
+`aws ssm start-session --region us-east-1 --target <retired instance>` and run
+`systemctl list-units 'desk-testbox-run-*'`: it should stay empty for a few minutes. Anything
+scheduled against the old instance, such as a planned stand-down, must be pointed at the new one.
+Provisioning accepts only the current machine size, so a branch from before a size change must
+rebase before re-running `provision.sh`.
 
 ## Re-create or move
 
@@ -177,8 +189,8 @@ Allow about ten minutes for a fresh bootstrap; provisioning waits up to thirty m
 
 The replacement is independent: no data migration is needed. After testing it, retire the
 old protected instance and its regional security group with the owner's approval. The IAM
-role/profile are global and reused across regions. Recreating in the same region requires
-retiring the old instance first. Never disable termination protection as routine setup.
+role/profile are global and reused across regions. Replacing it in the same region uses
+a standby (above); plain re-provisioning reuses the tagged instance. Never disable termination protection as routine setup.
 
 The bootstrap pins Rust 1.99.1, uv 0.13.0 (SHA-256 verified), Python 3.13, cvc5 1.4.2 and Node 24.21.0.
 cvc5 is verified against [the repository checksums](../tools/cvc5.sha256). Playwright's
