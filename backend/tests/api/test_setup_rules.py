@@ -571,6 +571,32 @@ async def test_a_policy_fallback_after_a_lone_contact_refusal_drops_every_policy
     assert REFUSED_CONTACT not in caplog.text
 
 
+@pytest.mark.parametrize("cap", ["policy_count_limit", "policy_text_limit"])
+async def test_a_cap_refusal_that_also_names_the_contact_drops_the_contact_and_every_policy_line(cap, caplog):
+    """One combined refusal can name the contact and a cap together; it is still a cap, so the next write carries
+    neither the contact nor any policy line instead of sending the over-cap policies again."""
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact=REFUSED_CONTACT, summary="About our business",
+                                    intake="Ask about consultations", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusal = {"contact": ["contact_format"], "charter": [cap]}
+    charters = charter_writes(kernel, [refusal])
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    held = await put_parts(kernel, parts)
+
+    policy_keys = [claim.key for claim in parts.charter if claim.key.startswith("policy:")]
+    assert held == ["contact", *policy_keys]
+    assert len(charters) == 2
+    assert not [claim for claim in charters[1] if claim["key"] == "contact" or claim["key"].startswith("policy:")]
+    assert [request.url.path for request in kernel.requests[2:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert [record.args for record in warnings] == [
+        {"contact": ["contact_format"], **{key: [] for key in policy_keys}}]
+    assert all(claim.value not in caplog.text for claim in parts.charter)
+
+
 async def test_a_refusal_after_the_cap_with_nothing_left_to_drop_propagates():
     kernel = ScriptedKernel()
     parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About our business",
