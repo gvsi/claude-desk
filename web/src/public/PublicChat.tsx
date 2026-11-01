@@ -249,8 +249,12 @@ function hiddenUnderComposer(end: HTMLElement, composer: HTMLElement): number {
   return end.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
 }
 
-/** A reply of Claude's still coming in: its words being revealed, or its cards fading in after them (ClaudeMessage). */
-const REPLY_COMING_IN = '.cd-claude-message[aria-busy="true"]';
+/**
+ * A reply of Claude's still coming in: its words being revealed or its cards fading in after them
+ * (ClaudeMessage), or the receipts attached under it landing after those, while its row is still
+ * arriving (TranscriptRow).
+ */
+const REPLY_COMING_IN = '.cd-claude-message[aria-busy="true"], .cd-transcript-row--live .cd-claude-message';
 
 /**
  * Whether a reply of Claude's in the conversation `end` closes is still coming in, kept up to date
@@ -267,7 +271,7 @@ function useReplyComingIn(endRef: RefObject<HTMLElement | null>, drawn: boolean)
     const conversation = endRef.current?.parentElement;
     if (!drawn || !conversation) return undefined;
     const observer = new MutationObserver(check);
-    observer.observe(conversation, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy'] });
+    observer.observe(conversation, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy', 'class'] });
     return () => observer.disconnect();
   }, [drawn, endRef, check]);
   return comingIn;
@@ -946,8 +950,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   };
   // Claude's reply is on its way: from the visitor's message until the stream says what came of it
   // (writing, a reply, a line, an error), unless it didn't send; then while Claude writes and the
-  // kernel checks the reply; then while its words are revealed and its cards come in. The visitor
-  // can type meanwhile, and Send waits.
+  // kernel checks the reply; then while its words are revealed and its cards and receipts come in.
+  // The visitor can type meanwhile, and Send waits.
   const lastSent = state.rows.findLast(({ item }) => item.kind === 'visitor')?.item;
   const replyOnItsWay =
     sentAt !== null && state.lastSeq === sentAt && state.connection === 'open' && lastSent?.kind === 'visitor' && lastSent.status === 'sent';

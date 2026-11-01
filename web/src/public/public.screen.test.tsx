@@ -1807,16 +1807,22 @@ describe('public chat page', () => {
     await expect.element(box).toHaveValue('And on a Sunday?');
     expect(sends()).toBe(1);
 
-    // The reply comes in, its words revealed and then its card: Send waits while it does.
+    // The reply comes in, its words revealed, then its card, then its receipt: Send waits while it does.
+    const replyRowLanding = () => document.querySelector('.cd-transcript-row--live .cd-claude-message') !== null;
     const whileComingIn: boolean[] = [];
+    let receiptsFollowed = false;
     const observer = new MutationObserver(() => {
-      if (document.querySelector(COMING_IN)) whileComingIn.push((send.element() as HTMLButtonElement).disabled);
+      if (!document.querySelector(COMING_IN) && !replyRowLanding()) return;
+      if (document.querySelector('.cd-transcript-row--following')) receiptsFollowed = true;
+      whileComingIn.push((send.element() as HTMLButtonElement).disabled);
     });
     observer.observe(document.body, { subtree: true, childList: true, attributes: true });
     onTestFinished(() => observer.disconnect());
     release();
     await turnEnded(before);
+    await vi.waitFor(() => expect(replyRowLanding()).toBe(false), { timeout: 5_000 });
     observer.disconnect();
+    expect(receiptsFollowed).toBe(true);
     expect(whileComingIn.length).toBeGreaterThan(0);
     expect(whileComingIn.filter((disabled) => !disabled)).toEqual([]);
     // It has come in: the words typed meanwhile are still there, with focus, and they send.
