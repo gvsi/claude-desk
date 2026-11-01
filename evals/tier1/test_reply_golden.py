@@ -23,6 +23,7 @@ import pytest
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
+from desk.api.prompts import STATUS_LINES
 from desk.contracts import ClauseTemplate, LedgerEntry, OwnerMessageResult, ReplyVerdict, RuleCard, Violation
 from desk.markdown_text import blank_list_markers
 from desk.rewrites import PROSE_ONLY, REWRITABLE
@@ -58,6 +59,10 @@ OWNER_SAY = "I'll come and look at the sink myself."
 STAND_IN_CANARY = "cdk-0000000000000000"   # the stub's document canary, shaped like the kernel's
 KEEP_ALIVE_S = 12 * 3600   # a hop well inside the 24 hours a visitor session may sit idle before it closes
 HANDED_OFF = ["handoff"]
+# A failure only of the prose with no card to keep asks the visitor first: the kernel's call-back offer, as prose,
+# since the golden Desk (a Rivera copy) offers visitors a call back (the owner's decision of 2026-11-01).
+OFFERED = ["prose"]
+OFFER = STATUS_LINES["offer_callback"]
 
 # Rows of golden/replies.yaml
 
@@ -161,9 +166,9 @@ class ReplyRow(BaseModel):
                              "so it requires it")
         if self.expect.blocks is not None and self.expect.blocks != self.blocks:
             raise ValueError(f"the draft shows {self.blocks}, not {self.expect.blocks}: a failed check shows "
-                             "checked cards, then any drafted handoff, for prose-only failures, otherwise "
-                             "the handoff clause (or no blocks on a rewritable first attempt), a passing one "
-                             "its prose and cards in order")
+                             "checked cards, then any drafted handoff, for prose-only failures, or with no card "
+                             "to keep the call-back offer as prose, otherwise the handoff clause (or no blocks on "
+                             "a rewritable first attempt), a passing one its prose and cards in order")
         if self.setup == "travel_past_expiry" and not any(clause.fact in QUOTE_ROLES for clause in self.clauses):
             raise ValueError("travel_past_expiry travels past a cited quote's expiry, so the row cites a quote")
         if self.soft_promise != "pass":   # one try, no recheck: the reply decides the verdict
@@ -187,13 +192,15 @@ class ReplyRow(BaseModel):
 
     @property
     def blocks(self) -> list[str]:
-        """Prose-only failures keep their cards, then a drafted handoff clause; other failures
-        hand off. A rewritable first attempt shows nothing, and a passing one its prose and cited
-        cards."""
+        """Prose-only failures keep their cards, then a drafted handoff clause, or with no card to
+        keep show the call-back offer in place of any handoff; other failures hand off. A
+        rewritable first attempt shows nothing, and a passing one its prose and cited cards."""
         if not self.expect.ok:
             if not self.final and set(self.expect.kinds) <= REWRITABLE:
                 return []
-            if set(self.expect.kinds) <= PROSE_ONLY and self.kept_clauses:
+            if set(self.expect.kinds) <= PROSE_ONLY:
+                if not self.kept_clauses:
+                    return OFFERED
                 drafted = any(clause.template == "handoff" for clause in self.clauses)
                 return [clause.template for clause in self.kept_clauses] + (HANDED_OFF if drafted else [])
             return HANDED_OFF
@@ -214,6 +221,9 @@ class ReplyRow(BaseModel):
         else:
             fields["violations.0.kind"] = {"$in": expect.kinds}
         fields |= shown_blocks(self.blocks)
+        if not expect.ok and self.blocks == OFFERED:   # the kernel's words, in the reply's language
+            fields["blocks.0.text"] = (OFFER[expect.language] if expect.language is not None
+                                       else {"$in": list(OFFER.values())})
         cited = iter(self.clauses if expect.ok else self.kept_clauses if self.blocks != HANDED_OFF else [])
         for n, block in enumerate(self.blocks):
             if block == "prose":
@@ -286,6 +296,13 @@ def handed_off(caller: Caller, kind: str) -> Expect:
     """A failed check: a `kind` violation, and only the handoff clause to show."""
     return Expect(fields={"ok": False, "generation": caller.state.generation, "violations.0.kind": kind,
                           **shown_blocks(HANDED_OFF)})
+
+
+def offered(caller: Caller, kind: str, language: str = "en") -> Expect:
+    """A check failed only for its prose with no card to keep: a `kind` violation, and only the
+    kernel's call-back offer to show, as prose in `language`."""
+    return Expect(fields={"ok": False, "generation": caller.state.generation, "violations.0.kind": kind,
+                          **shown_blocks(OFFERED), "blocks.0.text": OFFER[language]})
 
 
 async def owner_says(k: KernelHarness, desk: GoldenDesk, session: Caller, text: str, *, expect: Expect) -> Any:
@@ -598,7 +615,7 @@ async def test_verdict_signatures_verify_independently(k: KernelHarness):
     quote = await make_quote_fact(k, desk, visitor, "drain")
     verdicts = [
         await check_reply(k, visitor, CLEAN_EN, expect=passes(visitor, ["prose"])),
-        await check_reply(k, visitor, NUMBER_PROSE, expect=handed_off(visitor, "number_in_prose")),
+        await check_reply(k, visitor, NUMBER_PROSE, expect=offered(visitor, "number_in_prose")),
         await check_reply(k, visitor, FRENCH_PROSE, expect=handed_off(visitor, "unsupported_language")),
         await check_reply(k, visitor, QUOTE_PROSE, [{"template": "quote", "fact_id": quote}],
                           expect=passes(visitor, ["prose", "quote"])),
@@ -643,7 +660,7 @@ async def test_visitor_bound_kernel_text_has_no_digits(k: KernelHarness, fake: F
     quote = await make_quote_fact(k, desk, visitor, "drain")
     verdicts = [
         await check_reply(k, visitor, CLEAN_EN, expect=passes(visitor, ["prose"])),
-        await check_reply(k, visitor, NUMBER_PROSE, expect=handed_off(visitor, "number_in_prose")),
+        await check_reply(k, visitor, NUMBER_PROSE, expect=offered(visitor, "number_in_prose")),
         await check_reply(k, visitor, QUOTE_PROSE, [{"template": "quote", "fact_id": quote}],
                           expect=passes(visitor, ["prose", "quote"])),
     ]

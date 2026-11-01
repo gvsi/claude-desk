@@ -50,7 +50,7 @@ from .test_execute import executed
 from .test_money_cap import post_draft
 from .test_payment_links import confirm, delay, link_for, nothing_listening, quoted, view
 from .test_release_document import confirmed, violations
-from .test_reply_check import assert_handed_off, checked, clause, public_key, verify_verdict
+from .test_reply_check import assert_handed_off, assert_offered, checked, clause, public_key, verify_verdict
 from .test_sessions import set_mode
 
 PASS = Review(within_charter_bp=9500, manipulation_bp=300, recommendation="allow")
@@ -607,7 +607,7 @@ async def test_claude_cannot_draft_link_cancelled(app, client, reviewer, templat
         assert cited[1] in [f.fact_id for f in (await context_of(client, visitor.session_id, visitor.headers)).facts]
         verdict = await checked(client, visitor, "Your $20.00 payment link was cancelled.")
         assert "number_in_prose" in [violation.kind for violation in verdict.violations]
-        assert_handed_off(verdict)
+        assert_offered(verdict)
     stranger = await open_visitor(client, copy)                         # another chat, citing this one's fact
     drafts = [(visitor, [clause(template)]), *((visitor, [clause(template, fact_id)]) for fact_id in cited),
               (stranger, [clause(template, cited[-1])])]

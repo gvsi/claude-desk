@@ -44,7 +44,8 @@ from desk.contracts import CopyCreated
 from desk.db.session import API_CONNECT_OPTIONS, database_url, libpq_url
 from desk.db.tables import APP_TABLES
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
-from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
+from desk.next_steps import next_steps
+from tests.kernel_contract.fake_kernel import CALL_BACK_STEP, FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO, create_fake_ro
 
 BACKEND = Path(__file__).resolve().parents[2]
@@ -114,6 +115,17 @@ class Visitor:
 
     def __repr__(self) -> str:
         return f"Visitor({self.ids!r})"
+
+
+def without_call_backs(fake: FakeKernelState, desk_id: str) -> None:
+    """The owner turns off each of the Desk's tools that offers a call back (`desk.next_steps`): the call-back tool
+    Rivera's seed enables, and any business tool for urgent requests. A draft blocked only for its prose, with no card
+    to keep, then shows the handoff card rather than the kernel's call-back offer."""
+    desk = fake.desks[desk_id]
+    offering = [profile for profile in desk.tools.values() if CALL_BACK_STEP in next_steps([profile])]
+    assert "native.request_callback" in [profile.tool for profile in offering]
+    for profile in offering:
+        fake._put_tool(desk, profile.model_copy(update={"status": "disabled"}))
 
 
 async def new_visitor(http: KernelHttp, fake: FakeKernelState, copy: CopyCreated | None = None) -> Visitor:

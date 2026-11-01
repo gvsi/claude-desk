@@ -36,7 +36,7 @@ from desk.api.tools import (
 from desk.contracts import Clause, ClauseTemplate, Decision, ToolCall, ToolName, Violation
 from desk.events import EvHeld, EvReceipt, SseEvent
 from desk.kernel_api import DecideRequest, ExecuteRequest, SessionContext
-from tests.api.conftest import new_visitor
+from tests.api.conftest import new_visitor, without_call_backs
 from tests.api.fakes import ScriptedModel, tool_use
 from tests.kernel_contract.fake_kernel import fake_kernel_app, route_keys
 
@@ -687,7 +687,12 @@ async def test_final_prose_failure_delivers_checked_cards_without_handoff(api_co
     assert fake.handoffs == {}
 
 
-async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
+@pytest.mark.parametrize("call_backs", [True, False], ids=["call-back-offer", "no-call-backs"])
+async def test_reply_blocked_once_then_the_offer_or_the_handoff(api_conn, caller, fake, call_backs):
+    # The second block shows what the kernel puts in the draft's place: the call-back offer, a reply that asks the
+    # visitor first, on a Desk that offers call backs (the owner's decision of 2026-11-01), else the handoff.
+    if not call_backs:
+        without_call_backs(fake, caller.desk_id)
     draft = {"prose": "It comes to $89 for the visit.", "clauses": []}
     first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_1")
 
@@ -709,13 +714,21 @@ async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
 
     second = await send_reply(api_conn, caller, 0, draft, 2, call_id="toolu_2")
     (message,) = await events(api_conn, caller.session_id)
-    assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
-    assert message.blocks[0].text == "Let me check with Maria Rivera."
-    assert (second.result, second.is_error, second.delivered) == ({"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
-    assert len(check_drafts(fake)) == 2                                     # the verdict's handoff, no third check
+    if call_backs:
+        assert not message.handoff and [block.template for block in message.blocks] == [None]
+        assert message.blocks[0].text == "Would you like me to arrange a callback?"
+        assert (second.result, second.is_error, second.delivered) == (
+            {"outcome": "delivered", "message_id": message.message_id, "prose_shown": False}, False, "reply")
+        assert fake.handoffs == {}
+    else:
+        assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
+        assert message.blocks[0].text == "Let me check with Maria Rivera."
+        assert (second.result, second.is_error, second.delivered) == (
+            {"outcome": "delivered_handoff", "prose_shown": False}, True, "handoff")
+    assert len(check_drafts(fake)) == 2                                     # the verdict's blocks, no third check
     assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_2", message.message_id, 1)]
-    # The second try's draft is kept with the handoff shown in its place, naming that verdict; the handoff, not the
-    # draft, shows its triage (no ledger entry on the row), and the outcome carries nothing more to keep.
+    # The second try's draft is kept with the offer or the handoff shown in its place, naming that verdict; what was
+    # shown, not the draft, shows its triage (no ledger entry on the row), and the outcome carries nothing more to keep.
     ((ref_id, kept),) = await stopped_drafts(api_conn, caller.session_id)
     assert (ref_id, kept["draft"], kept["ledger_seq"], second.kept) == (message.message_id, draft, None, None)
 

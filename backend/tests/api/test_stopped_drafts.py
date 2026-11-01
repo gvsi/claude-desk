@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 
 from desk.api.main import create_app
+from tests.api.conftest import without_call_backs
 from tests.api.fakes import ScriptedModel, response, text
 from tests.api.notes import conversation_notes
 from tests.api.test_approvals import jobs_done
@@ -270,6 +271,7 @@ async def test_a_take_over_during_a_sibling_replys_check_isnt_held_up(app, brows
 async def test_a_triage_shows_on_the_draft_claude_rewrote_or_on_the_handoff_in_its_place(
         app, browser, fake, kernel_http, model, engine, jobs_connector):
     chat = await new_chat(app, browser, kernel_http, fake)
+    without_call_backs(fake, fake.sessions[chat.session_id].desk_id)   # so the handoff shows, not the call-back offer
     fake.violation("promise_word", times=2)                    # the draft and its rewrite are both stopped
     model.add(response(reply(DRAFT)), response(reply(SECOND_DRAFT)), response())
     model.jobs["triage"].extend([answer(REPLY_TRIAGE)] * 2)

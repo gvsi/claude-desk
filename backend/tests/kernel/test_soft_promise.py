@@ -24,9 +24,10 @@ from .helpers import connections_of, ledger_rows, until_waiting
 from .test_adapters import visitor_of
 from .test_decide import decided, open_visitor
 from .test_execute import executed
-from .test_handoff_card import BLOCKED, BLOCKED_ES, CLEAN, HANDOFF_CARD, handoffs_of
+from .test_handoff_card import CLEAN, HANDOFF_CARD, hand_over, handoffs_of
 from .test_lead_tools import CALLBACK, callback, handoff_done
-from .test_reply_check import assert_handed_off, checked, clause, own_booking, own_quote, reply_entries
+from .test_reply_check import (assert_handed_off, assert_offered, checked, clause, own_booking, own_quote,
+                               reply_entries, without_call_backs)
 
 # A stranger's steps on a fresh Rivera copy, in tool-name order. The seed's urgent tool, first by
 # name, offers the native call-back's step, which is listed once, there.
@@ -112,9 +113,12 @@ async def cancellation_during_signing(app, client, reviewer, monkeypatch, *, pro
         assert [b.template for b in verdict.blocks] == ([None, "payment_link"] if passing else ["payment_link"])
         assert verdict.ok == passing
         assert await handoffs_of(app, copy) == []
-    else:
+    elif prose == "Here is your quote.":         # the passing draft fails with the withdrawn card's refusal
         assert_handed_off(verdict)
         assert len(await handoffs_of(app, copy)) == 1
+    else:                                         # only the prose failed, and no card is left to keep
+        assert_offered(verdict)
+        assert await handoffs_of(app, copy) == []
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
@@ -165,8 +169,12 @@ async def test_card_expiring_while_waiting_for_finalize_lock_is_dropped(app, cli
     finally:
         if checking is not None:
             verdict = await asyncio.wait_for(checking, 5)
-    assert_handed_off(verdict)
-    assert len(await handoffs_of(app, copy)) == 1
+    if prose == "Here is your quote.":             # the passing draft fails with the expired card's refusal
+        assert_handed_off(verdict)
+        assert len(await handoffs_of(app, copy)) == 1
+    else:                                          # only the prose failed, and no card is left to keep
+        assert_offered(verdict)
+        assert await handoffs_of(app, copy) == []
     verify_verdict(await public_key(client), visitor.session_id, verdict)
 
 
@@ -230,7 +238,10 @@ async def test_person_removed_while_soft_check_sleeps_loses_private_card(app, cl
     else:
         assert (response.status_code, response.json()) == (409, {"code": "closed"})
     [verdict] = finalized
-    assert_handed_off(verdict)
+    if flagged:                    # only the prose failed, and no card is left to keep
+        assert_offered(verdict)
+    else:                          # the passing draft fails with the private card's refusal
+        assert_handed_off(verdict)
     assert all(block.fact_id != quote.fact_id for block in verdict.blocks)
 
 
@@ -242,7 +253,9 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
                                               drafted):
     """A card withdrawn while the soft check runs is dropped at signing and ledgered in `dropped`.
     A prose-blocked draft keeps the cards still current, then a handoff clause it drafted; with no
-    card left it shows the handoff clause. A shown handoff opens one owner handoff and one alert."""
+    card left it shows the call-back offer in place of both, as Rivera's Desk offers call backs. A
+    passing draft that loses a card shows the handoff clause. A shown handoff opens one owner
+    handoff and one alert."""
     from desk.db.models import Fact as FactRow
     from sqlalchemy import select
     from .helpers import kernel_ctx
@@ -285,11 +298,13 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
     if flagged and keep_other:
         assert [(b.template, b.fact_id) for b in verdict.blocks] == [("payment_link", clauses[1]["fact_id"])] + (
             [("handoff", None)] if drafted else [])
+    elif flagged:
+        assert_offered(verdict)                                              # nothing left to keep: ask first
     else:
         assert_handed_off(verdict)                                           # blocks == ["handoff"]
     verify_verdict(await public_key(client), visitor.session_id, verdict)
     shows_handoff = any(b.template == "handoff" for b in verdict.blocks)
-    assert shows_handoff == (drafted or not (flagged and keep_other))
+    assert shows_handoff == (not flagged or (keep_other and drafted))
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == (
         [("card", "open")] if shows_handoff else [])
     assert len(await handoff_alerts(app, copy)) == int(shows_handoff)
@@ -504,7 +519,7 @@ async def test_denying_being_an_ai_is_blocked(app, client, reviewer, prose, lang
     verdict = await checked(client, visitor, prose)
 
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [("soft_promise", "soft.denies_ai", prose[:40])]
-    assert_handed_off(verdict, language)                                    # handed off in the reply's language
+    assert_offered(verdict, language)                                       # the offer, in the reply's language
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose, cards=[], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (["soft_promise"],
@@ -520,7 +535,7 @@ async def test_both_flags_block_with_both_rules(app, client, reviewer):
     # one violation per flag, the promise first, so the ledger and the regenerate hint keep both reasons
     assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
         ("soft_promise", "soft.promise", prose[:40]), ("soft_promise", "soft.denies_ai", prose[:40])]
-    assert_handed_off(verdict)
+    assert_offered(verdict)
     assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=prose, cards=[], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["violations"], entry.event.summary["rule_ids"]) == (
@@ -556,7 +571,7 @@ async def test_soft_promise_failures_block(app, client, reviewer, case, monkeypa
 
         assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
             ("check_unavailable", "soft.unavailable", prose[:40])]
-        assert_handed_off(verdict)
+        assert_offered(verdict)
         assert len(model.requests) == 1                                   # one try: no recheck, no fallback
     entries = await reply_entries(app, copy)
     assert [entry.event.summary["rule_ids"] for entry in entries] == [["soft.unavailable"]] * len(replies)
@@ -573,8 +588,8 @@ async def test_soft_promise_is_skipped_when_prose_already_fails(app, client, rev
     copy, visitor = await visitor_of(app, client)
     verdict = await checked(client, visitor, "That will be $89.")
     assert {v.kind for v in verdict.violations} == {"number_in_prose"}
-    assert_handed_off(verdict)
-    assert reviewer.soft_inputs == []                                     # no call: the reply is already handed off
+    assert_offered(verdict)
+    assert reviewer.soft_inputs == []                                     # no call: the reply has already failed
     [entry] = await reply_entries(app, copy)
     assert entry.event.summary["soft_promise"] is None
 
@@ -606,11 +621,11 @@ async def test_soft_promise_is_skipped_for_card_only_replies(app, client, review
 
 # ---- An open handoff's card backs a later reply ------------------------------------------------------
 
-@pytest.mark.parametrize(("language", "blocked", "clean"), [
-    ("en", BLOCKED, CLEAN),
-    ("es", BLOCKED_ES, "Con gusto le ayudo."),
+@pytest.mark.parametrize(("language", "clean"), [
+    ("en", CLEAN),
+    ("es", "Con gusto le ayudo."),
 ], ids=["en", "es"])
-async def test_the_soft_promise_check_reads_an_open_handoffs_card(app, client, reviewer, language, blocked, clean):
+async def test_the_soft_promise_check_reads_an_open_handoffs_card(app, client, reviewer, language, clean):
     """While the session has an open handoff, the check is shown the handoff card's text as one
     of the reply's cards, in the reply's language, though the reply doesn't show it again: a
     later "Maria Rivera will reply here" is backed. With none open, or once the owner has marked
@@ -619,7 +634,7 @@ async def test_the_soft_promise_check_reads_an_open_handoffs_card(app, client, r
     verdict = await checked(client, visitor, clean)
     assert verdict.ok and reviewer.soft_inputs[-1].cards == []                   # none open
 
-    assert not (await checked(client, visitor, blocked)).ok                     # the card opens one
+    await hand_over(client, visitor)                                            # the card opens one
     [handoff] = await handoffs_of(app, copy)
     asked = len(reviewer.soft_inputs)
     verdict = await checked(client, visitor, clean)
@@ -661,7 +676,7 @@ async def test_a_session_with_no_handoff_of_its_own_is_shown_no_card(app, client
     """Another session's open handoff backs nothing in this one."""
     copy, visitor = await visitor_of(app, client)
     other = await open_visitor(client, copy)
-    assert not (await checked(client, other, BLOCKED)).ok
+    await hand_over(client, other)
     assert (await checked(client, visitor, CLEAN)).ok
     assert reviewer.soft_inputs[-1].cards == []
 
@@ -669,19 +684,25 @@ async def test_a_session_with_no_handoff_of_its_own_is_shown_no_card(app, client
 REPLY_HERE = "Maria Rivera will reply here."   # backed only by an open handoff's card
 
 
-@pytest.mark.parametrize("card_template", [None, "quote", "payment_link"])
-async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, client, reviewer, card_template):
+@pytest.mark.parametrize(("card_template", "call_backs"), [
+    (None, True), (None, False), ("quote", True), ("payment_link", True),
+], ids=["no-card", "no-card-no-call-backs", "quote", "payment_link"])
+async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, client, reviewer, card_template,
+                                                                         call_backs):
     """The open handoff is read without a lock, so the model never holds one, and the owner may
     mark it done while the model reads the draft. A reply the model then passes on the card's
     strength isn't shown: with the handoff gone nothing backs the card's words, so the reply fails
-    as the check would have failed it without the card, and the handoff card in its place opens
-    a new handoff."""
+    as the check would have failed it without the card. It keeps its checked card; with none, it
+    asks with the call-back offer, which opens nothing, or on a Desk that offers no call back
+    shows the handoff card, which opens a new handoff."""
     copy, visitor = await visitor_of(app, client)
+    if not call_backs:
+        await without_call_backs(app, copy)
     from .test_handoff_card import quote_and_payment
     clauses = ([c for c in await quote_and_payment(client, reviewer, visitor) if c["template"] == card_template]
                if card_template else [])
     card_texts = [render.check_text(b) for b in (await checked(client, visitor, "", clauses)).blocks] if clauses else []
-    assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
+    await hand_over(client, visitor)                                            # the card opens one
     [first] = await handoffs_of(app, copy)
     asked, answer, shown = asyncio.Event(), asyncio.Event(), []
     soft_promise = reviewer.soft_promise
@@ -707,11 +728,14 @@ async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, cl
         ("soft_promise", REPLY_HERE, "soft.handoff_closed")]
     if card_template:
         assert [(b.template, b.fact_id) for b in verdict.blocks] == [(card_template, clauses[0]["fact_id"])]
-        assert [(r.handoff_id, r.status) for r in await handoffs_of(app, copy)] == [(first.handoff_id, "done")]
+    elif call_backs:
+        assert_offered(verdict)
     else:
         assert_handed_off(verdict)
     statuses = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
-    if not card_template:
+    if card_template or call_backs:
+        assert statuses == {first.handoff_id: ("card", "done")}
+    else:
         [second] = [handoff_id for handoff_id in statuses if handoff_id != first.handoff_id]
         assert statuses == {first.handoff_id: ("card", "done"), second: ("card", "open")}
     [entry] = (await reply_entries(app, copy))[-1:]
@@ -724,7 +748,7 @@ async def test_the_handoff_a_reply_leans_on_is_held_until_it_is_recorded(app, cl
     """A reply that passed on an open handoff's card holds that handoff `FOR SHARE` from its
     final check to its commit: the owner's mark of done waits for the verdict, then goes ahead."""
     copy, visitor = await visitor_of(app, client)
-    assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
+    await hand_over(client, visitor)                                            # the card opens one
     [first] = await handoffs_of(app, copy)
     append, appending, go_on = ledger.append, asyncio.Event(), asyncio.Event()
 
@@ -759,13 +783,14 @@ async def test_the_handoff_a_reply_leans_on_is_held_until_it_is_recorded(app, cl
 async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app, client, reviewer, card_template):
     """A call-back request may run while the model reads a reply that leans on the open card
     handoff, and close that handoff to open its own. A call-back backs nothing, so the reply fails
-    as the check would have failed it without the card, and its handoff card opens no second
-    handoff: the call-back is the session's open one."""
+    as the check would have failed it without the card: it keeps its checked card, or with none
+    asks with the call-back offer, and opens no second handoff: the call-back is the session's
+    open one."""
     copy, visitor = await visitor_of(app, client)
     from .test_handoff_card import quote_and_payment
     clauses = ([c for c in await quote_and_payment(client, reviewer, visitor) if c["template"] == card_template]
                if card_template else [])
-    assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
+    await hand_over(client, visitor)                                            # the card opens one
     [card] = await handoffs_of(app, copy)
     asked, answer = asyncio.Event(), asyncio.Event()
     soft_promise = reviewer.soft_promise
@@ -789,7 +814,7 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
     if card_template:
         assert [(b.template, b.fact_id) for b in verdict.blocks] == [(card_template, clauses[0]["fact_id"])]
     else:
-        assert_handed_off(verdict)
+        assert_offered(verdict)
     rows = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
     assert rows.pop(card.handoff_id) == ("card", "done")
     assert list(rows.values()) == [("callback", "open")]

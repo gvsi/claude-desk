@@ -71,14 +71,17 @@ EXECUTED: dict[str, str] = {
 }
 
 # The kernel's other visitor texts, key for key with `es.MESSAGES`: the verify card's messages,
-# the same whether or not a contact is on record, and the Demo inbox's code entry, whose body is the
-# only kernel text that carries a code.
+# the same whether or not a contact is on record, the Demo inbox's code entry, whose body is the
+# only kernel text that carries a code, and the call-back offer a reply blocked only for its prose
+# shows when it has no card to keep (`reply_check.blocked_blocks`), the API's signed
+# `STATUS_LINES["offer_callback"]` word for word.
 MESSAGES: dict[str, str] = {
     "verify_started": "If that contact is on record, a code is on its way. Enter it below to confirm it's you.",
     "verify_already": "You're already confirmed in this chat.",
     "inbox_code_preview": "New verification code",
     "inbox_code_body": ("Your {business} code is {code}. It expires in ten minutes. "
                         "If you didn't ask for it, ignore this message."),
+    "offer_callback": "Would you like me to arrange a callback?",
 }
 
 # Owner-only, in English: the preview line of a Demo inbox alert.

@@ -78,6 +78,20 @@ def test_recovered_reply_reads_the_delivered_handoff_flag_and_whether_its_prose_
         assert "prose_shown" not in loop._recovered_reply(shown, tool_use("send_reply", tool_input)).result
 
 
+@pytest.mark.parametrize("language", ["en", "es"])
+def test_a_recovered_call_back_offer_is_a_reply_whose_prose_wasnt_shown(language):
+    # The kernel's call-back offer is a prose block it writes in place of a draft blocked only for its prose with no
+    # card to keep: delivered as a reply with no handoff, and Claude's own prose wasn't shown, unless those were its
+    # words (a passing reply that asks the same question shows Claude's prose).
+    offer = prompts.STATUS_LINES["offer_callback"][language]
+    shown = SimpleNamespace(ref_id="msg-recovered", handoff=False, blocks=[RenderedBlock(kind="prose", text=offer)])
+    blocked = loop._recovered_reply(shown, tool_use("send_reply", {"prose": "It's $89.", "clauses": []}))
+    assert (blocked.delivered, blocked.result) == (
+        "reply", {"outcome": "delivered", "message_id": "msg-recovered", "prose_shown": False})
+    asked = loop._recovered_reply(shown, tool_use("send_reply", {"prose": offer, "clauses": []}))
+    assert asked.result == {"outcome": "delivered", "message_id": "msg-recovered"}
+
+
 @pytest.fixture
 async def locks(db) -> AsyncIterator[AsyncEngine]:
     """The turn-lock pool, as the API process opens it: connections of their own, apart from the API's pool."""

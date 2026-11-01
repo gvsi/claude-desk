@@ -46,6 +46,7 @@ from desk.contracts import (
     PriceItem,
     Probe,
     ProbeResult,
+    RenderedBlock,
     ReplyDraft,
     ReplyVerdict,
     RuleCard,
@@ -103,6 +104,7 @@ from desk.kernel_api import (
     WhoAmI,
 )
 from desk.money_cap import lower_to_cap
+from desk.next_steps import NEXT_STEPS, next_steps
 from tests.kernel_contract import ro_tables
 from tests.kernel_contract.fake_kernel import (
     FAKE_ROUTES,
@@ -663,7 +665,9 @@ async def test_cancel_held_decision(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
-async def test_check_reply_blocks_numbers_with_handoff(kernel, ro_read):
+async def test_check_reply_blocks_numbers_and_asks_first(kernel, ro_read):
+    """A number in Claude's prose is blocked, and with no card to keep the visitor sees only the call-back offer,
+    which Rivera's Desk has (the owner's decision of 2026-11-01), never the number."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
@@ -671,14 +675,70 @@ async def test_check_reply_blocks_numbers_with_handoff(kernel, ro_read):
 
     blocked = await check_reply(view, session_id, 0, "It comes to $89 for the visit.")
     assert not blocked.ok and "number_in_prose" in {violation.kind for violation in blocked.violations}
-    assert [(block.kind, block.template) for block in blocked.blocks] == [("card", "handoff")]
-    assert "Maria Rivera" in blocked.blocks[0].text and "89" not in blocked.blocks[0].text
+    assert blocked.blocks == [RenderedBlock(kind="prose", text=OFFER["en"])]
     assert (blocked.generation, blocked.language) == (0, "en")
 
     clean = await check_reply(view, session_id, 0, "Happy to help with your drain.")
     assert clean.ok and clean.violations == []
     assert [(block.kind, block.text) for block in clean.blocks] == [("prose", "Happy to help with your drain.")]
     assert clean.message_id != blocked.message_id and clean.ledger_seq > blocked.ledger_seq
+
+
+# The kernel's call-back offer, the API's signed `STATUS_LINES["offer_callback"]` (the owner's decision of 2026-11-01).
+OFFER = {"en": "Would you like me to arrange a callback?", "es": "¿Quiere que solicite una llamada?"}
+
+
+async def without_call_backs(http: KernelHttp, ro_read, ro_schema: str, copy: CopyCreated, view: CredentialView,
+                             session_id: str) -> None:
+    """The owner turns off (`POST /tools/confirm`) each tool the session is given that offers a call back
+    (`desk.next_steps`): the call-back tool Rivera's seed enables, and any business tool for urgent requests. Each is
+    pinned at the definition its `tools` row holds."""
+    offering = [profile.tool for profile in (await context(view, session_id)).tools
+                if NEXT_STEPS["native.request_callback"] in next_steps([profile])]
+    assert "native.request_callback" in offering
+    rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, definition_sha256 FROM {ro}.tools WHERE desk_id = %s",
+                   (copy.desk_ids[0],))
+    disabled = await http.owner(copy.owner_token).call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=copy.desk_ids[0], enable=False, tools=[
+            ToolPin(tool=row["tool"], definition_sha256=row["definition_sha256"]) for row in rows
+            if row["tool"] in offering]))
+    assert sorted(profile.tool for profile in disabled.profiles if profile.status == "disabled") == sorted(offering)
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_a_prose_only_block_with_nothing_to_keep_asks_before_handing_off(kernel, ro_read):
+    """Self-serve first (the owner's decision of 2026-11-01): a draft blocked only for its prose, with no checked card
+    to keep, on a Desk that offers call backs (Rivera's seed does), shows the kernel's call-back offer as prose in the
+    reply's language, in place of the handoff card and of one Claude drafted, with the reply receipt, and opens no
+    owner handoff. Another language still hands off, and so does the same draft once the Desk offers no call back."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    english, spanish = await new_visitor(http, slug), await new_visitor(http, slug)
+
+    view, session_id = http.session(english.session_token), english.state.session_id
+    for clauses in ([], [Clause(template="handoff")]):
+        offered = await view.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+            session_id=session_id, generation=0, prose="It comes to $89 for the visit.", clauses=clauses)))
+        assert not offered.ok and {violation.kind for violation in offered.violations} == {"number_in_prose"}
+        assert offered.blocks == [RenderedBlock(kind="prose", text=OFFER["en"])]
+        assert (offered.language, offered.visitor_plain) == ("en", "Reply checked against Maria Rivera's rules")
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+    french = await check_reply(view, session_id, 0, "Bonjour, je peux vous aider.")
+    assert [block.template for block in french.blocks] == ["handoff"]       # no rewrite fixes another language
+
+    view, session_id = http.session(spanish.session_token), spanish.state.session_id
+    assert (await check_reply(view, session_id, 0, "Hola, puedo ayudarle con eso.")).language == "es"
+    offered = await check_reply(view, session_id, 0, "$89.")
+    assert (offered.language, offered.blocks, offered.visitor_plain) == (
+        "es", [RenderedBlock(kind="prose", text=OFFER["es"])], "Respuesta revisada con las reglas de Maria Rivera")
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+
+    await without_call_backs(http, ro_read, ro_schema, copy, view, session_id)
+    handed = await check_reply(view, session_id, 0, "$89.")
+    assert [block.template for block in handed.blocks] == ["handoff"]
+    assert handed.visitor_plain == "Pasado a Maria Rivera para responder"
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, session_id)] == ["card"]
 
 
 @pytest.mark.kernel_plan("01a")
@@ -756,6 +816,8 @@ async def test_status_lines_are_the_kernels(kernel, ro_read):
     assert (await check_reply(view, session_id, 0, "Happy to help.")).visitor_plain == (
         "Reply checked against Maria Rivera's rules")
     assert (await check_reply(view, session_id, 0, "It costs 80 dollars.")).visitor_plain == (
+        "Reply checked against Maria Rivera's rules")       # blocked for its prose alone: the call-back offer shows
+    assert (await check_reply(view, session_id, 0, "Bonjour, je peux vous aider.")).visitor_plain == (
         "Passed to Maria Rivera to answer")
 
     spanish = await new_visitor(http, slug)
@@ -1370,8 +1432,8 @@ HANDED_TO_YOU = "A visitor is waiting in a conversation the Desk handed to you."
 
 @pytest.mark.kernel_plan("01b")
 async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_read):
-    """The handoff card opens a handoff the owner sees (#96). A reply the check blocks shows the visitor the handoff
-    card and opens one handoff on the session, which the owner's Needs you lists from `kernel_ro.handoffs`: kind
+    """The handoff card opens a handoff the owner sees (#96). A reply the check blocks for what no rewrite fixes
+    (another language) shows the visitor the handoff card and opens one handoff on the session, which the owner's Needs you lists from `kernel_ro.handoffs`: kind
     `card`, no call-back window and the kernel's reason, never the draft's words. The owner gets one alert naming no
     decision and nothing of the draft. A second blocked reply in the same session shows the card again but opens none
     and alerts nothing. Claude's own draft citing the card opens one too. The alert follows the Desk's notification
@@ -1394,7 +1456,7 @@ async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_r
     blocked = await new_visitor(http, slug)
     for _ in range(2):
         verdict = await check_reply(http.session(blocked.session_token), blocked.state.session_id, 0,
-                                    "It comes to $89 for the visit.")
+                                    OTHER_LANGUAGE)
         assert not verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
         assert open_handoffs() == [(blocked.state.session_id, "card", None, CARD_HANDOFF_REASON)]
         (alert,) = await alerts()
@@ -1415,7 +1477,7 @@ async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_r
                      path={"id": desk_id})
     unalerted = await new_visitor(http, slug)
     verdict = await check_reply(http.session(unalerted.session_token), unalerted.state.session_id, 0,
-                                "It comes to $89 for the visit.")
+                                OTHER_LANGUAGE)
     assert not verdict.ok and len(open_handoffs()) == 3
     assert (unalerted.state.session_id, "card", None, CARD_HANDOFF_REASON) in open_handoffs()
     assert len(await alerts()) == 2
@@ -1428,11 +1490,12 @@ OTHER_LANGUAGE = "Bonjour, je peux vous aider."             # unsupported_langua
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
     ("", [Clause(template="handoff")], True, True, ["handoff"], "Passed to Maria Rivera to answer"),
-    (BLOCKED_PROSE, [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
+    (OTHER_LANGUAGE, [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
+    (BLOCKED_PROSE, [], True, False, [None], "Reply checked against Maria Rivera's rules"),   # the call-back offer
     (BLOCKED_PROSE, [Clause(template="hours", fact_id="charter:hours")], True, False, ["hours"],
      "Reply checked against Maria Rivera's rules"),
     (BLOCKED_PROSE, [], False, False, [], "Passed to Maria Rivera to answer"),
-], ids=["passing-handoff", "final-handoff", "final-kept-card", "unshown-first-attempt"])
+], ids=["passing-handoff", "final-handoff", "final-offer", "final-kept-card", "unshown-first-attempt"])
 async def test_check_reply_receipt_follows_the_shown_handoff_clause(kernel, ro_read, prose, clauses, final, ok,
                                                                   templates, receipt):
     http, ro_schema, _ = kernel
@@ -1452,12 +1515,14 @@ HOURS_CLAUSE = Clause(template="hours", fact_id="charter:hours")
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize(("prose", "clauses", "templates"), [
     ("", [Clause(template="handoff")], ["handoff"]),
-    (BLOCKED_PROSE, [], ["handoff"]),
+    (OTHER_LANGUAGE, [], ["handoff"]),
+    (BLOCKED_PROSE, [], [None]),                                            # the call-back offer, as prose
+    (BLOCKED_PROSE, [Clause(template="handoff")], [None]),                  # in place of a drafted handoff too
     (BLOCKED_PROSE, [HOURS_CLAUSE], ["hours"]),
     (BLOCKED_PROSE, [HOURS_CLAUSE, Clause(template="handoff")], ["hours", "handoff"]),
     ("Here are our opening hours.", [HOURS_CLAUSE], [None, "hours"]),
-], ids=["passing-handoff", "final-handoff", "final-kept-card", "final-kept-card-then-drafted-handoff",
-        "passing-checked"])
+], ids=["passing-handoff", "final-handoff", "final-offer", "final-offer-for-a-drafted-handoff", "final-kept-card",
+        "final-kept-card-then-drafted-handoff", "passing-checked"])
 async def test_delivered_handoff_flag_matches_the_reply_receipt(kernel, ro_read, prose, clauses, templates):
     """The visitor's delivered event flag and the kernel's signed reply receipt can't disagree about a handoff, and a
     shown handoff clause opens the owner's handoff: Claude's cited one, the kernel's in a blocked draft's place, or
@@ -1498,9 +1563,10 @@ def session_handoffs(ro_read, ro_schema: str, copy: CopyCreated, session_id: str
 async def test_only_a_handoff_card_the_session_sees_opens_an_owner_handoff(kernel, ro_read):
     """The API checks a first draft it could still rewrite with `final` false (`CheckReplyRequest.final`). Blocked only
     for kinds a rewrite fixes (`desk.rewrites`), it is never shown, so the kernel opens no owner handoff and alerts
-    nothing; the same draft checked as final opens one, and so does a non-final draft blocked for a kind no rewrite
-    fixes. Each reply entry records `final`. While the session has a held request awaiting the owner, whose own alert
-    and item the owner has, a final block opens none; once the owner has answered it, the next one does."""
+    nothing; the same draft checked as final is shown as the call-back offer, which opens none either, and a
+    non-final draft blocked for a kind no rewrite fixes shows the handoff card and opens one. Each reply entry
+    records `final`. While the session has a held request awaiting the owner, whose own alert and item the owner
+    has, a handoff card opens none; once the owner has answered it, the next one does."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
@@ -1523,28 +1589,28 @@ async def test_only_a_handoff_card_the_session_sees_opens_an_owner_handoff(kerne
     assert await handed_to_you() == 0 and await recorded_final(rewritable) is False
     shown = await checked(http, visitor, BLOCKED_PROSE, final=True)
     assert not shown.ok and await recorded_final(shown) is True
-    assert [block.template for block in shown.blocks] == ["handoff"]
-    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)] == ["card"]
-    assert await handed_to_you() == 1
+    assert shown.blocks == [RenderedBlock(kind="prose", text=OFFER["en"])]
+    assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == []
+    assert await handed_to_you() == 0
 
     stranger = await new_visitor(http, slug)
     french = await checked(http, stranger, OTHER_LANGUAGE, final=False)
     assert "unsupported_language" in {violation.kind for violation in french.violations}
     assert [block.template for block in french.blocks] == ["handoff"]
     assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, stranger.state.session_id)] == ["card"]
-    assert await handed_to_you() == 2
+    assert await handed_to_you() == 1
 
     asking = await new_visitor(http, slug)
     held = await decide(http.session(asking.session_token), asking.state.session_id, 0, "call-1", "native.quote",
                         quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
     assert held.state == "held"
-    assert not (await checked(http, asking, BLOCKED_PROSE, final=True)).ok
+    assert not (await checked(http, asking, OTHER_LANGUAGE, final=True)).ok
     assert session_handoffs(ro_read, ro_schema, copy, asking.state.session_id) == []
-    assert await handed_to_you() == 2                          # the owner has the held request's alert and item
+    assert await handed_to_you() == 1                          # the owner has the held request's alert and item
     await answer(owner, held.decision_id, "deny_once")
-    assert not (await checked(http, asking, BLOCKED_PROSE, final=True)).ok
+    assert not (await checked(http, asking, OTHER_LANGUAGE, final=True)).ok
     assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, asking.state.session_id)] == ["card"]
-    assert await handed_to_you() == 3
+    assert await handed_to_you() == 2
 
 
 @pytest.mark.kernel_plan("01b")
@@ -1559,7 +1625,7 @@ async def test_a_call_back_request_closes_the_card_handoff_and_opens_its_own(ker
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
     visitor = await new_visitor(http, slug)
-    assert not (await checked(http, visitor, BLOCKED_PROSE, final=True)).ok
+    assert not (await checked(http, visitor, OTHER_LANGUAGE, final=True)).ok
     ((card_id, kind, status),) = session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)
     assert (kind, status) == ("card", "open")
 
@@ -1585,7 +1651,7 @@ async def test_a_call_back_request_closes_the_card_handoff_and_opens_its_own(ker
 
     previewing = await http.owner(copy.owner_token).call(
         "POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor", preview=True))
-    assert not (await checked(http, previewing, BLOCKED_PROSE, final=True)).ok
+    assert not (await checked(http, previewing, OTHER_LANGUAGE, final=True)).ok        # shows the handoff card
     assert session_handoffs(ro_read, ro_schema, copy, previewing.state.session_id) == []
 
 

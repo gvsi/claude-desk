@@ -69,6 +69,7 @@ MESSAGES: dict[str, str] = {
     "inbox_code_preview": "Nuevo código de verificación",
     "inbox_code_body": ("Tu código de {business} es {code}. Vence en diez minutos. "
                         "Si no lo pediste, ignora este mensaje."),
+    "offer_callback": "¿Quiere que solicite una llamada?",
 }
 
 WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")

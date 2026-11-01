@@ -31,7 +31,7 @@ from .test_adapters import quote_args, visitor_of
 from .test_context import get_context, owner_session_id
 from .test_decide import Visitor, decided, open_visitor, set_mode, set_session
 from .test_execute import executed, read
-from .test_reply_check import assert_handed_off, checked, clause, own_booking, own_quote, session_of
+from .test_reply_check import assert_handed_off, assert_offered, checked, clause, own_booking, own_quote, session_of
 
 ROUTE = "POST /sessions/{session_id}/turn"
 ENGLISH = "Hi, how much is it to clear a drain?"
@@ -108,10 +108,10 @@ async def test_the_reply_checks_fallback_follows_the_turn(app, client):
         "$180.00", ["Drain clearing", "Válido hasta lunes 2 de noviembre, 9:04"])
     assert (handoff.title, handoff.lines) == (
         "Déjame consultarlo con Maria Rivera.", ["Maria Rivera te responderá aquí."])
-    # prose too short to tell, handed off: the handoff speaks it too
+    # prose too short to tell, blocked: the call-back offer speaks it too
     verdict = await checked(client, visitor, "Le prometo.")
     assert [(v.kind, v.rule_id) for v in verdict.violations] == [("promise_word", "lex.es.promise")]
-    assert_handed_off(verdict, "es")
+    assert_offered(verdict, "es")
     assert (await session_of(app, copy, visitor)).last_language == "es"
 
 
