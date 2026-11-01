@@ -275,7 +275,7 @@ export const BusinessJobPhone: Story = {
   },
 };
 
-const intakeQuestions = ['Which tax year is this for?', 'Is it for a business?', 'Who did your books last year?'];
+const intakeQuestions: [string, string, string] = ['Which tax year is this for?', 'Is it for a business?', 'Who did your books last year?'];
 const intakeDef = { title: 'Before an intro call', description: 'Asks questions.', config: { block: 'intake' as const, questions: intakeQuestions } };
 
 /** An intake job: its questions in the Asks row, one numbered line each, in asking order. */
