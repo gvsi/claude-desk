@@ -1642,8 +1642,7 @@ async def test_old_generation_and_owner_mode_drafts_are_409(app, client):
     assert [entry.event.ref_id for entry in await reply_entries(app, copy)] == [verdict.message_id]
 
 
-@pytest.mark.parametrize("tries", [1, 2])
-async def test_a_take_over_during_a_reply_check_waits_for_no_model_call(app, client, reviewer, frozen_clock, tries):
+async def test_a_take_over_during_a_reply_check_waits_for_no_model_call(app, client, reviewer, frozen_clock):
     """The reply check writes the session row only at its end, just before its ledger entry, so it
     holds no lock on the row while the soft-promise check runs: Maria's take-over answers at once.
     The draft's verdict keeps the generation it was sent at, which `deliver()` then drops."""
@@ -1651,17 +1650,10 @@ async def test_a_take_over_during_a_reply_check_waits_for_no_model_call(app, cli
     asked, answer = asyncio.Event(), asyncio.Event()
     soft_promise = reviewer.soft_promise
 
-    calls = 0
-
-    async def slow_model(data, *, timeout_s=None):
-        nonlocal calls
-        calls += 1
-        if calls < tries:
-            from desk.kernel_service.decisions import CallUsage
-            return None, CallUsage(status="timeout", **reviewer.SOFT_USAGE)
+    async def slow_model(data):
         asked.set()
         await answer.wait()                                      # the model answers only once the test lets it
-        return await soft_promise(data, timeout_s=timeout_s)
+        return await soft_promise(data)
 
     reviewer.soft_promise = slow_model
     frozen_clock.advance(60)                                     # a minute after the visitor's last call
@@ -1672,7 +1664,6 @@ async def test_a_take_over_during_a_reply_check_waits_for_no_model_call(app, cli
     finally:
         answer.set()                                             # never left waiting on the model
     verdict = await asyncio.wait_for(checking, 5)
-    assert calls == tries
     assert (state["mode"], state["generation"]) == ("owner", 1)
     assert (verdict.ok, verdict.generation) == (True, 0)
     row = await session_of(app, copy, visitor)

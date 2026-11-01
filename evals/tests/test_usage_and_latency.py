@@ -904,18 +904,18 @@ async def test_latency_command_names_a_failed_call_without_its_body(tmp_path, ca
 
 
 @pytest.mark.parametrize("status", ["ok", "invalid", "timeout"])
-def test_soft_check_pair_is_one_cost_record_including_unavailable(status):
+def test_soft_check_try_is_one_cost_record_including_unavailable(status):
+    """The reply ledger's soft-check summary is one try (`tries` 1, `first_status` its status), priced
+    once whether or not it gave a verdict."""
     from evals.latency import spend_usd
     from evals.usage import collect_usage
 
-    first = call_usage(HAIKU, input_tokens=900, cached=100, write=50, output=40, ms=420)
-    pair = {**first, "status": status, "first_status": "error", "tries": 2,
-            **{key: first[key] * 2 for key in
-               ("input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens", "latency_ms")}}
+    call = call_usage(SONNET, input_tokens=900, cached=100, write=50, output=40, ms=420, status=status)
+    summary = {**call, "first_status": status, "tries": 1}
     event = {"kind": "reply", "session_id": SESSION,
-             "summary": {"soft_promise": pair, "violations": [] if status == "ok" else ["check_unavailable"]}}
+             "summary": {"soft_promise": summary, "violations": [] if status == "ok" else ["check_unavailable"]}}
     records = collect_usage({"ledger_entries": [{"event": event}]}, [SESSION])
     [record] = records
-    assert (record.route, record.ms) == ("soft_promise", 840)
-    assert record.cost_usd("anthropic") == pytest.approx(2 * priced(first))
-    assert spend_usd(records, "anthropic").kernel_usd == pytest.approx(2 * priced(first))
+    assert (record.route, record.model, record.ms) == ("soft_promise", SONNET, 420)
+    assert record.cost_usd("anthropic") == pytest.approx(priced(call))
+    assert spend_usd(records, "anthropic").kernel_usd == pytest.approx(priced(call))

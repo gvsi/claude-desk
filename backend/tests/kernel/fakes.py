@@ -158,10 +158,10 @@ class FakeDecisions:
         status = "ok" if self.answer is not None else "error"
         return Reviewed(review=self.answer, usage=CallUsage(status=status, **self.USAGE))
 
-    async def soft_promise(self, data: SoftPromiseInput, *, timeout_s: float | None = None) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
+    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
         self.soft_inputs.append(data)
         if self.soft_backend is not None:
-            return await self.soft_backend.soft_promise(data, timeout_s=timeout_s)
+            return await self.soft_backend.soft_promise(data)
         status = "ok" if self.soft_answer is not None else "error"
         return self.soft_answer, CallUsage(status=status, **self.SOFT_USAGE)
 

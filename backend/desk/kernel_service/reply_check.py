@@ -35,17 +35,17 @@ the session-state rows ("Session state responses": token, copy, closed, generati
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Sonnet 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
-   (`soft.denies_ai`). Timeout, error or unparsable output gets one unchanged-input recheck,
-   both tries within one 4 s deadline (at most 2 s each; no recheck below 0.5 s remaining).
-   A refusal gets no recheck. No verdict is `check_unavailable` (`soft.unavailable`), final.
-   While the session has an open handoff the handoff card opened
+   (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (6 s), with no recheck and no
+   fallback (the owner's decision of 2026-10-31), inside the API's 10 s for the route: no
+   verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
+   (`soft.unavailable`), final. While the session has an open handoff the handoff card opened
    (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
    doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
    here" is backed, as the card that opened it said. A call-back request backs nothing (the
    owner's decision of 2026-10-31): its own card names a time and never says the owner will
    reply here, and once its window has passed nothing promises a call. That handoff is read
    without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
-   each check one pooled connection, across both tries. A reply that passes with the handoff's
+   each check one pooled connection, across the try. A reply that passes with the handoff's
    card is checked again in step 7.
 6. `ok` when nothing was found: the prose (when not empty) and the cards. A prose-only failure
    keeps checked cards alone, without a cited handoff; any other failure, or no card to keep,
@@ -79,7 +79,6 @@ import hashlib
 import json
 import logging
 import re
-import time
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -95,7 +94,7 @@ from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Ledge
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import agents, auth, context, decisions, demo_inbox, labels, lang, ledger, render, sessions
+from desk.kernel_service import agents, auth, context, demo_inbox, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseUsage
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
@@ -676,32 +675,21 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock]) -> tuple[list[Violation], SoftPromiseUsage | None]:
-    """Step 5: one unchanged-input recheck after timeout, error or invalid output, within one
-    deadline of twice the per-try timeout. Under 0.5 s left skips the recheck; a refusal never
-    retries. Only a verdict can pass. Usage is summed once for the reply ledger, with the first
-    status and the deciding try's status. `finalize` still checks handoff backing under lock.
-    The model is shown the session's fixed next steps, from its resolved tools."""
+    """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
+    rendered for it, and an open handoff's card), with the session's fixed next steps from its
+    resolved tools. One try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and no
+    fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
+    (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
+    error, a refusal, an unparsable answer) is `check_unavailable` (`soft.unavailable`). The call's
+    usage goes to the ledger as one try, its first status its status. (`finalize` adds
+    `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(
         Desk.desk_id == session_row.desk_id)))).one()
     tools = await context.resolved_tools(ctx, principal_for(session_row), session_row, desk_row)
-    data = SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards],
-                            next_steps=next_steps(tools))
-    timeout = decisions.SOFT_PROMISE_TIMEOUT_S
-    deadline = time.monotonic() + 2 * timeout
-    verdict, first = await ctx.decisions.soft_promise(data, timeout_s=timeout)
-    deciding, tries = first, 1
-    remaining = deadline - time.monotonic()
-    if verdict is None and (first is None or first.status != "refusal") and remaining >= 0.5:
-        verdict, deciding = await ctx.decisions.soft_promise(data, timeout_s=min(timeout, remaining))
-        tries = 2
-    calls = [call for call in (first, deciding if tries == 2 else None) if call is not None]
-    usage = None
-    if calls:
-        usage = SoftPromiseUsage(
-            model=calls[-1].model, status=deciding.status if deciding is not None else "error",
-            first_status=first.status if first is not None else "error", tries=tries,
-            **{key: sum(getattr(call, key) for call in calls) for key in
-               ("input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens", "latency_ms")})
+    verdict, call = await ctx.decisions.soft_promise(
+        SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards],
+                         next_steps=next_steps(tools)))
+    usage = None if call is None else SoftPromiseUsage(**call.model_dump(), first_status=call.status, tries=1)
     if verdict is None:
         return [Violation(kind="check_unavailable", span=_span(prose), rule_id="soft.unavailable")], usage
     rule_ids = (["soft.promise"] if verdict.promises_beyond_cards else []) + (

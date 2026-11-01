@@ -288,8 +288,7 @@ DENIALS = frozenset({"I am a real person.", "Soy una persona de verdad."})
 
 
 class ScriptedSoftPromise:
-    async def soft_promise(self, data: SoftPromiseInput, *,
-                           timeout_s: float | None = None) -> tuple[SoftPromiseVerdict, CallUsage]:
+    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict, CallUsage]:
         verdict = SoftPromiseVerdict(promises_beyond_cards=data.prose in PROMISES,
                                      denies_being_ai=data.prose in DENIALS)
         return verdict, CallUsage(status="ok", **FakeDecisions.SOFT_USAGE)

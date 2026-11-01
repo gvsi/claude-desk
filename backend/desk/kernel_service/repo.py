@@ -7,9 +7,9 @@ rows. A route takes it as `ctx: Ctx`: the transaction commits after the route re
 the answer is sent, so a failed commit answers 500, and it rolls back on any exception.
 
 An agent request first holds its turn's nonce row `FOR UPDATE` (`agents.verify_call`), across
-both soft-check tries and through the reply transaction. No path that holds a row below asks
-for a nonce row. Each reply check also holds one pooled connection across both tries. With
-`seen=False` it holds no session-row lock across either model call.
+the soft check's one try and through the reply transaction. No path that holds a row below asks
+for a nonce row. Each reply check also holds one pooled connection across the try. With
+`seen=False` it holds no session-row lock across the model call.
 
 Row locks are taken in one order, so no two kernel transactions wait on each other:
 
@@ -102,15 +102,16 @@ the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`
 bumps the generation, and an allow from the old generation expires at `/execute`. No other
 kernel call holds the row across a model call.
 
-A reply check's soft calls share one deadline of 4 s: at most 2 s each, the recheck limited to
-min(2 s, remaining), skipped below 0.5 s remaining, and never after a refusal. This is the model
-budget, not an end-to-end deadline. Finalize can then wait on its session write behind T1's
-re-list and normalize (about 3 s), a queued decision's normalize and review (about 5 s), and a
-provider completion (about 2 s), as below: about 14 s including its own model budget, plus
-queries, ledger contention and commit. Arbitrary lock contention has no finite overall bound.
-Past the API's 6 s timeout the API shows `kernel_unavailable`; the kernel may still commit the
-verdict and open the owner's handoff. The generation fence is unchanged: `open_card_handoff`
-re-reads the generation under lock and `deliver()` drops stale verdicts. This fails closed.
+A reply check's soft call is one try of at most 6 s (`decisions.SOFT_PROMISE_TIMEOUT_S`), with no
+recheck and no fallback (the owner's decision of 2026-10-31 replaced an earlier unchanged-input
+recheck), inside the API's 10 s for `/check_reply`. This is the model budget, not an end-to-end
+deadline. Finalize can then wait on its session write behind T1's re-list and normalize (about
+3 s), a queued decision's normalize and review (about 5 s), and a provider completion (about
+2 s), as below: about 16 s including its own model budget, plus queries, ledger contention and
+commit. Arbitrary lock contention has no finite overall bound. Past the API's 10 s the API shows
+`kernel_unavailable`; the kernel may still commit the verdict and open the owner's handoff. The
+generation fence is unchanged: `open_card_handoff` re-reads the generation under lock and
+`deliver()` drops stale verdicts. This fails closed.
 
 A payment link's completion holds the same row `FOR SHARE` across its provider call (C2,
 `payments._pay`, Plan 01c), so a decision and a completion on one session take turns: each takes

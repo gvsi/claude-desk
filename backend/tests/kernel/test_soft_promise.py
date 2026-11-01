@@ -193,10 +193,10 @@ async def test_person_removed_while_soft_check_sleeps_loses_private_card(app, cl
     soft_promise = reviewer.soft_promise
     reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
 
-    async def slow_model(data, *, timeout_s=None):
+    async def slow_model(data):
         asked.set()
         await answer.wait()
-        return await soft_promise(data, timeout_s=timeout_s)
+        return await soft_promise(data)
 
     reviewer.soft_promise = slow_model
     finalized, finalize = [], reply_check.finalize
@@ -248,10 +248,10 @@ async def test_signing_rechecks_current_facts(app, client, reviewer, frozen_cloc
     soft_promise = reviewer.soft_promise
     reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
 
-    async def slow_model(data, *, timeout_s=None):
+    async def slow_model(data):
         asked.set()
         await answer.wait()
-        return await soft_promise(data, timeout_s=timeout_s)
+        return await soft_promise(data)
 
     reviewer.soft_promise = slow_model
     checking = asyncio.create_task(checked(client, visitor, "Here is your quote.", clauses))
@@ -296,10 +296,10 @@ async def test_signing_rechecks_claims_after_an_owner_replacement(app, client, r
     soft_promise = reviewer.soft_promise
     reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=flagged, denies_being_ai=False)
 
-    async def slow_model(data, *, timeout_s=None):
+    async def slow_model(data):
         asked.set()
         await answer.wait()
-        return await soft_promise(data, timeout_s=timeout_s)
+        return await soft_promise(data)
 
     reviewer.soft_promise = slow_model
     checking = asyncio.create_task(checked(client, visitor, "Here are the details.", clauses))
@@ -510,13 +510,14 @@ async def test_soft_promise_failures_block(app, client, reviewer, case, monkeypa
         assert [(v.kind, v.rule_id, v.span) for v in verdict.violations] == [
             ("check_unavailable", "soft.unavailable", prose[:40])]
         assert_handed_off(verdict)
-        assert len(model.requests) == (1 if case in ("timeout", "refusal") else 2)
+        assert len(model.requests) == 1                                   # one try: no recheck, no fallback
     entries = await reply_entries(app, copy)
     assert [entry.event.summary["rule_ids"] for entry in entries] == [["soft.unavailable"]] * len(replies)
-    assert {(entry.event.summary["soft_promise"]["model"], entry.event.summary["soft_promise"]["status"])
-            for entry in entries} == {(SONNET, status)}
+    assert {(entry.event.summary["soft_promise"]["model"], entry.event.summary["soft_promise"]["status"],
+             entry.event.summary["soft_promise"]["first_status"], entry.event.summary["soft_promise"]["tries"])
+            for entry in entries} == {(SONNET, status, status, 1)}
     failures = [record.getMessage() for record in caplog.records if record.name == "desk.kernel_service.decisions"]
-    assert [message.split()[0] for message in failures] == ["soft_promise_failed"] * (len(replies) * (1 if case in ("timeout", "refusal") else 2))
+    assert [message.split()[0] for message in failures] == ["soft_promise_failed"] * len(replies)
     assert all(f"status={status}" in message for message in failures) and MARKER not in caplog.text
 
 
@@ -637,11 +638,11 @@ async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, cl
     asked, answer, shown = asyncio.Event(), asyncio.Event(), []
     soft_promise = reviewer.soft_promise
 
-    async def slow_model(data, *, timeout_s=None):
+    async def slow_model(data):
         shown.append(data.cards)
         asked.set()
         await answer.wait()                                      # the model answers only once the test lets it
-        return await soft_promise(data, timeout_s=timeout_s)                          # and passes the prose
+        return await soft_promise(data)                          # and passes the prose
 
     reviewer.soft_promise = slow_model
     checking = asyncio.create_task(checked(client, visitor, REPLY_HERE, clauses))
@@ -721,10 +722,10 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
     asked, answer = asyncio.Event(), asyncio.Event()
     soft_promise = reviewer.soft_promise
 
-    async def slow_model(data, *, timeout_s=None):
+    async def slow_model(data):
         asked.set()
         await answer.wait()
-        return await soft_promise(data, timeout_s=timeout_s)
+        return await soft_promise(data)
 
     reviewer.soft_promise = slow_model
     checking = asyncio.create_task(checked(client, visitor, REPLY_HERE, clauses))
@@ -746,71 +747,39 @@ async def test_a_card_a_call_back_closes_while_the_model_reads_backs_nothing(app
     assert list(rows.values()) == [("callback", "open")]
 
 
-@pytest.mark.parametrize(("statuses", "expected", "shown"), [
-    (["timeout", "pass"], [], True),
-    (["timeout", "flag"], [("soft_promise", "soft.promise")], False),
-    (["timeout", "timeout"], [("check_unavailable", "soft.unavailable")], True),
-    (["error", "invalid"], [("check_unavailable", "soft.unavailable")], True),
-    (["flag"], [("soft_promise", "soft.promise")], False),
-    (["pass"], [], True),
-    (["refusal"], [("check_unavailable", "soft.unavailable")], True),
+@pytest.mark.parametrize(("status", "expected", "shown"), [
+    ("pass", [], True),
+    ("flag", [("soft_promise", "soft.promise")], False),
+    ("timeout", [("check_unavailable", "soft.unavailable")], True),
+    ("error", [("check_unavailable", "soft.unavailable")], True),
+    ("invalid", [("check_unavailable", "soft.unavailable")], True),
+    ("refusal", [("check_unavailable", "soft.unavailable")], True),
 ])
-async def test_soft_check_rechecks_once_and_ledgers_the_pair(app, client, reviewer, statuses, expected, shown):
+async def test_soft_check_makes_one_try_and_ledgers_it(app, client, reviewer, status, expected, shown):
+    """The owner's decision of 2026-10-31: one Sonnet try within `SOFT_PROMISE_TIMEOUT_S`, no recheck
+    and no fallback. No verdict is `check_unavailable`, shown at once even on a first attempt; a
+    flag on a first attempt is rewritten, so nothing is shown. The ledger keeps the usage summary's
+    shape, with one try whose first status is its status."""
     from desk.kernel_service.decisions import CallUsage
 
     copy, visitor = await visitor_of(app, client)
-    inputs, timeouts = [], []
+    inputs = []
 
-    async def scripted(data, *, timeout_s=None):
-        status = statuses[len(inputs)]  # an extra try fails the test
+    async def scripted(data):
+        assert not inputs, "the soft check made a second try"
         inputs.append(data)
-        timeouts.append(timeout_s)
         answer = (SoftPromiseVerdict(promises_beyond_cards=status == "flag", denies_being_ai=False)
                   if status in ("pass", "flag") else None)
-        counts = {key: value * len(inputs) if isinstance(value, int) else value
-                  for key, value in reviewer.SOFT_USAGE.items()}
-        return answer, CallUsage(status="ok" if answer else status, **counts)
+        return answer, CallUsage(status="ok" if answer else status, **reviewer.SOFT_USAGE)
 
     reviewer.soft_promise = scripted
     verdict = await checked(client, visitor, CLEAN, final=False)
     assert [(v.kind, v.rule_id) for v in verdict.violations] == expected
     assert bool(verdict.blocks) == shown
-    assert len(inputs) == len(statuses)
-    assert all(data == inputs[0] for data in inputs)
-    assert all(0 < timeout <= 2.0 for timeout in timeouts)
+    assert len(inputs) == 1
     hands = await handoffs_of(app, copy)
     assert len(hands) == int(bool(expected) and shown)
     [entry] = await reply_entries(app, copy)
-    summary = entry.event.summary["soft_promise"]
-    assert summary == {
-        **{key: value * sum(range(1, len(statuses) + 1)) if isinstance(value, int) else value
-           for key, value in reviewer.SOFT_USAGE.items()},
-        "status": "ok" if statuses[-1] in ("pass", "flag") else statuses[-1],
-        "first_status": "ok" if statuses[0] in ("pass", "flag") else statuses[0], "tries": len(statuses),
-    }
-
-
-@pytest.mark.parametrize(("elapsed", "timeouts"), [(3.7, [3.0, 2.3]), (5.6, [3.0]), (6.1, [3.0])])
-async def test_soft_check_uses_one_deadline_and_skips_a_late_recheck(app, client, reviewer, monkeypatch,
-                                                                  elapsed, timeouts):
-    from types import SimpleNamespace
-    from desk.kernel_service import reply_check
-    from desk.kernel_service.decisions import CallUsage
-
-    copy, visitor = await visitor_of(app, client)
-    clock = iter([100.0, 100.0 + elapsed])
-    monkeypatch.setattr(reply_check, "time", SimpleNamespace(monotonic=lambda: next(clock)))
-    monkeypatch.setattr(decisions, "SOFT_PROMISE_TIMEOUT_S", 3.0)
-    called = []
-
-    async def slow(data, *, timeout_s):
-        called.append(timeout_s)
-        return None, CallUsage(status="timeout", **reviewer.SOFT_USAGE)
-
-    reviewer.soft_promise = slow
-    verdict = await checked(client, visitor, CLEAN, final=False)
-    assert called == pytest.approx(timeouts)
-    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("check_unavailable", "soft.unavailable")]
-    assert_handed_off(verdict)
-    [entry] = await reply_entries(app, copy)
-    assert entry.event.summary["soft_promise"]["tries"] == len(timeouts)
+    deciding = "ok" if status in ("pass", "flag") else status
+    assert entry.event.summary["soft_promise"] == {
+        **reviewer.SOFT_USAGE, "status": deciding, "first_status": deciding, "tries": 1}

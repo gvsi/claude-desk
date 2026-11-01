@@ -248,10 +248,12 @@ class CallUsage(BaseModel):
 
 
 class SoftPromiseUsage(CallUsage):
-    """One reply check's deciding status and summed usage across its bounded pair of tries."""
+    """The reply ledger's soft-check usage: its one try (the owner's decision of 2026-10-31 replaced
+    an earlier unchanged-input recheck), so `tries` is 1 and `first_status` is `status`. The shape
+    is kept for readers of the ledger."""
 
     first_status: CallStatus
-    tries: Literal[1, 2]
+    tries: Literal[1]
 
 
 class Reviewed(BaseModel):
@@ -313,10 +315,9 @@ class DecisionsBackend(Protocol):
         """The reviewer's scores for one action; `review` is None on any failure."""
         ...
 
-    async def soft_promise(self, data: SoftPromiseInput, *,
-                           timeout_s: float | None = None) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
+    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
         """The soft-promise verdict on one reply, None on any failure; the usage is None when no
-        call was made. `timeout_s` bounds this try within the reply check's shared deadline."""
+        call was made."""
         ...
 
 
@@ -381,8 +382,7 @@ class OfflineDecisions:
     async def review(self, data: ReviewInput) -> Reviewed:
         return Reviewed(review=None, usage=None)
 
-    async def soft_promise(self, data: SoftPromiseInput, *,
-                           timeout_s: float | None = None) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
+    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
         return SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False), None
 
 
@@ -424,13 +424,12 @@ class AnthropicDecisions:
             timeout_s=REVIEW_TIMEOUT_S, failed="review_failed")
         return Reviewed(review=review, usage=usage)
 
-    async def soft_promise(self, data: SoftPromiseInput, *,
-                           timeout_s: float | None = None) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
+    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
         return await self._ask(
             SoftPromiseVerdict, data, model=SOFT_PROMISE_MODEL, max_tokens=SOFT_PROMISE_MAX_TOKENS,
             system=SOFT_PROMISE_SYSTEM, schema=SOFT_PROMISE_SCHEMA,
             thinking={"type": "adaptive"},
-            timeout_s=SOFT_PROMISE_TIMEOUT_S if timeout_s is None else timeout_s, failed="soft_promise_failed")
+            timeout_s=SOFT_PROMISE_TIMEOUT_S, failed="soft_promise_failed")
 
     async def _ask(self, answer: type[Answer], data: BaseModel, *, model: str, max_tokens: int, system: str,
                    schema: dict[str, Any], thinking: dict[str, str], timeout_s: float,

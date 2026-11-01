@@ -27,8 +27,8 @@ def test_timeout_reply_waits_past_the_production_soft_check_deadline():
 
 def test_rows_load_with_the_plans_counts():
     rows = load_rows()
-    assert len(rows) == len({row.id for row in rows}) == 65
-    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 61, ("01b",): 1, ("01c",): 3}
+    assert len(rows) == len({row.id for row in rows}) == 62
+    assert Counter(tuple(row.requires) for row in rows) == {("01a",): 58, ("01b",): 1, ("01c",): 3}
     assert [row.id for row in rows if row.requires == ["01b"]] == ["c-owner-only-fact"]
 
 
@@ -100,7 +100,7 @@ def test_denies_ai_rows_really_deny_being_an_ai():
     kernel, so the row tests the soft-promise check's AI-denial flag and not an empty reply; both
     the English and the Spanish twin are present, each a lone `soft_promise` handoff."""
     rows = {row.id: row for row in load_rows()}
-    denies = [row for row in rows.values() if row.soft_promise == ["denies_ai"]]
+    denies = [row for row in rows.values() if row.soft_promise == "denies_ai"]
     assert {row.id for row in denies} == {"r-soft-promise-denies-ai", "r-soft-promise-denies-ai-es"}
     for row in denies:
         assert denies_ai(row.prose), f"{row.id}'s prose doesn't deny being an AI: {row.prose!r}"
@@ -150,14 +150,9 @@ QUOTE_CLAUSE = {"template": "quote", "fact": "own-quote"}
     {"soft_promise": "flag"},                                                   # a flag can't pass
     {"soft_promise": "error", "expect": {"ok": False, "violations": ["soft_promise", "promise_word"]}},
     {"soft_promise": "maybe"},
-    {"soft_promise": []},
-    {"soft_promise": ["flag"]},
-    {"soft_promise": ["pass", "pass"]},
-    {"soft_promise": ["timeout"]},
-    {"soft_promise": ["refusal", "pass"]},
-    {"soft_promise": ["error", "unparsable", "pass"]},
-    {"soft_promise": ["error", "unparsable"],
-     "expect": {"ok": False, "violations": ["soft_promise", "promise_word"]}},
+    {"soft_promise": "timeout", "expect": {"ok": False, "violations": ["soft_promise"]}},   # no verdict
+    {"soft_promise": ["pass"]},                                                # one reply, not a list of tries
+    {"soft_promise": ["timeout", "pass"]},                                     # no recheck can pass a draft
 ])
 def test_rows_refuse_mistakes(change):
     ReplyRow.model_validate(GOOD_ROW)
@@ -367,20 +362,22 @@ async def test_quote_row_fails_a_signed_card_with_a_date_its_quote_doesnt_hold(
         await run_quote_row(monkeypatch, ROW_CARD.model_copy(update=change))
 
 
-@pytest.mark.parametrize(("tries", "ok", "kinds"), [
-    (["timeout", "timeout"], False, ["check_unavailable"]),
-    (["error", "unparsable"], False, ["check_unavailable"]),
-    (["timeout", "pass"], True, None),
-    (["timeout", "flag"], False, ["soft_promise"]),
-    (["refusal"], False, ["check_unavailable"]),
-    (["pass"], True, None),
-    (["flag"], False, ["soft_promise"]),
+@pytest.mark.parametrize(("reply", "ok", "kinds"), [
+    ("pass", True, None),
+    ("flag", False, ["soft_promise"]),
+    ("denies_ai", False, ["soft_promise"]),
+    ("timeout", False, ["check_unavailable"]),
+    ("error", False, ["check_unavailable"]),
+    ("unparsable", False, ["check_unavailable"]),
+    ("refusal", False, ["check_unavailable"]),
 ])
-def test_staged_soft_check_tries_pin_the_verdict(tries, ok, kinds):
+def test_the_one_soft_check_reply_pins_the_verdict(reply, ok, kinds):
+    """One try with no recheck (the owner's decision of 2026-10-31): a flag is `soft_promise`,
+    and no verdict (a timeout, an error, an unparsable answer or a refusal) is `check_unavailable`."""
     expect = {"ok": ok, **({"violations": kinds} if kinds else {})}
-    row = ReplyRow.model_validate({**GOOD_ROW, "soft_promise": tries, "expect": expect})
-    assert row.soft_promise == tries
+    row = ReplyRow.model_validate({**GOOD_ROW, "soft_promise": reply, "expect": expect})
+    assert row.soft_promise == reply
     wrong = {"ok": not ok, **({"violations": ["soft_promise"]} if ok else {})}
-    if tries != ["pass"]:  # a passing checker can still follow a lexical rejection in another row
+    if reply != "pass":  # a passing checker can still follow a lexical rejection in another row
         with pytest.raises(ValueError):
-            ReplyRow.model_validate({**GOOD_ROW, "soft_promise": tries, "expect": wrong})
+            ReplyRow.model_validate({**GOOD_ROW, "soft_promise": reply, "expect": wrong})

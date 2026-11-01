@@ -148,7 +148,7 @@ async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewe
     elif kind == "denies_ai":
         reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=True)
     elif kind == "check_unavailable":
-        async def refusal(data, *, timeout_s=None):
+        async def refusal(data):
             return None, CallUsage(model="claude-haiku-5-5", status="refusal", input_tokens=0, cached_tokens=0,
                                    output_tokens=0, latency_ms=0)
         reviewer.soft_promise = refusal
@@ -183,7 +183,7 @@ async def test_shown_checker_outage_keeps_cards_without_another_owner_item(app, 
     before = [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)]
     alerts_before = len(await handoff_alerts(app, copy))
 
-    async def refusal(data, *, timeout_s=None):
+    async def refusal(data):
         return None, CallUsage(model="claude-haiku-5-5", status="refusal", latency_ms=0)
 
     reviewer.soft_promise = refusal
@@ -432,10 +432,10 @@ async def test_a_card_a_take_over_keeps_from_the_visitor_opens_none(app, client,
     reviewer.soft_answer = FLAGGED
     soft_promise = reviewer.soft_promise
 
-    async def slow_model(data, *, timeout_s=None):
+    async def slow_model(data):
         asked.set()
         await answer.wait()                                      # the model answers only once the test lets it
-        return await soft_promise(data, timeout_s=timeout_s)
+        return await soft_promise(data)
 
     reviewer.soft_promise = slow_model
     frozen_clock.advance(60)

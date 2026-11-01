@@ -148,8 +148,7 @@ class ReplyRow(BaseModel):
     prose: str
     clauses: list[ClauseSpec] = []
     final: StrictBool = True
-    soft_promise: list[Literal["pass", "flag", "denies_ai", "error", "timeout", "unparsable", "refusal"]] = Field(
-        default_factory=lambda: ["pass"], min_length=1, max_length=2)
+    soft_promise: Literal["pass", "flag", "denies_ai", "error", "timeout", "unparsable", "refusal"] = "pass"
     expect: ReplyExpect
 
     @model_validator(mode="after")
@@ -167,14 +166,11 @@ class ReplyRow(BaseModel):
                              "in order")
         if self.setup == "travel_past_expiry" and not any(clause.fact in QUOTE_ROLES for clause in self.clauses):
             raise ValueError("travel_past_expiry travels past a cited quote's expiry, so the row cites a quote")
-        failure = {"timeout", "error", "unparsable"}
-        if (self.soft_promise[0] in failure) != (len(self.soft_promise) == 2):
-            raise ValueError("a failed first try stages exactly one recheck; a verdict or refusal stages no recheck")
-        if self.soft_promise != ["pass"]:
-            last = self.soft_promise[-1]
-            kinds = [] if last == "pass" else ["soft_promise"] if last in ("flag", "denies_ai") else ["check_unavailable"]
-            if self.expect.ok != (not kinds) or (kinds and self.expect.violations != kinds):
-                raise ValueError("the deciding staged try must give exactly its verdict and violation kind")
+        if self.soft_promise != "pass":   # one try, no recheck: the reply decides the verdict
+            kinds = ["soft_promise"] if self.soft_promise in ("flag", "denies_ai") else ["check_unavailable"]
+            if self.expect.ok or self.expect.violations != kinds:
+                raise ValueError("a flag is a soft_promise violation and no verdict is check_unavailable, "
+                                 "each the only one")
         return self
 
     @property
@@ -438,7 +434,7 @@ async def assert_auth_ledgered(records: Any, desk: GoldenDesk, session_id: str, 
 async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: ReplyRow):
     desk = await golden_desk(k)
     caller = await open_caller(k, desk, "visitor")
-    if row.soft_promise[-1] == "denies_ai":   # the fixture only tests the flag if its prose really denies being an AI
+    if row.soft_promise == "denies_ai":   # the fixture only tests the flag if its prose really denies being an AI
         assert denies_ai(row.prose), f"{row.id}'s prose must deny being an AI: {row.prose!r}"
     made_from = k.clock.now()
     facts = await cite_facts(k, fake, records, desk, caller, row)
@@ -448,9 +444,8 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
     elif row.setup == "travel_past_expiry":
         cited = [facts[clause.fact] for clause in row.clauses if clause.fact in QUOTE_ROLES]
         await travel_past_expiry(k, records, desk, caller, cited)
-    if row.soft_promise != ["pass"]:
-        fake.script(SOFT_PROMISE_MODEL, *(SOFT_PROMISE_REPLIES[step] for step in row.soft_promise),
-                    repeat_last=row.soft_promise[-1] in ("timeout", "error", "unparsable"), schema="SoftPromiseVerdict")
+    if row.soft_promise != "pass":   # one reply; a second try would get the default pass, and is caught below
+        fake.script(SOFT_PROMISE_MODEL, SOFT_PROMISE_REPLIES[row.soft_promise], schema="SoftPromiseVerdict")
     checks_before = len(fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict"))
     verdict = await check_reply(
         k, caller, row.prose, row.draft_clauses(facts), final=row.final,
@@ -469,10 +464,10 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
                     block, {P}, headline=P, percents=(), items=[SEED_TITLES["drain"]],
                     expires=quote_expiries(made_from, made_until, row.expect.language))
                 assert not problems, f"the quote card, for one drain clearing at {P} cents: {problems}"
-        if row.soft_promise != ["pass"] or (row.expect.ok and row.prose):
-            assert len(fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict")) - checks_before == len(
-                row.soft_promise), "exactly one model call per staged try, never an extra retry"
-        if row.soft_promise[-1] == "denies_ai":   # the only model-free handling of a reply that denies being an AI
+        if row.soft_promise != "pass" or (row.expect.ok and row.prose):
+            assert len(fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict")) - checks_before == 1, (
+                "one soft-promise check: no recheck and no fallback")
+        if row.soft_promise == "denies_ai":   # the only model-free handling of a reply that denies being an AI
             denials = [violation for violation in verdict.violations if violation.kind == "soft_promise"]
             assert denials and all(violation.rule_id == DENIES_AI_RULE_ID for violation in denials), (
                 f"a reply the check read as denying it is an AI is {DENIES_AI_RULE_ID}: "
