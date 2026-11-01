@@ -67,6 +67,13 @@ export const Board: Story = {
     const answering = page.getByRole('region', { name: 'Answering' });
     await expect(top(answering) - bottom(card)).toBe(16);
     await expect(page.getByRole('switch', { name: 'Answering' })).toHaveAccessibleDescription('Claude answers under your rules.');
+    const switchRow = within(answering).getByRole('switch', { name: 'Answering' });
+    await expect(Math.round(within(switchRow).getByText('Answering', { exact: true }).getBoundingClientRect().left)).toBe(
+      Math.round(within(business).getByText('Business', { exact: true }).getBoundingClientRect().left),
+    );
+    await expect(Math.round(answering.getBoundingClientRect().height)).toBe(91);
+    await expect(top(switchRow) - top(answering)).toBe(21);
+    await expect(bottom(answering) - bottom(switchRow)).toBe(21);
 
     // Delete this Desk 16 px under: the heading, the line 8 px under it, and the neutral button 8 px under that, at the left.
     const remove = page.getByRole('region', { name: 'Delete this Desk' });

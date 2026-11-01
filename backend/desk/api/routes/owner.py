@@ -91,10 +91,12 @@ class CopyRequest(BaseModel):
 async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup]]:
     """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
     unfinished setup interviews by Desk ID, from the API's own rows."""
-    desks = [row for row in await ctx.ro.desks() if row["desk_id"] in ctx.desk_ids]
+    # Deleted Desks still consume pending setup claims; whoami lists only the active Desks to show.
+    all_desks = await ctx.ro.desks()
+    desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    return desks, businesses, await owner_reads.unfinished_setups(ctx)
+    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks)
 
 
 def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup]) -> DeskSummary:

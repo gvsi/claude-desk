@@ -34,6 +34,7 @@ from desk.api.store import Ids
 from desk.contracts import AgentAuth, DemoAgentIssued, ReplyDraft
 from desk.kernel_api import CheckReplyRequest, CreateCopyRequest, DemoAgentRequest
 from tests.api.fakes import ScriptedModel, gated, response, tool_use
+from tests.api.notes import conversation_notes
 from tests.api.test_approvals import jobs_done, resolved
 from tests.api.test_public_chat import DISCOUNTED_QUOTE, reply
 from tests.api.test_secrets_at_rest import at_rest
@@ -1076,7 +1077,8 @@ async def test_an_agents_verified_note_is_written_once(app, browser, fake, kerne
     # The kernel verifies the session, then the note can't be written: the request answers 500, and nothing is noted.
     with notes_fail(monkeypatch):
         disclosed_error(await agent.send("Here is the code", verify_code=code), 500, "internal")
-    assert fake.sessions[agent.session_id].verified and await messages(engine, agent.session_id, "note") == []
+    assert fake.sessions[agent.session_id].verified and await conversation_notes(
+        engine, agent.session_id, "text", "wake") == []
 
     # Sent again under a new nonce, the kernel answers that the session is verified: the note is written now, and
     # Claude reads it. Once noted, it isn't again.
@@ -1084,7 +1086,7 @@ async def test_an_agents_verified_note_is_written_once(app, browser, fake, kerne
     assert (await agent.send("Here is the code", verify_code=code)).status_code == 200
     assert "The visitor verified as the contact on record." in model_text(model.requests[-1])
     assert (await agent.send("Here it is again", verify_code=code)).status_code == 200
-    assert await messages(engine, agent.session_id, "note") == [
+    assert await conversation_notes(engine, agent.session_id, "text", "wake") == [
         ("The visitor verified as the contact on record.", True)]
 
 

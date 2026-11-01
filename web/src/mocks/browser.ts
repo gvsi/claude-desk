@@ -7,6 +7,7 @@
 import { http, HttpResponse } from 'msw';
 import { setupWorker } from 'msw/browser';
 
+import { mockDrain } from '../test/mockDrain.ts';
 import { EPOCH_HEADER, EPOCH_PARAM, createHandlers, unstamped } from './handlers.ts';
 import { mockStore } from './store.ts';
 
@@ -52,7 +53,12 @@ export function stampRequests(): void {
     if (!isApi(input instanceof Request ? input.url : input)) return pageFetch(input, init);
     const request = new Request(input, init);
     request.headers.set(EPOCH_HEADER, String(mockStore.epoch));
-    return pageFetch(request);
+    const finish = mockDrain.trackFetch(request);
+    try {
+      return await pageFetch(request);
+    } finally {
+      finish();
+    }
   };
   const PageEventSource = window.EventSource;
   window.EventSource = class extends PageEventSource {
