@@ -63,11 +63,14 @@ db-roles:
 	fi
 
 # For a database thrown away after the run, as each CI job's is: skip durable commits (no WAL flush
-# at commit, no fsync), since the tests spend much of their time committing. A crash loses only the
-# run. Never on a database whose data matters; `ALTER SYSTEM RESET ALL` and a reload undo it.
+# at commit, no fsync), since the tests spend much of their time committing. ALTER SYSTEM changes the
+# whole Postgres instance, and a crash with fsync off can corrupt it, so the target refuses to run
+# unless CI is set: never on a database whose data matters, such as docker-compose's. Discard the
+# instance afterwards rather than turning the settings back on.
 db-throwaway: DB_NAME ?= desk
 db-throwaway:
-	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+	@if [ -z "$$CI" ]; then echo "db-throwaway: only for CI's throwaway database (CI isn't set): it turns off durable commits for the whole Postgres instance" >&2; exit 1; fi; \
+	if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	PGPASSWORD="$$DESK_ADMIN_PASSWORD" psql -X -q -o /dev/null -v ON_ERROR_STOP=1 -h "$(DB_HOST)" -p "$(DB_PORT)" -U desk_admin \
 		-d "$(DB_NAME)" -c 'ALTER SYSTEM SET fsync = off' -c 'ALTER SYSTEM SET synchronous_commit = off' \
 		-c 'ALTER SYSTEM SET full_page_writes = off' -c 'SELECT pg_reload_conf()'
