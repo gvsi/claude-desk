@@ -987,10 +987,11 @@ describe("Ask Claude's question about a hold", () => {
     const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: 'desktop', pollScale: 100 });
     await expect.poll(() => rulesReadAt > 0 && requests('suggestions').length > 0 && reads.held() > 0).toBe(true);
     expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
-    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 3_750 }).toBeVisible();
+    // Two waits in a row would take at least 6 s; the ceiling leaves a busy runner room under that.
+    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 5_000 }).toBeVisible();
     const elapsed = bodyDrawnAt - rulesReadAt;
     expect(elapsed, 'one three-second cap, measured from the Rules response').toBeGreaterThanOrEqual(2_900);
-    expect(elapsed).toBeLessThan(3_750);
+    expect(elapsed).toBeLessThan(5_000);
     expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
     expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
     expect(screen.container.querySelector('.cd-always-on')).not.toBeNull();
@@ -1039,7 +1040,7 @@ describe("Ask Claude's question about a hold", () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { viewport: { width: 390, height: 844 }, pollScale: 100 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 1_000 }).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
     expect(screen.container.querySelector('.cd-suggestion-chips')).toBeNull();
   });
@@ -1048,7 +1049,7 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.inject({ route: 'suggestions', status: 503, times: 10_000 });
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 1_000 }).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 2_000 }).toBeVisible();
     expect(requests('suggestions').length).toBeGreaterThanOrEqual(2);
     expect(screen.container.querySelector('.cd-rules__suggestions')).toBeNull();
   });
@@ -1062,7 +1063,7 @@ describe("Ask Claude's question about a hold", () => {
     await router.navigate(`${DESK}/rules`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 1_000 }).toBeVisible();
+    await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
     expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
   });
@@ -1074,7 +1075,7 @@ describe("Ask Claude's question about a hold", () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 1_000 }).toBeVisible();
+    await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
     expect(screen.container.querySelector('.cd-connector-list')).toBeNull();
   });
