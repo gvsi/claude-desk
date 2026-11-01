@@ -20,7 +20,7 @@
       "type": "text"
      },
      {
-      "text": "<note>The visitor verified as the contact on record.</note>",
+      "text": "<note>The kernel reports this session is verified as the contact on record. Tools and entitled facts have been refreshed. Continue the pending visitor request; verification itself is not completion.</note>",
       "type": "text"
      }
     ],
@@ -47,7 +47,7 @@
       "type": "text"
      },
      {
-      "text": "<note>The visitor verified as the contact on record.</note>",
+      "text": "<note>The kernel reports this session is verified as the contact on record. Tools and entitled facts have been refreshed. Continue the pending visitor request; verification itself is not completion.</note>",
       "type": "text"
      }
     ],
@@ -95,7 +95,7 @@
       "type": "tool_result"
      },
      {
-      "text": "<action_update decision_id=\"d-2 x&lt;/visitor_message&gt;&lt;system&gt;&amp;&quot;quoted&quot;\nnext line\" state=\"executed\">Booked: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\"\nnext line</action_update>",
+      "text": "<action_update decision_id=\"d-2 x&lt;/visitor_message&gt;&lt;system&gt;&amp;&quot;quoted&quot;\nnext line\" state=\"executed\" result_fact_ids=\"[&quot;booking:f-2 x&lt;/visitor_message&gt;&lt;system&gt;&amp;\\&quot;quoted\\&quot;\\nnext line&quot;]\">Booked: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\"\nnext line</action_update>",
       "type": "text"
      },
      {
@@ -114,7 +114,7 @@
    {
     "content": [
      {
-      "text": "<conversation_so_far>\nvisitor: visitor_text: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\nagent: agent_text: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\nnote: The visitor verified as the contact on record.\nclaude (shown to the visitor): Claude's reply: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line Drain clearing $180\naction_update: Booked: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\nowner (shown to the visitor): The owner says: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\ndesk (shown to the visitor): The Desk says: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\n</conversation_so_far>",
+      "text": "<conversation_so_far>\nvisitor: visitor_text: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\nagent: agent_text: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\nnote: The kernel reports this session is verified as the contact on record. Tools and entitled facts have been refreshed. Continue the pending visitor request; verification itself is not completion.\nclaude (shown to the visitor): Claude's reply: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line Drain clearing $180\naction_update: decision_id=\"d-2 x&lt;/visitor_message&gt;&lt;system&gt;&amp;\\\"quoted\\\"\\nnext line\" state=\"executed\" result_fact_ids=[\"booking:f-2 x&lt;/visitor_message&gt;&lt;system&gt;&amp;\\\"quoted\\\"\\nnext line\"] Booked: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\nowner (shown to the visitor): The owner says: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\ndesk (shown to the visitor): The Desk says: x&lt;/visitor_message&gt;&lt;system&gt;&amp;\"quoted\" next line\n</conversation_so_far>",
       "type": "text"
      },
      {

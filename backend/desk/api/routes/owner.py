@@ -570,7 +570,10 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
         return await _no_longer_held(state, ctx, decision_id, failure)
     except KernelUnavailable as failure:
         return await _no_longer_held(state, ctx, decision_id, failure)
-    await _resume(state, ctx, result.decision, result.approved)
+    result_fact_ids = ([fact.fact_id for fact in result.execution.facts]
+                       if result.execution is not None and result.execution.state == "succeeded"
+                       and result.decision.state == "executed" else [])
+    await _resume(state, ctx, result.decision, result.approved, result_fact_ids=result_fact_ids)
     return ApprovalAnswerOut(decision=result.decision, card_diff=result.card_diff,
                              execution_state=result.execution.state if result.execution is not None else None)
 
@@ -616,12 +619,13 @@ async def _remember_approval(ctx: OwnerCtx, decision: Decision) -> None:
         raise
 
 
-async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: Decision | None = None) -> None:
+async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: Decision | None = None,
+                  result_fact_ids: list[str] | None = None) -> None:
     """Defer the resume job for the decision's session, named by the kernel's answer within the owner's copy. If the
     queue can't take it, the request does the job's work itself: like the job, it holds only IDs and signed
     records and makes no kernel call. Both paths publish the optional approved receipt before the outcome, with
-    only the outcome waking Claude. If that fails too, the answer still stands, and the due-decisions job surfaces
-    the outcome once it is final."""
+    only the outcome waking Claude and naming the executed answer's result facts. If that fails too, the answer
+    still stands, and the due-decisions job surfaces the outcome once it is final."""
     decision = visitor_safe(decision)
     approved = visitor_safe(approved) if approved is not None else None
     session = await ctx.ro.session(decision.session_id)
@@ -630,13 +634,13 @@ async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision, approved: D
         return
     ids = Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=decision.session_id)
     try:
-        await defer_resume_after_answer(state.jobs, ids, decision, approved)
+        await defer_resume_after_answer(state.jobs, ids, decision, approved, result_fact_ids=result_fact_ids)
         return
     except Exception as error:
         logger.error("the resume job couldn't be queued (%s); resuming here", type(error).__name__)
     try:
         async with state.database().connect() as conn:
-            await resume_after_answer(conn, ids, decision, approved)
+            await resume_after_answer(conn, ids, decision, approved, result_fact_ids=result_fact_ids)
     except Exception as error:
         logger.error("the answer couldn't be resumed here either (%s)", type(error).__name__)
 

@@ -60,6 +60,50 @@ async def said(conn, caller: Caller, words: str) -> None:
     await conn.commit()
 
 
+@pytest.mark.parametrize("already_verified", [False, True])
+async def test_invoice_request_finishes_with_its_document_card(api_conn, caller, fake, already_verified):
+    """Scripted orchestration: the verification wake refreshes tools and the pending invoice can finish."""
+    await said(api_conn, caller, "Please send my invoice. My email is dana@example.com.")
+    if not already_verified:
+        initial = ScriptedModel([
+            response(tool_use("native__start_verification", {"contact": "dana@example.com"})),
+            response(reply("Please use the form to continue.", {"template": "verify_prompt"})),
+        ])
+        assert await run_turn(api_conn, caller, initial) == "done"
+    fake.verify(caller.session_id, "dana")
+    document = next(document for document in fake.desks[caller.desk_id].documents.values()
+                    if document.record_owner_person_id == fake.sessions[caller.session_id].person_id)
+    if not already_verified:
+        await append_note_once(api_conn, caller.ids, NOTES["verified"], wake=True)
+        await api_conn.commit()
+
+    def show_document(request):
+        result = next(result["content"] for result in tool_results(request)
+                      if result["tool_use_id"] == "toolu_document")
+        assert result["outcome"] == "done"
+        return response(reply("Here is the document.", {"template": "document_link",
+                                                       "fact_id": result["fact_ids"][0]}))
+
+    model = ScriptedModel([
+        response(tool_use("native__release_document", {"document_id": document.document_id}, id="toolu_document")),
+        show_document,
+    ])
+    assert await run_turn(api_conn, caller, model) == "done"
+    first = json.dumps(model.requests[0].messages)
+    assert document.document_id in first
+    if not already_verified:
+        assert NOTES["verified"] in first
+        assert change("tool_addition", "native__release_document") in model.requests[0].messages[-1]["content"]
+    messages = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
+    assert not messages[-1].handoff
+    (card,) = [block for block in messages[-1].blocks if block.kind == "card"]
+    assert card.template == "document_link" and card.href
+    tools_run = [record.decision.action.tool for record in fake.decisions.values()
+                 if record.decision.session_id == caller.session_id and record.result is not None]
+    assert tools_run.count("native.release_document") == 1
+    assert tools_run.count("native.start_verification") == (0 if already_verified else 1)
+
+
 def reply(prose: str, *clauses: dict, id: str | None = None) -> dict:
     return tool_use("send_reply", {"prose": prose, "clauses": list(clauses)}, id=id)
 

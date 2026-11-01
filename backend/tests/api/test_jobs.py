@@ -7,6 +7,8 @@ what they leave is read with the visitor's own credential on the session's next 
 """
 
 import asyncio
+import json
+from xml.etree import ElementTree
 from datetime import timedelta
 
 import pytest
@@ -37,12 +39,13 @@ from desk.api.jobs import (
     surface_due_decisions,
 )
 from desk.api.runner import TurnRunner
+from desk.api.loop import run_turn
 from desk.api.sse import append_control, unhandled_controls
 from desk.api.tools import Caller
 from desk.contracts import Decision, ToolCall
 from desk.db.session import procrastinate_connector
 from desk.kernel_api import AnswerRequest, CreateCopyRequest, CreateSessionRequest, DecideRequest, ExecuteRequest
-from tests.api.fakes import ScriptedModel
+from tests.api.fakes import ScriptedModel, response, tool_use
 
 DRAIN = {"items": [{"item_id": "drain", "qty": 1}]}
 
@@ -88,6 +91,62 @@ async def show(engine, caller: Caller, decision: Decision, phase: str) -> None:
     async with engine.connect() as conn:
         await deliver(conn, caller.ids, Status(decision, phase))
         await conn.commit()
+
+
+async def test_an_approved_booking_is_shown_with_its_result_card(copy, engine):
+    caller = await copy.visitor()
+    desk = copy.fake.desks[caller.desk_id]
+    slot = next(iter(desk.slots))
+    copy.fake.script("native.book", outcome="hold")
+    held = await caller.kernel.call("POST /decide", DecideRequest(
+        session_id=caller.session_id, generation=0,
+        call=ToolCall(call_id="approved-booking", tool="native.book", args={"slot_id": slot})))
+    assert held.state == "held"
+    executed = await copy.answer(held)
+    result = copy.fake.decisions[held.decision_id].result
+    (fact,) = result.facts
+    assert executed.state == "executed" and fact.kind == "booking"
+
+    def show_booking(request):
+        updates = [ElementTree.fromstring(block["text"]) for message in request.messages
+                   for block in message["content"] if block.get("type") == "text"
+                   and block["text"].startswith("<action_update ")]
+        assert json.loads(updates[0].attrib["result_fact_ids"]) == [fact.fact_id]
+        return response(tool_use("send_reply", {"prose": "Here are the details of your request.",
+                                                "clauses": [{"template": "booking_confirmed",
+                                                             "fact_id": fact.fact_id}]}))
+
+    async with engine.connect() as conn:
+        await resume_after_answer(conn, caller.ids, executed, result_fact_ids=[fact.fact_id])
+        assert await run_turn(conn, caller, ScriptedModel([show_booking])) == "done"
+        messages = (await conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s"
+                                            " AND type = 'message'"), {"s": caller.session_id})).scalars().all()
+    assert [block["fact_id"] for message in messages for block in message["blocks"]
+            if block.get("template") == "booking_confirmed"] == [fact.fact_id]
+    assert len([entry for entry in desk.ledger if entry.event.kind == "execute"
+                and entry.event.summary.get("decision_id") == held.decision_id]) == 1
+
+
+async def test_resume_carries_only_result_ids_on_executed_updates(copy, engine):
+    caller = await copy.visitor()
+    held = await copy.decide(caller, "with-result", discount_bp=1500)
+    executed = await copy.answer(held)
+    fact_ids = [fact.fact_id for fact in copy.fake.decisions[held.decision_id].result.facts]
+    async with engine.connect() as conn:
+        assert await resume_after_answer(conn, caller.ids, executed, result_fact_ids=fact_ids)
+        block = (await conn.execute(text("SELECT model_content FROM app.messages WHERE session_id = :s"
+                                         " AND kind = 'action_update'"), {"s": caller.session_id})).scalar_one()
+    update = ElementTree.fromstring(block["text"])
+    assert json.loads(update.attrib["result_fact_ids"]) == fact_ids
+    assert update.attrib["decision_id"] == held.decision_id
+    for state in ("denied", "expired"):
+        other = await copy.visitor()
+        decision = (await copy.decide(other, state, discount_bp=1500)).model_copy(update={"state": state})
+        async with engine.connect() as conn:
+            await resume_after_answer(conn, other.ids, decision, result_fact_ids=fact_ids)
+            block = (await conn.execute(text("SELECT model_content FROM app.messages WHERE session_id = :s"
+                                             " AND kind = 'action_update'"), {"s": other.session_id})).scalar_one()
+        assert "result_fact_ids" not in ElementTree.fromstring(block["text"]).attrib
 
 
 async def session_rows(engine, session_id: str) -> dict[str, list]:
