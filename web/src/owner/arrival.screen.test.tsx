@@ -9,15 +9,17 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import { observeRequests } from '../api/http.ts';
+import { newIdempotencyKey, observeRequests } from '../api/http.ts';
 import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
+import type { SetupState } from '../api/views.ts';
 import { BREAK_IT_IDEAS } from '../lib/breakItIdeas.ts';
 import { readLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
 import { copyOut } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
+import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdReads } from '../test/holdReads.ts';
 import { renderRoute, VIEWPORTS } from '../test/renderRoute.tsx';
@@ -1995,6 +1997,48 @@ describe('Things to try ticks off', () => {
     await things.getByRole('button', { name: 'Hide this list' }).click();
     await expect.element(things).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: 'Show things to try' })).toHaveFocus();
+  });
+
+  it('a_desk_made_in_setup_ticks_create_only_once_it_is_live', async () => {
+    // The owner starts a Desk of their own and takes its setup up to going live, with Answering
+    // turned on early: the copy lists it, still naming its setup.
+    const started = await mockStore.dispatch('startSetup', {
+      body: {
+        description: "I'm Lena, and Lena's Bike Repair fixes bikes in Berkeley, Monday to Saturday.",
+        timezone: 'America/Los_Angeles',
+        idempotency_key: newIdempotencyKey(),
+      },
+    });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const { interview_id: id, desk_id: made } = started.body as SetupState;
+    const step = async (key: RouteKey, body?: unknown) => {
+      const answer = await mockStore.dispatch(key, { params: { id }, body });
+      if ('network' in answer || answer.status !== 200) throw new Error(`the mock answers ${key}`);
+    };
+    await step('setupConsent', { allow: false });
+    for (const question of SETUP_QUESTIONS) await step('setupAnswer', { question: question.key, text: 'Yes, that works.' });
+    for (const key of ['setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm'] as const) await step(key);
+    const answering = await mockStore.dispatch('setAnswering', { params: { desk_id: made }, body: { on: true } });
+    if ('network' in answering || answering.status !== 200) throw new Error('the mock sets Answering');
+
+    // Its Today says it isn't live yet, so "Create your own Desk" waits: no done line, no tick.
+    const inSetup = await renderRoute(`/app/${made}/today`);
+    await expect.element(inSetup.screen.getByRole('heading', { name: /^Finish setting up/ })).toBeVisible();
+    const waiting = thingRow(inSetup.screen, 'Create your own Desk');
+    await expect.element(waiting).toBeVisible();
+    expect(waiting.getByText('Done. Your new Desk is live.', { exact: true }).elements()).toHaveLength(0);
+    expect(waiting.getByText('Done', { exact: true }).elements()).toHaveLength(0);
+    await expect.element(waiting.getByRole('link', { name: 'Start a Desk' })).toBeVisible();
+    await expect.element(thingsToTry(inSetup.screen).getByText('About 10 minutes. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    // It goes live: the row ticks with its done line.
+    await step('goLive');
+    const live = await renderRoute(`/app/${made}/today`);
+    const done = thingRow(live.screen, 'Create your own Desk');
+    await expect.element(done.getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+    expect(done.getByText('Done', { exact: true }).elements()).toHaveLength(1);
+    await expect.element(thingsToTry(live.screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(live.screen.getByRole('heading', { name: /^Finish setting up/ }).elements()).toHaveLength(0);
   });
 
   it('count_reads_of_4_before_anything_is_held', async () => {

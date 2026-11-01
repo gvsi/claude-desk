@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DecisionState, EvMessage, LedgerEntry, LedgerEvent } from '../../api/contracts.ts';
 import type { Attempt, BusinessOut, ConversationSummary, DeskSummary, OwnerTranscript, TranscriptItem } from '../../api/views.ts';
+import { isLive } from '../useDesks.ts';
 import {
   NOTHING_DONE,
   answeredInView,
@@ -276,11 +277,29 @@ describe('the Desk the copy started with', () => {
 describe('create your own Desk', () => {
   it('a Desk besides the one the copy started with counts', () => {
     expect(madeAnotherDesk([business('biz-rivera', [desk('desk-main')]), business('biz-new', [desk('desk-new')])], 'desk-main')).toBe(true);
+    expect(
+      madeAnotherDesk([business('biz-rivera', [desk('desk-main')]), business('biz-new', [{ ...desk('desk-new'), answering: false }])], 'desk-main'),
+    ).toBe(true);
     expect(madeAnotherDesk([business('biz-rivera', [desk('desk-main')])], 'desk-main')).toBe(false);
   });
 
   it('once the first Desk is deleted, the Desks still listed are the others', () => {
     expect(madeAnotherDesk([business('biz-new', [desk('desk-new')])], 'desk-main')).toBe(true);
+  });
+
+  it("a Desk still in setup isn't one until it goes live, Answering on or not, the first Desk listed or deleted", () => {
+    const inSetup: DeskSummary = { ...desk('desk-new'), answering: true, setup: { interview_id: 'int-new', step: 'preview' } };
+    const main = business('biz-rivera', [desk('desk-main')]);
+    expect(madeAnotherDesk([main, business('biz-new', [inSetup])], 'desk-main')).toBe(false);
+    expect(madeAnotherDesk([business('biz-new', [inSetup])], 'desk-main')).toBe(false);
+    expect(madeAnotherDesk([main, business('biz-new', [{ ...inSetup, setup: null }])], 'desk-main')).toBe(true);
+  });
+
+  it('a Desk listed without its setup counts as live, as Today reads it', () => {
+    const { setup: _setup, ...withoutSetup } = desk('desk-new');
+    const live = withoutSetup as DeskSummary;
+    expect(isLive(live)).toBe(true);
+    expect(madeAnotherDesk([business('biz-rivera', [desk('desk-main')]), business('biz-new', [live])], 'desk-main')).toBe(true);
   });
 });
 
