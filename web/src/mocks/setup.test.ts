@@ -313,7 +313,7 @@ describe('setup consultant run and decisions', () => {
     expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
   });
 
-  it('holds_decisions_and_card_answers_as_202_busy_and_refuses_concurrent_mutations', async () => {
+  it('holds_decisions_and_card_answers_as_202_busy_and_does_not_apply_concurrent_turns', async () => {
     for (const action of ['decision', 'answer'] as const) {
       let state = await cpaAt('schedule');
       const id = state.interview_id;
@@ -324,9 +324,14 @@ describe('setup consultant run and decisions', () => {
       });
       expect(response).toMatchObject({ status: 202, body: { busy: true, pending_card: proposal_id } });
       if (action === 'answer' && !('network' in response)) expect((response.body as SetupState).messages.at(-1)).toMatchObject({ role: 'owner', text: 'Yes' });
-      expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id }, body: { accept: false } })).toMatchObject({ status: 409 });
-      expect(await mockStore.dispatch('setupSuggestions', { params: { id }, body: {} })).toMatchObject({ status: 409 });
-      expect(await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: null, card: proposal_id, text: 'No' } })).toMatchObject({ status: 409 });
+      for (const [key, target, body] of [
+        ['setupProposal', proposal_id, { accept: false }],
+        ['setupProposal', 'unknown', { accept: true }],
+        ['setupSuggestions', undefined, {}],
+        ['setupAnswer', undefined, { question: null, card: proposal_id, text: 'No' }],
+      ] as const) {
+        expect(await mockStore.dispatch(key, { params: { id, ...(target ? { proposal_id: target } : {}) }, query: { cards: '1' }, body })).toEqual(response);
+      }
       release();
       state = await setupState('setup', id);
       expect(state.busy).toBe(false);

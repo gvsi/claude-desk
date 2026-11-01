@@ -1074,6 +1074,7 @@ export const SETUP_ROUTES: ServedRoutes = {
   setupAnswer(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
+    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
     const body = isRecord(req.body) ? req.body : {};
     const { text, question, card } = body;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX) return INVALID;
@@ -1082,7 +1083,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { interview } = found;
     const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
     // An answer to a question the interview has moved past is refused, never applied to the next one.
-    if (interview.state.step !== 'questions' || interview.state.busy) return CONFLICT;
+    if (interview.state.step !== 'questions') return CONFLICT;
     if (cardAnswer ? card !== interview.state.pending_card : at === -1 || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
     // One turn at a time, as the API runs them: another answer while one is running is refused.
     if (interview.running !== null) return CONFLICT;
@@ -1110,10 +1111,11 @@ export const SETUP_ROUTES: ServedRoutes = {
   setupProposal(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
+    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
     const { interview } = found;
     const proposal = interview.state.messages.find((message) => message.card?.proposal_id === req.params.proposal_id)?.card;
     if (!proposal) return NOT_FOUND;
-    if (interview.state.step !== 'questions' || interview.state.busy || interview.running !== null) return CONFLICT;
+    if (interview.state.step !== 'questions' || interview.running !== null) return CONFLICT;
     if (proposal.proposal_id !== interview.state.pending_card || proposal.state !== 'proposed') return CONFLICT;
     const body = isRecord(req.body) ? req.body : {};
     if (req.malformed || typeof body.accept !== 'boolean') return INVALID;
@@ -1156,8 +1158,9 @@ export const SETUP_ROUTES: ServedRoutes = {
   setupSuggestions(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
+    if (found.interview.state.busy) return { status: 202, body: stateOf(found.interview, req.query) };
     const { interview } = found;
-    if (interview.state.step !== 'questions' || interview.state.consent === null || interview.state.busy || interview.running !== null) return CONFLICT;
+    if (interview.state.step !== 'questions' || interview.state.consent === null || interview.running !== null) return CONFLICT;
     if (req.malformed || !isRecord(req.body) || Object.keys(req.body).length !== 0) return INVALID;
     interview.usedSuggestions = true;
     say(interview, 'owner', 'Use your suggestions');

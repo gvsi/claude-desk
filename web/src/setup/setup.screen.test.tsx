@@ -3528,6 +3528,38 @@ describe('consultant setup', () => {
     expect(card.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
   });
 
+  it.each(['answer', 'decision'] as const)('keeps_an_unapplied_%s_after_another_runs_202_and_poll', async (action) => {
+    const state = await consultantAt('schedule');
+    const id = state.interview_id;
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: 'phone' });
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
+    const card = screen.getByRole('article', { name: 'Book a free intro call', exact: true });
+    await expect.element(card).toBeVisible();
+    const complete = holdNextAnswer(mockStore.world, id);
+    let released = false;
+    const release = () => { if (!released) { released = true; complete(); } };
+    onTestFinished(release);
+    expect(await mockStore.dispatch('setupAnswer', { params: { id }, query: { cards: '1' }, body: { question: null, card: state.pending_card, text: 'How would that work?' } })).toMatchObject({ status: 202, body: { busy: true } });
+    const key = action === 'answer' ? 'setupAnswer' : 'setupProposal';
+    const sent = requests(key).length;
+    if (action === 'answer') { await box.fill('Keep these words for my next answer.'); await userEvent.keyboard('{Enter}'); }
+    else await card.getByRole('button', { name: 'Set it up', exact: true }).click();
+    await expect.poll(() => requests(key).length).toBe(sent + 1);
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(box).toBeDisabled();
+    release();
+    await expect.element(box).toBeEnabled();
+    if (action === 'answer') await expect.element(box).toHaveValue('Keep these words for my next answer.');
+    else await expect.element(card.getByRole('button', { name: 'Set it up', exact: true })).toBeEnabled();
+    expect(card.getByText('Set up', { exact: true }).elements()).toHaveLength(0);
+    expect(card.getByText('I couldn’t save that just now. Try again.', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
+    const current = await mockStore.dispatch('setup', { params: { id }, query: { cards: '1' } });
+    expect(current).toMatchObject({ status: 200, body: { pending_card: state.pending_card, busy: false } });
+    if ('network' in current) throw new Error('read failed');
+    expect((current.body as SetupState).messages.some(({ role, text }) => role === 'owner' && text === 'Keep these words for my next answer.')).toBe(false);
+  });
+
   it('a_202_decision_keeps_the_pressed_button_busy_and_polls_the_next_card', async () => {
     const state = await consultantAt('schedule');
     const release = holdNextDecision(mockStore.world, state.interview_id);

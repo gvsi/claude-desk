@@ -177,7 +177,9 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     setAmountRequired(null);
     setSuggestionsError(null);
     try {
-      onState(await request('setupAnswer', { params: { id }, body: answer.question === null ? { question: null, card: answer.card, text: answer.text } : { question: answer.question, text: answer.text } }));
+      const next = await request('setupAnswer', { params: { id }, body: answer.question === null ? { question: null, card: answer.card, text: answer.text } : { question: answer.question, text: answer.text } });
+      onState(next);
+      if (next.busy === true && outcomeOf(next, answer) !== 'taken') setRefill({ text: answer.text });
       setSending(null);
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
@@ -298,7 +300,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     if (refill === null || !box || box.disabled) return;
     fillComposer(box, refill.text, { focus: false });
     setRefill(null);
-  }, [refill, sending, retrying, failed]);
+  }, [refill, sending, retrying, failed, busy]);
 
   useEffect(() => {
     // Disabling the textarea drops focus to the page. An owner's move elsewhere cancels its return,
