@@ -57,6 +57,10 @@ from .test_owner_messages import sent
 from .test_reply_check import checked
 from .test_verification import check, code_in, entry_of, started
 
+# A reply in another language: a failure no rewrite fixes, so the handoff card shows and opens the card handoff
+# these cases need, where a prose-only block would show the call-back offer and open none.
+OTHER_LANGUAGE = "Bonjour, je peux vous aider."
+
 # The tables whose rows the kernel locks, in the order it locks them (repo.py); `handoffs` stands
 # for an adapter's own rows.
 LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "people", "verification_challenges",
@@ -409,13 +413,13 @@ async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, clie
     _, visitor = await visitor_of(app, client)
     frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written
     with lock_log(app) as log:
-        assert not (await checked(client, visitor, "That will be $180.")).ok
+        assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok
     # the session row, then the handoffs (the session's open ones, none, then the card's, inserted), then the
     # handoff's entry and the verdict's; the owner's alert is an insert under a fresh key
     assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
     frozen_clock.advance(1)
     with lock_log(app) as log:
-        assert not (await checked(client, visitor, "That will be $180.")).ok
+        assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok
     # the open one, held FOR SHARE so the owner can't mark it done meanwhile, and only the verdict's entry
     assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
@@ -423,7 +427,7 @@ async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, clie
 
 async def test_a_reply_backed_by_an_open_handoff_keeps_the_lock_order(app, client, frozen_clock):
     _, visitor = await visitor_of(app, client)
-    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card opens a handoff
     frozen_clock.advance(1)
     with lock_log(app) as log:
         assert (await checked(client, visitor, "Maria Rivera will reply here.")).ok
@@ -542,7 +546,7 @@ async def test_deleting_a_desk_runs_in_the_lock_order(app, client):
 
 async def test_a_call_back_taking_over_a_card_handoff_runs_in_the_lock_order(app, client):
     _, visitor = await visitor_of(app, client)
-    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card opens a handoff
     allowed = await decided(client, visitor, "native.request_callback", CALLBACK)
     with lock_log(app) as log:
         assert (await executed(client, visitor, allowed)).state == "succeeded"
@@ -584,7 +588,7 @@ async def test_closing_a_handoff_runs_in_the_lock_order(app, client):
 @pytest.mark.parametrize("how", ["takeover", "owner_message"])
 async def test_the_owner_handling_a_conversation_closes_its_card_handoff_in_the_lock_order(app, client, how):
     copy, visitor = await visitor_of(app, client)
-    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card's handoff opens
+    assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card's handoff opens
     with lock_log(app) as log:
         if how == "takeover":
             await set_mode(client, copy, visitor.session_id, "owner", 0)
@@ -610,7 +614,7 @@ async def test_a_booking_runs_in_the_lock_order(app, client, reviewer):
 
 async def test_a_booking_closing_a_card_handoff_runs_in_the_lock_order(app, client, reviewer):
     _, visitor = await visitor_of(app, client)
-    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card opens a handoff
     reviewer.answer = PASS
     allowed = await book(client, visitor, "S-20261102-1400")
     with lock_log(app) as log:

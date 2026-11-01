@@ -84,6 +84,9 @@ BOOKING_CLAIM = "it said a booking was made instead of showing the card"
 REPLY_WHY_BY_RULE = {
     "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
     "soft.jev": "a second check flagged a promise the business's records don't back",
+    # The owner's wording of 2026-11-01: chats render Markdown.
+    "markdown.link": "it linked to a site the business's contact details don't name",
+    "markdown.image": "it included an image",
     # Proposed wording awaiting the owner's sign-off.
     "policy_combined": "it cited a policy line the checkpoint now withholds",
     "soft.unavailable": "the checkpoint wasn't available",

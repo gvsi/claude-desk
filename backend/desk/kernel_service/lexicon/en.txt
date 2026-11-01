@@ -40,7 +40,9 @@ date	mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?
 date	january|february|march|april|june|july|august|september|october|november|december
 date	(?:(?<=[^\W\d_] )|(?<=[^\W\d_], )|(?:in|on|by|until|till|next|this|early|late|mid|last)[\s-]+)(?-i:May)
 date	today|tonight|tomorrow|yesterday|weekends?|noon|midnight|o['’]?clock
-date	(?:next|this|last)[\s-]+(?:week|month|year)|this[\s-]+(?:morning|afternoon|evening)
+# "Last year" is no date, and a year's possessive ("this year's return") names a thing, not a time (the
+# owner's decision of 2026-11-01): "this year" and "next year" are dates otherwise.
+date	(?:next|this|last)[\s-]+(?:week|month)|(?:next|this)[\s-]+year(?![’']s\b)|this[\s-]+(?:morning|afternoon|evening)
 date	[ap]\.\s?m\.?|pm
 date	same[\s-]{0,3}day
 # A time soon: "in" or "within" and up to three words before minutes or hours ("in an hour",

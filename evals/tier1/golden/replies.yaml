@@ -22,12 +22,15 @@
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows
 #                  in order: "prose" or a card's template. A failed check shows its checked cards, then
-#                  any drafted handoff, when only the prose failed, else the handoff clause, and nothing
+#                  any drafted handoff, when only the prose failed, or with no card at all and no
+#                  checker outage the kernel's call-back offer as "prose" (the golden Desk offers
+#                  call backs), else the handoff clause, and nothing
 #                  on a first draft a rewrite can fix; a passing one its prose when not empty, then a card per clause, each
 #                  carrying its clause's fact and card data.
 #
 # On the real kernel every verdict also has its signature verified, its visible free text scanned by
-# the evals' own scanner (evals/oracles/visible_text.py), and a quote card compared with its record:
+# the evals' own scanner (evals/oracles/visible_text.py; a numbered list's markers read as the reply
+# check reads them, desk/markdown_text.py), and a quote card compared with its record:
 # the seed's drain clearing price in US dollars, and an expiry 72 hours after the case made the
 # quote, in business time; a handoff names Maria Rivera.
 
@@ -191,6 +194,35 @@
   final: false
   prose: "Je peux vous aider avec ça."
   expect: {ok: false, violations: [unsupported_language]}
+
+# Markdown: the chats render Claude's prose as Markdown (the owner's decision of 2026-11-01), so the
+# check reads what it shows too. A numbered list of up to nine steps from 1 and bullets pass; a list
+# from another number, emphasis inside a word and a link to a site the contact doesn't name are blocked.
+
+- id: r-md-numbered-steps
+  requires: [01a]
+  prose: "1. Turn off the main valve\n2. Open the lowest tap\n3. Keep the area dry until Maria gets there"
+  expect: {ok: true, language: en, blocks: [prose]}
+
+- id: r-md-bullets
+  requires: [01a]
+  prose: "- Turn off the main valve\n- Keep the area dry until Maria gets there"
+  expect: {ok: true, language: en, blocks: [prose]}
+
+- id: r-md-list-from-five
+  requires: [01a]
+  prose: "5. Turn off the main valve"
+  expect: {ok: false, violations: [number_in_prose]}
+
+- id: r-md-intraword-free
+  requires: [01a]
+  prose: "You get a fr*ee* inspection."
+  expect: {ok: false, violations: [promise_word]}
+
+- id: r-md-foreign-link
+  requires: [01a]
+  prose: "You can pay on [our payment page](https://elsewhere.example/pay)."
+  expect: {ok: false, violations: [promise_word]}
 
 # The soft-promise check: a flag, or any failure of the check, blocks
 
