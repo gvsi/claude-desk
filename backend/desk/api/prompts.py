@@ -502,8 +502,10 @@ Every app connects when the owner accepts it (simulated in this preview)."""
 # the fact turn's guidance and the field's description in each schema that has it.
 PUBLIC_CONTACT_FORMAT = (
     'only ways to reach the business, each a phone number (an extension such as "ext. 12" is fine), an email or a '
-    'website (an https URL or a bare domain), separated by commas or "or"; a short label such as "Call us at" or '
-    '"Email" may come before one, but no other words, such as offers or promises.')
+    'website (an https URL or a bare domain), separated by commas or "or". Each may have at most one label before '
+    'it, with or without a colon, only from this list: "Call us at", "Call", "Call or text", "Text us at", "Text", '
+    '"Email us at", "Email", "Phone", "Tel", "Mobile", "Office", "Website", "Web", "Llámanos al", "Escríbenos a", '
+    '"Teléfono", "Correo"; no other words, such as offers or promises.')
 
 _TOPICS = """\
 Topics (reference)

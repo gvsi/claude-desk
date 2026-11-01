@@ -181,9 +181,13 @@ def test_setup_tells_the_consultant_the_public_contact_format_once_per_place():
     one says that format, in one sentence: the fact turn's guidance once, and the field's description in every turn
     schema that has it, the suggested facts and the patch code merges."""
     sentence = prompts.PUBLIC_CONTACT_FORMAT
-    for part in ('"ext. 12"', "an https URL or a bare domain", 'separated by commas or "or"', '"Call us at"',
-                 '"Email"', "no other words, such as offers or promises"):
+    for part in ('"ext. 12"', "an https URL or a bare domain", 'separated by commas or "or"', "at most one label",
+                 "with or without a colon", "only from this list", "no other words, such as offers or promises"):
         assert part in sentence
+    # The labels the kernel accepts before a part, and no others: the sentence offers no open-ended example.
+    labels = ["Call us at", "Call", "Call or text", "Text us at", "Text", "Email us at", "Email", "Phone", "Tel",
+              "Mobile", "Office", "Website", "Web", "Llámanos al", "Escríbenos a", "Teléfono", "Correo"]
+    assert re.findall(r'"([^"]+)"', sentence) == ["ext. 12", "or", *labels]
     assert SETUP_TURN_SYSTEM.count(sentence) == 1
     for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
         assert sentence not in system
