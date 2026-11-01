@@ -128,6 +128,20 @@ def test_scoped_jobs_run_unless_explicitly_ruled_out_even_if_classification_fail
     assert job["if"] == "${{ !cancelled() && needs.changes.outputs." + flag + " != 'false' }}"
 
 
+def test_backend_scoped_job_gates_do_not_depend_on_web():
+    for job_id, job in load(WORKFLOW)["jobs"].items():
+        if "needs.changes.outputs.backend" not in job.get("if", ""):
+            continue
+        for step in job["steps"]:
+            words = shlex.split(step.get("run", ""))
+            for index, word in enumerate(words):
+                option, separator, value = word.partition("=")
+                if option in {"--run-if", "--required-if"}:
+                    path = value if separator else words[index + 1]
+                    path = path.removeprefix("./").rstrip("/")
+                    assert path != "web" and not path.startswith("web/"), (job_id, step["name"], path)
+
+
 def test_secret_scan_and_repo_checks_start_without_classification():
     for job_id in ["secret-scan", "repo"]:
         job = load(WORKFLOW)["jobs"][job_id]

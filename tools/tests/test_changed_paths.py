@@ -1,5 +1,6 @@
 """PR path scoping must only skip suites whose inputs are known to be unchanged."""
 
+import ast
 import os
 import posixpath
 import re
@@ -165,6 +166,18 @@ def test_backend_scoped_sources_do_not_read_web_except_deployment_paths():
         if paths:
             references[file] = paths
     assert references == WEB_REFERENCE_ALLOWLIST, "Remove stale deployment exceptions"
+
+
+def test_tier2_gated_inputs_do_not_include_web():
+    # Parse only this tuple; importing evals.results would pull in the evals environment.
+    module = ast.parse((ROOT / "evals/results.py").read_text())
+    [value] = [
+        node.value for node in module.body if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "GATED_PATHS" for target in node.targets)
+    ]
+    paths = ast.literal_eval(value)
+    assert paths and isinstance(paths, tuple)
+    assert not any(path == "web" or path.startswith("web/") for path in paths), paths
 
 
 @pytest.mark.parametrize(
