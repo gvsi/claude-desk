@@ -716,6 +716,10 @@ describe('Safety', () => {
     await expect.element(recordRow(screen, hours).getByText('Desk details changed', { exact: true })).toBeVisible();
     expect(screen.getByText('Desk details changed').elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
+    // The entry's full trace reads the row's name as its sentence.
+    await recordRow(screen, opened ?? 0).click();
+    const trace = region(screen, `Full trace of entry ${opened}`);
+    await expect.element(trace.getByText('Chat handed to you. Recorded by the checkpoint.', { exact: true })).toBeVisible();
   });
 
   it('handoff_closed_by_a_call_back_says_so', async () => {
@@ -764,6 +768,10 @@ describe('Safety', () => {
     await expect.element(recordRow(screen, wrote.seq).getByText('Handoff closed when you wrote in the chat', { exact: true })).toBeVisible();
     expect(screen.getByText('Chat marked done', { exact: true }).elements()).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
+    // The closing's full trace reads the row's name as its sentence.
+    await recordRow(screen, tookOver.seq).click();
+    const trace = region(screen, `Full trace of entry ${tookOver.seq}`);
+    await expect.element(trace.getByText('Handoff closed when you took over. Recorded by the checkpoint.', { exact: true })).toBeVisible();
   });
 
   it('filters_start_with_all', async () => {
