@@ -847,6 +847,66 @@ describe("setup's examples", () => {
   });
 });
 
+describe('what setup reads once the owner allows it', () => {
+  /** The labels of what setup read after the owner allowed it, for `description`. */
+  async function readsFor(description: string): Promise<string[]> {
+    const id = (await startState(description)).interview_id;
+    const state = await setupState('setupConsent', id, { allow: true });
+    return state.messages.filter(({ role }) => role === 'tool_label').map(({ text }) => text);
+  }
+
+  /** Each starter's two web searches, in `START_EXAMPLES`' order: Juniper Hair Studio's as they always were. */
+  const STARTER_SEARCHES = [
+    ['Searched the web: hair salon deposits and late cancellations', 'Searched the web: salon new client consultation form'],
+    ['Searched the web: emergency plumber call-out fees', 'Searched the web: water heater replacement quotes'],
+    ['Searched the web: rental application fees and deposits', 'Searched the web: tenant maintenance request form'],
+    ['Searched the web: CPA free consultation and engagement letters', 'Searched the web: tax return client intake questions'],
+  ];
+  /** Descriptions no starter describes, as the situations' words try them. */
+  const UNMATCHED = [
+    "I'm Lena, and Lena's Bike Repair fixes bikes in Berkeley, Monday to Saturday.",
+    'Soy Ana. Tengo la Panadería Ana en Oakland: pan de masa madre y pasteles por encargo.',
+    // A word that only starts like "hair" names no salon.
+    'Lake Dental is a dental practice treating cavities, chipped teeth and hairline cracks.',
+  ];
+  /** Words that belong to a salon's work: none of them in another business's searches. */
+  const SALON = /\b(?:salons?|hair\w*|balayage|colou?rs?|cuts?|stylists?)\b/i;
+
+  it('each_starter_searches_the_web_for_its_own_business', async () => {
+    // Its Claude memory first, then two searches about running that business, in either language.
+    for (const language of ['en', 'es'] as const) {
+      for (const [at, { chip, description }] of START_EXAMPLES[language].examples.entries()) {
+        expect(await readsFor(description), chip).toEqual([MEMORY_LABEL, ...(STARTER_SEARCHES[at] ?? [])]);
+      }
+    }
+  });
+
+  it('a_business_no_starter_describes_gets_searches_that_fit_any_business', async () => {
+    for (const description of UNMATCHED) {
+      expect(await readsFor(description), description).toEqual([
+        MEMORY_LABEL,
+        'Searched the web: small business booking and deposit policies',
+        'Searched the web: new customer intake questions',
+      ]);
+    }
+  });
+
+  it('only_the_salon_searches_for_salon_work', async () => {
+    const others = [...START_EXAMPLES.en.examples.slice(1), ...START_EXAMPLES.es.examples.slice(1)].map(({ description }) => description);
+    for (const description of [...others, ...UNMATCHED]) {
+      for (const label of await readsFor(description)) expect(label, description).not.toMatch(SALON);
+    }
+    for (const label of STARTER_SEARCHES[0] ?? []) expect(label).toMatch(SALON);
+  });
+
+  it('a_search_that_fails_says_so_for_any_business', async () => {
+    // The memory read, then the single failure label, whatever the business.
+    for (const description of [START_EXAMPLES.en.examples[0]?.description ?? '', UNMATCHED[0] ?? '']) {
+      expect(await readsFor(`${description} Preview: search fails.`), description).toEqual([MEMORY_LABEL, "Couldn't search the web just now"]);
+    }
+  });
+});
+
 describe("the real situations, in the business's own words", () => {
   /**
    * The situations setup tries on `description`'s draft and the draft itself, every question answered

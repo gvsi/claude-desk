@@ -368,9 +368,10 @@ type BookingDays = NonNullable<RuleCard['hours']>['days'];
 const WEEKDAYS: BookingDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
 
 /**
- * A business's words for the six situations setup tries (`situationsFor`), in their order, and for
- * the rules its draft names them in. Only the words and the business's own booking days differ
- * between businesses: what each situation tries, plans and gets otherwise follows the draft alone.
+ * A business's words for the six situations setup tries (`situationsFor`), in their order, for
+ * the rules its draft names them in, and for the web searches setup shows once the owner allows its
+ * reads. Only the words and the business's own booking days differ between businesses: what each
+ * situation tries, plans and gets otherwise follows the draft alone.
  */
 interface SituationWords {
   /**
@@ -393,6 +394,11 @@ interface SituationWords {
   saturday: string;
   /** Someone else's private details. */
   someoneElses: string;
+  /**
+   * What setup searches the web for once the owner allows it: two topics about running this kind
+   * of business, each shown as "Searched the web: …".
+   */
+  searches: readonly [string, string];
 }
 
 /** Rivera Plumbing's words: the situations as the mock always told them. */
@@ -405,6 +411,7 @@ const PLUMBER_WORDS: SituationWords = {
   document: 'A customer asks for their last invoice',
   saturday: 'A visitor wants a Saturday morning visit for a slow drain',
   someoneElses: "Someone asks for another customer's address",
+  searches: ['emergency plumber call-out fees', 'water heater replacement quotes'],
 };
 
 /** Words for a business none of the starters describes: nothing in them names a kind of work. */
@@ -417,6 +424,7 @@ const ANY_BUSINESS_WORDS: SituationWords = {
   document: 'A customer asks for their last invoice',
   saturday: 'A visitor wants to book a time on Saturday morning',
   someoneElses: "Someone asks for another customer's address",
+  searches: ['small business booking and deposit policies', 'new customer intake questions'],
 };
 
 /** A CPA firm's description, as the consultant run tells one apart. */
@@ -442,6 +450,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: "A client asks for last year's return",
       saturday: 'A visitor wants a free consult on Saturday morning',
       someoneElses: "Someone asks for another client's tax return",
+      searches: ['CPA free consultation and engagement letters', 'tax return client intake questions'],
     },
   ],
   [[/\b(?:plumb|plomer)/i], PLUMBER_WORDS],
@@ -458,6 +467,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: 'A client asks for their last receipt',
       saturday: 'A visitor wants balayage on Saturday morning',
       someoneElses: "Someone asks for another client's phone number",
+      searches: ['hair salon deposits and late cancellations', 'salon new client consultation form'],
     },
   ],
   [
@@ -471,6 +481,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: 'A tenant asks for a copy of their lease',
       saturday: 'A visitor wants a Saturday morning viewing',
       someoneElses: 'Someone asks which apartment another tenant lives in',
+      searches: ['rental application fees and deposits', 'tenant maintenance request form'],
     },
   ],
 ];
@@ -866,8 +877,7 @@ function completeConsent(interview: Interview): void {
     if (interview.searchFails) {
       say(interview, 'tool_label', "Couldn't search the web just now");
     } else {
-      say(interview, 'tool_label', 'Searched the web: hair salon deposits and late cancellations');
-      say(interview, 'tool_label', 'Searched the web: salon new client consultation form');
+      for (const search of interview.words.searches) say(interview, 'tool_label', `Searched the web: ${search}`);
     }
   }
   if (interview.consultant) openConsultant(interview);
