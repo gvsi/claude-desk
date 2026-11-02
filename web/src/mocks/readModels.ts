@@ -345,12 +345,14 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
     .filter((d) => d.decision.state === 'held')
     .map((d) => {
       const session = world.sessions.get(d.decision.session_id);
+      const cards = d.decision.policy_version === desk.policy.version
+        ? desk.policy.cards : desk.versions.get(d.decision.policy_version) ?? [];
       return {
         at: d.createdAt,
         item: {
           decision: d.decision,
           handoff: null,
-          held_by: holdingCard(desk.policy.cards, d.decision.card_ids)?.reason ?? null,
+          held_by: holdingCard(cards, d.decision.card_ids)?.reason ?? null,
           held_at: isoTime(d.createdAt),
           session: needsYouSession(session, d.decision.session_id),
           from_the_visitor: fromTheVisitor(session),
