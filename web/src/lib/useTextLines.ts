@@ -21,13 +21,21 @@ export interface TextBox {
  * `className` gives them and the fonts this browser has, so a skeleton draws as many lines, and as
  * tall a block, as the words will take on every platform, rather than a count read off one
  * machine. Until `box` is laid out it is `fallback` lines; it is measured again when `box`
- * resizes and when fonts finish loading.
+ * resizes and when fonts finish loading. A caller that changes `box`'s width itself, from a
+ * measurement of its own in the same commit, passes that value as `layoutKey`: the box is measured
+ * again in the commit that applies it, before the browser paints, where a resize alone would be
+ * caught only after the first frame.
  *
  * The words go into a probe only for the length of the measurement: an invisible, inert element as
  * wide as `box`, appended to it and removed in the same task, so no frame and no reader ever meets
  * them.
  */
-export function useTextBox(box: RefObject<HTMLElement | null>, { parts, className }: TextLinesProbe, fallback: number): TextBox {
+export function useTextBox(
+  box: RefObject<HTMLElement | null>,
+  { parts, className }: TextLinesProbe,
+  fallback: number,
+  layoutKey?: unknown,
+): TextBox {
   const [measured, setMeasured] = useState<TextBox>();
   const key = JSON.stringify(parts);
   useLayoutEffect(() => {
@@ -83,11 +91,11 @@ export function useTextBox(box: RefObject<HTMLElement | null>, { parts, classNam
       observer?.disconnect();
       document.fonts.removeEventListener('loadingdone', measure);
     };
-  }, [box, key, className]);
+  }, [box, key, className, layoutKey]);
   return measured ?? { lines: fallback, height: undefined };
 }
 
 /** How many lines the page's own words take at the width of `box` (see `useTextBox`). */
-export function useTextLines(box: RefObject<HTMLElement | null>, probe: TextLinesProbe, fallback: number): number {
-  return useTextBox(box, probe, fallback).lines;
+export function useTextLines(box: RefObject<HTMLElement | null>, probe: TextLinesProbe, fallback: number, layoutKey?: unknown): number {
+  return useTextBox(box, probe, fallback, layoutKey).lines;
 }

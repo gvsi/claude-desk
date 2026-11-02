@@ -1,4 +1,4 @@
-/* Button: one of three weights, two heights, plus the danger variants for answers that refuse.
+/* Button: one of three weights, two heights, plus danger variants for refusals and deletes that cannot be undone.
    Hover fills change at motion-instant; a press shrinks the button slightly at motion-fast.
    Nothing moves under reduced motion.
 
@@ -198,7 +198,7 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
   background: var(--button-primary-hover);
 }
 
-/* The red answers keep their red words while busy: the filled one takes its hover fill and the
+/* The red buttons keep their red words while busy: the filled one takes its hover fill and the
    ghost one the hover ground, both listed pairs (contrast.ts). */
 .cd-button--danger[aria-busy='true'],
 .cd-button--danger.cd-button--waiting {
@@ -214,7 +214,7 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
    a quarter arc on it, turning once every motion-spin at an even speed, and still under reduced
    motion. The label and a menu button's chevron keep their places, unseen, so the button keeps
    its width and the label still names it. The arc is the busy label color at full strength, so it
-   reads at the busy pair's ratio, 5.3:1 or more, where a graphic needs 3:1; the ring behind it is
+   reads at the busy pair's ratio, 4.8:1 or more, where a graphic needs 3:1; the ring behind it is
    decoration. Dots are only for someone typing (WritingIndicator). */
 .cd-button[aria-busy='true'] > .cd-button__label {
   opacity: 0;
