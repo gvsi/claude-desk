@@ -1193,7 +1193,7 @@ export function GeneralSettings({ answering, onDelete = fn() }: { answering: str
         <SectionHeader id="board-settings-delete" title="Delete this Desk" />
         <div className="board-settings__delete-row">
           <p className="board-settings__delete-line board-quiet cd-type-meta">{DELETE_DESK_LINE}</p>
-          <Button variant="secondary" size="main" onClick={onDelete}>
+          <Button variant="danger" size="main" onClick={onDelete}>
             Delete this Desk
           </Button>
         </div>
