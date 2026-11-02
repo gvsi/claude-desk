@@ -4,7 +4,17 @@
  * `forecast.test.ts` holds it to the document. Whatever is predicted is named by its quarter; the fits' exact days
  * appear only in the document's own table.
  */
-import { CLAUDE_SCORES, TAU3_BAR, TAU3_FITS, TAU3_SOURCE, TAU3_SOURCES, dayOf, quarterYear, type Tau3Row } from './tau3.ts';
+import {
+  CLAUDE_SCORES,
+  TAU3_BAR,
+  TAU3_FITS,
+  TAU3_SOURCE,
+  TAU3_SOURCES,
+  dayOf,
+  quarterYear,
+  type Tau3Board,
+  type Tau3Row,
+} from './tau3.ts';
 
 /** A score as the boards print it: "56.0%". */
 export function percent(score: number): string {
@@ -52,7 +62,64 @@ export function bandQuarters(): string {
 }
 
 /** The bar as a percentage: "80%". */
-const BAR = `${Math.round(TAU3_BAR * 100)}%`;
+export const BAR = `${Math.round(TAU3_BAR * 100)}%`;
+
+const NUMBER_WORDS = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+];
+
+/** A count in words, as the chart's words say it: "ten"; past twenty, in digits. */
+export function countWords(count: number): string {
+  return NUMBER_WORDS[count] ?? String(count);
+}
+
+/** "A", "A and B", "A, B and C". */
+function listed(words: string[]): string {
+  return words.length < 2 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words.at(-1) ?? ''}`;
+}
+
+/** A model's name without "Claude ", as the chart's labels and caption say it. */
+export function shortName(row: Tau3Row): string {
+  return row.model.replace(/^Claude /, '');
+}
+
+/** A board as the chart's caption names it: its name, with the short name its labels use when that differs. */
+function boardName(board: Tau3Board): string {
+  const { name } = TAU3_SOURCES[board];
+  return name === board ? name : `${name} (${board})`;
+}
+
+/**
+ * The chart's caption, from the rows it draws: how many of Claude's scores come from Sierra's board, which scores come
+ * from each other board (the boards in the order of their first score), how many scores the line runs through, and
+ * the bar.
+ */
+export function chartCaption(claude: readonly Tau3Row[], top: Tau3Row): string {
+  const byRelease = (a: Tau3Row, b: Tau3Row) => a.released.localeCompare(b.released);
+  const sierra = claude.filter((row) => row.board === 'Sierra').sort(byRelease);
+  const groups = new Map<Tau3Board, Tau3Row[]>();
+  for (const row of [...claude.filter((score) => score.board !== 'Sierra'), top].sort(byRelease)) {
+    groups.set(row.board, [...(groups.get(row.board) ?? []), row]);
+  }
+  const fromBoards = [...groups].map(([board, rows], i) => {
+    const verb = i > 0 ? '' : rows.length === 1 ? ' is' : ' are';
+    return `${listed(rows.map(shortName))}${verb} from ${boardName(board)}`;
+  });
+  const others = fromBoards.length < 2 ? (fromBoards[0] ?? '') : `${fromBoards.slice(0, -1).join(', ')}, and ${fromBoards.at(-1) ?? ''}`;
+  const count = countWords(sierra.length);
+  const last = sierra.at(-1);
+  const fromSierra = last
+    ? `${count.charAt(0).toUpperCase()}${count.slice(1)} of Claude’s scores, up to ${shortName(last)}, are from ${TAU3_SOURCES.Sierra.name}’s board; `
+    : '';
+  const all = countWords(claude.length);
+  return (
+    `Each dot is one model’s score. ${fromSierra}${others}. The line is a straight-line fit in log-odds through all ` +
+    `${all} Claude scores, dashed where it runs ahead of today. The band runs from where the Opus scores alone reach ` +
+    `${BAR} to where all ${all} do. The boards’ setups differ, so scores from different boards are only roughly ` +
+    `comparable.`
+  );
+}
 
 /** The first and the last day any of the text's three fits reaches the bar. */
 const CROSSINGS = Object.values(TAU3_FITS)

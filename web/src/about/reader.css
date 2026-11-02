@@ -173,9 +173,9 @@
   fill: none;
 }
 
-/* A label's leader to its point: structure, like the gridlines. */
+/* A label's leader to its point, which says which point the label is for: secondary ink, which holds 3:1. */
 .cd-about-chart__leader {
-  stroke: var(--line-control-hover);
+  stroke: var(--text-secondary);
   stroke-width: 1;
 }
 

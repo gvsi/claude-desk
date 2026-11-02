@@ -10,8 +10,19 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { BAND, GLANCE, LATEST_CLAUDE, PREDICTION, TODAY, bandQuarters, percent, quarterSpan } from './forecast.ts';
-import { dayOf } from './tau3.ts';
+import {
+  BAND,
+  GLANCE,
+  LATEST_CLAUDE,
+  PREDICTION,
+  TODAY,
+  bandQuarters,
+  chartCaption,
+  countWords,
+  percent,
+  quarterSpan,
+} from './forecast.ts';
+import { CLAUDE_SCORES, TOP_SCORE, dayOf, type Tau3Row } from './tau3.ts';
 
 const PREDICTION_MD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../docs/capability-prediction.md');
 
@@ -74,5 +85,46 @@ describe('the forecast in quarters', () => {
 
   it('percent_prints_one_decimal', () => {
     expect([percent(56), percent(58.2), percent(37.3)]).toEqual(['56.0%', '58.2%', '37.3%']);
+  });
+});
+
+describe('the chart caption', () => {
+  const CAPTION =
+    'Each dot is one model’s score. Seven of Claude’s scores, up to Opus 5, are from Sierra’s board; Sonnet 5 and ' +
+    'Fable 5.1 are from Artificial Analysis (AA), and Opus 5.5 and Gemini 4 Argon from Fireworks. The line is a ' +
+    'straight-line fit in log-odds through all ten Claude scores, dashed where it runs ahead of today. The band runs ' +
+    'from where the Opus scores alone reach 80% to where all ten do. The boards’ setups differ, so scores from ' +
+    'different boards are only roughly comparable.';
+
+  it('caption_says_the_data', () => {
+    expect(chartCaption(CLAUDE_SCORES, TOP_SCORE)).toBe(CAPTION);
+  });
+
+  it('caption_follows_the_data', () => {
+    // Its counts and its boards are the rows': another Claude score on Fireworks joins that board's list, by release,
+    // and the line runs through all eleven.
+    const sonnet55: Tau3Row = { model: 'Claude Sonnet 5.5', released: '2026-11-20', score: 60, board: 'Fireworks' };
+    expect(chartCaption([...CLAUDE_SCORES, sonnet55], TOP_SCORE)).toBe(
+      CAPTION.replace('Opus 5.5 and Gemini 4 Argon from', 'Opus 5.5, Gemini 4 Argon and Sonnet 5.5 from').replaceAll(
+        'all ten',
+        'all eleven',
+      ),
+    );
+    // Opus 5.5 scored on Sierra's own board instead: eight from Sierra, up to Opus 5.5, and Gemini alone on Fireworks.
+    const onSierra = CLAUDE_SCORES.map((row) => (row.model === 'Claude Opus 5.5' ? { ...row, board: 'Sierra' as const } : row));
+    expect(chartCaption(onSierra, TOP_SCORE)).toBe(
+      CAPTION.replace('Seven of Claude’s scores, up to Opus 5,', 'Eight of Claude’s scores, up to Opus 5.5,').replace(
+        'Opus 5.5 and Gemini 4 Argon from Fireworks',
+        'Gemini 4 Argon from Fireworks',
+      ),
+    );
+    // A board's first group says "is" for one score.
+    const oneOnAA = CLAUDE_SCORES.filter((row) => row.model !== 'Claude Sonnet 5');
+    expect(chartCaption(oneOnAA, TOP_SCORE)).toContain('board; Fable 5.1 is from Artificial Analysis (AA), and Opus 5.5');
+    expect(chartCaption(oneOnAA, TOP_SCORE)).toContain('through all nine Claude scores');
+  });
+
+  it('count_words_spell_small_counts', () => {
+    expect([1, 7, 10, 11, 20, 21].map(countWords)).toEqual(['one', 'seven', 'ten', 'eleven', 'twenty', '21']);
   });
 });

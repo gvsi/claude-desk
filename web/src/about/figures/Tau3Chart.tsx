@@ -1,14 +1,26 @@
 /**
  * Claude's τ³-Banking scores and when their trend reaches the prediction's bar, as the prediction board draws it:
- * the ten Claude releases scored on any board in primary ink with the latest ringed, the top score from any lab as a
- * hollow point, each labelled score naming its board; the 80% bar; today; the straight-line fit through all ten,
+ * every Claude release scored on any board in primary ink with the latest ringed, the top score from any lab as a
+ * hollow point, each labelled score naming its board; the 80% bar; today; the straight-line fit through all of them,
  * solid through the scores and dashed ahead of today to the bar; the band from where the Opus fit reaches the bar to
- * where the fit through all ten does; and the prediction's quarter. Time is in quarters throughout. Everything it
+ * where the fit through all of them does; and the prediction's quarter. Time is in quarters throughout. Everything it
  * draws comes from `tau3.ts` (through `forecast.ts`), whose tests hold it to the prediction's text.
  */
 import { useId, type CSSProperties } from 'react';
 
-import { BAND, LATEST_CLAUDE, PREDICTION, TODAY, bandQuarters, percent, quarterSpan } from '../forecast.ts';
+import {
+  BAND,
+  BAR,
+  LATEST_CLAUDE,
+  PREDICTION,
+  TODAY,
+  bandQuarters,
+  chartCaption,
+  countWords,
+  percent,
+  quarterSpan,
+  shortName,
+} from '../forecast.ts';
 import {
   CLAUDE_SCORES,
   TAU3_BAR,
@@ -90,7 +102,7 @@ const DESKTOP: Layout = {
     'Gemini 4 Argon': { dx: -8, dy: -34, anchor: 'end' },
   },
   note: { iso: '2025-12-01', score: 12 },
-  band: { title: 'Trend reaches 80%', anchor: 'middle' },
+  band: { title: `Trend reaches ${BAR}`, anchor: 'middle' },
   prediction: `Prediction: by ${PREDICTION.label}`,
 };
 
@@ -109,18 +121,13 @@ const PHONE: Layout = {
     'Gemini 4 Argon': { dx: -6, dy: -30, anchor: 'end' },
   },
   note: null,
-  band: { title: 'Reaches 80%', anchor: 'end' },
+  band: { title: `Reaches ${BAR}`, anchor: 'end' },
   prediction: `By ${PREDICTION.label}`,
 };
 
 const GRID = [0, 20, 40, 60, 80, 100];
 /** Ten days between the trend's samples. */
 const STEP = 10 * 24 * 60 * 60 * 1000;
-
-/** A model's name without "Claude ", for a label beside its point. */
-function shortName(row: Tau3Row): string {
-  return row.model.replace(/^Claude /, '');
-}
 
 /** A point's tooltip: its model, its score and its board. */
 function pointTitle(row: Tau3Row): string {
@@ -131,6 +138,9 @@ function pointTitle(row: Tau3Row): string {
 function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+/** The caption, built from the rows the chart draws (`forecast.ts`). */
+const CAPTION = chartCaption(CLAUDE_SCORES, TOP_SCORE);
 
 /** Every point the chart draws, by release date, for its text equivalent. */
 const POINTS = [...CLAUDE_SCORES, TOP_SCORE].sort((a, b) => a.released.localeCompare(b.released));
@@ -145,9 +155,10 @@ function earlyRun(layout: Layout): Tau3Row[] {
 function fitSentence(): string {
   const { early, to } = quarterSpan(BAND.from, BAND.to);
   return (
-    `The line, a straight-line fit in log-odds through all ten Claude scores, is solid up to today, ` +
-    `${quarterYear(TODAY)}, and dashed after; it reaches 80% ${early ? 'early in' : 'in'} ${to}. The band runs from ` +
-    `${quarterYear(BAND.from)}, where the fit through the Opus scores alone reaches 80%, to ${early ? 'early ' : ''}${to}. ` +
+    `The line, a straight-line fit in log-odds through all ${countWords(CLAUDE_SCORES.length)} Claude scores, is ` +
+    `solid up to today, ${quarterYear(TODAY)}, and dashed after; it reaches ${BAR} ${early ? 'early in' : 'in'} ${to}. ` +
+    `The band runs from ${quarterYear(BAND.from)}, where the fit through the Opus scores alone reaches ${BAR}, to ` +
+    `${early ? 'early ' : ''}${to}. ` +
     `The prediction is by ${PREDICTION.label}.`
   );
 }
@@ -193,7 +204,7 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
     >
       <div className="cd-about-frame cd-about-chart__frame">
         <div className="cd-about-chart__head">
-          <p className="cd-about-figure-title cd-type-section">Claude’s τ³-Banking score, and when the trend reaches 80%</p>
+          <p className="cd-about-figure-title cd-type-section">{`Claude’s τ³-Banking score, and when the trend reaches ${BAR}`}</p>
           <p className="cd-about-chart__subtitle cd-type-caption">
             {compact
               ? 'Bank customer-service tasks done right on the first try'
@@ -214,7 +225,7 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
             </span>
             <span className="cd-about-chart__key-item">
               <span className="cd-about-chart__key-band" aria-hidden="true" />
-              {compact ? 'Reaches 80%' : 'When the trend reaches 80%'}
+              {compact ? `Reaches ${BAR}` : `When the trend reaches ${BAR}`}
             </span>
           </p>
         </div>
@@ -282,7 +293,7 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
 
           <line data-bar="" data-tau3-part="bar" className="cd-about-chart__bar" x1={plot.left} x2={plot.right} y1={bar} y2={bar} />
           <text data-tau3-part="bar-label" className="cd-about-chart__label cd-type-caption" x={plot.left + 6} y={bar - 8}>
-            The bar: 80%
+            {`The bar: ${BAR}`}
           </text>
 
           <line
@@ -468,13 +479,7 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
       </div>
       <figcaption id={captionId} className={`cd-about-figcaption ${compact ? 'cd-type-caption' : 'cd-type-article-caption'}`}>
         <span className="cd-about-fignum">Figure 1</span>{' '}
-        <span>
-          Each dot is one model’s score. Seven of Claude’s scores, up to Opus 5, are from Sierra’s board; Sonnet 5 and
-          Fable 5.1 are from Artificial Analysis (AA), and Opus 5.5 and Gemini 4 Argon from Fireworks. The line is a
-          straight-line fit in log-odds through all ten Claude scores, dashed where it runs ahead of today. The band runs
-          from where the Opus scores alone reach 80% to where all ten do. The boards’ setups differ, so scores from
-          different boards are only roughly comparable.
-        </span>
+        <span>{CAPTION}</span>
       </figcaption>
     </figure>
   );

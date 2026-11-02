@@ -834,7 +834,8 @@ describe('the figures on paper', () => {
       };
       const marks: [string, (el: Element) => string][] = [
         // The chart: the releases, the top score's ring, Opus 5.5's ring, the trend and its dashed run ahead of today,
-        // the bar, today's rule and the prediction's bracket, and the key's dot, ring and dash.
+        // the bar, today's rule and the prediction's bracket, the leaders that tie each label to its point, and the
+        // key's dot, ring and dash.
         ['[data-point="claude"]', (el) => getComputedStyle(el).fill],
         ['[data-point="top"]', (el) => getComputedStyle(el).stroke],
         ['[data-ring]', (el) => getComputedStyle(el).stroke],
@@ -846,6 +847,7 @@ describe('the figures on paper', () => {
         }],
         ['.cd-about-chart__bar', (el) => getComputedStyle(el).stroke],
         ['.cd-about-chart__rule', (el) => getComputedStyle(el).stroke],
+        ['.cd-about-chart__leader', (el) => getComputedStyle(el).stroke],
         ['.cd-about-chart__key-dot', (el) => getComputedStyle(el).backgroundColor],
         ['.cd-about-chart__key-ring', (el) => getComputedStyle(el).borderTopColor],
         ['.cd-about-chart__key-dash', (el) => getComputedStyle(el).borderTopColor],
