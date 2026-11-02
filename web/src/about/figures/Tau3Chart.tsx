@@ -1,22 +1,23 @@
 /**
- * Claude's τ³-Banking scores, the capability prediction's lead figure: the seven Claude releases in primary
- * ink with the latest ringed, the top score from any lab as a hollow point, the 80% bar, the prediction date,
- * the straight-line fit through all seven from the latest release on, and the band between the fits the text
- * cites. Everything it draws comes from `tau3.ts`, whose tests hold it to the prediction's text.
+ * Claude's τ³-Banking scores and when their trend reaches the prediction's bar, as the prediction board draws it:
+ * the ten Claude releases scored on any board in primary ink with the latest ringed, the top score from any lab as a
+ * hollow point, each labelled score naming its board; the 80% bar; today; the straight-line fit through all ten,
+ * solid through the scores and dashed ahead of today to the bar; the band from where the Opus fit reaches the bar to
+ * where the fit through all ten does; and the prediction's quarter. Time is in quarters throughout. Everything it
+ * draws comes from `tau3.ts` (through `forecast.ts`), whose tests hold it to the prediction's text.
  */
 import { useId, type CSSProperties } from 'react';
 
-import { TextLink } from '../../ds/index.ts';
+import { BAND, LATEST_CLAUDE, PREDICTION, TODAY, bandQuarters, percent, quarterSpan } from '../forecast.ts';
 import {
   CLAUDE_SCORES,
   TAU3_BAR,
   TAU3_FITS,
-  TAU3_SOURCE,
+  TAU3_SOURCES,
   TOP_SCORE,
   dayOf,
   monthYear,
-  shortDate,
-  shortMonthYear,
+  quarterYear,
   type Tau3Row,
 } from '../tau3.ts';
 import { usePlayOnce } from './usePlayOnce.ts';
@@ -26,76 +27,104 @@ import '../reader.css';
 /** A Claude release's point, with its place in date order, from which its turn to appear is worked out. */
 type PointStyle = CSSProperties & { '--cd-tau3-i': number };
 
-function pointStyle(index: number): PointStyle {
-  return { '--cd-tau3-i': index };
-}
+/** The chart, with the number of releases, which sets when the parts after them come in. */
+type ChartStyle = CSSProperties & { '--cd-tau3-count': number };
 
 export interface Tau3ChartProps {
-  /** The phone layout: a narrower plot that keeps only the short labels. */
+  /** The phone layout: a narrower plot, a shorter subtitle and key, and fewer labels. */
   compact?: boolean;
 }
 
-/** The end of the month the prediction names ("By October 2027"). */
-const PREDICTION_DATE = dayOf('2027-10-31');
+/** The plot's time span: Q3 2025, the first Claude score's quarter, to the end of the prediction's quarter. */
+const DOMAIN = { from: dayOf('2025-07-01'), to: PREDICTION.to };
 
-/** The plot's time span, from the first Claude release's month to past the prediction date. */
-const DOMAIN = { from: dayOf('2025-09-01'), to: dayOf('2028-01-01') };
+/** Each quarter's first day across the plot, its last quarter's end included. */
+const QUARTERS: Date[] = [];
+for (let at = DOMAIN.from; at.getTime() <= DOMAIN.to.getTime(); at = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 3, 1))) {
+  QUARTERS.push(at);
+}
 
-/** Each layout's drawing, in its viewBox's units. */
+/** Each year on the plot, with the span of it the plot shows, for its name under its quarters. */
+const YEARS = [...new Set(QUARTERS.slice(0, -1).map((day) => day.getUTCFullYear()))].map((year) => ({
+  year,
+  from: new Date(Math.max(Date.UTC(year, 0, 1), DOMAIN.from.getTime())),
+  to: new Date(Math.min(Date.UTC(year + 1, 0, 1), DOMAIN.to.getTime())),
+}));
+
+/** Where a label sits, from its point: its offset in the plot's units and the side its words run to. */
+interface LabelPlace {
+  dx: number;
+  dy: number;
+  anchor: 'start' | 'end';
+}
+
+/** Each layout's drawing, in its viewBox's units, which are pixels at the reading column's width. */
 interface Layout {
   width: number;
   height: number;
   plot: { left: number; right: number; top: number; bottom: number };
   point: number;
   ring: number;
-  /** Ticks on the time axis, with their labels. */
-  ticks: { iso: string; label: string }[];
-  /** The score axis's label at each gridline. */
-  scoreLabel: (score: number) => string;
   dash: string;
+  /** The labelled scores, by model, beside their points. */
+  labels: Record<string, LabelPlace>;
+  /** Sierra's early run, which shares one label: where its middle sits, as a day and a score. */
+  note: { iso: string; score: number } | null;
+  /** The band's label: its first line, and where both lines line up. */
+  band: { title: string; anchor: 'middle' | 'end' };
+  prediction: string;
 }
 
 const DESKTOP: Layout = {
-  width: 1000,
-  height: 440,
-  plot: { left: 56, right: 972, top: 28, bottom: 392 },
-  point: 6,
-  ring: 11,
-  ticks: ['2026-01-01', '2026-07-01', '2027-01-01', '2027-07-01'].map((iso) => ({ iso, label: shortMonthYear(dayOf(iso)) })),
-  scoreLabel: (score) => `${score}%`,
+  width: 584,
+  height: 400,
+  plot: { left: 44, right: 576, top: 40, bottom: 356 },
+  point: 5.5,
+  ring: 10,
   dash: '6 6',
+  labels: {
+    'Claude Sonnet 5': { dx: -6, dy: 50, anchor: 'end' },
+    'Claude Opus 5': { dx: -30, dy: -22, anchor: 'end' },
+    'Claude Fable 5.1': { dx: 52, dy: 56, anchor: 'start' },
+    'Claude Opus 5.5': { dx: 40, dy: 34, anchor: 'start' },
+    'Gemini 4 Argon': { dx: -8, dy: -34, anchor: 'end' },
+  },
+  note: { iso: '2025-12-01', score: 12 },
+  band: { title: 'Trend reaches 80%', anchor: 'middle' },
+  prediction: `Prediction: by ${PREDICTION.label}`,
 };
 
 const PHONE: Layout = {
-  width: 350,
-  height: 300,
-  plot: { left: 36, right: 340, top: 22, bottom: 266 },
-  point: 5,
-  ring: 9,
-  ticks: ['2026-01-01', '2027-01-01'].map((iso) => ({ iso, label: iso.slice(0, 4) })),
-  scoreLabel: (score) => `${score}`,
+  width: 318,
+  height: 350,
+  plot: { left: 32, right: 314, top: 40, bottom: 306 },
+  point: 4.5,
+  ring: 8,
   dash: '5 5',
+  labels: {
+    'Claude Sonnet 5': { dx: -4, dy: 62, anchor: 'end' },
+    'Claude Opus 5': { dx: -32, dy: -20, anchor: 'end' },
+    'Claude Fable 5.1': { dx: 28, dy: 62, anchor: 'start' },
+    'Claude Opus 5.5': { dx: 22, dy: 36, anchor: 'start' },
+    'Gemini 4 Argon': { dx: -6, dy: -30, anchor: 'end' },
+  },
+  note: null,
+  band: { title: 'Reaches 80%', anchor: 'end' },
+  prediction: `By ${PREDICTION.label}`,
 };
 
 const GRID = [0, 20, 40, 60, 80, 100];
-/** Ten days between the fit line's samples. */
-const FIT_STEP = 10 * 24 * 60 * 60 * 1000;
-
-/** A score as the leaderboard prints it: "48.7%". */
-function percent(score: number): string {
-  return `${score.toFixed(1)}%`;
-}
+/** Ten days between the trend's samples. */
+const STEP = 10 * 24 * 60 * 60 * 1000;
 
 /** A model's name without "Claude ", for a label beside its point. */
 function shortName(row: Tau3Row): string {
   return row.model.replace(/^Claude /, '');
 }
 
-/** "Apr to Oct 2027", or "Nov 2026 to Feb 2027" across a year. */
-function monthRange(from: Date, to: Date): string {
-  const [fromMonth, fromYear] = shortMonthYear(from).split(' ');
-  const end = shortMonthYear(to);
-  return fromYear === end.split(' ')[1] ? `${fromMonth} to ${end}` : `${shortMonthYear(from)} to ${end}`;
+/** A point's tooltip: its model, its score and its board. */
+function pointTitle(row: Tau3Row): string {
+  return `${row.model}, ${percent(row.score)} on ${TAU3_SOURCES[row.board].name}`;
 }
 
 /** Two decimals are finer than a pixel at either size, and keep the markup short. */
@@ -103,18 +132,25 @@ function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-const LOWEST = CLAUDE_SCORES.reduce((low, row) => (row.score < low.score ? row : low));
-const LATEST = CLAUDE_SCORES[CLAUDE_SCORES.length - 1] ?? LOWEST;
-const BAND = { from: TAU3_FITS.acrossLabs.crosses(TAU3_BAR), to: TAU3_FITS.claude.crosses(TAU3_BAR) };
-
 /** Every point the chart draws, by release date, for its text equivalent. */
 const POINTS = [...CLAUDE_SCORES, TOP_SCORE].sort((a, b) => a.released.localeCompare(b.released));
 
-/** What the dashed line and the band show, in the months the text names. */
-const FIT_SENTENCE =
-  `The dashed line, a straight-line fit in log-odds through all seven Claude scores, reaches 80% in ` +
-  `${monthYear(BAND.to)}; the band runs from ${monthYear(BAND.from)}, where the fit through the best score ` +
-  `across labs reaches 80%, to ${monthYear(BAND.to)}.`;
+/** Sierra's early run of scores, which shares one label: Claude's scores before the first one labelled on its own. */
+function earlyRun(layout: Layout): Tau3Row[] {
+  const first = CLAUDE_SCORES.findIndex((row) => row.model in layout.labels);
+  return first < 0 ? [] : CLAUDE_SCORES.slice(0, first);
+}
+
+/** What the line, the band and the prediction show, in quarters. */
+function fitSentence(): string {
+  const { early, to } = quarterSpan(BAND.from, BAND.to);
+  return (
+    `The line, a straight-line fit in log-odds through all ten Claude scores, is solid up to today, ` +
+    `${quarterYear(TODAY)}, and dashed after; it reaches 80% ${early ? 'early in' : 'in'} ${to}. The band runs from ` +
+    `${quarterYear(BAND.from)}, where the fit through the Opus scores alone reaches 80%, to ${early ? 'early ' : ''}${to}. ` +
+    `The prediction is by ${PREDICTION.label}.`
+  );
+}
 
 export function Tau3Chart({ compact = false }: Tau3ChartProps) {
   const id = useId();
@@ -127,43 +163,58 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
   const x = (date: Date) => round(plot.left + ((date.getTime() - DOMAIN.from.getTime()) / span) * (plot.right - plot.left));
   const y = (score: number) => round(plot.bottom - (score / 100) * (plot.bottom - plot.top));
   const at = (row: Tau3Row) => ({ cx: x(dayOf(row.released)), cy: y(row.score) });
+  const trendAt = (time: number) => `${x(new Date(time))},${y(TAU3_FITS.claude.at(new Date(time)) * 100)}`;
 
-  const fit: string[] = [];
-  for (let t = dayOf(LATEST.released).getTime(); t < PREDICTION_DATE.getTime(); t += FIT_STEP) {
-    fit.push(`${x(new Date(t))},${y(TAU3_FITS.claude.at(new Date(t)) * 100)}`);
-  }
-  fit.push(`${x(PREDICTION_DATE)},${y(TAU3_FITS.claude.at(PREDICTION_DATE) * 100)}`);
+  // The trend: solid from the first score to today, then dashed from today to where it reaches the bar.
+  const first = dayOf(CLAUDE_SCORES[0]?.released ?? '2025-07-01').getTime();
+  const solid: string[] = [];
+  for (let t = first; t < TODAY.getTime(); t += STEP) solid.push(trendAt(t));
+  solid.push(trendAt(TODAY.getTime()));
+  const ahead: string[] = [];
+  for (let t = TODAY.getTime(); t < BAND.to.getTime(); t += STEP) ahead.push(trendAt(t));
+  ahead.push(`${x(BAND.to)},${y(TAU3_BAR * 100)}`);
 
   const bar = y(TAU3_BAR * 100);
   const band = { left: x(BAND.from), right: x(BAND.to) };
-  const prediction = x(PREDICTION_DATE);
-  const top = at(TOP_SCORE);
-  const lowest = at(LOWEST);
-  const latest = at(LATEST);
+  const today = x(TODAY);
+  const bracket = { left: x(PREDICTION.from), right: x(PREDICTION.to), top: plot.top - 8 };
+  const latest = at(LATEST_CLAUDE);
+  const run = earlyRun(layout);
+  const bandWords = [layout.band.title, bandQuarters()];
+  const bandX = layout.band.anchor === 'end' ? plot.right : round((band.left + band.right) / 2);
+  const style: ChartStyle = { '--cd-tau3-count': CLAUDE_SCORES.length };
 
   return (
     <figure
       ref={ref}
       className={`cd-about-figure cd-about-chart${compact ? ' cd-about-figure--compact cd-about-chart--compact' : ''}`}
       data-play={play ?? undefined}
+      style={style}
     >
       <div className="cd-about-frame cd-about-chart__frame">
         <div className="cd-about-chart__head">
-          <p className="cd-about-figure-title cd-type-section">Claude on τ³-Banking, pass^1</p>
+          <p className="cd-about-figure-title cd-type-section">Claude’s τ³-Banking score, and when the trend reaches 80%</p>
+          <p className="cd-about-chart__subtitle cd-type-caption">
+            {compact
+              ? 'Bank customer-service tasks done right on the first try'
+              : 'The share of a bank’s customer-service tasks each model gets right on the first try, by its release date'}
+          </p>
           <p className="cd-about-chart__key cd-type-caption">
             <span className="cd-about-chart__key-item">
               <span className="cd-about-chart__key-dot" aria-hidden="true" />
-              Claude releases
+              Claude
+            </span>
+            <span className="cd-about-chart__key-item">
+              <span className="cd-about-chart__key-ring" aria-hidden="true" />
+              Another lab
             </span>
             <span className="cd-about-chart__key-item">
               <span className="cd-about-chart__key-dash" aria-hidden="true" />
-              {compact ? (
-                'Fit, all seven'
-              ) : (
-                <>
-                  <code className="cd-about-code">estimate:</code> log-odds fit, all seven
-                </>
-              )}
+              {compact ? 'Trend' : 'Trend through Claude’s scores'}
+            </span>
+            <span className="cd-about-chart__key-item">
+              <span className="cd-about-chart__key-band" aria-hidden="true" />
+              {compact ? 'Reaches 80%' : 'When the trend reaches 80%'}
             </span>
           </p>
         </div>
@@ -194,17 +245,20 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
               y2={y(score)}
             />
           ))}
-          {layout.ticks.map(({ iso }) => (
-            <line
-              key={iso}
-              data-tau3-part="tick"
-              className="cd-about-chart__axis-line"
-              x1={x(dayOf(iso))}
-              x2={x(dayOf(iso))}
-              y1={plot.bottom}
-              y2={plot.bottom + (compact ? 5 : 6)}
-            />
-          ))}
+          {/* Each new year as a faint vertical, so a reader can place a point in its year at a glance. */}
+          {QUARTERS.slice(1, -1)
+            .filter((day) => day.getUTCMonth() === 0)
+            .map((day) => (
+              <line
+                key={day.toISOString()}
+                data-tau3-part="grid"
+                className="cd-about-chart__grid"
+                x1={x(day)}
+                x2={x(day)}
+                y1={plot.top}
+                y2={plot.bottom}
+              />
+            ))}
           <line
             data-tau3-part="axis"
             className="cd-about-chart__axis-line"
@@ -213,82 +267,85 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
             y1={plot.bottom}
             y2={plot.bottom}
           />
+          {/* A tick at each quarter's start, taller where a year starts. */}
+          {QUARTERS.map((day) => (
+            <line
+              key={day.toISOString()}
+              data-tau3-part="tick"
+              className="cd-about-chart__axis-line"
+              x1={x(day)}
+              x2={x(day)}
+              y1={plot.bottom}
+              y2={plot.bottom + (day.getUTCMonth() === 0 ? 22 : 5)}
+            />
+          ))}
 
           <line data-bar="" data-tau3-part="bar" className="cd-about-chart__bar" x1={plot.left} x2={plot.right} y1={bar} y2={bar} />
-          <text
-            data-tau3-part="bar-label"
-            className="cd-about-chart__label cd-type-caption"
-            x={plot.left + (compact ? 4 : 8)}
-            y={bar - (compact ? 8 : 10)}
-          >
-            {compact ? '80% bar' : 'The bar: 80% pass^1'}
+          <text data-tau3-part="bar-label" className="cd-about-chart__label cd-type-caption" x={plot.left + 6} y={bar - 8}>
+            The bar: 80%
           </text>
-          <line data-tau3-part="rule" className="cd-about-chart__rule" x1={prediction} x2={prediction} y1={plot.top} y2={plot.bottom} />
+
+          <line
+            data-today=""
+            data-tau3-part="today"
+            className="cd-about-chart__rule"
+            x1={today}
+            x2={today}
+            y1={plot.top - 8}
+            y2={plot.bottom}
+          />
+          <text
+            data-tau3-part="today-label"
+            className="cd-about-chart__label cd-type-caption"
+            x={today}
+            y={plot.top - 14}
+            textAnchor="middle"
+          >
+            Today
+          </text>
+
+          {/* The prediction names a quarter, not a day: a bracket over the whole of it. */}
+          <path
+            data-bracket=""
+            data-tau3-part="rule"
+            className="cd-about-chart__rule cd-about-chart__bracket"
+            d={`M${bracket.left} ${plot.top - 2} V${bracket.top} H${bracket.right} V${plot.top - 2}`}
+          />
           <text
             data-tau3-part="prediction-date"
             className="cd-about-chart__label cd-type-caption"
-            x={prediction - (compact ? 6 : 8)}
-            y={plot.top + (compact ? 12 : 14)}
+            x={bracket.right}
+            y={plot.top - 14}
             textAnchor="end"
           >
-            {compact ? shortMonthYear(PREDICTION_DATE) : `Prediction date, ${shortMonthYear(PREDICTION_DATE)}`}
+            {layout.prediction}
           </text>
-          {compact ? (
-            <text
-              data-tau3-part="band-label"
-              className="cd-about-chart__axis cd-type-caption"
-              x={(band.left + band.right) / 2}
-              y={plot.bottom - 10}
-              textAnchor="middle"
-            >
-              Fits
-            </text>
-          ) : (
-            <>
-              <text
-                data-tau3-part="band-label"
-                className="cd-about-chart__axis cd-type-caption"
-                x={(band.left + band.right) / 2}
-                y={plot.bottom - 30}
-                textAnchor="middle"
-              >
-                Fits cross the bar
-              </text>
-              <text
-                data-tau3-part="band-label"
-                className="cd-about-chart__axis cd-type-caption"
-                x={(band.left + band.right) / 2}
-                y={plot.bottom - 14}
-                textAnchor="middle"
-              >
-                {monthRange(BAND.from, BAND.to)}
-              </text>
-            </>
-          )}
 
+          {bandWords.map((words, i) => (
+            <text
+              key={words}
+              data-tau3-part="band-label"
+              className={`${i === bandWords.length - 1 ? 'cd-about-chart__label' : 'cd-about-chart__axis'} cd-type-caption`}
+              x={bandX}
+              y={plot.bottom - 10 - 15 * (bandWords.length - 1 - i)}
+              textAnchor={layout.band.anchor}
+            >
+              {words}
+            </text>
+          ))}
+
+          <polyline data-trend="" data-tau3-part="trend" className="cd-about-chart__fit cd-about-chart__fit--past" points={solid.join(' ')} />
           <polyline
             data-fit=""
             data-tau3-part="fit"
             className="cd-about-chart__fit"
-            points={fit.join(' ')}
+            points={ahead.join(' ')}
             strokeDasharray={layout.dash}
           />
 
-          <circle data-point="top" data-tau3-part="top" className="cd-about-chart__top" {...top} r={layout.point}>
-            <title>{`${TOP_SCORE.model}, ${shortDate(TOP_SCORE.released)}: ${percent(TOP_SCORE.score)}, the top score`}</title>
+          <circle data-point="top" data-tau3-part="top" className="cd-about-chart__top" {...at(TOP_SCORE)} r={layout.point}>
+            <title>{pointTitle(TOP_SCORE)}</title>
           </circle>
-          {compact ? null : (
-            <text
-              data-point-label=""
-              data-tau3-part="point-label"
-              className="cd-about-chart__label cd-type-caption"
-              x={top.cx - 12}
-              y={top.cy - 12}
-              textAnchor="end"
-            >
-              {`Top score, ${TOP_SCORE.model} ${percent(TOP_SCORE.score)}`}
-            </text>
-          )}
           {/* In release order (`tau3.ts` sorts them), which is the order they appear in when the chart plays. */}
           {CLAUDE_SCORES.map((row, i) => (
             <circle
@@ -296,63 +353,92 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
               data-point="claude"
               data-tau3-part="point"
               className="cd-about-chart__point"
-              style={pointStyle(i)}
+              style={{ '--cd-tau3-i': i } as PointStyle}
               {...at(row)}
               r={layout.point}
             >
-              <title>{`${row.model}, ${shortDate(row.released)}: ${percent(row.score)}`}</title>
+              <title>{pointTitle(row)}</title>
             </circle>
           ))}
-          <text
-            data-point-label=""
-            data-tau3-part="point-label"
-            className="cd-about-chart__label cd-type-caption"
-            x={lowest.cx}
-            y={lowest.cy + (compact ? 20 : 26)}
-            textAnchor="middle"
-          >
-            {compact ? percent(LOWEST.score) : `${shortName(LOWEST)} ${percent(LOWEST.score)}`}
-          </text>
-          <circle
-            data-ring=""
-            data-tau3-part="ring"
-            className="cd-about-chart__ring"
-            cx={latest.cx}
-            cy={latest.cy}
-            r={layout.ring}
-          />
-          <text
-            data-point-label=""
-            data-tau3-part="point-label"
-            className="cd-about-chart__label cd-type-caption"
-            x={latest.cx + (compact ? 12 : 16)}
-            y={latest.cy + (compact ? 20 : 24)}
-          >
-            {`${shortName(LATEST)} ${percent(LATEST.score)}`}
-          </text>
+          <circle data-ring="" data-tau3-part="ring" className="cd-about-chart__ring" cx={latest.cx} cy={latest.cy} r={layout.ring} />
+
+          {/* Each labelled score beside its point, with a short leader: its model and score, then its board. */}
+          {POINTS.filter((row) => row.model in layout.labels).map((row) => {
+            const place = layout.labels[row.model] as LabelPlace;
+            const point = at(row);
+            const tx = round(point.cx + place.dx);
+            const ty = round(point.cy + place.dy);
+            const below = ty > point.cy;
+            return (
+              <g key={row.model} data-point-label="" data-tau3-part="point-label">
+                <line
+                  className="cd-about-chart__leader"
+                  x1={point.cx}
+                  y1={round(point.cy + (below ? 1 : -1) * (layout.point + 2))}
+                  x2={tx}
+                  y2={round(below ? ty - 13 : ty + 19)}
+                />
+                <text className="cd-about-chart__label cd-type-caption" x={tx} y={ty} textAnchor={place.anchor}>
+                  {`${shortName(row)}, ${percent(row.score)}`}
+                </text>
+                <text className="cd-about-chart__axis cd-type-caption" x={tx} y={ty + 15} textAnchor={place.anchor}>
+                  {row.board}
+                </text>
+              </g>
+            );
+          })}
+          {layout.note && run.length > 0 ? (
+            <text
+              data-point-note=""
+              data-tau3-part="point-label"
+              className="cd-about-chart__axis cd-type-caption"
+              x={x(dayOf(layout.note.iso))}
+              y={y(layout.note.score)}
+              textAnchor="middle"
+            >
+              {`${shortName(run[0] as Tau3Row)} to ${shortName(run[run.length - 1] as Tau3Row)}: ${run[0]?.board ?? ''}`}
+            </text>
+          ) : null}
 
           {GRID.map((score) => (
             <text
               key={score}
               data-tau3-part="score-label"
               className="cd-about-chart__axis cd-type-caption"
-              x={plot.left - (compact ? 8 : 12)}
+              x={plot.left - 8}
               y={y(score) + 4}
               textAnchor="end"
             >
-              {layout.scoreLabel(score)}
+              {`${score}%`}
             </text>
           ))}
-          {layout.ticks.map(({ iso, label }) => (
+          {/* Each quarter's name halfway along it, the prediction's in primary ink; the years under them. */}
+          {QUARTERS.slice(0, -1).map((day, i) => {
+            const next = QUARTERS[i + 1] as Date;
+            const predicted = day.getTime() === PREDICTION.from.getTime();
+            return (
+              <text
+                key={day.toISOString()}
+                data-tau3-part="tick-label"
+                className={`${predicted ? 'cd-about-chart__label' : 'cd-about-chart__axis'} cd-type-caption`}
+                x={round((x(day) + x(next)) / 2)}
+                y={plot.bottom + 17}
+                textAnchor="middle"
+              >
+                {`Q${Math.floor(day.getUTCMonth() / 3) + 1}`}
+              </text>
+            );
+          })}
+          {YEARS.map(({ year, from, to }) => (
             <text
-              key={iso}
+              key={year}
               data-tau3-part="tick-label"
               className="cd-about-chart__axis cd-type-caption"
-              x={x(dayOf(iso))}
-              y={plot.bottom + (compact ? 20 : 24)}
+              x={round((x(from) + x(to)) / 2)}
+              y={plot.bottom + 36}
               textAnchor="middle"
             >
-              {label}
+              {year}
             </text>
           ))}
         </svg>
@@ -362,33 +448,32 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
               <tr>
                 <th scope="col">Model</th>
                 <th scope="col">Released</th>
-                <th scope="col">pass^1</th>
+                <th scope="col">Score</th>
+                <th scope="col">Board</th>
               </tr>
             </thead>
             <tbody>
               {POINTS.map((row) => (
                 <tr key={row.model}>
-                  <th scope="row">{row === TOP_SCORE ? `${row.model}, the top score` : row.model}</th>
-                  <td>{shortDate(row.released)}</td>
+                  <th scope="row">{row === TOP_SCORE ? `${row.model}, another lab` : row.model}</th>
+                  <td>{monthYear(dayOf(row.released))}</td>
                   <td>{percent(row.score)}</td>
+                  <td>{TAU3_SOURCES[row.board].name}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p>{FIT_SENTENCE}</p>
+          <p>{fitSentence()}</p>
         </div>
       </div>
       <figcaption id={captionId} className={`cd-about-figcaption ${compact ? 'cd-type-caption' : 'cd-type-article-caption'}`}>
         <span className="cd-about-fignum">Figure 1</span>{' '}
         <span>
-          {`Seven Claude releases on Sierra’s τ³-Banking leaderboard; ${shortName(LOWEST)} to ${shortName(LATEST)} `}
-          {`rose from ${percent(LOWEST.score)} to ${percent(LATEST.score)} in eight months. `}
-          The dashed line is a straight-line fit in log-odds through all seven;{' '}
-          {compact ? 'the band' : 'the shaded band'} is where the fits in the text cross 80%. Source:{' '}
-          <TextLink href={TAU3_SOURCE.url} external>
-            taubench.com
-          </TextLink>
-          {compact ? '.' : ', pass^1 as listed.'}
+          Each dot is one model’s score. Seven of Claude’s scores, up to Opus 5, are from Sierra’s board; Sonnet 5 and
+          Fable 5.1 are from Artificial Analysis (AA), and Opus 5.5 and Gemini 4 Argon from Fireworks. The line is a
+          straight-line fit in log-odds through all ten Claude scores, dashed where it runs ahead of today. The band runs
+          from where the Opus scores alone reach 80% to where all ten do. The boards’ setups differ, so scores from
+          different boards are only roughly comparable.
         </span>
       </figcaption>
     </figure>
