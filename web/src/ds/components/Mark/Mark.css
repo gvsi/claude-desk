@@ -1,5 +1,6 @@
 /* The Claude Desk mark: a clay dome under ink lines, with no tile. On the dark grounds the ink is
-   light (mark-ink-light); on a light ground it keeps the drawing's dark ink (mark-ink). Only the app
+   light (mark-ink-light); on a light ground, the light theme's included, it keeps the drawing's dark
+   ink (mark-ink). Only the app
    icon draws the white tile (mark-tile, with its mark-hairline edge), and on it the ink is the
    drawing's dark ink. These are the mark's fixed colors, the same in every theme, and
    nothing else uses them. The fills are set here, not as SVG attributes, because presentation
@@ -26,6 +27,19 @@
 .cd-mark--light .cd-mark__ink,
 .cd-mark--tile .cd-mark__ink {
   fill: var(--mark-ink);
+}
+
+/* The light theme turns the app's grounds to paper, so the bell drawn for them takes the drawing's
+   dark ink there, chosen in this browser or by a system that prefers it when System is chosen. The
+   clay dome is the logo's own and stays; the ink lines set the bell off the paper. */
+:root[data-theme='light'] .cd-mark--dark .cd-mark__ink {
+  fill: var(--mark-ink);
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme='system'] .cd-mark--dark .cd-mark__ink {
+    fill: var(--mark-ink);
+  }
 }
 
 /* The wordmark on one line: the name, then the Preview badge 8 px to its right, centred on it. The

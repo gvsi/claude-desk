@@ -4,8 +4,9 @@
  * read once, `breakItIdeas.ts`), whether this browser has had an owner's demo copy, so a
  * session that ends is said to have ended after a reload too (`providers.tsx`), and the chat each
  * payment link the public chat showed came from, so the paid checkout can link back to it (one
- * record of token digests and paths, `payChats.ts`), and which of the owner's notifications they
- * have seen (`notifications/seen.ts`). Nothing else is stored in the browser.
+ * record of token digests and paths, `payChats.ts`), the theme chosen in this browser (`theme.ts`;
+ * index.html's first script reads the same key), and which of the owner's notifications they have
+ * seen (`notifications/seen.ts`). Nothing else is stored in the browser.
  * Storage can be missing or blocked (a private window, blocked site data), so neither function
  * ever throws.
  */
@@ -15,10 +16,16 @@ const KEYS = {
   breakItHandoff: 'claude-desk.break-it-handoff',
   hadOwnerCopy: 'claude-desk.had-owner-copy',
   payChats: 'claude-desk.pay-chats',
+  theme: 'claude-desk.theme',
   notificationsSeen: 'claude-desk.notifications-seen',
 } as const;
 
 export type LocalKey = keyof typeof KEYS;
+
+/** The key a value is stored under, as a storage event from another tab names it. */
+export function storageKey(key: LocalKey): string {
+  return KEYS[key];
+}
 
 /** The stored value, or null when there is none or storage can't be read. */
 export function readLocal(key: LocalKey): string | null {
