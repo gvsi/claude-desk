@@ -11,6 +11,7 @@ import { cdp, page, userEvent } from 'vitest/browser';
 
 import type { PublicDesk } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
+import { chooseTheme } from '../../test/theme.ts';
 import { Composer } from '../Composer/Composer.tsx';
 import { Transcript } from '../Transcript/Transcript.tsx';
 import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
@@ -405,6 +406,37 @@ function aboutDrawsItsLine(): boolean {
 
 /** Each window's name: "390x844". */
 const named = ([width, height]: Size) => `${width}x${height}`;
+
+it('the_header_keeps_paper_ink_on_the_owners_colour_in_either_theme', () => {
+  // On the owner's colour the header's name and tagline are paper ink, the same in both themes, as
+  // the page's mapping gives them. On the panel, where the colour can't be used, they take the
+  // theme's own ink: light on the dark ground, dark on light paper.
+  const onPanel: PublicBrand = { ...brandOf(desk), field: 'var(--bg-panel)', ink: 'var(--text-primary)', inkSecondary: 'var(--text-secondary)' };
+  const seen = [];
+  for (const theme of ['dark', 'light'] as const) {
+    chooseTheme(theme);
+    for (const [ground, brand] of [['colour', brandOf(desk)], ['panel', onPanel]] as const) {
+      act(() => root.render(
+        <PublicShell brand={brand} ownerName="Mike Turner" language="en" onAskForOwner={() => {}} composer={null}>
+          {null}
+        </PublicShell>,
+      ));
+      seen.push({
+        theme,
+        ground,
+        name: getComputedStyle(one('.cd-public-shell__brand-name')).color,
+        tagline: getComputedStyle(one('.cd-public-shell__tagline')).color,
+      });
+    }
+  }
+  const paper = { name: 'rgba(250, 249, 245, 0.92)', tagline: 'rgba(250, 249, 245, 0.64)' };
+  expect(seen).toEqual([
+    { theme: 'dark', ground: 'colour', ...paper },
+    { theme: 'dark', ground: 'panel', ...paper },
+    { theme: 'light', ground: 'colour', ...paper },
+    { theme: 'light', ground: 'panel', name: 'rgba(28, 27, 25, 0.92)', tagline: 'rgba(28, 27, 25, 0.68)' },
+  ]);
+});
 
 it('the_english_disclosure_keeps_one_period_after_the_business_name', () => {
   act(() => root.render(

@@ -1,6 +1,6 @@
 /**
  * The business's look on its public page, from the Desk the kernel serves: only plain colors pass,
- * and only when the shell's text stays readable over them.
+ * and only when the header's paper ink stays readable over them.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -67,7 +67,7 @@ describe('brandFrom', () => {
   });
 
   it('low_contrast_brand_falls_back', () => {
-    // Near-white: the shell's light text would be unreadable over it.
+    // Near-white: the header's paper ink would be unreadable over it.
     expect(brandFrom(withBrand({ primary: '#f0f0f0', accent: '#B87333' })).brand.field).toBe('var(--bg-panel)');
     // Light enough for the primary text but not the tagline's secondary text: both must hold 4.5:1.
     expect(brandFrom(withBrand({ primary: '#2f625c', accent: '#B87333' })).brand.field).toBe('var(--bg-panel)');
@@ -75,7 +75,7 @@ describe('brandFrom', () => {
 
     // A contrast check that throws can't vouch for the field either.
     contrast.throws = true;
-    expect(brandFrom(withBrand({ primary: '#222220', accent: '#B87333' })).brand.field).toBe('var(--bg-panel)');
+    expect(brandFrom(withBrand({ primary: '#222220', accent: '#B87333' })).brand).toMatchObject({ field: 'var(--bg-panel)', ink: 'var(--text-primary)', inkSecondary: 'var(--text-secondary)' });
   });
 
   it('non_hex_brand_falls_back', () => {
