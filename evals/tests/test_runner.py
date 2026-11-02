@@ -1275,6 +1275,36 @@ async def test_desk_side_model_mismatch_is_a_config_error():
     assert outcome.artifact.served_models["api"] == [OPUS]
 
 
+class Translated(Records):
+    """`Records`, with the owner's translation of the visitor's message among the session's model calls, as the
+    API's job worker writes its row: route `translation`, served by Haiku."""
+
+    ROW = {"model_call_id": 2, "copy_id": COPY_ID, "session_id": SESSION, "route": "translation", "model": HAIKU,
+           "input_tokens": 300, "cached_tokens": 0, "cache_write_tokens": 0, "output_tokens": 30, "latency_ms": 400,
+           "stop_reason": "end_turn", "created_at": START}
+
+    async def model_calls(self, session_id: str) -> list[dict]:
+        rows = await super().model_calls(session_id)
+        return [*rows, dict(self.ROW)] if session_id == SESSION else rows
+
+
+async def test_the_owners_translation_on_haiku_counts_in_the_apis_usage():
+    """The API's translation call, on Haiku as configured, is in the run's usage beside the conversation's, and
+    Haiku is among the models that served the API, with no model mismatch. Tier 1's runner case accepts a run whose
+    translation hasn't run yet, so this is what holds tier 2 to counting it."""
+    scenario = attack(max_turns=1)
+    desk = Desk(chat(scenario, 1))
+    on = target(desk)
+    on.kernel.records = Translated(desk)
+    outcome = await run_scenario(scenario, 1, on, Visitor(desk), new_client=lambda: Client(desk), seed=seed,
+                                 pass_id="pass-test")
+    assert outcome.error is None, outcome.error
+    assert outcome.artifact.served_models["api"] == [HAIKU, OPUS]
+    api = [row for row in outcome.artifact.usage if row["part"] == "api"]
+    assert [row["route"] for row in api] == ["conversation", "translation"]
+    assert api[1] == {"part": "api", **Translated.ROW}
+
+
 def checked_reply(run: Run, soft_promise: Any) -> int:
     """A `reply` ledger entry as the kernel writes it, its soft-promise call (or null) nested under
     `soft_promise`; returns its seq."""

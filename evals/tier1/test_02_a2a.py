@@ -21,11 +21,13 @@ failing on the fault it exists to catch.
 - `a2a_resent_after_its_turn`: a request sent again after its turn gets its stored answer, with no
   model call or decision.
 
-"No model call" counts the calls a turn makes: Claude's and the kernel's checks (the reviewer and
-the soft-promise check). The owner's translation job, which the API queues for each agent message
-it stores and the job worker runs beside the turns (Plan 02b, Task 10), is left out, and so are its
-usage rows when a case compares a session's rows: it decides and answers nothing, and the cases
-script it to find English, so it stores nothing else.
+"No model call" counts every call on the fake model server but the owner's annotation jobs':
+Claude's and the kernel's own (its reviewer, its soft-promise check, its web search), each once.
+The owner's translation and triage jobs, which the API queues (a translation for each agent message
+it stores) and the job worker runs beside the turns (Plan 02b, Task 10), are left out, told apart by
+their Haiku model and their schema, and so are their usage rows when a case compares a session's
+rows: they decide and answer nothing, and the cases script the translation to find English, so it
+stores nothing else.
 """
 
 import json
@@ -35,23 +37,25 @@ import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from desk.contracts import A2ARequest, DemoAgentIssued, Review
+from desk.contracts import A2ARequest, DemoAgentIssued
 from desk.events import A2AResponse
 from evals.client import DeskClient
 from evals.fakes import FakeAnthropic, Json, ToolUse
+from evals.fakes.anthropic_server import schema_of
 from evals.tier1.args import find_slots_args
 from evals.tier1.golden_desk import REVIEW_PASS, REVIEWER_MODEL, GoldenDesk, golden_desk
 from evals.tier1.harness import AgentTurns, Auth, KernelHarness
-from evals.tier1.targets import API_HAIKU_MODEL, SOFT_PROMISE_MODEL, ApiTarget
+from evals.tier1.targets import API_HAIKU_MODEL, ApiTarget
 from evals.tier1.test_api_payloads import found_in, send_reply
 
 pytestmark = pytest.mark.requires("01c", "02")
 
 OPUS = "claude-opus-5-5"                 # the conversation model (Plan 02a)
-REVIEW_FIELDS = frozenset(Review.model_fields)   # the kernel's reviewer's answer; its schema has no title (Plan 01a)
-SOFT_PROMISE_SCHEMA = "SoftPromiseVerdict"   # the kernel's soft-promise check (Plan 01a)
 TRANSLATION_SCHEMA = "Translation"       # the owner's translation job (Plan 02b, Task 10)
-ANNOTATION_ROUTES = frozenset({"translation", "triage"})   # the owner's annotation jobs' model routes
+TRIAGE_SCHEMA = "Triage"                 # the owner's triage job (Plan 02b, Task 10)
+# The owner's annotation jobs: their calls by model and schema, and their usage rows by route.
+ANNOTATION_CALLS = frozenset({(API_HAIKU_MODEL, TRANSLATION_SCHEMA), (API_HAIKU_MODEL, TRIAGE_SCHEMA)})
+ANNOTATION_ROUTES = frozenset({"translation", "triage"})
 REFUSED = {"code": "auth", "disclosure": "ai"}   # the API's answer to a request the kernel refused (401)
 ENGLISH = {"language": "en", "translation": ""}  # a Translation of a message already in English
 
@@ -73,7 +77,8 @@ def script_the_checks(fake: FakeAnthropic) -> None:
 def any_further_turn_decides(fake: FakeAnthropic) -> None:
     """Once Claude's script has run out, each further call of Claude's looks for open slots: a turn a fault starts
     then decides something, so a case's "nothing decided" can fail, where an unscripted call would only fail the
-    turn."""
+    turn. A case sets it just after taking its snapshot, so it answers only the requests that should run no turn,
+    and a Claude call too many before then stays unscripted, which fails `fake.check()`."""
     fake.default(OPUS, ToolUse("native__find_slots", find_slots_args()))
 
 
@@ -119,20 +124,10 @@ def prose(answer: A2AResponse) -> list[str]:
 
 # What the stack holds
 
-def answer_fields(body: dict) -> frozenset[str]:
-    """The fields of the answer a structured call asks for (`output_config.format.schema`), or none."""
-    node: object = body
-    for key in ("output_config", "format", "schema", "properties"):
-        node = node.get(key) if isinstance(node, dict) else None
-    return frozenset(node) if isinstance(node, dict) else frozenset()
-
-
 def turn_calls(fake: FakeAnthropic) -> int:
-    """The model calls turns made so far: Claude's and the kernel's checks (module docstring). The reviewer shares
-    its model with the soft-promise check, so its calls are told apart by the `Review` they ask for."""
-    reviews = [body for body in fake.calls(REVIEWER_MODEL) if answer_fields(body) == REVIEW_FIELDS]
-    return (len(fake.calls(OPUS)) + len(reviews)
-            + len(fake.calls(SOFT_PROMISE_MODEL, schema=SOFT_PROMISE_SCHEMA)))
+    """The model calls turns made so far: every call but the owner's annotation jobs', each counted once (module
+    docstring). A call the kernel or the API adds to a turn counts without being named here."""
+    return sum((body.get("model"), schema_of(body)) not in ANNOTATION_CALLS for body in fake.calls())
 
 
 async def agent_sessions(records, desk: GoldenDesk) -> dict[str, str]:
@@ -203,7 +198,6 @@ async def test_replayed_a2a_nonce_other_body(k: KernelHarness, api: ApiTarget, f
     called and no session is opened."""
     script_the_checks(fake)
     fake.script(OPUS, send_reply(HAPPY))
-    any_further_turn_decides(fake)
     desk = await golden_desk(k)
     issued = await mint(k, desk)
     agent = Auth.agent(issued, desk.slug, k.clock)
@@ -213,6 +207,7 @@ async def test_replayed_a2a_nonce_other_body(k: KernelHarness, api: ApiTarget, f
         session_id = answered(await send(client, agent), "the opening request").session_id
         before = await decided(records, desk, session_id)
         calls, sessions = turn_calls(fake), await agent_sessions(records, desk)
+        any_further_turn_decides(fake)
 
         agent.new_turn(session_id=session_id, message="Book me the earliest visit, please.", nonce=nonce)
         refused(await send(client, agent), "its nonce reused under another body, naming its session,")
@@ -278,7 +273,6 @@ async def test_a2a_resent_after_its_turn(k: KernelHarness, api: ApiTarget, fake:
     and no new session."""
     script_the_checks(fake)
     fake.script(OPUS, send_reply(HAPPY), ToolUse("native__find_slots", find_slots_args()), send_reply(SLOTS))
-    any_further_turn_decides(fake)
     desk = await golden_desk(k)
     agent = Auth.agent(await mint(k, desk), desk.slug, k.clock)
     async with DeskClient(api.base_url, api.passcode) as client:
@@ -294,13 +288,14 @@ async def test_a2a_resent_after_its_turn(k: KernelHarness, api: ApiTarget, fake:
         assert decisions, "the request for open slots decided nothing, so sending it again would prove nothing"
         calls, turns = turn_calls(fake), await records.a2a_turns(session_id)
         sessions = await agent_sessions(records, desk)
+        any_further_turn_decides(fake)
 
         for what, (body, headers), answer in (("the opening request", opening, first),
                                               ("the request for open slots", slots, second)):
             again = await client.a2a(desk.slug, body, headers)
             assert (again.status_code, json_of(again)) == (200, json_of(answer)), (
                 f"{what} sent again answered {again.status_code}, not its stored answer: {again.text[:300]}")
-    assert turn_calls(fake) == calls, "a request sent again made a model call"
     assert await decided(records, desk, session_id) == decisions, "a request sent again was decided"
+    assert turn_calls(fake) == calls, "a request sent again made a model call"
     assert await records.a2a_turns(session_id) == turns, "a request sent again stored a new turn"
     assert await agent_sessions(records, desk) == sessions, "a request sent again opened a session"
