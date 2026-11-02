@@ -157,7 +157,11 @@ export const Phone: Story = {
     </div>
   ),
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: { canvas: 'none', canvasNote: 'N-R2-Agents-06-Phone: the address takes its own line and “Copy address” goes under it.' },
+  parameters: {
+    canvas: 'N-R2-Agents-06-Phone',
+    canvasNote:
+      'The address alone, as the board draws it under “Connect your own agent”: it takes its own line and “Copy address” goes under it. Its column is 326 px, 2 px wider than the board’s card is inside; the card and the rest of the board’s 390 × 2000 page aren’t drawn, and the story runs at the 390 × 844 phone window.',
+  },
   play: async ({ canvas, canvasElement }) => {
     const value = canvasElement.querySelector<HTMLElement>('code')!;
     const button = canvas.getByRole('button', { name: 'Copy address' });
