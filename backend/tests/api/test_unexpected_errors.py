@@ -83,7 +83,8 @@ async def test_the_servers_own_record_of_an_app_error_drops_the_exception(api, c
     # A traceback that also names a link has had its token redacted into formatted text by then: dropped too.
     caplog.clear()
     server.error("Exception in ASGI application\n", exc_info=RuntimeError(f"{PRIVATE} at /api/d/a-link-token"))
-    assert [(record.exc_info, record.exc_text) for record in caplog.records] == [(None, None)]
+    assert [(record.getMessage(), record.exc_info, record.exc_text) for record in caplog.records] == [
+        ("Exception in ASGI application\n", None, None)]                 # its type went with the redacted traceback
     assert PRIVATE not in logged(caplog)
 
     caplog.clear()

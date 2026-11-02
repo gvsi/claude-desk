@@ -54,7 +54,9 @@ class _ServerAppErrors(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if str(record.msg).startswith(APP_ERROR):
             # The type is code, not data, and is the only record left of an error the middleware doesn't see: a
-            # cancellation, or one raised by the 500 handler itself.
+            # cancellation, or one raised by the 500 handler itself. When `log_redaction` has already moved a
+            # traceback naming a link into `exc_text`, the exception and its type are gone, and the line stays bare:
+            # the traceback's last line can't stand in, since a message with line breaks puts data there.
             if isinstance(record.exc_info, tuple) and record.exc_info[0] is not None:
                 error = record.exc_info[1]
                 kind = record.exc_info[0] if error is None else _innermost(error)
