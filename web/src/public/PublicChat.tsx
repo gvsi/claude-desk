@@ -55,6 +55,7 @@ import { useVisitorChat, type ChatStatus } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
 import { VerifyInline } from './verify/VerifyInline.tsx';
+import { showsWritingLine } from './writingLine.ts';
 
 import './PublicChat.css';
 
@@ -891,7 +892,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     waitedOn?.kind === 'visitor' &&
     waitedOn.status !== 'failed';
   // Start the existing dots with Send, and keep the same line when Claude's writing event arrives.
-  const writing = state.writing || (ready && state.error === null && pendingTurn);
+  const writing = showsWritingLine({ writing: state.writing, ready, error: state.error, connection: state.connection, turnPending: pendingTurn });
   const replyOnItsWay = pendingTurn && state.connection === 'open' && waitedOn?.kind === 'visitor' && waitedOn.status === 'sent';
   // While the stream is down, reconnecting or given up, no reply can be heard: nothing waits for one.
   const sendHeld = ready && (replyOnItsWay || (state.writing && state.connection === 'open') || replyComingIn);
