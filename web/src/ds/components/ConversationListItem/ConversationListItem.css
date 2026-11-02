@@ -7,6 +7,7 @@
    motion-instant. Nothing moves under reduced motion. */
 
 .cd-conversation-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -15,6 +16,7 @@
   overflow: hidden;
   min-height: calc(var(--size-control) + var(--space-16));
   padding: var(--space-6) var(--space-10);
+  padding-left: calc(var(--space-10) + 16px);
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-primary);
@@ -92,6 +94,38 @@
   color: var(--text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cd-conversation-item.cd-conversation-item--unread {
+  background: var(--fill-hover);
+}
+
+.cd-conversation-item.cd-conversation-item--unread:hover {
+  background: var(--fill-secondary-hover);
+}
+
+.cd-conversation-item__unread-dot {
+  position: absolute;
+  left: 10px;
+  top: 13px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+}
+
+.cd-conversation-item--unread .cd-conversation-item__name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cd-conversation-item--unread .cd-conversation-item__time {
+  color: var(--accent-blue);
+  font-weight: 520;
+}
+
+.cd-conversation-item--unread .cd-conversation-item__quote {
+  color: var(--text-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

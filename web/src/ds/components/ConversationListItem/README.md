@@ -9,7 +9,7 @@
 
 ## What it shows
 
-- A row link at `radius-control`, at least 48 px tall, padded 6 px by 10 px.
+- A row link at `radius-control`, at least 48 px tall, padded 6 px by 10 px with a shared left column of `calc(var(--space-10) + 16px)` for read and unread rows.
 - First line: the name in `control` type, shown as written (`data-copy="user"`, since a visitor may have given it), then the time at the right in `caption` type, `text-secondary`, with tabular figures.
 - A demo visitor's chat (`demoVisitor`) has a `Pill` "Demo visitor" right after the name, 8 px from it, on the same line, so the row is never taken for a real customer's. The name keeps its own width and gives way before the pill; the time stays at the right.
 - Preview line: what the visitor last wrote (`quote`), in curly quotes, “Tuesday at 2 works.”, in `meta` type, `text-secondary`, 2 px under the name and time, marked `data-copy="user"`. Blank or missing quotes leave this line out.
@@ -17,6 +17,7 @@
 - Status line: a `size-dot` dot beside the words that say the same ("Needs you", "Agent"), in `caption` type, `text-secondary`, below the preview when there is one. A replayed conversation (`recorded`) ends that line with a `RecordedTag`, pushed to its end under the time. With no status, the line holds the tag alone; with neither, there is no status line. A row with only its name and time centers them in its 48 px.
 - Each line stays on one line and ends in an ellipsis when it doesn't fit. Status words ellipsize before the Recorded tag; the tag keeps its whole width. Names and previews give way while the time stays at the right.
 - The conversation open beside the list is `aria-current="true"` on `bg-selected`. Other rows fill with `fill-hover` on hover.
+- An `unread` row has a 10 px `accent-blue` dot at left 10 px, top 13 px, hidden from screen readers. A hidden “Unread:” prefix carries the same state in the link's name, as Notifications does. Its name is weight 600 in `text-primary`, its time weight 520 in `accent-blue`, and its preview in `text-primary`. Its fill is `fill-hover`, deepening to `fill-secondary-hover` on hover, including while current. Read rows keep their usual ink and fill.
 
 ## What the consumer provides
 
@@ -39,6 +40,7 @@
 | `status` | `{ tone: StatusTone; text: string }` | The dot is `aria-hidden`; the words carry the status. Left out when the name already says it. |
 | `href` | `string` | Required. |
 | `current` | `boolean` | `aria-current="true"` on the selected fill. |
+| `unread` | `boolean` | Defaults to `false`. Shows the unread dot, stronger ink and tinted fill; the hidden prefix joins the link's name. |
 | `recorded` | `boolean` | The Recorded tag at the end of the status line. Its word joins the link's name. |
 | `demoVisitor` | `boolean` | The "Demo visitor" pill right after the name. Its words join the link's name. |
 | `quote` | `string` | The visitor's own words, quoted below the name and time and above the status or tag. They join the link's name. A blank quote is left out. |

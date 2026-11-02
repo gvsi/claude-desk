@@ -58,13 +58,13 @@ class NothingIfItThrows extends Component<{ children: ReactNode }, { threw: bool
 function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [still] = useState(() => {
-    const { business, desk, liveCount, unreadCount, reads } = stillToday(new Date(opened), new Date(readAt));
+    const { business, desk, unreadCount, reads } = stillToday(new Date(opened), new Date(readAt));
     // Answering, a Desk's hold and a place to scroll back to do nothing here: the picture is inert,
     // and no copy exists yet.
     const context = { business, desk, setAnswering: ignore, holdDesk: ignore, reachPlace: ignore } satisfies OwnerDeskContext;
     // Today's labels are drawn at the moment the picture reads its copy, as Today will draw them.
     const clock = () => new Date(readAt);
-    return { client: new StillQueryClient(reads), desk: context, liveCount, unreadCount, clock };
+    return { client: new StillQueryClient(reads), desk: context, unreadCount, clock };
   });
   const { business, desk } = still.desk;
 
@@ -89,7 +89,6 @@ function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
                   business={business}
                   desk={desk}
                   current="today"
-                  liveCount={still.liveCount}
                   unreadCount={still.unreadCount}
                   switching={false}
                   onToggleSwitcher={ignore}

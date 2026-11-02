@@ -116,6 +116,8 @@ export interface SessionRecord {
   lastActivity: number;
   /** The owner's view: the visitor's view leaves out whispers. */
   items: TranscriptItem[];
+  /** The newest transcript cursor the owner marked read. */
+  readThrough: number;
   /** Every event the session's stream has carried, `seq` from 1 with no gaps. */
   events: { seq: number; ev: SseEvent }[];
   listeners: Set<Listener>;
@@ -384,8 +386,8 @@ export class MockWorld {
     const policy = activePolicy(fields.desk_id);
     const desk: DeskRecord = {
       brand: { ...BUSINESS.brand },
-      // The copy's first Desk is the seed, which keeps its own words; one added later has no setup type. The mock
-      // keeps no read markers yet, so it counts no unread conversations.
+      // The copy's first Desk is the seed, which keeps its own words; one added later has no setup type.
+      // Read models fill the unread count from the sessions' current markers.
       summary: {
         ...summary, business_name: BUSINESS.name, answering: true, business_type: this.desks.length === 0 ? 'rivera' : 'other',
         unread_conversations: 0,
@@ -436,6 +438,7 @@ export class MockWorld {
       language: 'en',
       lastActivity: this.now(),
       items: [],
+      readThrough: 0,
       events: [],
       listeners: new Set(),
       typingUntil: null,
@@ -470,6 +473,16 @@ export class MockWorld {
     };
     desk.ledger.push(entry);
     return entry;
+  }
+
+  isUnread(session: SessionRecord): boolean {
+    return !session.ownerPreview && session.items.some((item) =>
+      item.n > session.readThrough && (item.kind === 'visitor_text' || item.kind === 'agent_text'));
+  }
+
+  markRead(session: SessionRecord, through: number): void {
+    const newest = session.items.reduce((max, item) => Math.max(max, item.n), 0);
+    session.readThrough = Math.max(session.readThrough, Math.min(through, newest));
   }
 
   private addItem(session: SessionRecord, kind: TranscriptKind, text: string | null, event: TranscriptItem['event']): void {

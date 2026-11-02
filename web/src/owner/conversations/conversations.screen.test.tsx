@@ -951,7 +951,7 @@ describe('Conversations', () => {
     agent.displayName = null;
     agent.state = { ...agent.state, verified: false };
     const { screen } = await renderRoute(LIST);
-    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Agent/ });
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Unread: Agent/ });
     await expect.element(row.getByText('Agent · Visit booked', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-status-dot--info')).not.toBeNull();
     await expectScreenBasics(screen.container, { owner: true });
@@ -2690,7 +2690,7 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
 
     // A conversation, with its held request and the owner's controls, then has it, with a way back.
-    await list.getByRole('link', { name: new RegExp(`^${DANA}`) }).first().click();
+    await list.getByRole('link', { name: new RegExp(`^Unread: ${DANA}`) }).first().click();
     await expect.element(screen.getByRole('heading', { level: 2, name: DANA })).toBeVisible();
     // The list steps aside: hidden from sight and from the accessibility tree alike.
     expect(list.elements()).toHaveLength(0);

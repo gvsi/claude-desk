@@ -18,6 +18,8 @@ export interface ConversationListItemProps {
   href: string;
   /** The conversation open beside the list: marked `aria-current` on the selected fill. */
   current?: boolean;
+  /** Visitor or visiting agent messages the owner hasn't seen yet. */
+  unread?: boolean;
   /** Recorded history replayed into this copy: the Recorded tag at the end of the status line. */
   recorded?: boolean;
   /**
@@ -51,6 +53,7 @@ export function ConversationListItem({
   status,
   href,
   current = false,
+  unread = false,
   recorded = false,
   demoVisitor = false,
   quote,
@@ -62,7 +65,8 @@ export function ConversationListItem({
   const quoted = previewed && quote !== undefined && quote.trim() !== '';
   const lined = previewed && !quoted && line !== undefined && line.trim() !== '';
   return (
-    <a href={href} className="cd-conversation-item" aria-current={current || undefined}>
+    <a href={href} className={`cd-conversation-item${unread ? ' cd-conversation-item--unread' : ''}`} aria-current={current || undefined}>
+      {unread ? <><span className="cd-conversation-item__unread-dot" aria-hidden="true" /><span className="cd-sr-only">Unread: </span></> : null}
       <span className="cd-conversation-item__top">
         <span className={demoVisitor ? 'cd-conversation-item__name cd-conversation-item__name--tagged cd-type-control' : 'cd-conversation-item__name cd-type-control'} data-copy="user">
           {name}
