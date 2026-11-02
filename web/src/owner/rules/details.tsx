@@ -1,6 +1,10 @@
+import type { ReactElement, ReactNode } from 'react';
+
 import type { RuleCard } from '../../api/contracts.ts';
 import type { PolicyVersionOut, ToolRow } from '../../api/views.ts';
-import { ConnectorName, effectPhrases, StatusLabel, type ConnectorView, type DetailsCode, type DetailsField } from '../../ds/index.ts';
+import {
+  AdvancedDetails, ConnectorName, effectPhrases, StatusLabel, type ConnectorView, type DetailsCode, type DetailsField,
+} from '../../ds/index.ts';
 import { BUSINESS_WORDS } from '../connectors/businessWords.ts';
 import { toolState } from '../connectors/catalog.ts';
 import { capOf } from './drafts.ts';
@@ -90,4 +94,27 @@ export function ruleDetails(version: Version, cards: readonly RuleCard[], { mone
     : cards.length === 1 ? cardAsSet(cards[0]!)
       : cards.length > 1 ? cards.map(cardAsSet) : undefined;
   return value === undefined ? { fields } : { fields, code: { label: 'The rule as you set it', value } };
+}
+
+/** What a row passes a Details: the id of its words, and how it draws itself around the button. */
+interface DetailsRow {
+  /** The id of the words the row is about (a tool's title, a rule's sentence). */
+  describedBy?: string;
+  /** Draws the row with the Details button where it goes; the panel opens under what it returns. */
+  children: (toggle: ReactElement) => ReactNode;
+}
+
+/** A tool row's Details (REV-RULES-D), from its `ToolRow` and the connector it's listed under. */
+export function ToolDetails({ row, connector, describedBy, children }: DetailsRow & { row: ToolRow; connector: ConnectorView | null }) {
+  return <AdvancedDetails {...toolDetails(row, connector)} onCopy={copyText} describedBy={describedBy}>{children}</AdvancedDetails>;
+}
+
+/**
+ * A rule row's Details, from the active version and the row's cards: none for a sentence drawn from
+ * no card, and `moneyCap` for the payment limit's row, whose block is the version's limit.
+ */
+export function RuleDetails({ version, cards, moneyCap = false, describedBy, children }: DetailsRow & {
+  version: Version; cards: readonly RuleCard[]; moneyCap?: boolean;
+}) {
+  return <AdvancedDetails {...ruleDetails(version, cards, { moneyCap })} onCopy={copyText} describedBy={describedBy}>{children}</AdvancedDetails>;
 }

@@ -7,7 +7,6 @@ import { ownerErrorCopy } from '../../api/http.ts';
 import type { PeopleOut, PolicyVersionOut, RulesView, ToolRow } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import {
-  AdvancedDetails,
   Breadcrumb,
   Button,
   Card,
@@ -32,7 +31,7 @@ import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { deskPath } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
-import { copyText, ruleDetails, toolDetails, type Details } from './details.tsx';
+import { RuleDetails, ToolDetails } from './details.tsx';
 import { governingRules, hubSections } from './hub.ts';
 import { holdLine, moneyCapToolSentence, ruleMeta, ruleSentence, type SentenceWords } from './ruleSentence.ts';
 import { peopleQuery, rulesQuery } from './RuleDraftReview.tsx';
@@ -44,14 +43,16 @@ const TITLE = 'Your tools';
 const INTRO = 'Each connector brings tools; each tool lists the rules that cover it. A rule shared with other tools says so once, then reads "the same rule as above".';
 
 /** A sentence row: its words, then its status dot and its Details (REV-RULES-D), whose panel opens under the row. */
-function ToolRule({ parts, mode, shared, repeated, card, audience, details }: {
+function ToolRule({ parts, mode, shared, repeated, card, audience, version, details }: {
   parts: readonly SentencePart[]; mode: RuleMode; shared?: readonly string[]; repeated?: boolean;
-  card?: RuleCard; audience?: string; details: Details;
+  card?: RuleCard; audience?: string; version: PolicyVersionOut;
+  /** What its Details reads: the row's cards (none for a sentence from no card), or the payment limit's. */
+  details: { cards: readonly RuleCard[]; moneyCap?: boolean };
 }) {
   const textId = useId();
   return (
     <li className={`cd-house-rules__rule${repeated ? ' cd-house-rules__rule--reference cd-type-meta' : ''}`} data-rule-id={card?.card_id}>
-      <AdvancedDetails {...details} onCopy={copyText} describedBy={textId}>
+      <RuleDetails version={version} {...details} describedBy={textId}>
         {(toggle) => (
           <div className="cd-house-rules__rule-row">
             <div className="cd-house-rules__rule-text" id={textId}>
@@ -68,7 +69,7 @@ function ToolRule({ parts, mode, shared, repeated, card, audience, details }: {
             <span className="cd-house-rules__rule-actions"><StatusDot tone={OUTCOME_TONE[mode]} />{toggle}</span>
           </div>
         )}
-      </AdvancedDetails>
+      </RuleDetails>
     </li>
   );
 }
@@ -82,7 +83,7 @@ function ToolHeader({ row, title, href, description, connector }: {
 }) {
   const titleId = useId();
   return (
-    <AdvancedDetails {...toolDetails(row, connector)} onCopy={copyText} describedBy={titleId}>
+    <ToolDetails row={row} connector={connector} describedBy={titleId}>
       {(toggle) => (
         <div className="cd-house-rules__tool-header">
           <div className="cd-house-rules__tool-text">
@@ -95,7 +96,7 @@ function ToolHeader({ row, title, href, description, connector }: {
           {toggle}
         </div>
       )}
-    </AdvancedDetails>
+    </ToolDetails>
   );
 }
 
@@ -167,7 +168,7 @@ function ToolConnectors({ deskId, view, people }: { deskId: string; view: RulesV
                   );
                 })}
                 {!moneyTools.includes(row) ? null : <ToolRule parts={moneyCapToolSentence(view.active.auto_money_cap_cents ?? 0)} mode="ask"
-                  shared={otherTitles(moneyTools, row)} repeated={moneyTools[0] !== row} details={ruleDetails(view.active, [], { moneyCap: true })} />}
+                  shared={otherTitles(moneyTools, row)} repeated={moneyTools[0] !== row} version={view.active} details={{ cards: [], moneyCap: true }} />}
               </ul>
             </section>
           );
@@ -186,10 +187,10 @@ function ToolRuleWithHold({ card, words, hold, shared, repeated, version, drawn 
   version: PolicyVersionOut; drawn: boolean;
 }) {
   const audience = card.who === 'anyone' ? undefined : ruleMeta(card, words).who;
-  const details = ruleDetails(version, drawn ? [card] : []);
+  const details = { cards: drawn ? [card] : [] };
   return <>
-    <ToolRule parts={ruleSentence(card, words)} mode={card.mode} card={card} audience={audience} shared={shared} repeated={repeated} details={details} />
-    {hold === null ? null : <ToolRule parts={hold} mode="ask" audience={audience} details={details} />}
+    <ToolRule parts={ruleSentence(card, words)} mode={card.mode} card={card} audience={audience} shared={shared} repeated={repeated} version={version} details={details} />
+    {hold === null ? null : <ToolRule parts={hold} mode="ask" audience={audience} version={version} details={details} />}
   </>;
 }
 
