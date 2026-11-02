@@ -229,7 +229,7 @@ describe('Settings', () => {
     await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
     expect(root.dataset.theme).toBe('light');
 
-    await subNav(screen).getByRole('link', { name: 'Notifications' }).click();
+    await subNav(screen).getByRole('link', { name: 'Alerts' }).click();
     await expect.element(main(screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
     await subNav(screen).getByRole('link', { name: 'General' }).click();
     await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
