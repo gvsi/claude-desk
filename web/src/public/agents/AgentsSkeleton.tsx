@@ -3,6 +3,16 @@ import { AGENTS_COPY, DEMO_TASK_COPY, DEMO_TASKS } from './copy.ts';
 
 import './AgentCardPage.css';
 
+/**
+ * The fresh copy's "What agents can do here": one row for each ability the Turner seed offers an
+ * agent, in the order the kernel's Agent Card lists them, each with the lines it takes on a phone.
+ * On wider screens every row is one line.
+ */
+const CAN_DO_ROWS: Readonly<Record<CopyLanguage, readonly number[]>> = {
+  en: [1, 1, 1, 1, 2, 1, 1, 2, 1, 1],
+  es: [1, 1, 1, 1, 2, 1, 1, 2, 2, 1],
+};
+
 /** Shapes for one reference card, using the real cards' title and body spacing. */
 function ReferenceCard({ rows, text, anchor }: { rows: readonly number[]; text: 'body' | 'meta'; anchor: string }) {
   return (
@@ -65,7 +75,7 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
               </div>
             </div>
           </SkeletonCard>
-          <ReferenceCard rows={language === 'es' ? [1, 1, 2, 1] : [1, 1, 1, 1]} text="body" anchor="can-do-card" />
+          <ReferenceCard rows={CAN_DO_ROWS[language]} text="body" anchor="can-do-card" />
           <ReferenceCard rows={language === 'es' ? [2, 3, 2, 1, 1] : [2, 2, 2, 1, 1]} text="meta" anchor="prove-card" />
           <SkeletonCard padding={16} anchor="connect-card">
             <Skeleton shape="line" text="section" width="55%" />
