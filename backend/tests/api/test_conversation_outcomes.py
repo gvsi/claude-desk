@@ -206,9 +206,29 @@ async def test_agent_charge_carries_its_amount(scene):
     assert await facts(scene, ids) == ("deposit_paid", None, 2000, None)
 
 
-async def confirm_payment(scene, ids, at, cents, *, confirmed=True) -> None:
+@pytest.mark.parametrize("mismatch", ["session", "tool"])
+@pytest.mark.parametrize("tool,card,outcome", [
+    ("native.book", "booking_confirmed", "visit_booked"),
+    ("native.charge_mandate", "charge_confirmed", "deposit_paid"),
+])
+async def test_agent_outcome_drops_mismatched_action_facts(scene, mismatch, tool, card, outcome):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    action = {"resource_kind": "slot", "starts_at": local(2026, 11, 2, 10), "amount_cents": 2000}
+    if mismatch == "session":
+        other = await agent(scene, at)
+        action["session_id"] = other.session_id
+    else:
+        action["tool"] = "native.quote"
+    # The decision and its decide entry belong to this agent; the referenced action doesn't match.
+    await record(scene, ids, at, tool=tool, card=card, action=action)
+    assert await facts(scene, ids) == (outcome, None, None, None)
+
+
+async def confirm_payment(scene, ids, at, cents, *, confirmed=True, refused_retry_link=None) -> str:
     """One of the agent's payment links paid at `at`, its move to `paid` ledgered as the kernel ledgers one, then, when
-    `confirmed`, the Desk's own payment confirmation, ledgered after it."""
+    `confirmed`, the Desk's own payment confirmation, ledgered after it. Optionally ledger a refused retry of an
+    older link just before that confirmation. Return the paid link's ID."""
     fake, owner = scene.fake, scene.owner
     fake.now = at
     desk = fake.desks[owner.desk_id]
@@ -221,7 +241,10 @@ async def confirm_payment(scene, ids, at, cents, *, confirmed=True) -> None:
                 session_id=ids.session_id, ref_id=link_id)
     fake.flush()
     if not confirmed:
-        return
+        return link_id
+    if refused_retry_link is not None:
+        fake.append(desk, "payment", {"link_id": refused_retry_link, "state": "paid", "refused": True},
+                    session_id=ids.session_id, ref_id=refused_retry_link)
     reply = fake.append(desk, "reply", {"message_id": f"confirm-{link_id}", "author": "desk", "ok": True},
                         session_id=ids.session_id, ref_id=f"confirm-{link_id}")
     fake.flush()
@@ -233,6 +256,8 @@ async def confirm_payment(scene, ids, at, cents, *, confirmed=True) -> None:
         await deliver(conn, ids, Reply(verdict, "desk", "kernel"), ro_schema="fake_kernel_ro")
         await conn.commit()
 
+    return link_id
+
 
 async def test_agent_payment_confirmation_carries_its_own_links_amount(scene):
     at = local(2026, 10, 30, 9)
@@ -241,6 +266,25 @@ async def test_agent_payment_confirmation_carries_its_own_links_amount(scene):
     await confirm_payment(scene, ids, at + timedelta(minutes=1), 2000)
     # A link paid after the newest confirmation, with no confirmation of its own, isn't the one it confirmed.
     await confirm_payment(scene, ids, at + timedelta(minutes=2), 5000, confirmed=False)
+    assert await facts(scene, ids) == ("deposit_paid", None, 2000, None)
+
+
+@pytest.mark.parametrize("state", ["cancelled", "expired"])
+async def test_agent_payment_confirmation_drops_unpaid_link_amount(scene, state):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    link_id = await confirm_payment(scene, ids, at, 2000)
+    scene.admin.execute("UPDATE fake_kernel_ro.payment_links SET state = %s WHERE link_id = %s", (state, link_id))
+    assert await facts(scene, ids) == ("deposit_paid", None, None, None)
+
+
+@pytest.mark.parametrize("older_cents", [5000, 18000])
+async def test_agent_payment_confirmation_ignores_refused_retry(scene, older_cents):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    older_link = await confirm_payment(scene, ids, at, older_cents)
+    # The older link's refused retry is the last payment entry before the newer confirmation.
+    await confirm_payment(scene, ids, at + timedelta(minutes=1), 2000, refused_retry_link=older_link)
     assert await facts(scene, ids) == ("deposit_paid", None, 2000, None)
 
 
