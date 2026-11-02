@@ -64,6 +64,7 @@ import {
   AGENTS_COPY,
   DEMO_TASKS,
   DEMO_TASK_COPY,
+  DEMO_TASK_ROWS,
   FALLBACK_TASK_SET,
   agentStartLostLine,
   isDemoTaskSet,
@@ -430,15 +431,23 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
       </Notice>
     );
   }
-  // Until the Desk's set is read, the tasks' shapes hold their place, as the page's skeleton draws them.
-  const chips = !OFFERS_TASKS.has(status) ? null : taskSet === null ? (
-    <div className="cd-suggestion-chips" aria-hidden="true" data-loading="task-chips">
-      {DEMO_TASKS.map((t) => (
-        <Skeleton key={t} shape="block" measure={{ label: DEMO_TASK_COPY[language].rivera[t], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" />
-      ))}
+  // Each kind wraps on its own. Until the set is read, the same rows hold the chips' places.
+  const chips = !OFFERS_TASKS.has(status) ? null : (
+    <div className="cd-agents-card__tasks">
+      {DEMO_TASK_ROWS.map((row) => {
+        if (taskSet === null) return (
+          <div key={row[0]} className="cd-suggestion-chips" aria-hidden="true" data-loading="task-chips">
+            {row.map((t) => (
+              <Skeleton key={t} shape="block" measure={{ label: DEMO_TASK_COPY[language].rivera[t], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" />
+            ))}
+          </div>
+        );
+        const tasks = row.filter((t) => (choices?.tasks ?? DEMO_TASKS).includes(t));
+        return tasks.length === 0 ? null : (
+          <SuggestionChips key={row[0]} label={copy.tasksLabel} suggestions={tasks.map((t) => words[t])} onPick={pick} />
+        );
+      })}
     </div>
-  ) : (
-    <SuggestionChips label={copy.tasksLabel} suggestions={(choices?.tasks ?? DEMO_TASKS).map((t) => words[t])} max={DEMO_TASKS.length} onPick={pick} />
   );
   // After a run that finished, failed or is gone, the tasks come at its end, under its last line
   // (boards 04 and 05); otherwise they sit under the signed limit (board 03).

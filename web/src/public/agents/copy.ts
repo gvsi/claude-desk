@@ -19,6 +19,12 @@ export const DEMO_TASKS = ['book_visit', 'ask_question', 'quote_and_deposit', 'p
 
 export type DemoTask = (typeof DEMO_TASKS)[number];
 
+/** Board 03: tasks without money first, payment tasks second; each row wraps on its own. */
+export const DEMO_TASK_ROWS = [
+  ['book_visit', 'ask_question'],
+  ['quote_and_deposit', 'push_the_limit'],
+] as const satisfies readonly (readonly DemoTask[])[];
+
 export type { DemoTaskSet };
 
 /** The set whose words the panel shows when the Desk's set can't be read: plain words for any business. */

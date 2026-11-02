@@ -71,8 +71,8 @@ function limitIn(screen: RenderResult, panelName = 'Send an agent', regionName =
 const follows = (earlier: Element | null | undefined, later: Element | null | undefined): boolean =>
   earlier != null && later != null && (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
-/** The panel's group of task chips. */
-const chipGroup = (screen: RenderResult) => screen.getByRole('region', { name: 'Send an agent' }).getByRole('group', { name: 'Tasks for the agent' }).element();
+/** The panel's first row of task chips. */
+const chipGroup = (screen: RenderResult) => screen.getByRole('region', { name: 'Send an agent' }).getByRole('group', { name: 'Tasks for the agent' }).elements()[0];
 
 /** The task chips the panel offers now, by name. */
 const chipsIn = (screen: RenderResult) =>
@@ -221,6 +221,39 @@ async function plantDesk(patch: Partial<PublicDesk>): Promise<void> {
 }
 
 describe('agents page', () => {
+  it.each([
+    ['desktop', true], ['phone', true], ['desktop', false], ['phone', false],
+  ] as const)('task_rows_by_kind_%s_payments_%s', async (viewport, payments) => {
+    if (!payments) {
+      for (const tool of mockStore.world.desks[0]!.tools) {
+        if (tool.tool === 'native.payment_link' || tool.tool === 'native.charge_mandate') tool.status = 'disabled';
+      }
+    }
+    const { screen } = await renderRoute(PAGE, { viewport });
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: TASKS[0] })).toBeVisible();
+    expect([innerWidth, innerHeight]).toEqual([VIEWPORTS[viewport].width, VIEWPORTS[viewport].height]);
+    const rows = panel.getByRole('group', { name: 'Tasks for the agent' }).elements();
+    expect(rows.map((row) => [...row.querySelectorAll('button')].map((chip) => chip.textContent)))
+      .toEqual(payments ? [TASKS.slice(0, 2), TASKS.slice(2)] : [TASKS.slice(0, 2)]);
+    for (const row of rows) {
+      expectComputed(row, { display: 'flex', flexWrap: 'wrap', gap: '8px' });
+      const chips = [...row.querySelectorAll('button')].map((chip) => chip.getBoundingClientRect());
+      expect(chips.every((chip) => chip.left >= row.getBoundingClientRect().left && chip.right <= row.getBoundingClientRect().right)).toBe(true);
+      if (viewport === 'desktop') expect(chips[0]!.top).toBe(chips[1]!.top);
+    }
+    const first = rows[0]!.getBoundingClientRect();
+    if (payments) {
+      expect(rows[1]!.getBoundingClientRect().top - first.bottom).toBe(8);
+    } else {
+      // No empty payment row or trailing row gap inside the task stack.
+      const stack = rows[0]!.parentElement!.getBoundingClientRect();
+      expect(stack.top).toBe(first.top);
+      expect(stack.bottom).toBe(first.bottom);
+    }
+    expectNoHorizontalScroll();
+  });
+
   it('agent_card_lists_skills_and_endpoint', async () => {
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
     onTestFinished(() => writeText.mockRestore());

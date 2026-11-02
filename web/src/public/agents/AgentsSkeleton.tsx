@@ -1,5 +1,5 @@
 import { ConceptFooter, PublicBrandHeaderSkeleton, Skeleton, SkeletonCard, type CopyLanguage } from '../../ds/index.ts';
-import { AGENTS_COPY, DEMO_TASK_COPY, DEMO_TASKS } from './copy.ts';
+import { AGENTS_COPY, DEMO_TASK_COPY, DEMO_TASKS, DEMO_TASK_ROWS } from './copy.ts';
 
 import './AgentCardPage.css';
 
@@ -60,8 +60,12 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
                   {language === 'es' ? <Skeleton shape="line" text="caption" width="60%" className="cd-agents-skeleton__phone-line" /> : null}
                 </div>
               </div>
-              <div className="cd-suggestion-chips">
-                {DEMO_TASKS.map((task, i) => <Skeleton key={task} shape="block" measure={{ label: DEMO_TASK_COPY[language].rivera[task], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" anchor={`task-chip-${i}`} />)}
+              <div className="cd-agents-card__tasks">
+                {DEMO_TASK_ROWS.map((row) => (
+                  <div key={row[0]} className="cd-suggestion-chips">
+                    {row.map((task) => <Skeleton key={task} shape="block" measure={{ label: DEMO_TASK_COPY[language].rivera[task], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" anchor={`task-chip-${DEMO_TASKS.indexOf(task)}`} />)}
+                  </div>
+                ))}
               </div>
             </div>
           </SkeletonCard>
