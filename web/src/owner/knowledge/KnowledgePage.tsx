@@ -13,7 +13,7 @@ import { useRef, useState } from 'react';
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../../api/http.ts';
 import type { KnowledgeRow } from '../../api/views.ts';
-import { Button, KnowledgeAdd, KnowledgeList, NAV_LABELS, Notice, PageHeader, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
+import { Button, KnowledgeAdd, KnowledgeList, NAV_LABELS, Notice, PageHeader, Pill, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -62,6 +62,12 @@ export const KNOWLEDGE_COPY = {
 } as const;
 
 type Busy = 'note' | 'file' | 'switch';
+
+/** The examples "Add something" shows in its empty fields on the copy's starting sample Desk, the plumbing demo; other Desks show none. */
+const SAMPLE_EXAMPLES = {
+  websitePlaceholder: 'turner-plumbing.example/blog',
+  notePlaceholder: "We don't work on gas lines or septic tanks.",
+} as const;
 
 /** A Desk's knowledge, as the owner may see it. Query keys start with the route key. */
 const knowledgeKey = (deskId: string) => ['knowledge', deskId] as const;
@@ -350,12 +356,14 @@ export function KnowledgePage() {
 
   return (
     <>
-      <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} />
+      {/* The plumbing demo's sample rows and questions are mocks: it says so once, beside its title. Every Desk's More
+          sources and website field say on their own line what doesn't work yet, with no pill. */}
+      <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} {...(isStartingDesk ? { badge: <Pill>Mock</Pill> } : {})} />
       <div className="cd-knowledge">
         <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} isStartingDesk={isStartingDesk} /></div>
         <div className="cd-knowledge__add">
         <KnowledgeAdd
-          {...(isStartingDesk ? { websitePlaceholder: 'turner-plumbing.example/blog' } : {})}
+          {...(isStartingDesk ? SAMPLE_EXAMPLES : {})}
           note={note}
           onNoteChange={(text) => {
             setNote(text);
@@ -386,7 +394,7 @@ export function KnowledgePage() {
 /** Static examples share the real source list’s card and row markup: the business’s sample questions (Turner’s by default) and more sources. */
 export function KnowledgePreviews({ questions = SAMPLE_QUESTIONS }: { questions?: readonly KnowledgeRowView[] } = {}) {
   return <div className="cd-knowledge__previews">
-    <KnowledgeList title="Questions Claude couldn’t answer" items={questions} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} />
-    <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
+    <KnowledgeList title="Questions Claude couldn’t answer" items={questions} note={<VisionNote pill={false}>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} />
+    <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote pill={false}>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
   </div>;
 }
