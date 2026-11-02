@@ -35,7 +35,6 @@ A wrong or incomplete frame is one high-level P1/P2 `abstraction gap`; don't lis
 ## Review focus
 
 - **Safety invariants.** Check the change against each of the six in `AGENTS.md`. A change that weakens one, opens a path around one (a tool executed without a fresh `/decide` allow or a bound approval, visitor-visible text that skips the reply check, a price or date in free prose, a rule activated without the compiler and proofs, a baseline check that can be switched off), or loosens a test, eval threshold or oracle to get past one is P1 with type `safety invariant`.
-- **Constitution.** If `.local/constitution.md` exists, read it and score the target against its rubric after the safety pass. Report shortfalls as findings of type `constitution`, naming the rubric item, with the severities it sets. Quote nothing from that file in your output beyond the item name.
 - **Kernel/API trust boundary.** The API process (`backend/desk/api/`) holds only the Anthropic API key, passes session IDs and never identities (principal, person, level, assurance) to the kernel, and can't write policies, facts, approvals, sessions or the ledger. Flag any business credential, kernel-table write or identity field crossing to the API side, and any kernel endpoint that trusts what the API asserts.
 - **Fail closed.** Every error, timeout, missing reviewer score, parse failure, unknown or drifted tool and unexpected kernel response must end in refuse, hold or block, never in allow, execute or reveal. Look for broad `except` blocks, defaults and fallbacks that turn a failure into success.
 - **Untrusted text.** Tool results, knowledge, MCP tool descriptions, owner whispers and visitor messages must never reach a path that treats them as instructions or policy.
@@ -50,7 +49,7 @@ Your job is coverage: the orchestrator validates every finding before anything i
 - **Evidence:** `file:line` refs, snippets, doc links, or a command the orchestrator can run in under 30 seconds.
 - **Reasoning:** the steps from observation to conclusion.
 - **Root cause:** the underlying defect, not the symptom.
-- **Type:** `local defect`, `abstraction gap`, `safety invariant`, `constitution`, `product decision` or `test coverage gap`.
+- **Type:** `local defect`, `abstraction gap`, `safety invariant`, `product decision` or `test coverage gap`.
 - **Impact:** plain-language impact on visitors, the owner, money, data or operations.
 - **Proposed fix:** concrete and minimal.
 - **Verification hint:** 1–2 commands or grep patterns that independently confirm the issue.
@@ -81,7 +80,7 @@ Then each finding in exactly this format:
 ```
 [#] P1 — Short title
 Location:         path/to/file.py:42
-Type:             local defect | abstraction gap | safety invariant | constitution | product decision | test coverage gap
+Type:             local defect | abstraction gap | safety invariant | product decision | test coverage gap
 Impact:           <plain-language impact>
 Root cause:       <one sentence>
 Evidence:         <file:line refs, snippets, doc links, search trail>

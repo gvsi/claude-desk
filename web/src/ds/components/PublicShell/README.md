@@ -1,6 +1,6 @@
 # PublicShell
 
-`PublicShell` is the public page around a conversation: the business's brand header with its open status, the chat with the AI disclosure, the composer and the business's charter beside it. It is a column the window's height in which only the conversation scrolls.
+`PublicShell` is the public page around a conversation: the business's brand header and open status, the chat with the AI disclosure, the composer and the business's charter beside it. It is a column the window's height in which only the conversation scrolls.
 
 ## When to use
 
@@ -41,7 +41,7 @@
     The line still names Claude as an AI and says it is paused, so the AI disclosure is never off; it is the shell's own copy, and the consumer can't empty it or pass other words. Each `{ownerName}` is marked as written by someone (`data-copy="user"`), as the other names are. When the owner hands back, the usual disclosure and the button come back. The shell draws only its head: the chat's own lines ("Mike Turner joined the chat", "Claude is helping again.") are the page's `SystemLine`s in the conversation.
   - **Focus.** If "Ask for {ownerName}" has focus as the owner joins, focus goes on to the composer's text box (or, while that is disabled, to the conversation's scroll region, the stop after Ask), without scrolling, so it doesn't drop to the page and the visitor stays where they were reading. Focus anywhere else, or nowhere, stays where it is.
   - The conversation (`children`) in its scroll region, then the `composer` with `ConceptFooter poweredBy` under it (see "The page never scrolls"). The conversation sets `--cd-row-max: 100%`, so each `TranscriptRow` fills the chat column, edge to edge with the composer.
-- **The about column**, 300 px on the panel at the right, from the header to the foot of the window, named "About {name}" / "Sobre {name}":
+- **The about column**, `size-public-about` (22% of the window, clamped to 300–400 px) on the panel at the left, from the header to the foot of the window, named "About {name}" / "Sobre {name}":
   - The `about` blocks in order: cards as `ReplyCard`s in the page's language, prose as text.
   - The `aboutLinks` under "For AI agents" / "Para agentes de IA". Only paths on this site become links (`/d/…`); a scheme or another host is left out.
   - A charter taller than the window scrolls in the column, on its own.
@@ -51,7 +51,7 @@ Names (the business's, the Desk's, the owner's) are shown as written. The page c
 
 ## Open status
 
-The header says whether the business is open now, in the kernel's words.
+The shell says whether the business is open now, in the kernel's words.
 
 - **The kernel writes it.** The kernel works out `PublicDesk.open_status` from the business's hours, on its own clock and in the business's time zone, and writes `text` in English or Spanish ("Open now, until 6:00 pm", "Cerrado ahora. Abre el lunes a las 8:00").
 - **The page shows it verbatim.** The shell shows `text` exactly as given and reads nothing else of the status but `open`. It does no time formatting or arithmetic, and the browser's clock and time zone decide nothing. This is the one clock time a visitor surface shows outside a card.
@@ -59,8 +59,8 @@ The header says whether the business is open now, in the kernel's words.
 - **Closed adds one line of the shell's own**, under the kernel's words in the secondary ink. It follows `language` like the rest of the shell's copy, and isn't shown when open:
   - "Claude can still help."
   - "Claude puede ayudarte igual."
-- **Type and color.** The kernel's words are `meta`, in the brand's ink and marked `data-copy="user"`, as the name is. The closed line is `caption`, a step quieter, 2 px under them.
-- **Placement.** At the right end of the header's row, level with the monogram. Below 640 px of shell width it takes its own line under the monogram and name, from the left gutter, 8 px below them, however short it is. A long line wraps inside the header and never scrolls sideways.
+- **Type and color.** The kernel's words are `meta`, in the theme's `text-primary` in the About column or the brand's ink in the header and marked `data-copy="user"`, as the name is. The closed line is `caption`, a step quieter, 2 px under them.
+- **Placement.** From 900 px of shell width, inside the About column, 8 px under its title and 16 px above the first card. The dot uses `status-handled`, the closed ring and quieter line `text-secondary`. The header holds only the business identity. Without an About column, or below 900 px, the status stays in the header, at the right end of its row, level with the monogram. Below 640 px of shell width it takes its own line under the monogram and name, from the left gutter, 8 px below them, however short it is. A long line wraps inside the header and never scrolls sideways.
 - **No status, no line.** Without `openStatus`, with `null` (a Desk without hours, or a computation the kernel dropped), or with anything that isn't a non-empty `text` and a boolean `open`, there is no line and no dot, and the header is exactly as it is without hours.
 
 ## The page never scrolls
@@ -122,7 +122,7 @@ It isn't sent when the shell first lays out (it is short or tall from its first 
 
 The shell is an inline-size container, so it lays out by its own width, not the window's. Below 720 px (each state of the handoff board at 640 px, a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40, and below 640 px the open status also has its own line under the name.
 
-From 900 px of shell width the about column stands at the right of the chat. Below 900 px there is no room for it beside the chat, and the page doesn't scroll, so it opens the scroll region instead: the first thing above the conversation, the region's full width on the panel, with a hairline between it and the first message. It scrolls away as the chat goes on and comes back at the chat's start. Where the conversation comes to rest with the column's own hairline within 24 px under the chat's head (a chat a little shorter than the region, followed to its end), that hairline is left out, so the head's own line is the one line there rather than two a few px apart; from 24 px down the column draws it as ever. Only the column's own hairline steps aside: a card's edge inside the column passing under the head is content scrolling, as a message's is. The shell judges this after every render, scroll and resize, the column's own included (it watches the column while the column opens the scroll region, as the web font arriving can change its height), and the line keeps its pixel, so nothing moves. With forced colors the line takes the system's `Canvas` color there, as the browser would otherwise draw a transparent border in its text color. Until the shell has measured itself it opens the scroll region too, where it takes nothing from the chat's width, so the chat never lays out squeezed beside it. The shell watches its own width and moves the column before the browser paints, then judges short or tall with the column in place, and the rest of the page stays mounted as it moves (an unsent draft is kept, and stays focused). If focus is on a link in the column when it moves, focus goes to the same link in the moved column.
+From 900 px of shell width the about column stands at the left of the chat, with a hairline on its right edge. Below 900 px there is no room for it beside the chat, and the page doesn't scroll, so it opens the scroll region instead: the first thing above the conversation, the region's full width on the panel, with a hairline between it and the first message. It scrolls away as the chat goes on and comes back at the chat's start. Where the conversation comes to rest with the column's own hairline within 24 px under the chat's head (a chat a little shorter than the region, followed to its end), that hairline is left out, so the head's own line is the one line there rather than two a few px apart; from 24 px down the column draws it as ever. Only the column's own hairline steps aside: a card's edge inside the column passing under the head is content scrolling, as a message's is. The shell judges this after every render, scroll and resize, the column's own included (it watches the column while the column opens the scroll region, as the web font arriving can change its height), and the line keeps its pixel, so nothing moves. With forced colors the line takes the system's `Canvas` color there, as the browser would otherwise draw a transparent border in its text color. Until the shell has measured itself it opens the scroll region too, where it takes nothing from the chat's width, so the chat never lays out squeezed beside it. The shell watches its own width and moves the column before the browser paints, then judges short or tall with the column in place, and the rest of the page stays mounted as it moves (an unsent draft is kept, and stays focused). If focus is on a link in the column when it moves, focus goes to the same link in the moved column.
 
 Beside the chat, a charter taller than the column scrolls in the column, on its own. While it does, the column is a stop in the tab order (it is already named by its heading), so it scrolls from the keyboard too, and it stays one while it has focus, so focus doesn't drop to the page when the window grows and the column stops scrolling under it. When it fits, or when it opens the scroll region, it isn't a stop of its own.
 
@@ -189,7 +189,7 @@ is the shell skeleton's only text when `footer` is true. The consumer keeps a hi
 main landmark outside the layer on a standalone loading page.
 
 The brand shape uses `bg-panel` until the business's colours arrive, its real monogram size and
-name/tagline line boxes, and one open-hours line when `hours` is true. It follows the header's own
+name/tagline line boxes, and one open-hours line when `hours` is true. In the wide shell with an About column, that line moves into the column, as the real status does. It follows the header's own
 container rules: the status wraps below the name under 640 px. A fresh copy's open header matches;
 at 390 px, closed and no-hours headers change height once (19 px taller and 16 px shorter).
 The agents page passes `hours={false}` because its real header has no hours.
@@ -201,6 +201,8 @@ meta line, the inline composer and three starter chips as wide as the fresh copy
 real fresh copy's five charter cards and two agents links: beside the chat from 900 px, and under
 the footer below that, as the first view does. In setup's fresh preview (`footer={false}`), there
 is no charter or footer, so neither is drawn.
+The Hours and deposit-policy placeholder wrap lines follow the About column's content width,
+so their cards keep their landed heights as the column grows.
 
 A first visit to a Desk with starters lands in place. A resumed chat keeps its head in place, and
 its composer moves down to the bottom as it lands. A Desk without starters lands on the greeting

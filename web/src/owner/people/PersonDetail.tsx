@@ -124,7 +124,7 @@ function TheirConversations({ deskId, personId }: { deskId: string; personId: st
   const groups = personConversations(list.data, personId, business.timezone, now);
   return (
     <>
-      <ReadFailed failure={failure} />
+      <ReadFailed failure={failure ?? needsFailure} />
       <section className="cd-person__conversations" aria-labelledby={titleId}>
         <SectionHeader id={titleId} title="Conversations" />
         {groups.length === 0 ? (
@@ -142,6 +142,7 @@ function TheirConversations({ deskId, personId }: { deskId: string; personId: st
                       status={conversationListStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id), firstName(business.owner_display_name)) ?? undefined}
                       href={conversationPath(deskId, s.session_id)}
                       recorded={s.replayed === true}
+                      demoVisitor={s.demo_visitor === true}
                       quote={s.latest_visitor_text ?? undefined}
                     />
                   </li>
