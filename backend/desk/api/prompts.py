@@ -732,9 +732,10 @@ reviews it and turns the Desk on, so describe what you'll set up, never somethin
 accepts an app, code connects it after your reply: say you're connecting it and that nothing runs until they've \
 reviewed its tools, never that it's already connected. If <setup_plan> shows an app as \
 "{SETUP_PLAN_NOT_CONNECTED}", its connection didn't go through: never say it's connected, and when you mention it, \
-say they can finish connecting it on the Tools step; jobs that use it stay in the plan. You can't change a card \
-the owner already decided or decide it again: a job they accepted stays as they chose, and one they turned down \
-can come back as a new job in add_jobs."""
+say they can finish connecting it on the Tools step; jobs that use it stay in the plan. Payments through Stripe can \
+also be connected on the Tools step if they turned Stripe down. You can't change a card the owner already decided or \
+decide it again: a job they accepted stays as they chose, and one they turned down can come back as a new job in \
+add_jobs when they ask for it."""
 
 _SAFETY = """\
 What you never decide
@@ -1126,8 +1127,7 @@ SETUP_OFFER_ANSWER_LINE = (
     "<setup_plan> already lists a job as planned, it's the one you added for this answer and you've replied: set "
     "next to its id, with question as the short line before its card, leave reply empty and add nothing. When they "
     "ask for an app <setup_plan> doesn't list, set next to it, with question as the line before its card; an app it "
-    "already lists can't be proposed again, so say where it stands (payments through Stripe can still be connected "
-    "on the Tools step, even if they turned it down). Facts, limits and the jobs they accepted stay as "
+    "already lists can't be proposed again, so say where it stands. Facts, limits and the jobs they accepted stay as "
     "they are: those cards are closed and no later screen changes a job, so never say you've changed one, never "
     "point to a card or another place to change it, and don't add a second job to change one; say plainly it stays "
     "as they chose. A client that can't show cards gets no jobs or apps here: say you can't add one from here. "

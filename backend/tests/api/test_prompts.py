@@ -573,7 +573,7 @@ def test_setup_never_calls_an_app_connected_once_its_connection_failed():
             "that use it stay in the plan.")
     assert f'"{SETUP_PLAN_NOT_CONNECTED}"' in rule
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
-        assert f"never that it's already connected. {rule} You can't change a card" in system
+        assert f"never that it's already connected. {rule} Payments through Stripe can" in system
         assert "  " not in system
     assert ('its id and status: planned, shown, accepted, "accepted, not connected", declined, changed or dropped'
             in SETUP_TURN_SYSTEM)
@@ -647,13 +647,14 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
 def test_decided_cards_stay_as_decided():
     # No decided card can be decided again, before the plan closes or after: setup never points the owner back to one.
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
-        assert "a job they accepted stays as they chose, and one they turned down can come back as a new job" in (
-            " ".join(system.split()))
+        flat = " ".join(system.split())
+        assert ("a job they accepted stays as they chose, and one they turned down can come back as a new job in "
+                "add_jobs when they ask for it") in flat
+        assert "Payments through Stripe can also be connected on the Tools step if they turned Stripe down" in flat
         assert "point them to its card" not in system
     for words in ("A yes to that offer puts the owner on record", "never point to a card or another place",
                   "an app it already lists can't be proposed again", "A job they turned down, or one left out, can "
-                  "come back", "If they also said yes to the offer, don't say you've added them",
-                  "payments through Stripe can still be connected on the Tools step"):
+                  "come back", "If they also said yes to the offer, don't say you've added them"):
         assert words in SETUP_OFFER_ANSWER_LINE
 
 
