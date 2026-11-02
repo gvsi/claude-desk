@@ -83,6 +83,18 @@ function log(screen: RenderResult) {
   return screen.getByRole('log');
 }
 
+/**
+ * The scroll region around the conversation's transcript. When the first read is slow enough for
+ * the pane's skeleton to show, its shapes fade over the conversation for a moment after it lands,
+ * and their own region of this class comes first in the page until they go; so take the one that
+ * holds the log.
+ */
+function transcriptRegion(screen: RenderResult): Element {
+  const region = log(screen).element().closest('.cd-conversation__scroll');
+  if (!region) throw new Error('the transcript scrolls in its own region');
+  return region;
+}
+
 /** Makes `chat` longer than the window: `count` more messages from the visitor. Returns the last. */
 function lengthen(chat: SessionRecord, count = 30): string {
   let last = '';
@@ -345,7 +357,7 @@ describe('Conversations', () => {
     const last = lengthen(chat);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     // The long chat overflows its region first: until it has, the region's end reads as its latest
     // and a place 300 px down can't be set.
     await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
@@ -383,7 +395,7 @@ describe('Conversations', () => {
     const last = lengthen(chat);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     const endGap = () => region.scrollHeight - region.clientHeight - region.scrollTop;
     // As above, the long chat overflows its region first; until then its end reads as its latest at 0.
     await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
@@ -426,7 +438,7 @@ describe('Conversations', () => {
     await row.click();
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
     expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
     expect(region.scrollHeight).toBeGreaterThan(region.clientHeight);
