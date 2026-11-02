@@ -480,7 +480,7 @@
 
 /* The pane's shapes: the transcript's region opens at its end, as the chat's does, but never
    scrolls. The owner's controls keep their room with nothing drawn in it: the line about whispers
-   and the whisper box at their heights. */
+   and the whisper box with its helper line at their heights. */
 .cd-conversation-skeleton .cd-conversation__scroll {
   overflow: hidden;
 }
