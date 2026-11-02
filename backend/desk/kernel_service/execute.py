@@ -900,17 +900,19 @@ def _orphaned(cutoff: datetime) -> Any:
 
 async def refresh_decision(ctx: KernelCtx, decision_row: DecisionRow) -> DecisionRow:
     """A decision as a read settles it: its orphaned execution reconciled, then lazy expiry, then a
-    held money decision's answers recomputed at the active version's money cap
-    (`decide.refresh_answers`; "Decision lifecycle"), in the caller's transaction, except that a
-    reconciliation commits at once (`reconcile_orphans`). That commit ends the caller's locks, so
-    the decision is then read again `FOR UPDATE`, as the caller may have held it, and the rest goes
-    on in a new transaction under it. Returns the current row."""
+    held discount quote its session's later booking made stale cancelled
+    (`decide.supersede_if_booked`), then a held money decision's answers recomputed at the active
+    version's money cap (`decide.refresh_answers`; "Decision lifecycle"), in the caller's
+    transaction, except that a reconciliation commits at once (`reconcile_orphans`). That commit
+    ends the caller's locks, so the decision is then read again `FOR UPDATE`, as the caller may have
+    held it, and the rest goes on in a new transaction under it. Returns the current row."""
     decision_id, action_id = decision_row.decision_id, decision_row.action_id
     if action_id is not None and decision_row.state in ("allowed", "approved", "unknown"):
         if await reconcile_orphans(ctx, at_startup=False, action_id=action_id):
             decision_row = await _one(ctx, select(DecisionRow).where(DecisionRow.decision_id == decision_id)
                                       .with_for_update().execution_options(populate_existing=True))
-    return await decide.refresh_answers(ctx, await decide.expire_if_due(ctx, decision_row))
+    return await decide.refresh_answers(
+        ctx, await decide.supersede_if_booked(ctx, await decide.expire_if_due(ctx, decision_row)))
 
 
 async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str | None = None) -> list[str]:

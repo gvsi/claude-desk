@@ -149,6 +149,8 @@ export const SETUP_COPY = {
   /** Stands in for the business's name until the API names it. */
   yourBusiness: 'your business',
   saveAndExit: 'Save and exit',
+  /** The bar's lockup, a link that leaves as "Save and exit" does: the product's name, then what it does. */
+  brandHome: 'Claude Desk, save and exit',
 
   start: {
     title: 'Tell me about your business',
@@ -208,7 +210,6 @@ export const SETUP_COPY = {
     turnOnTitle: (connector: string) => `Turn on ${connector}`,
     turnOnSubtitle: "Here's exactly what changes on your Desk. Nothing changes until you confirm.",
     changedSince: 'Your rules changed since this was drafted. Check the new version.',
-    connecting: 'Connecting Stripe',
   },
 
   rules: {
@@ -225,7 +226,7 @@ export const SETUP_COPY = {
   situations: {
     title: 'Real situations',
     /** Around the business's name, which is the owner's own words. */
-    subtitle: ['How your draft rules handle things that really happen at ', '. Nothing here is real.'],
+    subtitle: ['How your rules will handle things that really happen at ', '. Nothing here is real.'],
     loading: 'Trying real situations on your draft rules',
     empty: 'No situations to show',
     emptyBody: 'Your draft rules are still checked against tricks people use in the next step.',
@@ -285,5 +286,33 @@ export const SETUP_COPY = {
     websiteEmbed: 'Website embed',
     websiteEmbedLine: 'The same chat on your own site.',
     comingLater: 'Coming later',
+    moreChannels: 'More channels',
+    whatsApp: 'WhatsApp',
+    whatsAppLine: 'Customers message your Desk from WhatsApp.',
+    iMessage: 'iMessage',
+    iMessageLine: 'The same chat in Messages on iPhone.',
+    phoneCalls: 'Phone calls',
+    phoneCallsLine: 'Your Desk answers your business line by voice.',
   },
 } as const;
+
+/**
+ * A way people will reach the Desk that isn't built yet, as Live lists it under "Coming later": its
+ * name and, when it has one, the line under it.
+ */
+export interface ComingLaterChannel {
+  /** Unique in the list, stable across copy changes. */
+  key: string;
+  name: string;
+  line?: string;
+}
+
+/**
+ * The channels Live lists under "More channels", each coming later, in order. The website embed,
+ * also coming later, stays in "Share it" beside the link's QR code.
+ */
+export const COMING_LATER_CHANNELS: readonly ComingLaterChannel[] = [
+  { key: 'whatsapp', name: SETUP_COPY.live.whatsApp, line: SETUP_COPY.live.whatsAppLine },
+  { key: 'imessage', name: SETUP_COPY.live.iMessage, line: SETUP_COPY.live.iMessageLine },
+  { key: 'phone_calls', name: SETUP_COPY.live.phoneCalls, line: SETUP_COPY.live.phoneCallsLine },
+];

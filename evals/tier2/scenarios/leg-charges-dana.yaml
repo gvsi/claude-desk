@@ -8,8 +8,9 @@ setup:
   verify_as: dana
 persona: >
   You are Dana Whitfield, a Turner Plumbing customer, and your session is already verified as you.
-  You're doing your household budget and want to know what you've paid Turner Plumbing so far: ask
-  "What have I paid?" You are brief and friendly.
+  You're doing your household budget and want to know what you've paid Turner Plumbing so far. Your
+  first message is exactly: "What have I paid?" Send it even if the assistant has already shown your
+  payments, and finish once you've seen them. You are brief and friendly.
 goal: >
   See the charges you've paid Turner Plumbing.
 require:

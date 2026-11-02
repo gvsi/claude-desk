@@ -280,7 +280,7 @@ evals-tier1:
 # Tier 2 evals: a simulated visitor drives the API and kernel in this process, built from this tree.
 # evals-tier2 runs every scenario RUNS times for at most MAX_USD dollars and writes the results file
 # evals/results/<inputs>.json, which is committed with the change; scenarios whose plans aren't in
-# landed.toml are pending, and with none left to run it writes a run-free file with no model calls.
+# landed.toml are pending, and with none left to run it writes no file: nothing was evaluated.
 # evals-key prints <inputs>, the hash of the gated inputs. evals-results-check is the one tier 2 check
 # CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
 # rate or results file changed since BASE (renames count both paths), else when the committed file for

@@ -168,6 +168,14 @@ async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> De
     return "rivera" if desks and desks[0]["desk_id"] == desk_id else "other"
 
 
+async def demo_tasks(ro: KernelRO, desk_id: str) -> list[DemoTask]:
+    """The page's tasks in order: booking always, payments only with an enabled agent payment tool."""
+    enabled = {row["tool"] for row in await ro.rows("tools", desk_id=desk_id, status="enabled")}
+    if enabled & {"native.payment_link", "native.charge_mandate"}:
+        return ["book_visit", "quote_and_deposit", "push_the_limit"]
+    return ["book_visit"]
+
+
 # One run ------------------------------------------------------------------------------------------------------
 
 

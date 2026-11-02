@@ -10,7 +10,7 @@ export const RULES_SUBTITLE = 'What Claude can do on this Desk, where each tool 
 export const REVIEWER_LINE = 'The reviewer is a separate model that reads each request before it runs. It can only hold a request for your answer, never let one through.';
 
 /** The owner sees the proposed change before it applies. */
-export const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
+export const COMPOSER_HELPER = 'Claude shows you the change before anything applies.';
 
 /** A quote rule of the owner's that lets anyone get a quote without asking: what Turner's fixed examples change. */
 function quotesOnItsOwn(card: RuleCard): boolean {

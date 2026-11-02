@@ -7,6 +7,7 @@ import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
 import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { Notice } from '../Notice/Notice.tsx';
 import { OutcomeMenu } from '../OutcomeMenu/OutcomeMenu.tsx';
+import { StatusLabel } from '../StatusDot/StatusDot.tsx';
 import { OUTCOME_WORDS, outcomePhrase, type RuleMode } from '../OutcomeMenu/outcomeWords.ts';
 
 import './ConnectorReview.css';
@@ -42,9 +43,16 @@ interface ReviewControls {
   onCancel: () => void;
   /** The screen is drafting the change. */
   pending?: boolean;
-  /** The screen's message when turning it on failed; "Turn it on" works again. */
+  /** The screen's message when turning it on, or connecting, failed; its button works again. */
   error?: string;
 }
+
+/**
+ * An app the screen connects on this same screen (setup's Stripe): `not_connected` before it is,
+ * when its tools can't be known yet, so one row says so and the main button is "Connect {name}";
+ * `connected` once it is, with the review as ever. Omitted where the app was signed in to first.
+ */
+export type ReviewConnection = 'not_connected' | 'connected';
 
 export interface ReviewJobView {
   title: string;
@@ -53,8 +61,8 @@ export interface ReviewJobView {
 }
 
 export type ConnectorReviewProps = ReviewControls & (
-  | { connector: ConnectorView; intro?: string; job?: never }
-  | { job: ReviewJobView; connector?: never; intro?: never }
+  | { connector: ConnectorView; intro?: string; job?: never; connection?: ReviewConnection; onConnect?: () => void }
+  | { job: ReviewJobView; connector?: never; intro?: never; connection?: never; onConnect?: never }
 );
 
 /** A line for each rule that covers a tool, or the line that none does. */
@@ -75,13 +83,18 @@ function coverageLines(tool: ReviewToolView): string[] {
  * outcome it starts at. "Turn it on" asks the screen to draft the change, which shows in
  * `ChangeReview` before anything runs.
  */
-export function ConnectorReview({ connector, job, intro, tools, onChangeOutcome, onTurnOn, onCancel, pending = false, error }: ConnectorReviewProps) {
-  const { waiting, send } = useSendOnce<'turn_on'>(pending, error);
+export function ConnectorReview({ connector, job, intro, connection, onConnect, tools, onChangeOutcome, onTurnOn, onCancel, pending = false, error }: ConnectorReviewProps) {
+  const { waiting, send } = useSendOnce<'turn_on' | 'connect'>(pending, error);
   const failed = error !== undefined && error.trim() !== '';
   const builtIn = connector?.source.kind === 'built_in';
-  const lead = job ? BUSINESS_WORDS.lead : builtIn
-    ? "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on."
-    : `Nothing runs until you turn it on.${intro?.trim() ? ` ${intro.trim()}` : ''}`;
+  const app = !job && !builtIn ? connection : undefined;
+  const name = connector?.name ?? '';
+  let lead: string;
+  if (job) lead = BUSINESS_WORDS.lead;
+  else if (builtIn) lead = "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on.";
+  else if (app === 'not_connected') lead = `Connect it first, so Claude Desk can read what ${name} lets Claude do. Nothing runs until you turn it on.`;
+  else if (app === 'connected') lead = `Connected to ${name}'s test account. Nothing runs until you turn it on.`;
+  else lead = `Nothing runs until you turn it on.${intro?.trim() ? ` ${intro.trim()}` : ''}`;
 
   return (
     <div className="cd-connector-review" aria-busy={waiting || undefined}>
@@ -100,7 +113,15 @@ export function ConnectorReview({ connector, job, intro, tools, onChangeOutcome,
           <dl className="cd-connector-review__setup">
             {job.rows.filter((row) => row.value.trim() !== '').map((row) => (
               <div key={row.label} className="cd-connector-review__setup-row cd-type-meta">
-                <dt>{row.label}</dt><dd>{row.value}</dd>
+                <dt>{row.label}</dt>
+                <dd>
+                  {/* A list value (an intake's questions) takes one numbered line per entry, in its order. */}
+                  {row.items && row.items.length > 0 ? (
+                    <ol className="cd-connector-review__setup-list">
+                      {row.items.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+                    </ol>
+                  ) : row.value}
+                </dd>
               </div>
             ))}
           </dl>
@@ -108,7 +129,22 @@ export function ConnectorReview({ connector, job, intro, tools, onChangeOutcome,
       ) : null}
       <Card as="section" label="Tools" padding={16}>
         <ul role="list" className="cd-connector-review__tools">
-          {tools.map((tool) => (
+          {/* Before the app is connected its tools can't be known: one row says so, and when they'll show. */}
+          {app === 'not_connected' ? (
+            <li className="cd-connector-review__tool cd-connector-review__tool--placeholder">
+              <div className="cd-connector-review__layout">
+                <div className="cd-connector-review__text">
+                  <p className="cd-connector-review__name cd-type-body">{`${name}’s tools`}</p>
+                  <p className="cd-connector-review__description cd-type-meta">
+                    {`They show here once ${name} is connected, each with the rule it starts at.`}
+                  </p>
+                </div>
+                <span className="cd-connector-review__status cd-type-meta">
+                  <StatusLabel tone="held">Not connected</StatusLabel>
+                </span>
+              </div>
+            </li>
+          ) : tools.map((tool) => (
             <li key={tool.key} className="cd-connector-review__tool">
               <div className="cd-connector-review__layout">
                 <div className="cd-connector-review__text">
@@ -133,14 +169,24 @@ export function ConnectorReview({ connector, job, intro, tools, onChangeOutcome,
       </Card>
       <div className="cd-connector-review__controls">
         <div className="cd-connector-review__buttons">
-          <Button variant="primary" size="main" busy={waiting} onClick={() => send('turn_on', () => onTurnOn())}>
-            Turn it on
-          </Button>
+          {app === 'not_connected' ? (
+            <Button variant="primary" size="main" busy={waiting} onClick={() => send('connect', () => onConnect?.())}>
+              {`Connect ${name}`}
+            </Button>
+          ) : (
+            <Button variant="primary" size="main" busy={waiting} onClick={() => send('turn_on', () => onTurnOn())}>
+              Turn it on
+            </Button>
+          )}
           <Button variant="secondary" size="main" waiting={waiting} onClick={() => onCancel()}>
             Cancel
           </Button>
         </div>
-        <p className="cd-connector-review__hint cd-type-meta">You&apos;ll see the change to your rules before anything runs.</p>
+        <p className="cd-connector-review__hint cd-type-meta">
+          {app === 'not_connected'
+            ? "You review its tools here once it's connected."
+            : "You'll see the change to your rules before anything runs."}
+        </p>
       </div>
       {failed && !waiting ? <Notice tone="error">{error}</Notice> : null}
     </div>
