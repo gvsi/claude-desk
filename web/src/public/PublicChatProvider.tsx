@@ -538,7 +538,7 @@ class VisitorChat {
     // Back on the stream with the chat in the owner's hands, as it last knew: the stream's silence
     // doesn't say she is still there, and the stream has no word for "that was everything you
     // missed", so the chat reads the session to confirm it, or to learn she has left.
-    if (this.verifyModeUnconfirmed || (!this.modeKnown && this.snapshot.session?.mode === 'owner')) void this.confirmMode(epoch);
+    if (this.needsModeConfirmation()) void this.confirmMode(epoch);
     this.reopens = 0;
     // The server answers again: a good moment to settle any message whose answer was lost.
     this.checkRetries = 0;
@@ -574,7 +574,8 @@ class VisitorChat {
       if (this.confirming === attempt) {
         this.confirming = null;
         if (epoch === this.epoch && since === this.tracked && this.needsModeConfirmation()) {
-          const delay = REOPEN_DELAYS_MS[Math.min(this.confirmRetries, REOPEN_DELAYS_MS.length - 1)]!;
+          const delay = REOPEN_DELAYS_MS[this.confirmRetries];
+          if (delay === undefined) return;
           this.confirmRetries += 1;
           this.confirmTimer = setTimeout(() => {
             this.confirmTimer = null;
@@ -586,7 +587,8 @@ class VisitorChat {
   }
 
   private needsModeConfirmation(): boolean {
-    return !this.modeKnown && this.snapshot.session?.mode === 'owner' && this.following && this.users > 0
+    return (this.verifyModeUnconfirmed || (!this.modeKnown && this.snapshot.session?.mode === 'owner'))
+      && this.following && this.users > 0
       && this.snapshot.state.connection === 'open' && this.snapshot.state.error !== 'session';
   }
 
