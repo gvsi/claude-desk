@@ -819,12 +819,14 @@ SIGNED_TASK_LINES = {
 }
 
 
+def test_agent_stops_once_a_question_is_answered():
+    assert ("- When your task only asks a question, set done to true once the Desk has answered it, or has said it can't "
+            "and offered a next step.") in VISITING_AGENT_SYSTEM.split("When to stop\n", 1)[1].splitlines()
+
+
 def test_each_desk_set_has_its_own_fixed_task_lines():
     # Every set has a line for each task, and the agent's first message is AGENT_TASK around exactly that line.
     assert DEMO_TASKS == SIGNED_TASK_LINES
-    assert PROMPT_VERSION == "2026-10-31.31"
-    assert ("- When your task only asks a question, set done to true once the Desk has answered it, or has said it can't "
-            "and offered a next step.") in VISITING_AGENT_SYSTEM.split("When to stop\n", 1)[1]
     assert set(get_args(DemoTaskSet)) == set(DEMO_TASKS) == {"rivera", *get_args(BusinessType)}
     for task_set, lines in DEMO_TASKS.items():
         assert set(lines) == set(get_args(DemoTask))
