@@ -334,20 +334,22 @@ class _Chat:
         if answer.status_code != ok:
             raise RunFailed(f"the Desk answered {answer.status_code}")
 
-    async def write(self, message: str, *, read: int) -> None:
+    async def write(self, message: str, *, read: int) -> int:
         """Send `message` after a human pause: reading the `read` characters it was shown, a typing signal, then the
         typing itself."""
         reading = min(READING_MAX_S, READING_MIN_S + READING_PER_CHAR_S * read)
         await self.sleep(reading)
         await self.call("POST", "/typing", ok=204)
         await self.sleep(min(TYPING_PER_CHAR_S * len(message), PAUSE_MAX_S - reading))
-        await self.send(message)
+        return await self.send(message)
 
-    async def send(self, message: str) -> None:
+    async def send(self, message: str) -> int:
         if self.run.messages_sent >= MAX_MESSAGES:
             raise _Ended("limit")
+        mark = len(self.feed.events)
         await self.call("POST", "/messages", ok=202, json={"text": message})
         self.run.messages_sent += 1
+        return mark
 
     async def answered(self, mark: int, sent_at: datetime) -> bool:
         """Wait for the Desk's answer to the message sent when the feed held `mark` events; whether the visitor
@@ -467,8 +469,7 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
             raise _Ended("finished")
         if not step.message.strip():
             raise RunFailed("the model wrote an empty message")
-        await chat.write(step.message, read=read)
-        mark = len(chat.feed.events)
+        mark = await chat.write(step.message, read=read)
         nudged = await chat.answered(mark, chat.clock())
         lines = _lines(chat.feed.events, shown)
         shown, read = len(chat.feed.events), sum(len(line) for line in lines)
