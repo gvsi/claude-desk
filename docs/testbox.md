@@ -86,6 +86,14 @@ EOF independently triggers the remote watchdog. The lane lock is released only a
 call's service and its whole process group are stopped, including detached descendants
 in its control group. A killed process itself cannot wait for cleanup before exiting.
 
+All lanes on a laptop share one connection, and Session Manager carries uploads slowly
+(15–45 KB/s measured), so a keepalive reply can wait minutes behind other lanes' uploads.
+The client allows ten minutes for one before closing the connection. If the connection
+dies anyway, Session Manager can keep sshd's end open, and the dead connection's calls
+keep their lane locks. sshd closes such a connection after ten minutes without a
+keepalive reply, which ends those calls and frees their lanes. A call that waits longer
+than that for its lane is stuck: tell the CI lane.
+
 The client compares source content hashes under the lane lock and sends only changed files,
 repairing sources edited or removed by a previous remote command and removing new
 nonignored source files it created. Ignored build directories remain warm. It syncs tracked and

@@ -332,7 +332,10 @@ def open_connection(cache: Path, region: str, instance: str, api, remember: bool
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "desk-testbox-client", "-f", str(key)], check=True)
         control = control_path(cache, region, instance)
         proxy = shlex.join(aws + ["ssm", "start-session", "--target", instance, "--document-name", "AWS-StartSSHSession", "--parameters", "portNumber=%p"])
-        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-i", str(key)]
+        # Every lane's uploads queue on this one connection, and Session Manager carries uploads slowly, so a
+        # keepalive reply can wait minutes behind them. Allow ten minutes before giving up. A closed SSM stream
+        # still ends the master at once, because the proxy process exits.
+        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=20", "-i", str(key)]
         host = "ubuntu@" + instance
         check = subprocess.run(["ssh", *ssh_opts, "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if check.returncode:
