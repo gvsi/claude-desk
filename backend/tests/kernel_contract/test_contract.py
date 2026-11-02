@@ -2620,6 +2620,41 @@ async def test_charge_mandate_bounds_and_commits(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01c")
+async def test_a_link_whose_quote_a_mandate_charge_paid_reads_cancelled(kernel, ro_read):
+    """A quote is paid once. An agent gets a payment link to its deposit quote, then pays the same quote within its
+    mandate: the link can never be paid now, so the checkout reads it `cancelled`, naming no rule change, and
+    completing it is 409 `conflict`. The mandate holds the one $20 charge and nothing more."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, issued, slug)
+    session_id = created.state.session_id
+    view = turn_view(http, issued, slug, session_id, "Please send a payment link for the deposit")
+    owner = http.owner(copy.owner_token) if state is None else None      # the real kernel holds it for the owner
+    token, _ = await issue_payment_link(view, session_id, item_id(ro_read, ro_schema, copy, "Service call deposit"), 1,
+                                        owner=owner)
+    (link,) = ro_read(ro_schema, copy.copy_id, "SELECT quote_id FROM {ro}.payment_links WHERE session_id = %s",
+                      (session_id,))
+    view = turn_view(http, issued, slug, session_id, "Charge the deposit to the signed limit")
+    charging = await decide(view, session_id, 0, "call-charge", "native.charge_mandate", {"quote_id": link["quote_id"]})
+    assert charging.outcome == "allow"
+    assert (await execute(view, charging, 0)).state == "succeeded"
+
+    get, complete, _ = LINK_ROUTES
+    shown = await checkout(http, get, token)
+    assert (shown.state, shown.cancel_reason, shown.customer_name) == ("cancelled", None, None)
+    assert await refused(checkout(http, complete, token)) == (409, "conflict")
+    assert (await checkout(http, get, token)).state == "cancelled"
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT state FROM {ro}.payment_links WHERE session_id = %s",
+                     (session_id,))
+    assert row == {"state": "cancelled"}
+    (mandate,) = ro_read(ro_schema, copy.copy_id, "SELECT committed_cents, reserved_cents FROM {ro}.mandates"
+                                                  " WHERE mandate_id = %s", (issued.mandate.mandate_id,))
+    assert mandate == {"committed_cents": 2000, "reserved_cents": 0}
+
+
+@pytest.mark.kernel_plan("01c")
 @pytest.mark.parametrize("path", ["allow", "approval"])
 async def test_expired_mandate_at_execution_names_no_rule_change(kernel, ro_read, arrange, path):
     """Expiry changes the mandate's authority, not the owner's rules: both kernels ledger `conditions`,
