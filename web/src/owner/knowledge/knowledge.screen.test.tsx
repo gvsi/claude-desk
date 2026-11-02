@@ -223,7 +223,7 @@ describe('knowledge', () => {
     const list = main(screen).getByRole('list', { name: 'What Claude knows' });
     await expect.poll(() => list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').length).toBe(3);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
-    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.emptyNote);
+    await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveAccessibleDescription(expect.stringContaining(KNOWLEDGE_COPY.emptyNote));
     expect(posts()).toHaveLength(1);
     expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock')).toHaveLength(3);
     await expectScreenBasics(screen.container, { owner: true });
@@ -421,7 +421,7 @@ describe('knowledge', () => {
 
     // Nothing written: it says so and sends nothing.
     await addButton.click();
-    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.emptyNote);
+    await expect.element(field).toHaveAccessibleDescription(expect.stringContaining(KNOWLEDGE_COPY.emptyNote));
     expect(posts()).toEqual([]);
 
     // While the add is out: it spins, and "Add a file" waits.

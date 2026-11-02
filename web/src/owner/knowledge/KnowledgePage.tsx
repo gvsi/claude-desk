@@ -351,11 +351,14 @@ export function KnowledgePage() {
         <div className="cd-knowledge__add">
         <KnowledgeAdd
           note={note}
-          onNoteChange={setNote}
+          onNoteChange={(text) => {
+            setNote(text);
+            if (text.trim() !== '' && error === KNOWLEDGE_COPY.emptyNote) setError(undefined);
+          }}
           onAddNote={addNote}
           onAddFile={addFile}
           {...(busy === undefined ? {} : { busy })}
-          {...(error === undefined ? {} : { error })}
+          {...(error === undefined ? {} : error === KNOWLEDGE_COPY.emptyNote ? { noteError: error } : { error })}
           {...(added === null
             ? {}
             : {
