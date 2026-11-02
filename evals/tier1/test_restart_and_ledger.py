@@ -52,9 +52,9 @@ from evals.tier1.test_reply_golden import (
     NUMBER_PROSE,
     QUOTE_PROSE,
     check_reply,
-    offered,
     passes,
     signing_key,
+    status_lined,
 )
 from evals.tier1.test_sessions import NOT_FOUND, assert_ledgered
 from evals.tier1.test_verification import (
@@ -452,7 +452,8 @@ async def test_every_decision_reply_and_verification_attempt_is_ledgered(k: Kern
     ]
     verdicts = [
         await check_reply(k, visitor, CLEAN_EN, expect=passes(visitor, ["prose"])),
-        await check_reply(k, visitor, NUMBER_PROSE, expect=offered(visitor, "number_in_prose")),
+        # the quote above is held for the owner, so a blocked reply shows the status line, not the call-back offer
+        await check_reply(k, visitor, NUMBER_PROSE, expect=status_lined(visitor, "number_in_prose")),
     ]
     if k.landed("01b"):
         caller = await open_caller(k, desk, "visitor")

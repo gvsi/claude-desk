@@ -875,14 +875,16 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "verify": "Enter the code sent to the contact on record.", "hours": "Opening hours",
                      "owner_said": "Written by {owner}",
                      "owner_say_blocked": "Not sent: it included text from a private document",
-                     "offer_callback": "Would you like me to arrange a callback?"},
+                     "offer_callback": "Would you like me to arrange a callback?",
+                     "check_status": "Please check the request status in this chat."},
               "es": {"handoff": "Déjame consultarlo con {owner}.",
                      "checked": "Respuesta revisada con las reglas de {owner}",
                      "handed_off": "Pasado a {owner} para responder",
                      "verify": "Escribe el código enviado al contacto registrado.", "hours": "Horario",
                      "owner_said": "Escrito por {owner}",
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado",
-                     "offer_callback": "¿Quiere que solicite una llamada?"}}
+                     "offer_callback": "¿Quiere que solicite una llamada?",
+                     "check_status": "Consulte el estado de la solicitud en este chat."}}
 # A session's tools offer a call back when they offer this next step (`native.request_callback`, or a business tool
 # of block `urgent`), as the kernel's `reply_check.offers_call_back` reads them.
 CALL_BACK_STEP = NEXT_STEPS["native.request_callback"]
@@ -3560,9 +3562,11 @@ class FakeKernelState:
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
                  message_id: str | None = None, final: bool = True) -> ReplyVerdict:
-        """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) the checked cards, then the handoff
-        clause when the draft has one; with no card at all, the kernel's call-back offer as prose when
-        `_offers_call_back` (the owner's decision of 2026-11-01); else the handoff alone, ledgered and signed. An
+        """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) on a final draft while a held request
+        awaits the owner (`_status_line_fits`), the checked cards then the kernel's status line as prose; else the
+        checked cards, then the handoff clause when the draft has one; with no card at all, the kernel's call-back
+        offer as prose when `_offers_call_back` (the owner's decision of 2026-11-01); else the handoff alone, ledgered
+        and signed. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
@@ -3576,7 +3580,9 @@ class FakeKernelState:
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             handoff = RenderedBlock(kind="card", template="handoff", text=text, title=text)
             prose_only = all(violation.kind in PROSE_ONLY for violation in violations)
-            if kept and prose_only:
+            if prose_only and final and author == "claude" and self._status_line_fits(session, blocks, violations):
+                blocks = kept + [RenderedBlock(kind="prose", text=REPLY_TEXT[language]["check_status"])]
+            elif kept and prose_only:
                 drafted = any(block.kind == "card" and block.template == "handoff" for block in blocks)
                 blocks = kept + ([handoff] if drafted else [])   # a drafted handoff follows the kept cards
             elif prose_only and self._offers_call_back(session, desk, blocks, violations):
@@ -3609,6 +3615,20 @@ class FakeKernelState:
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
 
+    def _awaits_the_owner(self, session: Session) -> bool:
+        """Whether the session has a held request awaiting the owner: one neither answered, cancelled nor expired."""
+        return any(record.decision.session_id == session.session_id and record.decision.state == "held"
+                   and record.decision.expires_at > self.now for record in self.decisions.values())
+
+    def _status_line_fits(self, session: Session, blocks: list[RenderedBlock], violations: list[Violation]) -> bool:
+        """Whether a final draft blocked only for its prose shows the kept cards then the kernel's status line, as the
+        kernel's `reply_check.status_line_shown` decides: no checker outage (`check_unavailable`, which hands off), no
+        handoff clause Claude drafted (which is honoured), and a held request awaiting the owner. It takes precedence
+        over the call-back offer and opens no owner handoff."""
+        return (not any(violation.kind == "check_unavailable" for violation in violations)
+                and not any(block.kind == "card" and block.template == "handoff" for block in blocks)
+                and self._awaits_the_owner(session))
+
     def _offers_call_back(self, session: Session, desk: Desk, blocks: list[RenderedBlock],
                           violations: list[Violation]) -> bool:
         """Whether a draft blocked only for its prose shows the kernel's call-back offer, as the kernel's
@@ -3630,8 +3650,7 @@ class FakeKernelState:
         waiting, and `desk_data {part: "handoffs", refs, kind: "card"}` on the session. Returns its ID, or None."""
         if session.preview or self._open_handoff(session) is not None:
             return None
-        if any(record.decision.session_id == session.session_id and record.decision.state == "held"
-               and record.decision.expires_at > self.now for record in self.decisions.values()):
+        if self._awaits_the_owner(session):
             return None
         handoff_id = new_id("handoff")
         self.handoffs[handoff_id] = {
