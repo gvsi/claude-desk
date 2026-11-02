@@ -351,6 +351,11 @@
   margin-top: var(--space-2);
 }
 
+/* The rule reads as the Rules page's rule cell draws one: its sentence in primary text. */
+.cd-attempt__rule .cd-rule-sentence__sentence {
+  color: var(--text-primary);
+}
+
 .cd-attempt__part {
   display: flex;
   flex-direction: column;

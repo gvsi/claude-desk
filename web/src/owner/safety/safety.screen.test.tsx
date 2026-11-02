@@ -982,6 +982,8 @@ describe('Safety', () => {
       'The rule that turned it downClaude never shows private data to anyone but its verified ownerShare a document and See charges · EveryoneNever',
     );
     expect(rule.element().querySelector('.cd-rule-sentence__outcome .cd-status-dot--refused')).not.toBeNull();
+    // As the Rules page's rule cell draws a rule: its sentence in primary text.
+    expect(getComputedStyle(rule.element().querySelector('.cd-rule-sentence__sentence')!).color).toBe(tokenColor('--text-primary'));
     // Right under what was stopped, then the visitor's words (as #898 quotes them) and the rest.
     const parts = [...open.element().querySelectorAll('.cd-attempt > *')];
     const at = (el: Element | null) => parts.findIndex((part) => el !== null && part.contains(el));
@@ -993,9 +995,12 @@ describe('Safety', () => {
     await expect.element(open.getByRole('group', { name: 'The rule that turned it down', exact: true })).toHaveTextContent(
       'The rule that turned it downClaude never sends refundsRefund · AnyoneNever',
     );
-    await screen.getByRole('link', { name: /That time isn't open/ }).click();
+    const slot = screen.getByRole('link', { name: /That time isn't open/ });
+    await slot.click();
+    // Once its entry is the one open beside the list.
+    await expect.element(slot).toHaveAttribute('aria-current', 'true');
     await expect.element(open.getByText('This action didn\'t run.', { exact: true })).toBeVisible();
-    expect(open.element().textContent).not.toContain('The rule that turned it down');
+    await expect.poll(() => open.element().textContent).not.toContain('The rule that turned it down');
   });
 
   it('a_failed_rules_read_still_names_an_always_on_rule_and_says_so_for_an_owners_rule', async () => {

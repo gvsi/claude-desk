@@ -57,7 +57,7 @@ describe('heldRule', () => {
 
   it('an_ask_card_is_found_by_its_reason', () => {
     const refund = { decision: rivera.heldRefund, held_by: cards['rv-refund'].reason };
-    expect(shown(heldRule(refund, active, words))).toBe('Claude asks you before **any refund** / Refund · The customer who paid, verified / ask');
+    expect(shown(heldRule(refund, active, words))).toBe('Claude asks you before **any refund** / Refund · The customer, once verified / ask');
   });
 
   it('past_an_amount_limit_is_the_rules_hold_line', () => {
@@ -122,7 +122,7 @@ describe('heldRule picks the card that decided the hold first', () => {
     const danas = card({ card_id: 'b-dana-link', applies_to: 'native.payment_link', mode: 'ask', who: 'person', person_id: dana.personId, reason: 'Payments wait for you.' });
     const both = [...active, shared, danas];
     const held = { decision: heldLink(45_000, ['a-charges', 'b-dana-link']), held_by: 'Payments wait for you.' };
-    expect(shown(heldRule(held, both, { ...words, cards: both, people }))).toBe(`Claude asks you before **any payment link** / Payment link · ${dana.name} / ask`);
+    expect(shown(heldRule(held, both, { ...words, cards: both, people }))).toBe(`Claude asks you before sending **payment links** / Payment link · ${dana.name} / ask`);
   });
 
   it('a_persons_automatic_limit_decides_over_a_shared_ask_card', () => {
@@ -140,7 +140,7 @@ describe('heldRule picks the card that decided the hold first', () => {
     const asks = card({ card_id: 'z-link-ask', applies_to: 'native.payment_link', mode: 'ask', who: 'anyone', reason: 'Big links wait for you.' });
     const withAsk = [...active, asks];
     const held = { decision: heldLink(45_000, ['rv-link', 'z-link-ask']), held_by: 'Big links wait for you.' };
-    expect(shown(heldRule(held, withAsk, { ...words, cards: withAsk }))).toBe('Claude asks you before **any payment link** / Payment link · Anyone / ask');
+    expect(shown(heldRule(held, withAsk, { ...words, cards: withAsk }))).toBe('Claude asks you before sending **payment links** / Payment link · Anyone / ask');
   });
 
   it('an_ask_card_of_that_reason_only_on_the_requests_tool', () => {
@@ -153,7 +153,7 @@ describe('heldRule picks the card that decided the hold first', () => {
     const onIt = card({ card_id: 'l-ask', applies_to: 'native.payment_link', mode: 'ask', who: 'anyone', reason: 'Payments wait for you.' });
     const withBoth = [...withIt, onIt];
     expect(read(heldRule({ decision: heldLink(45_000, ['gone']), held_by: 'Payments wait for you.' }, withBoth, { ...words, cards: withBoth })?.parts ?? [])).toBe(
-      'Claude asks you before **any payment link**',
+      'Claude asks you before sending **payment links**',
     );
   });
 });

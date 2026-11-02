@@ -153,6 +153,12 @@
   color: var(--text-secondary);
 }
 
+/* The rule reads as the Rules page's rule cell draws one: its sentence in primary text, its key
+   values at 520; the line under it, the tools, who and qualifiers, stays secondary. */
+.cd-approval-card__rule .cd-rule-sentence__sentence {
+  color: var(--text-primary);
+}
+
 .cd-approval-card__rule + .cd-approval-card__answers {
   margin-top: var(--space-12);
 }

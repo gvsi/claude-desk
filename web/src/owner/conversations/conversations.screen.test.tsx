@@ -1557,14 +1557,16 @@ describe('Conversations', () => {
   });
 
   it('in_a_short_window_focus_in_the_transcript_holds_it', async () => {
-    // A long chat with Dana's refund held at its end, opened at 1440 by 560, where the open
-    // conversation scrolls as one: it opens at its end, and the owner is on the last receipt.
+    // A long chat with Dana's refund held at its end, opened at 1440 by 640, where the open
+    // conversation scrolls as one (under 37.5rem of content) and its end still shows the last held
+    // card's receipt above the card, with its "Your rule" box, and the owner's controls: it opens
+    // at its end, and the owner is on the last receipt.
     const first = mockStore.world.addHeldRefund();
     const chat = named(first.session_id, DANA);
     lengthen(chat);
     mockStore.world.addHeldRefund();
     const { screen, router } = await renderRoute(LIST);
-    await page.viewport(1440, 560);
+    await page.viewport(1440, 640);
     await router.navigate(conversation(first.session_id));
     await expect.poll(() => heldCard(screen, REFUND_REASON).elements().length).toBe(2);
     // The head names Dana once the list has read the chat, which can answer after the chat.

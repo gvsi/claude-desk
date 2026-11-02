@@ -537,7 +537,7 @@ describe('Today', () => {
     expect(ruleOf(SEEDED_REASON).element().textContent).toBe('Your ruleClaude asks you before any discountQuote · AnyoneAsk me first');
     expect([...ruleOf(SEEDED_REASON).element().querySelectorAll('strong')].map((key) => key.textContent)).toEqual(['any discount']);
     expect(ruleOf(LINK).element().textContent).toBe('Your ruleClaude asks you before payment links over $300Payment link · AnyoneAsk me first');
-    expect(ruleOf(REFUND_REASON).element().textContent).toBe('Your ruleClaude asks you before any refundRefund · The customer who paid, verifiedAsk me first');
+    expect(ruleOf(REFUND_REASON).element().textContent).toBe('Your ruleClaude asks you before any refundRefund · The customer, once verifiedAsk me first');
     await expect.element(heldCard(screen, GONE)).toBeVisible();
     expect(heldCard(screen, GONE).element().textContent).not.toContain('Your rule');
     // The tools are the owner's words; the outcome is the rule's, with its dot.

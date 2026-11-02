@@ -559,6 +559,9 @@ export const TwoPlainButtons: Story = {
     await expect(within(box).getByText('any discount').tagName).toBe('STRONG');
     expectComputed(box, RULE_BOX);
     expectComputed(within(box).getByText('Your rule'), { color: 'rgba(250, 249, 245, 0.64)', marginBottom: '6px' });
+    // As the Rules page's rule cell draws a rule: its sentence in primary text, the line under it secondary.
+    expectComputed(box.querySelector('.cd-rule-sentence__sentence')!, PLAIN_WORDS);
+    expectComputed(box.querySelector('.cd-rule-sentence__meta')!, { color: 'rgba(250, 249, 245, 0.64)' });
     await expect(card).not.toHaveTextContent('Held by your rule');
     const context = canvasElement.querySelector('.cd-approval-card__context')!;
     await expect(Math.round(box.getBoundingClientRect().top - context.getBoundingClientRect().bottom)).toBe(12);
@@ -700,7 +703,7 @@ export const DenyMenu: Story = {
     // Linda's card holds every booking, whoever asks, and its reason says no less.
     await expect(chen.ruleCards['cc-consult'].who).toBe('anyone');
     await expect(within(canvas.getByRole('article')).getByRole('group', { name: 'Your rule' })).toHaveTextContent(
-      'Your ruleClaude asks you before any bookingBook a visit · AnyoneAsk me first',
+      'Your ruleClaude asks you before bookingBook a visit · AnyoneAsk me first',
     );
 
     // Allow has one answer, a plain button; Deny has two, so it opens a menu: its word, then a chevron.
