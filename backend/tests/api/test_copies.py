@@ -95,7 +95,7 @@ async def test_copy_sets_the_scoped_owner_cookie(api, browser, fake):
     desk = fake.desks[copy.desk_ids[0]]
     assert CopyOut.model_validate(body) == CopyOut(copy_id=copy.copy_id, desks=[DeskSummary(
         desk_id=desk.desk_id, slug=desk.slug, name="Main line", business_name="Turner Plumbing", hours=desk.hours,
-        answering=True, setup=None)])
+        answering=True, setup=None, business_type="rivera")])
     assert [call.headers.get("x-owner-session") for call in fake.called("GET /whoami")] == [token]
     assert all("x-owner-session" not in call.headers for call in fake.called("POST /copies"))
 

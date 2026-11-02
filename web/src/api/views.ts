@@ -242,9 +242,12 @@ export interface NeedsYouSession {
 interface NeedsYouBase {
   session: NeedsYouSession;
   /**
-   * What the visitor (or visiting agent) wrote most recently, labelled: their previous and last
-   * messages, oldest first, each with whitespace collapsed and, past 200 characters, cut to 199 and "…",
-   * joined with " · "; just the last when there's one. Untrusted.
+   * What the visitor (or visiting agent) wrote, labelled: at most two messages; a held request quotes
+   * only the visitor's lines since Claude's last reply before its held status (a request whose status
+   * isn't in the chat quotes the chat's latest). If that window is empty, it quotes the newest visitor
+   * line before the status. A handoff quotes the chat's latest; oldest first,
+   * each with whitespace collapsed and, past 200
+   * characters, cut to 199 and "…", joined with " · "; just the last when there's one. Untrusted.
    */
   from_the_visitor: string | null;
   /**
