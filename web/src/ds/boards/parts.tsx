@@ -501,6 +501,10 @@ export interface ListedConversation {
   status?: { tone: StatusTone; text: string };
   /** Replayed into this copy: the row carries the Recorded tag. */
   recorded?: boolean;
+  /** A demo visitor's chat: the row carries its pill after the name. */
+  demoVisitor?: boolean;
+  /** What the visitor last wrote, quoted under the name. */
+  quote?: string;
 }
 
 /** The list under one day's label: "Today", "Yesterday", "Earlier this week". */

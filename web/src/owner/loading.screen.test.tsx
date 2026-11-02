@@ -427,11 +427,11 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'things-title', page: '.cd-things__title' },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
   { name: 'thing-tile-0', page: '.cd-things__item:first-child .cd-things__icon' },
-  { name: 'thing-tile-3', page: '.cd-things__item:last-child .cd-things__icon' },
+  { name: 'thing-tile-4', page: '.cd-things__item:last-child .cd-things__icon' },
   { name: 'things-hide', page: '.cd-things__hide > .cd-button', size: true },
-  ...[0, 1, 2, 3].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
+  ...[0, 1, 2, 3, 4].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
   // A phone row's chevron (not drawn from 640 px, as the cards' buttons aren't on a phone).
-  ...[0, 1, 2, 3].map((i) => ({ name: `thing-go-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__go`, size: true })),
+  ...[0, 1, 2, 3, 4].map((i) => ({ name: `thing-go-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__go`, size: true })),
   { name: 'needs-title', page: '.cd-today__section[tabindex] .cd-section-header__heading' },
   { name: 'held-card', page: '.cd-needs-you .cd-card', dimensions: ['width'] },
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
@@ -583,8 +583,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link, .cd-today-skeleton__action)')).toBeNull();
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
-  // Each card's line wraps in its quarter of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 3, 1, 3] : [2, 3, 2, 3]).forEach((count, i) => {
+  // Each card's line wraps in its third of the band on a laptop; each row's beside its tile and chevron on a phone.
+  (viewport === 'phone' ? [2, 2, 3, 1, 3] : [2, 2, 2, 1, 2]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
@@ -614,7 +614,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-week__part:last-child .cd-skeleton-line--meta', '.cd-week__part:last-child', ['65%', '30%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--control', '.cd-week__part:last-child', ['70%']);
 
-  const heldRow = '.cd-things__item:nth-child(3)';
+  // "Answer a held request" is fourth, after "Watch a demo visitor".
+  const heldRow = '.cd-things__item:nth-child(4)';
   const skeletonHeight = today.querySelector(heldRow)!.getBoundingClientRect().height;
   desks.release();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
@@ -622,7 +623,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   const detail = landed.querySelector('.cd-things__detail')!;
   const words = document.createRange();
   words.selectNodeContents(detail.querySelector('.cd-things__detail-now') ?? detail);
-  expect(new Set([...words.getClientRects()].map((rect) => rect.top)).size, 'the landed waiting line').toBe(viewport === 'phone' ? 1 : 2);
+  // One line in its row on a phone, and in its third of the band on a laptop.
+  expect(new Set([...words.getClientRects()].map((rect) => rect.top)).size, 'the landed waiting line').toBe(1);
   expect(Math.abs(landed.getBoundingClientRect().height - skeletonHeight), 'the held row lands at its skeleton height').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
 });
 
@@ -664,7 +666,7 @@ const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'si
 const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'week-title', 'week-bar-0'];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
-  const ticked = ['thing-tile-3', 'thing-action-3', 'thing-go-3'];
+  const ticked = ['thing-tile-4', 'thing-action-4', 'thing-go-4'];
   // From 640 px the cards of a row share its height, so the ticked card moves nothing.
   if (!phone) return TODAY_CONTENT_ANCHORS.filter(({ name }) => !ticked.includes(name));
   const under = new Set(UNDER_THINGS_ON_A_PHONE);
@@ -2070,7 +2072,9 @@ const SAFETY_ANCHORS: readonly SkeletonAnchor[] = [
     ['safety-detail-status', '.cd-attempt__status'], ['safety-detail-title', '.cd-attempt__reason'],
     ['safety-claim', '.cd-attempt__claim'], ['safety-origin', '.cd-attempt__origin'],
     ['safety-replayed', '.cd-attempt__what .cd-attempt__origin:last-child'],
-    ['safety-summary-label', '.cd-attempt__label'], ['safety-summary', '.cd-attempt__summary'],
+    // Claude's summary label, not the visitor's words' label above it on a refused request.
+    ['safety-summary-label', '.cd-attempt__part:has(> .cd-attempt__summary) > .cd-attempt__label'],
+    ['safety-summary', '.cd-attempt__summary'],
     ['safety-toggle-0', '.cd-attempt__toggle:first-child'], ['safety-toggle-1', '.cd-attempt__toggle:nth-of-type(2)'],
     ['safety-conversation', '.cd-attempt__conversation'],
   ].map(([name, page]) => ({ name: name!, page: page!, dimensions: ['bottom', 'height'] as const })),

@@ -30,6 +30,80 @@ def test_every_card_template_has_a_label_for_the_soft_checks():
     assert all(label.strip() == label and label for label in render.CHECK_LABELS.values())
 
 
+def test_a_request_receipt_reaches_the_soft_checks_with_a_label_no_card_has():
+    """The session's request receipts aren't templates: held or resolved, they share one English label of
+    their own, which no card's label shares, then what was asked for, in the reply's language, so a Spanish
+    reply about another request reads as one, then the decision's status line as the visitor saw it, and
+    nothing after it."""
+    assert render.RECEIPT_LABEL == "Request receipt"
+    assert render.RECEIPT_LABEL not in render.CHECK_LABELS.values()
+    assert render.receipt_check_text("native.quote", "Waiting for Mike Turner to approve", "en") == (
+        "Request receipt card: Quote request: Waiting for Mike Turner to approve")
+    assert render.receipt_check_text("native.quote", "Esperando la aprobación de Mike Turner", "es") == (
+        "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner")
+    assert render.receipt_check_text("block:intake", "Cancelado", "es") == (
+        "Request receipt card: Solicitud de datos: Cancelado")
+
+
+def test_a_held_request_that_ran_names_the_owners_approval_before_what_it_did():
+    """A request receipt is a held request's, so one that ran was approved by the owner first: its line says
+    what was done ("Quoted from Mike Turner's price list"), and the check reads the approval the chat showed
+    before it, in the reply's language, so "Mike Turner approved it" is backed."""
+    assert render.receipt_check_text("native.quote", "Quoted from Mike Turner's price list", "en",
+                                     approved_by="Mike Turner") == (
+        "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list")
+    assert render.receipt_check_text("native.quote", "Cotizado con la lista de precios de Mike Turner", "es",
+                                     approved_by="Mike Turner") == (
+        "Request receipt card: Solicitud de presupuesto: Mike Turner lo aprobó; "
+        "Cotizado con la lista de precios de Mike Turner")
+
+
+def test_every_tool_and_business_block_a_decision_can_hold_has_a_receipt_subject():
+    """Any enabled tool can be held (the compiler's default ask covers every tool no card for anyone does), so
+    every native and payments tool, and every business tool's block (`block:<name>`), names what was asked
+    for in each language: a new one without a subject fails here (until it has one, its receipts back
+    nothing)."""
+    from desk.contracts import BlockConfig, ToolName
+
+    blocks = {get_args(config.model_fields["block"].annotation)[0] for config in get_args(get_args(BlockConfig)[0])}
+    asked = set(get_args(ToolName)) | {f"block:{block}" for block in blocks}
+    assert set(render.RECEIPT_SUBJECTS) == {"en", "es"}
+    assert all(set(subjects) == asked for subjects in render.RECEIPT_SUBJECTS.values())
+    assert all(subject.strip() == subject and subject for subjects in render.RECEIPT_SUBJECTS.values()
+               for subject in subjects.values())
+    assert [render.RECEIPT_SUBJECTS["en"][tool] for tool in (
+        "native.quote", "native.book", "native.payment_link", "native.release_document", "payments.create_refund",
+        "payments.list_charges")] == [
+        "Quote request", "Booking request", "Payment link request", "Document request", "Refund request",
+        "Payment history request"]
+    assert [render.RECEIPT_SUBJECTS["es"][tool] for tool in (
+        "native.quote", "native.book", "native.payment_link", "native.release_document", "payments.create_refund",
+        "payments.list_charges")] == [
+        "Solicitud de presupuesto", "Solicitud de reserva", "Solicitud de enlace de pago", "Solicitud de documento",
+        "Solicitud de reembolso", "Solicitud de historial de pagos"]
+
+
+async def test_both_soft_checkers_read_the_receipts_after_the_cards(monkeypatch):
+    """Sonnet and Jev are shown one list: the reply's cards, each with its kind, then the receipts as given."""
+    soft_promise = AsyncMock(return_value=(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False),
+                                           None))
+    evaluate = AsyncMock(return_value=jev.Result(status="ok", scores=dict.fromkeys(jev.STATEMENTS, 0.0),
+                                                 blocked=False))
+    monkeypatch.setattr(reply_check.context, "resolved_tools", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reply_check, "principal_for", lambda session: None)
+    monkeypatch.setattr(jev, "evaluate", evaluate)
+    prose = "Your request is with Mike Turner now."
+    receipts = ["Request receipt card: Quote request: Waiting for Mike Turner to approve",
+                "Request receipt card: Quote request: Cancelled"]
+
+    await reply_check.soft_promises(stub_ctx(soft_promise), SimpleNamespace(desk_id="desk"), "en", prose,
+                                    DEPOSIT_CARDS[:1], receipts=receipts)
+
+    seen = ["Quote card: $20.00\nService call deposit\nGood until Monday, November 2, 9:04 am", *receipts]
+    soft_promise.assert_awaited_once_with(SoftPromiseInput(language="en", prose=prose, cards=seen))
+    evaluate.assert_awaited_once_with(prose, seen, [], api_key="fake-key")
+
+
 # A live deposit reply's cards: the quote, its payment link and a policy, as the kernel renders them.
 DEPOSIT_CARDS = [
     RenderedBlock(kind="card", template="quote",

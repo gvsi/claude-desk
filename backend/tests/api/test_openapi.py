@@ -60,6 +60,18 @@ def test_business_definition_and_setup_proposals_have_distinct_config_schemas():
     assert schemas["PurposePaymentConfig"]["properties"]["amount_cents"]["type"] == "integer"
 
 
+def test_a_setup_answer_takes_picks_and_a_question_says_when_several_apply():
+    schemas = json.loads(OPENAPI_PATH.read_text())["components"]["schemas"]
+    answer = schemas["SetupAnswerIn"]
+    assert "text" not in answer.get("required", [])
+    assert answer["properties"]["text"]["maxLength"] == 2000 and "minLength" not in answer["properties"]["text"]
+    picks = answer["properties"]["picks"]
+    assert (picks["maxItems"], picks["default"]) == (4, [])
+    assert (picks["items"]["minLength"], picks["items"]["maxLength"]) == (1, 80)
+    several = schemas["SetupMessage"]["properties"]["several"]
+    assert (several["type"], several["default"]) == ("boolean", False)
+
+
 def test_briefing_contract_counts_only_turned_down_requests():
     schemas = json.loads(OPENAPI_PATH.read_text())["components"]["schemas"]
     item = schemas["BriefingItem"]
@@ -195,6 +207,37 @@ def test_a2a_request_body_is_documented():
     assert set(schemas["A2ARequest"]["properties"]) == {"desk_slug", "session_id", "message", "mandate",
                                                         "verify_code"}
     assert "Mandate" in schemas
+
+
+def referenced(node, schemas: dict, found: set[str] | None = None) -> set[str]:
+    """The names of every component schema `node` refers to, directly or through other schemas."""
+    found = set() if found is None else found
+    if isinstance(node, dict):
+        ref = node.get("$ref", "")
+        if ref.startswith("#/components/schemas/") and (name := ref.rpartition("/")[2]) not in found:
+            found.add(name)
+            referenced(schemas[name], schemas, found)
+        for value in node.values():
+            referenced(value, schemas, found)
+    elif isinstance(node, list):
+        for value in node:
+            referenced(value, schemas, found)
+    return found
+
+
+def test_visitor_words_quoted_for_the_owner_reach_only_owner_routes():
+    """A model that quotes a visitor's words back (`from_the_visitor`: Needs you's cards, Safety's entries) is the
+    owner's alone: no visitor, agent, payment or document route sends or takes one."""
+    document = export_openapi()
+    schemas = document["components"]["schemas"]
+    quoting = {name for name, schema in schemas.items() if "from_the_visitor" in schema.get("properties", {})}
+    assert {"Attempt", "NeedsYouItem"} <= quoting
+    for path, item in document["paths"].items():
+        for method, operation in item.items():
+            if not operation["operationId"].startswith("owner_"):
+                assert not referenced(operation, schemas) & quoting, (method, path)
+    safety = document["paths"]["/api/owner/desks/{desk_id}/safety"]["get"]
+    assert "Attempt" in referenced(safety, schemas)
 
 
 # Path parameters are named after their resource, `id` for a setup interview (master plan, "Shared seams").

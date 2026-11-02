@@ -57,7 +57,8 @@ async def test_soft_check_gets_exactly_the_resolved_session_steps(app, client, r
     [data] = reviewer.soft_inputs
     assert data.next_steps == next_steps(seen.tools)
     assert data.next_steps
-    assert set(data.model_dump()) == {"language", "prose", "cards", "next_steps"}
+    assert set(data.model_dump()) == {"language", "prose", "cards", "next_steps", "approved_names"}
+    assert data.approved_names == []                      # the reply repeats no approved free name
 
 
 @pytest.mark.parametrize("tool,state", [

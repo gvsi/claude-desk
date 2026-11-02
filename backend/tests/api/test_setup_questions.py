@@ -50,6 +50,7 @@ from desk.api.prompts import (
     SetupNextStep,
     SetupUnderstanding,
     LIMIT_CHOICES,
+    LimitTopic,
     question_text,
 )
 from desk.api.ratelimit import RateLimited
@@ -165,8 +166,11 @@ def blank(output: type[BaseModel]) -> dict:
     return values
 
 
-def next_ask(topic: str) -> dict:
-    return {"kind": "done"} if topic == "done" else {"kind": "topic", "topic": topic}
+def next_ask(topic: str, *, several: bool = False) -> dict:
+    """`next` asking `topic`; `several` only where the output takes it (the next step and a typed card answer)."""
+    if topic == "done":
+        return {"kind": "done"}
+    return {"kind": "topic", "topic": topic, **({"several": True} if several else {})}
 
 
 def next_key(key: str) -> str:
@@ -210,9 +214,9 @@ def carrying(**fields) -> Callable[[ModelRequest], ModelUnavailable]:
 
 
 async def answer(owner: Owner, model: ScriptedModel, interview_id: str, text: str, *items,
-                 question: str | None = None) -> httpx.Response:
-    """The owner's answer to the question waiting (or to `question`), the model answering with `items` (one
-    `turn(...)` by default)."""
+                 question: str | None = None, picks: list[str] | None = None) -> httpx.Response:
+    """The owner's answer to the question waiting (or to `question`), typed (`text`), picked from its choices
+    (`picks`) or both, the model answering with `items` (one `turn(...)` by default)."""
     if question is None:
         question = (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["question"]
     model.add(*(items or (turn(),)))
@@ -222,7 +226,8 @@ async def answer(owner: Owner, model: ScriptedModel, interview_id: str, text: st
     closing = next_step("what_you_do", next={"kind": "done"}, plan="Your Desk will take customer requests.")
     model.add(closing)
     response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer",
-                                        json={"question": question, "text": text})
+                                        json={"question": question, "text": text,
+                                              **({"picks": picks} if picks is not None else {})})
     if closing in model.script:
         model.script.remove(closing)
     if following in model.script:  # no next step after a follow-up, failed turn or conflict
@@ -253,6 +258,7 @@ def understanding(**fields) -> dict:
                        {"app": "google_calendar", "why": "Keep visits together"}],
         "next_topic": "hours_and_area", "question": "Which areas do you cover?",
         "choices": [{"text": "Oakland", "recommended": True}, {"text": "East Bay", "recommended": False}],
+        "several": False,
         "suggested": {"service_area": "Oakland", "hours": [], "public_contact": "", "after_hours": "",
                       "price_items": []},
         **fields,
@@ -845,7 +851,7 @@ async def test_cards_take_capabilities_and_never_an_amount(
     from desk.api.prompts import PurposePaymentDraft, SetupUnderstanding
     assert "amount_cents" not in PurposePaymentDraft.model_fields
     assert set(SetupUnderstanding.model_fields) == {
-        "reply", "jobs", "connectors", "next_topic", "question", "choices", "suggested"}
+        "reply", "jobs", "connectors", "next_topic", "question", "choices", "several", "suggested"}
 
 
 @pytest.mark.parametrize("invalid", [False, True])
@@ -861,7 +867,7 @@ async def test_a_failed_understanding_still_asks_the_first_question(
     state = await landed(owner, state["interview_id"], cards=True)
     assert state["question"] == "what_you_do"
     assert state["messages"][-1] == {"role": "claude", "text": question_text("what_you_do", "trade"),
-                                       "choices": [], "card": None, "owner_decided": False}
+                                       "choices": [], "card": None, "several": False, "owner_decided": False}
     assert not any(message["card"] for message in state["messages"])
     assert not any("suggested" in entry for entry in (await stored(engine, state["interview_id"]))["transcript"])
     assert "understanding" in caplog.text and "first question" in caplog.text
@@ -894,6 +900,54 @@ async def test_question_choices_keep_to_the_seams_bounds(app, browser, kernel_ht
     expected = [] if single else [{"text": text, "recommended": index == 0} for index, text in
                                  enumerate(("Recommended", "First", "Also marked", "Fourth"))]
     assert state["messages"][-1]["choices"] == expected
+
+
+CHANNELS = [{"text": "Phone calls", "recommended": False}, {"text": "Texts", "recommended": False},
+            {"text": "Email", "recommended": False}]
+
+
+@pytest.mark.parametrize("several,choices,expected", [(True, CHANNELS, True), (False, CHANNELS, False),
+                                                      (True, [], False)])
+async def test_the_understandings_several_reaches_its_opening_question(
+    app, browser, kernel_http, model, engine, several, choices, expected,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    model.add(unparsed(understanding(next_topic="what_you_do", question="What eats up your time?", choices=choices,
+                                     several=several)))
+    state = await consent(owner, state["interview_id"], False, model)
+    assert state["question"] == "what_you_do"
+    asked = state["messages"][-1]
+    assert (asked["text"], asked["choices"], asked["several"]) == ("What eats up your time?", choices, expected)
+    row = await stored(engine, state["interview_id"])
+    assert row["transcript"][-1].get("several", False) is expected
+
+
+@pytest.mark.parametrize("several,choices,expected", [(True, CHANNELS, True), (False, CHANNELS, False),
+                                                      (True, CHANNELS[:1], False)])
+async def test_a_next_steps_several_reaches_the_question_it_asks(
+    app, browser, kernel_http, model, engine, several, choices, expected,
+):
+    # The consultant's next step says whether its topic's choices can be picked together; a fact turn's `next` can't
+    # (test_schema_budget.py), so a fact turn's question always takes one answer.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    path = f"/api/owner/setup/{state['interview_id']}"
+    await consent(owner, state["interview_id"], False, model)
+    await answer(owner, model, state["interview_id"], "Ask about quotes.", turn(next=next_ask("quote_limit")))
+    reply = await answer(owner, model, state["interview_id"], "Ask me first.", turn(),
+                         next_step("quote_limit", next=next_ask("contact_and_after_hours", several=several),
+                                   question="How do customers reach you?", choices=choices,
+                                   skip=["money_limit", "discounts"]))
+    assert reply.status_code == 200, reply.text
+    asked = (await owner.browser.get(path)).json()["messages"][-1]
+    # Several applies only to a question with choices: a single choice is dropped, and the flag with it.
+    assert (asked["text"], asked["several"]) == ("How do customers reach you?", expected)
+    assert len(asked["choices"]) == (len(choices) if len(choices) > 1 else 0)
+    assert reply.json()["messages"][-1] == asked
+    row = await stored(engine, state["interview_id"])
+    assert row["transcript"][-1]["question"] == "contact_and_after_hours"
+    assert row["transcript"][-1].get("several", False) is expected
 
 
 def test_the_seam_models_hold_their_bounds():
@@ -1555,7 +1609,7 @@ async def test_setups_messages_leave_out_the_owners_description(app, browser, fa
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
     assert state["messages"] == [{"role": "claude", "text": desk_setup.CONSENT_QUESTION,
-                                   "choices": [], "card": None, "owner_decided": False}]
+                                   "choices": [], "card": None, "several": False, "owner_decided": False}]
     interview_id = state["interview_id"]
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["messages"] == state["messages"]
     transcript = (await stored(engine, interview_id))["transcript"]
@@ -1566,6 +1620,23 @@ async def test_setups_messages_leave_out_the_owners_description(app, browser, fa
                                                                          "No, I'll type it"]
     assert DESCRIPTION not in [message["text"] for message in consented["messages"]]
     assert (await stored(engine, interview_id))["transcript"][0] == transcript[0]
+
+
+async def test_setup_keeps_an_offer_the_owner_stated_for_the_owner_alone(app, browser, kernel_http, model, engine):
+    # "Students get 10% off with a student ID" can't go in a customer line, and no rule gives it: setup keeps it, in
+    # the owner's words, to tell them at the end that it isn't set up. Rules and situations are drafted without it,
+    # and no customer line carries it.
+    owner = await new_owner(app, browser, kernel_http)
+    offer = "Students get 10% off with a student ID"
+    state = await begin(owner, model, offers=[offer])
+    answers = SetupAnswers.model_validate((await stored(engine, state["interview_id"]))["answers"])
+    assert answers.offers == [offer]
+    assert desk_setup.owner_rule_answers(answers).offers == []
+    assert "offers" not in desk_setup.SETUP_POLICY_CLAIMS
+    assert "- offers:" in SETUP_START_SYSTEM and "offers" in SetupStart.model_json_schema()["properties"]
+    # No later call reads them, so no turn can reword one into a customer line: a fact turn's message leaves them out.
+    interview = interview_with(answers, [desk_setup.Entry(role="owner", text=DESCRIPTION)])
+    assert "Students get" not in desk_setup._turn_message(interview, "what_you_do", "We fix bikes.")["content"][0]["text"]
 
 
 async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, kernel_http, model, engine, caplog):
@@ -1641,7 +1712,7 @@ async def test_setup_tools_use_the_owner_session_and_desk(app, browser, fake, ke
     desk.tools["native.fetch_website"] = desk.tools["native.fetch_website"].model_copy(update={"status": "disabled"})
     consented = await consent(owner, other["interview_id"], True, model)
     assert consented["messages"][3] == {"role": "tool_label", "text": "Couldn't read turner-plumbing.example",
-                                        "choices": [], "card": None, "owner_decided": False}
+                                        "choices": [], "card": None, "several": False, "owner_decided": False}
     proposed = [call.body["call"]["tool"] for call in fake.called("POST /decide")
                 if call.body["desk_id"] == other["desk_id"]]
     assert proposed == ["native.read_memory"]
@@ -2309,7 +2380,7 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
             assert followed.json()["messages"][-1] == {"role": "claude", "text": "How much, at most?",
                                                        "choices": [{"text": choice.text, "recommended": False}
                                                                    for choice in LIMIT_CHOICES[key]("trade")],
-                                                       "card": None, "owner_decided": False}
+                                                       "card": None, "several": False, "owner_decided": False}
         patch = {"owner_display_name": "Mike Turner", "public_contact": "(510) 555-0142"} \
             if key == "contact_and_after_hours" else {}
         reply = await answer(owner, model, interview_id, f"About {key}.", turn(**patch))
@@ -2587,8 +2658,8 @@ def test_turns_capture_business_policies_with_short_bounded_fields():
     # A turn's schema compiles into a grammar of capped size, so each policy field's description is short: what it
     # holds, and that it is customer copy in words without numbers. The turn's guidance holds the full rules
     # (test_setup_prompt_keeps_policy_text_public_and_free_of_numbers).
-    assert POLICY_FIELD_RULE == ("Written to customers, in words: no amounts, percentages, times, days, numbers "
-                                 "(even spelled out) or promise words.")
+    assert POLICY_FIELD_RULE == ("Written to customers, in words: no amounts, digits, number words but one or a, "
+                                 "hours, dates or promise words.")
     descriptions = {
         "pricing": 'How the business prices (a fixed menu, "from" prices, or per case after a consult).',
         "intake": "What new customers are asked or should have ready before the owner takes them on.",
@@ -2662,7 +2733,7 @@ def test_setup_summary_is_customer_copy_from_the_opening_parse():
                     **{key: output.model_fields["summary"].description for key, output in SETUP_TURNS.items()
                        if "summary" in output.model_fields}}
     missing = {name: description for name, description in descriptions.items()
-               if POLICY_FIELD_RULE not in description or "spelled out" not in description}
+               if POLICY_FIELD_RULE not in description or "number words" not in description}
     assert not missing, missing
     assert 'say "a small CPA firm", not "a two-person firm"' in summary_line
 
@@ -2672,13 +2743,195 @@ def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
             "answer; price_items holds only the prices that answer names.") in SETUP_TURN_SYSTEM
     # summary is published as the public About line (`policy:about`), which the kernel's public-text check refuses
     # with a number in it, spelled out or not ("a two-person firm"), so the customer-copy rule covers it too.
-    assert ("For summary, pricing, intake, after_hours and urgent, write them in words; keep amounts, percentages, "
-            "times, days and numbers (even spelled out), and promise words such as free, guaranteed, discount, "
-            "refund or confirmed out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    # The owner's own time frames stay word for word where that check allows them (seen live: "we reply within one
+    # business day" became "the team replies once the office reopens"); otherwise reply names the change.
+    assert ("For summary, pricing, intake, after_hours and urgent, write them in words, and keep the owner's own "
+            "words for a time frame, a threshold or what they commit to, word for word: \"we reply within one "
+            "business day\" and \"the next business day\" stay as they are. These lines can't carry amounts, "
+            "percentages, digits, number words other than one or a, hours or minutes, dates or days such as today, "
+            "tomorrow, the same day, a weekday's name, the weekend or this or next week, or promise words such as "
+            "free, guaranteed, discount, refund or confirmed. When the owner's words have one, write the closest "
+            "wording without it (\"within a day\" for \"within 24 hours\", \"a deadline within a week\" for \"a "
+            "deadline in the next week\"), and add one sentence to reply saying which words you changed, that lines "
+            "customers read can't carry numbers, hours or dates, and that they can change it under What customers "
+            "will read. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    assert ("When a customer line changes the owner's words, reply also has the sentence the rule for those lines "
+            "asks for.") in SETUP_TURN_SYSTEM
     assert ("summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to "
             "customers on the public page. Write them as the business speaking to its customers; never "
             "instructions to the Desk, private owner instructions, or a contact route other than the contact "
             "on record.") in SETUP_TURN_SYSTEM
+
+
+def test_setup_public_line_examples_hold_against_the_kernel_check():
+    # The rule's examples and the kinds of words it rules out match the kernel's public-text check itself, so setup
+    # never keeps a time frame the kernel would hold, nor rewrites one it would publish.
+    from desk.kernel_service.reply_check import scan_public_text
+
+    for kept in ("we reply within one business day", "the next business day", "within a day",
+                 "a deadline within a week"):
+        assert f'"{kept}"' in SETUP_TURN_SYSTEM and scan_public_text(f"{kept}.") == [], kept
+    for changed in ("within 24 hours", "a deadline in the next week"):
+        assert f'"{changed}"' in SETUP_TURN_SYSTEM and scan_public_text(f"{changed}.") != [], changed
+    for words in ("within two days", "within the hour", "in a few minutes", "today", "tomorrow", "the same day",
+                  "on Monday", "over the weekend", "this week", "next week", "free", "guaranteed"):
+        assert scan_public_text(f"We reply {words}.") != [], words
+    for words in ("within one day", "within a week", "the next business day", "within a few days"):
+        assert scan_public_text(f"We reply {words}.") == [], words
+
+
+@pytest.mark.parametrize(("text", "frames"), [
+    ("Take the message; we reply within one business day.", ["one business day"]),
+    ("Nothing is urgent except an IRS notice with a deadline in the next week.", ["next week"]),
+    ("Same-day for emergencies, otherwise the next business day.", ["same day", "next business day"]),
+    ("Call 555-123-4567. We're open 7 days a week, 24/7 by email; we reply within 24 hours.", ["24 hours"]),
+    ("Fuera de horario dejen mensaje; respondemos en un día hábil. Abrimos por la mañana.", ["un día hábil"]),
+    ("Un aviso del IRS con plazo la próxima semana es urgente.", ["próxima semana"]),
+    ("We reply within the hour, and returns are due by next Monday.", ["within the hour", "by next monday"]),
+    ("Respondemos antes del viernes.", ["antes del viernes"]),
+    ("We reply in a day or two, within 24 hrs for audits, 48h at most, or the next morning.",
+     ["in a day", "24 hrs", "48h", "next morning"]),
+    ("Respondemos en un dia habil, o la proxima semana.", ["un dia habil", "proxima semana"]),
+    # thresholds: how recent something urgent is, how much notice a booking needs
+    ("Nothing is urgent except an IRS notice from the last 30 days.", ["30 days"]),
+    ("Please give us a week's notice, or book at least a day in advance.", ["a week's notice", "at least a day"]),
+    # clock times are hours, never a time frame
+    ("Abrimos de lunes a viernes de 9h a 18h; open 24h for emergencies.", []),
+    # the days it opens are hours, never a deadline
+    ("Open Monday to Friday, 9 to 5; abrimos de lunes a viernes.", []),
+    ("Open Monday until Friday; abrimos del lunes hasta el viernes; open 24 hours a day.", []),
+    # rates, frequencies and how long something lasts are no time frames for a customer line
+    ("I charge $150 an hour, rent is $1,500 a month, we service pools once a week.", []),
+    ("Appointments last about an hour; visits last 90 minutes.", []),
+    ("Appointments last a few hours, or last for 90 minutes, and audits last one business day.", []),
+    ("Give us a couple of days to reply, or a few days at busy times.", ["a couple of days", "a few days"]),
+    ("A notice received in the last two days is urgent.", ["two days"]),
+    ("We do tax returns for families and small firms.", []),
+])
+def test_owner_time_frames_are_read_from_the_answer(text, frames):
+    assert desk_setup.owner_time_frames(text) == frames
+
+
+POINTER = "you can change it under What customers will read."
+
+
+@pytest.mark.parametrize("text", ["We reply within the hour.", "We reply by Friday.", "Respondemos antes del viernes."])
+def test_a_dropped_deadline_gets_the_retry_line(text):
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    softened = answer_turn(SETUP_TURNS["what_you_do"], intake="We reply soon.")
+    assert desk_setup.owner_time_frame_errors(text, softened) == [TIME_FRAME_UNACCOUNTED]
+    named = answer_turn(SETUP_TURNS["what_you_do"],
+                        f'Customer lines can\'t name days, so "{text[:-1]}" reads "soon"; {POINTER}',
+                        intake="We reply soon.")
+    assert desk_setup.owner_time_frame_errors(text, named) == []
+
+
+def test_saying_the_time_frame_back_is_no_named_change():
+    # Seen in review: the reply says the owner's words back while the line softens them. Only a reply that points the
+    # owner to the lines customers read names a change; the second answer stands either way.
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    text = "Take the message; we reply within one business day."
+    lines = {"after_hours": "Leave a message and the team replies once the office reopens."}
+    echoed = answer_turn(SETUP_TURNS["contact_and_after_hours"],
+                         "Got it: after hours you take a message and reply within one business day.", **lines)
+    assert desk_setup.owner_time_frame_errors(text, echoed) == [TIME_FRAME_UNACCOUNTED]
+    named = answer_turn(SETUP_TURNS["contact_and_after_hours"],
+                        f'I wrote "once the office reopens" for "within one business day"; {POINTER}', **lines)
+    assert desk_setup.owner_time_frame_errors(text, named) == []
+
+
+def test_a_time_frame_already_in_a_stored_line_is_kept():
+    # An earlier turn may hold the owner's words already; this turn's lines needn't repeat them, unless this turn
+    # redrafts that very line, which replaces the stored one.
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    text = "Take the message; we reply within one business day."
+    stored = {"after_hours": "Outside office hours, leave a message and we reply within one business day."}
+    drafted = answer_turn(SETUP_TURNS["contact_and_after_hours"], urgent="An IRS notice counts as urgent.")
+    assert desk_setup.owner_time_frame_errors(text, drafted, stored) == []
+    redrafted = answer_turn(SETUP_TURNS["contact_and_after_hours"],
+                            after_hours="Leave a message and the team replies once the office reopens.")
+    assert desk_setup.owner_time_frame_errors(text, redrafted, stored) == [TIME_FRAME_UNACCOUNTED]
+
+
+def test_the_retry_line_lets_only_a_fact_with_no_field_stay_out():
+    # "No line records it" would also describe a softened line; the prompt's own term is a field.
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    assert TIME_FRAME_UNACCOUNTED.endswith(
+        "A time frame for a fact this turn has no field for stays out; then answer as before.")
+    assert "A fact with no field on this turn isn't recorded on this turn" in SETUP_TURN_SYSTEM
+
+
+IRS_ANSWER = "Tax returns for families. Nothing is urgent except an IRS notice with a deadline in the next week."
+SOFTENED = "An IRS notice with a deadline coming up soon counts as urgent."
+NAMED = f'Customer lines can\'t name dates, so "in the next week" reads "within a week"; {POINTER}'
+
+
+@pytest.mark.parametrize("second", ["named", "still_unnamed"])
+async def test_a_turn_that_drops_the_owners_time_frame_gets_one_fresh_draft(app, browser, kernel_http, model,
+                                                                            engine, second):
+    # Seen live: "a deadline in the next week" became "a deadline coming up soon", with nothing said. A time frame the
+    # owner states is kept word for word in a customer line or named in reply; otherwise the turn gets one fresh
+    # draft, whose answer stands either way. The retry never repeats the owner's words.
+    from desk.api.prompts import ANSWER_RETRY, TIME_FRAME_UNACCOUNTED
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    retried = turn(NAMED, urgent="An IRS notice with a deadline within a week counts as urgent.") \
+        if second == "named" else turn(urgent=SOFTENED)
+    before = len(model.requests)
+    response = await answer(owner, model, interview_id, IRS_ANSWER, turn(urgent=SOFTENED), retried)
+    assert response.status_code == 200, response.text
+    assert len(model.requests) == before + 2
+    retry = model.requests[-1].messages[-1]["content"][0]["text"]
+    assert TIME_FRAME_UNACCOUNTED in retry and "next week" not in retry and "IRS" not in retry
+    # a neutral header: the turn's cards weren't refused
+    assert retry.startswith(ANSWER_RETRY.split("{errors}")[0]) and "cards" not in retry
+    row = await stored(engine, interview_id)
+    if second == "named":
+        assert row["answers"]["urgent"] == "An IRS notice with a deadline within a week counts as urgent."
+        assert NAMED in [entry["text"] for entry in row["transcript"]]
+    else:
+        assert row["answers"]["urgent"] == SOFTENED
+
+
+@pytest.mark.parametrize(("text", "first"), [
+    ("New clients send last year's return; we reply within one business day.",
+     turn(intake="New clients send last year's return, and we reply within one business day.")),
+    (IRS_ANSWER, turn(NAMED, urgent="An IRS notice with a deadline within a week counts as urgent.")),
+    ("We do tax returns for families, and we reply within one business day.", turn()),
+])
+async def test_a_turn_that_keeps_or_names_the_owners_time_frame_answers_at_once(app, browser, kernel_http, model,
+                                                                                engine, text, first):
+    # Kept word for word, named in reply, or no customer line drafted this turn: no retry.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    before = len(model.requests)
+    response = await answer(owner, model, interview_id, text, first)
+    assert response.status_code == 200, response.text
+    assert len(model.requests) == before + 1
+
+
+async def test_a_retry_with_too_little_time_left_is_skipped(app, browser, kernel_http, model, engine, monkeypatch):
+    # The answer run's deadline bounds the retry, as it does the understanding's: with too little time left the
+    # first answer stands rather than the whole turn running out of time.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    monkeypatch.setattr(desk_setup, "TURN_RUN_TIMEOUT_S", desk_setup.TURN_FINISH_S + 3)
+    before = len(model.requests)
+    response = await answer(owner, model, interview_id, IRS_ANSWER, turn(urgent=SOFTENED))
+    assert response.status_code == 200, response.text
+    assert len(model.requests) == before + 1
+    assert (await stored(engine, interview_id))["answers"]["urgent"] == SOFTENED
 
 
 UNSET = {"quote_auto_max_cents": None, "discount_auto_max_bp": None, "payment_link_auto_max_cents": None,
@@ -3718,7 +3971,7 @@ async def test_claude_chooses_the_next_fact_topic_and_its_words(app, browser, ke
     assert reply.status_code == 200, reply.text
     assert reply.json()["question"] == "contact_and_after_hours"
     assert reply.json()["messages"][-1] == {"role": "claude", "text": "What happens after hours?",
-                                             "choices": choices, "card": None, "owner_decided": False}
+                                             "choices": choices, "card": None, "several": False, "owner_decided": False}
 
 
 @pytest.mark.parametrize("following", ["contact_and_after_hours", "done"])
@@ -4012,9 +4265,105 @@ async def test_a_limit_topic_always_asks_codes_question_and_choices(app, browser
     assert reply.status_code == 200, reply.text
     assert reply.json()["question"] == "money_limit"
     assert reply.json()["messages"][-1] == {
-        "role": "claude", "text": question_text("money_limit", "office"), "card": None, "owner_decided": False,
+        "role": "claude", "text": question_text("money_limit", "office"), "card": None, "several": False, "owner_decided": False,
         "choices": [{"text": choice.text, "recommended": False}
                     for choice in LIMIT_CHOICES["money_limit"]("office")]}
+
+
+async def test_a_limit_question_never_takes_several_answers(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    await consent(owner, state["interview_id"], False, model)
+    await answer(owner, model, state["interview_id"], "We prepare tax returns.", turn(next=next_ask("quote_limit")))
+    reply = await answer(owner, model, state["interview_id"], "Ask me first.", turn(),
+                         next_step("quote_limit", next=next_ask("discounts", several=True), question="How much off?",
+                                   choices=CHANNELS))
+    assert reply.status_code == 200, reply.text
+    asked = reply.json()["messages"][-1]
+    assert (reply.json()["question"], asked["text"], asked["several"]) == (
+        "discounts", question_text("discounts", "office"), False)
+    row = await stored(engine, state["interview_id"])
+    assert "several" not in row["transcript"][-1]
+
+
+def test_picks_and_a_typed_answer_read_as_one_answer_in_the_questions_order():
+    from desk.api.prompts import Choice
+    choices = [Choice(text=choice["text"], recommended=False) for choice in CHANNELS]
+    assert desk_setup.picked_answer(choices, ["Email", "Phone calls"], "Walk-ins too") == "Phone calls, Email\nWalk-ins too"
+    assert desk_setup.picked_answer(choices, ["Texts", "Email"], "") == "Texts, Email"
+    assert desk_setup.picked_answer(choices, ["Texts"], "") == "Texts"
+    assert desk_setup.picked_answer(choices, [], "Mostly calls") == "Mostly calls"
+
+
+async def several_question(owner: Owner, model: ScriptedModel, interview_id: str, *, several: bool = True) -> dict:
+    """Answer the first question and the quote limit, the next step asking `hours_and_area` with three choices
+    (`CHANNELS`) and `several` (a fact turn's `next` can't say several); the state it lands."""
+    await answer(owner, model, interview_id, "Ask about quotes.", turn(next=next_ask("quote_limit")))
+    reply = await answer(owner, model, interview_id, "Ask me first.", turn(),
+                         next_step("quote_limit", next=next_ask("hours_and_area", several=several),
+                                   question="How do customers reach you?", choices=CHANNELS,
+                                   skip=["money_limit", "discounts"]))
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["question"] == "hours_and_area"
+    return reply.json()
+
+
+async def test_several_picks_and_a_typed_answer_reach_the_turn_as_one_answer(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    await several_question(owner, model, state["interview_id"])
+    reply = await answer(owner, model, state["interview_id"], "  Walk-ins too ", picks=["Email", "Phone calls"])
+    assert reply.status_code == 200, reply.text
+    said = "Phone calls, Email\nWalk-ins too"
+    assert [message["text"] for message in reply.json()["messages"] if message["role"] == "owner"][-1] == said
+    row = await stored(engine, state["interview_id"])
+    assert [entry["text"] for entry in row["transcript"] if entry["role"] == "owner"][-1] == said
+    request = next(request for request in reversed(model.requests)
+                   if request.output_schema is SETUP_TURNS["hours_and_area"])
+    assert f"<owner_answer>{said}</owner_answer>" in request.messages[0]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("several", [False, True])
+async def test_one_pick_reads_as_a_clicked_choice(app, browser, kernel_http, model, engine, several):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    await several_question(owner, model, state["interview_id"], several=several)
+    reply = await answer(owner, model, state["interview_id"], "", picks=["Texts"])
+    assert reply.status_code == 200, reply.text
+    row = await stored(engine, state["interview_id"])
+    assert [entry["text"] for entry in row["transcript"] if entry["role"] == "owner"][-1] == "Texts"
+    request = next(request for request in reversed(model.requests)
+                   if request.output_schema is SETUP_TURNS["hours_and_area"])
+    assert "<owner_answer>Texts</owner_answer>" in request.messages[0]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("several,body", [
+    (False, {"question": "hours_and_area", "text": "", "picks": ["Phone calls", "Texts"]}),
+    (True, {"question": "hours_and_area", "text": "", "picks": ["Phone calls", "Fax"]}),
+    (True, {"question": "hours_and_area", "text": "", "picks": ["phone calls"]}),
+    (True, {"question": "hours_and_area", "text": "", "picks": ["Texts", "Texts"]}),
+    (True, {"question": "hours_and_area", "text": "", "picks": ["Phone calls", "Texts", "Email", "Fax", "Post"]}),
+    (True, {"question": "hours_and_area", "text": "", "picks": ["x" * 81]}),
+    (True, {"question": "hours_and_area", "text": "", "picks": [""]}),
+    (True, {"question": "hours_and_area", "text": ""}),
+    (True, {"question": "hours_and_area", "text": "   ", "picks": []}),
+    (True, {"question": "hours_and_area"}),
+    (True, {"card": "p-012345abcdef", "text": "Yes", "picks": ["Texts"]}),
+], ids=["two-on-one-answer", "not-a-choice", "not-exact", "duplicate", "five", "too-long", "empty-pick", "nothing",
+        "blank-text", "no-text", "with-a-card"])
+async def test_picks_the_question_cant_take_are_refused(app, browser, kernel_http, model, engine, several, body):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    await several_question(owner, model, state["interview_id"], several=several)
+    before, calls = await stored(engine, state["interview_id"]), len(model.requests)
+    response = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/answer", json=body)
+    assert (response.status_code, response.json()) == (422, {"error": "invalid"})
+    assert await stored(engine, state["interview_id"]) == before
+    assert len(model.requests) == calls
+    assert (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()["question"] == "hours_and_area"
 
 
 @pytest.mark.parametrize("reply_text", ["Most firms let me take a couple grand", "🔟 is typical", "Got it"])
@@ -4054,12 +4403,14 @@ async def test_a_skipped_money_topic_leaves_the_cap_at_0(app, browser, fake, ker
     assert not any(request.output_schema is SETUP_TURNS["money_limit"] for request in model.requests)
 
 
+@pytest.mark.parametrize("picked", [False, True], ids=["typed", "picked"])
 @pytest.mark.parametrize("key,index,patch", [
     ("money_limit", 1, {"auto_money_cap_cents": 900000, "payment_link_auto_max_cents": 900000, "refunds": "never"}),
     ("documents_and_payments", 1, {"documents": "none"}),
     ("documents_and_payments", 2, {"documents": "ask"}),
 ])
-async def test_a_clicked_choice_answers_its_limit(app, browser, kernel_http, model, engine, key, index, patch):
+async def test_a_clicked_choice_answers_its_limit(app, browser, kernel_http, model, engine, key, index, patch, picked):
+    # A choice sent as the answer's text, as the web sent a click, or as its one pick, reads the same.
     from desk.api.prompts import LIMIT_CHOICES
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type="office")
@@ -4068,8 +4419,8 @@ async def test_a_clicked_choice_answers_its_limit(app, browser, kernel_http, mod
     reply = await answer(owner, model, state["interview_id"], "We prepare returns.", turn(next=next_ask(key)))
     assert reply.status_code == 200, reply.text
     choice = LIMIT_CHOICES[key]("office")[index]
-    reply = await answer(owner, model, state["interview_id"], "  " + choice.text + "  ",
-                         turn(step_done=False, **patch))
+    reply = await answer(owner, model, state["interview_id"], "" if picked else "  " + choice.text + "  ",
+                         turn(step_done=False, **patch), picks=[choice.text] if picked else None)
     assert reply.status_code == 200, reply.text
     row = await stored(engine, state["interview_id"])
     assert {name: row["answers"][name] for name in choice.values} == choice.values
@@ -4130,7 +4481,7 @@ async def test_opting_in_asks_codes_money_question(app, browser, kernel_http, mo
     assert response.status_code == 200, response.text
     assert response.json()["question"] == "money_limit"
     assert response.json()["messages"][-1] == {
-        "role": "claude", "text": question_text("money_limit", "trade"), "card": None, "owner_decided": False,
+        "role": "claude", "text": question_text("money_limit", "trade"), "card": None, "several": False, "owner_decided": False,
         "choices": [{"text": choice.text, "recommended": False} for choice in LIMIT_CHOICES["money_limit"]("trade")]}
 
 
@@ -4248,6 +4599,52 @@ async def test_skip_ignores_covered_topics_and_a_covered_topic_is_never_asked_ag
     after = await stored(engine, state["interview_id"])
     assert after["transcript"][:len(before["transcript"])] == before["transcript"]
     assert sum("what_you_do" in entry.get("covered", []) for entry in after["transcript"]) == 1
+
+
+NAMES_A_DISCOUNT = "I'm Mike Turner. Turner Plumbing fixes leaks. You can take up to 10% off without asking me."
+
+
+@pytest.mark.parametrize(("named", "limit", "value"), [
+    ([], None, None), (["discounts"], "discount_auto_max_bp", 1000), (["money_limit"], "auto_money_cap_cents", 10000)])
+async def test_a_limit_the_description_names_is_asked_even_when_a_turn_skips_it(
+    app, browser, kernel_http, model, engine, named, limit, value,
+):
+    # The owner's description named a limit ("you can take up to 10% off without asking me"), so the start reading
+    # lists its topic among the named limits. A turn that skips it is overruled: code asks that limit's own question
+    # next, the opt-in money question too. Naming it sets nothing: the limit comes only from that question's answer,
+    # and answering it closes the questions. With no limit named, the same skip closes the questions as before.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, description=NAMES_A_DISCOUNT if named else DESCRIPTION, named_limits=named)
+    iid = state["interview_id"]
+    assert (await stored(engine, iid))["answers"].get("named_limits", []) == named
+    await consent(owner, iid, False, model)
+    await answer(owner, model, iid, "We fix leaks.")
+    skipped = [key for key in QUESTION_KEYS if key not in ("what_you_do", "hours_and_area", "contact_and_after_hours")]
+    await answer(owner, model, iid, "Oakland, 8 to 6.", turn(next=next_ask("contact_and_after_hours"), skip=skipped))
+    response = await answer(owner, model, iid, "Call (510) 555-0142. After hours, take a message.",
+                            turn(next=next_ask("done"), skip=skipped))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    if not named:
+        assert (body["step"], body["question"]) == ("questions", "test_client")
+        return
+    (topic,) = named
+    assert (body["step"], body["question"]) == ("questions", topic)
+    assert body["messages"][-1]["text"] == question_text(topic, "trade")
+    before = (await stored(engine, iid))["answers"]
+    assert (before.get("discount_auto_max_bp"), before.get("auto_money_cap_cents", 0)) == (None, 0)   # nothing set yet
+    response = await answer(owner, model, iid, "Up to 10%." if topic == "discounts" else "$100.",
+                            turn(**{limit: value}), unavailable())
+    assert response.status_code == 200, response.text
+    assert (response.json()["step"], response.json()["question"]) == ("questions", "test_client")
+    assert (await stored(engine, iid))["answers"][limit] == value
+    # The named limits are code's: no model call reads them.
+    assert all("named_limits" not in json.dumps(request.messages) for request in model.requests)
+
+
+def test_named_limit_topics_are_the_limit_questions():
+    from desk.api.prompts import LIMIT_QUESTIONS as fields
+    assert set(get_args(LimitTopic)) == set(LIMIT_CHOICES) == set(fields.values())
 
 
 async def test_a_failed_next_step_asks_the_first_uncovered_topic(app, browser, kernel_http, model, engine):
@@ -4872,7 +5269,7 @@ async def test_typed_card_answers_share_the_turn_guard(app, browser, kernel_http
         assert second.json()["busy"] is True
         assert second.json() == (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()
         assert second.json()["messages"][-1] == {"role": "owner", "text": "Yes", "card": None, "choices": [],
-                                                 "owner_decided": False}
+                                                 "several": False, "owner_decided": False}
         assert asked.count("setup_turn") == 1
     finally:
         release.set()
