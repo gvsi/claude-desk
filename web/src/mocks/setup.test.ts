@@ -8,12 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PublicDesk, RenderedBlock, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { BusinessOut, CopyOut, DemoAgentRun, RulesDraft, SetupState, SetupTools, SituationResult, Today, VisitorSession } from '../api/views.ts';
+import type { BusinessOut, CopyOut, DemoAgentRun, RulesDraft, SetupState, SetupTools, SituationResult, Today, ToolConfirmedOut, VisitorSession } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { PUBLIC_COPY } from '../public/copy.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
-import { businessToolRows, seedBusinessTools } from './businessTools.ts';
+import { businessToolRows, replaceBusinessTools, seedBusinessTools } from './businessTools.ts';
 import { EVENT_GAP_MS } from './script.ts';
 import { RIVERA } from './seed.ts';
 import {
@@ -136,20 +136,61 @@ describe('setup consultant run and decisions', () => {
     expect(state.messages.find(({ text }) => text.startsWith('Here’s what I’d have your Desk do:'))?.text).toBe('Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.');
   });
 
-  it('appends_accepted_jobs_in_order_without_replacing_a_taken_tool_name', async () => {
+  it('reconciles_accepted_setup_jobs_after_closing_the_questions_three_times', async () => {
     let state = await cpaAt('schedule');
     const desk = mockStore.world.desk(state.desk_id)!;
-    seedBusinessTools(desk, businessToolRows([state.messages.at(-1)!.card!.job!]));
-    const toolsBefore = structuredClone(desk.tools);
+    const job = state.messages.at(-1)!.card!.job!;
+    seedBusinessTools(desk, businessToolRows([job, { ...job, title: 'Old setup job' }]));
     state = await setupState('setupSuggestions', state.interview_id, {});
+    const booking = desk.tools.find(({ tool }) => tool === 'desk.book-a-free-intro-call')!;
+    const params = { desk_id: state.desk_id };
+    const on = await mockStore.dispatch('confirmTool', { params, body: { tools: [{ tool: booking.tool, definition_sha256: booking.definition_sha256 }], enable: true } });
+    if ('network' in on || on.status !== 200) throw new Error('job must draft its turn on');
+    const draft = (on.body as ToolConfirmedOut).draft!;
+    expect(await mockStore.dispatch('confirmRules', { params, body: { version: draft.version } })).toMatchObject({ status: 200 });
+    const bookingBefore = structuredClone(desk.tools.find(({ tool }) => tool === booking.tool)!);
+    expect(bookingBefore.status).toBe('enabled');
+    // Suggestions may connect accepted apps; later closings must keep those tools as they are.
+    const toolsBefore = structuredClone(desk.tools.filter(({ source }) => source !== 'business'));
+    for (const ending of ['answer', 'suggestions']) {
+      state = await setupState('setupReopen', state.interview_id, { text: 'Closed Fridays.', idempotency_key: `replace-jobs-${ending}` });
+      state = ending === 'answer'
+        ? await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Take a message after hours.' })
+        : await setupState('setupSuggestions', state.interview_id, {});
+      expect(state.step).toBe('tools');
+    }
     const response = await mockStore.dispatch('setupTools', { params: { id: state.interview_id } });
     if ('network' in response || response.status !== 200) throw new Error('setup tools must answer 200');
     expect((response.body as SetupTools).tools.filter(({ source }) => source === 'business').map(({ tool, business, status }) => [tool, business?.title, status])).toEqual([
-      ['desk.book-a-free-intro-call', 'Book a free intro call', 'needs_review'],
-      ['desk.book-a-free-intro-call-2', 'Book a free intro call', 'needs_review'],
+      ['desk.book-a-free-intro-call', 'Book a free intro call', 'enabled'],
+      ['desk.old-setup-job', 'Old setup job', 'disabled'],
       ['desk.ask-new-clients-three-questions', 'Ask new clients three questions', 'needs_review'],
     ]);
-    expect(desk.tools.slice(0, toolsBefore.length)).toEqual(toolsBefore);
+    expect(desk.tools.find(({ tool }) => tool === booking.tool)).toEqual(bookingBefore);
+    expect(desk.tools.find(({ tool }) => tool === 'desk.old-setup-job')?.review_reason).toBeNull();
+    expect(new Set(desk.tools.map(({ tool }) => tool)).size).toBe(desk.tools.length);
+    expect(desk.tools.filter(({ source }) => source !== 'business')).toEqual(toolsBefore);
+  });
+
+  it('changed_jobs_need_review_and_disabled_jobs_return_as_new', async () => {
+    const state = await cpaAt('schedule');
+    const desk = mockStore.world.desk(state.desk_id)!;
+    const job = state.messages.at(-1)!.card!.job!;
+    seedBusinessTools(desk, businessToolRows([job]));
+    const before = desk.tools.find(({ source }) => source === 'business')!;
+    before.status = 'enabled';
+    before.review_reason = null;
+    const changed = { ...job, config: { block: 'typed_booking' as const, appointment_type: 'Free intro call', minutes: 30 } };
+    replaceBusinessTools(desk, [changed]);
+    const row = desk.tools.find(({ tool }) => tool === before.tool)!;
+    expect(row).toMatchObject({ status: 'needs_review', review_reason: 'changed', business: { config: changed.config } });
+    expect(row.definition_sha256).not.toBe(before.definition_sha256);
+    replaceBusinessTools(desk, []);
+    expect(row).toMatchObject({ status: 'disabled', review_reason: null });
+    replaceBusinessTools(desk, [changed]);
+    expect(desk.tools.filter(({ source }) => source === 'business')).toEqual([
+      expect.objectContaining({ tool: row.tool, status: 'needs_review', review_reason: 'new', definition_sha256: row.definition_sha256 }),
+    ]);
   });
 
   it('both_finish_paths_leave_a_non_consultant_desks_tools_unchanged', async () => {
@@ -493,6 +534,18 @@ describe('setup consultant run and decisions', () => {
     state = await setupState('setupAnswer', id, { question: null, card: payment, text: 'Yes, please' });
     expect(state.messages.find(({ card }) => card?.proposal_id === payment)?.card?.state).toBe('declined');
     expect(state.messages.filter(({ role }) => role === 'owner').at(-1)?.text).toBe('Yes, please');
+  });
+
+  it.each([
+    ['Yes, please', 'declined', undefined],
+    ['Not now', 'declined', true],
+  ] as const)('marks_a_typed_%s_to_an_unpriced_payment_as_the_owners_decision_only_when_setup_can_take_it', async (text, state, decided) => {
+    // As the API's typed decision: a yes can't accept a payment with no amount, so setup declines it for the owner.
+    let at = await cpaAt('payment');
+    const payment = at.pending_card!;
+    at = await setupState('setupAnswer', at.interview_id, { question: null, card: payment, text });
+    const message = at.messages.find(({ card }) => card?.proposal_id === payment);
+    expect([message?.card?.state, message?.owner_decided]).toEqual([state, decided]);
   });
 
   it('suggestions_record_the_owner_and_finish_all_leftovers_with_safe_unpriced_payments', async () => {
