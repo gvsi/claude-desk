@@ -43,7 +43,7 @@ The first release is for real owners, who sign in with their Claude account.
 
 ## How we'll know it works
 
-Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through 47 attacks and 37 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
+Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through 48 attacks and 39 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
 
 | Measure | What it shows | Prototype |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs
 | Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; measured: $0.048 mean, $0.048 p50, $0.100 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md)) |
 | Reveal delay, p50 and p95, measured locally | the wait for a checked reply | `estimate:` 1.1 s p50, 2.8 s p95; measured: 1,229 / 3,909 ms (n = 60) ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b) |
 
-Limits: we wrote the scenarios, real attackers adapt, 23 held-out tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
+Limits: we wrote the scenarios, real attackers adapt, 24 held-out legitimate tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
 
 ## Business path
 
