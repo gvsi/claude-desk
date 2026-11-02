@@ -1,7 +1,19 @@
 import type { RuleCard } from '../../api/contracts.ts';
 
 /** The Rules header and its loading shapes use the same signed subtitle. */
-export const RULES_SUBTITLE = 'What Claude can do on this Desk, where each tool comes from, and your rules for it.';
+export const RULES_SUBTITLE = 'Your connectors, their tools, and the rules that cover each.';
+
+/** Rules' two sections (REV-RULES-D, A): the always-on rules over every tool, then each connector's tools. */
+export const RULES_SECTIONS = {
+  across: { title: 'Across your Desk', caption: 'These cover everything Claude does, whatever the tool.' },
+  tools: { title: 'Tool by tool', caption: 'Each connector’s tools, with your rules for each.' },
+} as const;
+
+/** What happens to anything no rule lists, the last row of "Across your Desk". */
+export const RULES_FALLBACK = 'Anything not listed here, Claude asks you first';
+
+/** The line under "Your Desk’s jobs" on Rules. */
+export const JOBS_LINE = 'Jobs you set up in your own words.';
 
 /** All rules' line under its subtitle: who "Checked by the reviewer" means, and that it can only hold. */
 export const REVIEWER_LINE = 'The reviewer is a separate model that reads each request before it runs. It can only hold a request for your answer, never let one through.';
@@ -41,7 +53,7 @@ export function rulesChipsToOffer(cards: readonly RuleCard[] | undefined): reado
   return cards === undefined ? RULES_CHIPS : FIXED_CHIPS.filter((chip) => !chip.inEffect(cards)).map((chip) => chip.text);
 }
 
-/** The connector list's summary, for the version the API names. */
+/** The line under Rules' tools, for the version the API names. */
 export function rulesVersionLine(version: number): string {
   return `Version ${version} of your rules, checked against the always-on rules`;
 }

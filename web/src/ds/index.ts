@@ -344,3 +344,4 @@ export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from '
 export { SidebarSkeleton } from './components/Sidebar/SidebarSkeleton.tsx';
 export { ReviewerBarSkeleton } from './components/ReviewerBar/ReviewerBarSkeleton.tsx';
 export { PageHeaderSkeleton, type PageHeaderSkeletonProps } from './components/PageHeader/PageHeaderSkeleton.tsx';
+export { LandedGlow, UpdatedPill } from './components/ConnectorSection/Landing.tsx';

@@ -10,24 +10,33 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.
 
 const DESK = `/app/${RIVERA.deskId}`;
 
-it.each(['desktop', 'phone'] as const)('at %s, a generated hold keeps its agent audience beside an anyone limit', async (viewport) => {
+/** Each rule row under `root` as the owner reads it: its sentence, then " / " and the line under it when it has one. */
+function cells(root: Element): string[] {
+  return [...root.querySelectorAll('.cd-house-rules__rule')].map((row) => {
+    const sentence = row.querySelector('.cd-rule-sentence__sentence')?.textContent ?? '';
+    const line = row.querySelector('.cd-house-rules__rule-line')?.textContent;
+    return line === undefined ? sentence : `${sentence} / ${line}`;
+  });
+}
+
+/** The line under a rule's sentence: who it is for and its qualifiers. */
+const lineOf = (row: Element | null) => row?.querySelector('.cd-house-rules__rule-line')?.textContent ?? null;
+
+it.each(['desktop', 'phone'] as const)('at %s, a hold keeps its agent audience beside an anyone limit, on each rule\'s own line', async (viewport) => {
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   const base = desk.policy.cards.find((card) => card.applies_to === 'native.payment_link')!;
   desk.policy.cards = [
-    { ...base, card_id: 'anyone-payment', mode: 'auto', who: 'anyone', max_amount_cents: 30_000 },
-    { ...base, card_id: 'agent-payment', mode: 'auto', who: 'agent', agent_key_id: 'key-one-agent', max_amount_cents: 2_000 },
+    { ...base, card_id: 'anyone-payment', mode: 'auto', who: 'anyone', max_amount_cents: 30_000, review: false },
+    { ...base, card_id: 'agent-payment', mode: 'auto', who: 'agent', agent_key_id: 'key-one-agent', max_amount_cents: 2_000, review: false },
   ];
-  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport });
-  const payments = screen.getByRole('region', { name: 'Payments', exact: true });
-  const agentHold = payments.getByText('Over $20, Claude asks you first', { exact: true });
-  const anyoneHold = payments.getByText('Over $300, Claude asks you first', { exact: true });
-  await expect.element(agentHold).toBeVisible();
-  await expect.element(anyoneHold).toBeVisible();
-  expect(screen.container.querySelector('[data-rule-id="agent-payment"] .cd-rule-sentence__meta')?.textContent).toBe('One agent');
-  const audience = agentHold.element().closest('li')!.querySelector('.cd-rule-sentence__meta');
-  expect(audience?.textContent).toBe('One agent');
-  expect(audience?.classList.contains('cd-type-meta')).toBe(true);
-  expect(anyoneHold.element().closest('li')!.querySelector('.cd-rule-sentence__meta')).toBeNull();
+  const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
+  const link = screen.getByRole('region', { name: 'Payment link', exact: true });
+  await expect.element(link.getByText('Claude can send payment links up to $20', { exact: true })).toBeVisible();
+  // Past each limit it asks, for the people that rule is for: a qualifier on its line, not a row of its own.
+  expect(lineOf(screen.container.querySelector('[data-rule-id="agent-payment"]'))).toBe('One agent · Over $20, it asks you first');
+  expect(lineOf(screen.container.querySelector('[data-rule-id="anyone-payment"]'))).toBe('Anyone · Over $300, it asks you first');
+  expect(link.element().querySelectorAll('.cd-house-rules__rule')).toHaveLength(2);
+  expect(screen.container.querySelector('[data-rule-id="agent-payment"] .cd-house-rules__rule-line')?.classList.contains('cd-type-meta')).toBe(true);
   await expectScreenBasics(screen.container, { owner: true });
   expectNoHorizontalScroll();
 });
@@ -36,26 +45,25 @@ it('an Allow private-data rule keeps its verified record-owner scope', async () 
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   const base = desk.policy.cards.find((card) => card.applies_to === 'native.release_document')!;
   desk.policy.cards = [{ ...base, card_id: 'shared-owner', applies_to: 'effect:private_data', mode: 'auto', who: 'record_owner' }];
-  const { screen } = await renderRoute(`${DESK}/rules/all`);
+  const { screen } = await renderRoute(`${DESK}/rules`);
   const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
   await expect.element(stripe.getByText("Claude can share private data, once they've confirmed it's them", { exact: true })).toBeVisible();
   const rows = screen.container.querySelectorAll('[data-rule-id="shared-owner"]');
   expect(rows).toHaveLength(1);
   for (const row of rows) {
-    const meta = row.querySelector('.cd-rule-sentence__meta');
-    expect(meta?.textContent).toBe("The record's owner, verified");
-    expect(meta?.classList.contains('cd-type-meta')).toBe(true);
+    expect(lineOf(row)).toBe('The customer, once verified');
+    expect(row.querySelector('.cd-house-rules__rule-line')?.classList.contains('cd-type-meta')).toBe(true);
   }
   expectNoHorizontalScroll();
 });
 
-it.each(['desktop', 'phone'] as const)('at %s, every outcome preserves each audience without adding an Anyone line', async (viewport) => {
+it.each(['desktop', 'phone'] as const)('at %s, every outcome says whom it is for in the same words', async (viewport) => {
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   const base = desk.policy.cards.find((card) => card.applies_to === 'native.release_document')!;
-  const scopes: { who: RuleCard['who']; text: string | null }[] = [
-    { who: 'anyone', text: null },
-    { who: 'verified', text: 'Verified customers' },
-    { who: 'record_owner', text: "The record's owner, verified" },
+  const scopes: { who: RuleCard['who']; text: string }[] = [
+    { who: 'anyone', text: 'Anyone' },
+    { who: 'verified', text: 'The customer, once verified' },
+    { who: 'record_owner', text: 'The customer, once verified' },
     { who: 'person', text: 'Dana Whitfield, verified' },
     { who: 'agent', text: 'One agent' },
   ];
@@ -67,19 +75,17 @@ it.each(['desktop', 'phone'] as const)('at %s, every outcome preserves each audi
     })),
     { ...base, card_id: `${mode}:paid`, mode, applies_to: 'payments.create_refund' },
   ]);
-  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport });
+  const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
   await expect.element(screen.getByText('Dana Whitfield, verified', { exact: true }).first()).toBeVisible();
   for (const mode of ['auto', 'ask', 'never'] as const) {
-    for (const { who, text } of [...scopes, { who: 'paid', text: 'The customer who paid, verified' }]) {
+    for (const { who, text } of [...scopes, { who: 'paid', text: 'The customer, once verified' }]) {
       const row = screen.container.querySelector(`[data-rule-id="${mode}:${who}"]`)!;
-      const meta = row.querySelector('.cd-rule-sentence__meta');
-      expect(meta?.textContent ?? null).toBe(text);
+      const line = row.querySelector('.cd-house-rules__rule-line')!;
+      expect(line.textContent, `${mode} ${who}`).toBe(text);
       const sentence = row.querySelector('.cd-rule-sentence__sentence')!;
       expect(sentence.textContent).toMatch(mode === 'auto' ? /^Claude can / : mode === 'ask' ? /^Claude asks you before / : /^Claude never /);
-      if (meta !== null) {
-        expect(meta.classList.contains('cd-type-meta')).toBe(true);
-        expect(meta.compareDocumentPosition(sentence) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-      }
+      expect(line.classList.contains('cd-type-meta')).toBe(true);
+      expect(line.compareDocumentPosition(sentence) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     }
   }
   await expectScreenBasics(screen.container, { owner: true });
@@ -90,43 +96,61 @@ it.each(['ask', 'never'] as const)('at 390, a shared %s rule keeps its owner sco
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   const base = desk.policy.cards.find((card) => card.applies_to === 'native.release_document')!;
   desk.policy.cards = [{ ...base, card_id: 'shared-owner', applies_to: 'effect:private_data', mode }];
-  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport: 'phone' });
-  await expect.element(screen.getByText("The record's owner, verified", { exact: true }).first()).toBeVisible();
+  const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
+  await expect.element(screen.getByText('The customer, once verified', { exact: true }).first()).toBeVisible();
   const rows = [...screen.container.querySelectorAll('[data-rule-id="shared-owner"]')];
   expect(rows).toHaveLength(3);
   expect(rows.filter((row) => row.classList.contains('cd-house-rules__rule--reference'))).toHaveLength(2);
-  for (const row of rows) expect(row.querySelector('.cd-rule-sentence__meta')?.textContent).toBe("The record's owner, verified");
+  for (const row of rows) expect(lineOf(row)).toBe('The customer, once verified');
   expectNoHorizontalScroll();
 });
 
-it('Your tools gives Payments and Stripe C4 sentences with dots alone', async () => {
-  const { screen } = await renderRoute(`${DESK}/rules/all`);
-  await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
+it('Payments and Stripe open with the money band, then each tool with its rules', async () => {
+  const { screen } = await renderRoute(`${DESK}/rules`);
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
   const payments = screen.getByRole('region', { name: 'Payments', exact: true });
   await expect.element(payments.getByText('Built in', { exact: true })).toBeVisible();
-  await expect.element(payments.getByText('Claude can send payment links up to $300', { exact: true })).toBeVisible();
-  await expect.element(payments.getByText('Over $300, Claude asks you first', { exact: true })).toBeVisible();
-  await expect.element(payments.getByText('Claude can take agent payments up to $20 from a signed limit', { exact: true })).toBeVisible();
-  await expect.element(payments.getByText('Over $20, Claude asks you first', { exact: true })).toBeVisible();
-  await expect.element(payments.getByText('Any payment over $500 asks you first', { exact: true })).toBeVisible();
+  // The band, on the card's fill: the payment limit over the card's money tools, then "never moves money", always on.
+  const band = payments.element().querySelector('.cd-house-rules__money')!;
+  expect(cells(band)).toEqual([
+    'Claude asks you before any payment over $500, whatever the rules below say / Payment link and Charge within a signed limit',
+    'Claude never moves money without your rule or a signed limit / Payment link and Charge within a signed limit',
+  ]);
+  expect(getComputedStyle(band).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  // The limit's row: Change, then its held dot, then Details.
+  const actions = [...band.querySelector('[data-money-limit] .cd-house-rules__rule-actions')!.children];
+  expect(actions.map((part) => part.textContent || part.className)).toEqual(['Change', 'cd-status-dot cd-status-dot--held', 'Details']);
+  expect(cells(payments.getByRole('region', { name: 'Payment link' }).element())).toEqual([
+    'Claude can send payment links up to $300 / Anyone · Checked by the reviewer · Over $300, it asks you first',
+  ]);
+  expect(cells(payments.getByRole('region', { name: 'Charge within a signed limit' }).element())).toEqual([
+    'Claude can take agent payments up to $20 from a signed limit / Anyone · Over $20, it asks you first',
+  ]);
   const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
   await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
-  await expect.element(stripe.getByText("Claude can show customers their own charges, once they've confirmed it's them", { exact: true })).toBeVisible();
-  await expect.element(stripe.getByText('Claude asks you before any refund', { exact: true })).toBeVisible();
-  expect(stripe.element().querySelectorAll('.cd-status-dot')).toHaveLength(3);
+  expect(cells(stripe.element().querySelector('.cd-house-rules__money')!)).toEqual([
+    'Claude asks you before any payment over $500, whatever the rules below say / Refund',
+    'Claude never moves money without your rule or a signed limit / Refund',
+  ]);
+  expect(cells(stripe.getByRole('region', { name: 'See charges' }).element())).toEqual([
+    "Claude can show customers their own charges, once they've confirmed it's them / The customer, once verified",
+    'Claude never shows private data to anyone but its verified owner',
+  ]);
+  expect(cells(stripe.getByRole('region', { name: 'Refund' }).element())).toEqual(['Claude asks you before any refund / The customer, once verified']);
+  // The outcome is in each sentence; at the right only dots, "Always on" and Details.
   expect(stripe.getByText('Allow', { exact: true }).elements()).toHaveLength(0);
   expect(stripe.getByText('Ask me first', { exact: true }).elements()).toHaveLength(0);
-  expect(screen.container.textContent).not.toContain('Checked by the reviewer');
+  expect(screen.container.textContent).not.toContain('Any payment over $500 asks you first');
   expect(screen.container.textContent).not.toContain('Anything else here: ask me.');
   await expectScreenBasics(screen.container, { owner: true });
   expectNoHorizontalScroll();
 });
 
-it('at 390, a shared card and the money cap each show in full only once across connectors', async () => {
+it('at 390, a shared card shows in full only once across connectors, and the payment limit once in each money band', async () => {
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   const base = desk.policy.cards.find((card) => card.applies_to === 'native.release_document')!;
   desk.policy.cards.push({ ...base, card_id: 'shared-private', applies_to: 'effect:private_data', mode: 'never', who: 'anyone' });
-  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport: 'phone' });
+  const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
   const documents = screen.getByRole('region', { name: 'Documents', exact: true });
   await expect.element(documents.getByText('Claude never shares private data', { exact: true })).toBeVisible();
   const shared = documents.element().querySelector('.cd-house-rules__shared');
@@ -134,14 +158,14 @@ it('at 390, a shared card and the money cap each show in full only once across c
   expect([...shared!.querySelectorAll('[data-copy="user"]')].map((title) => title.textContent)).toEqual(['See charges', 'Refund']);
   const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
   expect(stripe.getByText('Claude never shares private data · Shared rule, as above', { exact: true }).elements()).toHaveLength(2);
-  expect(screen.getByText('Any payment over $500 asks you first', { exact: true }).elements()).toHaveLength(1);
-  expect(screen.getByText('Any payment over $500 asks you first · Shared rule, as above', { exact: true }).elements()).toHaveLength(2);
+  expect(screen.getByText('Claude asks you before any payment over $500, whatever the rules below say', { exact: true }).elements()).toHaveLength(2);
+  expect(screen.container.querySelectorAll('[data-money-limit]')).toHaveLength(2);
+  expect(screen.container.textContent).not.toContain('Shared rule, as above · Any payment');
   const payments = screen.getByRole('region', { name: 'Payments', exact: true });
-  expect(payments.element().querySelector('.cd-house-rules__shared')?.textContent)
-    .toBe('Shared rule. Also applies to:Charge within a signed limit and Refund');
+  expect(payments.element().querySelector('.cd-house-rules__shared')).toBeNull();
   expect([...payments.element().querySelectorAll('strong')].map((value) => value.textContent)).toContain('$500');
   expect(screen.container.querySelectorAll('.cd-house-rules__tool-name[data-copy="user"]')).toHaveLength(12);
-  expect(screen.container.textContent).not.toMatch(/input_schema|Cedar|Checked by the reviewer/);
+  expect(screen.container.textContent).not.toMatch(/input_schema|Cedar/);
   await expectScreenBasics(screen.container, { owner: true });
   expectNoHorizontalScroll();
 });
@@ -161,18 +185,22 @@ function panelOf(toggle: Element): HTMLElement {
 
 it.each(['desktop', 'phone'] as const)('at %s, every tool and rule has Details, collapsed, that the keyboard opens and closes', async (viewport) => {
   const desk = mockStore.world.desk(RIVERA.deskId)!;
-  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport });
+  const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
   const link = screen.getByRole('region', { name: 'Payment link', exact: true });
   await expect.element(link.getByText('Claude can send payment links up to $300', { exact: true })).toBeVisible();
 
-  // One Details per tool and per rule row, every one closed, and no panel drawn.
+  // One Details per tool and per rule row with a dot, every one closed, and no panel drawn; an
+  // always-on rule has none, and "Anything not listed here" keeps Details' empty place.
   const toggles = screen.getByRole('button', { name: 'Details', exact: true }).elements();
-  const rows = screen.container.querySelectorAll('.cd-house-rules__tool').length + screen.container.querySelectorAll('.cd-house-rules__rule').length;
-  expect(toggles).toHaveLength(rows);
+  const drawn = (selector: string) => [...screen.container.querySelectorAll(selector)].filter((el) => el.closest('.cd-skeleton-screen__layer') === null);
+  const ruleRows = drawn('.cd-house-rules__rule');
+  const withDetails = ruleRows.filter((row) => row.querySelector('.cd-status-dot') !== null && row.querySelector('.cd-advanced-details__slot') === null);
+  expect(toggles).toHaveLength(drawn('.cd-house-rules__tool').length + withDetails.length);
+  expect(ruleRows.filter((row) => row.querySelector('.cd-house-rules__always-on') !== null).every((row) => row.querySelector('button') === null)).toBe(true);
   expect(toggles.every((toggle) => toggle.getAttribute('aria-expanded') === 'false')).toBe(true);
   expect(screen.container.querySelector('.cd-advanced-details__panel')).toBeNull();
   // Every rule's status dot sits in one column, just left of its Details (REV-RULES-D v351).
-  const dots = [...screen.container.querySelectorAll('.cd-house-rules__rule-actions > .cd-status-dot')];
+  const dots = drawn('.cd-house-rules__rule-actions > .cd-status-dot');
   expect(new Set(dots.map((dot) => Math.round(dot.getBoundingClientRect().left))).size).toBe(1);
   expect(new Set(toggles.map((toggle) => Math.round(toggle.getBoundingClientRect().right))).size).toBe(1);
 
@@ -233,7 +261,7 @@ it('the JSON in Details is the tool row and the rule card, and Copy copies it', 
   const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
   onTestFinished(() => writeText.mockRestore());
   const desk = mockStore.world.desk(RIVERA.deskId)!;
-  const { screen } = await renderRoute(`${DESK}/rules/all`);
+  const { screen } = await renderRoute(`${DESK}/rules`);
   const link = screen.getByRole('region', { name: 'Payment link', exact: true });
   await expect.element(link.getByText('Claude can send payment links up to $300', { exact: true })).toBeVisible();
 
@@ -273,13 +301,12 @@ it('the JSON in Details is the tool row and the rule card, and Copy copies it', 
   expect(rulePanel.textContent).toContain('Copied.');
   expect(toolPanel.textContent).not.toContain('Copied.');
 
-  // Its hold reads the same card; the payment limit's block is the version's limit.
-  const hold = screen.getByText('Over $300, Claude asks you first', { exact: true }).element().closest('li')!;
-  expect(JSON.parse((await openCode(hold.querySelector<HTMLElement>('.cd-house-rules__rule-actions > button')!)).textContent!)).toMatchObject({ card_id: 'rv-link' });
-  const cap = screen.getByText('Any payment over $500 asks you first', { exact: true }).element().closest('li')!;
-  const capCode = await openCode(cap.querySelector<HTMLElement>('.cd-house-rules__rule-actions > button')!);
+  // The payment limit's block is the version's limit.
+  const cap = screen.container.querySelector('[data-money-limit]')!;
+  const capToggle = cap.querySelector<HTMLElement>('.cd-house-rules__rule-actions > .cd-advanced-details__toggle')!;
+  const capCode = await openCode(capToggle);
   expect(JSON.parse(capCode.textContent!)).toEqual({ auto_money_cap_cents: 50_000 });
-  expect(fieldsOf(panelOf(cap.querySelector('.cd-house-rules__rule-actions > button')!)).map(([label]) => label)).toEqual(['Version', 'Policy hash']);
+  expect(fieldsOf(panelOf(capToggle)).map(([label]) => label)).toEqual(['Version', 'Policy hash']);
   await expectScreenBasics(screen.container, { owner: true });
   expectNoHorizontalScroll();
 });
@@ -293,7 +320,7 @@ it.each(['desktop', 'phone'] as const)('at %s, with every Details open, no input
     : tool);
   // A tool no card covers asks by default; its sentence comes from no card.
   desk.policy.cards = desk.policy.cards.filter((card) => card.applies_to !== 'native.find_slots');
-  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport });
+  const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
   await expect.element(screen.getByText('Claude can send payment links up to $300', { exact: true })).toBeVisible();
   for (const toggle of screen.getByRole('button', { name: 'Details', exact: true }).elements()) await userEvent.click(toggle);
   const open = screen.getByRole('button', { name: 'Details', exact: true }).elements();
@@ -325,7 +352,7 @@ it.each(['desktop', 'phone'] as const)('at %s, with every Details open, no input
 });
 
 it.each(['desktop', 'phone'] as const)("at %s, a tool's effects show only in its Details, never as badges on its row", async (viewport) => {
-  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport });
+  const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
   const refund = screen.getByRole('region', { name: 'Refund', exact: true });
   await expect.element(refund.getByText('Claude asks you before any refund', { exact: true })).toBeVisible();
   // No tool or rule row carries an effect badge ("Money", "Private data", "Can't be undone").
