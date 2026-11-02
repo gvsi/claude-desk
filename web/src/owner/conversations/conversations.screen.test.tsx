@@ -48,6 +48,10 @@ const conversation = (sessionId: string) => `${LIST}/${sessionId}`;
 
 const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
 
+/** The whisper box's line while the visitor is in the chat, and while they aren't. */
+const HERE = (name: string) => `${name} is in the chat now. Claude will use your whisper in its reply right away.`;
+const AWAY = (name: string) => `${name} isn't in the chat now. Claude will use your whisper when they next write.`;
+
 /** The line under the take-over box: what was its placeholder before it gave an example. */
 const TAKE_OVER_HELPER = 'They see your words exactly as you write them.';
 
@@ -914,7 +918,7 @@ describe('Conversations', () => {
     await expect.element(chat.getByRole('button', { name: "Reply checked against Mike Turner's rules Open the full trace." }).first()).toBeVisible();
     const whisper = session(DANA_LIVE).items.find((item) => item.kind === 'whisper');
     await expect
-      .element(chat.getByText(`Your whisper, ${formatClock(whisper?.created_at ?? '', LA)}. Only Claude sees this.`, { exact: true }))
+      .element(chat.getByText(`Your whisper, ${formatClock(whisper?.created_at ?? '', LA)}. Only Claude sees this, and uses it in its next reply.`, { exact: true }))
       .toBeVisible();
     await expect.element(chat.getByText('offer Thursday morning too', { exact: true })).toBeVisible();
 
@@ -1548,7 +1552,7 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
     const box = screen.getByRole('textbox', { name: 'Whisper to Claude', exact: true });
     await expect.element(box).toHaveAttribute('placeholder', "Ask what they've tried so far");
-    expect(box.element().hasAttribute('aria-describedby')).toBe(false);
+    await expect.element(box).toHaveAccessibleDescription(AWAY('The visitor'));
   });
 
   it('whisper_in_ai_mode', async () => {
@@ -1570,7 +1574,7 @@ describe('Conversations', () => {
     const kept = chat.items.filter((item) => item.kind === 'whisper').at(-1);
     expect(kept?.text).toBe(words);
     await expect
-      .element(log(screen).getByText(`Your whisper, ${formatClock(kept?.created_at ?? '', LA)}. Only Claude sees this.`, { exact: true }).last())
+      .element(log(screen).getByText(`Your whisper, ${formatClock(kept?.created_at ?? '', LA)}. Only Claude sees this, and uses it in its next reply.`, { exact: true }).last())
       .toBeVisible();
     await expect.element(box).toHaveValue('');
 
@@ -1578,6 +1582,47 @@ describe('Conversations', () => {
     expect(chat.events.length).toBe(streamed);
     expect(requests('ownerTyping')).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_says_a_visitor_with_no_name_is_away', async () => {
+    // No one is on the chat's stream, and it has no name on record: a whisper waits for their next message.
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const box = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    await expect.element(box).toHaveAccessibleDescription(AWAY('The visitor'));
+    await expect.element(screen.getByText(AWAY('The visitor'), { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_says_when_the_visitor_is_here', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const box = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    await expect.element(box).toHaveAccessibleDescription(AWAY(DANA));
+
+    // Dana opens the chat: her stream listens, and the next read says Claude will use a whisper at once.
+    const listening = () => {};
+    chat.listeners.add(listening);
+    await expect.element(box, { timeout: 2_000 }).toHaveAccessibleDescription(HERE(DANA));
+    await expect.element(screen.getByText(HERE(DANA), { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // She leaves: away again.
+    chat.listeners.delete(listening);
+    await expect.element(box, { timeout: 2_000 }).toHaveAccessibleDescription(AWAY(DANA));
+  });
+
+  it('whisper_helper_is_absent_during_take_over', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    chat.listeners.add(() => {});
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(screen.getByText(HERE(DANA), { exact: true })).toBeVisible();
+
+    // Once the owner has the chat, her words go to Dana: the box says nothing about whispers.
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeVisible();
+    await expect.element(box).not.toHaveAccessibleDescription(HERE(DANA));
+    expect(screen.getByText(/in the chat now/).elements()).toHaveLength(0);
   });
 
   it('stale_generation_refetches', async () => {
