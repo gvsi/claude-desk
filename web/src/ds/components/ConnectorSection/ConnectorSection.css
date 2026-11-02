@@ -67,12 +67,13 @@
 }
 
 /* A tool: its name over its line, then its words, its outcome and a chevron, each centered across
-   both lines. The name is the link, and its overlay covers the row, with the row's focus edge. */
+   both lines. Like RuleRow, the text keeps 240 px; the words and outcome wrap when space is tight.
+   The name is the link, and its overlay covers the row, with the row's focus edge. */
 .cd-connector-section__tool {
   position: relative;
   isolation: isolate;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, auto) minmax(0, auto) auto;
   grid-template-areas:
     'name summary outcome chevron'
     'description summary outcome chevron';
@@ -84,7 +85,7 @@
 
 /* A row without a page: no chevron, so the words and the outcome keep the row's right edge. */
 .cd-connector-section__tool--plain {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, auto) minmax(0, auto);
   grid-template-areas:
     'name summary outcome'
     'description summary outcome';
