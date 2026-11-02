@@ -233,6 +233,14 @@ afterEach(() => {
 
 describe('Conversations', () => {
   it.each([[1512, 982], [390, 844]])('day_rules_and_visitor_previews_fit_at_%sx%s', async (width, height) => {
+    // The rows below are a day apart from a fixed afternoon on the Desk's clock, so the list's day
+    // groups never depend on when the test runs (near midnight, or on a 25-hour day as clocks go back).
+    // Only Date is faked: the page's timers and polling stay real.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const summaries = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
     const base = summaries[0]!;
     const longName = DANA.repeat(16);
