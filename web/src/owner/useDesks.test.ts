@@ -1,20 +1,26 @@
 /**
- * Desk list cancellation and `carrySetup`, on a query client of their own: cancelled HTTP reads
- * stop, and setup's cached interview only moves forward, never undoing what the API said.
+ * Desk list cancellation, Needs you's reads as its readers come and go, and `carrySetup`, on a query
+ * client of their own: cancelled HTTP reads stop, a Needs you read carries on while its readers swap
+ * and gives way to the read of a page that reads it as it opens, and setup's cached interview only
+ * moves forward, never undoing what the API said.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryObserver, type UseQueryResult } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ROUTES } from '../api/routes.ts';
-import type { BusinessOut, DeskSetup, DeskSummary } from '../api/views.ts';
+import { ROUTES, apiPath } from '../api/routes.ts';
+import type { BusinessOut, DeskSetup, DeskSummary, NeedsYouItem } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { DESKS_KEY, RIVERA_SAMPLE_BUSINESS_NAME, carrySetup, desksQuery } from './useDesks.ts';
+import { RIVERA } from '../mocks/seed.ts';
+import { mockStore } from '../mocks/store.ts';
+import { DESKS_KEY, RIVERA_SAMPLE_BUSINESS_NAME, carrySetup, desksQuery, needsYouKey, needsYouQuery, useNeedsYou } from './useDesks.ts';
 
 const DESK = 'desk-okafor';
 const INTERVIEW = 'setup-okafor';
@@ -113,6 +119,106 @@ it('unsubscribing_the_last_desks_observer_aborts_and_rolls_back_without_an_error
   expect(queryClient.getQueryState(DESKS_KEY)).toMatchObject({
     status: 'success', fetchStatus: 'idle', error: null, data: [], dataUpdatedAt: 123,
   });
+});
+
+/**
+ * Serves the main Desk's Needs you, holding each read until `release(n)` lets the nth (from 0)
+ * through with `answers[n]` (an empty list past them). `received` lists the reads as they came.
+ */
+function serveNeedsYou(answers: NeedsYouItem[][] = []): { received: Request[]; release: (n: number) => void } {
+  const received: Request[] = [];
+  const gates: { opened: Promise<void>; open: () => void }[] = [];
+  const gate = (n: number) => {
+    if (gates[n] === undefined) {
+      let open!: () => void;
+      const opened = new Promise<void>((resolve) => { open = resolve; });
+      gates[n] = { opened, open };
+    }
+    return gates[n];
+  };
+  const server = setupServer(http.get(`http://localhost${apiPath('needsYou', { desk_id: RIVERA.deskId })}`, async ({ request }) => {
+    const n = received.push(request) - 1;
+    await gate(n).opened;
+    return HttpResponse.json(answers[n] ?? []);
+  }));
+  server.listen();
+  const send = globalThis.fetch;
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => send(
+    typeof input === 'string' ? new URL(input, 'http://localhost') : input, init,
+  ));
+  stops.push(() => { for (let n = 0; n <= received.length; n += 1) gate(n).open(); vi.unstubAllGlobals(); server.close(); });
+  return { received, release: (n) => gate(n).open() };
+}
+
+it('a_needs_you_read_carries_on_as_its_readers_swap', async () => {
+  // As a page opens, its readers of Needs you can swap: the last one leaves just before the next
+  // comes. The read already out carries on for the next one, rather than being stopped and sent again.
+  const reads = serveNeedsYou();
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  stops.push(() => queryClient.clear());
+  const leave = new QueryObserver(queryClient, needsYouQuery(RIVERA.deskId)).subscribe(() => undefined);
+  await vi.waitFor(() => expect(reads.received).toHaveLength(1));
+
+  leave();
+  stops.push(new QueryObserver(queryClient, needsYouQuery(RIVERA.deskId)).subscribe(() => undefined));
+
+  expect(reads.received[0]!.signal.aborted).toBe(false);
+  reads.release(0);
+  await vi.waitFor(() => expect(queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.status).toBe('success'));
+  expect(reads.received).toHaveLength(1);
+});
+
+describe('a page that reads Needs you as it opens', () => {
+  /** The page's Needs you, as it last rendered. */
+  let page: UseQueryResult<NeedsYouItem[]> | undefined;
+  function RulesProbe() {
+    page = useNeedsYou(RIVERA.deskId, { readOnOpen: true });
+    return null;
+  }
+
+  /** Opens the page on `queryClient`, under StrictMode when `strict`, as `main.tsx` renders the app. */
+  function open(queryClient: QueryClient, strict: boolean): void {
+    const root = createRoot(document.createElement('div'));
+    const app = createElement(QueryClientProvider, { client: queryClient }, createElement(RulesProbe));
+    root.render(strict ? createElement(StrictMode, null, app) : app);
+    stops.push(() => root.unmount());
+  }
+
+  /** The seed's Needs you, its quote held. */
+  let heldQuote: NeedsYouItem[];
+  beforeEach(async () => {
+    page = undefined;
+    mockStore.reset('rivera');
+    heldQuote = (await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } }) as { body: NeedsYouItem[] }).body;
+    expect(heldQuote.some((item) => item.decision?.state === 'held')).toBe(true);
+  });
+
+  for (const strict of [false, true]) {
+    it(`replaces_a_read_sent_before_it_opened${strict ? '_under_strict_mode' : ''}`, async () => {
+      // The app kept a read with the quote held, and another went out on a page since left. The
+      // quote is answered meanwhile; that read's answer, from before this page opened, isn't the
+      // page's own. Its own read goes out once as it opens, under StrictMode too.
+      const reads = serveNeedsYou([heldQuote, []]);
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      stops.push(() => queryClient.clear());
+      queryClient.setQueryData(needsYouKey(RIVERA.deskId), heldQuote);
+      const leave = new QueryObserver(queryClient, needsYouQuery(RIVERA.deskId)).subscribe(() => undefined);
+      await vi.waitFor(() => expect(reads.received).toHaveLength(1));
+      leave();
+
+      open(queryClient, strict);
+      await vi.waitFor(() => expect(reads.received).toHaveLength(2));
+      reads.release(0);
+      // Time for the earlier read's answer to land, had it been kept.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(page?.isFetchedAfterMount).toBe(false);
+
+      reads.release(1);
+      await vi.waitFor(() => expect(page?.isFetchedAfterMount).toBe(true));
+      expect(page?.data).toEqual([]);
+      expect(reads.received).toHaveLength(2);
+    });
+  }
 });
 
 it('the_sample_business_name_matches_the_backend_seed_and_fixture', () => {

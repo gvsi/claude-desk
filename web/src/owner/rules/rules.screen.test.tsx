@@ -1566,6 +1566,40 @@ describe("Ask Claude's question about a hold", () => {
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
   });
 
+  it('hold_question_does_not_reuse_a_read_after_the_demo_inbox_opened', async () => {
+    // Opened once, the Demo inbox keeps a reader of Needs you for the Desk its alert names, idle
+    // while the sheet is closed: Rules is then not the read's last reader as the owner leaves, so
+    // the read started before leaving is still out as Rules opens again.
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    await screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ }).click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toBeVisible();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.poll(() => sheet.elements().length === 0 || !sheet.element().checkVisibility()).toBe(true);
+
+    const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'needsYou', status: 200, body: (answer as { body: unknown }).body, until });
+    const before = requests('needsYou').length;
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(before);
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
+    if (!held) throw new Error('the seed holds a quote');
+    mockStore.world.answer(held, 'deny_once');
+
+    const current = holdNeedsYou();
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
+    release();
+    await expect.poll(() => current.held()).toBeGreaterThan(0);
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+
   it('hold_question_goes_while_needs_you_cannot_be_read', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { retryScale: 0.05 });
     const group = screen.getByRole('group', { name: 'Suggestions' });

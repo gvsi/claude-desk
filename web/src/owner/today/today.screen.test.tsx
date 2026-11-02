@@ -768,6 +768,9 @@ describe('Today', () => {
     await mainNav(screen).getByRole('link', { name: /^Conversations/ }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
 
+    // Dropped between Conversations' polls: a poll still out would reach the hold below, though
+    // sent before it, and be counted as Today's read.
+    await expect.poll(() => queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.fetchStatus).toBe('idle');
     queryClient.removeQueries({ queryKey: needsYouKey(RIVERA.deskId) });
     const needsYou = holdReads(needsYouPath);
     await mainNav(screen).getByRole('link', { name: 'Today' }).click();

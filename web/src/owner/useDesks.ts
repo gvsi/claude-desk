@@ -5,7 +5,7 @@
  * alone.
  */
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { request } from '../api/http.ts';
 import { SETUP_STEPS, type BusinessOut, type DeskSetup, type DeskSummary, type NeedsYouItem, type SetupStep } from '../api/views.ts';
@@ -40,8 +40,10 @@ export async function confirmDesks(queryClient: QueryClient): Promise<BusinessOu
 
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
+// Needs you's read never takes the cancellation signal: with it, a read still out would be stopped
+// and sent again whenever its last reader leaves as the next comes, as Today's readers do as it opens.
 export const needsYouQuery = (deskId: string) =>
-  queryOptions({ queryKey: needsYouKey(deskId), queryFn: ({ signal }) => request('needsYou', { params: { desk_id: deskId }, signal }) });
+  queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
 export const ownerInboxQuery = () => queryOptions({ queryKey: OWNER_INBOX_KEY, queryFn: () => request('ownerInbox') });
 
 /** How long a page waits for a Desk's Today to be read ahead before it opens Today anyway, still loading. */
@@ -95,16 +97,32 @@ export function useToday(deskId: string, { retryOnMount = true }: ReadOptions = 
 /**
  * What waits for the owner on a Desk: held requests and open callbacks, polled. With `readOnOpen`,
  * the page reads it again as it opens however fresh the kept read is, for a page that shows only
- * what a read of its own says (Rules' question about a hold).
+ * what a read of its own says (Rules' question about a hold): a read already out, which may have
+ * gone out before the page opened (on a page since left), gives way to the page's own, and its
+ * answer is dropped.
  */
 export function useNeedsYou(deskId: string, { retryOnMount = true, readOnOpen = false }: ReadOptions & { readOnOpen?: boolean } = {}) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const needsYou = useQuery({
     ...needsYouQuery(deskId),
     staleTime: FRESH_MS,
     refetchInterval: pollMs('needsYou'),
     retryOnMount,
-    ...(readOnOpen ? { refetchOnMount: 'always' as const } : {}),
+    // Not as it mounts, which would join a read already out: the page's read on opening is the one below.
+    ...(readOnOpen ? { refetchOnMount: false } : {}),
   });
+  // The Desk whose Needs you this page has read as it opened: StrictMode runs the effect below twice
+  // for one opening, and the second run joins the first run's read rather than send another.
+  const opened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!readOnOpen) return;
+    // A read already out is cancelled for the page's own, and React Query drops its answer, so it
+    // never lands after the page's. With nothing read yet, a read already out (the Desk's first) is
+    // joined instead.
+    void queryClient.refetchQueries({ queryKey: needsYouKey(deskId), exact: true }, { cancelRefetch: opened.current !== deskId });
+    opened.current = deskId;
+  }, [readOnOpen, queryClient, deskId]);
+  return needsYou;
 }
 
 /**
