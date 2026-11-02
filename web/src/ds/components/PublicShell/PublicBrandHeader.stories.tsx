@@ -12,8 +12,8 @@ const BRAND: PublicBrand = {
   tagline: rivera.publicDesk.en.desk_name,
   monogram: 'T',
   field: rivera.publicDesk.en.brand.primary ?? '',
-  ink: 'var(--text-primary)',
-  inkSecondary: 'var(--text-secondary)',
+  ink: 'var(--text-on-brand)',
+  inkSecondary: 'var(--text-on-brand-secondary)',
   accent: rivera.publicDesk.en.brand.accent ?? '',
 };
 

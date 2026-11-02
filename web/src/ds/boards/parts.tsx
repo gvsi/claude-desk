@@ -720,8 +720,8 @@ export function brandOf(publicDesk: PublicDesk): PublicBrand {
     tagline: publicDesk.desk_name,
     monogram: Array.from(publicDesk.business_name)[0] ?? '',
     field: publicDesk.brand.primary ?? '',
-    ink: 'var(--text-primary)',
-    inkSecondary: 'var(--text-secondary)',
+    ink: 'var(--text-on-brand)',
+    inkSecondary: 'var(--text-on-brand-secondary)',
     accent: publicDesk.brand.accent ?? '',
   };
 }

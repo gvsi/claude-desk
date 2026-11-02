@@ -16,12 +16,14 @@ import { OWNER_NAME_FALLBACK, brandFrom } from './brand.ts';
 const SETUP_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'api', 'setup.py');
 
 // The design system's contrast check, which a test can make throw, as it does on a color it can't read.
-const contrast = vi.hoisted(() => ({ throws: false }));
+// It also notes each ink it was asked about.
+const contrast = vi.hoisted(() => ({ throws: false, inks: [] as string[] }));
 vi.mock('../ds/contrast.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../ds/contrast.ts')>();
   return {
     ...actual,
     contrastRatio: (...args: Parameters<typeof actual.contrastRatio>) => {
+      contrast.inks.push(args[0]);
       if (contrast.throws) throw new Error('Unsupported color');
       return actual.contrastRatio(...args);
     },
@@ -30,6 +32,7 @@ vi.mock('../ds/contrast.ts', async (importOriginal) => {
 
 afterEach(() => {
   contrast.throws = false;
+  contrast.inks = [];
 });
 
 const desk: PublicDesk = rivera.publicDesk.en;
@@ -45,10 +48,22 @@ describe('brandFrom', () => {
       tagline: 'Main line',
       monogram: 'T',
       field: '#1F4E4A',
-      ink: 'var(--text-primary)',
-      inkSecondary: 'var(--text-secondary)',
+      ink: 'var(--text-on-brand)',
+      inkSecondary: 'var(--text-on-brand-secondary)',
       accent: '#B87333',
     });
+  });
+
+  it('the_owners_colour_keeps_paper_ink_in_either_theme', () => {
+    // On the owner's colour the header's text is paper ink, which no theme changes, and that is the
+    // ink the contrast check measures. Where the colour can't be used, the panel takes the theme's
+    // own ink, dark on light paper and light on the dark ground.
+    expect(brandFrom(desk).brand).toMatchObject({ field: '#1F4E4A', ink: 'var(--text-on-brand)', inkSecondary: 'var(--text-on-brand-secondary)' });
+    expect(new Set(contrast.inks)).toEqual(new Set(['var(--text-on-brand)', 'var(--text-on-brand-secondary)']));
+    for (const primary of ['#f0f0f0', 'red', undefined]) {
+      const { brand } = brandFrom(withBrand(primary === undefined ? {} : { primary, accent: '#B87333' }));
+      expect(brand, String(primary)).toMatchObject({ field: 'var(--bg-panel)', ink: 'var(--text-primary)', inkSecondary: 'var(--text-secondary)' });
+    }
   });
 
   it('low_contrast_brand_falls_back', () => {
