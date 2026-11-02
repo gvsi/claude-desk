@@ -372,6 +372,129 @@ describe('Arrival', () => {
     expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
   });
 
+  it('back_again_while_the_passcode_is_tried_opens_today', async () => {
+    // Mike Turner starts the demo, goes Back while the passcode is still being tried, and Forward
+    // again before Turner Plumbing's public page has drawn, so the first visit's page never went.
+    // The copy is made once he is back: the dialog leaves onto its Today, as it always does, and
+    // nothing asks him for the passcode again.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    await router.navigate('/');
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    const copy = holdTheCopy();
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(copy.sent()).toBe(true));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    // Time for the page to ask for this browser's copy again, had it started over: with none made
+    // yet, the answer would be no copy.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    copy.release();
+    await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    expect(requests('copies')).toHaveLength(1);
+  });
+
+  it('back_again_after_the_copy_was_made_away_opens_it_as_the_passcode_does', async () => {
+    // Mike Turner goes Back while the passcode is tried, and the copy is made while he is away,
+    // before Turner Plumbing's public page has drawn: the page does nothing with it meanwhile.
+    // Forward again, it opens the copy as the passcode does, the old copy's reads dropped and its
+    // Today read ahead, and the dialog leaves onto that Today.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    await router.navigate('/');
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    const copy = holdTheCopy();
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(copy.sent()).toBe(true));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+
+    const made = nextAnswerTo('copies');
+    copy.release();
+    await made.settled;
+    // Well past anything the page would do with the copy, had it carried on while he was away.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(handOff.steps()).toEqual(['open']);
+    expect(requests('desks')).toEqual([]);
+
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    expect(requests('copies')).toHaveLength(1);
+  });
+
+  it('going_back_as_the_dialog_leaves_stays_back', async () => {
+    // Mike Turner's new copy is read ahead and the dialog starts to leave onto its Today. He goes
+    // Back before it has closed, and it closes before Turner Plumbing's public page has drawn, with
+    // the first visit's page still on screen: closed, it doesn't take him to Today.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+    const welcome = screen.getByRole('heading', { name: 'How can Turner Plumbing help?' });
+    await expect.element(welcome).toBeVisible();
+    await router.navigate('/');
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const el = dialog.element() as HTMLDialogElement;
+    const handOff = watchTheHandOff(el);
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+
+    // Back the moment the dialog starts to leave, well inside its exit; and whether it is still open
+    // as the router moves to the public page.
+    let wentBack = false;
+    let openAsTheRouterLeft: boolean | null = null;
+    const stop = router.subscribe((state) => {
+      if (openAsTheRouterLeft === null && state.location.pathname === PUBLIC_PAGE) openAsTheRouterLeft = el.open;
+    });
+    onTestFinished(stop);
+    const watch = new MutationObserver(() => {
+      if (wentBack || !el.classList.contains('cd-intro--leaving')) return;
+      wentBack = true;
+      publicPage.hold();
+      void router.navigate(-1);
+    });
+    watch.observe(el, { attributes: true, attributeFilter: ['class'] });
+    onTestFinished(() => watch.disconnect());
+    needsYou.release();
+    await expect.poll(() => handOff.steps()).toContain('closed');
+    expect(openAsTheRouterLeft, 'the dialog, still open as the router left the page').toBe(true);
+    // Time for the page to go on to Today, had it.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed']);
+    publicPage.draw();
+    await expect.element(welcome).toBeVisible();
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('returning_owner_in_strict_mode_reads_today_ahead_once', async () => {
+    // Under StrictMode, as in development, the page's effects run twice as it opens. The first run's
+    // read ahead stops with it, so Mike Turner's Today is read ahead once, and opens drawn.
+    const { screen, router } = await renderRoute('/', { strict: true, pollScale: 100 });
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    // Time for a second read ahead's reads to go out, had there been one.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const reads = (['me', 'desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]);
+    expect(Object.fromEntries(reads)).toEqual({ me: 1, desks: 1, today: 1, needsYou: 1 });
+  });
+
   it('start_the_demo_reads_today_once', async () => {
     // Polls far apart, so none lands while the reads are counted.
     const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false }, pollScale: 100 });
@@ -2817,6 +2940,28 @@ function holdTheAnswerTo(key: RouteKey): { sent: () => boolean; release: () => v
       await released;
       if ('network' in answer) return HttpResponse.error();
       return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+    }),
+  );
+  return { sent: () => sent, release };
+}
+
+/**
+ * The next passcode's request, held before it reaches the mock, so no copy is made until
+ * `release()`, or the test's end, lets it through. `sent()` says whether it came.
+ */
+function holdTheCopy(): { sent: () => boolean; release: () => void } {
+  let sent = false;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.post(ROUTES.copies.path, async () => {
+      if (sent) return undefined;
+      sent = true;
+      await released;
+      return undefined;
     }),
   );
   return { sent: () => sent, release };
