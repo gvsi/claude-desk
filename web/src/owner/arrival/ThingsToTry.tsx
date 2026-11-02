@@ -21,9 +21,9 @@ export interface ThingsToTryProps {
    * for; null while there is none.
    */
   firstHeld: NeedsYouItem | null;
-  /** The final decisions of the requests answered on Today in this view. */
+  /** The decisions of the requests answered on Today in this view, each as last read. */
   answered: Iterable<{ state: Decision['state'] }>;
-  /** The final decision of the request answered on Today last, kept when its card is dismissed. */
+  /** The decision of the request answered on Today last, as last read, kept when its card is dismissed. */
   latestAnswer: { decision_id: string; state: Decision['state']; owner_plain?: string | null } | null;
   /** "Open the request": brings the held request's card into view and focus. */
   onFocusRequest: () => void;

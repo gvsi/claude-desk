@@ -204,7 +204,7 @@ export const THINGS_TO_TRY = {
   breakIt: {
     icon: 'safety',
     title: 'Try to break it',
-    detail: 'Ask for a discount, another customer’s address or Mike’s home number. Safety shows what was refused and why.',
+    detail: 'Ask for a discount, another customer’s address or Mike’s home number. Safety shows what was stopped and why.',
     action: 'Show me ideas',
   },
   held: {
@@ -991,7 +991,7 @@ export function riveraRuleRow(card: RuleCard): RuleRowProps {
     rule: card,
     words: rivera.ruleWords[id],
     limit: limits[id],
-    shared: card.applies_to.startsWith('effect:') ? { appliesTo: rivera.sharedChargeAppliesTo } : undefined,
+    shared: card.applies_to.startsWith('effect:') ? rivera.sharedChargeShared : undefined,
     onChangeOutcome: fn(),
   };
 }

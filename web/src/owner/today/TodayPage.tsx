@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { Button, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
@@ -22,7 +23,8 @@ import { greetingPresence } from './presence.ts';
 import { requestInHash } from './requestLink.ts';
 import { briefingPath, SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
-import { TodaySkeleton } from './TodaySkeleton.tsx';
+import { useTodayNow } from './todayClock.ts';
+import { skeletonSetupOf, TodaySkeleton } from './TodaySkeleton.tsx';
 
 import './Today.css';
 
@@ -95,11 +97,19 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const cards = useRef(new Map<string, HTMLElement>());
   // Whether the demo bar's Demo inbox sheet is open, as the frame hears it.
   const inboxOpen = useInboxOpen();
+  // The time the greeting is drawn at: the browser's, or the still picture's.
+  const greetedAt = useTodayNow();
 
-  const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
+  // The owner's first name, or '' when they gave none: setup's fallback ("Owner") stands in for a
+  // name then, and the greeting names no one rather than greet them by it.
+  const given = givenOwnerName(business.owner_display_name);
+  const name = given === null ? '' : (today.data?.greeting_name ?? firstName(given)).trim();
+  const greeting = greetingFor(greetedAt, business.timezone);
   // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
   // and for a Desk listed without it (an API from before it).
   const setup = isLive(desk) ? null : desk.setup;
+  // Today's skeleton draws the "Not live yet" card where it will land.
+  const skeletonSetup = skeletonSetupOf(desk);
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
@@ -207,7 +217,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   });
   if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
   const requested = !returningFromBriefing && visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
-  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused;
+  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused && readFailure === null;
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
@@ -260,7 +270,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   return (
     <>
       {opening ? <h1 className="cd-sr-only">Today</h1> : null}
-      <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton />} className="cd-today-opening">
+      <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton setup={skeletonSetup} />} className="cd-today-opening">
         <div className="cd-today" onClick={followInAppLinks(navigate)} onClickCapture={(event) => {
           if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
@@ -272,7 +282,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
           <div className="cd-today__band">
             <div className="cd-today__greeting">
               <Greeting
-                text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
+                text={name ? `${greeting}, ${name}` : greeting}
                 presence={today.data ? greetingPresence(live) : undefined}
                 link={{ label: link, onCopy: copyLink, copied: copied !== null }}
                 actions={
@@ -292,6 +302,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               deskId={deskId}
               business={desk.business_name}
               today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
+              heldCount={readWorked ? listed.length : undefined}
+              callbackCount={callbacks.length}
               firstHeldId={firstHeld?.decision.decision_id ?? null}
             />
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />

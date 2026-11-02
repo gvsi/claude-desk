@@ -42,6 +42,7 @@ The screen passes every connector and where it stands; nothing here decides what
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `jobs` | `readonly SetupJobRow[]` | Optional. The Desk's jobs, already validated and formatted by the screen. |
+| `rowRef` | `(key: string, row: HTMLLIElement \| null) => void` | Optional. Receives each row by connector or job key for returning focus after review; the keyed row survives its button becoming "On". |
 | `builtIn` | `SetupToolsRow[]` | Required. The connectors that are part of Claude Desk, Verification among them, under "Built in"; an `off` row's button says "Add". |
 | `external` | `SetupToolsRow[]` | Required. The apps to connect from outside, under "Connect your own"; an `off` row's button says "Connect", a `needs_review` row's "Review". |
 

@@ -83,7 +83,7 @@ The [evals guide](docs/evals.md) says what each suite tests, how a run is judged
 
 ## Run it locally
 
-You need Docker, uv, Rust 1.99.1 (rustup reads it from `kernel/rust-toolchain.toml`) and Node 24.
+You need Docker with Compose (running), uv, Rust 1.99.1 (rustup reads it from `kernel/rust-toolchain.toml`), Node 24 (24.15 or later), and make, git, curl, unzip and a C compiler: Xcode Command Line Tools on macOS, `build-essential` on Debian or Ubuntu. uv fetches Python 3.13. It's set up for macOS and Linux, arm64 or x86_64; on Windows, use WSL. The first `make setup` builds the kernel and takes several minutes.
 
 ```sh
 make setup   # dependencies, the kernel module and proof binary, cvc5, Postgres in Docker, migrations and roles
@@ -91,6 +91,10 @@ make dev     # the kernel on 127.0.0.1:8701, the API on 127.0.0.1:8700 and the w
 ```
 
 Then open the address Vite prints. Model features need an Anthropic API key: add `ANTHROPIC_API_KEY=<your key>` to `.env`, which `make setup` copies from `.env.example`. `make dev` starts all three services and stops them together; it refuses to start without the proof binary and cvc5 installed by `make setup`.
+
+`make setup` runs Postgres on 127.0.0.1:5433; if it stops, for example after a restart, `docker compose up -d db` starts it again. Besides 8700 and 8701, `make dev` uses 8702 for the mock payments server the kernel starts, and Vite uses 5173, so these ports need to be free.
+
+Run the tests with `make test` and `make web-test`. `make test` runs the kernel's tests and the backend's. The backend's use the local database and empty its tables, including any Desks you made, so stop `make dev` first. `make web-test` runs the web app's tests, after installing Playwright's browsers and their system packages; on Linux that needs Debian or Ubuntu and asks for sudo. Both are long runs: CI splits the backend tests across four machines.
 
 ## How it was built
 

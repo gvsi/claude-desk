@@ -73,11 +73,27 @@ export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps
   const tricks = useRef<HTMLUListElement>(null);
   const landing = useLanding(tricks, check, live, check.data?.rows.length ?? 0);
 
+  /**
+   * Confirms a draft made again on a conflict. After "Change something" the API confirms a draft only
+   * once its safety check has run, which such a draft's hasn't: its 409 `conflict` runs the check on
+   * it, then confirms once more. Any other setup confirms it with no check the owner wouldn't see.
+   */
+  const confirmChecked = async (): Promise<PolicyVersion | RulesDraft> => {
+    try {
+      return await request('setupConfirm', { params: { id } });
+    } catch (err) {
+      if (!(err instanceof ApiError && err.kind === 'conflict' && err.code === 'conflict')) throw err;
+      await request('setupSafetyCheck', { params: { id } });
+      return request('setupConfirm', { params: { id } });
+    }
+  };
+
   /** Confirms setup's rules; an answer that is the redrafted rules (after a proving retry) is confirmed once more. */
   const confirmSetup = async (): Promise<PolicyVersion> => {
-    const first = await request('setupConfirm', { params: { id } });
+    // "Confirm rules" confirms the draft whose check is on screen; the conflict review's, its new draft.
+    const first = conflict !== null ? await confirmChecked() : await request('setupConfirm', { params: { id } });
     if (!isDraft(first)) return first;
-    const second = await request('setupConfirm', { params: { id } });
+    const second = await confirmChecked();
     if (isDraft(second)) throw new ApiError('unavailable', { route: 'setupConfirm', method: 'POST', status: 200 });
     return second;
   };

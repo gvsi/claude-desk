@@ -104,10 +104,10 @@ it('picks_up_a_turn_that_lands_at_the_apis_110_second_run_deadline_without_givin
   expect(work.gaveUp).toBe(false);
 });
 
-it('ignores_absent_busy_and_other_steps_and_cleans_up_on_unmount_even_with_a_read_in_flight', async () => {
+it('ignores_absent_busy_and_idle_steps_and_cleans_up_on_unmount_even_with_a_read_in_flight', async () => {
   show({ ...busy, busy: undefined });
   await advance(4000);
-  show({ ...busy, step: 'tools' });
+  show({ ...busy, step: 'tools', busy: false });
   await advance(4000);
   expect(reread).not.toHaveBeenCalled();
   let finish!: (state: SetupState) => void;
@@ -122,12 +122,27 @@ it('ignores_absent_busy_and_other_steps_and_cleans_up_on_unmount_even_with_a_rea
   expect(reread).toHaveBeenCalledTimes(1);
 });
 
-it('retries_a_rejected_read_and_stops_when_the_step_moves_on_even_if_busy_stays_true', async () => {
+it('retries_a_rejected_read_and_waits_for_busy_to_clear_even_when_the_step_changes', async () => {
   reread.mockRejectedValueOnce(new Error('read failed'));
   show(busy);
   await advance(2000);
   expect(reread).toHaveBeenCalledTimes(1);
   reread.mockResolvedValueOnce({ ...busy, step: 'tools' });
+  await advance(2000);
+  expect(reread).toHaveBeenCalledTimes(2);
+  reread.mockResolvedValueOnce({ ...landed, step: 'tools' });
+  await advance(2000);
+  expect(reread).toHaveBeenCalledTimes(3);
+  await advance(100000);
+  expect(reread).toHaveBeenCalledTimes(3);
+  expect(work.gaveUp).toBe(false);
+});
+
+it.each(['tools', 'rules', 'situations', 'safety_check', 'preview'] as const)('polls_a_reopen_still_running_at_%s_until_the_questions_land', async (step) => {
+  show({ ...busy, step });
+  await advance(2000);
+  expect(reread).toHaveBeenCalledTimes(1);
+  reread.mockResolvedValueOnce(landed);
   await advance(2000);
   expect(reread).toHaveBeenCalledTimes(2);
   await advance(100000);

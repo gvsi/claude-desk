@@ -62,9 +62,26 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
   after its retry gets the fixed transition line instead. When the owner typed their own contact on the contact
-  question, setup first asks once, with code's two choices, whether to add them as a test client
-  (`TEST_CLIENT_OFFER`), and code alone reads the answer, with no model turn: only a yes puts them on record as a
-  client with that contact (`PUT /desks/{id}/people`), and any answer moves on to step `tools`.
+  question, setup first asks, with code's two choices, whether to add them as a test client (`TEST_CLIENT_OFFER`).
+  Code reads a yes or a no with no model turn: only a yes puts them on record as a client with that contact
+  (`PUT /desks/{id}/people`), and either moves on to step `tools`. Any other answer, such as a request for another
+  job or a question, goes to setup's consultant in one planning call (`_consult_on_offer`): Claude replies, and a job
+  it adds or an app it names reopens the plan on its card before step `tools`; closing it again settles the cards,
+  appends a second closing plan, finishes again and asks the offer again. With nothing new to show, or Claude
+  unavailable, the offer is asked again at once.
+
+- **Change something** (`reopen`): from a step after the questions (`tools` through `preview`; never once live,
+  when changes are made in the owner app), the owner's message takes the interview back to `questions` as its next
+  turn, answered on the contact question behind a code ask the owner isn't shown. A change that belongs to another
+  topic is asked there next, a limit on its own question with code's choices (`_next_ask`, on that turn alone), and
+  so is each fact the turn gave that the contact question can't record off its topic, in turn (`_held_off_topic`,
+  `Entry.asks_after`). A drop of a job or connector the owner accepted shows its card again for them to decide (and
+  "Use your suggestions" settles it as their no), unless the same call adds a job of its kind, which replaces it
+  (`_record_plan`); a Stripe connection taken away has its payment tools switched off (`publish_plan`). The turn
+  drops the rules draft, so the rules, situations and safety check are drafted again on the way forward; the confirm
+  then waits for the safety check to run again, and proving work that read the interview before a reopen never
+  writes after it (`Interview.reopens`). The safety check, the confirm and going live never run alongside a change in
+  this process (`_transition`). Each send carries an idempotency key, kept on the owner's message.
 
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
@@ -269,6 +286,7 @@ from desk.api.versions import (
     ChangesAlwaysOn,
     active_row,
     checkable,
+    confirm_tools,
     connect_payments,
     post_draft,
     rules_draft,
@@ -319,6 +337,8 @@ from desk.kernel_api import (
     PolicyConfirmRequest,
     PolicyProbeRequest,
     SessionContext,
+    ToolPin,
+    ToolsConfirmRequest,
 )
 from desk.presets import PRESETS
 
@@ -387,26 +407,56 @@ QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
 AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
-# The test-client offer, asked once at the plan's end (`_offer_test_client`), its two choices, and Claude's line after
-# a yes. Owner-facing words, kept together for copy review.
+# The test-client offer, asked at the plan's end (`_offer_test_client`), its two choices, and Claude's line after a yes.
+# Owner-facing words, kept together for copy review.
 TEST_CLIENT_OFFER = ("Want to try your Desk the way a client would? I can add you as a test client, with your own "
                      "contact, so you can check verification and private answers yourself.")
 TEST_CLIENT_YES = "Add me as a test client"
 TEST_CLIENT_NO = "Not now"
 TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me."
-TEST_CLIENT: TestClientQuestion = "test_client"   # the offer's question, which code alone asks and reads
+TEST_CLIENT: TestClientQuestion = "test_client"   # the offer's question, which code alone asks
 TEST_CLIENT_REF = "test-client"                   # the owner's ref among the Desk's people, as a test client
 # The words and phrases code reads in a typed answer to the test-client offer (`_reads_yes`), in English and Spanish:
-# a "no" one wins over any "yes" one, and an answer with neither gets the same offer again.
+# a "no" one wins over any "yes" one. A yes or a no is read only from a short plain answer; anything longer, or with a
+# request or a condition, goes to setup's consultant (`_consult_on_offer`). That leans on purpose: a plain answer sent
+# there costs one model call and the offer again, while a request read as a yes or a no is dropped without a word.
+TEST_CLIENT_MAX_WORDS = 8          # words in an answer, besides the offer's own (`TEST_CLIENT_NAMED`)
+TEST_CLIENT_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 TEST_CLIENT_TYPED_YES = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead", "please do", "do it", "add me",
                          "sounds good", "sí", "si", "vale", "claro", "dale", "añádeme", "agrégame")
 TEST_CLIENT_TYPED_NO = ("no", "not", "don't", "dont", "nope", "not now", "later", "skip", "no gracias")
+# The offer's own words in an answer ("as a test client", "como cliente de prueba"), which the word limit leaves out.
+TEST_CLIENT_NAMED = re.compile(r"\b(?:as\s+)?(?:(?:a|the|my)\s+)?test\s+clients?\b"
+                               r"|\b(?:como\s+)?cliente\s+de\s+prueba\b", re.IGNORECASE)
 # A typed answer that asks something, or gives a yes only on a condition, which is never a yes or a no: a question mark,
 # a question's opening word, or "if" ("si" in Spanish, unless it stands alone as a yes, "Si" or "Si, …").
 TEST_CLIENT_UNCLEAR = re.compile(r"[?¿]|^\W*(?:what|how|why|does|can|is|will|qué|cómo|por qué)\b"
                                  r"|^\W*do\s+(?:you|i|we|they|he|she|this|that)\b|\bif\b", re.IGNORECASE)
 TEST_CLIENT_SI = re.compile(r"\bsi\b", re.IGNORECASE)
 TEST_CLIENT_SI_ALONE = re.compile(r"^\W*si\s*(?:$|[,.!])", re.IGNORECASE)
+# A typed answer that also asks for something besides the offer, which is never a yes or a no: adding or setting up
+# anything but the owner, their contact or the test client (not after "don't" or "not"); a job (not a "good job");
+# connecting, changing or removing something (not after "don't", or "don't want to"); "también", or "also" and another
+# word; or one of the Desk's own jobs (deposits, payments, retainers, invoices, bookings, charging) or configuring.
+TEST_CLIENT_REQUEST = re.compile(
+    r"(?<!n't\s)(?<!not\s)\b(?:add|adding|añade|añadir|agrega|agregar|set\s+up|create|crea|crear|configura"
+    r"|configurar)\b"
+    r"(?!\s+(?:me|myself|us|it|that|this|anything|my\s+(?:email|number|phone|contact)"
+    r"|mi\s+(?:correo|número|teléfono|contacto)|(?:(?:a|the|my)\s+)?test\s+clients?)\b)"
+    r"|(?<!good\s)(?<!great\s)(?<!nice\s)\bjobs?\b"
+    r"|(?<!n't\s)(?<!n't\swant\sto\s)(?<!not\swant\sto\s)"
+    r"\b(?:connect\w*|conecta\w*|change[sd]?|changing|cambia\w*|remove|quita\w*|elimina\w*|trabajos?)\b"
+    r"|\b(?:también|tambien)\b|\balso\s+(?!like|try|check)\w"
+    r"|\b(?:deposits?|payments?|retainers?|invoices?|bookings?|depósitos?|pagos?|reservas?|cobr\w*)\b|\bconfigure\b",
+    re.IGNORECASE)
+# Any yes or no code reads (`TEST_CLIENT_TYPED_YES`, `TEST_CLIENT_TYPED_NO`) opening an answer, perhaps with "please" or
+# "thanks", that goes on with "and", "but", "y" or "pero": more follows, unless it only ends politely ("No, but thanks",
+# "Sí, y gracias", "Not now, but maybe later").
+_TYPED_ANSWERS = "|".join(r"\s+".join(map(re.escape, phrase.split()))
+                          for phrase in sorted(TEST_CLIENT_TYPED_YES + TEST_CLIENT_TYPED_NO, key=len, reverse=True))
+TEST_CLIENT_CONJOINED = re.compile(
+    rf"^\W*(?:{_TYPED_ANSWERS})\b(?:\W+(?:please|thanks|thank\s+you|gracias|por\s+favor))?\W+(?:and|but|y|pero)\b"
+    r"(?!\W*(?:thanks|thank\s+you|gracias|maybe\s+later|later|más\s+tarde)\b\W*$)", re.IGNORECASE)
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -418,6 +468,9 @@ LIMIT_LABELS = {"quote_auto_max_cents": "a quote limit", "discount_auto_max_bp":
 
 Record = Callable[[ModelResponse], Awaitable[None]]
 Output = TypeVar("Output", bound=BaseModel)
+# What closes a planning turn with nothing left to ask (`_advance_ask`): `close_setup`, or the test-client offer again
+# after an answer to it that reopened the plan (`_consult_on_offer`).
+Close = Callable[[OwnerCtx, AsyncEngine, ModelClient, "Interview"], Awaitable[None]]
 
 
 # Names and defaults ----------------------------------------------------------------------------------------------
@@ -505,6 +558,13 @@ class Entry(BaseModel):
     connector_connect_attempted: bool = False
     # On the owner's answer to the test-client offer: "yes" once their yes is saved, "added" once they're on record.
     test_client: Literal["yes", "added"] | None = None
+    # On the owner's message that reopened the questions from a later step ("Change something", `reopen`): the send's
+    # idempotency key and its body's hash, which a repeat must match.
+    reopen_key: str | None = None
+    reopen_sha256: str | None = None
+    # On a question code asks for a fact a change gave off its own question (`_held_off_topic`): the other such facts'
+    # questions, asked in turn after it, before the questions close.
+    asks_after: list[QuestionKey] = []
 
 
 class ConnectedApp(BaseModel):
@@ -556,6 +616,18 @@ class Interview:
     def busy(self) -> bool:
         """A stored transcript entry explicitly marks a pending background run."""
         return any(entry.pending is not None for entry in self.transcript)
+
+    @property
+    def reopens(self) -> int:
+        """How many times "Change something" took the interview back to its questions (`reopen`), landed or running:
+        work that read the interview before one must not write after it."""
+        return sum(entry.reopen_key is not None for entry in self.transcript)
+
+    @property
+    def reopening(self) -> bool:
+        """Whether the turn running now is the change that reopened the questions: its owner's message, staged and
+        still pending, carries the send's key."""
+        return any(entry.pending is not None and entry.reopen_key is not None for entry in self.transcript)
 
     @property
     def connected_apps(self) -> list[ConnectorKey]:
@@ -683,7 +755,7 @@ def _stored(interview: Interview) -> dict:
             "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
                                                                  if value is None or
                                                                  (name in {"choices", "covered", "planned", "dropped", "cards", "owner_fields",
-                                                                           "owner_decided",
+                                                                           "owner_decided", "asks_after",
                                                                            "connector_connect_attempted"}
                                                                   and not value)})
                            for entry in interview.transcript],
@@ -716,19 +788,39 @@ async def _commit(engine: AsyncEngine, owner: OwnerCtx, interview: Interview, se
 
 
 _RUNNING: set[str] = set()       # the interviews with a consent or an answer running in this process
+# The interviews with a safety check, a confirm or a go-live running in this process, and how many of each.
+_TRANSITIONS: dict[str, int] = {}
 
 
 @contextlib.contextmanager
 def _turn(interview_id: str) -> Iterator[None]:
     """Hold the interview's one running consent or answer in this process: another sent meanwhile is 409 `conflict` at
-    once, before any model call or read (one in another process is caught when it saves, by `_commit`)."""
-    if interview_id in _RUNNING:
+    once, before any model call or read (one in another process is caught when it saves, by `_commit`). So is one sent
+    while a safety check, a confirm or a go-live runs (`_transition`): a change can't reopen the questions under
+    them."""
+    if interview_id in _RUNNING or interview_id in _TRANSITIONS:
         raise ApiProblem(409, "conflict")
     _RUNNING.add(interview_id)
     try:
         yield
     finally:
         _RUNNING.discard(interview_id)
+
+
+@contextlib.contextmanager
+def _transition(interview_id: str) -> Iterator[None]:
+    """Hold a safety check, a confirm or a go-live from before its first read to after its last write: 409 `conflict`
+    at once while a turn runs on the interview in this process (a reopen, say), and a turn sent meanwhile is 409 too
+    (`_turn`). Transitions don't hold one another; each checks the draft version it read when it writes."""
+    if interview_id in _RUNNING:
+        raise ApiProblem(409, "conflict")
+    _TRANSITIONS[interview_id] = _TRANSITIONS.get(interview_id, 0) + 1
+    try:
+        yield
+    finally:
+        left = _TRANSITIONS.pop(interview_id) - 1
+        if left:
+            _TRANSITIONS[interview_id] = left
 
 
 def _clear_configs(interview: Interview) -> None:
@@ -759,7 +851,8 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False,
                       consent=interview.consent, question=interview.question, busy=interview.busy,
                       pending_card=interview.pending_card,
                       held_policy_keys=interview.held_policy_keys,
-                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry))
+                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry),
+                                             owner_decided=entry.owner_decided)
                                 for entry in interview.transcript[1:]
                                 if (entry.text or entry.choices or entry.card is not None) and
                                 (cards or entry.card is None) and (entry.role != "owner" or bool(entry.text))])
@@ -1457,7 +1550,7 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
-            await after_finish(ctx, interview)
+            await publish_plan(ctx, engine, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=lambda interview: [Entry(role="owner", text="")], turn=turn,
@@ -2152,6 +2245,21 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
     return SetupAnswers.model_validate(values)
 
 
+def _held_off_topic(before: SetupAnswers, after: SetupAnswers, patch: SetupPatch,
+                    key: QuestionKey) -> list[QuestionKey]:
+    """The questions that record the facts this turn's patch would change on them (`FACT_HOMES`), but which `merged`
+    kept off the answers on question `key`, as off its topic: each one once, in the patch's order."""
+    homes = []
+    for name in _fact_patch_fields(patch, key):
+        home = FACT_HOMES.get(name)
+        if home is None or home in homes or _on_topic(name, key) or getattr(after, name) != getattr(before, name):
+            continue
+        there = merged(before, SetupPatch.model_validate({name: getattr(patch, name)}), home)
+        if getattr(there, name) != getattr(before, name):
+            homes.append(home)
+    return homes
+
+
 async def _rename(owner: OwnerCtx, desk_id: str, patch: SetupPatch) -> None:
     """Send a new owner or business name the turn gave to the kernel (`PUT /desks/{id}/business`)."""
     name, owner_display_name = " ".join((patch.business_name or "").split()), reduce_name(patch.owner_display_name)
@@ -2189,11 +2297,15 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
 
 
 def _next_ask(interview: Interview, source, available: list[ProposalCard]) -> QuestionKey | ProposalCard | None:
-    """Honor one fitting ask, otherwise ordinary topics first, then the hidden plan in order."""
+    """Honor one fitting ask, otherwise ordinary topics first, then the hidden plan in order. On the turn of the change
+    that reopened the questions (`reopen`) alone, a topic covered before can be asked again when Claude names it, but
+    for the one being answered, so a change reaches the question that records it; the turns after it ask none again."""
     unshown = [card for card in available if card.proposal_id not in interview.dropped] if interview.shows_cards else []
     proposed = source.next if source is not None else None
     if proposed is not None:
-        if proposed.kind == "topic" and proposed.topic not in interview.covered:
+        answering = interview.latest_ask.question if interview.latest_ask is not None else None
+        if proposed.kind == "topic" and (proposed.topic not in interview.covered
+                                         or (interview.reopening and proposed.topic != answering)):
             return proposed.topic
         if proposed.kind in {"job", "connector"}:
             found = next((card for card in unshown if _names_card(source, card)), None)
@@ -2355,18 +2467,21 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
 
 
 async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
-                   source, reply: Entry, *, closing_call: bool = False, replies: _TurnReplies | None = None) -> None:
+                   source, reply: Entry, *, closing_call: bool = False, replies: _TurnReplies | None = None,
+                   close: Close | None = None) -> None:
     """Choose the final ask before deciding which of this answer's replies can be stored beside it."""
     replies = replies if replies is not None else _TurnReplies()
     replies.track(reply)
-    await _advance_ask(owner, engine, model, interview, source, reply, replies, closing_call=closing_call)
+    await _advance_ask(owner, engine, model, interview, source, reply, replies, closing_call=closing_call, close=close)
     asked = interview.latest_ask
     replies.before(asked.question if interview.step == "questions" and asked is not None else None)
 
 
 async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
-                       source, reply: Entry, replies: _TurnReplies, *, closing_call: bool = False) -> None:
-    """Append exactly one ask or close. Metadata lives on this turn's Claude entry, never on a card."""
+                       source, reply: Entry, replies: _TurnReplies, *, closing_call: bool = False,
+                       close: Close | None = None) -> None:
+    """Append exactly one ask or close: `close_setup`, unless the caller gives what closes instead (`close`).
+    Metadata lives on this turn's Claude entry, never on a card."""
     if source is not None:
         interview.cover(source.skip)
     available = _record_plan(interview, source, reply)
@@ -2399,9 +2514,13 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             entry = Entry(role="claude", text=following.reply.strip() if following else "")
             interview.transcript.append(entry)
             replies.track(entry)
-            await _advance_ask(owner, engine, model, interview, following, entry, replies, closing_call=True)
+            await _advance_ask(owner, engine, model, interview, following, entry, replies, closing_call=True,
+                               close=close)
             return
-        await close_setup(owner, engine, model, interview, answered=replies.answered(interview))
+        if close is not None:
+            await close(owner, engine, model, interview)
+        else:
+            await close_setup(owner, engine, model, interview, answered=replies.answered(interview))
 
 
 def _show_card(interview: Interview, card: ProposalCard) -> None:
@@ -2414,13 +2533,53 @@ def _show_card(interview: Interview, card: ProposalCard) -> None:
 
 
 def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCard]:
-    """Record additions and valid drops even on a follow-up; return only items available before this turn."""
+    """Record additions and valid drops even on a follow-up; return only items available before this turn.
+
+    Once "Change something" reopened the questions, the plan can also change what the owner accepted, through the
+    cards that record it, and only by the plan's own `drop` (a job's kind is no identity: an owner can have several
+    jobs of one kind, and a job added without a drop sits beside them). A drop naming an accepted job that the same
+    call adds a job of its kind for is replaced by that job (`changed`), which waits for the owner's decision. A drop
+    naming any other accepted job or connector changes it to a fresh copy of its card, which waits for the owner's
+    decision and is available at once: a job the owner took isn't removed on Claude's word alone."""
     available = interview.unshown
     if source is not None:
         available_ids = {card.proposal_id for card in available}
         reply.dropped = list(dict.fromkeys(proposal_id for proposal_id in source.drop if proposal_id in available_ids))
         reply.planned = [card for draft in source.add_jobs if (card := _planned_job(interview, draft)) is not None]
+        if interview.reopens:
+            replacements = list(reply.planned)
+            for proposal_id in dict.fromkeys(source.drop):
+                kept = next((card for card in _accepted_cards(interview) if card.proposal_id == proposal_id), None)
+                if kept is None:
+                    continue
+                added = next((card for card in replacements
+                              if kept.job is not None and card.job is not None and card.job.job == kept.job.job), None)
+                if added is not None:
+                    replacements.remove(added)
+                    _supersede(interview, kept.proposal_id, added.proposal_id)
+                    continue
+                again = kept.model_copy(deep=True, update={"proposal_id": new_proposal_id(), "state": "proposed"})
+                if again.connector is not None:
+                    again.connector.connected = False
+                _supersede(interview, kept.proposal_id, again.proposal_id)
+                reply.dropped.append(kept.proposal_id)        # so settling the copy is the owner's no (`settle_plan`)
+                reply.planned.append(again)
+                available.append(again)
     return available
+
+
+def _accepted_cards(interview: Interview) -> list[ProposalCard]:
+    """The plan's jobs and connectors the owner has: each card's current copy, accepted."""
+    return [card for card in interview.planned if card.state == "accepted"]
+
+
+def _supersede(interview: Interview, proposal_id: str, replacement: str) -> None:
+    """Change every copy of card `proposal_id`, planned or shown, to a reference to card `replacement`."""
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if card.proposal_id == proposal_id:
+                card.state = "changed"
+                card.superseded_by = replacement
 
 
 def _decide_typed(interview: Interview, proposal_id: str, accept: bool) -> bool:
@@ -2526,70 +2685,12 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             connect = _claim_connector_connect(interview, None if interview.step == "tools" else card)
             return
         if question == TEST_CLIENT:
-            _answer_test_client(interview, staged[0])
+            await _answer_test_client(ctx, engine, model, interview, staged[0])
             if interview.step == "tools":
                 connect = _claim_connector_connect(interview)
             return
-        since = len(interview.transcript)
-        key = question
-        desk_id = interview.desk_id
         said, = staged
-        _hold_unless_kept(interview, key)
-        turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
-                                [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
-        patch = turn.patch()
-        if key in LIMIT_CHOICES:
-            choice = next((choice for choice in LIMIT_CHOICES[key](interview.business_type)
-                           if text.strip() == choice.text), None)
-            if choice is not None:
-                patch = SetupPatch.model_validate({**patch.model_dump(), **choice.values})
-                turn.step_done = True
-        entries = []
-        reply = Entry(role="claude", text=turn.reply.strip())
-        replies = _TurnReplies()
-        replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
-        if reply.text:
-            entries.append(reply)
-        site = website_url(getattr(turn, "website", ""))  # the contact question's model has none (`FIELD_TURNS`)
-        if site is not None and site[0] not in interview.tried_websites():
-            if interview.consent:
-                entries.append(await _read_website(ctx, desk_id, *site))
-            else:
-                said.website = site[0]                   # kept as text: nothing is read without consent
-        await _rename(ctx, desk_id, patch)
-        backed = _backed_off_topic(patch, key, text, interview.answers)
-        updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields, backed=backed)
-        owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
-        said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
-        for name in _fact_patch_fields(patch, key):
-            if name not in FACT_HOMES:
-                continue
-            if name in said.owner_fields:
-                updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
-            elif getattr(interview.answers, name) == getattr(updated, name):
-                continue
-            elif name not in updated.suggested_fields:
-                updated.suggested_fields.append(name)
-        interview.answers = updated
-        interview.transcript += entries
-        if turn.step_done:
-            interview.cover([key])
-            following = await _next_step(ctx, engine, model, interview) if key in LIMIT_CHOICES else turn
-            next_reply = reply
-            if key in LIMIT_CHOICES:
-                next_reply = Entry(role="claude", text=following.reply.strip() if following else "")
-                interview.transcript.append(next_reply)
-            elif not any(entry is reply for entry in interview.transcript):
-                interview.transcript.append(reply)
-            await _advance(ctx, engine, model, interview, following, next_reply,
-                           closing_call=key in LIMIT_CHOICES, replies=replies)
-        elif key not in LIMIT_CHOICES:
-            if not any(entry is reply for entry in interview.transcript):
-                interview.transcript.append(reply)
-            _record_plan(interview, turn, reply)
-        await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
-                                 follow_up=turn if not turn.step_done else None)
-
+        await _question_turn(ctx, engine, model, interview, question, text, said)
         if interview.step == "tools":
             connect = _claim_connector_connect(interview)
 
@@ -2599,11 +2700,178 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
-            await after_finish(ctx, interview)
+            await publish_plan(ctx, engine, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=stage, turn=run, after=after,
                           render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
+
+
+async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
+                         key: QuestionKey, text: str, said: Entry) -> None:
+    """The owner's answer `text` (stored as `said`, this run's staged entry) to question `key`, in its own turn
+    model: the patch merged into the answers, Claude's reply, and the next ask or the close."""
+    since = len(interview.transcript)
+    desk_id = interview.desk_id
+    # The questions still to ask for facts a change gave off their own questions, waiting on the one answered.
+    waiting = list(interview.latest_ask.asks_after) if interview.latest_ask is not None else []
+    _hold_unless_kept(interview, key)
+    turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
+                            [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
+    patch = turn.patch()
+    if key in LIMIT_CHOICES:
+        choice = next((choice for choice in LIMIT_CHOICES[key](interview.business_type)
+                       if text.strip() == choice.text), None)
+        if choice is not None:
+            patch = SetupPatch.model_validate({**patch.model_dump(), **choice.values})
+            turn.step_done = True
+    entries = []
+    reply = Entry(role="claude", text=turn.reply.strip())
+    replies = _TurnReplies()
+    replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
+    if reply.text:
+        entries.append(reply)
+    site = website_url(getattr(turn, "website", ""))  # the contact question's model has none (`FIELD_TURNS`)
+    if site is not None and site[0] not in interview.tried_websites():
+        if interview.consent:
+            entries.append(await _read_website(ctx, desk_id, *site))
+        else:
+            said.website = site[0]                   # kept as text: nothing is read without consent
+    await _rename(ctx, desk_id, patch)
+    backed = _backed_off_topic(patch, key, text, interview.answers)
+    updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields, backed=backed)
+    owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
+    said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
+    for name in _fact_patch_fields(patch, key):
+        if name not in FACT_HOMES:
+            continue
+        if name in said.owner_fields:
+            updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
+        elif getattr(interview.answers, name) == getattr(updated, name):
+            continue
+        elif name not in updated.suggested_fields:
+            updated.suggested_fields.append(name)
+    # Once "Change something" reopened the questions, a change to a fact this question doesn't record, which
+    # `merged` kept out of the answers (free text is never taken off its topic), is asked on the question that records
+    # it, right after Claude's reply: the owner's words then land there instead of being dropped. Each such question
+    # is asked in turn, the rest waiting on the one asked (`asks_after`), and the questions close only after the last.
+    held = _held_off_topic(interview.answers, updated, patch, key) if interview.reopens else []
+    homes = [home for home in dict.fromkeys([*held, *waiting]) if home != key]
+    # The change's own turn may also name a topic covered before (a limit, say), which `_next_ask` would ask: it
+    # waits after the facts' questions, asked in code's words, rather than being lost to them.
+    proposed = getattr(turn, "next", None)
+    if (held and interview.reopening and proposed is not None and proposed.kind == "topic"
+            and proposed.topic in interview.covered and proposed.topic != key and proposed.topic not in homes):
+        homes.append(proposed.topic)
+    interview.answers = updated
+    interview.transcript += entries
+    if held or (turn.step_done and homes):
+        if turn.step_done:
+            interview.cover([key])
+        if not any(entry is reply for entry in interview.transcript):
+            interview.transcript.append(reply)
+        # A limit question's turn has no plan of its own (its planning call is `_next_step`, skipped here).
+        _record_plan(interview, turn if key not in LIMIT_CHOICES else None, reply)
+        asked = _ask(interview, homes[0])
+        asked.asks_after = homes[1:]
+        replies.before(asked.question)
+        interview.transcript.append(asked)
+    elif turn.step_done:
+        interview.cover([key])
+        following = await _next_step(ctx, engine, model, interview) if key in LIMIT_CHOICES else turn
+        next_reply = reply
+        if key in LIMIT_CHOICES:
+            next_reply = Entry(role="claude", text=following.reply.strip() if following else "")
+            interview.transcript.append(next_reply)
+        elif not any(entry is reply for entry in interview.transcript):
+            interview.transcript.append(reply)
+        await _advance(ctx, engine, model, interview, following, next_reply,
+                       closing_call=key in LIMIT_CHOICES, replies=replies)
+    elif key not in LIMIT_CHOICES:
+        if not any(entry is reply for entry in interview.transcript):
+            interview.transcript.append(reply)
+        _record_plan(interview, turn, reply)
+    await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
+                             follow_up=turn if not turn.step_done else None)
+    asked = interview.latest_ask
+    if homes and not held and not turn.step_done and asked is not None and asked.question == key:
+        asked.asks_after = homes             # a follow-up on this question: the rest still wait on it
+
+
+# "Change something": the chat again, from a later step ------------------------------------------------------------
+
+# The steps "Change something" reopens the chat from. A live Desk is changed in the owner app instead.
+REOPEN_STEPS: tuple[SetupStep, ...] = ("tools", "rules", "situations", "safety_check", "preview")
+# The question the owner's change answers: a fact question that reads the answers so far, the plan and the memory and
+# website, and whose turn records hours, the contact, what happens after hours and what's urgent. A change that
+# belongs to another topic (a limit, say) is asked there next: Claude names it, and code asks it again
+# (`_next_ask`), a limit in code's own words with its choices, so a limit still comes only from its own question.
+REOPEN_TOPIC: QuestionKey = "contact_and_after_hours"
+
+
+def reopen_sha256(text: str) -> str:
+    """The sha256 of a reopen's canonical body, its key left out: what a repeat with the key must match."""
+    return body_sha256({"text": text})
+
+
+def _reopened_by(interview: Interview, key: str) -> Entry | None:
+    return next((entry for entry in interview.transcript if entry.reopen_key == key), None)
+
+
+async def reopen(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, text: str, key: str, *,
+                 runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                 cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """"Change something": back to the questions from a later step (`REOPEN_STEPS`), with `text` as the owner's next
+    turn, run through the shared turn runner as an answer is. The turn moves the interview to `questions`, drops the
+    rules draft (its cards and version; the situations and the safety check were tried against it), then answers the
+    owner on `REOPEN_TOPIC`, behind a code ask the owner isn't shown. Nothing changes until the turn lands: a failed
+    or abandoned turn removes the owner's message and leaves the interview at its step.
+
+    Idempotent per send by `key`, kept on the owner's message with its body's hash: a repeat answers the interview as
+    it stands, and the same key with other text is 409 `conflict`. Another send is 409 `conflict` while a turn runs,
+    at the questions step and once the Desk is live."""
+    request_sha256 = reopen_sha256(text)
+    render = partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled)
+    interview = await _recover_turn(owner, engine, interview_id, runs)
+    first = _reopened_by(interview, key)
+    if first is not None:
+        if first.reopen_sha256 != request_sha256:
+            raise ApiProblem(409, "conflict")
+        interview.business_tools_enabled = business_tools_enabled
+        return render(interview, await _slug(owner, owner.desk(interview.desk_id)))
+    if interview.busy or interview_id in _RUNNING or interview_id in _TRANSITIONS:
+        raise ApiProblem(409, "conflict")
+    connect = False
+
+    def check(interview: Interview) -> None:
+        interview.business_tools_enabled = business_tools_enabled
+        if interview.step not in REOPEN_STEPS or _reopened_by(interview, key) is not None:
+            raise ApiProblem(409, "conflict")
+
+    def stage(interview: Interview) -> list[Entry]:
+        return [Entry(role="owner", text=text, reopen_key=key, reopen_sha256=request_sha256)]
+
+    async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        nonlocal connect
+        interview.business_tools_enabled = business_tools_enabled
+        said, = staged
+        interview.step = "questions"
+        interview.draft_cards, interview.draft_version = [], None
+        # The question the change answers, before the owner's words; its empty text shows nothing.
+        at = next(index for index, entry in enumerate(interview.transcript) if entry is said)
+        interview.transcript.insert(at, Entry(role="claude", text="", question=REOPEN_TOPIC))
+        await _question_turn(ctx, engine, model, interview, REOPEN_TOPIC, text, said)
+        if interview.step == "tools":
+            connect = _claim_connector_connect(interview)
+
+    async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if connect:
+            await _connect_accepted_connector(ctx, engine, interview)
+        if interview.step == "tools":
+            await publish_plan(ctx, engine, interview)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=stage, turn=turn, after=after, render=render)
 
 
 # Finish ------------------------------------------------------------------------------------------------------
@@ -2614,23 +2882,42 @@ def _unpriced_payment(job: JobProposal | None) -> bool:
 
 
 def settle_plan(interview: Interview) -> None:
-    """Settle the remaining plan and emit each never-shown card once, without I/O."""
+    """Settle the remaining plan and emit each never-shown card once, without I/O. A card shown again because the plan
+    dropped what the owner had accepted (`_record_plan`) settles as declined: the owner asked to drop it, so Claude's
+    suggestions never take it back."""
     # Changed cards and their superseded_by links stay intact; only proposed replacements can settle.
     pending = interview.pending_card
+    dropped = interview.dropped
+    asked_to_drop = {card.superseded_by for entry in interview.transcript
+                     for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]
+                     if card.proposal_id in dropped and card.superseded_by is not None}
+
+    def settled(card: ProposalCard) -> str:
+        return "declined" if _unpriced_payment(card.job) or card.proposal_id in asked_to_drop else "accepted"
+
     for card in interview.unshown:
-        card.state = "declined" if _unpriced_payment(card.job) else "accepted"
+        card.state = settled(card)
         _show_card(interview, card)
     if pending is not None:
         card = next(entry.card for entry in reversed(interview.transcript)
                     if entry.card is not None and entry.card.proposal_id == pending)
-        card.state = "declined" if _unpriced_payment(card.job) else "accepted"
-    # Stored interviews may contain earlier acceptances that bypassed the amount check.
+        card.state = settled(card)
+    # Stored interviews may contain earlier acceptances that bypassed the amount check. Code voids such a yes, so it is
+    # no longer the owner's decision: the setup plan says the job was left out for want of an amount (`_setup_plan`).
+    # Which yeses code voids is read from each card's latest shown copy, as `_setup_plan` reads it, so an older copy
+    # can't clear a newer decision on the same card.
+    latest = {entry.card.proposal_id: entry.card for entry in interview.transcript if entry.card is not None}
+    voided = {proposal_id for proposal_id, card in latest.items()
+              if card.state == "accepted" and _unpriced_payment(card.job)}
     for entry in interview.transcript:
         for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
             if card.state == "accepted" and _unpriced_payment(card.job):
                 card.state = "declined"
             if card.state == "accepted" and card.connector is not None and card.connector.app != "stripe":
                 card.connector.connected = True
+    for entry in interview.transcript:
+        if entry.card is not None and entry.card.proposal_id in voided:
+            entry.owner_decided = False
 
 
 async def close_setup(owner, engine, model, interview: Interview, *, answered: bool = False) -> None:
@@ -2642,11 +2929,15 @@ async def close_setup(owner, engine, model, interview: Interview, *, answered: b
     closing reply left out this way was never on the owner's display.
 
     While the offer waits, the plan is closed already: closing again ("Use your suggestions") moves on to the Tools
-    step without another plan and writes nothing. The caller owns persistence and after_finish.
+    step without another plan and writes nothing. A plan an answer to the offer reopened (`_consult_on_offer`) closes
+    as the first time did: settling its cards and finishing again change only what its new jobs add, and the offer is
+    asked again. The caller owns persistence and after_finish.
     """
     if interview.offering:
         interview.step = "tools"
         return
+    for entry in interview.transcript:
+        entry.asks_after = []                # closing ("Use your suggestions", say) asks no fact a change left
     settle_plan(interview)
     plan = ""
     for attempt in range(2):
@@ -2888,22 +3179,46 @@ def _ask_test_client(interview: Interview) -> None:
 
 
 def _offer_test_client(interview: Interview) -> None:
-    """Once the plan is closed, offer once to put the owner on record as a test client, only when they typed their own
-    contact (`_owner_contact`). Setup then waits on the answer (`_answer_test_client`) before its Tools step."""
-    if _owner_contact(interview) is None or any(entry.question == TEST_CLIENT for entry in interview.transcript):
+    """Once the plan is closed, offer to put the owner on record as a test client, only when they typed their own
+    contact (`_owner_contact`) and haven't answered the offer with a yes or a no (`_test_client_answered`): an answer
+    that was neither can reopen the plan (`_consult_on_offer`), and closing it again asks once more. Setup then waits
+    on the answer (`_answer_test_client`) before its Tools step."""
+    if _owner_contact(interview) is None or _test_client_answered(interview):
         return
     _ask_test_client(interview)
 
 
+def _test_client_answered(interview: Interview) -> bool:
+    """Whether the owner answered the test-client offer with a yes or a no (`_reads_yes`): an owner line typed while
+    the offer was the question waiting, whatever came after it."""
+    asked = None
+    for entry in interview.transcript:
+        if entry.role == "claude" and (entry.question is not None or entry.card is not None):
+            asked = entry.question
+        elif entry.role == "owner" and asked == TEST_CLIENT and _reads_yes(entry.text) is not None:
+            return True
+    return False
+
+
 def _reads_yes(text: str) -> bool | None:
-    """The owner's answer to the test-client offer, read word by word by code alone: None when it asks something or
-    says yes only on a condition (`TEST_CLIENT_UNCLEAR`, so "What does add me as a test client mean?" and "What happens
-    if I say yes?" are neither); else False when it has a "no" word or phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and
-    "don't add me" are no); else True when it has a "yes" one (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client"
-    and "Sure, go ahead" are yes); else None."""
-    if TEST_CLIENT_UNCLEAR.search(text) or (TEST_CLIENT_SI.search(text) and not TEST_CLIENT_SI_ALONE.match(text)):
+    """The owner's answer to the test-client offer, read word by word by code alone. A yes or a no is read only from a
+    short plain answer; anything longer, or with a request or a condition, is neither, and goes to setup's consultant.
+    None when it has more than `TEST_CLIENT_MAX_WORDS` words, leaving out the offer's own (`TEST_CLIENT_NAMED`, so
+    "Sure, go ahead and add me as a test client" is short); asks something or says yes only on a condition
+    (`TEST_CLIENT_UNCLEAR`, so "What does add me as a test client mean?" and "What happens if I say yes?" are
+    neither); asks for something besides the offer (`TEST_CLIENT_REQUEST`, so "Sí, cambia el horario" and "Not now,
+    connect Google Calendar first" are neither); or goes on after its yes or no (`TEST_CLIENT_CONJOINED`, so "Yes
+    please, and take retainer payments" is neither, but "No, but thanks" is a no). Else False when it has a "no" word
+    or phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and "don't add me" are no); else True when it has a "yes" one
+    (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client" and "Sure, go ahead" are yes); else None."""
+    plain = text.replace("\u2019", "'")
+    words = TEST_CLIENT_WORD.findall(plain.casefold())
+    counted = TEST_CLIENT_WORD.findall(TEST_CLIENT_NAMED.sub(" ", plain))
+    if (len(counted) > TEST_CLIENT_MAX_WORDS or TEST_CLIENT_UNCLEAR.search(plain) or TEST_CLIENT_REQUEST.search(plain)
+            or TEST_CLIENT_CONJOINED.match(plain)
+            or (TEST_CLIENT_SI.search(plain) and not TEST_CLIENT_SI_ALONE.match(plain))):
         return None
-    said = " {} ".format(" ".join(re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.casefold().replace("\u2019", "'"))))
+    said = " {} ".format(" ".join(words))
     if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_NO):
         return False
     if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_YES):
@@ -2911,18 +3226,45 @@ def _reads_yes(text: str) -> bool | None:
     return None
 
 
-def _answer_test_client(interview: Interview, said: Entry) -> None:
-    """The owner's answer to the test-client offer (`said`), read by code with no model call (`_reads_yes`). An answer
-    that is neither a yes nor a no gets the same offer again; a yes or a no moves setup on to its Tools step. A yes,
+async def _answer_test_client(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
+                              said: Entry) -> None:
+    """The owner's answer to the test-client offer (`said`), read by code (`_reads_yes`). A yes or a no makes no model
+    call and moves setup on to its Tools step; anything else goes to setup's consultant (`_consult_on_offer`). A yes,
     with a contact the owner typed (`_owner_contact`), is marked on their answer, which the turn saves before anyone
     is put on record (`_put_test_client`, after the save); a no writes nothing and adds no line."""
     answer = _reads_yes(said.text)
     if answer is None:
-        _ask_test_client(interview)
+        await _consult_on_offer(owner, engine, model, interview)
         return
     if answer and _owner_contact(interview) is not None:
         said.test_client = "yes"
     interview.step = "tools"
+
+
+async def _consult_on_offer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview) -> None:
+    """An answer to the test-client offer that is neither a yes nor a no, such as a request for another job or a
+    question, goes to setup's consultant in one planning call (`_next_step`, which reads the owner's words as their
+    answer), and Claude's reply is kept. What the call adds to or drops from the plan is recorded as on any planning
+    turn (`_advance`). When it leaves something new to show (a job it added, which the next planning call shows, or an
+    app it names), the plan reopens on that card before the Tools step; deciding the last card, or "Use your
+    suggestions", closes it again (`close_setup`), which asks the offer again. With nothing new to show, or with
+    Claude unavailable, the offer is asked again at once. A client without cards keeps no job the call adds: no card
+    could show it, and the plan won't close again to settle it."""
+    following = await _next_step(owner, engine, model, interview)
+    if following is None:
+        _ask_test_client(interview)
+        return
+    if not interview.shows_cards:
+        following = following.model_copy(update={"add_jobs": []})
+    reply = Entry(role="claude", text=following.reply.strip())
+    interview.transcript.append(reply)
+    await _advance(owner, engine, model, interview, following, reply, close=_offer_again)
+
+
+async def _offer_again(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview) -> None:
+    """Close a planning turn on the test-client offer with nothing new to show: the plan stays closed as it was, and
+    the offer is asked again."""
+    _ask_test_client(interview)
 
 
 def _record_test_client(interview: Interview) -> bool:
@@ -2974,7 +3316,8 @@ async def _put_test_client(owner: OwnerCtx, engine: AsyncEngine, interview: Inte
 
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
     """Publish accepted configurations as one batch for the owner's tool review. When the kernel refuses the batch
-    and names some of its tools, publish it once more without them; any other refusal is raised."""
+    and names some of its tools, publish it once more without them; any other refusal is raised. An empty batch goes
+    out only while the Desk has business tools from before (a change that dropped every job): it takes them away."""
     tools = []
     used = set()
     configured = [job for job in accepted_jobs if job.config is not None]
@@ -2994,7 +3337,8 @@ async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list
         tools.append({"tool": f"desk.{name}", "title": job.title[:60],
                       "description": " ".join(job.how.split())[:300],
                       "config": job.config.model_dump(mode="json")})
-    if not tools:
+    if not tools and all(row["status"] == "disabled"
+                         for row in await owner.ro.rows("tools", desk_id=desk_id, source="business")):
         return
     try:
         await owner.kernel.call("PUT /desks/{id}/business_tools",
@@ -3066,6 +3410,71 @@ async def _connect_accepted_connector(owner: OwnerCtx, engine: AsyncEngine, inte
         return
 
 
+def _removed_payments(interview: Interview) -> set[str]:
+    """The Stripe cards the owner had connected that a change took away (`changed`, with no Stripe card accepted now):
+    their payment tools are still on in the kernel until switched off (`_switch_off_payments`), which marks them no
+    longer connected."""
+    cards = {card.proposal_id: card for card in interview.planned}
+    cards.update((entry.card.proposal_id, entry.card) for entry in interview.transcript if entry.card is not None)
+    stripe = [card for card in cards.values() if card.connector is not None and card.connector.app == "stripe"]
+    if any(card.state == "accepted" for card in stripe):
+        return set()
+    return {card.proposal_id for card in stripe if card.state == "changed" and card.connector.connected}
+
+
+def _unmark_connected(interview: Interview, proposal_ids: set[str]) -> None:
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if card.proposal_id in proposal_ids and card.connector is not None:
+                card.connector.connected = False
+
+
+async def _switch_off_payments(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
+    """Switch off the payment tools of a Stripe connection a change took away (`_removed_payments`), as the owner's
+    review does (`POST /tools/confirm` with `enable=False`), then mark its cards no longer connected, so it happens
+    once. A failure is raised: the Tools step's read tries again (`setup_tools`)."""
+    removed = _removed_payments(interview)
+    if not removed:
+        return
+    desk_id = owner.desk(interview.desk_id)
+    on = [row for row in await owner.ro.rows("tools", desk_id=desk_id, order_by=("tool",))
+          if row["tool"] in MCP_TOOLS and row["status"] != "disabled"]
+    if owner.ro.conn.in_transaction():
+        await owner.ro.conn.rollback()       # no read stays open while the kernel is asked
+    if on:
+        await confirm_tools(owner, ToolsConfirmRequest(desk_id=desk_id, enable=False, tools=[
+            ToolPin(tool=row["tool"], definition_sha256=row["definition_sha256"]) for row in on]))
+    for attempt in range(2):
+        current = await _read(engine, owner, interview.interview_id)
+        seen = _stored(current)
+        current.business_tools_enabled = interview.business_tools_enabled
+        _unmark_connected(current, removed)
+        try:
+            await _commit(engine, owner, current, seen)
+        except ApiProblem as failed:
+            if failed.status != 409 or failed.error != "conflict":
+                raise
+            if attempt == 0:
+                continue
+            # The tools are off; the mark waits for the next read, which finds none on and only writes it.
+            logger.warning("setup couldn't mark removed payments switched off (conflict)")
+            return
+        break
+    _unmark_connected(interview, removed)
+
+
+async def publish_plan(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
+    """Publish setup's settled plan after the commit that closed it: switch off the payment tools of a Stripe
+    connection a change took away (a failure is logged, and the Tools step's read tries again), then write the
+    business tools (`after_finish`)."""
+    try:
+        await _switch_off_payments(owner, engine, interview)
+    except Exception as failed:
+        logger.warning("setup couldn't switch off removed payment tools (%s); the Tools step tries again",
+                       type(failed).__name__)
+    await after_finish(owner, interview)
+
+
 async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
     """Apply enabled business tools after the setup commit, without a database lock."""
     if not interview.business_tools_enabled:
@@ -3109,7 +3518,7 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
-            await after_finish(ctx, interview)
+            await publish_plan(ctx, engine, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=lambda interview: [Entry(role="owner", text="Use your suggestions")],
@@ -3167,9 +3576,17 @@ async def interview_desk(owner: OwnerCtx, engine: AsyncEngine, interview_id: str
     return owner.desk(interview.desk_id)
 
 
+async def interview_scope(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> tuple[str, int]:
+    """The Desk of the copy's interview `interview_id` (404 for any other), and how many times "Change something"
+    reopened its questions (`Interview.reopens`): what its proving work is kept by."""
+    async with engine.connect() as conn:
+        interview = await _load(conn, owner.copy_id, interview_id)
+    return owner.desk(interview.desk_id), interview.reopens
+
+
 def _require_step(interview: Interview, steps: tuple[SetupStep, ...], *, drafted: bool = False) -> None:
     """409 `conflict` unless the interview is at one of `steps` (and, with `drafted`, has a rules draft)."""
-    if interview.step not in steps or (drafted and interview.draft_version is None):
+    if interview.busy or interview.step not in steps or (drafted and interview.draft_version is None):
         raise ApiProblem(409, "conflict")
 
 
@@ -3178,10 +3595,18 @@ def _later(step: SetupStep, than: SetupStep) -> SetupStep:
 
 
 async def _update(engine: AsyncEngine, owner: OwnerCtx, interview_id: str,
-                  change: Callable[[Interview], None]) -> Interview:
-    """Apply `change` to the interview under its row lock and save it, in one transaction."""
+                  change: Callable[[Interview], None], *, reopens: int | None = None,
+                  version: int | None = None, steps: tuple[SetupStep, ...] | None = None) -> Interview:
+    """Apply `change` to the interview under its row lock and save it, in one transaction. With `reopens` (what the
+    work read), 409 `conflict` with nothing saved once "Change something" has reopened the questions since: what the
+    work drafted or tried was about the answers before. So too with `version` (the rules draft the work read) once the
+    draft is another, and with `steps` once the interview has left them."""
     async with engine.connect() as conn, conn.begin():
         interview = await _load(conn, owner.copy_id, interview_id, lock=True)
+        if ((reopens is not None and interview.reopens != reopens)
+                or (version is not None and interview.draft_version != version)
+                or (steps is not None and interview.step not in steps)):
+            raise ApiProblem(409, "conflict")
         change(interview)
         await _save(conn, interview)
     return interview
@@ -3791,22 +4216,24 @@ async def _posted(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], template
 
 
 async def _store_cards(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, cards: list[RuleCard], *,
-                       replace_stored: bool = False) -> list[RuleCard]:
+                       replace_stored: bool = False, reopens: int | None = None) -> list[RuleCard]:
     """Store setup's cards for its rules draft and return the cards stored: those already there when another request
     stored them first, unless `replace_stored`."""
     def keep(interview: Interview) -> None:
         if replace_stored or not interview.draft_cards:
             interview.draft_cards = list(cards)
 
-    return (await _update(engine, owner, interview_id, keep)).draft_cards
+    return (await _update(engine, owner, interview_id, keep, reopens=reopens)).draft_cards
 
 
-async def _drafted(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, version: int, step: SetupStep) -> None:
+async def _drafted(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, version: int, step: SetupStep, *,
+                   reopens: int | None = None) -> None:
     def note(interview: Interview) -> None:
+        # A new version after reopening has not been tried, even if the preceding draft reached the safety check.
+        interview.step = step if interview.reopens and interview.draft_version != version else _later(interview.step, step)
         interview.draft_version = version
-        interview.step = _later(interview.step, step)
 
-    await _update(engine, owner, interview_id, note)
+    await _update(engine, owner, interview_id, note, reopens=reopens)
 
 
 async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str,
@@ -3820,6 +4247,7 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
     _require_step(interview, RULE_STEPS)
+    reopens = interview.reopens
     answers, business_type = owner_rule_answers(interview.answers), interview.business_type
     cards = interview.draft_cards
     template = template_cards(business_type, answers)
@@ -3829,11 +4257,12 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
         today = now.astimezone(ZoneInfo(timezone)).date()
         held = await _put_parts(owner, desk_id, seed_parts(interview.answers, timezone, business_type=business_type,
                                                          today=today, publish_policies=setup_policy_claims_enabled))
-        await _update(engine, owner, interview_id, lambda current: current.hold_policies(held))
+        await _update(engine, owner, interview_id, lambda current: current.hold_policies(held), reopens=reopens)
 
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
             nonlocal cards                      # the first set keeps cards another request stored first
-            cards = await _store_cards(engine, owner, interview_id, drafted, replace_stored=bool(cards))
+            cards = await _store_cards(engine, owner, interview_id, drafted, replace_stored=bool(cards),
+                                       reopens=reopens)
             return await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
 
         version = await draft_cards(model, recorder(engine, owner, CARD_DRAFT_ROUTE), business_type, answers,
@@ -3841,9 +4270,9 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
     else:
         version = await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
     if (version is None or version.status == "rejected") and cards != template:
-        cards = await _store_cards(engine, owner, interview_id, template, replace_stored=bool(cards))
+        cards = await _store_cards(engine, owner, interview_id, template, replace_stored=bool(cards), reopens=reopens)
         version = checkable(await _post_draft(owner, desk_id, cards, answers.auto_money_cap_cents))
-    await _drafted(engine, owner, interview_id, version.version, "rules")
+    await _drafted(engine, owner, interview_id, version.version, "rules", reopens=reopens)
     return rules_draft(version, version_cap(version))
 
 
@@ -4018,7 +4447,8 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     built = [situation(number, draft, prices, answers.hours, timezone, now)
              for number, draft in enumerate(drafted.situations, 1)]
     results = await _run_probes(owner, desk_id, version, [each.probe for each in built])
-    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", _later(found.step, "situations")))
+    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", _later(found.step, "situations")),
+                  reopens=interview.reopens)
     by_id = {card.card_id: card for card in drafted_cards}
     return [SituationResult(situation=each, result=result, matches=situation_matches(each.expected, result, by_id))
             for each, result in zip(built, results, strict=True)]
@@ -4068,25 +4498,28 @@ def safety_probes(answers: SetupAnswers, prices: dict[str, int]) -> list[tuple[S
 
 async def safety_check(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SafetyCheck:
     """What a bad actor would try, against the draft: each row's outcome and reason are the kernel's, verbatim, and a
-    row is blocked only by an outcome that stops it and never when it depends on the reviewer."""
-    async with engine.connect() as conn:
-        interview = await _load(conn, owner.copy_id, interview_id)
-    desk_id = owner.desk(interview.desk_id)
-    _require_step(interview, RULE_STEPS, drafted=True)
-    listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
-    prices = {row["item_id"]: row["unit_cents"] for row in listed}
-    name = interview.answers.owner_display_name
-    built = safety_probes(owner_rule_answers(interview.answers), prices)
-    started = monotonic()
-    results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
-    seconds = round(monotonic() - started, 1)
-    rows = [SafetyRow(label=spec.label,
-                      tries=spec.tries.format(owner_intro=f"Hi, it's {name or 'the owner'}. "),
-                      result=result,
-                      blocked=result.outcome in spec.blocked_by and not result.depends_on_review)
-            for (spec, _), result in zip(built, results, strict=True)]
-    await _update(engine, owner, interview_id,
-                  lambda found: setattr(found, "step", _later(found.step, "safety_check")))
+    row is blocked only by an outcome that stops it and never when it depends on the reviewer. Held against a change
+    (`_transition`), it marks the safety check run only for the draft it tried: 409 `conflict` once the rules were
+    drafted again meanwhile, whose own check is still to run."""
+    with _transition(interview_id):
+        interview = await _read(engine, owner, interview_id)
+        desk_id = owner.desk(interview.desk_id)
+        _require_step(interview, RULE_STEPS, drafted=True)
+        listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
+        prices = {row["item_id"]: row["unit_cents"] for row in listed}
+        name = interview.answers.owner_display_name
+        built = safety_probes(owner_rule_answers(interview.answers), prices)
+        started = monotonic()
+        results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
+        seconds = round(monotonic() - started, 1)
+        rows = [SafetyRow(label=spec.label,
+                          tries=spec.tries.format(owner_intro=f"Hi, it's {name or 'the owner'}. "),
+                          result=result,
+                          blocked=result.outcome in spec.blocked_by and not result.depends_on_review)
+                for (spec, _), result in zip(built, results, strict=True)]
+        await _update(engine, owner, interview_id,
+                      lambda found: setattr(found, "step", _later(found.step, "safety_check")),
+                      reopens=interview.reopens, version=interview.draft_version)
     return SafetyCheck(rows=rows, blocked=sum(row.blocked for row in rows), total=len(rows), seconds=seconds)
 
 
@@ -4098,43 +4531,58 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
     since the draft (409), the same cards are drafted again on the rules now in force, and the new draft is raised
     (`RulesChangedSinceDraft`) for the owner to confirm instead. A draft the kernel already activated (a confirm
     whose answer was lost) moves setup on without activating anything again; any other draft that isn't proved is
-    409 `conflict`."""
-    async with engine.connect() as conn:
-        interview = await _load(conn, owner.copy_id, interview_id)
-    desk_id = owner.desk(interview.desk_id)
-    _require_step(interview, RULE_STEPS, drafted=True)
-    row = await owner.ro.one("policy_versions", desk_id=desk_id, version=interview.draft_version)
-    if row is not None and row["status"] == "active":     # a Desk has one active version: this draft is in force
-        await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
-        active = version_from_row(row)
-        await tell_cancelled_links(owner, engine, desk_id, active)
-        return active
-    if row is None or row["status"] != "proved":
-        raise ApiProblem(409, "conflict")
-    try:
-        active = await owner.kernel.call("POST /policy/confirm", PolicyConfirmRequest(
-            desk_id=desk_id, version=interview.draft_version))
-    except KernelFailed as refused:
-        if refused.code != "conflict":
-            raise
-        version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
-                                              owner_rule_answers(interview.answers).auto_money_cap_cents))
-        await _drafted(engine, owner, interview_id, version.version, "rules")
-        raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
-    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
+    409 `conflict`. Once "Change something" has reopened the questions, the rules are confirmed only after the safety
+    check has run again on their new draft (step `safety_check`), else 409 `conflict`. Held against a change
+    (`_transition`), it checks the step, the draft and the reopens before the kernel call and again as it writes."""
+    with _transition(interview_id):
+        interview = await _read(engine, owner, interview_id)
+        desk_id = owner.desk(interview.desk_id)
+        steps = ("safety_check", "preview") if interview.reopens else RULE_STEPS
+        _require_step(interview, steps, drafted=True)
+        reopens, drafted = interview.reopens, interview.draft_version
+
+        async def confirmed() -> None:
+            await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"),
+                          reopens=reopens, version=drafted, steps=steps)
+
+        row = await owner.ro.one("policy_versions", desk_id=desk_id, version=drafted)
+        if row is not None and row["status"] == "active":     # a Desk has one active version: this draft is in force
+            await confirmed()
+            active = version_from_row(row)
+            await tell_cancelled_links(owner, engine, desk_id, active)
+            return active
+        if row is None or row["status"] != "proved":
+            raise ApiProblem(409, "conflict")
+        try:
+            active = await owner.kernel.call("POST /policy/confirm", PolicyConfirmRequest(
+                desk_id=desk_id, version=drafted))
+        except KernelFailed as refused:
+            if refused.code != "conflict":
+                raise
+            version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
+                                                  owner_rule_answers(interview.answers).auto_money_cap_cents))
+            await _drafted(engine, owner, interview_id, version.version, "rules", reopens=reopens)
+            raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
+        await confirmed()
     await tell_cancelled_links(owner, engine, desk_id, active)
     return active
 
 
 async def go_live(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, public_origin: str) -> WentLive:
     """Turn Answering on once the rules are confirmed (step `preview`, else 409 `conflict`): the Desk answers the
-    public at its address (step `live`)."""
-    async with engine.connect() as conn:
-        interview = await _load(conn, owner.copy_id, interview_id)
-    desk_id = owner.desk(interview.desk_id)
-    _require_step(interview, ("preview",))
-    await owner.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=True), path={"id": desk_id})
-    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "live"))
+    public at its address (step `live`). Held against a change (`_transition`); one that still lands meanwhile (from
+    another process) is 409 `conflict`, and Answering goes off again, so the Desk never answers on the rules before it."""
+    with _transition(interview_id):
+        interview = await _read(engine, owner, interview_id)
+        desk_id = owner.desk(interview.desk_id)
+        _require_step(interview, ("preview",))
+        await owner.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=True), path={"id": desk_id})
+        try:
+            await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "live"),
+                          reopens=interview.reopens, version=interview.draft_version, steps=("preview",))
+        except ApiProblem:
+            await owner.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False), path={"id": desk_id})
+            raise
     slug = await _slug(owner, desk_id)
     return WentLive(public_url=f"{public_origin}/d/{slug}", slug=slug)
 
@@ -4145,10 +4593,14 @@ async def go_live(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, publi
 async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
                       business_tools_enabled: bool = False) -> SetupTools:
     """The new Desk's tools as the kernel lists them, each with the active rules' cards that cover it, and the mock
-    payments server while it isn't connected."""
+    payments server while it isn't connected. Payment tools a change took away but that publishing the plan couldn't
+    switch off are switched off first (`_switch_off_payments`); a failure there is this read's error."""
     async with engine.connect() as conn:
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
+    if interview.step != "questions" and _removed_payments(interview):
+        interview.business_tools_enabled = business_tools_enabled
+        await _switch_off_payments(owner, engine, interview)    # its first try failed: tried again, or the read fails
     if (business_tools_enabled and interview.step != "questions"
             and any(job.config is not None for job in accepted_jobs(interview))
             and not await owner.ro.rows("tools", desk_id=desk_id, source="business")):
