@@ -1705,7 +1705,7 @@ describe('taking over', () => {
     expect(agent.events.map(({ ev }) => ev.type)).toEqual(['owner_joined', 'owner_left']);
   });
 
-  it.each(['empty', 'owner_answered', 'claude'] as const)('hand_back_starts_nothing_after_%s', async (latest) => {
+  it.each(['empty', 'owner_answered', 'owner', 'claude'] as const)('hand_back_starts_nothing_after_%s', async (latest) => {
     const { session, events } = await openChat();
     const params = { session_id: session.session_id };
     if (latest === 'claude') {
@@ -1713,8 +1713,8 @@ describe('taking over', () => {
       await drain();
     }
     expect((await call('takeover', { params, body: { generation: session.generation } })).status).toBe(200);
-    if (latest === 'owner_answered') {
-      await send('Do you work in Alameda?');
+    if (latest === 'owner_answered') await send('Do you work in Alameda?');
+    if (latest === 'owner_answered' || latest === 'owner') {
       expect((await call('ownerMessage', { params, body: { kind: 'say', text: 'Yes, we do.' } })).status).toBe(200);
     }
     const before = events.length;
