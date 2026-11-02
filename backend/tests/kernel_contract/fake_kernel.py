@@ -61,7 +61,7 @@ contract test, before the task that first uses them.
   summary. A document link serves its bytes once within a day. A payment link, for the session's own current quote at
   its amount under the seed's `rv-link` card, is read, completed (a `charge` fact and the kernel's `payment_confirmed`
   verdict) or cancelled by its token alone; anything but `issued` is 409 `conflict`. A link whose quote another
-  payment has paid (a mandate charge, or another of its links) is cancelled when it is next read or completed,
+  payment has paid (a mandate charge, or another of its links) is cancelled when it is next read, completed or reached by an activation,
   ledgered `quote_paid` with no `cancel_reason`, since it can never be paid now. Tokens are kept in memory,
   never mirrored. `PaymentLinkView` serves the contract's fields: the Desk's business name, the verified customer
   by first name and last initial while the link is issued, and `cancel_reason` `rules_changed` for a link a rule
@@ -214,6 +214,8 @@ from desk.contracts import (
 from desk.kernel_api import (
     KERNEL_ROUTES,
     TURN_TEXT_CHARS,
+    AgentAbility,
+    AgentOutcome,
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
@@ -393,6 +395,8 @@ RIVERA_CARDS = [
           hours=RIVERA_HOURS[1], review=True),
     _card("rv-docs", "native.release_document", "auto", "record_owner",
           "Customers get their own documents after confirming it's them."),
+    _card("rv-charges", "payments.list_charges", "auto", "record_owner",
+          "Customers see their own past payments after confirming it's them."),
     _card("rv-link", "native.payment_link", "auto", "anyone", "Payment links for quotes up to $300, checked by the "
           "reviewer.", max_amount_cents=30_000, review=True),
     _card("rv-mandate", "native.charge_mandate", "auto", "anyone",
@@ -666,14 +670,14 @@ WEEKDAYS = {"en": ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satu
 AGENT_TOOLS = {
     "en": {"native.quote": "Get a quote from the price list", "native.find_slots": "Find open times",
            "native.book": "Book a visit", "native.payment_link": "Get a payment link for a quote",
-           "native.charge_mandate": "Pay for a quote within the limit of a signed mandate",
+           "native.charge_mandate": "Pay for a quote within a signed limit",
            "native.capture_lead": "Leave contact details", "native.request_callback": "Ask for a callback",
            "native.start_verification": "Verify a customer with a code sent to their contact on record",
            "native.release_document": "Receive a verified customer's own documents",
            "payments.list_charges": "List a verified customer's own charges"},
     "es": {"native.quote": "Pedir una cotización de la lista de precios", "native.find_slots": "Buscar horarios libres",
            "native.book": "Reservar una visita", "native.payment_link": "Pedir un enlace de pago para una cotización",
-           "native.charge_mandate": "Pagar una cotización dentro del límite de un mandato firmado",
+           "native.charge_mandate": "Pagar una cotización dentro de un límite firmado",
            "native.capture_lead": "Dejar datos de contacto",
            "native.request_callback": "Pedir que te devuelvan la llamada",
            "native.start_verification": "Verificar a un cliente con un código enviado a su contacto registrado",
@@ -682,10 +686,51 @@ AGENT_TOOLS = {
 }
 
 
-def agent_card(language: str, tools: set[str]) -> list[RenderedBlock]:
+# What happens when an agent asks for each ability, in the kernel's words beside it (`render.en`, `render.es`).
+AGENT_OUTCOMES = {"en": {"allowed": "Allowed", "asks_first": "Asks first", "never": "Never"},
+                  "es": {"allowed": "Permitido", "asks_first": "Pregunta primero", "never": "Nunca"}}
+
+
+def agent_card(language: str, tools: set[str], outcomes: dict[str, AgentOutcome]) -> list[AgentAbility]:
     """The Agent Card in `language`: the kernel's prose blocks, one for each of `tools` an agent may ask for there, by
-    its label in the card's order, and none when there are none."""
-    return [RenderedBlock(kind="prose", text=label) for tool, label in AGENT_TOOLS[language].items() if tool in tools]
+    its label in the card's order, each with its outcome from `outcomes` and the words for it, and none when there are
+    none."""
+    return [AgentAbility(kind="prose", text=label, outcome=outcomes[tool],
+                         outcome_text=AGENT_OUTCOMES[language][outcomes[tool]])
+            for tool, label in AGENT_TOOLS[language].items() if tool in tools]
+
+
+# The abilities whose label names a verified customer: their outcome is read for that customer, so cards for verified
+# people and record owners count there too (the kernel's `public.STANDING`); every other reads the cards for anyone.
+VERIFIED_CUSTOMER_TOOLS = frozenset({"native.release_document", "payments.list_charges"})
+
+
+def agent_outcomes(cards: list[RuleCard], tools: dict[str, ToolProfile], asked: set[str]) -> dict[str, AgentOutcome]:
+    """Each of `asked`'s outcome for an agent with no standing of its own, by the cards for anyone (the kernel's
+    `compiler.outcome_for`, mirrored here), and for a verified customer's own documents and charges by the cards for
+    verified people and record owners too, never a person's or an agent key's: a never card on the tool or one of its
+    effects refuses it; an auto card on the tool, or auto effect cards naming every one of its effects, allows it
+    unless an ask card at its specificity or above covers it; anything else asks first."""
+    outcomes: dict[str, AgentOutcome] = {}
+    for tool in asked:
+        standings = {"anyone", "verified", "record_owner"} if tool in VERIFIED_CUSTOMER_TOOLS else {"anyone"}
+        anyone = [card for card in cards if card.who in standings and not card.is_default]
+        effects = set(tools[tool].effects)
+
+        def on(card: RuleCard) -> bool:
+            return card.applies_to == tool or card.applies_to in {f"effect:{effect}" for effect in effects}
+
+        if any(card.mode == "never" and on(card) for card in anyone):
+            outcomes[tool] = "never"
+            continue
+        asks = [card for card in anyone if card.mode == "ask" and on(card)]
+        autos = [card for card in anyone if card.mode == "auto" and card.applies_to == tool]
+        by_effect = [card for card in anyone if card.mode == "auto" and card.applies_to.startswith("effect:") and on(card)]
+        if effects and {card.applies_to.removeprefix("effect:") for card in by_effect} == effects:
+            autos += by_effect
+        allowed = any(all(_specificity(ask) < _specificity(card) for ask in asks) for card in autos)
+        outcomes[tool] = "allowed" if allowed else "asks_first"
+    return outcomes
 
 
 def open_window(hours: list[HoursWindow], tz: ZoneInfo, now: datetime) -> tuple[bool, datetime | None, datetime] | None:
@@ -2386,7 +2431,8 @@ class FakeKernelState:
         while refused := public_policy_fields([
                 (block.fact_id, block.text) for block in charter if block.template == "policy"]):
             charter = [block for block in charter if block.fact_id not in refused]
-        card = agent_card(language, self._agent_tools(desk))
+        tools = self._agent_tools(desk)
+        card = agent_card(language, tools, agent_outcomes(desk.cards, desk.tools, tools))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
                           owner_display_name=desk.owner_display_name, brand=effective_brand(desk.brand), charter=charter,
                           agent_card=card, open_status=self._open_status(desk, language),
@@ -4132,12 +4178,18 @@ class FakeKernelState:
         return self._policy_version(desk, record)
 
     def _cancel_disallowed_links(self, desk: Desk) -> list[str]:
-        """Activation rechecks auto-allowed links; single-use owner approvals survive a rule change."""
+        """Activation rechecks auto-allowed links; single-use owner approvals survive a rule change. A link whose
+        quote another payment has paid is cancelled for that first, whatever the rules say or who approved it
+        (`_settle_paid_quote`, naming the version): no `cancel_reason`, so no chat line. Unlike the kernel, this
+        activation has no expiry or mandate-expiry move of its own, so a paid quote's link past its expiry or
+        mandate reads `cancelled` here where the kernel would expire it or cancel it for its mandate."""
         decisions = {record.decision.action.action_id: record for record in self.decisions.values()
                      if record.decision.action is not None and record.decision.outcome == "allow"}
         cancelled = []
         for link in self.payment_links.values():
-            if link.desk_id != desk.desk_id or link.state != "issued" or link.action_id not in decisions:
+            if link.desk_id != desk.desk_id or link.state != "issued":
+                continue
+            if self._settle_paid_quote(link, version=desk.policy_version) or link.action_id not in decisions:
                 continue
             record = decisions[link.action_id]
             action = record.decision.action
@@ -4620,13 +4672,18 @@ class FakeKernelState:
         self.append(desk, "payment", {"link_id": link.link_id, "state": state, **summary},
                     session_id=link.session_id)
 
-    def _settle_paid_quote(self, link: PaymentLink) -> None:
-        """An `issued` link whose quote another payment has paid can never be paid: a read or a completion cancels
-        it, with no `cancel_reason` and no chat line, ledgered `{link_id, state: "cancelled", reason: "quote_paid"}`,
-        as the kernel's read (`reconcile_link`) and its completion's quote check do."""
+    def _settle_paid_quote(self, link: PaymentLink, *, version: int | None = None) -> bool:
+        """An `issued` link whose quote another payment has paid can never be paid: a read, a completion or an
+        activation (of `version`, which the entry and the link name) cancels it, with no `cancel_reason` and no chat
+        line, ledgered `{link_id, state: "cancelled", reason: "quote_paid"}`, as the kernel's read
+        (`reconcile_link`), its completion's quote check and its activation do. Whether it moved the link."""
         quote = self.quotes.get(link.quote_id)
         if link.state == "issued" and quote is not None and quote["status"] == "paid":
-            self._move_link(link, "cancelled", reason="quote_paid")
+            if version is not None:
+                link.cancelled_by_version = version
+            self._move_link(link, "cancelled", reason="quote_paid", **({} if version is None else {"version": version}))
+            return True
+        return False
 
     def _issued(self, link: PaymentLink, step: str) -> None:
         """Completing or cancelling needs an `issued` link; anything else is 409 `conflict`, ledgered."""
@@ -4682,7 +4739,8 @@ class FakeKernelState:
         session, and the answer carries the kernel's `payment_confirmed` verdict for that session at its current
         generation, ledgered `reply` by the Desk, in any mode (`deliver()` decides whether it is shown)."""
         link = self._payment_link(request)
-        self._settle_paid_quote(link)
+        if self._settle_paid_quote(link):
+            raise Refusal(409, "conflict")              # one `payment` entry, the cancel, as the kernel's C2 writes
         self._issued(link, "complete")
         desk, session = self.desks[link.desk_id], self.sessions[link.session_id]
         charge_id = new_id("charge")
