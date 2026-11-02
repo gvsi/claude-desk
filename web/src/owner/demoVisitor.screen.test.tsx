@@ -5,13 +5,13 @@
  * its conversation with Stop, and how the note says it ended.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Locator } from 'vitest/browser';
+import { userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const CARD_TITLE = 'Watch a demo visitor';
@@ -118,6 +118,7 @@ describe('Demo visitor', () => {
     expect(router.state.location.pathname).toBe(TODAY);
     expect(demoChats()).toHaveLength(0);
     expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
 
     // The next try goes through.
     await startControl(things, viewport).click();
@@ -193,7 +194,9 @@ describe('Demo visitor', () => {
     await expect.element(head).toBeVisible();
     const pills = [...head.element().closest('header')!.querySelectorAll('.cd-pill')].map((el) => el.textContent);
     expect(pills).toEqual(['Public', 'Demo visitor']);
+    await expect.element(demoNote(screen)).toMatchTextContent(NOTE);
     expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it.each(['desktop', 'phone'] as const)('the_note_says_who_plays_it_and_stop_ends_it_on_%s', async (viewport: Viewport) => {
@@ -272,5 +275,42 @@ describe('Demo visitor', () => {
     expect(pill.closest('.cd-approval-card__top')).not.toBeNull();
     expect(tagged[0]!.textContent).toContain('Could I get 10% off as a returning customer?');
     expectNoHorizontalScroll();
+  });
+
+  it('the_card_and_stop_take_the_keyboard_by_their_names', async () => {
+    const { screen, router } = await renderRoute(TODAY);
+    const things = region(screen, 'Things to try');
+    const start = things.getByRole('button', { name: 'Start a demo visitor', exact: true });
+    await expect.element(start).toBeVisible();
+    // The card's button is the stop after "Open your public page", and Enter starts it.
+    (things.getByRole('link', { name: 'Open your public page', exact: true }).element() as HTMLElement).focus();
+    await userEvent.tab();
+    await expect.element(start).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => router.state.location.pathname).toContain('/conversations/');
+
+    // In its conversation, Stop is the first stop after the conversation's name, named by its words.
+    const name = screen.getByRole('heading', { level: 2, name: 'Riley' });
+    const stop = screen.getByRole('button', { name: STOP, exact: true });
+    await expect.element(stop).toBeVisible();
+    (name.element() as HTMLElement).focus();
+    await userEvent.tab();
+    await expect.element(stop).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+    await expect.element(name).toHaveFocus();
+  });
+
+  it('on_a_phone_the_row_is_named_by_its_title_and_described_by_its_line', async () => {
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    const things = region(screen, 'Things to try');
+    const row = things.getByRole('button', { name: CARD_TITLE, exact: true });
+    await expect.element(row).toBeVisible();
+    await expect.element(row).toHaveAccessibleDescription(CARD_DETAIL);
+    // After a start that failed, the row is described by the line that says so.
+    mockStore.inject({ route: 'startDemoVisitor', status: 503, body: { error: 'demo_budget' } });
+    await row.click();
+    await expect.element(things.getByRole('alert')).toHaveTextContent(START_FAILED);
+    await expect.element(row).toHaveAccessibleDescription(START_FAILED);
   });
 });
