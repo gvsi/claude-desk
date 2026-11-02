@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy import text as sql
 
 from desk.api import proving, setup
-from desk.api.prompts import QUESTIONS, DraftedSituations
+from desk.api.prompts import QUESTIONS, DraftedSituations, JobDraft, question_text
 from tests.api.fakes import gated, unavailable
 from tests.api.test_setup_questions import Owner, answer, next_step, stored as stored_questions, structured, turn, until
 from tests.api.test_setup_rules import (  # noqa: F401  (the app and model fixtures)
@@ -26,8 +26,10 @@ from tests.api.test_setup_rules import (  # noqa: F401  (the app and model fixtu
     HOURS,
     SITUATIONS,
     app,
+    business_jobs,
     drafted,
     drafted_rules,
+    finish_business_jobs,
     model,
     policy,
     ready,
@@ -42,10 +44,11 @@ def reopen_path(state: dict) -> str:
     return f"/api/owner/setup/{state['interview_id']}/reopen"
 
 
-async def reopen(owner: Owner, state: dict, text: str = CHANGE, *, key: str | None = None) -> httpx.Response:
+async def reopen(owner: Owner, state: dict, text: str = CHANGE, *, key: str | None = None,
+                 cards: bool = False) -> httpx.Response:
     """The owner's change, sent from a step after the questions with its own idempotency key."""
-    return await owner.browser.post(reopen_path(state), json={"text": text,
-                                                              "idempotency_key": key or secrets.token_hex(8)})
+    return await owner.browser.post(reopen_path(state) + ("?cards=1" if cards else ""),
+                                    json={"text": text, "idempotency_key": key or secrets.token_hex(8)})
 
 
 async def at_step(owner: Owner, model, state: dict, step: str) -> None:
@@ -469,3 +472,164 @@ async def test_an_abandoned_reopen_is_recovered_and_the_same_send_can_run_again(
     assert [message["text"] for message in recovered.json()["messages"]].count(CHANGE) == 1
     row = await stored(engine, state["interview_id"])
     assert row["draft_cards"] == [] and row["draft_version"] is None
+
+
+# Changes to the plan and the facts the owner gave before. Nothing the owner asks for is dropped while Claude's reply
+# says it was noted: the change lands, or code asks the question or shows the card that records it.
+
+@pytest.mark.parametrize(("said", "field", "value", "home"), [
+    ("We cover Brooklyn now too.", "service_area", "Oakland, Berkeley and Brooklyn", "hours_and_area"),
+    ("We install water softeners now as well.", "summary",
+     "Turner Plumbing fixes leaks and water heaters and installs water softeners around Oakland.", "what_you_do"),
+])
+async def test_a_change_to_a_fact_another_question_records_is_asked_on_that_question(
+        app, browser, kernel_http, model, engine, said, field, value, home):
+    # The contact question's turn can't replace the owner's own service area or summary: free text is never taken off
+    # its topic. So code asks that fact's own question next, after Claude's reply, and the owner's answer there
+    # records it.
+    owner, state = await ready(app, browser, kernel_http, model)
+    await at_step(owner, model, state, "situations")
+    before = (await stored(engine, state["interview_id"]))["answers"][field]
+    model.add(turn("Noted.", **{field: value}, next={"kind": "done"}, plan="Your Desk books weekday visits."))
+    changed = await reopen(owner, state, said)
+    assert changed.status_code == 200, changed.text
+    body = changed.json()
+    assert (body["step"], body["question"]) == ("questions", home)
+    assert [message["text"] for message in body["messages"][-2:]] == ["Noted.", question_text(home, "trade")]
+    assert (await stored(engine, state["interview_id"]))["answers"][field] == before
+
+    reply = await answer(owner, model, state["interview_id"], said, turn(**{field: value}, next={"kind": "done"}))
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    assert (await stored(engine, state["interview_id"]))["answers"][field] == value
+
+
+# `business_jobs`' cards: repair requests, urgent help, a visit (declined) and answering questions.
+JOB_IDS = [f"p-{index:012x}" for index in range(4)]
+TOOLS = "PUT /desks/{id}/business_tools"
+ASK_REFUNDS = GOOD_CARDS[-1]       # a card that fits a setup with no limits answered
+
+
+async def with_jobs(app, browser, kernel_http, model, engine):
+    """An owner on the web's client, which shows cards, whose setup closed with `business_jobs`' four jobs, each
+    decided by the owner on its card (the third declined): at the Tools step, with the accepted jobs' tools."""
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, state["interview_id"])
+        for entry in interview.transcript:
+            if entry.role == "owner":
+                entry.cards = True
+        interview.transcript += [setup.Entry(role="claude", text="", card=card.model_copy(deep=True),
+                                             owner_decided=True) for card in interview.transcript[-1].planned]
+        await setup._save(conn, interview)
+    await finish_business_jobs(owner, state, model)
+    return owner, state, jobs
+
+
+def cards_of(body: dict, proposal_id: str) -> list[dict]:
+    return [message["card"] for message in body["messages"]
+            if message["card"] is not None and message["card"]["proposal_id"] == proposal_id]
+
+
+async def decide(owner: Owner, model, state: dict, proposal_id: str, accept: bool, *, closes: bool = False):
+    """The owner's click on the waiting card; Claude has nothing more to ask, and when `closes`, writes the plan."""
+    model.add(next_step("what_you_do", next={"kind": "done"}))
+    if closes:
+        model.add(next_step("what_you_do", next={"kind": "done"}, plan="Your Desk flags urgent help."))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/proposals/{proposal_id}?cards=1",
+                                     json={"accept": accept})
+    assert reply.status_code == 200, reply.text
+    return reply.json()
+
+
+def drafted_jobs(model) -> str:
+    """What the last rules draft was told of the owner's jobs: its one message, as text."""
+    request = [request for request in model.requests if request.route == "card_draft"][-1]
+    return json.dumps(request.messages)
+
+
+async def test_dropping_a_job_the_owner_accepted_asks_them_on_its_card_again(
+        app, browser, kernel_http, model, engine, fake):
+    # Claude drops the job, as the owner asked: code doesn't take a job the owner accepted on Claude's word, but shows
+    # its card again for the owner to decide. Their no lands: the tool goes, and the rules are drafted without it.
+    owner, state, jobs = await with_jobs(app, browser, kernel_http, model, engine)
+    writes = len(fake.called(TOOLS))
+    model.add(turn("Okay, no more repair requests.", drop=[JOB_IDS[0]], next={"kind": "done"}))
+    changed = await reopen(owner, state, "Remove the repair intake job.", cards=True)
+    assert changed.status_code == 200, changed.text
+    body = changed.json()
+    card = body["messages"][-1]["card"]
+    assert (body["step"], body["pending_card"]) == ("questions", card["proposal_id"])
+    assert card["proposal_id"] != JOB_IDS[0]
+    assert (card["state"], card["job"]["title"]) == ("proposed", jobs[0].title)
+    assert body["messages"][-2]["text"] == "Okay, no more repair requests."
+    earlier = cards_of(body, JOB_IDS[0])
+    assert earlier and all((each["state"], each["superseded_by"]) == ("changed", card["proposal_id"])
+                           for each in earlier)
+
+    landed = await decide(owner, model, state, card["proposal_id"], False, closes=True)
+    assert landed["step"] == "tools"
+    current = await setup._read(engine, owner, state["interview_id"])
+    assert [job.title for job in setup.accepted_jobs(current)] == [jobs[1].title, jobs[3].title]
+    (write,) = fake.called(TOOLS)[writes:]
+    assert [tool["title"] for tool in write.body["tools"]] == [jobs[1].title]
+
+    await drafted_rules(owner, model, state, ASK_REFUNDS)
+    assert jobs[0].title not in drafted_jobs(model) and jobs[1].title in drafted_jobs(model)
+
+
+async def test_dropping_every_job_asks_each_card_and_takes_every_tool_away(
+        app, browser, kernel_http, model, engine, fake):
+    owner, state, jobs = await with_jobs(app, browser, kernel_http, model, engine)
+    writes = len(fake.called(TOOLS))
+    model.add(turn("Okay, I'll stop all of those.", drop=[JOB_IDS[0], JOB_IDS[1], JOB_IDS[3]],
+                   next={"kind": "done"}))
+    changed = await reopen(owner, state, "Don't do any of those jobs, just answer the phone.", cards=True)
+    assert changed.status_code == 200, changed.text
+    body = changed.json()
+    for index, kept in enumerate((0, 1, 3)):
+        card = body["messages"][-1]["card"]
+        assert (card["state"], card["job"]["title"]) == ("proposed", jobs[kept].title)
+        assert body["pending_card"] == card["proposal_id"]
+        body = await decide(owner, model, state, card["proposal_id"], False, closes=index == 2)
+    assert body["step"] == "tools"
+    current = await setup._read(engine, owner, state["interview_id"])
+    assert setup.accepted_jobs(current) == []
+
+    # The empty batch goes out, so the tools published before are taken away.
+    (write,) = fake.called(TOOLS)[writes:]
+    assert write.body == {"tools": []}
+    tools = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")).json()["tools"]
+    assert not [row for row in tools if row["source"] == "business" and row["status"] != "disabled"]
+    await drafted_rules(owner, model, state, ASK_REFUNDS)
+    assert not any(job.title in drafted_jobs(model) for job in jobs)
+
+
+async def test_a_new_job_of_the_kind_of_one_the_owner_accepted_replaces_it(
+        app, browser, kernel_http, model, engine, fake):
+    # Claude changes the repair requests job by planning another of its kind: the one the owner accepted is changed
+    # to it, never kept beside it, and the new one is shown for the owner to decide.
+    owner, state, jobs = await with_jobs(app, browser, kernel_http, model, engine)
+    writes = len(fake.called(TOOLS))
+    photos = JobDraft(job="intake", title="Repair requests with photos", who="", why="See the problem first",
+                      how="Ask what needs repair and for a photo of it.", autonomy="ask",
+                      config={"block": "intake", "questions": ["What needs repair?", "Can you send a photo?"]})
+    model.add(turn("I'll ask for a photo with each repair request.", add_jobs=[photos], next={"kind": "done"}))
+    model.add(next_step("what_you_do", next={"kind": "done"}))
+    changed = await reopen(owner, state, "Ask for a photo with repair requests.", cards=True)
+    assert changed.status_code == 200, changed.text
+    body = changed.json()
+    card = body["messages"][-1]["card"]
+    assert (card["state"], card["job"]["title"], body["pending_card"]) == (
+        "proposed", photos.title, card["proposal_id"])
+    assert all((each["state"], each["superseded_by"]) == ("changed", card["proposal_id"])
+               for each in cards_of(body, JOB_IDS[0]))
+
+    landed = await decide(owner, model, state, card["proposal_id"], True, closes=True)
+    assert landed["step"] == "tools"
+    current = await setup._read(engine, owner, state["interview_id"])
+    assert [job.title for job in setup.accepted_jobs(current)] == [jobs[1].title, jobs[3].title, photos.title]
+    (write,) = fake.called(TOOLS)[writes:]
+    assert [tool["title"] for tool in write.body["tools"]] == [jobs[1].title, photos.title]
+    await drafted_rules(owner, model, state, ASK_REFUNDS)
+    assert jobs[0].title not in drafted_jobs(model) and photos.title in drafted_jobs(model)

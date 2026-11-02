@@ -2190,6 +2190,21 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey, *,
     return SetupAnswers.model_validate(values)
 
 
+def _held_off_topic(before: SetupAnswers, after: SetupAnswers, patch: SetupPatch,
+                    key: QuestionKey) -> list[QuestionKey]:
+    """The questions that record the facts this turn's patch would change on them (`FACT_HOMES`), but which `merged`
+    kept off the answers on question `key`, as off its topic: each one once, in the patch's order."""
+    homes = []
+    for name in _fact_patch_fields(patch, key):
+        home = FACT_HOMES.get(name)
+        if home is None or home in homes or _on_topic(name, key) or getattr(after, name) != getattr(before, name):
+            continue
+        there = merged(before, SetupPatch.model_validate({name: getattr(patch, name)}), home)
+        if getattr(there, name) != getattr(before, name):
+            homes.append(home)
+    return homes
+
+
 async def _rename(owner: OwnerCtx, desk_id: str, patch: SetupPatch) -> None:
     """Send a new owner or business name the turn gave to the kernel (`PUT /desks/{id}/business`)."""
     name, owner_display_name = " ".join((patch.business_name or "").split()), reduce_name(patch.owner_display_name)
@@ -2456,13 +2471,47 @@ def _show_card(interview: Interview, card: ProposalCard) -> None:
 
 
 def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCard]:
-    """Record additions and valid drops even on a follow-up; return only items available before this turn."""
+    """Record additions and valid drops even on a follow-up; return only items available before this turn.
+
+    Once "Change something" reopened the questions, the plan can also change what the owner accepted, through the
+    cards that record it: a drop naming an accepted job or connector changes it to a fresh copy of its card, which
+    waits for the owner's decision and is available at once (a job the owner took isn't removed on Claude's word
+    alone); and a job added of an accepted job's kind replaces it (`changed`), never sitting beside it."""
     available = interview.unshown
     if source is not None:
         available_ids = {card.proposal_id for card in available}
         reply.dropped = list(dict.fromkeys(proposal_id for proposal_id in source.drop if proposal_id in available_ids))
         reply.planned = [card for draft in source.add_jobs if (card := _planned_job(interview, draft)) is not None]
+        if interview.reopens:
+            for added in list(reply.planned):
+                for kept in _accepted_cards(interview):
+                    if kept.job is not None and kept.job.job == added.job.job:
+                        _supersede(interview, kept.proposal_id, added.proposal_id)
+            for proposal_id in dict.fromkeys(source.drop):
+                kept = next((card for card in _accepted_cards(interview) if card.proposal_id == proposal_id), None)
+                if kept is None:
+                    continue
+                again = kept.model_copy(deep=True, update={"proposal_id": new_proposal_id(), "state": "proposed"})
+                if again.connector is not None:
+                    again.connector.connected = False
+                _supersede(interview, kept.proposal_id, again.proposal_id)
+                reply.planned.append(again)
+                available.append(again)
     return available
+
+
+def _accepted_cards(interview: Interview) -> list[ProposalCard]:
+    """The plan's jobs and connectors the owner has: each card's current copy, accepted."""
+    return [card for card in interview.planned if card.state == "accepted"]
+
+
+def _supersede(interview: Interview, proposal_id: str, replacement: str) -> None:
+    """Change every copy of card `proposal_id`, planned or shown, to a reference to card `replacement`."""
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if card.proposal_id == proposal_id:
+                card.state = "changed"
+                card.superseded_by = replacement
 
 
 def _decide_typed(interview: Interview, proposal_id: str, accept: bool) -> bool:
@@ -2632,9 +2681,22 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             continue
         elif name not in updated.suggested_fields:
             updated.suggested_fields.append(name)
+    # Once "Change something" reopened the questions, a change to a fact this question doesn't record, which
+    # `merged` kept out of the answers (free text is never taken off its topic), is asked on the question that records
+    # it, right after Claude's reply: the owner's words then land there instead of being dropped.
+    held = _held_off_topic(interview.answers, updated, patch, key) if interview.reopens else []
     interview.answers = updated
     interview.transcript += entries
-    if turn.step_done:
+    if held:
+        if turn.step_done:
+            interview.cover([key])
+        if not any(entry is reply for entry in interview.transcript):
+            interview.transcript.append(reply)
+        _record_plan(interview, turn, reply)
+        asked = _ask(interview, held[0])
+        replies.before(asked.question)
+        interview.transcript.append(asked)
+    elif turn.step_done:
         interview.cover([key])
         following = await _next_step(ctx, engine, model, interview) if key in LIMIT_CHOICES else turn
         next_reply = reply
@@ -3097,7 +3159,8 @@ async def _put_test_client(owner: OwnerCtx, engine: AsyncEngine, interview: Inte
 
 async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
     """Publish accepted configurations as one batch for the owner's tool review. When the kernel refuses the batch
-    and names some of its tools, publish it once more without them; any other refusal is raised."""
+    and names some of its tools, publish it once more without them; any other refusal is raised. An empty batch goes
+    out only while the Desk has business tools from before (a change that dropped every job): it takes them away."""
     tools = []
     used = set()
     configured = [job for job in accepted_jobs if job.config is not None]
@@ -3117,7 +3180,8 @@ async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list
         tools.append({"tool": f"desk.{name}", "title": job.title[:60],
                       "description": " ".join(job.how.split())[:300],
                       "config": job.config.model_dump(mode="json")})
-    if not tools:
+    if not tools and all(row["status"] == "disabled"
+                         for row in await owner.ro.rows("tools", desk_id=desk_id, source="business")):
         return
     try:
         await owner.kernel.call("PUT /desks/{id}/business_tools",
