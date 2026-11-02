@@ -739,8 +739,7 @@ async def handback(session_id: SessionId, body: GenerationIn,
                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SessionState:
     """Hand a conversation the owner took over back to Claude, at the generation the owner last read: the kernel
     moves it to mode `ai` (a new generation), the visitor sees the owner leave, and Claude reads that the owner handed
-    it back. Work that waited for the owner (an unanswered visitor line, an answered request's outcome, a whisper)
-    wakes Claude, whose turn runs
+    it back. Work that waited for the owner (an answered request's outcome, a whisper) wakes Claude, whose turn runs
     with the visitor's credential once it is present: the open stream or the next request."""
     return await _change_mode(ctx, session_id, "ai", body.generation)
 
