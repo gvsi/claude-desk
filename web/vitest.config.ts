@@ -67,7 +67,16 @@ export default defineConfig(async (env) =>
                 headless: true,
                 provider: playwright({ contextOptions: { ...DARK, reducedMotion: 'reduce' } }),
                 viewport: { width: 1280, height: 820 },
-                instances: [{ browser: 'chromium' }],
+                instances: [
+                  { browser: 'chromium', exclude: [...configDefaults.exclude, 'src/ds/test/scrollbar.browser.test.tsx'] },
+                  {
+                    browser: 'chromium',
+                    name: 'ds-browser (visible scrollbars)',
+                    include: ['src/ds/test/scrollbar.browser.test.tsx'],
+                    // Native-scrollbar regressions need real gutters; other fixtures keep their usual browser.
+                    provider: playwright({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] }, contextOptions: { ...DARK, reducedMotion: 'reduce' } }),
+                  },
+                ],
               },
             },
           },
