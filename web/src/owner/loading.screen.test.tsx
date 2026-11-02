@@ -309,6 +309,8 @@ it.each([
   // the Desks arrive; the card then lands where its shape was.
   const state = await deskLeftAtRules();
   const today = `/app/${state.desk_id}/today`;
+  // A Desk this browser saw that the copy no longer has is dropped as the unfinished one is kept.
+  writeLocal('todaySetup', JSON.stringify({ 'desk-gone': { step: 'rules', answering: false, business: 'Old Plumbing' } }));
   const first = await renderRoute(today, { viewport: { width, height } });
   await expect.element(first.screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true })).toBeVisible();
   expect(JSON.parse(readLocal('todaySetup') ?? '{}'), 'only the unfinished Desk is remembered').toEqual({
@@ -352,7 +354,15 @@ it('a_desk_no_longer_in_the_copy_is_forgotten_once_the_desks_are_read', async ()
   await cleanup();
   for (const bad of ['not json', '[1]', JSON.stringify({ [RIVERA.deskId]: { step: 'live', answering: true, business: 'x' } })]) {
     writeLocal('todaySetup', bad);
+    // While the Desks are read, an unreadable record draws no card on the loading page.
+    const desks = holdReads(ROUTES.desks.path);
+    onTestFinished(desks.release);
     const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+    await nextFrames();
+    expect(document.querySelector('.cd-owner-opening'), bad).not.toBeNull();
+    expect(document.querySelector('.cd-owner-opening .cd-continue-setup'), bad).toBeNull();
+    desks.release();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
     expect(document.querySelector('.cd-continue-setup'), bad).toBeNull();
     await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
