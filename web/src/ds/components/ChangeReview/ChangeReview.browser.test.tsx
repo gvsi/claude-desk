@@ -123,7 +123,7 @@ it('tool_titles_in_a_rows_title_and_its_targets_are_user_text', () => {
       after: { ...side, appliesTo: { titles: ['Quote', TITLE] } },
       changed: ['applies_to'],
     },
-    // An added rule, with its target on the meta line, and a tool turned on.
+    // An added rule, its tools on a meta line of their own under its words, and a tool turned on.
     { key: 'added', change: 'added', title: { titles: [TITLE] }, before: null, after: { ...side, appliesTo: { titles: [TITLE] } }, changed: [] },
     { key: 'on', change: 'turned_on', title: { titles: [TITLE] }, before: null, after: side, changed: [] },
     // A group's words are the app's own, so they stay plain.
@@ -137,6 +137,17 @@ it('tool_titles_in_a_rows_title_and_its_targets_are_user_text', () => {
   const targets = [...container.querySelectorAll('.cd-change-review__target')].map((el) => el.textContent);
   expect(targets).toEqual(['Quote', `Quote and ${TITLE} Changed`, TITLE, 'Every tool that charges money']);
   const metas = [...container.querySelectorAll('.cd-change-review__row > .cd-change-review__body > .cd-change-review__meta')].map((el) => el.textContent);
-  expect(metas).toEqual(['Shared rule', `${TITLE} · Anyone`, 'Anyone', 'Shared rule · Every tool that charges money · Anyone']);
+  expect(metas).toEqual(['Shared rule', 'Anyone', TITLE, 'Anyone', 'Shared rule · Every tool that charges money · Anyone']);
+  // Each title starts its line set off as user text, its own isolated run: never mid-line.
+  const setOff = [...container.querySelectorAll('[data-copy="user"]')];
+  expect(setOff.length).toBeGreaterThan(0);
+  for (const title of setOff) {
+    expect(title.classList.contains('cd-user-name'), title.textContent ?? '').toBe(true);
+    expect(getComputedStyle(title).unicodeBidi).toBe('isolate');
+  }
+  // Every line that names tools starts with its first title.
+  for (const line of new Set(setOff.map((title) => title.closest('p')))) {
+    expect(line?.textContent?.startsWith(line.querySelector('[data-copy="user"]')?.textContent ?? '-'), line?.textContent ?? '').toBe(true);
+  }
   expect(container.querySelector('.cd-change-review__row:last-child [data-copy="user"]')).toBeNull();
 });

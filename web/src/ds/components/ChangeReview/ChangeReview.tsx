@@ -140,9 +140,11 @@ function Target({ target }: { target: RuleTarget }) {
 const SHARED_RULE = 'Shared rule';
 
 /**
- * The connector's name, then "Shared rule" for a shared rule, then what the rule applies to, then
- * the side's words, joined by " · ". A built-in connector is named alone; an external one keeps its
- * Mock badge (`ConnectorName`), so a mock is never named without saying so.
+ * The connector's name, then "Shared rule" for a shared rule, then a group's words the rule applies
+ * to, then the side's words, joined by " · ". A rule that applies to tools by title names them on a
+ * line of their own under it, set off as user text, so no title sits mid-line. A built-in connector is
+ * named alone; an external one keeps its Mock badge (`ConnectorName`), so a mock is never named
+ * without saying so.
  */
 function MetaLine({
   connector,
@@ -165,25 +167,29 @@ function MetaLine({
   // The review's rows name the connector without "Built in"; an app keeps its Mock badge.
   if (connector) parts.push(<ConnectorName key="connector" connector={connector} size="inline" hideBuiltIn />);
   if (shared) parts.push(<span key="shared">{SHARED_RULE}</span>);
-  if (says(appliesTo)) {
-    parts.push(
-      <span key="target">
-        <Target target={typeof appliesTo === 'string' ? appliesTo.trim() : appliesTo} />
-      </span>,
-    );
-  }
+  if (says(appliesTo) && typeof appliesTo === 'string') parts.push(<span key="target">{appliesTo.trim()}</span>);
   if (text !== '') parts.push(<span key="words">{text}</span>);
-  if (parts.length === 0) return null;
+  const className = `cd-change-review__meta cd-type-meta${strong ? ' cd-change-review__strong' : ''}`;
+  const titles =
+    says(appliesTo) && typeof appliesTo !== 'string' ? (
+      <p className={className}>
+        <ToolTitleList titles={appliesTo.titles} />
+      </p>
+    ) : null;
+  if (parts.length === 0) return titles;
   return (
-    <p className={`cd-change-review__meta cd-type-meta${strong ? ' cd-change-review__strong' : ''}`}>
-      {parts.flatMap((part, index) => (index === 0 ? [part] : [<span key={`sep-${index}`}> · </span>, part]))}
-      {tag ? (
-        <>
-          {' '}
-          <ChangedTag />
-        </>
-      ) : null}
-    </p>
+    <>
+      <p className={className}>
+        {parts.flatMap((part, index) => (index === 0 ? [part] : [<span key={`sep-${index}`}> · </span>, part]))}
+        {tag ? (
+          <>
+            {' '}
+            <ChangedTag />
+          </>
+        ) : null}
+      </p>
+      {titles}
+    </>
   );
 }
 
