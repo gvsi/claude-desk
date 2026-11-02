@@ -269,6 +269,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               deskId={deskId}
               business={desk.business_name}
               today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
+              heldCount={needsYou.data === undefined || needsYou.errorUpdatedAt > needsYou.dataUpdatedAt || needsYou.isPaused ? undefined : listed.length}
               firstHeldId={firstHeld?.decision.decision_id ?? null}
             />
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />

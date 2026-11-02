@@ -15,14 +15,14 @@ const STEP_ICONS: readonly IconName[] = ['people', 'conversations', 'rules'];
 const TONES: Readonly<Record<TodayOutcomeKind, StatusTone>> = { handled: 'handled', held: 'held', turnedDown: 'refused' };
 
 /**
- * Today's counts from the Today read: handled is the briefing's answers and bookings, held what
- * needs the owner, turned down the requests refused, all since last night. Null until the read is
- * in, and while the API doesn't send the answers, so the line never says less than happened.
+ * Handled and turned down come from Today's briefing since last night. Held counts only the
+ * requests waiting for the owner's answer, from the same Needs you read and filter as Safety.
+ * Null until both reads are in, and while the API doesn't send the answers.
  */
-export function todayCounts(today: Today | undefined): TodayCounts | null {
+export function todayCounts(today: Today | undefined, heldCount: number | undefined): TodayCounts | null {
   const answers = today?.briefing.answers;
-  if (today === undefined || answers === undefined) return null;
-  return { handled: answers + today.briefing.bookings, held: today.needs_you_count, turnedDown: today.briefing.turned_down };
+  if (today === undefined || answers === undefined || heldCount === undefined) return null;
+  return { handled: answers + today.briefing.bookings, held: heldCount, turnedDown: today.briefing.turned_down };
 }
 
 export interface HowItWorksProps {
@@ -31,6 +31,8 @@ export interface HowItWorksProps {
   business: string;
   /** The Today read, or undefined while it is out or has failed. */
   today: Today | undefined;
+  /** The requests held in Needs you, excluding callbacks; undefined until a current read is in. */
+  heldCount: number | undefined;
   /** The oldest request still held, which "held N for you" opens in Needs you; null when none is. */
   firstHeldId: string | null;
 }
@@ -41,13 +43,13 @@ export interface HowItWorksProps {
  * hairline, each outcome a link to where it is: what it handled to Conversations, what it held to
  * Needs you, what it turned down to Safety.
  */
-export function HowItWorks({ deskId, business, today, firstHeldId }: HowItWorksProps) {
+export function HowItWorks({ deskId, business, today, heldCount, firstHeldId }: HowItWorksProps) {
   const titleId = useId();
-  const counts = todayCounts(today);
+  const counts = todayCounts(today, heldCount);
   const outcomes = counts === null ? null : todayOutcomes(counts);
   const hrefs: Readonly<Record<TodayOutcomeKind, string>> = {
     handled: conversationsPath(deskId),
-    // Call-back requests count too; without a held approval, open the Needs you section itself.
+    // Keep a Needs you landing if the oldest request disappears while an answer settles.
     held: firstHeldId === null ? `${todayPath(deskId)}#needs-you` : requestPath(deskId, firstHeldId),
     turnedDown: `/app/${encodeURIComponent(deskId)}/safety`,
   };
