@@ -490,12 +490,14 @@ STATUS_TEXT = {
            "refused": "Not something I can do here", "approved": "{owner} approved this",
            "denied": "{owner} decided not to go ahead", "expired": "This request timed out", "cancelled": "Cancelled",
            "executed": "Done", "failed": "That didn't go through", "unknown": "Still confirming this",
-           "refused_at_execution": "The rules changed, so this didn't go ahead"},
+           "refused_at_execution": "The rules changed, so this didn't go ahead",
+           "closed_by_booking": "Closed: your booking replaced this request"},
     "es": {"allowed": "Revisado con las reglas de {owner}", "held": "Esperando la aprobación de {owner}",
            "refused": "No es algo que pueda hacer aquí", "approved": "{owner} lo aprobó",
            "denied": "{owner} decidió no seguir adelante", "expired": "Esta solicitud venció", "cancelled": "Cancelado",
            "executed": "Hecho", "failed": "No se pudo completar", "unknown": "Todavía lo estamos confirmando",
-           "refused_at_execution": "Las reglas cambiaron, así que no se hizo"},
+           "refused_at_execution": "Las reglas cambiaron, así que no se hizo",
+           "closed_by_booking": "Cerrada: su reserva sustituyó esta solicitud"},
 }
 # Owner-only refusal lines for the fake's two refusal paths: a changed policy and exhausted mandate.
 # The owner has no language setting yet, so these stay English whatever the session's language.
@@ -2896,7 +2898,8 @@ class FakeKernelState:
 
     def _transition(self, record: DecisionRecord, state: str, kind: str = "decide", **summary) -> Decision:
         """Move a decision to `state`: ledgered, re-signed, mirrored. The owner's line (`owner_plain`, unsigned) is set
-        for a refusal at execution and for a held request a booking closed, and cleared in every other state."""
+        for a refusal at execution and for a held request a booking closed, and cleared in every other state. A held
+        request a booking closed also takes its own visitor line (the kernel's `closed_by_booking`)."""
         desk = self.desks[record.desk_id]
         decision = record.decision
         session = self.sessions[decision.session_id]
@@ -2912,6 +2915,7 @@ class FakeKernelState:
                 and summary.get("check") in {"tool", "profile", "pin", "policy"} else "fallback"]
         elif state == "cancelled" and summary.get("cancelled_by") == "booking":
             owner_plain = OWNER_BOOKING_CLOSED_TEXT
+            line = STATUS_TEXT["es" if session.last_language == "es" else "en"]["closed_by_booking"]
         record.decision = self._signed(decision.model_copy(update={
             "state": state, "visitor_plain": line, "owner_plain": owner_plain,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))

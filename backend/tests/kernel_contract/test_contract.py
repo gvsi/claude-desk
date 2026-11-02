@@ -1741,7 +1741,7 @@ async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booki
 @pytest.mark.parametrize("booking", ["native", "typed"])
 async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(kernel, ro_read, booking):
     """A visitor whose discount quote is held and who then books, at list price, no longer waits on the discount: the
-    next read of the held quote, through the API's own client, finds it `cancelled` with the state's own line, ledgered
+    next read of the held quote, through the API's own client, finds it `cancelled` with its own line, ledgered
     `decide` naming the booking and the rules version in force with its money cap, and the owner's answer to it is 409
     with nothing run. A typed booking writes the same booking, so it counts the same way. Another session's held
     discount quote, with no booking, stays held. The owner alone reads that a booking closed it (`owner_plain`, the
@@ -1763,7 +1763,8 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(kernel
     assert (await execute(view, booked, 0)).state == "succeeded"
 
     cancelled = await read_decision(view, held.decision_id)
-    assert (cancelled.state, cancelled.visitor_plain, cancelled.answers) == ("cancelled", "Cancelled", [])
+    assert (cancelled.state, cancelled.visitor_plain, cancelled.answers) == (
+        "cancelled", "Closed: your booking replaced this request", [])
     assert cancelled.ledger_seq > held.ledger_seq and cancelled.signature != held.signature
     assert cancelled.owner_plain is None
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")

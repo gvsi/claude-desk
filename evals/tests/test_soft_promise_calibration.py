@@ -195,7 +195,7 @@ def test_the_case_file_holds_every_group():
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
         "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4,
-        "request_receipts": 38}
+        "request_receipts": 42}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
@@ -203,7 +203,7 @@ def test_the_case_file_holds_every_group():
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
         "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
-        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 16, "flag": 22}}
+        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 18, "flag": 24}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
     # The voice examples quote the English system prompt; its two policy examples carry their cards.
     from desk.api.prompts import VOICE_EXAMPLES
@@ -290,8 +290,8 @@ def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
     from desk.kernel_service.render import receipt_check_text
 
     cases = {c.id: c for c in load_cases(CASES_FILE) if c.group == "request_receipts"}
-    reached = ("held", "approved", "denied", "expired", "cancelled", "failed", "unknown", "refused_at_execution",
-               "tool_unavailable")
+    reached = ("held", "approved", "denied", "expired", "cancelled", "closed_by_booking", "failed", "unknown",
+               "refused_at_execution", "tool_unavailable")
     receipts = {}
     for language in ("en", "es"):
         for asked in kernel_render.RECEIPT_SUBJECTS[language]:
@@ -313,14 +313,23 @@ def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
         ("en", "This is waiting for approval; you can see where it stands in this chat.", "pass"): [held["en"]],
         ("es", "Esto está esperando aprobación; puede consultar su estado en este chat.", "pass"): [held["es"]]}
     # each resolved receipt, in each language, backs one honest reply and stops at least one promise past it
-    for key in ("cancelled", "denied", "expired"):
+    for key in ("cancelled", "closed_by_booking", "denied", "expired"):
         lines = {receipt_check_text("native.quote", kernel_render.status(key, language, owner="Mike Turner"), language)
                  for language in ("en", "es")}
         beside = [(c.language, c.expected) for c in cases.values() if c.cards[-1] in lines]
         assert {("en", "pass"), ("es", "pass"), ("en", "flag"), ("es", "flag")} <= set(beside), key
-    # the cancelled request's honest reply stands beside the booking that closed it, and an approved one's
+    # the honest reply about a request a booking closed stands beside that booking and the request's own line for
+    # it (`closed_by_booking`), never the generic "Cancelled" a visitor's own cancel shows, and an approved one's
     # beside the quote it ran, whose receipt is the kernel's executed line
-    assert all(len(c.cards) == 2 for c in cases.values() if c.id.endswith("closed-by-booking"))
+    closed = {language: receipt_check_text("native.quote", kernel_render.status(
+        "closed_by_booking", language, owner="Mike Turner"), language) for language in ("en", "es")}
+    assert closed == {
+        "en": "Request receipt card: Quote request: Closed: your booking replaced this request",
+        "es": "Request receipt card: Solicitud de presupuesto: Cerrada: su reserva sustituyó esta solicitud"}
+    assert {(c.language, c.expected): (c.cards[0].split(chr(10))[0], c.cards[1])
+            for c in cases.values() if c.id.endswith("closed-by-booking")} == {
+        ("en", "pass"): ("Booking confirmed card: Monday, November 2", closed["en"]),
+        ("es", "pass"): ("Booking confirmed card: lunes 2 de noviembre", closed["es"])}
     ran = {language: receipt_check_text("native.quote", kernel_render.executed_status(
         "native.quote", language, owner="Mike Turner"), language) for language in ("en", "es")}
     assert {(c.language, c.expected): (c.cards[0].split(chr(10))[0], c.cards[1])

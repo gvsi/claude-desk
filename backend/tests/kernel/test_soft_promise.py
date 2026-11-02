@@ -881,7 +881,8 @@ async def test_the_soft_check_reads_a_held_requests_receipt(app, client, reviewe
 
 async def test_the_soft_check_reads_the_update_of_a_request_a_booking_closed(app, client, reviewer, frozen_clock):
     """A held discount quote the visitor's own booking closed (`decide.supersede_if_booked`, settled by
-    the next read of it) is no longer a held request: the check is shown its update's receipt ("Cancelled")
+    the next read of it) is no longer a held request: the check is shown its update's receipt ("Closed: your
+    booking replaced this request")
     beside the booking's card, so "your earlier request was closed" is backed, until Claude's next reply
     that passes has told the visitor."""
     from .test_approvals import read_id
@@ -895,7 +896,8 @@ async def test_the_soft_check_reads_the_update_of_a_request_a_booking_closed(app
     verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
     card = verdict.blocks[-1]
     assert reviewer.soft_inputs[-1].cards == [f"Booking confirmed card: {card.text}",
-                                              "Request receipt card: Quote request: Cancelled"]
+                                              "Request receipt card: Quote request: Closed: your booking replaced "
+                                              "this request"]
     assert verdict.ok and [(block.kind, block.template) for block in verdict.blocks] == [
         ("prose", None), ("card", "booking_confirmed")]
 

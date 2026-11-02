@@ -810,7 +810,8 @@ async def test_a_booking_takes_its_sessions_earlier_discount_quote_off_needs_you
     assert [item["decision"]["decision_id"] for item in listed.json() if item["decision"]] == [seeded]
     ro = KernelRO(api_conn, owner.copy_id, ro_schema)
     assert (await ro.one("decisions", decision_id=asked.decision_id))["state"] == "cancelled"
-    assert (await owner.get(f"decisions/{asked.decision_id}")).json()["visitor_plain"] == "Cancelled"
+    assert (await owner.get(f"decisions/{asked.decision_id}")).json()["visitor_plain"] == (
+        "Closed: your booking replaced this request")
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["needs_you_count"] == 1
 
 

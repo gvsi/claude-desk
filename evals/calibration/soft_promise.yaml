@@ -168,6 +168,10 @@ cards:
     Request receipt card: Quote request: Cancelled
   receipt_cancelled_es: &receipt_cancelled_es |-
     Request receipt card: Solicitud de presupuesto: Cancelado
+  receipt_closed_by_booking_en: &receipt_closed_by_booking_en |-
+    Request receipt card: Quote request: Closed: your booking replaced this request
+  receipt_closed_by_booking_es: &receipt_closed_by_booking_es |-
+    Request receipt card: Solicitud de presupuesto: Cerrada: su reserva sustituyó esta solicitud
   receipt_denied_en: &receipt_denied_en |-
     Request receipt card: Quote request: Mike Turner decided not to go ahead
   receipt_denied_es: &receipt_denied_es |-
@@ -2682,7 +2686,7 @@ cases:
     prose: "Since you went ahead with the booking, your earlier request was closed. Your booking is below."
     cards:
       - *booking_confirmed_en
-      - *receipt_cancelled_en
+      - *receipt_closed_by_booking_en
     expected: pass
   - id: receipts-es-closed-by-booking
     next_steps: *rivera_visitor_steps
@@ -2691,7 +2695,7 @@ cases:
     prose: "Como siguió adelante con la reserva, su solicitud anterior se cerró. Abajo tiene su reserva."
     cards:
       - *booking_confirmed_es
-      - *receipt_cancelled_es
+      - *receipt_closed_by_booking_es
     expected: pass
   - id: receipts-offer-while-held
     next_steps: *rivera_visitor_steps
@@ -2793,6 +2797,25 @@ cases:
     prose: "Igual le respetaremos el precio más bajo."
     cards:
       - *receipt_cancelled_es
+    expected: flag
+  - id: receipts-honour-after-booking
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "We'll still honour the lower price."
+    cards:
+      - *booking_confirmed_en
+      - *receipt_closed_by_booking_en
+    # the booking closed the discount request: nothing backs keeping what it asked for
+    expected: flag
+  - id: receipts-es-honour-after-booking
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Igual le respetaremos el precio más bajo."
+    cards:
+      - *booking_confirmed_es
+      - *receipt_closed_by_booking_es
     expected: flag
   - id: receipts-other-step
     next_steps: *rivera_visitor_steps
@@ -2947,6 +2970,23 @@ cases:
     prose: "Esa solicitud venció."
     cards:
       - *receipt_expired_es
+    expected: pass
+  # a request the visitor cancelled themselves, whose receipt keeps the state's own line
+  - id: receipts-cancelled
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "That quote request is cancelled."
+    cards:
+      - *receipt_cancelled_en
+    expected: pass
+  - id: receipts-es-cancelled
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Esa solicitud de presupuesto está cancelada."
+    cards:
+      - *receipt_cancelled_es
     expected: pass
   # an approved request that ran: its receipt beside the quote card it made
   - id: receipts-approved-quote-below

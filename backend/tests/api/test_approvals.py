@@ -472,7 +472,8 @@ async def test_a_booking_closed_line_stays_on_owner_reads(app, browser, fake, ke
                                                          jobs_connector, monkeypatch):
     # The visitor's discount waits for Mike, then they book a time at list price: the kernel closes the stale request,
     # and Mike's late answer reads why. Only his reads carry that line; the visitor's own read, the resume job, the
-    # chat's events and stored rows, and what Claude reads carry the signed state's line ("Cancelled") alone.
+    # chat's events and stored rows, and what Claude reads carry the signed visitor line alone ("Closed: your booking
+    # replaced this request").
     from desk.api import jobs
     from desk.api.routes import owner
 
@@ -533,7 +534,7 @@ async def test_a_booking_closed_line_stays_on_owner_reads(app, browser, fake, ke
         updates = (await conn.execute(text(
             "SELECT text FROM app.messages WHERE session_id = :s AND kind = 'action_update'"),
             {"s": held.session_id})).scalars().all()
-    assert updates == ["Cancelled"]
+    assert updates == ["Closed: your booking replaced this request"]
     for serialized in (transcript.text, json.dumps([event.model_dump(mode="json") for _, event in events]),
                        json.dumps(rows), json.dumps(model.requests[-1].messages)):
         assert BOOKED_LINE not in serialized
