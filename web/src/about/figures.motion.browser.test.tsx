@@ -212,10 +212,11 @@ describe('Tau3Chart with motion', () => {
   });
 
   it('chart_plays_in_its_signed_order', async () => {
-    // The board's order: the frame of the chart shows from the start; then the Claude releases one by one, then
-    // the top score, the ring and the point labels, then the fit, then the band and the prediction date.
-    const FROM_THE_START = ['grid', 'axis', 'tick', 'tick-label', 'score-label', 'bar', 'bar-label'];
-    const LATE = ['top', 'ring', 'point-label'];
+    // The board's order: the frame of the chart shows from the start, today's rule with it; then the Claude
+    // releases one by one, then the top score, the ring, the point labels and the trend through the scores, then the
+    // trend's dashed run ahead of today, then the band and the prediction's bracket.
+    const FROM_THE_START = ['grid', 'axis', 'tick', 'tick-label', 'score-label', 'bar', 'bar-label', 'today', 'today-label'];
+    const LATE = ['top', 'ring', 'point-label', 'trend'];
     const AFTER_THE_FIT = ['band', 'rule', 'prediction-date', 'band-label'];
     const emphasis = tokenEasing('--motion-ease-emphasis');
 
@@ -246,16 +247,17 @@ describe('Tau3Chart with motion', () => {
       // The frame never moves.
       for (const { name, part } of each(FROM_THE_START)) expect(timing(part).name, `${size}: ${name}`).toBe('none');
 
-      // The seven releases scale in one by one in date order, 80 ms apart, each over 200 ms on the emphasis ease.
+      // The ten releases scale in one by one in date order, 80 ms apart, each over 200 ms on the emphasis ease.
       const points = parts('point').sort((a, b) => Number(a.getAttribute('cx')) - Number(b.getAttribute('cx')));
-      expect(points).toHaveLength(7);
-      expect(points.map((point) => timing(point).delay), size).toEqual([0, 80, 160, 240, 320, 400, 480]);
+      expect(points).toHaveLength(10);
+      expect(points.map((point) => timing(point).delay), size).toEqual([0, 80, 160, 240, 320, 400, 480, 560, 640, 720]);
       for (const point of points) {
         expect(timing(point), size).toMatchObject({ duration: 200, easing: emphasis, fill: 'backwards' });
       }
       const lastPoint = timing(points.at(-1)!);
 
-      // Then the top score, the ring and the point labels fade in, after the last release starts and before the fit.
+      // Then the top score, the ring, the point labels and the trend fade in, after the last release starts and
+      // before the dashed run draws.
       const fit = timing(parts('fit')[0]!);
       for (const { name, part } of each(LATE)) {
         const late = timing(part);
@@ -264,11 +266,11 @@ describe('Tau3Chart with motion', () => {
         expect(late, `${size}: ${name}`).toMatchObject({ duration: 200, fill: 'backwards' });
       }
 
-      // The fit draws once the last release is in, over the signed 600 ms, on the emphasis ease.
+      // The dashed run ahead of today draws once the last release is in, over the signed 600 ms, on the emphasis ease.
       expect(fit.delay, size).toBeGreaterThanOrEqual(lastPoint.delay + lastPoint.duration);
       expect(fit, size).toMatchObject({ duration: 600, easing: emphasis });
 
-      // Then the band, the rule, the prediction date and the band's labels, which wait their turn hidden.
+      // Then the band, the bracket, the prediction and the band's labels, which wait their turn hidden.
       for (const { name, part } of each(AFTER_THE_FIT)) {
         const after = timing(part);
         expect(after.delay, `${size}: ${name}`).toBeGreaterThanOrEqual(fit.delay + fit.duration);
