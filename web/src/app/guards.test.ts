@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { withoutComments, withoutCssComments } from '../test/withoutComments.ts';
+
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 interface Source {
@@ -83,9 +85,8 @@ function withoutHeaderPalette(source: Source): Source {
   for (const [start, end] of ranges.reverse()) text = text.slice(0, start) + ' '.repeat(end - start) + text.slice(end);
   return { ...source, text };
 }
-// A CSS comment; a palette's root rule, its class alone as the selector (read with comments blanked); and a
-// custom property's name, which is a declaration's whole name.
-const CSS_COMMENT = /\/\*[\s\S]*?(?:\*\/|$)/g;
+// A palette's root rule, its class alone as the selector (read with comments blanked); and a custom property's
+// name, which is a declaration's whole name.
 const rootRule = (root: string) => new RegExp(String.raw`(?<=^|[{};])\s*\.${root}\s*\{([^{}]*)\}`, 'g');
 const CUSTOM_PROPERTY_NAME = /^--[\w-]+$/;
 
@@ -121,7 +122,7 @@ function declarationRanges(body: string, offset: number): [number, number][] {
  * only to find the rule and read its declarations' names, so a name in a comment or a string never passes for one.
  */
 function withoutThePalette(text: string, root: string): string {
-  const code = text.replace(CSS_COMMENT, (comment) => ' '.repeat(comment.length));
+  const code = withoutCssComments(text);
   const read = text.split('');
   for (const rule of code.matchAll(rootRule(root))) {
     const bodyStart = rule.index + rule[0].indexOf('{') + 1;
@@ -414,11 +415,6 @@ function bindingsNotFromTheHook(scanned: Source[]): string[] {
     if (OTHER_DECLARATION.test(text)) bad.push(`${file}: openStatus is declared or assigned elsewhere`);
     return bad;
   });
-}
-
-/** `text` without its comments, so a comment that names something isn't taken for code. */
-function codeOf(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
 }
 
 /** The index just past the brace, bracket or parenthesis that closes the one at `open` in `code`. */
@@ -1176,8 +1172,12 @@ describe('app source guards', () => {
       'sample.tsx: chat is declared or assigned elsewhere',
     ]);
     expect(ownerInChatNotFromTheChat(visitor)).toEqual([]);
+    // The binding check below and the method check further down read code without its comments. A comment
+    // marker inside a string is text, so the code after it on the same line still counts.
+    expect(withoutComments("const a = '//'; const b = <X ownerInChat />;")).toContain('ownerInChat');
+    expect(methodBody(withoutComments("class C { private a(): string { return '//'; } private followMode(): void {} }"), 'followMode')).not.toBeNull();
     // It is passed where it is meant to be, so the check can't pass by finding nothing.
-    expect(visitor.filter(({ text }) => /\bownerInChat=\{chat\.ownerInChat\}/.test(codeOf(text))).map(({ file }) => file)).toEqual(['public/PublicChat.tsx']);
+    expect(visitor.filter(({ file, text }) => /\bownerInChat=\{chat\.ownerInChat\}/.test(withoutComments(text, file))).map(({ file }) => file)).toEqual(['public/PublicChat.tsx']);
 
     // In the visitor chat, the value is `ownerInChatNow`'s, which reads the session's mode and only
     // ANDs on what keeps it false.
@@ -1233,7 +1233,7 @@ describe('app source guards', () => {
     expect(ownerInChatSources(chat?.text ?? '', reducer?.text ?? '')).toEqual([]);
     expect(sessionModeWrites(chat?.text ?? '')).toEqual([]);
     // The rules read the methods they name, so they can't pass by finding nothing.
-    for (const method of ['openedSession', 'followMode', 'laterSession', 'laterRead']) expect(methodBody(codeOf(chat?.text ?? ''), method), method).not.toBeNull();
+    for (const method of ['openedSession', 'followMode', 'laterSession', 'laterRead']) expect(methodBody(withoutComments(chat?.text ?? '', VISITOR_CHAT_FILE), method), method).not.toBeNull();
     expect(ownerInChatNodes(chat?.text ?? '').some((node) => ts.isPropertyAssignment(node) && ts.isCallExpression(node.initializer) && sameExpression(node.initializer.expression, 'ownerInChatNow')), 'the chat sets it from ownerInChatNow').toBe(true);
   });
 
