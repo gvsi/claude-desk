@@ -1642,6 +1642,22 @@ def test_setup_plan_tells_an_unpriced_payment_code_settled_from_the_owners_own_n
     assert status == ("declined" if owner_says == "no" else setup.SETUP_PLAN_NO_AMOUNT)
 
 
+def test_setup_plan_tells_a_stored_yes_to_an_unpriced_payment_from_the_owners_own_no():
+    # An interview stored before the amount check may hold the owner's yes to a payment with no amount. Settling the
+    # plan voids that yes (`settle_plan`), and the setup plan says why, not that the owner turned it down.
+    payment = job("payment", title="Pay a retainer", how=PAYMENT_HOW, config={
+        "block": "purpose_payment", "purpose": "Retainer", "amount_cents": None})
+    entries = proposal_entries([payment, job()], [], business_tools_enabled=True)
+    entries[0].card.state = "accepted"
+    entries[0].owner_decided = True
+    state = plan_state(entries)
+    payment_id = entries[0].card.proposal_id
+    setup.settle_plan(state)
+    status = next(item["status"] for item in setup._setup_plan(state)["items"] if item["id"] == payment_id)
+    assert (entries[0].card.state, status) == ("declined", setup.SETUP_PLAN_NO_AMOUNT)
+    assert setup.owner_job_answers(state) == []
+
+
 async def test_understanding_mints_hidden_proposals_with_code_owned_availability(monkeypatch):
     from tests.api.test_setup_questions import understanding
     answer = setup.SetupUnderstanding(**understanding(jobs=[
