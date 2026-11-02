@@ -303,11 +303,14 @@ export function ConversationSkeleton({ recorded = false }: { recorded?: boolean 
   );
 }
 
-/** A fresh copy's first rows: two visitor previews, one booked and one held, then an agent's status without a preview. */
+/**
+ * A fresh copy's first rows: two visitor previews, one booked and one held, then an agent's line
+ * saying what it did, above its status.
+ */
 const ROWS = [
   { name: '50%', preview: '75%', status: '20%' },
   { name: '40%', preview: '85%', status: '45%' },
-  { name: '75%', preview: null, status: '25%' },
+  { name: '75%', preview: '45%', status: '25%' },
 ] as const;
 
 /** Day groups enough to fill a tall window's list column; what the column can't show is cut off. */

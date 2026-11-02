@@ -3214,6 +3214,19 @@ async def test_use_your_suggestions_accepts_the_unshown_planned_jobs(proposals, 
             [setup.Entry.model_validate(entry) for entry in transcript])) == []
 
 
+async def test_use_your_suggestions_keeps_the_closing_reply_before_the_plan(proposals, model, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    before = (await stored(engine, interview_id))["transcript"]
+    closing = "I'll go with my suggestions for the rest."
+    model.add(next_step("what_you_do", next={"kind": "done"}, reply=closing, plan="The closing plan."))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions?cards=1", json={})
+    assert reply.status_code == 200, reply.text
+    tail = (await stored(engine, interview_id))["transcript"][len(before):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
+        setup.PAYMENT_LINE, closing, "The closing plan."]
+
+
 async def test_a_decision_changes_the_card_and_claude_asks_the_next_thing(proposals, model, engine):
     owner, state, ids = proposals
     interview_id = state['interview_id']
@@ -3297,6 +3310,61 @@ async def test_a_decision_that_closes_setup_runs_after_finish_after_the_commit(p
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}", json=body)
     assert reply.status_code == 200, reply.text
     assert calls == [interview_id]
+
+
+async def show_last_card(engine, interview_id, ids, last):
+    """Decide every planned item but `last`, then show `last` as the one card left to ask."""
+    row = await stored(engine, interview_id)
+    for entry in row["transcript"]:
+        for card in [*entry.get("planned", []), *([entry["card"]] if entry.get("card") else [])]:
+            if card["proposal_id"] != last:
+                card["state"] = "declined"
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
+    await show_card(engine, interview_id, last)
+
+
+@pytest.mark.parametrize("typed", [False, True])
+async def test_a_declined_last_card_is_acknowledged_once_before_the_closing_plan(proposals, model, engine, typed):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_last_card(engine, interview_id, ids, ids[2])
+    before = await stored(engine, interview_id)
+    declined = "Understood, I'll leave Stripe out, so retainer links stay with you for now."
+    first = (card_answer("decline", reply=declined, next={"kind": "done"}, question="", skip=list(setup.QUESTION_KEYS))
+             if typed else next_step("what_you_do", reply=declined, next={"kind": "done"},
+                                     skip=list(setup.QUESTION_KEYS)))
+    # The closing call reads the declined card in the plan and says so again.
+    model.add(first, next_step("what_you_do", next={"kind": "done"}, reply="Understood, I'll leave payments out for now.",
+                               plan="The closing plan."))
+    endpoint, body = ("answer", {"card": ids[2], "text": "Not now"}) if typed else (f"proposals/{ids[2]}", {"accept": False})
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}?cards=1", json=body)
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    tail = (await stored(engine, interview_id))["transcript"][len(before["transcript"]):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude"] == [declined, "The closing plan."]
+    assert [message["text"] for message in reply.json()["messages"][-2:]] == [declined, "The closing plan."]
+    stripe_card = next(card for card in shown(reply) if card["proposal_id"] == ids[2])
+    assert stripe_card["state"] == "declined"
+
+
+@pytest.mark.parametrize("typed", [False, True])
+async def test_a_last_card_decision_with_no_reply_keeps_the_closing_reply(proposals, model, engine, typed):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_last_card(engine, interview_id, ids, ids[2])
+    before = await stored(engine, interview_id)
+    first = (card_answer("decline", reply="", next={"kind": "done"}, question="", skip=list(setup.QUESTION_KEYS))
+             if typed else next_step("what_you_do", reply="", next={"kind": "done"}, skip=list(setup.QUESTION_KEYS)))
+    closing = "Understood, I'll leave payments out for now."
+    model.add(first, next_step("what_you_do", next={"kind": "done"}, reply=closing, plan="The closing plan."))
+    endpoint, body = ("answer", {"card": ids[2], "text": "Not now"}) if typed else (f"proposals/{ids[2]}", {"accept": False})
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}?cards=1", json=body)
+    assert reply.status_code == 200, reply.text
+    tail = (await stored(engine, interview_id))["transcript"][len(before["transcript"]):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
+        closing, "The closing plan."]
 
 
 async def test_drafting_gets_only_jobs_decided_on_a_shown_card(proposals, model, engine):

@@ -86,6 +86,30 @@ EOF independently triggers the remote watchdog. The lane lock is released only a
 call's service and its whole process group are stopped, including detached descendants
 in its control group. A killed process itself cannot wait for cleanup before exiting.
 
+All lanes on a laptop share one connection, and Session Manager carries uploads slowly
+(15–45 KB/s measured), so a keepalive reply can wait minutes behind other lanes' uploads.
+The client allows ten minutes for one before closing the connection. If the connection
+dies anyway, Session Manager can keep sshd's end open, and the dead connection's calls
+keep their lane locks. sshd closes such a connection after ten minutes without a
+keepalive reply, which ends those calls and frees their lanes: on the live machine, a
+silenced connection's lane was free 11 to 12 minutes later. A call that waits more than
+about 15 minutes for its lane is stuck: tell the CI lane.
+
+A connection can also go silent without closing, after a dropped network or when the
+laptop wakes from sleep. Every lane's calls then hang until the keepalives give up, up to
+ten minutes. To close it at once, run `bash tools/testbox/close-connections`. This ends
+every running call from this laptop that uses the shared connection, and the next call
+opens a new one. A call sending a large upload over a connection of its own (below) keeps
+sending, then stops with "lost the lane's connection during the upload"; if it is stuck
+too, stop it with Ctrl-C.
+
+An upload over 1 MB, such as a lane's first (an 11 MB Git bundle and about 30 MB of
+source files), goes over a compressed connection of its own instead, which takes a few
+seconds to open. The call then says "sending … MB outside the shared connection", and
+other lanes' calls don't wait behind it. Compression shrinks the source files about
+fourfold. On a quiet network a new lane's whole upload took 34 seconds, and round trips
+on the shared connection stayed at 0.2 seconds throughout.
+
 The client compares source content hashes under the lane lock and sends only changed files,
 repairing sources edited or removed by a previous remote command and removing new
 nonignored source files it created. Ignored build directories remain warm. It syncs tracked and
