@@ -155,18 +155,15 @@
   overflow-wrap: anywhere;
 }
 
-/* On the owner's colour, which is dark in either theme, the preview's words and the monogram's edge
-   take the inks for it, as the public header does. On the panel they keep the theme's own. */
-.cd-header-colour__preview--brand {
-  color: var(--text-on-brand);
+/* The preview's secondary words and the monogram's edge take the secondary ink the public header's
+   mapping gives (`--cd-header-colour-ink-secondary`, set on the preview): paper ink on the owner's
+   colour in both themes, the theme's own on the panel. */
+.cd-header-colour__preview .cd-settings__quiet {
+  color: var(--cd-header-colour-ink-secondary);
 }
 
-.cd-header-colour__preview--brand .cd-settings__quiet {
-  color: var(--text-on-brand-secondary);
-}
-
-.cd-header-colour__preview--brand .cd-header-colour__monogram {
-  border-color: var(--text-on-brand-secondary);
+.cd-header-colour__preview .cd-header-colour__monogram {
+  border-color: var(--cd-header-colour-ink-secondary);
 }
 
 /* Answering's card: the switch row pads itself 8 px, so 8 px more at the sides puts its words 16 px
