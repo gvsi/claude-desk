@@ -8,6 +8,28 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.
 
 const DESK = `/app/${RIVERA.deskId}`;
 
+it.each(['desktop', 'phone'] as const)('at %s, a generated hold keeps its agent audience beside an anyone limit', async (viewport) => {
+  const desk = mockStore.world.desk(RIVERA.deskId)!;
+  const base = desk.policy.cards.find((card) => card.applies_to === 'native.payment_link')!;
+  desk.policy.cards = [
+    { ...base, card_id: 'anyone-payment', mode: 'auto', who: 'anyone', max_amount_cents: 30_000 },
+    { ...base, card_id: 'agent-payment', mode: 'auto', who: 'agent', agent_key_id: 'key-one-agent', max_amount_cents: 2_000 },
+  ];
+  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport });
+  const payments = screen.getByRole('region', { name: 'Payments', exact: true });
+  const agentHold = payments.getByText('Over $20, Claude asks you first', { exact: true });
+  const anyoneHold = payments.getByText('Over $300, Claude asks you first', { exact: true });
+  await expect.element(agentHold).toBeVisible();
+  await expect.element(anyoneHold).toBeVisible();
+  expect(screen.container.querySelector('[data-rule-id="agent-payment"] .cd-rule-sentence__meta')?.textContent).toBe('One agent');
+  const audience = agentHold.element().closest('li')!.querySelector('.cd-rule-sentence__meta');
+  expect(audience?.textContent).toBe('One agent');
+  expect(audience?.classList.contains('cd-type-meta')).toBe(true);
+  expect(anyoneHold.element().closest('li')!.querySelector('.cd-rule-sentence__meta')).toBeNull();
+  await expectScreenBasics(screen.container, { owner: true });
+  expectNoHorizontalScroll();
+});
+
 it('an Allow private-data rule keeps its verified record-owner scope', async () => {
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   const base = desk.policy.cards.find((card) => card.applies_to === 'native.release_document')!;

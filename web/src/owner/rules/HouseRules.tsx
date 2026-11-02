@@ -41,9 +41,9 @@ const TITLE = 'Your tools';
 const INTRO = 'Each connector brings tools; each tool lists the rules that cover it. A rule shared with other tools says so once, then reads "the same rule as above".';
 
 /** A sentence row keeps its trailing controls separate so Details can follow the dot in Task G. */
-function ToolRule({ parts, mode, shared, repeated, card, words }: {
+function ToolRule({ parts, mode, shared, repeated, card, audience }: {
   parts: readonly SentencePart[]; mode: RuleMode; shared?: readonly string[]; repeated?: boolean;
-  card?: RuleCard; words: SentenceWords;
+  card?: RuleCard; audience?: string;
 }) {
   return (
     <li className={`cd-house-rules__rule${repeated ? ' cd-house-rules__rule--reference cd-type-meta' : ''}`} data-rule-id={card?.card_id}>
@@ -51,8 +51,8 @@ function ToolRule({ parts, mode, shared, repeated, card, words }: {
         <RuleSentence
           parts={repeated ? [...parts, { text: ' · Shared rule, as above' }] : parts}
         />
-        {card === undefined || card.who === 'anyone' ? null : (
-          <p className="cd-rule-sentence__meta cd-type-meta">{ruleMeta(card, words).who}</p>
+        {audience === undefined ? null : (
+          <p className="cd-rule-sentence__meta cd-type-meta">{audience}</p>
         )}
         {shared === undefined || shared.length === 0 || repeated ? null : (
           <p className="cd-house-rules__shared cd-type-meta">Shared rule. Also applies to:<br /><ToolTitleList titles={shared} /></p>
@@ -138,7 +138,7 @@ function ToolConnectors({ deskId, view, people }: { deskId: string; view: RulesV
                       shared={shared === undefined ? undefined : otherTitles(shared, row)} repeated={shared !== undefined && shared[0] !== row} />
                   );
                 })}
-                {!moneyTools.includes(row) ? null : <ToolRule parts={moneyCapToolSentence(view.active.auto_money_cap_cents ?? 0)} mode="ask" words={words}
+                {!moneyTools.includes(row) ? null : <ToolRule parts={moneyCapToolSentence(view.active.auto_money_cap_cents ?? 0)} mode="ask"
                   shared={otherTitles(moneyTools, row)} repeated={moneyTools[0] !== row} />}
               </ul>
             </section>
@@ -152,9 +152,10 @@ function ToolConnectors({ deskId, view, people }: { deskId: string; view: RulesV
 function ToolRuleWithHold({ card, words, hold, shared, repeated }: {
   card: RuleCard; words: SentenceWords; hold: SentencePart[] | null; shared?: readonly string[]; repeated: boolean;
 }) {
+  const audience = card.who === 'anyone' ? undefined : ruleMeta(card, words).who;
   return <>
-    <ToolRule parts={ruleSentence(card, words)} mode={card.mode} card={card} words={words} shared={shared} repeated={repeated} />
-    {hold === null ? null : <ToolRule parts={hold} mode="ask" words={words} />}
+    <ToolRule parts={ruleSentence(card, words)} mode={card.mode} card={card} audience={audience} shared={shared} repeated={repeated} />
+    {hold === null ? null : <ToolRule parts={hold} mode="ask" audience={audience} />}
   </>;
 }
 
