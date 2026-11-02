@@ -430,3 +430,39 @@ def test_a_change_to_the_masters_settings_opens_its_own_master(tmp_path, monkeyp
     current = client.control_path(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa')
     monkeypatch.setattr(client, 'MASTER_OPTIONS', ('ServerAliveInterval=15', 'ServerAliveCountMax=3'))
     assert client.control_path(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa') != current
+
+
+def _effective_ssh(args):
+    """ssh's own reading of these options, without connecting: `ssh -G` prints the configuration it would use."""
+    import shutil
+    if shutil.which('ssh') is None:
+        pytest.skip('needs the OpenSSH client')
+    done =subprocess.run(['ssh', '-F', '/dev/null', '-G', *args, 'ubuntu@i-0aaaaaaaaaaaaaaaa'], capture_output=True, text=True, check=True)
+    return dict(line.split(' ', 1) for line in done.stdout.splitlines() if ' ' in line)
+
+
+def test_a_large_upload_goes_over_its_own_compressed_connection_and_a_small_one_shares(tmp_path):
+    """Every lane's calls share one connection, and Session Manager carries it slowly, so a new lane's first upload
+    (an 11 MB Git bundle and 30 MB of source files) held every other lane's calls and keepalives behind it for
+    minutes. A large upload opens its own connection over a new Session Manager session instead, compressed, since
+    the macOS rsync has no reliable -z. A small one stays on the shared connection, which is already open."""
+    import shlex
+    from desk_tools import testbox_client as client
+
+    shared = ['-o', 'ControlMaster=auto', '-o', f'ControlPath={tmp_path / "shared.sock"}', '-o', 'ProxyCommand=aws ssm start-session --target %h']
+    small = shlex.split(client.transport(shared, client.BULK_BYTES))
+    assert small == ['ssh', *shared]
+    assert _effective_ssh(small[1:])['controlpath'] == str(tmp_path / 'shared.sock')
+    large = _effective_ssh(shlex.split(client.transport(shared, client.BULK_BYTES + 1))[1:])
+    assert large['controlmaster'] == 'false'
+    assert large.get('controlpath', 'none') == 'none'   # ssh -G leaves an unset control path out
+    assert large['compression'] == 'yes'
+    assert large['proxycommand'].startswith('aws ssm start-session')
+
+
+def test_an_uploads_size_counts_files_and_links_and_skips_missing_paths(tmp_path):
+    from desk_tools import testbox_client as client
+
+    (tmp_path / 'a.txt').write_bytes(b'x' * 1000)
+    (tmp_path / 'link').symlink_to('a.txt')
+    assert client.upload_size(tmp_path, ['a.txt', 'link', 'gone.txt']) == 1000 + len('a.txt')

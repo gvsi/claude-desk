@@ -301,6 +301,28 @@ def control_path(cache: Path, region: str, instance: str) -> Path:
     return cache / (hashlib.sha256(key.encode()).hexdigest()[:20] + ".sock")
 
 
+# A large upload on the shared connection holds every other lane's calls and keepalives behind it, so it opens its own
+# connection over a new Session Manager session (about 6 s), compressed: macOS openrsync has no reliable -z, and
+# source files shrink about fourfold. ssh keeps the first value given for each option, so these go first.
+BULK_BYTES = 1_000_000
+BULK_OPTIONS = ("-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "Compression=yes")
+
+
+def transport(ssh_opts: list[str], size: int) -> str:
+    """rsync's remote shell for an upload of `size` bytes: the shared connection, or a connection of its own."""
+    return shlex.join(["ssh", *(BULK_OPTIONS if size > BULK_BYTES else ()), *ssh_opts])
+
+
+def upload_size(root: Path, paths) -> int:
+    total = 0
+    for path in paths:
+        try:
+            total += (root / path).lstat().st_size
+        except FileNotFoundError:
+            continue
+    return total
+
+
 def warm_instance(cache: Path, region: str) -> str | None:
     try:
         instance = json.loads((cache / f"connection-{region}.json").read_text())["instance"]
@@ -483,9 +505,13 @@ def run(args, root, lane, cache):
             rsync = shutil.which("rsync")
             if not rsync:
                 raise RuntimeError("rsync is required (macOS openrsync is supported)")
-            transport = shlex.join(["ssh", *ssh_opts])
+            request_size = upload_size(tmp, [p.relative_to(tmp) for p in tmp.rglob("*") if p.is_file()])
+            delta_size = upload_size(root, delta)
+            if max(request_size, delta_size) > BULK_BYTES:
+                print(f"testbox: sending {(request_size + delta_size) / 1e6:.1f} MB over a connection of its own, so "
+                      "other lanes' calls don't wait behind it", file=sys.stderr, flush=True)
             # Protocol 29 works with macOS openrsync. No .git, environment, ignored files or build artifacts.
-            subprocess.run([rsync, "-rlpt", "-e", transport, str(tmp) + "/", host + ":" + base + "/transfer/"], check=True)
+            subprocess.run([rsync, "-rlpt", "-e", transport(ssh_opts, request_size), str(tmp) + "/", host + ":" + base + "/transfer/"], check=True)
             timing.mark("request_transfer")
             # Delete stale source paths before sync, including file-to-directory branch changes.
             subprocess.run(ssh + ["python3 -c " + shlex.quote(cleanup_script(base))], check=True)
@@ -493,7 +519,7 @@ def run(args, root, lane, cache):
             if delta:
                 # Content hashes already selected changed paths; force transfer even when size
                 # and mtime match. This also repairs sources altered by a previous remote job.
-                subprocess.run([rsync, "-rlpt", "--ignore-times", "--from0", "--files-from=" + str(tmp / "files"), "-e", transport, str(root) + "/", host + ":" + base + "/repo/"], check=True)
+                subprocess.run([rsync, "-rlpt", "--ignore-times", "--from0", "--files-from=" + str(tmp / "files"), "-e", transport(ssh_opts, delta_size), str(root) + "/", host + ":" + base + "/repo/"], check=True)
             timing.mark("source_transfer")
             print(f"testbox: sync complete ({time.monotonic() - start:.2f}s)", file=sys.stderr, flush=True)
             # Run the worker shipped by this client, even if the selected tree has no tools.
