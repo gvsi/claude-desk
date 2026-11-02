@@ -285,6 +285,7 @@ from desk.api.versions import (
     ChangesAlwaysOn,
     active_row,
     checkable,
+    confirm_tools,
     connect_payments,
     post_draft,
     rules_draft,
@@ -335,6 +336,8 @@ from desk.kernel_api import (
     PolicyConfirmRequest,
     PolicyProbeRequest,
     SessionContext,
+    ToolPin,
+    ToolsConfirmRequest,
 )
 from desk.presets import PRESETS
 
@@ -1545,7 +1548,7 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
-            await after_finish(ctx, interview)
+            await publish_plan(ctx, engine, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=lambda interview: [Entry(role="owner", text="")], turn=turn,
@@ -2695,7 +2698,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
-            await after_finish(ctx, interview)
+            await publish_plan(ctx, engine, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=stage, turn=run, after=after,
@@ -2856,7 +2859,7 @@ async def reopen(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
-            await after_finish(ctx, interview)
+            await publish_plan(ctx, engine, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=stage, turn=turn, after=after, render=render)
@@ -3398,6 +3401,71 @@ async def _connect_accepted_connector(owner: OwnerCtx, engine: AsyncEngine, inte
         return
 
 
+def _removed_payments(interview: Interview) -> set[str]:
+    """The Stripe cards the owner had connected that a change took away (`changed`, with no Stripe card accepted now):
+    their payment tools are still on in the kernel until switched off (`_switch_off_payments`), which marks them no
+    longer connected."""
+    cards = {card.proposal_id: card for card in interview.planned}
+    cards.update((entry.card.proposal_id, entry.card) for entry in interview.transcript if entry.card is not None)
+    stripe = [card for card in cards.values() if card.connector is not None and card.connector.app == "stripe"]
+    if any(card.state == "accepted" for card in stripe):
+        return set()
+    return {card.proposal_id for card in stripe if card.state == "changed" and card.connector.connected}
+
+
+def _unmark_connected(interview: Interview, proposal_ids: set[str]) -> None:
+    for entry in interview.transcript:
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if card.proposal_id in proposal_ids and card.connector is not None:
+                card.connector.connected = False
+
+
+async def _switch_off_payments(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
+    """Switch off the payment tools of a Stripe connection a change took away (`_removed_payments`), as the owner's
+    review does (`POST /tools/confirm` with `enable=False`), then mark its cards no longer connected, so it happens
+    once. A failure is raised: the Tools step's read tries again (`setup_tools`)."""
+    removed = _removed_payments(interview)
+    if not removed:
+        return
+    desk_id = owner.desk(interview.desk_id)
+    on = [row for row in await owner.ro.rows("tools", desk_id=desk_id, order_by=("tool",))
+          if row["tool"] in MCP_TOOLS and row["status"] != "disabled"]
+    if owner.ro.conn.in_transaction():
+        await owner.ro.conn.rollback()       # no read stays open while the kernel is asked
+    if on:
+        await confirm_tools(owner, ToolsConfirmRequest(desk_id=desk_id, enable=False, tools=[
+            ToolPin(tool=row["tool"], definition_sha256=row["definition_sha256"]) for row in on]))
+    for attempt in range(2):
+        current = await _read(engine, owner, interview.interview_id)
+        seen = _stored(current)
+        current.business_tools_enabled = interview.business_tools_enabled
+        _unmark_connected(current, removed)
+        try:
+            await _commit(engine, owner, current, seen)
+        except ApiProblem as failed:
+            if failed.status != 409 or failed.error != "conflict":
+                raise
+            if attempt == 0:
+                continue
+            # The tools are off; the mark waits for the next read, which finds none on and only writes it.
+            logger.warning("setup couldn't mark removed payments switched off (conflict)")
+            return
+        break
+    _unmark_connected(interview, removed)
+
+
+async def publish_plan(owner: OwnerCtx, engine: AsyncEngine, interview: Interview) -> None:
+    """Publish setup's settled plan after the commit that closed it: switch off the payment tools of a Stripe
+    connection a change took away (a failure is logged, and the Tools step's read tries again), then write the
+    business tools (`after_finish`)."""
+    try:
+        await _switch_off_payments(owner, engine, interview)
+    except Exception as failed:
+        logger.warning("setup couldn't switch off removed payment tools (%s); the Tools step tries again",
+                       type(failed).__name__)
+    await after_finish(owner, interview)
+
+
 async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
     """Apply enabled business tools after the setup commit, without a database lock."""
     if not interview.business_tools_enabled:
@@ -3441,7 +3509,7 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClie
         if connect:
             await _connect_accepted_connector(ctx, engine, interview)
         if interview.step == "tools":
-            await after_finish(ctx, interview)
+            await publish_plan(ctx, engine, interview)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=lambda interview: [Entry(role="owner", text="Use your suggestions")],
@@ -4516,10 +4584,14 @@ async def go_live(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, publi
 async def setup_tools(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
                       business_tools_enabled: bool = False) -> SetupTools:
     """The new Desk's tools as the kernel lists them, each with the active rules' cards that cover it, and the mock
-    payments server while it isn't connected."""
+    payments server while it isn't connected. Payment tools a change took away but that publishing the plan couldn't
+    switch off are switched off first (`_switch_off_payments`); a failure there is this read's error."""
     async with engine.connect() as conn:
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
+    if interview.step != "questions" and _removed_payments(interview):
+        interview.business_tools_enabled = business_tools_enabled
+        await _switch_off_payments(owner, engine, interview)    # its first try failed: tried again, or the read fails
     if (business_tools_enabled and interview.step != "questions"
             and any(job.config is not None for job in accepted_jobs(interview))
             and not await owner.ro.rows("tools", desk_id=desk_id, source="business")):

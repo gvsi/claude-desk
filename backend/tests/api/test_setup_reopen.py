@@ -787,3 +787,71 @@ async def test_your_suggestions_clear_the_facts_still_to_ask(app, browser, kerne
     model.add(next_step("contact_and_after_hours", next={"kind": "done"}, plan="Your Desk books weekday visits."))
     again = await reopen(owner, state)
     assert again.status_code == 200 and again.json()["step"] == "tools", again.text
+
+
+async def connected_stripe(app, browser, kernel_http, model, engine) -> tuple[Owner, dict, str]:
+    """An owner on the web's client whose closed setup accepted the Stripe card and connected it, with its payment
+    tools reviewed and switched on at the Tools step: at the Tools step. The Stripe card's id."""
+    owner, state = await ready(app, browser, kernel_http, model, cards=True)
+    iid, desk_id = state["interview_id"], state["desk_id"]
+    card = setup.ProposalCard(proposal_id="p-abababababab", kind="connector", state="accepted", job=None,
+                              connector=setup.ConnectorProposal(app="stripe", label="Stripe", why="Take payments",
+                                                                connectable=True, connected=True))
+    async with engine.begin() as conn:
+        current = await setup._load(conn, owner.copy_id, iid)
+        current.transcript.append(setup.Entry(role="claude", text="", planned=[card]))
+        current.transcript.append(setup.Entry(role="claude", text="", card=card.model_copy(deep=True),
+                                              owner_decided=True, connector_connect_attempted=True))
+        await setup._save(conn, current)
+    connected = await owner.browser.post(f"/api/owner/setup/{iid}/tools/connect")
+    assert connected.status_code == 200, connected.text
+    pins = [{"tool": row["tool"], "definition_sha256": row["definition_sha256"]} for row in connected.json()]
+    reviewed = await owner.browser.post(f"/api/owner/policy/{desk_id}/tools/confirm", json={"tools": pins, "enable": True})
+    assert reviewed.status_code == 200, reviewed.text
+    activated = await owner.browser.post(f"/api/owner/policy/{desk_id}/confirm",
+                                         json={"version": reviewed.json()["draft"]["version"]})
+    assert activated.status_code == 200, activated.text
+    return owner, state, card.proposal_id
+
+
+async def payment_tools_on(owner: Owner, state: dict) -> list[str]:
+    listed = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert listed.status_code == 200, listed.text
+    return [row["tool"] for row in listed.json()["tools"] if row["source"] == "mcp" and row["status"] != "disabled"]
+
+
+async def test_declining_stripe_after_a_change_switches_its_payment_tools_off(
+        app, browser, kernel_http, model, engine, fake):
+    # "Disconnect Stripe": its card is shown again, and the owner declines it. The plan has no Stripe, so its payment
+    # tools are switched off as the plan is published, not left on behind a disconnected card.
+    owner, state, stripe = await connected_stripe(app, browser, kernel_http, model, engine)
+    assert await payment_tools_on(owner, state)
+    model.add(turn("We'll stop using Stripe.", drop=[stripe], next={"kind": "done"}))
+    changed = await reopen(owner, state, "Disconnect Stripe. I don't want payments connected.", cards=True)
+    assert changed.status_code == 200, changed.text
+    again = changed.json()["pending_card"]
+    assert again is not None and again != stripe
+    landed = await decide(owner, model, state, again, False, closes=True)
+    assert landed["step"] == "tools"
+    switched = [call.body for call in fake.called("POST /tools/confirm") if call.body["enable"] is False]
+    assert len(switched) == 1
+    assert {pin["tool"] for pin in switched[0]["tools"]} == {"payments.list_charges", "payments.create_refund"}
+    assert await payment_tools_on(owner, state) == []
+    # Done once: the Tools step's later reads switch nothing off again.
+    assert await payment_tools_on(owner, state) == []
+    assert len([call for call in fake.called("POST /tools/confirm") if call.body["enable"] is False]) == 1
+
+
+async def test_payment_tools_a_change_left_on_are_switched_off_when_the_tools_are_read(
+        app, browser, kernel_http, model, engine, fake):
+    # The switch-off failed as the plan was published: the Tools step's read tries again, and a failure there is the
+    # read's own error, shown with its "Try again", never ignored.
+    owner, state, stripe = await connected_stripe(app, browser, kernel_http, model, engine)
+    model.add(turn("We'll stop using Stripe.", drop=[stripe], next={"kind": "done"}))
+    changed = await reopen(owner, state, "Disconnect Stripe.", cards=True)
+    fake.fail("POST /tools/confirm", "500", times=2)
+    landed = await decide(owner, model, state, changed.json()["pending_card"], False, closes=True)
+    assert landed["step"] == "tools"
+    failed = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert failed.status_code >= 500, failed.text
+    assert await payment_tools_on(owner, state) == []

@@ -3497,7 +3497,7 @@
     "/api/owner/setup/{id}/tools": {
       "get": {
         "summary": "Setup Tools",
-        "description": "The new Desk's tools, and the mock payments server while it isn't connected.",
+        "description": "The new Desk's tools, and the mock payments server while it isn't connected. The payment tools of a Stripe\nconnection \"Change something\" took away are switched off first, when publishing the plan couldn't: 503 when the\nkernel can't do it now, so a retry tries again.",
         "operationId": "owner_setup_tools",
         "parameters": [
           {

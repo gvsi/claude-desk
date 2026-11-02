@@ -258,7 +258,9 @@ async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn,
 @router.get("/{id}/tools", response_model=SetupTools, responses=error_responses(401, 404, 422, 503))
 async def setup_tools(interview_id: InterviewId, request: Request,
                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupTools:
-    """The new Desk's tools, and the mock payments server while it isn't connected."""
+    """The new Desk's tools, and the mock payments server while it isn't connected. The payment tools of a Stripe
+    connection "Change something" took away are switched off first, when publishing the plan couldn't: 503 when the
+    kernel can't do it now, so a retry tries again."""
     state = runtime(request).started()
     return await setup.setup_tools(ctx, state.database(), interview_id,
                                    business_tools_enabled=state.settings.business_tools_enabled)
