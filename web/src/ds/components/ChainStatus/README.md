@@ -1,6 +1,6 @@
 # ChainStatus
 
-`ChainStatus` is the one line over the Safety ledger: whether every signed entry still matches the chain, and how many entries there are.
+`ChainStatus` is the one line over the Safety ledger: whether any signed entry has changed since it was written, and how many entries there are.
 
 ## When to use
 
@@ -17,11 +17,13 @@
 
 | State | Dot | Line |
 | --- | --- | --- |
-| `chainOk: true` | handled | "Every entry matches the chain" |
-| `chainOk: false`, or anything but `true` or `null` | refused | "Entry {firstBadSeq} doesn't match the chain" ("An entry doesn't match the chain" without a well-formed number) |
+| `chainOk: true` | handled | "No entry has been changed since it was written" |
+| `chainOk: false`, or anything but `true` or `null` | refused | "Something in this record changed at entry {firstBadSeq}" ("Something in this record has changed since it was written" without a well-formed number) |
 | `chainOk: null` | info | "Not checked yet" |
 
-Beside the line, the count as a `CountPill` read as "{n} entries"; at the end, "Signed with a development key" when `devKey`.
+Beside the line, the count in words, "{n} entries" ("1 entry"), in caption type and the secondary text color (`entriesLabel`); at the end, "Signed with a development key" when `devKey`.
+
+The words claim no more than the kernel's check shows. A pass means every entry still hashes and verifies as signed, in an unbroken run that ends at the head the kernel last wrote. A failure at an entry is the first place the record stops checking out, which may be a removed or added entry rather than that entry changing, so the line names where the record changed, not that the entry itself did. The full trace (`FullTrace`) keeps the chain's own terms.
 
 ## Props
 

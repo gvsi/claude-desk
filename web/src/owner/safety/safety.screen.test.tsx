@@ -178,6 +178,8 @@ const NOTHING = "When a request is turned down or a reply is stopped, you'll see
 const HEADLINE = /^I turned down \d+ requests? this week\.$/;
 const NONE_TURNED_DOWN = "I didn't turn down any requests this week.";
 const SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
+/** The record's check, passed, in the owner's words. */
+const UNCHANGED = 'No entry has been changed since it was written';
 
 /**
  * One of Claude's drafts the reply check stopped at `at`: entry `seq` of the record, and its
@@ -318,8 +320,11 @@ describe('Safety', () => {
     const { screen } = await renderRoute(SAFETY);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
     await expect.element(screen.getByText('I turned down 2 requests this week.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('img', { name: `${entries} entries`, exact: true })).toBeVisible();
+    await expect.element(screen.getByText(UNCHANGED, { exact: true })).toBeVisible();
+    // The count says what it counts, in words, not a bare number in a pill.
+    await expect.element(screen.getByText(`${entries} entries`, { exact: true })).toBeVisible();
+    expect(document.querySelector('.cd-chain-status .cd-count-pill')).toBeNull();
+    expect(document.querySelector('.cd-chain-status')?.textContent).not.toMatch(/chain/i);
     expect(document.body.textContent).not.toMatch(/talk me around|attempts? (?:was|were) stopped/);
 
     // One request reads in the singular.
@@ -452,8 +457,8 @@ describe('Safety', () => {
   it('broken_chain_is_plain', async () => {
     injectLedger(ledgerPage(threeEntries(), { chain_ok: false, first_bad_seq: 2 }));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    await expect.element(screen.getByText("Entry 2 doesn't match the chain", { exact: true })).toBeVisible();
-    expect(screen.getByText('Every entry matches the chain').elements()).toHaveLength(0);
+    await expect.element(screen.getByText('Something in this record changed at entry 2', { exact: true })).toBeVisible();
+    expect(screen.getByText(UNCHANGED).elements()).toHaveLength(0);
 
     // An entry's full trace says the chain is broken, and where, never that it was verified.
     await recordRow(screen, 3).click();
@@ -1066,7 +1071,7 @@ describe('Safety', () => {
     await listSeededHold();
     const { screen } = await renderRoute(SAFETY);
     await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(UNCHANGED, { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     // A held request is held, not stopped, and claims nothing about what happens next.
     await screen.getByRole('link', { name: /^Today, \d{1,2}:\d{2} [ap]m A visitor not on record/ }).click();
@@ -1106,7 +1111,7 @@ describe('Safety', () => {
     // The record was read and checked; then a later read fails. The check says so, first, beside
     // what it last found, and stays until a read works, so an old check never reads as current.
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    const checked = screen.getByText('Every entry matches the chain', { exact: true });
+    const checked = screen.getByText(UNCHANGED, { exact: true });
     const record = screen.getByRole('list', { name: 'Every entry, newest first' });
     await expect.element(checked).toBeVisible();
     await expect.element(record).toBeVisible();
@@ -1165,7 +1170,7 @@ describe('Safety', () => {
     const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
     await expect.element(line, { timeout: 5_000 }).toBeVisible();
     await expect.element(nothing).not.toBeInTheDocument();
-    expect(line.element().compareDocumentPosition(screen.getByText('Every entry matches the chain').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.element().compareDocumentPosition(screen.getByText(UNCHANGED).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await readsMore('safety', 2);
     await readsMore('today', 1);
     expect(nothing.elements()).toHaveLength(0);
