@@ -206,6 +206,7 @@ from desk.api.prompts import (
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
     SETUP_OFFER_ANSWER_LINE,
+    SETUP_REOPEN_LINE,
     SETUP_PLAN_NOT_CONNECTED,
     SETUP_PLAN_NO_AMOUNT,
     SETUP_PLAN_TAG,
@@ -1925,6 +1926,8 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
               wrap(QUESTION_ASKED_TAG, asked)])
     if not limit_turn and not interview.business_tools_enabled:
         parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
+    if not limit_turn and interview.reopening:
+        parts.insert(1, SETUP_REOPEN_LINE)                       # the change's own turn alone
     parts.append(wrap(ANSWERS_SO_FAR_TAG, so_far))
     reads = [] if limit_turn else transcript
     for entry in reads:

@@ -37,6 +37,7 @@ from desk.api.prompts import (
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
     SETUP_OFFER_ANSWER_LINE,
+    SETUP_REOPEN_LINE,
     SETUP_NEXT_HEAD,
     SETUP_PLAN_NOT_CONNECTED,
     SETUP_TURN_HEAD,
@@ -685,17 +686,30 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
 
 
 def test_decided_cards_stay_as_decided():
-    # No decided card can be decided again, before the plan closes or after: setup never points the owner back to one.
+    # Claude never points the owner back to a decided card. After the plan closes, Change something is how they change
+    # one: its own turn says how a drop shows the card again for them to decide.
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
         flat = " ".join(system.split())
         assert ("a job they accepted stays as they chose, and one they turned down can come back as a new job in "
-                "add_jobs when they ask for it") in flat
+                "add_jobs when they ask for it. Once the questions are done, Change something under the plan can "
+                "change an accepted job; that turn says how") in flat
         assert "Payments through Stripe can also be connected on the Tools step if they turned Stripe down" in flat
         assert "point them to its card" not in system
-    for words in ("A yes to that offer puts the owner on record", "never point to a card or another place",
-                  "an app it already lists can't be proposed again", "A job they turned down, or one left out, can "
-                  "come back", "If they also said yes to the offer, don't say you've added them"):
+    for words in ("A yes to that offer puts the owner on record", "an app it already lists can't be proposed again",
+                  "A job they turned down, or one left out, can come back",
+                  "If they also said yes to the offer, don't say you've added them",
+                  "this answer can't change them, so never say you've changed one, don't point to a card"):
         assert words in SETUP_OFFER_ANSWER_LINE
+    # Once the owner answers the offer, setup moves on and "Change something" sits under the plan, so the offer's
+    # answer points there for a fact, limit or job they want different, never to a card or anywhere else.
+    assert "once they've answered the offer, they can change it with Change something under the plan" in (
+        SETUP_OFFER_ANSWER_LINE)
+    assert "no later screen" not in SETUP_OFFER_ANSWER_LINE and "another place" not in SETUP_OFFER_ANSWER_LINE
+    for words in ("the owner pressed Change something", "put its id from <setup_plan> in drop",
+                  "also put the changed job in add_jobs", "never that it's changed",
+                  "To change a fact, put it in its field as usual",
+                  "set next to its topic even though it's covered, with step_done true"):
+        assert words in SETUP_REOPEN_LINE
 
 
 def test_setup_writing_allows_markdown_but_no_exclamation_marks():
@@ -1007,7 +1021,7 @@ PROMPT_NAMES ={"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_
                 "SETUP_START_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_TURN_HEAD", "SETUP_RETRY", "QUESTIONS",
                 "QUESTION_KEYS", "SETUP_NEXT_SYSTEM", "SETUP_NEXT_HEAD", "SetupNextStep",
                 "SETUP_CARD_ANSWER_SYSTEM", "SETUP_CLIENT_CARDS", "SETUP_CLOSING_LINE", "SetupCardAnswer",
-                "SETUP_OFFER_ANSWER_LINE",
+                "SETUP_OFFER_ANSWER_LINE", "SETUP_REOPEN_LINE",
                 "question_text", "setup_turn_head", "SetupStart", "SetupTurn", "SETUP_TURNS", "SetupPatch",
                 "SetupAnswers", "HoursAnswer", "PriceAnswer", "MemoryDraft", "ConnectorKey", "CONNECTOR_LABELS",
                 # triage and owner translations (Plan 02b, Task 10)
@@ -1057,7 +1071,7 @@ def _fixed() -> set[str]:
             *(persona.goal for persona in DEMO_VISITORS.values()), *_parts(DEMO_VISITOR_BRIEF),
             *(field.description for field in VisitorStep.model_fields.values()),
             *(part for line in DEMO_VISITOR_LINES.values() for part in _parts(line)), *DEMO_VISITOR_NOTES.values(),
-            *SETUP_CLIENT_CARDS.values(), SETUP_CLOSING_LINE, SETUP_OFFER_ANSWER_LINE,
+            *SETUP_CLIENT_CARDS.values(), SETUP_CLOSING_LINE, SETUP_OFFER_ANSWER_LINE, SETUP_REOPEN_LINE,
             *(line for system in (SETUP_START_SYSTEM, SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM) for line in system.splitlines()
               if len(line) > 20),
             *(part for template in (SETUP_TURN_HEAD, SETUP_NEXT_HEAD, SETUP_RETRY,
