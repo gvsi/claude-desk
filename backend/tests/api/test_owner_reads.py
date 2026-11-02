@@ -789,6 +789,31 @@ async def test_expired_hold_refreshes_on_read(app, browser, fake, kernel_http, r
     assert today.status_code == 200 and today.json()["needs_you_count"] == 0
 
 
+async def test_a_booking_takes_its_sessions_earlier_discount_quote_off_needs_you(app, browser, fake, kernel_http,
+                                                                                ro_schema, api_conn):
+    # A visitor asks for half off, which the rules hold for Mike, then books at list price: the held discount is
+    # stale, so the kernel's read cancels it and Needs you no longer offers it. The seed's own hold, in a session
+    # with no booking, stays.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    seeded = seeded_hold(fake, owner)
+    neighbour = await guest(kernel_http, fake, owner)
+    asked = await neighbour.decide("native.quote", discounted_quote(fake, owner, 5000))
+    assert asked.state == "held"
+    fake.now += timedelta(minutes=2)
+    desk = fake.desks[owner.desk_id]
+    slot = min(slot.slot_id for slot in desk.slots.values() if slot.starts_at > fake.now)
+    await neighbour.run("native.book", {"slot_id": slot})
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    assert [item["decision"]["decision_id"] for item in listed.json() if item["decision"]] == [seeded]
+    ro = KernelRO(api_conn, owner.copy_id, ro_schema)
+    assert (await ro.one("decisions", decision_id=asked.decision_id))["state"] == "cancelled"
+    assert (await owner.get(f"decisions/{asked.decision_id}")).json()["visitor_plain"] == "Cancelled"
+    assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["needs_you_count"] == 1
+
+
 async def test_briefing_answers_after_a_stopped_draft(scene, clock):
     who = await scene.visitor(local(2026, 10, 29, 19))
     await scene.text(who, local(2026, 10, 29, 19))
