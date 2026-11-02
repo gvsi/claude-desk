@@ -23,6 +23,9 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
   const selected = optimistic ?? paletteKey(business.brand);
   const shown = optimistic === null ? business.brand ?? {} : paletteBrand(optimistic);
   const { brand } = brandFrom({ business_name: business.name, desk_name: desk.name, owner_display_name: business.owner_display_name, brand: shown });
+  // The field is the owner's colour when it is one (a hex colour): its words take the inks for it,
+  // the same in both themes. Otherwise it is the theme's panel, with the theme's own inks.
+  const onOwnerColour = brand.field.startsWith('#');
 
   const save = useMutation({
     // Aborting fetch cannot undo a server write. Serialize writes, even across remounts,
@@ -122,10 +125,10 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
         </div>
         <p className="cd-type-caption cd-settings__quiet">{selected === null ? 'Custom colour' : PALETTE_NAMES[selected]}</p>
         <div
-          className="cd-header-colour__preview"
+          className={`cd-header-colour__preview${onOwnerColour ? ' cd-header-colour__preview--brand' : ''}`}
           role="group"
           aria-label="Header preview"
-          style={{ backgroundColor: brand.field, borderBottomColor: brand.accent, color: brand.ink }}
+          style={{ backgroundColor: brand.field, borderBottomColor: brand.accent }}
         >
           <span className="cd-header-colour__monogram cd-type-wordmark" aria-hidden="true">{brand.monogram}</span>
           <div className="cd-header-colour__names" data-copy="user">
