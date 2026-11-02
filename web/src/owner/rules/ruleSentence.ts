@@ -135,20 +135,49 @@ const URGENT_PHRASE: ToolPhrase = {
   never: [{ text: 'take ' }, key('urgent callbacks')],
 };
 
+/** The verbs a Desk job's title may start with, each with its form after "Claude asks you before ". */
+const TITLE_VERBS: Readonly<Record<string, string>> = {
+  ask: 'asking',
+  book: 'booking',
+  collect: 'collecting',
+  quote: 'quoting',
+  request: 'requesting',
+  schedule: 'scheduling',
+  send: 'sending',
+  share: 'sharing',
+  show: 'showing',
+  take: 'taking',
+};
+
+/**
+ * A Desk job's title as a phrase. One that starts with a verb (`TITLE_VERBS`) reads as what Claude
+ * does, the rest of the title set off as the owner's words, as the setup boards word a job (REV-SETUP-1,
+ * -3): "Claude can book a free intro call", "Claude asks you before sending **a retainer link**",
+ * "Claude never books a free intro call". Any other title is used: "Claude can use SMS reminder".
+ */
+function titlePhrase(title: string): ToolPhrase {
+  const match = /^(\S+)\s+(\S.*)$/s.exec(title);
+  const verb = match?.[1]?.toLowerCase() ?? '';
+  const rest = match?.[2] ?? '';
+  const ing = Object.hasOwn(TITLE_VERBS, verb) ? TITLE_VERBS[verb] : undefined;
+  if (ing !== undefined && rest !== '') {
+    return { can: [{ text: `${verb} ` }, { text: rest, user: true }], before: [{ text: `${ing} ` }, { text: rest, key: true, user: true }] };
+  }
+  const named: SentencePart = { text: lowerFirst(title), user: true };
+  return { can: [{ text: 'use ' }, named], before: [{ text: 'using ' }, named] };
+}
+
 /**
  * A target's phrase: the table's; a Desk's urgent job's (`URGENT_PHRASE`); a listed business tool's
- * own title, set off as user text, "use {title}"; else the app's words for it ("use a connected
- * tool"), never its raw name.
+ * own title, set off as user text (`titlePhrase`: "book a free intro call", else "use {title}");
+ * else the app's words for it ("use a connected tool"), never its raw name.
  */
 function targetPhrase(target: string, business: BusinessTools): ToolPhrase {
   const phrase = Object.hasOwn(TOOL_PHRASES, target) ? TOOL_PHRASES[target] : undefined;
   if (phrase !== undefined) return phrase;
   if (isBusinessToolName(target) && business.get(target)?.config.block === 'urgent') return URGENT_PHRASE;
   const title = isBusinessToolName(target) ? toolDisplayName(target, business) : null;
-  if (title !== null && title.trim() !== '') {
-    const named: SentencePart = { text: lowerFirst(title.trim()), user: true };
-    return { can: [{ text: 'use ' }, named], before: [{ text: 'using ' }, named] };
-  }
+  if (title !== null && title.trim() !== '') return titlePhrase(title.trim());
   const words = lowerFirst(targetWords(target, business));
   return { can: `use ${words}`, before: `using ${words}` };
 }

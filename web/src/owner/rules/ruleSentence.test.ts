@@ -195,6 +195,26 @@ describe('any tool', () => {
     expect(read(ruleSentence({ ...urgent, applies_to: 'desk.sms-reminder' }, { business: sms }))).toBe('Claude can use SMS reminder');
   });
 
+  it('a_job_whose_title_starts_with_a_verb_reads_as_what_claude_does', () => {
+    // REV-SETUP-1 and -3: "Claude asks you before sending **a retainer link**", not "using send a retainer link".
+    const jobs: BusinessTools = new Map([
+      ['desk.intro-call', { title: 'Book a free intro call', description: '', config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 } }],
+      ['desk.retainer', { title: 'Send a retainer link', description: '', config: { block: 'purpose_payment', purpose: 'Retainer', amount_cents: 50_000 } }],
+      ['desk.intake', { title: 'Ask new clients three questions', description: '', config: { block: 'intake', questions: ['x'] } }],
+    ]);
+    const job = (applies_to: string, mode: RuleCard['mode']) => ruleSentence({ ...urgent, card_id: applies_to, applies_to, mode }, { business: jobs });
+    expect(read(job('desk.intro-call', 'auto'))).toBe('Claude can book a free intro call');
+    expect(read(job('desk.intro-call', 'ask'))).toBe('Claude asks you before booking **a free intro call**');
+    expect(read(job('desk.intro-call', 'never'))).toBe('Claude never books a free intro call');
+    expect(read(job('desk.retainer', 'ask'))).toBe('Claude asks you before sending **a retainer link**');
+    expect(read(job('desk.intake', 'ask'))).toBe('Claude asks you before asking **new clients three questions**');
+    // The rest of the title is still the owner's own words, set off as user text.
+    expect(job('desk.retainer', 'ask').filter((part) => part.user === true).map((part) => part.text)).toEqual(['a retainer link']);
+    // The actual hours follow, as for any booking.
+    const hours = cards['rv-book-wk'].hours;
+    expect(read(ruleSentence({ ...urgent, applies_to: 'desk.intro-call', hours }, { business: jobs }))).toBe('Claude can book a free intro call on **weekdays, 8:00 am to 6:00 pm**');
+  });
+
   it('an_unknown_tool_never_shows_its_raw_name', () => {
     for (const applies_to of ['native.teleport', 'desk.not-listed', 'mcp.secret_tool']) {
       const unknown = card({ card_id: 'u', applies_to, mode: 'auto', who: 'anyone' });

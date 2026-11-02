@@ -47,7 +47,7 @@ it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order, with
   await expect.element(jobs.getByText('Free intro call, 20 minutes, in your opening hours')).toBeVisible();
   await expect.element(jobs.getByText('Asks: Is this for you or for a business? Which tax years do you need help with? Do you already have a bookkeeper?')).toBeVisible();
   await expect.element(jobs.getByText('Claude can use new client intake', { exact: true })).toBeVisible();
-  await expect.element(jobs.getByText('Claude asks you before using book a free intro call', { exact: true })).toBeVisible();
+  await expect.element(jobs.getByText('Claude asks you before booking a free intro call', { exact: true })).toBeVisible();
   expect(jobs.getByText('Anything else here: ask me.').elements()).toHaveLength(0);
   expect(jobs.getByRole('link').elements()).toHaveLength(0);
   // The Desk's own jobs are the first card, tool by tool.
