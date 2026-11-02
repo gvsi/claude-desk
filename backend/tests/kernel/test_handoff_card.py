@@ -961,7 +961,7 @@ async def test_a_held_request_awaiting_the_owner_is_the_conversations_item(app, 
     copy, visitor = await visitor_of(app, client)
     await without_call_backs(app, copy)                          # so the blocked drafts show the handoff card
     held = await held_quote(client, visitor)
-    status = await checked(client, visitor, BLOCKED)             # the visitor is told to check the request
+    status = await checked(client, visitor, BLOCKED)             # the visitor is told the request is waiting for approval
     assert [(block.kind, block.text) for block in status.blocks] == [("prose", STATUS_LINE["en"])]
     assert (await checked(client, visitor, "", [clause("handoff")])).ok          # nor a card Claude cites
     assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
