@@ -477,6 +477,16 @@ export function moneyCapSentence(cents: number): SentencePart[] {
   return [{ text: 'Claude asks you before any payment over ' }, key(formatCents(cents)), { text: ', whatever the other rules say' }];
 }
 
+/**
+ * The payment limit at the top of a money connector's card on Rules (REV-RULES-D, A), over the
+ * rules listed below it: "Claude asks you before any payment over **$500**, whatever the rules
+ * below say"; at 0, "Claude asks you before any payment".
+ */
+export function moneyCapBandSentence(cents: number): SentencePart[] {
+  if (cents <= 0) return [{ text: 'Claude asks you before any payment' }];
+  return [{ text: 'Claude asks you before any payment over ' }, key(formatCents(cents)), { text: ', whatever the rules below say' }];
+}
+
 /** C4's compact payment-limit sentence on Your tools; C1 keeps `moneyCapSentence`. */
 export function moneyCapToolSentence(cents: number): SentencePart[] {
   if (cents <= 0) return [{ text: 'Any payment asks you first' }];

@@ -19,6 +19,7 @@ import {
   moneyCapMeta,
   moneyCapSentence,
   moneyCapToolSentence,
+  moneyCapBandSentence,
   ACROSS_DESK_SENTENCES,
   ruleMeta,
   ruleQualifiers,
@@ -29,6 +30,11 @@ import {
 
 const cards = rivera.ruleCards;
 const words = { business: NO_BUSINESS_TOOLS };
+
+it('the money band leads its rules with the payment limit, over the rules below it', () => {
+  expect(read(moneyCapBandSentence(50_000))).toBe('Claude asks you before any payment over **$500**, whatever the rules below say');
+  expect(read(moneyCapBandSentence(0))).toBe('Claude asks you before any payment');
+});
 
 it('the C4 money cap has its compact sentence, including the unset cap', () => {
   expect(read(moneyCapToolSentence(50_000))).toBe('Any payment over **$500** asks you first');
