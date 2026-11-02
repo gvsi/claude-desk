@@ -69,6 +69,7 @@ export interface VisionOwnerShellProps extends VisionOwner {
 export function VisionOwnerShell({ bar, business, owner, desks, currentDeskId, current, peopleLabel, counts, answeringDescription, children }: VisionOwnerShellProps) {
   return (
     <AppShell
+      todayHref={VISION_SIDEBAR_HREFS.today}
       business={business}
       fill
       banner={bar}

@@ -114,6 +114,8 @@ const meta = {
   title: 'Layout/AppShell',
   component: AppShell,
   args: {
+    todayHref: hrefs.today,
+    linkComponent: RouterLink,
     business: rivera.business.name,
     sidebar,
     banner: <ReviewerBar ownerName={rivera.business.ownerName} onStartOver={fn()} />,
@@ -504,7 +506,7 @@ export const Skeleton: Story = {
         />
       </div>
       <div data-shaped-frame aria-hidden="true" ref={(element) => element?.setAttribute('inert', '')}>
-        <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={9} about={ABOUT.links.length} />}>
+        <AppShell todayHref={hrefs.today} skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={9} about={ABOUT.links.length} />}>
           <div />
         </AppShell>
       </div>

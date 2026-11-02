@@ -71,6 +71,7 @@ export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setu
   const { page, fill, centered } = pageSkeletonFor(pathname, search, showSampleContent, setup);
   return (
     <AppShell
+      todayHref={`/app/${encodeURIComponent(deskId)}/today`}
       skeleton
       business=""
       banner={<ReviewerBarSkeleton inbox />}

@@ -112,6 +112,7 @@ function RulesScreen(args: Parameters<typeof AskClaudePanel>[0]) {
   const [open, setOpen] = useState(false);
   return (
     <AppShell
+      todayHref="#today"
       business={chen.business.name}
       sidebar={
         <nav aria-label="Main">

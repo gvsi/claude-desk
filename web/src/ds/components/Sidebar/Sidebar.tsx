@@ -22,6 +22,7 @@ export type SidebarHrefs = Record<Exclude<NavKey, 'connectors'>, string> & { con
 export interface SidebarLinkProps {
   href: string;
   className: string;
+  'aria-label'?: string;
   'aria-current'?: 'page';
   children: ReactNode;
 }
@@ -147,16 +148,17 @@ export function Sidebar({
   linkComponent: Link = PlainLink,
   about,
 }: SidebarProps) {
+  const preview = true;
   const aboutId = useId();
   // One page is current: while a document from the about group is open, the main nav marks none.
   const mainCurrent = about?.links.some((link) => link.current === true) ? null : current;
   return (
     <div className="cd-sidebar">
       {/* The lockup (owner, 2026-10-30): the 36 px bell, the name and the Preview badge, on one line. */}
-      <div className="cd-sidebar__brand">
+      <Link href={hrefs.today} className="cd-sidebar__brand" aria-label={`Claude Desk${preview ? ' Preview' : ''}, go to Today`}>
         <Mark size={36} />
-        <Wordmark preview />
-      </div>
+        <Wordmark preview={preview} />
+      </Link>
       <button
         type="button"
         className="cd-sidebar__business cd-type-control"

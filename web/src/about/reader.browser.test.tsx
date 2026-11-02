@@ -1207,11 +1207,10 @@ describe('ReaderPage', () => {
         document.title = 'Today · Claude Desk';
         const screen = await renderReader(id, { size, lastDesk });
         expect(document.title, where).toBe(`${PAGES[id].title} · Claude Desk`);
-        // One link into the prototype, in the top bar, the same words at every width, never naming the
+        // The invitation into the prototype, in the top bar, the same words at every width, never naming the
         // business, with the chat icon: to this browser's Desk when it has opened one.
-        const back = [...(screen.container.querySelector('header')?.querySelectorAll('a') ?? [])].filter(
-          (link) => !link.closest('nav'),
-        );
+        const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true }).elements();
+        expect(back[0]?.closest('header'), where).not.toBeNull();
         expect(back.map(readText), where).toEqual(['Try Desk prototype']);
         expect(back[0]?.querySelector('svg')?.innerHTML, where).toBe(CHAT_ICON);
         expect(back[0]?.getAttribute('href'), where).toBe(to);
@@ -1287,6 +1286,8 @@ describe('ReaderPage', () => {
     (screen.container.querySelector('.cd-about-try') as HTMLElement).focus();
     window.scrollTo(0, 50);
     await expect.poll(() => window.scrollY).toBe(50);
+    await userEvent.tab();
+    await expect.element(screen.getByRole('link', { name: 'Claude Desk, home', exact: true })).toHaveFocus();
     await userEvent.tab();
     const focused = document.activeElement as HTMLElement;
     expect(focused.closest('nav[aria-label="About this prototype"]')).not.toBeNull();

@@ -47,6 +47,8 @@
 | --- | --- | --- |
 | `sidebar` | `ReactNode` | Required. |
 | `business` | `string` | Required. Shown in the compact top bar, as written, and as its `title`. |
+| `todayHref` | `string` | Required. The current Desk's Today, linked from the compact bar's mark. |
+| `linkComponent` | `ComponentType<SidebarLinkProps>` | The router's link component, as on Sidebar; a plain anchor by default. |
 | `banner` | `ReactNode` | Full width, above everything. |
 | `layout` | `'auto' \| 'compact'` | `auto` (the default) switches to the top bar below 768 px. |
 | `fill` | `boolean` | The page fills the main area, unpadded, for a page with its own columns. The sidebar is unchanged. |

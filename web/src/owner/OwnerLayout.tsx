@@ -211,7 +211,7 @@ function DeskGate({ deskId }: { deskId: string }) {
   const next = shown ? (
     <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />
   ) : failed ? (
-    <OwnerState error={desks.error} focusRetry={retried.current} onRetry={() => {
+    <OwnerState deskId={deskId} error={desks.error} focusRetry={retried.current} onRetry={() => {
       retried.current = true;
       void desks.refetch();
     }} />
@@ -453,6 +453,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   return (
     <AppShell
       business={business.name}
+      todayHref={todayPath(deskId)}
+      linkComponent={RouterLink}
       banner={
         <ReviewerBar
           ownerName={business.owner_display_name}
@@ -592,7 +594,7 @@ function BesideTheBusinessRow({ container, children }: { container: RefObject<HT
 }
 
 /** When the copy's Desks cannot be read: the product's name, an error and a next step. */
-function OwnerState({ error, onRetry, focusRetry = false }: { error: unknown; onRetry?: () => void; focusRetry?: boolean }) {
+function OwnerState({ deskId, error, onRetry, focusRetry = false }: { deskId?: string; error: unknown; onRetry?: () => void; focusRetry?: boolean }) {
   const titleId = useId();
   const retryButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -604,8 +606,10 @@ function OwnerState({ error, onRetry, focusRetry = false }: { error: unknown; on
   return (
     <div className="cd-owner-state">
       <header className="cd-owner-state__brand">
-        <Mark />
-        <Wordmark />
+        <Link to={deskId ? todayPath(deskId) : '/'} className="cd-owner-state__home" aria-label={deskId ? 'Claude Desk, go to Today' : 'Claude Desk, home'}>
+          <Mark />
+          <Wordmark />
+        </Link>
       </header>
       <main className="cd-owner-state__main" aria-labelledby={titleId}>
         <h1 id={titleId} className="cd-sr-only">

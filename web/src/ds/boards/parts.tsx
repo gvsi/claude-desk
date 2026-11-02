@@ -142,6 +142,7 @@ function OwnerFrame({
 }: OwnerFrameProps) {
   return (
     <AppShell
+      todayHref={OWNER_HREFS.today}
       business={business}
       fill={fill}
       panel={panel}

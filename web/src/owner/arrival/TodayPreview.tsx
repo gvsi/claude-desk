@@ -79,6 +79,7 @@ function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
         <TodayClockContext.Provider value={still.clock}>
           <OwnerDeskProvider value={still.desk}>
             <AppShell
+              todayHref={`/app/${encodeURIComponent(desk.desk_id)}/today`}
               business={business.name}
               banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={ignore} actions={<OwnerInbox timezone={business.timezone} />} />}
               sidebar={
