@@ -8,7 +8,7 @@ The demo business is Turner Plumbing. You play Mike Turner, its owner, while Cla
 
 [desk.alcantara.xyz](https://desk.alcantara.xyz)
 
-The passcode comes with the link. Each visitor gets a fresh copy of the Turner Plumbing demo, tied to a browser cookie, with no account to create.
+The passcode comes with the submission. Each visitor gets a fresh copy of the Turner Plumbing demo, tied to a browser cookie, with no account to create.
 
 ## Things to try
 

@@ -63,7 +63,7 @@ The main risks are a wrong answer under Claude's name, hostile traffic using up 
 
 ## The prototype
 
-The prototype, v1's enforced core, is at [desk.alcantara.xyz](https://desk.alcantara.xyz) (the passcode comes with the link), with the code at [github.com/gvsi/claude-desk](https://github.com/gvsi/claude-desk). Each visitor acts as Mike in a fresh copy of Turner Plumbing. Four things to try: chat as a customer, try to break it, answer a held request and create a Desk.
+The prototype, v1's enforced core, is at [desk.alcantara.xyz](https://desk.alcantara.xyz) (the passcode comes with the submission), with the code at [github.com/gvsi/claude-desk](https://github.com/gvsi/claude-desk). Each visitor acts as Mike in a fresh copy of Turner Plumbing. Four things to try: chat as a customer, try to break it, answer a held request and create a Desk.
 
 **Real.**
 
