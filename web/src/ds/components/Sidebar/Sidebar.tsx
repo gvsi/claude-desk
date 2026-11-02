@@ -82,6 +82,10 @@ export interface SidebarProps {
   current: NavKey;
   /** Where each row goes. Without `connectors` or `notifications`, that row isn't drawn and the rows close up. */
   hrefs: SidebarHrefs;
+  /** The lockup's destination, independent of the nav rows; `hrefs.today` by default. */
+  brandHref?: string;
+  /** The destination in the lockup's accessible name, after its visible name and badge. */
+  brandDestination?: 'today' | 'home';
   /** The business's word for the people it serves, the third row: "Customers", "Clients". */
   peopleLabel: string;
   /**
@@ -162,6 +166,8 @@ export function Sidebar({
   onSwitchDesk,
   current,
   hrefs,
+  brandHref = hrefs.today,
+  brandDestination = 'today',
   peopleLabel,
   counts,
   answering,
@@ -179,7 +185,7 @@ export function Sidebar({
   return (
     <div className="cd-sidebar">
       {/* The lockup (owner, 2026-10-30): the 36 px bell, the name and the Preview badge, on one line. */}
-      <Link href={hrefs.today} className="cd-sidebar__brand" aria-label={`Claude Desk${preview ? ' Preview' : ''}, go to Today`}>
+      <Link href={brandHref} className="cd-sidebar__brand" aria-label={`Claude Desk${preview ? ' Preview' : ''}, ${brandDestination === 'home' ? 'home' : 'go to Today'}`}>
         <Mark size={36} />
         <Wordmark preview={preview} />
       </Link>

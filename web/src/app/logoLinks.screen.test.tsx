@@ -83,6 +83,31 @@ it('about_lockup_links_home_by_keyboard_and_click_at_both_widths', async () => {
   }
 });
 
+it('vision_owner_branding_links_home_without_changing_illustrative_nav_at_both_widths', async () => {
+  for (const viewport of ['desktop', 'phone'] as const) {
+    const { screen, router } = await renderRoute('/vision/team-desk', { viewport, seed: { name: 'rivera', signedIn: false } });
+    const logo = screen.getByRole('link', {
+      name: viewport === 'desktop' ? 'Claude Desk Preview, home' : 'Claude Desk, home',
+      exact: true,
+    });
+    await expect.element(logo).toHaveAttribute('href', '/');
+    await tabTo(logo.element());
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    await router.navigate('/vision/team-desk');
+    await logo.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    await router.navigate('/vision/team-desk');
+    if (viewport === 'phone') await screen.getByRole('button', { name: 'Menu', exact: true }).click();
+    await expect.element(screen.getByRole('link', { name: 'Today', exact: true })).toHaveAttribute('href', '#today');
+    const lockup = screen.getByRole('link', { name: 'Claude Desk Preview, home', exact: true });
+    await expect.element(lockup).toHaveAttribute('href', '/');
+    expect(lockup.element().textContent).toBe('Claude Desk Preview');
+    await lockup.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+  }
+});
+
 const BROKEN_OWNER = {
   path: '/broken-owner',
   element: <div />,

@@ -44,6 +44,10 @@ export interface AppShellProps {
   business: string;
   /** The current Desk's Today, for the compact bar's mark. */
   todayHref: string;
+  /** The compact mark's destination, independent of the nav rows; `todayHref` by default. */
+  brandHref?: string;
+  /** The destination in the mark's accessible name, after "Claude Desk"; Today by default. */
+  brandDestination?: 'today' | 'home';
   /** The router's link component, as passed to Sidebar; a plain anchor by default. */
   linkComponent?: ComponentType<SidebarLinkProps>;
   /** A full-width line above everything, such as the `ReviewerBar`. */
@@ -119,7 +123,7 @@ function reducesMotion(): boolean {
  * Menu opens the sidebar as a modal sheet, and Escape, "Close menu" or going to a page closes it
  * and returns focus to Menu.
  */
-export function AppShell({ sidebar, business, todayHref, linkComponent = PlainLink, banner, layout = 'auto', fill = false, skeleton = false, panel, children }: AppShellProps) {
+export function AppShell({ sidebar, business, todayHref, brandHref = todayHref, brandDestination = 'today', linkComponent = PlainLink, banner, layout = 'auto', fill = false, skeleton = false, panel, children }: AppShellProps) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
   const reduced = useSyncExternalStore(subscribeReducedMotion, reducesMotion, () => true);
@@ -178,7 +182,7 @@ export function AppShell({ sidebar, business, todayHref, linkComponent = PlainLi
             <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor="menu" />
           </div>
         ) : (
-          <CompactNav sidebar={sidebar} business={business} todayHref={todayHref} linkComponent={linkComponent} inert={inert} />
+          <CompactNav sidebar={sidebar} business={business} brandHref={brandHref} brandDestination={brandDestination} linkComponent={linkComponent} inert={inert} />
         )
       ) : null}
       <div className="cd-app-shell__body">
@@ -531,7 +535,7 @@ class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
 }
 
 /** The compact navigation: the top bar with the mark, the business and Menu, and the sheet Menu opens. */
-function CompactNav({ sidebar, business, todayHref, linkComponent: Link = PlainLink, inert }: Pick<AppShellProps, 'sidebar' | 'business' | 'todayHref' | 'linkComponent'> & { inert: boolean }) {
+function CompactNav({ sidebar, business, brandHref, brandDestination, linkComponent: Link = PlainLink, inert }: Pick<AppShellProps, 'sidebar' | 'business' | 'linkComponent'> & { brandHref: string; brandDestination: 'today' | 'home'; inert: boolean }) {
   const [open, setOpen] = useState(false);
   const sheet = useRef<HTMLDialogElement>(null);
   const menu = useRef<HTMLButtonElement>(null);
@@ -576,7 +580,7 @@ function CompactNav({ sidebar, business, todayHref, linkComponent: Link = PlainL
   return (
     <>
       <div className="cd-app-shell__topbar" {...inertWhen(inert)}>
-        <Link href={todayHref} className="cd-app-shell__brand" aria-label="Claude Desk, go to Today">
+        <Link href={brandHref} className="cd-app-shell__brand" aria-label={`Claude Desk, ${brandDestination === 'home' ? 'home' : 'go to Today'}`}>
           <Mark />
         </Link>
         {/* A name too long for the bar is cut with an ellipsis; its title holds it in full. */}

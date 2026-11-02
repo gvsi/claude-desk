@@ -46,6 +46,8 @@
 | `onSwitchDesk` | `(deskId: string) => void` | Required. Not called for the current Desk. |
 | `current` | `NavKey` | Required. `'today' \| 'conversations' \| 'people' \| 'knowledge' \| 'rules' \| 'connectors' \| 'safety' \| 'notifications' \| 'profile' \| 'share' \| 'settings'`. With no Connectors or Notifications href, that key marks no row. |
 | `hrefs` | `SidebarHrefs` | Required. An href for every `NavKey`; `connectors` and `notifications` are optional, and without one its row isn't drawn. |
+| `brandHref` | `string` | The lockup's destination, independent of the nav rows. Defaults to `hrefs.today`; vision pages pass `/`. |
+| `brandDestination` | `'today' \| 'home'` | Defaults to `today`. Appends "go to Today" or "home" to the accessible name, after the visible name and Preview badge. |
 | `peopleLabel` | `string` | Required. The third row. |
 | `counts` | `{ conversations?: NavCount; safety?: NavCount & { attention?: boolean }; notifications?: NavCount }` | `NavCount` is `{ n: number; label: string }`. |
 | `answering` | `boolean` | Required. |

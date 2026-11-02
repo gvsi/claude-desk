@@ -48,6 +48,8 @@
 | `sidebar` | `ReactNode` | Required. |
 | `business` | `string` | Required. Shown in the compact top bar, as written, and as its `title`. |
 | `todayHref` | `string` | Required. The current Desk's Today, linked from the compact bar's mark. |
+| `brandHref` | `string` | Overrides the compact mark's destination, independently of the nav rows. Defaults to `todayHref`; vision pages pass `/`. |
+| `brandDestination` | `'today' \| 'home'` | Defaults to `today`. Names the mark "Claude Desk, go to Today" or "Claude Desk, home". |
 | `linkComponent` | `ComponentType<SidebarLinkProps>` | The router's link component, as on Sidebar; a plain anchor by default. |
 | `banner` | `ReactNode` | Full width, above everything. |
 | `layout` | `'auto' \| 'compact'` | `auto` (the default) switches to the top bar below 768 px. |
