@@ -352,8 +352,8 @@ describe('the About documents', () => {
 
   it('a_bad_document_names_its_file_and_line', () => {
     const prediction = raw('capability-prediction.md');
-    const line = prediction.split('\n').indexOf('## Limitations') + 1;
-    expect(() => readDocument('prediction', prediction.replace('## Limitations', '### Limitations'))).toThrow(
+    const line = prediction.split('\n').indexOf('## Why the limits stay in code') + 1;
+    expect(() => readDocument('prediction', prediction.replace('## Why the limits stay in code', '### Why the limits stay in code'))).toThrow(
       `docs/capability-prediction.md line ${line}: a heading below ##`,
     );
     expect(() => readDocument('proposal', raw('product-proposal.md').replace('The prototype, v1', 'This prototype'))).toThrow(
