@@ -180,7 +180,7 @@ describe('the About documents', () => {
       route: '/about/proposal',
       title: 'Product proposal',
       summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
-      pullQuote: 'Talking Claude around can’t make it act past the owner’s rules.',
+      pullQuote: 'Prompt injection and social engineering can’t make it act past the owner’s rules.',
       hero: 'architecture',
       next: 'prediction',
     });
@@ -210,7 +210,7 @@ describe('the About documents', () => {
       // Read from disk too, so the quote is the document's and not only the parse's.
       expect(raw(file), file).toContain(straight(pullQuote));
     }
-    expect(ABOUT_DOCUMENTS.proposal.pullQuote).toBe('Talking Claude around can’t make it act past the owner’s rules.');
+    expect(ABOUT_DOCUMENTS.proposal.pullQuote).toBe('Prompt injection and social engineering can’t make it act past the owner’s rules.');
     expect(ABOUT_DOCUMENTS.prediction.pullQuote).toBe(
       'It will still be open to prompt injection and social engineering, so the business’s limits have to be enforced in code, outside the model.',
     );

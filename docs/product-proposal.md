@@ -6,7 +6,7 @@ Giovanni Alcantara · October 29, 2026
 
 Claude Desk gives a person or small business a public, always-on Claude that strangers and other people's agents can talk to. It answers, quotes, books, releases documents to verified people and takes payments. Requests that need the owner are held for a one-tap answer. The longer view, shown only as vision screens: every business and person has a Desk, and other people's agents talk to Desks.
 
-Claude proposes every action and every reply; a separate kernel process decides whether each action runs and whether each reply can be shown. The kernel holds every business credential. Talking Claude around can't make it act past the owner's rules. Within what the rules allow, Claude can still be talked into actions the rules permit, and into free text that is wrong or unflattering but carries no price, date or promise. Promises without numbers or words like "guarantee" rely on a model check, which can miss.
+Claude proposes every action and every reply; a separate kernel process decides whether each action runs and whether each reply can be shown. The kernel holds every business credential. Prompt injection and social engineering can't make it act past the owner's rules. Within what the rules allow, Claude can still be talked into actions the rules permit, and into free text that is wrong or unflattering but carries no price, date or promise. Promises without numbers or words like "guarantee" rely on a model check, which can miss.
 
 ## Who it's for and the problem
 

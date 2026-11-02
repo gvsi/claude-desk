@@ -61,7 +61,7 @@ const SOURCES: Record<AboutId, Source> = {
     next: 'prediction',
     forThePage: proposalForThePage,
     words: {
-      pullQuote: 'Talking Claude around can’t make it act past the owner’s rules.',
+      pullQuote: 'Prompt injection and social engineering can’t make it act past the owner’s rules.',
       hero: 'architecture',
     },
   },
