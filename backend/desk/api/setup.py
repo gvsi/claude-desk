@@ -62,9 +62,13 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
   after its retry gets the fixed transition line instead. When the owner typed their own contact on the contact
-  question, setup first asks once, with code's two choices, whether to add them as a test client
-  (`TEST_CLIENT_OFFER`), and code alone reads the answer, with no model turn: only a yes puts them on record as a
-  client with that contact (`PUT /desks/{id}/people`), and any answer moves on to step `tools`.
+  question, setup first asks, with code's two choices, whether to add them as a test client (`TEST_CLIENT_OFFER`).
+  Code reads a yes or a no with no model turn: only a yes puts them on record as a client with that contact
+  (`PUT /desks/{id}/people`), and either moves on to step `tools`. Any other answer, such as a request for another
+  job or a question, goes to setup's consultant in one planning call (`_consult_on_offer`): Claude replies, and a job
+  it adds or an app it names reopens the plan on its card before step `tools`; closing it again settles the cards,
+  appends a second closing plan, finishes again and asks the offer again. With nothing new to show, or Claude
+  unavailable, the offer is asked again at once.
 
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
@@ -387,17 +391,17 @@ QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
 AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
-# The test-client offer, asked once at the plan's end (`_offer_test_client`), its two choices, and Claude's line after
-# a yes. Owner-facing words, kept together for copy review.
+# The test-client offer, asked at the plan's end (`_offer_test_client`), its two choices, and Claude's line after a yes.
+# Owner-facing words, kept together for copy review.
 TEST_CLIENT_OFFER = ("Want to try your Desk the way a client would? I can add you as a test client, with your own "
                      "contact, so you can check verification and private answers yourself.")
 TEST_CLIENT_YES = "Add me as a test client"
 TEST_CLIENT_NO = "Not now"
 TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me."
-TEST_CLIENT: TestClientQuestion = "test_client"   # the offer's question, which code alone asks and reads
+TEST_CLIENT: TestClientQuestion = "test_client"   # the offer's question, which code alone asks
 TEST_CLIENT_REF = "test-client"                   # the owner's ref among the Desk's people, as a test client
 # The words and phrases code reads in a typed answer to the test-client offer (`_reads_yes`), in English and Spanish:
-# a "no" one wins over any "yes" one, and an answer with neither gets the same offer again.
+# a "no" one wins over any "yes" one, and an answer with neither goes to setup's consultant (`_consult_on_offer`).
 TEST_CLIENT_TYPED_YES = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead", "please do", "do it", "add me",
                          "sounds good", "sí", "si", "vale", "claro", "dale", "añádeme", "agrégame")
 TEST_CLIENT_TYPED_NO = ("no", "not", "don't", "dont", "nope", "not now", "later", "skip", "no gracias")
@@ -418,6 +422,9 @@ LIMIT_LABELS = {"quote_auto_max_cents": "a quote limit", "discount_auto_max_bp":
 
 Record = Callable[[ModelResponse], Awaitable[None]]
 Output = TypeVar("Output", bound=BaseModel)
+# What closes a planning turn with nothing left to ask (`_advance_ask`): `close_setup`, or the test-client offer again
+# after an answer to it that reopened the plan (`_consult_on_offer`).
+Close = Callable[[OwnerCtx, AsyncEngine, ModelClient, "Interview"], Awaitable[None]]
 
 
 # Names and defaults ----------------------------------------------------------------------------------------------
@@ -2350,18 +2357,21 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
 
 
 async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
-                   source, reply: Entry, *, closing_call: bool = False, replies: _TurnReplies | None = None) -> None:
+                   source, reply: Entry, *, closing_call: bool = False, replies: _TurnReplies | None = None,
+                   close: Close | None = None) -> None:
     """Choose the final ask before deciding which of this answer's replies can be stored beside it."""
     replies = replies if replies is not None else _TurnReplies()
     replies.track(reply)
-    await _advance_ask(owner, engine, model, interview, source, reply, replies, closing_call=closing_call)
+    await _advance_ask(owner, engine, model, interview, source, reply, replies, closing_call=closing_call, close=close)
     asked = interview.latest_ask
     replies.before(asked.question if interview.step == "questions" and asked is not None else None)
 
 
 async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
-                       source, reply: Entry, replies: _TurnReplies, *, closing_call: bool = False) -> None:
-    """Append exactly one ask or close. Metadata lives on this turn's Claude entry, never on a card."""
+                       source, reply: Entry, replies: _TurnReplies, *, closing_call: bool = False,
+                       close: Close | None = None) -> None:
+    """Append exactly one ask or close: `close_setup`, unless the caller gives what closes instead (`close`).
+    Metadata lives on this turn's Claude entry, never on a card."""
     if source is not None:
         interview.cover(source.skip)
     available = _record_plan(interview, source, reply)
@@ -2394,9 +2404,10 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             entry = Entry(role="claude", text=following.reply.strip() if following else "")
             interview.transcript.append(entry)
             replies.track(entry)
-            await _advance_ask(owner, engine, model, interview, following, entry, replies, closing_call=True)
+            await _advance_ask(owner, engine, model, interview, following, entry, replies, closing_call=True,
+                               close=close)
             return
-        await close_setup(owner, engine, model, interview)
+        await (close or close_setup)(owner, engine, model, interview)
 
 
 def _show_card(interview: Interview, card: ProposalCard) -> None:
@@ -2521,7 +2532,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             connect = _claim_connector_connect(interview, None if interview.step == "tools" else card)
             return
         if question == TEST_CLIENT:
-            _answer_test_client(interview, staged[0])
+            await _answer_test_client(ctx, engine, model, interview, staged[0])
             if interview.step == "tools":
                 connect = _claim_connector_connect(interview)
             return
@@ -2633,7 +2644,9 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
     a test client when they typed their own contact (`_offer_test_client`): setup then waits on that answer.
 
     While the offer waits, the plan is closed already: closing again ("Use your suggestions") moves on to the Tools
-    step without another plan and writes nothing. The caller owns persistence and after_finish.
+    step without another plan and writes nothing. A plan an answer to the offer reopened (`_consult_on_offer`) closes
+    as the first time did: settling its cards and finishing again change only what its new jobs add, and the offer is
+    asked again. The caller owns persistence and after_finish.
     """
     if interview.offering:
         interview.step = "tools"
@@ -2878,11 +2891,25 @@ def _ask_test_client(interview: Interview) -> None:
 
 
 def _offer_test_client(interview: Interview) -> None:
-    """Once the plan is closed, offer once to put the owner on record as a test client, only when they typed their own
-    contact (`_owner_contact`). Setup then waits on the answer (`_answer_test_client`) before its Tools step."""
-    if _owner_contact(interview) is None or any(entry.question == TEST_CLIENT for entry in interview.transcript):
+    """Once the plan is closed, offer to put the owner on record as a test client, only when they typed their own
+    contact (`_owner_contact`) and haven't answered the offer with a yes or a no (`_test_client_answered`): an answer
+    that was neither can reopen the plan (`_consult_on_offer`), and closing it again asks once more. Setup then waits
+    on the answer (`_answer_test_client`) before its Tools step."""
+    if _owner_contact(interview) is None or _test_client_answered(interview):
         return
     _ask_test_client(interview)
+
+
+def _test_client_answered(interview: Interview) -> bool:
+    """Whether the owner answered the test-client offer with a yes or a no (`_reads_yes`): an owner line typed while
+    the offer was the question waiting, whatever came after it."""
+    asked = None
+    for entry in interview.transcript:
+        if entry.role == "claude" and (entry.question is not None or entry.card is not None):
+            asked = entry.question
+        elif entry.role == "owner" and asked == TEST_CLIENT and _reads_yes(entry.text) is not None:
+            return True
+    return False
 
 
 def _reads_yes(text: str) -> bool | None:
@@ -2901,18 +2928,42 @@ def _reads_yes(text: str) -> bool | None:
     return None
 
 
-def _answer_test_client(interview: Interview, said: Entry) -> None:
-    """The owner's answer to the test-client offer (`said`), read by code with no model call (`_reads_yes`). An answer
-    that is neither a yes nor a no gets the same offer again; a yes or a no moves setup on to its Tools step. A yes,
+async def _answer_test_client(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
+                              said: Entry) -> None:
+    """The owner's answer to the test-client offer (`said`), read by code (`_reads_yes`). A yes or a no makes no model
+    call and moves setup on to its Tools step; anything else goes to setup's consultant (`_consult_on_offer`). A yes,
     with a contact the owner typed (`_owner_contact`), is marked on their answer, which the turn saves before anyone
     is put on record (`_put_test_client`, after the save); a no writes nothing and adds no line."""
     answer = _reads_yes(said.text)
     if answer is None:
-        _ask_test_client(interview)
+        await _consult_on_offer(owner, engine, model, interview)
         return
     if answer and _owner_contact(interview) is not None:
         said.test_client = "yes"
     interview.step = "tools"
+
+
+async def _consult_on_offer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview) -> None:
+    """An answer to the test-client offer that is neither a yes nor a no, such as a request for another job or a
+    question, goes to setup's consultant in one planning call (`_next_step`, which reads the owner's words as their
+    answer), and Claude's reply is kept. What the call adds to or drops from the plan is recorded as on any planning
+    turn (`_advance`). When it leaves something new to show (a job it added, which the next planning call shows, or an
+    app it names), the plan reopens on that card before the Tools step; deciding the last card, or "Use your
+    suggestions", closes it again (`close_setup`), which asks the offer again. With nothing new to show, or with
+    Claude unavailable, the offer is asked again at once."""
+    following = await _next_step(owner, engine, model, interview)
+    if following is None:
+        _ask_test_client(interview)
+        return
+    reply = Entry(role="claude", text=following.reply.strip())
+    interview.transcript.append(reply)
+    await _advance(owner, engine, model, interview, following, reply, close=_offer_again)
+
+
+async def _offer_again(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview) -> None:
+    """Close a planning turn on the test-client offer with nothing new to show: the plan stays closed as it was, and
+    the offer is asked again."""
+    _ask_test_client(interview)
 
 
 def _record_test_client(interview: Interview) -> bool:

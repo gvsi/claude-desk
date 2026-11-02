@@ -45,7 +45,9 @@ from desk.api.prompts import (
     CARD_ERRORS,
     CARDS_REFUSED,
     DRAFT_RETRY,
+    OWNER_ANSWER_TAG,
     QUESTION_KEYS,
+    SETUP_NEXT_SYSTEM,
     SITUATIONS_SYSTEM,
     SITUATION_TOOLS_BY_WHO,
     DraftedRules,
@@ -59,6 +61,7 @@ from desk.api.prompts import (
     SituationDraft,
     SituationTool,
     dollars,
+    wrap,
 )
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
@@ -89,7 +92,7 @@ from desk.kernel_api import (
 from desk.kernel_service.activation import _probe_principal
 from desk.kernel_service.decide import tools_given
 from desk.presets import PRESETS
-from tests.api.fakes import ScriptedModel, gated, response
+from tests.api.fakes import ScriptedModel, gated, response, unavailable
 from tests.api.fakes import text as text_block
 from tests.api.test_kernel_client import ScriptedKernel
 from tests.api.test_setup_questions import (
@@ -231,14 +234,14 @@ def unparseable() -> object:
 
 async def answered(app, browser, kernel_http, model: ScriptedModel, *, business_type: str = "trade",
                    owner_display_name: str | None = "Mike Turner", said: dict[str, str] | None = None,
-                   **changes) -> tuple[Owner, dict]:
+                   cards: bool = False, **changes) -> tuple[Owner, dict]:
     """An owner whose setup answered every question (consent declined), and the state as it then stands: waiting on
     the test-client offer when the owner typed their own contact on the contact question, else at step `tools`.
     `changes` replace a patched field's value (None leaves it unanswered); `said` replaces what the owner typed on
-    the questions it names."""
+    the questions it names; `cards` is a client that shows cards."""
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type=business_type, owner_display_name=owner_display_name)
-    await consent(owner, state["interview_id"], False, model)
+    await consent(owner, state["interview_id"], False, model, cards=cards)
     for key in QUESTION_KEYS:
         patch = {name: changes.get(name, value) for name, value in PATCHES[key].items()}
         # The fixture is a completed owner interview: structured facts must be typed, not just model patches.
@@ -699,7 +702,8 @@ async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards:
 
 
 # The test-client offer: at the plan's end, setup offers to put the owner on record as a client, with the contact they
-# typed themselves, so they can try verification as a client would. Code asks it and reads the answer.
+# typed themselves, so they can try verification as a client would. Code asks it and reads a yes or a no; anything else
+# goes to setup's consultant, which can reopen the plan on a new card before the Tools step.
 
 OWNER_EMAIL = "mike@turner-plumbing.example"
 CONTACT_SAID = f"Mike Turner. Email {OWNER_EMAIL} or call (510) 555-0142, and take a message after hours."
@@ -714,14 +718,19 @@ def owner_line(text: str) -> dict:
     return {"role": "owner", "text": text, "choices": [], "card": None}
 
 
+def claude_line(text: str) -> dict:
+    return {"role": "claude", "text": text, "choices": [], "card": None}
+
+
 def kernel_writes(fake) -> list[tuple[str, object]]:
     """The fake kernel's calls since it was last cleared, but its reads (the owner's `GET /whoami` on each request)."""
     return [(call.path, call.body) for call in fake.calls if not call.route.startswith("GET ")]
 
 
-async def offered(app, browser, kernel_http, model: ScriptedModel) -> tuple[Owner, dict]:
+async def offered(app, browser, kernel_http, model: ScriptedModel, *, cards: bool = False) -> tuple[Owner, dict]:
     """An owner who typed their own contact on the contact question: setup waits on the test-client offer."""
-    owner, state = await answered(app, browser, kernel_http, model, said={"contact_and_after_hours": CONTACT_SAID})
+    owner, state = await answered(app, browser, kernel_http, model, said={"contact_and_after_hours": CONTACT_SAID},
+                                  cards=cards)
     assert (state["step"], state["question"], state["busy"]) == ("questions", "test_client", False)
     return owner, state
 
@@ -787,6 +796,20 @@ def test_a_test_client_phone_is_one_number_without_the_hours(said, contact):
     assert setup._owner_contact(contact_interview(said)) == contact
 
 
+@pytest.mark.parametrize("said, again", [
+    ("Not now", False), ("Yes please", False), ("Please add a retainer job.", True), ("What does that mean?", True),
+])
+def test_closing_the_plan_again_offers_again_until_a_yes_or_a_no(said, again):
+    interview = contact_interview("mike@example.test")
+    setup._ask_test_client(interview)
+    interview.transcript += [setup.Entry(role="owner", text=said), setup.Entry(role="claude", text="Got it.")]
+    asked = len(interview.transcript)
+    setup._offer_test_client(interview)
+    assert len(interview.transcript) == asked + int(again)
+    if again:
+        assert (interview.question, interview.transcript[-1].text) == ("test_client", setup.TEST_CLIENT_OFFER)
+
+
 @pytest.mark.parametrize("yes", [True, False])
 async def test_a_test_client_is_put_only_when_the_owner_says_yes(app, browser, fake, kernel_http, model, engine, yes):
     owner, state = await offered(app, browser, kernel_http, model)
@@ -821,34 +844,216 @@ async def test_a_test_client_is_put_only_when_the_owner_says_yes(app, browser, f
     assert (again.status_code, again.json()) == (409, {"error": "conflict"})
 
 
+CONSULTANT_REPLY = "It puts you on record as a client with your own contact, so you can try verification yourself."
+
+
+def consultant(reply: str = CONSULTANT_REPLY, **fields) -> Callable:
+    """Setup's consultant answering what the owner typed at the test-client offer: its reply, and by default nothing
+    added to the plan."""
+    return next_step("what_you_do", reply=reply, next={"kind": "done"}, **fields)
+
+
 @pytest.mark.parametrize("typed, read", [
     ("yes", "yes"), ("Yes please!", "yes"), ("Sure, go ahead", "yes"), ("OK, add me", "yes"),
     ("Yes, add me as a test client", "yes"), ("Sí", "yes"), ("vale", "yes"),
     ("no", "no"), ("No, not now", "no"), ("don't add me", "no"), ("Maybe later", "no"), ("No gracias", "no"),
-    ("what does that mean?", "again"), ("Can you change my hours first?", "again"),
+    ("what does that mean?", "other"), ("Can you change my hours first?", "other"),
     # A question, or a yes only on a condition, is no yes, whatever words it holds.
-    ("What does add me as a test client mean?", "again"), ("What happens if I say yes?", "again"),
-    ("If it's free, yes", "again"),
+    ("What does add me as a test client mean?", "other"), ("What happens if I say yes?", "other"),
+    ("If it's free, yes", "other"),
 ])
 async def test_a_typed_answer_to_the_test_client_offer_is_read_by_code(app, browser, fake, kernel_http, model,
                                                                        typed, read):
     owner, state = await offered(app, browser, kernel_http, model)
     fake.calls.clear()
     asked = len(model.requests)
+    if read == "other":
+        model.add(consultant())
     reply = await say(owner, state, typed)
     assert reply.status_code == 200, reply.text
     done = reply.json()
-    assert len(model.requests) == asked                   # read word by word by code, a "no" word winning
+    # A yes or a no is read word by word by code, a "no" word winning; anything else goes to setup's consultant once,
+    # which reads it as the owner's answer.
+    assert len(model.requests) == asked + int(read == "other")
     assert len(fake.called("PUT /desks/{id}/people")) == int(read == "yes")
-    if read == "again":
-        # Neither a yes nor a no: the same offer again, with its choices, and nothing written.
+    if read == "other":
+        sent = model.requests[-1]
+        assert sent.system[0]["text"] == SETUP_NEXT_SYSTEM
+        assert wrap(OWNER_ANSWER_TAG, typed) in sent.messages[0]["content"][0]["text"]
+        # Claude's reply, then the same offer again, with its choices, and nothing written.
         assert (done["step"], done["question"]) == ("questions", "test_client")
-        assert done["messages"][-3:] == [OFFER, owner_line(typed), OFFER]
+        assert done["messages"][-4:] == [OFFER, owner_line(typed), claude_line(CONSULTANT_REPLY), OFFER]
         assert (await say(owner, state, setup.TEST_CLIENT_YES)).json()["messages"][-1] == ADDED
         assert len(fake.called("PUT /desks/{id}/people")) == 1
+        assert len(model.requests) == asked + 1
     else:
         assert done["step"] == "tools"
         assert done["messages"][-2:] == ([owner_line(typed), ADDED] if read == "yes" else [OFFER, owner_line(typed)])
+
+
+# A request typed at the offer reopens the plan before the Tools step: Claude's reply, then the job it added as a card.
+REQUEST = ("Please add a retainer payment link job for an agreed engagement, with every payment asking me first; "
+           "leave Stripe disconnected for now")
+RETAINER = {"job": "payment", "title": "Retainer payment link", "who": "Clients with an agreed engagement",
+            "why": "Start agreed work without chasing payment", "how": "Sends a secure link to pay an agreed retainer.",
+            "autonomy": "ask", "config": {"block": "purpose_payment", "purpose": "Retainer"}}
+REOPENED_ID = "p-0123456789ab"
+REOPENED_LINE = "I'll add a retainer payment link, and every payment will ask you first."
+REOPENED_ASK = "Want the Desk to send retainer payment links?"
+SECOND_PLAN = "Your Desk will take customer requests and send retainer links once you approve each one."
+
+
+def watch_after_finish(monkeypatch) -> list[str]:
+    """The steps the post-finish work (`after_finish`: business tools and the rest) ran at, running it as usual."""
+    finished, after_finish = [], setup.after_finish
+
+    async def watched(ctx, interview):
+        finished.append(interview.step)
+        await after_finish(ctx, interview)
+
+    monkeypatch.setattr(setup, "after_finish", watched)
+    return finished
+
+
+async def reopened(app, browser, kernel_http, model, monkeypatch, *, job: dict = RETAINER) -> tuple[Owner, dict]:
+    """An owner with cards and business tools whose request typed at the test-client offer reopened the plan:
+    Claude's reply, then the job it added, shown as a waiting card by the next planning call."""
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    owner, state = await offered(app, browser, kernel_http, model, cards=True)
+    monkeypatch.setattr(setup, "new_proposal_id", lambda: REOPENED_ID)
+    asked = len(model.requests)
+    model.add(consultant(REOPENED_LINE, add_jobs=[job]),
+              next_step("what_you_do", next={"kind": "job", "job": REOPENED_ID}, question=REOPENED_ASK))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/answer?cards=1",
+                                     json={"question": "test_client", "text": REQUEST})
+    assert reply.status_code == 200, reply.text
+    assert len(model.requests) == asked + 2 and not model.script
+    return owner, reply.json()
+
+
+async def test_a_request_typed_at_the_test_client_offer_reopens_the_plan_on_its_card(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    finished = watch_after_finish(monkeypatch)
+    owner, state = await reopened(app, browser, kernel_http, model, monkeypatch)
+    path = f"/api/owner/setup/{state['interview_id']}"
+    # Claude's reply, then the job it added as a card that waits; the setup interview stays at its questions step.
+    assert (state["step"], state["question"], state["pending_card"]) == ("questions", None, REOPENED_ID)
+    assert state["messages"][-5:-1] == [OFFER, owner_line(REQUEST), claude_line(REOPENED_LINE),
+                                        claude_line(REOPENED_ASK)]
+    card = state["messages"][-1]["card"]
+    assert (card["proposal_id"], card["state"], card["job"]["title"]) == (REOPENED_ID, "proposed", RETAINER["title"])
+    assert finished == [] and not fake.called("PUT /desks/{id}/business_tools")
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 409    # the card waits, not the offer
+    # Accepted with its amount, and Claude's next step is done: a second closing plan, then the offer again.
+    model.add(next_step("what_you_do", reply="Retainer links it is.", next={"kind": "done"}),
+              next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    reply = await owner.browser.post(f"{path}/proposals/{REOPENED_ID}?cards=1",
+                                     json={"accept": True, "amount_cents": 25_000})
+    assert reply.status_code == 200, reply.text
+    closed = reply.json()
+    assert (closed["step"], closed["question"], closed["pending_card"]) == ("questions", "test_client", None)
+    assert closed["messages"][-3:] == [claude_line("Retainer links it is."), claude_line(SECOND_PLAN), OFFER]
+    assert finished == [] and not fake.called("PUT /desks/{id}/business_tools") and not model.script
+    # "Not now" reaches the Tools step: the post-finish work runs once, with the retainer among the accepted jobs.
+    done = await say(owner, state, setup.TEST_CLIENT_NO)
+    assert (done.status_code, done.json()["step"]) == (200, "tools")
+    assert finished == ["tools"]
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, state["interview_id"])
+    assert RETAINER["title"] in [job.title for job in setup.accepted_jobs(interview)]
+    assert RETAINER["how"] in interview.answers.how_we_help
+    (write,) = fake.called("PUT /desks/{id}/business_tools")
+    assert {"tool": "desk.retainer-payment-link", "title": RETAINER["title"], "description": RETAINER["how"],
+            "config": {"block": "purpose_payment", "purpose": "Retainer", "amount_cents": 25_000}} in (
+        write.body["tools"])
+
+
+async def test_an_app_named_at_the_test_client_offer_reopens_the_plan_on_its_card(
+        app, browser, fake, kernel_http, model, monkeypatch):
+    finished = watch_after_finish(monkeypatch)
+    owner, state = await offered(app, browser, kernel_http, model, cards=True)
+    monkeypatch.setattr(setup, "new_proposal_id", lambda: REOPENED_ID)
+    path = f"/api/owner/setup/{state['interview_id']}"
+    asked = len(model.requests)
+    model.add(next_step("what_you_do", reply="It can keep your visits in one place.",
+                        next={"kind": "connector", "connector": "google_calendar"},
+                        question="Connect Google Calendar?"))
+    typed = "Can you connect my Google Calendar too?"
+    reply = await owner.browser.post(f"{path}/answer?cards=1", json={"question": "test_client", "text": typed})
+    assert reply.status_code == 200, reply.text
+    shown = reply.json()
+    # One planning call: the app it names is a card that waits, after Claude's reply and its line.
+    assert len(model.requests) == asked + 1 and not model.script
+    assert (shown["step"], shown["question"], shown["pending_card"]) == ("questions", None, REOPENED_ID)
+    assert shown["messages"][-4:-1] == [owner_line(typed), claude_line("It can keep your visits in one place."),
+                                        claude_line("Connect Google Calendar?")]
+    assert shown["messages"][-1]["card"]["connector"]["app"] == "google_calendar"
+    # Not now: the plan closes again with a second closing plan, then the offer.
+    model.add(next_step("what_you_do", reply="I'll leave the calendar for now.", next={"kind": "done"}),
+              next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    reply = await owner.browser.post(f"{path}/proposals/{REOPENED_ID}?cards=1", json={"accept": False})
+    assert reply.status_code == 200, reply.text
+    closed = reply.json()
+    assert (closed["step"], closed["question"]) == ("questions", "test_client")
+    assert closed["messages"][-3:] == [claude_line("I'll leave the calendar for now."), claude_line(SECOND_PLAN), OFFER]
+    assert finished == [] and not model.script
+
+
+async def test_using_the_suggestions_while_a_reopened_card_waits_closes_and_offers_again(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    finished = watch_after_finish(monkeypatch)
+    intake = {"job": "intake", "title": "Take engagement requests", "who": "", "why": "Start agreed work sooner",
+              "how": "Takes the details of each new engagement.", "autonomy": "auto",
+              "config": {"block": "intake", "questions": ["What do you need help with?"]}}
+    owner, state = await reopened(app, browser, kernel_http, model, monkeypatch, job=intake)
+    assert state["pending_card"] == REOPENED_ID
+    # The waiting card settles as accepted, the plan closes again with a second closing plan, and the offer is asked
+    # again: the Tools step and its post-finish work still wait for the offer's answer.
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions?cards=1", json={})
+    assert reply.status_code == 200, reply.text
+    closed = reply.json()
+    assert (closed["step"], closed["question"], closed["pending_card"]) == ("questions", "test_client", None)
+    assert closed["messages"][-3:] == [owner_line("Use your suggestions"), claude_line(SECOND_PLAN), OFFER]
+    card = next(message["card"] for message in closed["messages"]
+                if message["card"] and message["card"]["proposal_id"] == REOPENED_ID)
+    assert card["state"] == "accepted"
+    assert finished == [] and not model.script
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).json()["step"] == "tools"
+    assert finished == ["tools"]
+    (write,) = fake.called("PUT /desks/{id}/business_tools")
+    assert intake["title"] in [tool["title"] for tool in write.body["tools"]]
+
+
+async def test_an_unavailable_claude_asks_the_test_client_offer_again(app, browser, fake, kernel_http, model):
+    owner, state = await offered(app, browser, kernel_http, model)
+    asked = len(model.requests)
+    model.add(unavailable())
+    reply = await say(owner, state, REQUEST)
+    assert reply.status_code == 200, reply.text
+    done = reply.json()
+    # As before Claude read such answers: the same offer again, with no reply, and nothing written.
+    assert len(model.requests) == asked + 1 and not model.script
+    assert (done["step"], done["question"]) == ("questions", "test_client")
+    assert done["messages"][-3:] == [OFFER, owner_line(REQUEST), OFFER]
+    assert not fake.called("PUT /desks/{id}/people")
+
+
+async def test_a_request_typed_at_the_offer_shows_no_card_to_a_client_without_cards(
+        app, browser, fake, kernel_http, model, monkeypatch):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    finished = watch_after_finish(monkeypatch)
+    owner, state = await offered(app, browser, kernel_http, model)
+    asked = len(model.requests)
+    model.add(consultant(REOPENED_LINE, add_jobs=[RETAINER]))
+    reply = await say(owner, state, REQUEST)
+    assert reply.status_code == 200, reply.text
+    done = reply.json()
+    # One planning call, Claude's reply, then the offer again: no card, and no second call to show one.
+    assert len(model.requests) == asked + 1 and not model.script
+    assert (done["step"], done["question"], done["pending_card"]) == ("questions", "test_client", None)
+    assert done["messages"][-4:] == [OFFER, owner_line(REQUEST), claude_line(REOPENED_LINE), OFFER]
+    assert finished == []
 
 
 @pytest.mark.parametrize("failure", ["422", "500", "connect"])
