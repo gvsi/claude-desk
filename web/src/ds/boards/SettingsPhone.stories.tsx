@@ -25,7 +25,7 @@ const meta = {
     canvasNote: [
       'Signed on 2026-10-30.',
       'Settings › General at 390 px: SubNav as one line across the page’s gutters over a hairline, then the details, Claude acts for you and Delete this Desk, 16 px apart, and the footer under them.',
-      'The board draws a ghost Change on each detail; the details are read-only, with no Change (owner decision, 2026-10-30), so the hours wrap at another word; Delete this Desk is neutral where the board draws it red (owner decision, 2026-10-30).',
+      'The board draws a ghost Change on each detail; the details are read-only, with no Change (owner decision, 2026-10-30), so the hours wrap at another word; Delete this Desk uses the red danger variant, as the board draws it (owner decision, 2026-11-02, replacing the earlier neutral-delete rule).',
       'The switch says “Claude acts for you” with “Within your rules” while on, the same on a laptop (owner decision, 2026-11-01). Every row from the top bar to the switch’s card sits where the render draws it.',
     ].join(' '),
   },
@@ -64,7 +64,7 @@ export const Board: Story = {
     await expect(top(switchRow) - top(answering)).toBe(21);
     await expect(bottom(answering) - bottom(switchRow)).toBe(21);
 
-    // Delete this Desk 16 px under: the heading, the line 8 px under it, and the neutral button 8 px under that, at the left.
+    // Delete this Desk 16 px under: the heading, the line 8 px under it, and the red button 8 px under that, at the left.
     const remove = page.getByRole('region', { name: 'Delete this Desk' });
     const heading = within(remove).getByRole('heading', { name: 'Delete this Desk' });
     const line = within(remove).getByText('Its public link stops working and its chats close. Its safety record is kept.');
@@ -73,7 +73,7 @@ export const Board: Story = {
     await expect(top(line) - bottom(heading)).toBe(8);
     await expect(top(button) - bottom(line)).toBe(8);
     await expect(Math.round(button.getBoundingClientRect().left)).toBe(16);
-    expectComputed(button, SPEC.secondaryMain);
+    expectComputed(button, SPEC.dangerMain);
 
     // The footer 16 px under the button, and nothing scrolls sideways.
     await expectFooter(canvasElement);
