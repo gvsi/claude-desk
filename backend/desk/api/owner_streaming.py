@@ -4,7 +4,7 @@ import asyncio
 import codecs
 import contextlib
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextvars import ContextVar
 from typing import Any
 
@@ -227,8 +227,18 @@ def event(name: str, data: dict) -> dict:
     return {"event": name, "data": json.dumps(data, ensure_ascii=False, separators=(",", ":"))}
 
 
-def response(events: AsyncIterator[dict]) -> EventSourceResponse:
-    return EventSourceResponse(events, ping=15, ping_message_factory=lambda: ServerSentEvent(comment="ping"))
+def response(events: AsyncGenerator[dict, None]) -> EventSourceResponse:
+    """`events` as an SSE response: an `open` comment at once, then the events, with a `ping` comment every 15 s while
+    idle; neither comment has data or an id. Behind CloudFront and the load balancer, a response's headers reach the
+    browser only with its first body byte, and EventSource opens on them: the comment opens it now, not at Claude's
+    first words or the first ping. Closing the response's body (a send that failed) closes `events` with it."""
+    async def opened() -> AsyncGenerator[dict | ServerSentEvent, None]:
+        yield ServerSentEvent(comment="open")
+        async with contextlib.aclosing(events) as items:
+            async for item in items:
+                yield item
+
+    return EventSourceResponse(opened(), ping=15, ping_message_factory=lambda: ServerSentEvent(comment="ping"))
 
 
 def failure(error: BaseException) -> dict[str, Any]:

@@ -43,6 +43,31 @@ function sample(text: string): Source[] {
   return [{ file: 'sample.tsx', text }];
 }
 
+/**
+ * The selectors of every rule inside a `prefers-color-scheme: light` media block, each one alone:
+ * the text before each rule's opening brace, split at its commas.
+ */
+function systemLightSelectors(css: string): string[] {
+  const found: string[] = [];
+  for (const match of css.matchAll(/@media[^{]*prefers-color-scheme\s*:\s*light[^{]*\{/g)) {
+    let depth = 1;
+    let start = match.index + match[0].length;
+    for (let i = start; i < css.length && depth > 0; i++) {
+      if (css[i] === '{') {
+        if (depth === 1) found.push(...css.slice(start, i).split(',').map((selector) => selector.trim()).filter(Boolean));
+        depth++;
+      } else if (css[i] === '}') {
+        depth--;
+        if (depth === 1) start = i + 1;
+      }
+    }
+  }
+  return found;
+}
+
+/** A selector that starts at a root not marked dark, so a system's light preference never overrides a chosen Dark. */
+const NOT_DARK_ROOT = /^:root:not\(\[data-theme=(["'])dark\1\]\)/;
+
 // HTML written from a string: React's escape hatch and the DOM's.
 const RAW_HTML = /dangerouslySetInnerHTML|\.(?:inner|outer)HTML\b|insertAdjacentHTML|document\.write/;
 
@@ -1317,6 +1342,29 @@ describe('app source guards', () => {
     const outsideTheDs = everything.filter(({ file }) => !file.startsWith('ds/') && !/\.test\.tsx?$/.test(file));
     expect(outsideTheDs.map(({ file }) => file)).toContain('about/ReaderPage.tsx');
     expect(hits(CAPS_BADGE_NAMES, outsideTheDs)).toEqual([]);
+  });
+
+  it('a_systems_light_preference_never_overrides_a_chosen_dark', () => {
+    // The app follows the device until a person chooses, and a chosen Dark marks the root: a
+    // stylesheet turns light for a system that prefers it only on a root not marked dark. Every
+    // stylesheet in src/, the design system's included.
+    const unscoped = ({ file, text }: Source) =>
+      systemLightSelectors(withoutCssComments(text)).filter((selector) => !NOT_DARK_ROOT.test(selector)).map((selector) => `${file}: ${selector}`);
+    // The matcher, on known samples first.
+    const scoped = `@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .a, :root:not([data-theme='dark']) { color: red } }`;
+    expect(sample(scoped).flatMap(unscoped)).toEqual([]);
+    const loose = `@media (prefers-color-scheme: light) { :root { color: red } .b { color: blue } }`;
+    expect(sample(loose).flatMap(unscoped)).toEqual(['sample.tsx: :root', 'sample.tsx: .b']);
+    const stylesheets: Source[] = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
+      .map((file) => file.split(path.sep).join('/'))
+      .filter((file) => file.endsWith('.css'))
+      .map((file) => ({ file, text: readFileSync(path.join(SRC, file), 'utf8') }));
+    // The two that have such a block today: the tokens and the mark.
+    expect(stylesheets.filter(({ text }) => systemLightSelectors(text).length > 0).map(({ file }) => file).sort()).toEqual([
+      'ds/components/Mark/Mark.css',
+      'ds/tokens.css',
+    ]);
+    expect(stylesheets.flatMap(unscoped)).toEqual([]);
   });
 
   it('mark_and_clay_colors_stay_in_their_components', () => {

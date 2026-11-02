@@ -1,6 +1,6 @@
 /**
  * index.html's first script: it marks the root with the theme chosen in this browser before the
- * page first paints, so a light or system choice never flashes dark, the default, while the app loads.
+ * page first paints, so a light or dark choice never flashes the other theme while the app loads.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -37,7 +37,7 @@ function runThemeScript(): void {
 }
 
 beforeEach(() => {
-  schemeMeta().content = 'dark';
+  schemeMeta().content = 'dark light';
 });
 
 afterEach(() => {
@@ -62,37 +62,37 @@ describe('the theme script in index.html', () => {
     const stylesheets = head.filter((el) => el.matches('link[rel="stylesheet"]'));
     expect(stylesheets.length).toBeGreaterThan(0);
     for (const sheet of stylesheets) expect(head.indexOf(script)).toBeLessThan(head.indexOf(sheet));
-    // The browser's own scheme is dark, the default, before the styles load.
-    expect(page.querySelector('meta[name="color-scheme"]')?.getAttribute('content')).toBe('dark');
+    // The browser's own scheme follows either theme before the styles load.
+    expect(page.querySelector('meta[name="color-scheme"]')?.getAttribute('content')).toBe('dark light');
   });
 
-  test('it_marks_the_root_with_a_light_or_system_choice_and_leaves_dark_unmarked', () => {
+  test('it_marks_the_root_with_a_light_or_dark_choice_and_leaves_the_system_its_own', () => {
     const root = document.documentElement;
-    // The root is marked, and the page's scheme follows the choice, so the blank page before the
-    // styles load is already in its colors: light alone, or both for the system to pick.
-    for (const [choice, scheme] of [['light', 'light'], ['system', 'dark light']] as const) {
+    for (const choice of ['light', 'dark']) {
       localStorage.setItem(storageKey('theme'), choice);
       runThemeScript();
-      expect([root.dataset.theme, schemeMeta().content], choice).toEqual([choice, scheme]);
+      // The root is marked, and the page's scheme names the choice alone, so the blank page before
+      // the styles load is already in its colors.
+      expect([root.dataset.theme, schemeMeta().content], choice).toEqual([choice, choice]);
       delete root.dataset.theme;
-      schemeMeta().content = 'dark';
+      schemeMeta().content = 'dark light';
     }
-    // Nothing stored, dark, or something that isn't a choice: dark, the default, so no mark and the
-    // scheme stays dark.
-    for (const stored of [null, 'dark', 'sepia']) {
-      localStorage.clear();
-      if (stored !== null) localStorage.setItem(storageKey('theme'), stored);
-      runThemeScript();
-      expect([root.hasAttribute('data-theme'), schemeMeta().content], String(stored)).toEqual([false, 'dark']);
-    }
+    // Nothing stored, or something that isn't a choice: the system's theme, so no mark, and the
+    // scheme still offers both for the system to pick.
+    localStorage.clear();
+    runThemeScript();
+    expect([root.hasAttribute('data-theme'), schemeMeta().content]).toEqual([false, 'dark light']);
+    localStorage.setItem(storageKey('theme'), 'sepia');
+    runThemeScript();
+    expect([root.hasAttribute('data-theme'), schemeMeta().content]).toEqual([false, 'dark light']);
   });
 
-  test('blocked_storage_leaves_the_dark_theme_without_throwing', () => {
+  test('blocked_storage_leaves_the_system_theme_without_throwing', () => {
     localStorage.setItem(storageKey('theme'), 'light');
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('The operation is insecure.', 'SecurityError');
     });
     expect(runThemeScript).not.toThrow();
-    expect([document.documentElement.hasAttribute('data-theme'), schemeMeta().content]).toEqual([false, 'dark']);
+    expect([document.documentElement.hasAttribute('data-theme'), schemeMeta().content]).toEqual([false, 'dark light']);
   });
 });
