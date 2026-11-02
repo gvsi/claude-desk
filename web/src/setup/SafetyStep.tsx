@@ -75,8 +75,11 @@ export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps
 
   /** Confirms setup's rules; an answer that is the redrafted rules (after a proving retry) is confirmed once more. */
   const confirmSetup = async (): Promise<PolicyVersion> => {
+    // A conflict replaces the draft: its predecessor's safety check cannot stand for the new rules.
+    if (conflict !== null) await request('setupSafetyCheck', { params: { id } });
     const first = await request('setupConfirm', { params: { id } });
     if (!isDraft(first)) return first;
+    await request('setupSafetyCheck', { params: { id } });
     const second = await request('setupConfirm', { params: { id } });
     if (isDraft(second)) throw new ApiError('unavailable', { route: 'setupConfirm', method: 'POST', status: 200 });
     return second;

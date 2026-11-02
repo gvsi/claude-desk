@@ -5,7 +5,7 @@
  * going live. Nothing turns on, goes live or reads "On" before its confirming request succeeds.
  */
 import { QueryClient } from '@tanstack/react-query';
-import { http } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { cdp, page, userEvent } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
@@ -29,7 +29,7 @@ import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, REOPEN_REPLY, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
 import { SETUP_WORK_GIVE_UP_MS } from './useSetupWork.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -208,8 +208,16 @@ const DISCLOSURE = /You're chatting with Claude, an AI answering for/;
  * An interview at the safety check whose rules changed after it drafted its own (Payments turned
  * on), opened with "Confirm rules" pressed: the conflict review is on screen.
  */
-async function openConflictReview(): Promise<{ state: SetupState; screen: RenderResult }> {
+async function openConflictReview(reopened = false): Promise<{ state: SetupState; screen: RenderResult }> {
   const { state } = await interviewAtSafety();
+  if (reopened) {
+    const params = { id: state.interview_id };
+    await mockStore.dispatch('setupReopen', { params, body: { text: 'Closed Saturdays.', idempotency_key: newIdempotencyKey() } });
+    await mockStore.dispatch('setupSuggestions', { params, body: {} });
+    await mockStore.dispatch('setupRules', { params });
+    await mockStore.dispatch('setupSituations', { params });
+    await mockStore.dispatch('setupSafetyCheck', { params });
+  }
   const desk = deskOf(state);
   const entries = ['native.payment_link', 'native.charge_mandate'].map((tool) => ({
     tool: tool as 'native.payment_link',
@@ -1979,10 +1987,139 @@ describe('setup', () => {
     const read = await mockStore.dispatch('setup', { params: { id: state.interview_id } });
     expect('network' in read ? null : (read.body as SetupState).step).toBe('rules');
 
+    // The message box is there to write the change in, and has focus on arrival.
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeVisible();
+    await expect.poll(() => document.activeElement).toBe(box.element());
+
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
     expect(requests('setupAnswer', mark)).toHaveLength(0);
+    expect(requests('setupReopen', mark)).toHaveLength(0);
+  });
+
+  it.each(['desktop', 'phone'] as const)('change_something_sits_first_beside_looks_right_on_real_situations_%s', async (viewport) => {
+    const { state } = await interviewAtRules();
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    await expect.element(screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem').first()).toBeVisible();
+
+    // The signed board: a secondary "Change something", main size, first in the actions row, left of "Looks right".
+    const change = screen.getByRole('button', { name: 'Change something', exact: true });
+    await expect.element(change).toBeVisible();
+    const row = change.element().closest('.cd-setup-step__actions');
+    expect([...(row?.children ?? [])].map((el) => el.textContent)).toEqual(['Change something', 'Looks right']);
+    expect([...change.element().classList]).toEqual(expect.arrayContaining(['cd-button--secondary', 'cd-button--main']));
+    const looksRight = screen.getByRole('button', { name: 'Looks right', exact: true }).element();
+    expect([...looksRight.classList]).toEqual(expect.arrayContaining(['cd-button--primary', 'cd-button--main']));
+    // One row, the row's own 8 px between them.
+    const [left, right] = [change.element().getBoundingClientRect(), looksRight.getBoundingClientRect()];
+    expect(right.top).toBe(left.top);
+    expect(right.left - left.right).toBe(8);
+    expectNoHorizontalScroll();
+
+    // It goes back to the chat with Claude, the message box focused, sending nothing.
+    const mark = mockStore.requests.length;
+    await change.click();
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(changeSomethingPath(state.interview_id));
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeVisible();
+    await expect.poll(() => document.activeElement).toBe(box.element());
+    expect(requests('setupReopen', mark)).toHaveLength(0);
+    expect(requests('setupAnswer', mark)).toHaveLength(0);
+  });
+
+  it.each(['response', 'stream', 'lost response'] as const)('a_change_sent_from_real_situations_reopens_the_chat_and_setup_moves_forward_again_%s', async (delivery) => {
+    // From Real situations on this page, so what the later steps read is still at hand.
+    const { state } = await interviewAtRules();
+    const id = state.interview_id;
+    const { screen, router } = await renderRoute(`/app/setup/${id}`);
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    await expect.element(screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem').first()).toBeVisible();
+    await screen.getByRole('button', { name: 'Change something', exact: true }).click();
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeVisible();
+    await expect.poll(() => document.activeElement).toBe(box.element());
+    const mark = mockStore.requests.length;
+    if (delivery === 'stream') mockStore.streamSetupTurns();
+    if (delivery === 'lost response') mockStore.inject({ route: 'setupReopen', status: 'network', afterCommit: true });
+
+    // The change goes through the reopen route with its own key, never as an answer.
+    await box.fill('We’re closed on Saturdays now.');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.poll(() => requests('setupReopen', mark)).toHaveLength(1);
+    const sent = requests('setupReopen', mark)[0]!.body as { text: string; idempotency_key: string };
+    expect(sent.text).toBe('We’re closed on Saturdays now.');
+    expect(sent.idempotency_key).toMatch(/\S/);
+    expect(requests('setupAnswer', mark)).toHaveLength(0);
+
+    // The page follows the API back to the questions: setup's chat as it is anywhere, at its own address.
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`/app/setup/${id}`);
+    const transcript = screen.getByRole('log', { name: 'Setup questions' });
+    await expect.element(transcript.getByText('We’re closed on Saturdays now.', { exact: true })).toBeVisible();
+    await expect.element(transcript.getByText(REOPEN_REPLY, { exact: true })).toBeVisible();
+    expect(screen.getByRole('list', { name: 'Set up your Desk' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
+    await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeVisible();
+
+    // Forward again: the questions close with a new plan, then the tools, then the rules, drafted again.
+    const drafts = requests('setupRules').length;
+    await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    const next = screen.getByRole('button', { name: 'Continue', exact: true });
+    await expect.element(next).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Change something', exact: true })).toBeVisible();
+    await next.click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(drafts);
+    // Real situations are tried again, on the new draft.
+    const tried = requests('setupSituations').length;
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    await expect.element(screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem').first()).toBeVisible();
+    await expect.poll(() => requests('setupSituations').length).toBeGreaterThan(tried);
+  });
+
+  it('a_failed_change_retries_the_same_words_with_the_same_key', async () => {
+    const { state } = await interviewAtRules();
+    const { screen } = await renderRoute(changeSomethingPath(state.interview_id));
+    mockStore.inject({ route: 'setupReopen', status: 503 });
+    await screen.getByRole('textbox', { name: 'Your answer' }).fill('Closed Saturdays.');
+    const mark = mockStore.requests.length;
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(screen.getByText(REOPEN_REPLY, { exact: true })).toBeVisible();
+    const sent = requests('setupReopen', mark).map(({ body }) => body);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
+    expect(requests('setupAnswer', mark)).toHaveLength(0);
+  });
+
+  it('a_change_that_closes_in_one_turn_shows_the_new_plan_and_redrafts_rules', async () => {
+    const { state } = await interviewAtRules();
+    const id = state.interview_id;
+    worker.use(http.post(`/api/owner/setup/${id}/reopen`, async ({ request }) => {
+      await mockStore.dispatch('setupReopen', { params: { id }, body: await request.json() });
+      const closed = await mockStore.dispatch('setupSuggestions', { params: { id }, body: {} });
+      if ('network' in closed) return HttpResponse.error();
+      return HttpResponse.json(closed.body as SetupState, { status: closed.status });
+    }, { once: true }));
+    const { screen, router } = await renderRoute(`/app/setup/${id}`);
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Change something', exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Change something', exact: true }).click();
+    await screen.getByRole('textbox', { name: 'Your answer' }).fill('We’re closed on Saturdays now.');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.poll(() => router.state.location.search).toBe('');
+    await expect.element(screen.getByRole('button', { name: 'Change something', exact: true })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Your answer' }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    const drafts = requests('setupRules').length;
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(drafts);
   });
 
   it('tools_start_at_the_outcome_rules_shows', async () => {
@@ -2624,6 +2761,16 @@ describe('setup', () => {
     expect(requests('confirmRules', mark)).toHaveLength(0);
     expect(desk.summary.answering).toBe(false);
     expect(requests('goLive', mark)).toHaveLength(0);
+  });
+
+  it('a_conflicted_draft_after_reopening_is_checked_again_before_confirmation', async () => {
+    const { screen } = await openConflictReview(true);
+    const mark = mockStore.requests.length;
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' })).toBeVisible();
+    const calls = mockStore.requests.slice(mark).map(({ key }) => key);
+    expect(calls.indexOf('setupSafetyCheck')).toBeGreaterThanOrEqual(0);
+    expect(calls.indexOf('setupConfirm')).toBeGreaterThan(calls.indexOf('setupSafetyCheck'));
   });
 
   it('go_live_shows_the_link', async () => {
@@ -4370,6 +4517,40 @@ describe('consultant setup', () => {
     await userEvent.keyboard('Yes, please{Enter}');
     await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
     await expect.element(box).toHaveFocus();
+  });
+
+  it.each(['desktop', 'phone'] as const)('change_something_sits_first_beside_continue_under_the_closing_plan_%s', async (viewport) => {
+    const state = await consultantAt('intake');
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    const next = screen.getByRole('button', { name: 'Continue', exact: true });
+    await expect.element(next).toBeVisible();
+
+    // The signed board: a secondary "Change something", main size, first in the dock's actions row, left of "Continue".
+    const change = screen.getByRole('button', { name: 'Change something', exact: true });
+    const row = change.element().closest('.cd-setup-step__actions');
+    expect(row?.closest('.cd-setup-dock')).not.toBeNull();
+    expect([...(row?.children ?? [])].map((el) => el.textContent)).toEqual(['Change something', 'Continue']);
+    expect([...change.element().classList]).toEqual(expect.arrayContaining(['cd-button--secondary', 'cd-button--main']));
+    expect([...next.element().classList]).toEqual(expect.arrayContaining(['cd-button--primary', 'cd-button--main']));
+    const [left, right] = [change.element().getBoundingClientRect(), next.element().getBoundingClientRect()];
+    expect(right.top).toBe(left.top);
+    expect(right.left - left.right).toBe(8);
+    expectNoHorizontalScroll();
+
+    // It opens the message box, focused, under the plan; "Continue" without sending goes back to the closing plan.
+    const mark = mockStore.requests.length;
+    await change.click();
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(changeSomethingPath(state.interview_id));
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeVisible();
+    await expect.poll(() => document.activeElement).toBe(box.element());
+    await expect.element(screen.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Change something', exact: true })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Your answer' }).elements()).toHaveLength(0);
+    expect(requests('setupReopen', mark)).toHaveLength(0);
   });
 
   it('a_page_opened_at_tools_skips_the_closing', async () => {

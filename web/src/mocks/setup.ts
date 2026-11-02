@@ -84,6 +84,12 @@ export const FOLLOW_UP = "That's fine. Give me your best guess, and you can chan
 /** What Claude says once the last question is answered. */
 export const QUESTIONS_DONE = "Thanks, that's everything I need. Next, choose what Claude can use.";
 
+/**
+ * Claude's reply to a change sent from a step after the questions ("Change something", `setupReopen`):
+ * the mock's stand-in for the model's answer, asking on the contact question as the API's reopen does.
+ */
+export const REOPEN_REPLY = 'Got it, I’ll change that. Anything else before I set it up again?';
+
 /** The test-client offer at the end of setup's plan, its two choices and Claude's line after a yes: the API's own words. */
 export const TEST_CLIENT_OFFER = 'Want to try your Desk the way a client would? I can add you as a test client, with your own contact, so you can check verification and private answers yourself.';
 export const TEST_CLIENT_YES = 'Add me as a test client';
@@ -131,6 +137,8 @@ interface Interview {
   running: { text: string; ownerStored?: boolean } | null;
   /** Consent runs in the background when a test holds it; its result lands on a later GET. */
   holdConsent: boolean;
+  /** Each "Change something" send by its idempotency key, with its words (`setupReopen`). */
+  reopens: Map<string, string>;
   consentResult: 'landed' | 'failed' | null;
   /**
    * While a streamed turn runs, the interview as reads see it: busy, with the owner's words. The
@@ -1501,6 +1509,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     decisionDone: null,
     running: null,
     holdConsent: false,
+    reopens: new Map(),
     consentResult: null,
     view: null,
     run: null,
@@ -1735,6 +1744,35 @@ export const SETUP_ROUTES: ServedRoutes = {
     finish();
     return ok(stateOf(interview, req.query));
   },
+  setupReopen(sv, req) {
+    // "Change something": back to the questions from a later step, the owner's words as the next turn (plan 02b).
+    const found = interviewOf(sv, req);
+    if (isFailure(found)) return found;
+    const body = isRecord(req.body) ? req.body : {};
+    const { text } = body;
+    const key = idempotencyKeyOf(body);
+    if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX || key === false) return INVALID;
+    const { interview } = found;
+    // A repeat answers the interview as it stands; the same key with other words is refused.
+    const held = interview.reopens.get(key);
+    if (held !== undefined) return held === text.trim() ? (busyOf(interview) ? { status: 202, body: stateOf(interview, req.query) } : ok(stateOf(interview, req.query))) : CONFLICT;
+    if (busyOf(interview) || interview.running !== null) return CONFLICT;
+    // Only from a step after the questions, and never once live.
+    if (!atLeast(interview.state.step, 'tools') || interview.state.step === 'live') return CONFLICT;
+    interview.reopens.set(key, text.trim());
+    const reopen = () => {
+      // What was drafted from the answers is gone: the steps after the questions draft it again.
+      interview.state.step = 'questions';
+      interview.draftVersion = null;
+      interview.state.pending_card = null;
+      interview.state.question = 'contact_and_after_hours';
+      say(interview, 'claude', REOPEN_REPLY);
+    };
+    say(interview, 'owner', text.trim());
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, reopen);
+    reopen();
+    return ok(stateOf(interview, req.query));
+  },
   setupEvents(sv, req) {
     // A 200 opens the stream (handlers.ts); `followSetupTurn` follows the running turn.
     const found = interviewOf(sv, req);
@@ -1782,6 +1820,8 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { interview, desk } = found;
     // Only at the rules' stages, with a draft (past the safety check is 409, as a confirm sent twice finds it).
     if (!atLeast(interview.state.step, 'rules') || atLeast(interview.state.step, 'preview') || interview.draftVersion === null) return CONFLICT;
+    // After "Change something", only once the safety check has run again on the new draft.
+    if (interview.reopens.size > 0 && interview.state.step !== 'safety_check') return CONFLICT;
     // A draft that isn't proved is never activated.
     const open = desk.drafts.get(interview.draftVersion);
     if (open && !proved(open.draft)) return CONFLICT;
@@ -1789,6 +1829,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (confirmed === 'stale' || confirmed === 'not_found' || confirmed === 'conflict') {
       // The rules changed since the draft: the same cards, drafted again at the answered limit on the rules now in force.
       interview.draftVersion = null;
+      if (interview.reopens.size > 0) interview.state.step = 'rules';
       return fail(409, 'rules_changed_since_draft', { draft: setupDraft(sv, interview, desk) });
     }
     // Answering stays off until the owner goes live.
