@@ -2851,6 +2851,25 @@ describe("Today's How your Desk works", () => {
     await refresh;
   });
 
+  it('how_your_desk_works_hides_and_recovers_counts_after_a_needs_you_refresh_fails', async () => {
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
+
+    mockStore.reset('rivera');
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
+    await allowTheSeededRequest(screen);
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0));
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+  });
+
   it('how_your_desk_works_hides_kept_counts_when_a_refresh_fails', async () => {
     const mounted = vi.spyOn(QueryClient.prototype, 'mount');
     const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
