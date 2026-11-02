@@ -1284,7 +1284,7 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
         answers=SetupAnswers(summary=described.summary, business_name=desk.business.name,
                              owner_display_name=(reduce_name(body.owner_display_name)
                                                  or reduce_name(described.owner_display_name) or None),
-                             offers=described.offers),
+                             offers=described.offers, named_limits=list(dict.fromkeys(described.named_limits))),
         transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None,
                           connected_apps=described.connected_apps,
                           search_queries=described.search_queries or None),
@@ -1915,7 +1915,8 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     entries never enter history: its current answer appears only in `owner_answer`."""
     transcript = _history(interview, run_id)
     limit_turn = key in LIMIT_QUESTIONS.values()
-    so_far = interview.answers.model_dump_json(exclude_defaults=True, exclude={"suggested_fields", "offers"})
+    so_far = interview.answers.model_dump_json(exclude_defaults=True,
+                                               exclude={"suggested_fields", "offers", "named_limits"})
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
     asked = next((entry.text for entry in reversed(transcript) if entry.question == key), "")
@@ -2321,6 +2322,12 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
                         job=JobProposal(**fields, can_do_today=CAPABILITIES[draft.job]), connector=None)
 
 
+def _askable(interview: Interview, key: QuestionKey) -> bool:
+    """Whether code asks `key` by default: any topic but an opt-in one, which only the owner's description can name
+    (`SetupAnswers.named_limits`) or the owner's answer can ask for."""
+    return key not in OPT_IN_TOPICS or key in interview.answers.named_limits
+
+
 def _next_ask(interview: Interview, source, available: list[ProposalCard]) -> QuestionKey | ProposalCard | None:
     """Honor one fitting ask, otherwise ordinary topics first, then the hidden plan in order. On the turn of the change
     that reopened the questions (`reopen`) alone, a topic covered before can be asked again when Claude names it, but
@@ -2336,7 +2343,7 @@ def _next_ask(interview: Interview, source, available: list[ProposalCard]) -> Qu
             found = next((card for card in unshown if _names_card(source, card)), None)
             if found is not None:
                 return found
-    return next((key for key in QUESTION_KEYS if key not in interview.covered and key not in OPT_IN_TOPICS),
+    return next((key for key in QUESTION_KEYS if key not in interview.covered and _askable(interview, key)),
                 unshown[0] if unshown else None)
 
 
@@ -2357,7 +2364,8 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
                                covered=", ".join(key for key in QUESTION_KEYS if closing or key in interview.covered),
                                uncovered="" if closing else ", ".join(key for key in QUESTION_KEYS
                                                                     if key not in interview.covered)),
-        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json(exclude={"suggested_fields", "offers"})),
+        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json(exclude={"suggested_fields", "offers",
+                                                                           "named_limits"})),
         wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)),
     ]
     if not interview.business_tools_enabled:
@@ -2407,7 +2415,7 @@ def _asks(text: str) -> bool:
 def _code_next(interview: Interview, answering: QuestionKey | None = None) -> QuestionKey | None:
     """The topic code asks next by default (`_next_ask` without the model's proposal), taking `answering` as covered."""
     return next((key for key in QUESTION_KEYS
-                 if key not in interview.covered and key != answering and key not in OPT_IN_TOPICS), None)
+                 if key not in interview.covered and key != answering and _askable(interview, key)), None)
 
 
 # A time frame or time threshold the owner states ("we reply within one business day", "a deadline in the next week").
@@ -2598,7 +2606,8 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     """Append exactly one ask or close: `close_setup`, unless the caller gives what closes instead (`close`).
     Metadata lives on this turn's Claude entry, never on a card."""
     if source is not None:
-        interview.cover(source.skip)
+        # A limit the owner's description named is asked on its own question, whatever the turn skips.
+        interview.cover([key for key in source.skip if key not in interview.answers.named_limits])
     available = _record_plan(interview, source, reply)
     if interview.shows_cards and source is not None and source.next.kind == "connector":
         app = source.next.connector
@@ -4268,7 +4277,7 @@ def owner_rule_answers(answers: SetupAnswers) -> SetupAnswers:
     """One projection for rule inputs: suggested facts are unanswered, summaries confer no job authority, and an offer
     the owner stated is only told back to them as not set up."""
     return SetupAnswers.model_validate({"summary": "", **answers.model_dump(
-        exclude={"suggested_fields", "how_we_help", "offers", *answers.suggested_fields})})
+        exclude={"suggested_fields", "how_we_help", "offers", "named_limits", *answers.suggested_fields})})
 
 
 async def draft_cards(model: ModelClient, record: Record, business_type: BusinessType, answers: SetupAnswers,

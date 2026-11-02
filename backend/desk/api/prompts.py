@@ -804,6 +804,8 @@ QuestionKey = Literal["what_you_do", "hours_and_area", "quote_limit", "discounts
                       "money_limit", "contact_and_after_hours"]
 QUESTION_KEYS: tuple[QuestionKey, ...] = get_args(QuestionKey)
 OPT_IN_TOPICS: tuple[QuestionKey, ...] = ("money_limit",)
+# The topics that set a limit, each on its own question (`LIMIT_QUESTIONS`).
+LimitTopic = Literal["quote_limit", "discounts", "documents_and_payments", "money_limit"]
 Day = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 Documents = Literal["verified_owner", "ask", "none"]
 Refunds = Literal["ask", "never"]
@@ -834,8 +836,15 @@ firm", not "a two-person firm".
 - offers: each discount or special price the description gives some customers, such as "Students get 10% off \
 with a student ID" or "Veterans get their first consultation free", in the owner's own words, at most four; else \
 empty. Not something anyone can book, such as a free consultation, estimate or meet and greet, and not a free \
-amenity such as parking. The summary can't carry them, so they go here: the owner hears at the end that they aren't \
-set up. Never one the description doesn't state.
+amenity such as parking, and not a limit on what the Desk may do without asking, which goes in named_limits. The \
+summary can't carry them, so they go here: the owner hears at the end that they aren't set up. Never one the \
+description doesn't state.
+- named_limits: each limit the description says how the Desk should handle on its own, from quote_limit (how much \
+it may quote without asking), discounts (how much off it may give without asking), documents_and_payments (whether \
+it may send customers their own documents) and money_limit (the most it may take or pay out without asking), such \
+as discounts for "you can take up to 10% off without asking me"; else empty. Only when the description says \
+whether, or how much, the Desk may do it without asking: never for a price, a payment method or an offer. Setup then \
+asks each one's own question: naming a limit here never sets it.
 - website: the business's website address if the description gives one, else null. Never make one up.
 - memory: up to eight short notes the owner's Claude memory would plausibly hold about this business, written \
 as the owner's own notes. Cover its name, what it does, its customers, how it prices, its hours and area, how it \
@@ -1412,6 +1421,9 @@ class SetupStart(BaseModel):
         default_factory=list, max_length=4,
         description="Each discount or special price the description gives some customers, in the owner's "
                     "words; else empty.")
+    named_limits: list[LimitTopic] = Field(
+        default_factory=list, max_length=4,
+        description="Each limit the description says how the Desk should handle on its own; else empty.")
     website: str | None = Field(None, max_length=2048, description="The business's website address, else null.")
     memory: list[MemoryDraft] = Field(default_factory=list, max_length=8)
     connected_apps: list[ConnectorKey] = Field(default_factory=list, max_length=4)
@@ -2005,6 +2017,10 @@ class SetupAnswers(BaseModel):
     # in their words: no customer line or rule can carry one, so no call after the start reads them, and setup only
     # tells the owner at the end that they aren't set up (`setup.offers_not_set_up`).
     offers: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field([], max_length=4)
+    # The limit topics the owner's description named (`SetupStart.named_limits`): code never lets a turn skip one, so
+    # its own question is asked (`setup._advance_ask`, `setup._next_ask`). Code's alone: no model call after the start
+    # reads them, and they never set a limit.
+    named_limits: list[LimitTopic] = Field([], max_length=4)
     # Written by code when setup fills from suggestions, never by a model turn or patch.
     suggested_fields: list[SetupPolicyField | SuggestedFactField] = Field(
         default_factory=list, max_length=len(SUGGESTED_FIELD_NAMES),
