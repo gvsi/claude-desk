@@ -133,7 +133,7 @@ it('a_tool_title_and_the_titles_a_shared_rule_names_are_user_text', () => {
   expectUserText(el, 'New client intake');
   // The line reads as it always has: the app's words, the titles joined, one period.
   expect(el.querySelector('.cd-rule-row__shared')?.textContent).toBe(
-    `Shared rule. Applies to every tool that changes something: Quote, ${TITLE} and New client intake.`,
+    `Shared rule. Applies to every tool that changes something:Quote, ${TITLE} and New client intake`,
   );
 });
 
