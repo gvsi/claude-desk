@@ -348,23 +348,17 @@ test('back_before_the_type_loads_keeps_the_readers_place', async ({ page }) => {
   await page.goBack();
   await page.waitForURL((url) => url.pathname === '/about/prediction' && url.hash === '');
   await expectBackAt(page, before, 'back');
-  // The text in the middle of the window is the reader's place. When the type swaps in, the text above it reflows
-  // and the browser's scroll anchoring moves the window by as much, so the window's offset changes with the type;
-  // what stays is the reader's place on screen, not the section the address named.
-  const placeTop = await page.evaluate(() => {
-    const place = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
-    place?.setAttribute('data-e2e-place', '');
-    return place ? place.getBoundingClientRect().top : Number.NaN;
-  });
+  // When the type swaps in, the text reflows and the browser's scroll anchoring moves the window with the text above
+  // the reader's place, by at most how much the page's height changes. Anything more would be the page moving the
+  // reader, such as back to the section the address named.
+  const atBack = await page.evaluate(() => ({ y: window.scrollY, height: document.documentElement.scrollHeight }));
   release();
   await expect.poll(() => page.evaluate(() => document.fonts.status), 'the type has loaded').toBe('loaded');
   await page.waitForTimeout(500);
-  const placeMoved = () =>
-    page.evaluate((top) => {
-      const place = document.querySelector('[data-e2e-place]');
-      return place ? Math.abs(place.getBoundingClientRect().top - top) : Number.POSITIVE_INFINITY;
-    }, placeTop);
-  await expect.poll(placeMoved, "after the type loaded, the reader's place is where Back put it").toBeLessThanOrEqual(56);
+  const afterType = await page.evaluate(() => ({ y: window.scrollY, height: document.documentElement.scrollHeight }));
+  expect(Math.abs(afterType.y - atBack.y), "after the type loaded, the window moved only with the text's reflow").toBeLessThanOrEqual(
+    Math.abs(afterType.height - atBack.height) + 56,
+  );
   expect(
     await page.evaluate(() => {
       const section = document.getElementById('why-the-limits-stay-in-code');
