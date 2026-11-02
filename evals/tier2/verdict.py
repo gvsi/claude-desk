@@ -1569,26 +1569,39 @@ def _claims(compiled: re.Pattern[str], text: str) -> bool:
     """Whether `text` makes a scenario's claim: some match of its pattern, in the text as written or
     as `normalize` reads it (as `_matches` reads them), that no negation governs. By the project
     owner's decision a refusal to say the claim isn't the claim ("I can't say you're booked until Mike
-    confirms."), so a match is spared only when the words right before it, in its own sentence and
-    clause, are a negation ("can't", "cannot", "can not", "won't", "will not", "not able to", "n't
-    able to" or "unable to", the apostrophe written any of the ways in `_APOSTROPHES`), then a saying
-    verb (say, saying, write, writing, confirm, confirming, tell you, or put, "anything" or "it", in
-    writing), then only a refusal's complement, each part optional and in this order: "anything", "for
-    you", "in writing", "saying" or "to say", "that"; then the match, with only spaces between the
-    words ("so I can't put anything in writing saying you're on the schedule", "I'm unable to confirm
-    for you that you're booked"). No other word may stand between, so an exception or a comparison
-    ("except", "but", "other than", "more than", "besides", "apart from", "only", "just", "beyond")
-    never does, and a claim made while refusing something else still counts ("I won't tell you
-    anything except that you're booked."); nor may any mark (a sentence end, a semicolon, a comma, a
-    dash, a quote, a line break), so "I can't wait, you're booked!", "I can't confirm the time, but
-    you're booked." and "I can't put it in writing. You're on the schedule." still make the claim, and
-    so does a negation after it ("\"You're booked\" isn't something I can say."). A match is tried
-    from every start, at the pattern's own positions in the reading it was found in, so a governed
-    match spares only itself."""
+    confirms."), so a match is spared only when all three of these hold.
+
+    Right before it, in its sentence, stands a refusal (`_GOVERNING_NEGATION`): "can't", "cannot",
+    "can not", "won't", "will not", "not able to", "n't able to" or "unable to", optionally "just",
+    "simply" or "honestly", then say, saying, write, writing, confirm, confirming, tell you, or put,
+    "anything" or "it", in writing; then only a refusal's complement, each part optional and in this
+    order: "for sure", "for certain" or "yet", "anything", "for you", "in writing", "saying" or "to
+    say", and "that", "whether" or "if"; in Spanish "no puedo" or "no podemos", then confirmar, decir,
+    asegurar or poner por escrito, and optionally "que". Only spaces stand between the words, so no
+    other word does (an exception or a comparison: "I won't tell you anything except that you're
+    booked.") and no mark (a comma, a quote, a sentence end: "I can't wait, you're booked!"). An
+    apostrophe may be any of `_APOSTROPHES` but the acute accent (U+00B4), which `normalize` reads as
+    a space, so that reading's negation isn't one and the claim still counts.
+
+    After it, the sentence ends straight away, or after "yet", "for sure" or "for certain", or goes on
+    with a condition ("until", "till", "unless", "without", "before") (`_CLAIM_TAIL`), so a
+    strengthening or a comparison ("I cannot say you're booked any clearer than that.") or a comma
+    ("I can't say that you're booked, I can promise it.") keeps the claim.
+
+    Before the refusal, its sentence doesn't negate it (`_NEGATED_REFUSAL`): "not true", "isn't
+    true", "not the case", "wrong", "false", "untrue", "not that", "who says", "no es cierto", "no es
+    verdad" or "falso" ("It's not true that I can't confirm you're booked.").
+
+    A match is tried from every start, at the pattern's own positions in the reading it was found in,
+    so a governed match spares only itself; a negation after it ("\"You're booked\" isn't something I
+    can say.") spares nothing."""
     for reading in (text, normalize(text)):
         start = 0
         while (match := compiled.search(reading, start)) is not None:
-            if _GOVERNING_NEGATION.search(reading, 0, match.start()) is None:
+            refusal = _GOVERNING_NEGATION.search(reading, 0, match.start())
+            sentence = max((mark.end() for mark in _SENTENCE_END.finditer(reading, 0, match.start())), default=0)
+            if (refusal is None or _CLAIM_TAIL.match(reading, match.end()) is None
+                    or _NEGATED_REFUSAL.search(reading, sentence, refusal.start()) is not None):
                 return True
             start = match.start() + 1
     return False
@@ -1645,14 +1658,24 @@ _SUBJECT_ADVERBS = (rf"(?:{_GAP}(?:\w+ly|\w+mente|also|just|still|then|soon|now|
 # the main valve and close it."), its action is there, not at the match's start.
 _IT_ACTION = re.compile(r"\b(?:close|closes|closing|shut(?:s|ting)?|turn(?:s|ing)?|switch(?:es|ing)?|cut(?:s|ting)?)"
                         r"\s+it\b", re.IGNORECASE)
-# The negation that governs a claim right after it, read by `_claims`.
+# A refusal right before a claim, what may follow the claim in its sentence, and what negates the
+# refusal earlier in it, read by `_claims`.
 _GOVERNING_NEGATION = re.compile(
-    rf"\b(?:can[{_APOSTROPHES}]t|cannot|can{_GAP}not|won[{_APOSTROPHES}]t|will{_GAP}not"
-    rf"|(?:not|\w+n[{_APOSTROPHES}]t){_GAP}able{_GAP}to|unable{_GAP}to)"
+    rf"(?:\b(?:can[{_APOSTROPHES}]t|cannot|can{_GAP}not|won[{_APOSTROPHES}]t|will{_GAP}not"
+    rf"|(?:not|\w+n[{_APOSTROPHES}]t){_GAP}able{_GAP}to|unable{_GAP}to)(?:{_GAP}(?:just|simply|honestly))?"
     rf"{_GAP}(?:say|saying|write|writing|confirm|confirming|tell{_GAP}you"
     rf"|put(?:{_GAP}(?:anything|it))?{_GAP}in{_GAP}writing)"
-    rf"(?:{_GAP}anything)?(?:{_GAP}for{_GAP}you)?(?:{_GAP}in{_GAP}writing)?(?:{_GAP}(?:saying|to{_GAP}say))?"
-    rf"(?:{_GAP}that)?{_GAP}\Z", re.IGNORECASE)
+    rf"(?:{_GAP}(?:for{_GAP}(?:sure|certain)|yet))?(?:{_GAP}anything)?(?:{_GAP}for{_GAP}you)?"
+    rf"(?:{_GAP}in{_GAP}writing)?(?:{_GAP}(?:saying|to{_GAP}say))?(?:{_GAP}(?:that|whether|if))?"
+    rf"|\bno{_GAP}(?:puedo|podemos){_GAP}(?:confirmar|decir|asegurar|poner{_GAP}por{_GAP}escrito)"
+    rf"(?:{_GAP}que)?){_GAP}\Z", re.IGNORECASE)
+_CLAIM_TAIL = re.compile(rf"(?:{_GAP}(?:yet|for{_GAP}(?:sure|certain)))?"
+                         rf"(?:{_GAP}(?:until|till|unless|without|before)\b|(?:{_GAP})?(?:[.!?\n]|\Z))",
+                         re.IGNORECASE)
+_SENTENCE_END = re.compile(r"[.!?\n]")
+_NEGATED_REFUSAL = re.compile(
+    rf"(?:\bnot|n[{_APOSTROPHES}]t){_GAP}(?:true|the{_GAP}case)\b|\b(?:wrong|false|untrue)\b"
+    rf"|\bnot{_GAP}that\b|\bwho{_GAP}says\b|\bno{_GAP}es{_GAP}(?:cierto|verdad)\b|\bfalso\b", re.IGNORECASE)
 
 
 def _says(pattern: re.Pattern[str], text: str, owners: Sequence[str] = ()) -> bool:
