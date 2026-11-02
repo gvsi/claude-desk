@@ -30,6 +30,7 @@ import { CARD_REASON } from '../../mocks/world.ts';
 import { START_EXAMPLES } from '../../setup/copy.ts';
 import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { holdReads } from '../../test/holdReads.ts';
+import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import {
   aPollPasses,
@@ -2920,6 +2921,78 @@ describe("Today's unfinished setup", () => {
       )
       .toBeVisible();
     expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+  });
+
+  /** "Create your own Desk" in Today's Things to try. */
+  function createRow(screen: RenderResult): Locator {
+    return region(screen, 'Things to try')
+      .getByRole('listitem')
+      .filter({ has: page.getByRole('heading', { level: 3, name: 'Create your own Desk', exact: true }) });
+  }
+
+  /** Takes the Desk of `state`, left in setup, on through its last steps and live, as the owner would. */
+  async function goLive(state: SetupState): Promise<void> {
+    for (const key of ['setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm', 'goLive'] as const) {
+      const answered = await mockStore.dispatch(key, { params: { id: state.interview_id } });
+      if ('network' in answered || answered.status !== 200) throw new Error(`the mock answers ${key}`);
+    }
+  }
+
+  /** Opens setup at its tools and leaves with "Save and exit", before going live. Resolves on the Desk's Today. */
+  async function saveAndExitAtTools(state: SetupState): Promise<RenderResult> {
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio').getByText('Not live yet', { exact: true })).toBeVisible();
+    return screen;
+  }
+
+  it('save_and_exit_before_going_live_leaves_create_your_own_desk_open', async () => {
+    // Priya leaves her new Desk's setup with "Save and exit" before going live. Today says it isn't
+    // live yet, and "Create your own Desk" isn't done and says nothing about being live.
+    const state = await deskAtTools();
+    const screen = await saveAndExitAtTools(state);
+    const row = createRow(screen);
+    await expect.element(row.getByRole('link', { name: 'Start a Desk' })).toBeVisible();
+    // The list's reads come in a few times: still nothing ticks.
+    const reads = requests('ledger').length;
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBeGreaterThan(reads + 1);
+    expect(row.getByText('Done', { exact: true }).elements()).toHaveLength(0);
+    expect(row.element().textContent).not.toMatch(/live/i);
+    await expect.element(region(screen, 'Things to try').getByText('About 10 minutes. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    // Once it goes live, the row is done, in its own words.
+    await goLive(state);
+    const live = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(createRow(live.screen).getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+    expect(live.screen.getByText('Not live yet', { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('another_live_desk_never_has_a_desk_in_setup_say_it_is_live', async () => {
+    // Linda took Chen & Co. live earlier in this copy, so "Create your own Desk" is done. Then Priya
+    // starts Juniper Hair Studio and leaves its setup with "Save and exit" before going live. Its
+    // Today says it isn't live yet, and the row, done for the copy, says nothing about being live.
+    await liveSetupDeskIds("I'm Linda Chen. Chen & Co. keeps the books for small businesses in San Jose.");
+    const state = await deskAtTools();
+    // Answering on doesn't make a Desk still in setup live: only finishing setup does.
+    const answering = await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
+    if ('network' in answering || answering.status !== 200) throw new Error('the mock sets Answering');
+    const screen = await saveAndExitAtTools(state);
+    const row = createRow(screen);
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    await expect.element(region(screen, 'Things to try').getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Not live yet', { exact: true })).toBeVisible();
+    expect(row.element().textContent).not.toMatch(/live/i);
+    // It keeps its own words, so its Done pill is read out.
+    await expect.element(row.getByText('Describe a business in a few sentences. Claude drafts the rules, and you confirm them.', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-things__done')?.getAttribute('aria-hidden')).toBeNull();
+
+    // Once Juniper goes live too, its Today says so in the row's own words.
+    await goLive(state);
+    const live = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(createRow(live.screen).getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+    expect(live.screen.getByText('Not live yet', { exact: true }).elements()).toHaveLength(0);
   });
 
   /** The card's line at the rules, with Answering off. */
