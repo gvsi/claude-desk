@@ -3665,6 +3665,14 @@ async def test_stored_accepted_unpriced_payment_is_declined_and_excluded_from_ru
     finished = await owner.browser.post(path + "/suggestions?cards=1", json={})
     assert finished.status_code == 200, finished.text
     assert next(card for card in shown(finished) if card["proposal_id"] == ids[1])["state"] == "declined"
+    # What the closing call tells Claude: code voided the owner's stored yes for want of an amount, so the plan says
+    # why, not that the owner turned it down. With business tools off it is declined as no payment job can run.
+    closing = next(request for request in reversed(model.requests) if request.output_schema is setup.SetupNextStep)
+    text = closing.messages[0]["content"][0]["text"]
+    assert setup.SETUP_CLOSING_LINE in text
+    plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
+    status = next(item["status"] for item in plan["items"] if item["id"] == ids[1])
+    assert status == (setup.SETUP_PLAN_NO_AMOUNT if tools_enabled else "declined")
     assert PAYMENT_HOW not in ((await stored(engine, interview_id))["answers"]["how_we_help"] or "")
     reloaded = await owner.browser.get(path + "?cards=1")
     assert next(card for card in shown(reloaded) if card["proposal_id"] == ids[1])["state"] == "declined"
