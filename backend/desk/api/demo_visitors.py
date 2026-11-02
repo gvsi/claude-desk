@@ -15,7 +15,7 @@ It keeps the session's event stream (`GET .../events`) open for the whole run, s
 wakes Claude only while the visitor's credential is present. Each step:
 
 1. Wait for the Desk: until Claude's turn ends (`turn_end`), or, once the owner has taken the chat over, until the
-   owner says something or hands it back. While the owner has the chat and stays quiet, it sends its one fixed nudge
+   owner says something or hands it back (waiting for Claude when work resumes). While the owner stays quiet, it sends its one fixed nudge
    (`DEMO_VISITOR_NUDGE`) after 90 seconds, with no model call, and ends `owner_silent` after four minutes.
 2. Its model reads what a visitor saw since its last step: each delivered message's plain text labelled by who said
    it (Claude, or the owner by the name the stream carries, as a person), each request's signed status, and where the
@@ -43,7 +43,7 @@ import contextlib
 import logging
 import math
 import secrets
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -225,12 +225,29 @@ def _owner_names(events: Sequence[_Seen]) -> list[str]:
     return names
 
 
+def _unfenced_events(events: Sequence[_Seen]) -> Iterator[tuple[int, _Seen]]:
+    """Keep presence and owner replies, but discard Claude's stale replies and ends after a resuming hand-back.
+    Replies already carry their generation; the hand-back and turn end identify which resumed work can answer."""
+    generation = None
+    for index, seen in enumerate(events):
+        event = seen.event
+        if event.type == "owner_left" and event.generation is not None:
+            generation = event.generation
+        if generation is not None and (event.type == "turn_end" or (
+                event.type == "message" and event.author == "claude")):
+            if event.generation is None or event.generation < generation:
+                continue
+        yield index, seen
+
+
 def _lines(events: Sequence[_Seen], start: int) -> list[str]:
     """How the chat's events from `start` on read to the visitor's model, each labelled by who said it (the Desk's
     own text, which the caller wraps)."""
     names, lines = _owner_names(events), []
-    for index in range(start, len(events)):
-        event = events[index].event
+    for index, seen in _unfenced_events(events):
+        if index < start:
+            continue
+        event = seen.event
         kind = event.type
         if kind == "message":
             said = "\n".join(block.text for block in event.blocks)
@@ -269,11 +286,12 @@ class _Answer:
 
 
 def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
-    """Whether the events after `mark` (the feed's length when the message went) answer it: Claude's turn ending while
-    Claude has the chat, or the owner's words or leaving while the owner has it. The stream's `session` error is the
-    chat ending."""
-    mode, heard = "ai", None
-    for index, seen in enumerate(events):
+    """Whether the events after `mark` (the feed's length when the message went) answer it: a turn failing, Claude's
+    turn ending while Claude has the chat, or the owner's words or an idle hand-back. A hand-back resuming work waits
+    for Claude's own generation's turn to end. An unanswered handoff waits under the owner-silence rule.
+    The stream's `session` error ends the chat."""
+    mode, heard, handoff = "ai", None, False
+    for index, seen in _unfenced_events(events):
         event = seen.event
         kind = event.type
         if kind == "owner_joined":
@@ -282,15 +300,25 @@ def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
             mode = "ai"
         if index < mark:
             continue
-        if kind == "error" and event.code == "session":
-            raise _Ended("chat_ended")
+        if kind == "error":
+            if event.code == "session":
+                raise _Ended("chat_ended")
+            return _Answer(True, mode, heard)
         if kind in ("owner_joined", "owner_typing"):
             heard = seen.at
-        elif kind == "owner_left" or (kind == "message" and event.author == "owner"):
+        elif kind == "message":
+            if event.author == "owner":
+                return _Answer(True, mode, heard)
+            if event.author == "claude":
+                if event.handoff and not handoff:
+                    heard = seen.at
+                handoff = event.handoff
+        elif kind == "owner_left" and not event.resuming and not handoff:
             return _Answer(True, mode, heard)
-        elif kind == "turn_end" and mode != "owner":
+        elif kind == "turn_end" and mode != "owner" and not handoff:
             return _Answer(True, mode, heard)
-    return _Answer(False, mode, heard)
+    # A handoff is a wait for an answer, even when the session still routes messages to Claude.
+    return _Answer(False, "owner" if handoff else mode, heard)
 
 
 async def _first(feed: _Feed, timer: Awaitable[None]) -> None:
@@ -321,9 +349,41 @@ class _Chat:
     sleep: Sleep
     deadline: datetime
 
+    def check(self) -> None:
+        """Terminal stream events and the deadline win over any completed operation."""
+        if self.feed.failed:
+            raise RunFailed("the event stream sent a frame that isn't an event")
+        if self.feed.ended or any(getattr(seen.event, "code", None) == "session" for seen in self.feed.events):
+            raise _Ended("chat_ended")
+        if self.clock() >= self.deadline:
+            raise _Ended("limit")
+
+    async def terminal(self) -> None:
+        """Watch the stream and remaining lifetime while another operation is in flight."""
+        while True:
+            self.check()
+            await _first(self.feed, self.sleep((self.deadline - self.clock()).total_seconds()))
+
+    async def active[T](self, operation: Awaitable[T]) -> T:
+        """Cancel active work as soon as the stream or the run ends, and join every helper task."""
+        work = asyncio.ensure_future(operation)
+        terminal = asyncio.create_task(self.terminal())
+        try:
+            self.check()
+            await asyncio.wait({work, terminal}, return_when=asyncio.FIRST_COMPLETED)
+            if terminal.done():
+                await terminal
+            self.check()
+            return await work
+        finally:
+            work.cancel()
+            terminal.cancel()
+            await asyncio.gather(work, terminal, return_exceptions=True)
+
     async def call(self, method: str, path: str, *, ok: int, json: dict | None = None) -> None:
         """One request to the Desk with the run's cookie: `RunFailed` for any answer but `ok`, and the chat's end for a
         401 `no_session`."""
+        self.check()
         try:
             answer = await self.http.request(method, f"{self.path}{path}", headers={"Cookie": self.cookie},
                                              json=json)
@@ -334,20 +394,22 @@ class _Chat:
         if answer.status_code != ok:
             raise RunFailed(f"the Desk answered {answer.status_code}")
 
-    async def write(self, message: str, *, read: int) -> None:
+    async def write(self, message: str, *, read: int) -> int:
         """Send `message` after a human pause: reading the `read` characters it was shown, a typing signal, then the
         typing itself."""
         reading = min(READING_MAX_S, READING_MIN_S + READING_PER_CHAR_S * read)
         await self.sleep(reading)
         await self.call("POST", "/typing", ok=204)
         await self.sleep(min(TYPING_PER_CHAR_S * len(message), PAUSE_MAX_S - reading))
-        await self.send(message)
+        return await self.send(message)
 
-    async def send(self, message: str) -> None:
+    async def send(self, message: str) -> int:
         if self.run.messages_sent >= MAX_MESSAGES:
             raise _Ended("limit")
+        mark = len(self.feed.events)
         await self.call("POST", "/messages", ok=202, json={"text": message})
         self.run.messages_sent += 1
+        return mark
 
     async def answered(self, mark: int, sent_at: datetime) -> bool:
         """Wait for the Desk's answer to the message sent when the feed held `mark` events; whether the visitor
@@ -355,13 +417,10 @@ class _Chat:
         and the run ends after `OWNER_SILENT_S`; the run's own time limit holds throughout."""
         nudged = False
         while True:
+            self.check()
             answer = _answer(self.feed.events, mark)
             if answer.answered:
                 return nudged
-            if self.feed.ended:
-                if self.feed.failed:
-                    raise RunFailed("the event stream sent a frame that isn't an event")
-                raise _Ended("chat_ended")
             now = self.clock()
             wait = (self.deadline - now).total_seconds()
             if wait <= 0:
@@ -373,8 +432,8 @@ class _Chat:
                 if not nudged and quiet >= NUDGE_AFTER_S:
                     nudged = True
                     if self.run.messages_sent < MAX_MESSAGES:
-                        await self.call("POST", "/typing", ok=204)
-                        await self.send(DEMO_VISITOR_NUDGE)
+                        await self.active(self.call("POST", "/typing", ok=204))
+                        await self.active(self.send(DEMO_VISITOR_NUDGE))
                     continue
                 wait = min(wait, (OWNER_SILENT_S if nudged else NUDGE_AFTER_S) - quiet)
             await _first(self.feed, self.sleep(wait))
@@ -428,15 +487,18 @@ async def run_demo_visitor(slug: str, task_set: DemoTaskSet, http: httpx.AsyncCl
     started = clock()
     path = f"/api/public/desks/{quote(slug, safe='')}"
     try:                                            # everything in the run ends it, however it goes
-        cookie = await _open_session(http, path, run)
-        if opened is not None:
-            await opened(run)
-        async with _listening(http, path, cookie, clock) as feed:
-            chat = _Chat(http=http, path=path, cookie=cookie, feed=feed, run=run, clock=clock, sleep=sleep,
-                         deadline=started + RUN_LIMIT)
-            await _converse(chat, model, task_set, record=record, spent=spent)
+        async with asyncio.timeout(RUN_LIMIT.total_seconds()):
+            cookie = await _open_session(http, path, run)
+            if opened is not None:
+                await opened(run)
+            async with _listening(http, path, cookie, clock) as feed:
+                chat = _Chat(http=http, path=path, cookie=cookie, feed=feed, run=run, clock=clock, sleep=sleep,
+                             deadline=started + RUN_LIMIT)
+                await _converse(chat, model, task_set, record=record, spent=spent)
     except _Ended as ended:
         _end(run, ended.how)
+    except TimeoutError:
+        _end(run, "limit")
     except ModelUnavailable:
         _fail(run, "the model was unavailable")
     except RunFailed as failed:
@@ -459,16 +521,15 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
     while True:
         if chat.run.messages_sent >= MAX_MESSAGES or calls >= MAX_MODEL_CALLS or chat.clock() >= chat.deadline:
             raise _Ended("limit")
-        if spent is not None and await spent():
+        if spent is not None and await chat.active(spent()):
             raise _Ended("budget")
-        step = await _step(model, messages, record)
+        step = await chat.active(_step(model, messages, record))
         calls += 1
         if step.done:
             raise _Ended("finished")
         if not step.message.strip():
             raise RunFailed("the model wrote an empty message")
-        await chat.write(step.message, read=read)
-        mark = len(chat.feed.events)
+        mark = await chat.active(chat.write(step.message, read=read))
         nudged = await chat.answered(mark, chat.clock())
         lines = _lines(chat.feed.events, shown)
         shown, read = len(chat.feed.events), sum(len(line) for line in lines)

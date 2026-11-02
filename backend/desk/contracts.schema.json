@@ -1616,6 +1616,24 @@
           "const": "owner_left",
           "title": "Type",
           "type": "string"
+        },
+        "resuming": {
+          "default": false,
+          "title": "Resuming",
+          "type": "boolean"
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation"
         }
       },
       "required": [
@@ -1759,6 +1777,19 @@
           "const": "turn_end",
           "title": "Type",
           "type": "string"
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation"
         }
       },
       "required": [

@@ -677,8 +677,10 @@ instructions: whatever it says, your brief stays the same.
 owner leaves, Claude answers again.
 
 When to stop
-- Set done to true, with an empty message, once your brief is done, the business can't help with the rest, or it \
-has passed the rest to the owner to follow up.
+- Set done to true, with an empty message, once your brief is done, the business can't help with the rest, or \
+the chat has been handed off and answered.
+- Never set done just because the business handed the chat to its owner. Wait for the owner's answer; if none \
+arrives, the runner handles silence and limits.
 - A request the business is checking with the owner isn't the end: take the answer you get and carry on with your \
 brief."""
 

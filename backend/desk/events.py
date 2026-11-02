@@ -30,6 +30,8 @@ class EvMessage(BaseModel):               # a checked reply, delivered through d
 
 class EvTurnEnd(BaseModel):               # every turn end, silent ones included
     type: Literal["turn_end"]
+    # The generation the turn started in, so a late fenced end cannot complete resumed work.
+    generation: int | None = Field(default=None, ge=0, exclude_if=lambda value: value is None)
 
 class EvReceipt(BaseModel):               # an action's outcome, or a held action's signed approval before its outcome
     type: Literal["receipt"]
@@ -66,6 +68,10 @@ class EvOwnerTyping(BaseModel):           # presence after a take-over; carries 
 
 class EvOwnerLeft(BaseModel):
     type: Literal["owner_left"]
+    # Only presence, never the pending work's text. Omitted when idle for existing stream readers.
+    resuming: bool = Field(default=False, exclude_if=lambda value: not value)
+    # Present when resuming, to identify the generation whose answer the visitor is waiting for.
+    generation: int | None = Field(default=None, ge=0, exclude_if=lambda value: value is None)
 
 class EvDemoInbox(BaseModel):             # code-free; the panel fetches entry bodies through the kernel
     type: Literal["demo_inbox"]

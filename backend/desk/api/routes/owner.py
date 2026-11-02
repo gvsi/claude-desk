@@ -713,11 +713,13 @@ async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionSt
         await _transcribed(conn, ids, EvOwnerJoined(type="owner_joined", name=name))
         await append_message(conn, ids, "note", text=NOTES["taken_over"], wake=False)
         return
+    resuming = await has_pending(conn, ids.session_id)
     if before == "owner":
-        await _transcribed(conn, ids, EvOwnerLeft(type="owner_left"))
+        await _transcribed(conn, ids, EvOwnerLeft(type="owner_left", resuming=resuming,
+                                                generation=now.generation if resuming else None))
     await append_message(conn, ids, "note", text=NOTES["handed_back" if before == "owner" else "resumed"],
                          wake=False)
-    if await has_pending(conn, ids.session_id):
+    if resuming:
         await append_control(conn, ids, "run_resumable", {"generation": now.generation})
 
 
