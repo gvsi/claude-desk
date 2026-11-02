@@ -118,9 +118,8 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
         <TextField label={copy.amount} value={amount} onChange={(value) => { setAmount(value); setError(null); }} hint={copy.amountHint} readOnly={disabled || !live || failed} {...(error ? { error } : {})} />
       </div> : null}
       {live && proposal.state === 'proposed' ? failed ? <FailedDecision disabled={disabled} onRetry={onRetry} /> : <div className="cd-setup-c3__actions cd-setup-c3__indent">
-        {payment && !amount.trim()
-          ? <Button variant="primary" disabled onClick={() => decide('accept')}>{copy.setItUp}</Button>
-          : <Button variant="primary" waiting={disabled && busyAction !== 'accept'} busy={busyAction === 'accept'} onClick={() => decide('accept')}>{copy.setItUp}</Button>}
+        {/* Pressed with no amount, it says why under Amount and sends nothing (`decisionBody`). */}
+        <Button variant="primary" waiting={disabled && busyAction !== 'accept'} busy={busyAction === 'accept'} onClick={() => decide('accept')}>{copy.setItUp}</Button>
         <Button variant="ghost" waiting={disabled && busyAction !== 'decline'} busy={busyAction === 'decline'} onClick={() => decide('decline')}>{copy.decline}</Button>
       </div> : null}
     </div>

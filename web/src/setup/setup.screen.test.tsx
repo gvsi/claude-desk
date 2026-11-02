@@ -4528,7 +4528,7 @@ describe('consultant setup', () => {
     const card = screen.getByRole('article', { name: title, exact: true });
     const accept = card.getByRole('button', { name: action, exact: true });
     if (kind === 'payment') {
-      await expect.element(accept).toBeDisabled();
+      await expect.element(accept).toBeEnabled();
       await card.getByRole('textbox', { name: 'Amount', exact: true }).fill('750');
     }
     const decline = card.getByRole('button', { name: 'Not now', exact: true });
@@ -4729,13 +4729,34 @@ describe('consultant setup', () => {
     const amount = screen.getByRole('textbox', { name: 'Amount', exact: true });
     await expect.element(amount).toBeVisible();
     const setup = screen.getByRole('button', { name: 'Set it up', exact: true });
-    await expect.element(setup).toBeDisabled();
+    await setup.click();
+    await expect.element(screen.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+    expect(decisions).toEqual([]);
     await expect.element(screen.getByText('Stripe', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Each payment shows in Today', { exact: true })).toBeVisible();
     await amount.fill('750.00');
     await setup.click();
     expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true, amount_cents: 75000 } }]);
     expectNoHorizontalScroll();
+  });
+
+  it('set_it_up_with_no_amount_says_why_and_accepts_nothing', async () => {
+    // The owner presses "Set it up" on a payment job before filling in Amount: the card says to enter
+    // one, and nothing is accepted. With an amount, the same press accepts the job.
+    const state = await consultantAt('payment');
+    const proposal = state.messages.at(-1)!.card!;
+    const decisions: unknown[] = [];
+    const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={(decision) => decisions.push(decision)} />);
+    const amount = screen.getByRole('textbox', { name: 'Amount', exact: true });
+    await expect.element(amount).toHaveValue('');
+    const setup = screen.getByRole('button', { name: 'Set it up', exact: true });
+    await setup.click();
+    await expect.element(screen.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+    await expect.element(amount).toHaveAttribute('aria-invalid', 'true');
+    expect(decisions).toEqual([]);
+    await amount.fill('50');
+    await setup.click();
+    expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true, amount_cents: 5000 } }]);
   });
 
   it.each(['7,5', '75 0', '1,50.00'] as const)('refuses_ambiguous_payment_grouping_%s_without_sending', async (dollars) => {
@@ -4766,17 +4787,15 @@ describe('consultant setup', () => {
     const amount = card.getByRole('textbox', { name: 'Amount', exact: true });
     await expect.element(amount).toBeVisible();
     const setup = card.getByRole('button', { name: 'Set it up', exact: true });
-    await expect.element(setup).toBeDisabled();
     const mark = requests('setupProposal').length;
-    for (const invalid of ['bad', '0', '$0.00', '-1', '1.234', '10000.01']) {
+    // Empty first, as the card opens, and again once cleared.
+    for (const invalid of ['', 'bad', '0', '$0.00', '-1', '1.234', '10000.01', '']) {
       await amount.fill(invalid);
       await setup.click();
       await expect.element(amount).toHaveAttribute('aria-invalid', 'true');
       await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
       expect(requests('setupProposal')).toHaveLength(mark);
     }
-    await amount.fill('');
-    await expect.element(setup).toBeDisabled();
     await amount.fill('750.00');
     await setup.click();
     await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
