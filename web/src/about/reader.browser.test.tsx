@@ -1131,6 +1131,33 @@ describe('ReaderPage', () => {
     }
   });
 
+  it('the_authors_name_links_to_their_profile', async () => {
+    // The byline's name, beside the article or in the line under the summary on a phone, and the
+    // footer's: each opens the author's LinkedIn profile in a new tab, with the words unchanged.
+    const profile = 'https://www.linkedin.com/in/giovannialcantara/';
+    for (const id of IDS) {
+      for (const size of [DESKTOP, PHONE]) {
+        const where = `${id} at ${size.width}`;
+        const screen = await renderReader(id, { size });
+        const root = screen.container;
+        const meta =
+          size === PHONE ? root.querySelector('[data-hero] [data-byline]') : root.querySelector('aside[aria-label="About this document"] dd');
+        const footer = root.querySelector('[data-ds="concept-footer"]');
+        for (const [part, words] of [
+          [meta, /^Giovanni Alcantara(?: · |$)/],
+          [footer, /^Concept prototype by Giovanni Alcantara, not an Anthropic product$/],
+        ] as const) {
+          expect(flat(part?.textContent), where).toMatch(words);
+          const links = [...(part?.querySelectorAll('a') ?? [])];
+          expect(links.map((link) => [link.textContent, link.getAttribute('href'), link.target, link.rel]), where).toEqual([
+            ['Giovanni Alcantara', profile, '_blank', 'noopener noreferrer'],
+          ]);
+        }
+        await screen.unmount();
+      }
+    }
+  });
+
   it('prototype_link_opens_your_desk_or_the_prototype', async () => {
     const cases = [
       { lastDesk: 'desk-rivera', size: DESKTOP, to: '/app/desk-rivera/today' },
@@ -1228,6 +1255,71 @@ describe('ReaderPage', () => {
     const focused = document.activeElement as HTMLElement;
     expect(focused.closest('nav[aria-label="About this prototype"]')).not.toBeNull();
     await expect.poll(() => focused.getBoundingClientRect().top).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+    await screen.unmount();
+  });
+
+  it('keyboard_focus_on_the_paper_draws_no_ring', async () => {
+    // Keyboard focus changes a control's own edge, never a ring outside it (owner, 2026-11-01), in the paper's
+    // secondary ink: the bar's pills and the contents list's items show 1 px inside them, "Read next" 1 px over
+    // its card's own border, and a link in the text turns its words and a 2 px underline the paper's ink.
+    const screen = await renderReader('proposal', { size: DESKTOP });
+    const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
+    const edge = `${tokenColor('--line-focus', root)} 0px 0px 0px 1px inset`;
+    expect(tokenColor('--line-focus', root)).toBe('rgb(92, 88, 80)');
+    const keyboardFocus = async (el: HTMLElement) => {
+      await userEvent.keyboard('{Shift}');
+      el.focus();
+      expect(el.matches(':focus-visible')).toBe(true);
+    };
+
+    const tryIt = screen.container.querySelector('.cd-about-try') as HTMLElement;
+    const pill = screen.container.querySelector('nav[aria-label="About this prototype"] a') as HTMLElement;
+    const item = screen.container.querySelector('.cd-about-contents__link') as HTMLElement;
+    for (const [name, el] of [['Try Desk prototype', tryIt], ['a page pill', pill], ['a contents item', item]] as const) {
+      await keyboardFocus(el);
+      expect.soft([getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow], name).toEqual(['none', edge]);
+    }
+    // A contents item reaches 8 px past its words on each side, so its edge clears the number, while the words
+    // stay level with the list's own edge.
+    const list = (item.closest('ol') as HTMLElement).getBoundingClientRect();
+    const number = (item.querySelector('.cd-about-contents__number') as HTMLElement).getBoundingClientRect();
+    const reach = item.getBoundingClientRect();
+    expect([number.left - list.left, list.left - reach.left, reach.right - list.right]).toEqual([0, 8, 8]);
+
+    const inText = screen.container.querySelector('article a.cd-text-link') as HTMLElement;
+    await keyboardFocus(inText);
+    const ink = tokenColor('--text-primary', root);
+    const text = getComputedStyle(inText);
+    expect([text.color, text.textDecorationLine, text.textDecorationThickness, text.textDecorationColor, text.boxShadow]).toEqual([ink, 'underline', '2px', ink, 'none']);
+
+    const next = screen.container.querySelector('.cd-about-next__link') as HTMLElement;
+    await keyboardFocus(next);
+    const card = next.closest('.cd-card') as HTMLElement;
+    const overlay = getComputedStyle(next, '::after');
+    expect([getComputedStyle(next).outlineStyle, getComputedStyle(next).boxShadow, overlay.outlineStyle, overlay.boxShadow]).toEqual(['none', 'none', 'none', edge]);
+    expect(overlay.borderTopLeftRadius).toBe(getComputedStyle(card).borderTopLeftRadius);
+    // The overlay lies over the card's border box, so its edge is the card's border.
+    const over = next.closest('.cd-about-next') as HTMLElement;
+    expect(over.getBoundingClientRect().toJSON()).toEqual(card.getBoundingClientRect().toJSON());
+    await screen.unmount();
+  });
+
+  it('read_next_fills_on_hover_and_keeps_its_border', async () => {
+    // Hover is a fill only, the paper's hover ink over the card, and the card's border stays as it rests: only
+    // keyboard focus changes an edge.
+    const screen = await renderReader('proposal', { size: DESKTOP });
+    const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
+    const over = screen.container.querySelector('.cd-about-next') as HTMLElement;
+    const card = over.querySelector('.cd-card') as HTMLElement;
+    over.scrollIntoView({ block: 'center' });
+    const rest = { fill: getComputedStyle(card).backgroundColor, border: getComputedStyle(card).borderTopColor };
+    const hoverInk = tokenColor('--fill-hover', root);
+    expect(hoverInk).toBe('rgba(28, 27, 25, 0.06)');
+    expect(rest.fill).not.toBe(hoverInk);
+    await userEvent.hover(over);
+    expect(over.matches(':hover')).toBe(true);
+    await expect.poll(() => getComputedStyle(card).backgroundColor).toBe(hoverInk);
+    expect(getComputedStyle(card).borderTopColor).toBe(rest.border);
     await screen.unmount();
   });
 
@@ -1467,7 +1559,7 @@ describe('ReaderPage', () => {
     expect(document.activeElement).toBe(heading);
     expect(heading.getAttribute('tabindex')).toBe('-1');
     expect(heading.matches(':focus-visible'), 'focus came from the keyboard').toBe(true);
-    expect(getComputedStyle(heading).outlineStyle).toBe('none');
+    expect([getComputedStyle(heading).outlineStyle, getComputedStyle(heading).boxShadow]).toEqual(['none', 'none']);
     // The router draws the new address in a transition, which a busy machine may not have drawn yet.
     await expect.poll(() => at.path).toBe('/about/prediction#limitations');
     // The next Tab goes on from the section, not from the top of the page.

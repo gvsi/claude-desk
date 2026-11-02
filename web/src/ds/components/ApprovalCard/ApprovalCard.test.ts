@@ -35,6 +35,25 @@ describe('ApprovalCard words', () => {
     expect(line('refused_at_execution', reason)).toBe(reason);
     expect(line('refused_at_execution', null)).toBe("Your rules changed before this ran, so it wasn't done.");
     expect(line('executed', reason)).toBe("You allowed this. It's done.");
+    expect(line('expired', reason)).toBe('This request expired before you answered. Nothing was done.');
+  });
+
+  it('a_request_a_booking_closed_shows_the_kernel_owner_line_and_one_the_visitor_cancelled_keeps_its_own', () => {
+    // The kernel sends an owner line on a cancelled request only when the visitor's booking closed it.
+    const line = (owner_plain: string | null | undefined) => {
+      const html = renderToStaticMarkup(createElement(ApprovalCard, {
+        decision: { ...rivera.decisions.cancelled, owner_plain },
+        waiting: 'Web chat, 6 min ago',
+        onAnswer: () => {},
+      }));
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      return doc.querySelector('.cd-approval-card__status-line')?.textContent;
+    };
+    const booked = 'The visitor booked before you answered, so this request closed.';
+    expect(line(booked)).toBe(booked);
+    expect(line(rivera.cancelledByBooking.owner_plain)).toBe(booked);
+    expect(line(null)).toBe('The visitor cancelled before you answered. Nothing was done.');
+    expect(line(undefined)).toBe('The visitor cancelled before you answered. Nothing was done.');
   });
 
   it('rule_answers_alone_have_their_full_words', () => {

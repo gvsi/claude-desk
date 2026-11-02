@@ -57,7 +57,7 @@
 
 A menu button keeps its variant's look, and its hover fill while its menu is open (`aria-expanded="true"`); its padding is `space-14` before the words and `space-10` after the chevron (`space-12` and `space-8` inline), because the icon carries its own margin.
 
-Disabled dims every variant to 40%. Busy never dims, even on a button that is disabled too: busy wins, and each variant steps to its busy colors and shows its spinner, as `busy` above says. Keyboard focus shows the base stylesheet's 2 px `ring-focus` ring at a 2 px offset on every variant; a click shows none.
+Disabled dims every variant to 40%. Busy never dims, even on a button that is disabled too: busy wins, and each variant steps to its busy colors and shows its spinner, as `busy` above says. Keyboard focus draws an edge just inside the button, never a ring outside it, so nothing moves: 1 px of `line-focus` on secondary, ghost, danger and danger-ghost, and 2 px of `bg-app` on the primary, whose cream fill hides the warm line. A click shows none.
 
 A label longer than its line, such as a long name on a phone or in the take-over bar's controls column, wraps inside the button in balanced lines, and the button grows taller with the same padding. A word wider than the line, such as a name with no spaces, breaks inside the button too (`overflow-wrap: anywhere`), even in a row of buttons. It is never wider than its container, and one line of label keeps it exactly `size-control` (or `size-control-main`) tall.
 

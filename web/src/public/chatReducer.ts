@@ -85,6 +85,13 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   error: EvErrorCode | null;
   /** Held requests the visitor can still cancel, oldest first. */
   openHolds: string[];
+  /**
+   * How many times the stream has said what came of a turn: Claude started writing, a reply came,
+   * the turn ended, it failed, the owner joined or left, the chat ended, or the stored conversation
+   * was read. A receipt or a held request's outcome doesn't count. The page holds Send from the
+   * visitor's message until this moves.
+   */
+  turnMarks: number;
   /** Each decision's latest receipt, used to replace it or attach an outcome below its approval. */
   latest: ReadonlyMap<string, ReceiptView>;
   /** Demo inbox notices for this chat (no code in them). */
@@ -131,6 +138,7 @@ export function initialChatState(): ChatState {
     connection: 'open',
     error: null,
     openHolds: [],
+    turnMarks: 0,
     latest: new Map(),
     inbox: [],
     seen: new Set(),
@@ -274,9 +282,9 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'writing':
       // Claude has started a turn: what it does now explains the reply it is writing, so the turn's
       // receipts wait for that reply, even in a turn the API started with no visitor message.
-      return { ...state, ...addPart(state, { kind: 'writing' }), writing: true, error: null };
+      return { ...state, ...addPart(state, { kind: 'writing' }), writing: true, error: null, turnMarks: state.turnMarks + 1 };
     case 'turn_end':
-      return { ...state, ...settle(state), writing: false, ownerTyping: null };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, turnMarks: state.turnMarks + 1 };
     case 'message': {
       const key = messageKey(ev);
       // The owner's own words replace the owner's typing dots, even when the chat already shows them.
@@ -288,6 +296,7 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
         writing: false,
         ownerTyping,
         seen: new Set(state.seen).add(key),
+        turnMarks: state.turnMarks + 1,
       };
     }
     case 'receipt':
@@ -305,9 +314,9 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       };
     }
     case 'owner_joined':
-      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false };
+      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false, turnMarks: state.turnMarks + 1 };
     case 'owner_left':
-      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false, ownerTyping: null };
+      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false, ownerTyping: null, turnMarks: state.turnMarks + 1 };
     case 'owner_typing': {
       // Kept whole, without its type: a later typing event replaces it.
       const { type: _type, ...ownerTyping } = ev;
@@ -316,7 +325,7 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'demo_inbox':
       return { ...state, inbox: [...state.inbox, ev] };
     case 'error':
-      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: ev.code };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: ev.code, turnMarks: state.turnMarks + 1 };
   }
 }
 
@@ -347,7 +356,7 @@ function withVisitor(state: ChatState, id: string, change: (item: ChatItem & { k
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case 'history':
-      return { ...fromHistory(action.transcript), connection: state.connection };
+      return { ...fromHistory(action.transcript), connection: state.connection, turnMarks: state.turnMarks + 1 };
     case 'event':
       // Seen already: the stream resumed from an earlier seq.
       if (action.seq <= state.lastSeq) return state;
@@ -377,7 +386,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // The stream resumes after the last seq the chat holds, and sends what it missed first.
       return { ...state, connection: action.connection, catchingUp: state.catchingUp || action.connection !== 'open' };
     case 'ended':
-      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: 'session' };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: 'session', turnMarks: state.turnMarks + 1 };
     case 'reset':
       return initialChatState();
   }

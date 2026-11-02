@@ -461,7 +461,7 @@
 
 /* On a phone each row is its next step: the icon tile, the title and its line, and a chevron at the
    right, whose press area covers the row (its ideas, under it, keep their own presses), with the
-   focus ring around the row. The card's button isn't drawn; a done row keeps its pill at the right. */
+   focus edge just inside the row. The card's button isn't drawn; a done row keeps its pill at the right. */
 @media (max-width: 639.98px) {
   .cd-things__item {
     position: relative;
@@ -491,13 +491,14 @@
     border-radius: var(--radius-control);
   }
 
+  /* With keyboard focus the row's overlay draws the focus edge, 1 px of line-focus just inside the
+     whole row; the chevron draws nothing of its own. */
   .cd-things__go:focus-visible {
-    outline: none;
+    box-shadow: none;
   }
 
   .cd-things__go:focus-visible::after {
-    outline: 2px solid var(--ring-focus);
-    outline-offset: 2px;
+    box-shadow: inset 0 0 0 1px var(--line-focus);
   }
 
   .cd-things__below {
@@ -525,12 +526,22 @@
   color: var(--text-primary);
 }
 
+/* Keyboard focus shows in the words, as a TextLink's: they and a 2 px underline turn the primary ink. */
+.cd-today-caption-link:focus-visible {
+  box-shadow: none;
+  color: var(--text-primary);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--text-primary);
+}
+
 /* Needs you: held requests and those answered here, in one list, then callbacks. An answered
    request keeps its place, with Dismiss under its card. The approval card's own box takes focus
    for "Open the request". */
 
-.cd-today__section[tabindex='-1']:focus:not(:focus-visible) {
+.cd-today__section[tabindex='-1']:focus {
   outline: none;
+  box-shadow: none;
 }
 
 .cd-needs-you {

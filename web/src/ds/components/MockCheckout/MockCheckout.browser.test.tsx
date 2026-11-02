@@ -289,7 +289,8 @@ it('the_paid_line_links_back_only_to_a_public_chat', () => {
   const CHAT = '/d/turner-plumbing-abc123';
   const { container, update } = render({ state: 'paid', chatHref: CHAT });
   const line = () => container.querySelector('.cd-checkout__state');
-  const links = () => [...container.querySelectorAll('a')];
+  // The footer's author link aside, the only link on the page.
+  const links = () => [...container.querySelectorAll('a')].filter((a) => !a.matches('[data-ds="concept-footer"] a'));
   expect(line()?.textContent).toBe('Paid. Go back to the chat to see it there.');
   expect(links()).toHaveLength(1);
   const [back] = links();

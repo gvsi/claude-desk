@@ -20,7 +20,7 @@ import {
 } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 
-import { Card, ConceptFooter, Icon, MarkAppIcon } from '../ds/index.ts';
+import { AUTHOR_NAME, AUTHOR_URL, Card, ConceptFooter, Icon, MarkAppIcon, TextLink } from '../ds/index.ts';
 import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { AboutBar, useAboutNarrow } from './AboutBar.tsx';
 import { ABOUT_DOCUMENTS, readingMinutes, type AboutDocument, type Block, type FigureName } from './documents.ts';
@@ -53,6 +53,16 @@ function bylineOf(blocks: Block[]): { author: string; date: string; day?: string
     date: `${month.slice(0, 3)} ${date}, ${year}`,
     day: `${year}-${String(index + 1).padStart(2, '0')}-${date.padStart(2, '0')}`,
   };
+}
+
+/** The byline's author: the prototype's author links to the author's profile in a new tab, as the footer does. */
+function Author({ name }: { name: string }) {
+  if (name !== AUTHOR_NAME) return <>{name}</>;
+  return (
+    <TextLink href={AUTHOR_URL} external runningText>
+      {name}
+    </TextLink>
+  );
 }
 
 /** A figure by its marker's name. */
@@ -314,7 +324,9 @@ function Details({ document, alsoRead }: { document: AboutDocument; alsoRead: Ab
       <dl className="cd-type-meta">
         <div>
           <dt>Written by</dt>
-          <dd>{author}</dd>
+          <dd>
+            <Author name={author} />
+          </dd>
         </div>
         <div>
           <dt>Date</dt>
@@ -344,7 +356,7 @@ function BylineLine({ document }: { document: AboutDocument }) {
   const { author, date, day } = bylineOf(document.blocks);
   return (
     <p className="cd-about-hero__byline cd-type-meta" data-byline="">
-      {author} · {day ? <time dateTime={day}>{date}</time> : date} · {`${readingMinutes(document.blocks)} min read`}
+      <Author name={author} /> · {day ? <time dateTime={day}>{date}</time> : date} · {`${readingMinutes(document.blocks)} min read`}
     </p>
   );
 }

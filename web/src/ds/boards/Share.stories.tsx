@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
+import { SHARE_CHANNELS } from '../../lib/channels.ts';
+import '../../owner/share/ShareKit.css';
 
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
@@ -71,13 +73,22 @@ function Share() {
           <div className="board-share__words">
             <h2 className="board-share__heading cd-type-section">Ready-made words</h2>
             <CopyList label="Ready-made words" items={WORDS} onCopy={fn(async () => {})} />
-            <div className="board-share__later">
-              <div className="board-share__later-text">
-                <p className="board-share__later-title cd-type-control">Website embed</p>
-                <p className="board-share__later-line cd-type-meta">The same chat on your own site.</p>
-              </div>
-              <Pill>Coming later</Pill>
-            </div>
+            <section className="cd-share-kit__channels" aria-label="More channels">
+              <h2 className="cd-share-kit__heading cd-type-section">More channels</h2>
+              <Card padding={0}>
+                <ul role="list" className="cd-share-kit__channel-list">
+                  {SHARE_CHANNELS.map((channel) => (
+                    <li key={channel.key} className="cd-share-kit__later">
+                      <div className="cd-share-kit__later-text">
+                        <p className="cd-share-kit__later-title cd-type-control">{channel.name}</p>
+                        <p className="cd-share-kit__later-line cd-type-meta">{channel.line}</p>
+                      </div>
+                      <Pill>Coming later</Pill>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            </section>
           </div>
         </div>
         <ConceptFooter />
@@ -95,9 +106,9 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Run2-Share',
     canvasNote: [
-      'Built against the board in review; sign-off pending.',
+      'More channels follows the signed Share boards from November 1.',
       'Share: the printable card is ShareCard, with the QR code in its slot (a placeholder here: the web app’s QrCode draws the real one), and the ready-made words are a CopyList.',
-      'The link card, its Copy link (the web app’s CopyLink), the website embed and the page’s columns are page layout the web app (plan 04) owns; the sidebar’s Connectors row belongs to another change.',
+      'The link card, its Copy link (the web app’s CopyLink), More channels and the page’s columns are page layout the web app (plan 04) owns; the sidebar’s Connectors row belongs to another change.',
       'The board draws the link card 1 px taller, so everything under it sits 1 px higher here.',
     ].join(' '),
   },
@@ -129,7 +140,14 @@ export const Board: Story = {
     const link = canvas.getByRole('region', { name: 'Your link' });
     expectComputed(within(link).getByRole('button', { name: 'Copy link' }), SPEC.primary);
     await expect(Math.round(link.getBoundingClientRect().height)).toBe(105);
-    await expect(one(canvasElement, '.board-share__later')).toHaveTextContent('Coming later');
+    const channels = canvas.getByRole('region', { name: 'More channels' });
+    const channelHeading = within(channels).getByRole('heading', { level: 2, name: 'More channels' });
+    const channelCard = one(channels, '.cd-card');
+    await expect(Math.round(channelHeading.getBoundingClientRect().top - wordsBox.bottom)).toBe(8);
+    await expect(Math.round(channelCard.getBoundingClientRect().top - channelHeading.getBoundingClientRect().bottom)).toBe(12);
+    const rows = within(channels).getAllByRole('listitem');
+    await expect(rows.map((row) => row.textContent)).toEqual(SHARE_CHANNELS.map(({ name, line }) => `${name}${line}Coming later`));
+    rows.forEach((row, index) => expectComputed(row, { ...SPEC.shareChannelRow, borderTopWidth: index === 0 ? '0px' : '1px' }));
     await expectFooter(canvasElement);
     await expectTabOrder(userEvent, [
       within(link).getByRole('button', { name: 'Copy link' }),

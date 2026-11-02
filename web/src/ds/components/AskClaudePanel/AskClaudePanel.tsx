@@ -23,7 +23,10 @@ export interface AskClaudePanelProps {
   onClose: () => void;
   /** Called with the owner's trimmed words from the panel's composer. */
   onSend: (text: string) => void;
-  /** Claude is writing: "Claude is writing" at the end of the conversation. */
+  /**
+   * Claude is writing: "Claude is writing" at the end of the conversation. The composer still takes
+   * typing and keeps its focus, but Send and Enter wait until the answer has come in.
+   */
   busy?: boolean;
   /** The conversation: the owner's words, Claude's serif replies and their cards, in order. */
   children: ReactNode;
@@ -181,7 +184,7 @@ export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskC
         {busy ? <WritingIndicator language="en" /> : null}
       </div>
       <div className="cd-ask-claude__composer">
-        <Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" onSend={onSend} />
+        <Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" sendHeld={busy} onSend={onSend} />
       </div>
     </div>
   );

@@ -99,7 +99,7 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
             </div>
           </SkeletonCard>
         </div>
-        <div className="cd-agents-skeleton__footer" data-skeleton-anchor="agents-footer"><ConceptFooter /></div>
+        <div className="cd-agents-skeleton__footer" data-skeleton-anchor="agents-footer"><ConceptFooter skeleton /></div>
       </div>
     </div>
   );

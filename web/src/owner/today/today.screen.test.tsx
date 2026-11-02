@@ -39,6 +39,7 @@ import {
   expectScreenBasics,
   focusIsOn,
   nextFrames,
+  tokenColor,
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
 import { customerLink } from '../customerLink.ts';
@@ -1425,10 +1426,12 @@ describe('Today', () => {
     await expect.poll(() => quoteIn(danaRow())?.textContent, { timeout: 5_000 }).toBe('“Actually, could it be 3 pm instead?”');
     expect(live.getByText('“Tuesday at 2 works.”', { exact: true }).elements()).toHaveLength(0);
 
-    // The Conversations list doesn't quote anyone.
+    // Conversations keeps the preview above status; Live now's two-line rows above stay unchanged.
     const list = await renderRoute(CONVERSATIONS);
     await expect.element(list.screen.getByRole('link', { name: /Needs you/ }).first()).toBeVisible();
-    expect(document.querySelectorAll('.cd-conversation-item__quote')).toHaveLength(0);
+    const heldRow = list.screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /50% off/ }).element();
+    expect(quoteIn(heldRow)?.textContent).toBe('“Can I get 50% off if I pay cash?”');
+    expect(heldRow.querySelector('.cd-conversation-item__status')?.textContent).toBe('Needs you');
   });
 
   it('live_now_quotes_named_people_over_what_they_are', async () => {
@@ -2557,12 +2560,14 @@ describe("Today's top band", () => {
     answerRow.element().scrollIntoView({ block: 'center' });
     const answerTitle = box(things.getByRole('heading', { level: 3, name: 'Answer a held request' }).element());
     expect(document.elementFromPoint(answerTitle.left + 4, answerTitle.top + answerTitle.height / 2)).toBe(answerRow.element());
-    // Tabbed to, the row shows the focus ring around the whole row.
+    // Tabbed to, the row shows the focus edge just inside the whole row, 1 px of line-focus, and no ring
+    // outside it; its chevron draws nothing of its own.
     things.getByRole('button', { name: 'Try to break it', exact: true }).element().focus();
     await userEvent.keyboard('{Tab}');
     expect(document.activeElement).toBe(answerRow.element());
     const ring = getComputedStyle(answerRow.element(), '::after');
-    expect([ring.outlineStyle, ring.outlineWidth]).toEqual(['solid', '2px']);
+    expect([ring.outlineStyle, ring.boxShadow]).toEqual(['none', `${tokenColor('--line-focus')} 0px 0px 0px 1px inset`]);
+    expect([getComputedStyle(answerRow.element()).outlineStyle, getComputedStyle(answerRow.element()).boxShadow]).toEqual(['none', 'none']);
     const ringBox = { top: rows[2]!.getBoundingClientRect().top, bottom: rows[2]!.getBoundingClientRect().bottom };
     expect(ringBox.bottom - ringBox.top).toBeGreaterThan(box(answerRow.element()).height);
     await answerRow.click();

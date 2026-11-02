@@ -394,11 +394,16 @@ def owner_refusal_key(reason: str | None, check: str | None) -> str:
     return "refused_fallback"
 
 
-# Every line `owner_refusal_key` picks is an owner line, checked at import: a missing one would raise in
-# `set_state` and leave a refusal at execution without its line (in T2, an action settled `unknown`).
+# The key of the owner's line for a held request a booking closed (`supersede_if_booked`, `set_state`).
+BOOKING_CLOSED_KEY = "cancelled_by_booking"
+
+# Every line `owner_refusal_key` picks is an owner line, and so is a booking's, checked at import: a missing one
+# would raise in `set_state` and leave a refusal at execution without its line (in T2, an action settled `unknown`).
 if not {owner_refusal_key(reason, check) for reason in ("session_ended", "rules_changed", None)
         for check in (*SESSION_ENDED_CHECKS, *RECHECK_CHECKS, "desk", None)} <= render.OWNER_STATUS_KEYS:
     raise RuntimeError("every refusal at execution has an owner line")
+if BOOKING_CLOSED_KEY not in render.OWNER_STATUS_KEYS:
+    raise RuntimeError("a held request a booking closed has an owner line")
 
 
 async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str = "decide",
@@ -412,10 +417,13 @@ async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str =
     transaction rolls back; in T2, `execute._run` settles the action `unknown`, with nothing
     delivered.
 
-    The owner's line (`owner_plain`) is set for `refused_at_execution` alone, picked by the
-    refusal's own `reason` and `check` in `summary` (`owner_refusal_key`, which always picks one)
-    and rendered in the owner's language (`render.owner_line`), never the session's; every other
-    state clears it. It isn't signed and never enters the summary, so no ledger entry holds it."""
+    The owner's line (`owner_plain`) is set in two cases, each rendered in the owner's language
+    (`render.owner_line`), never the session's: `refused_at_execution`, picked by the refusal's own
+    `reason` and `check` in `summary` (`owner_refusal_key`, which always picks one), and a held
+    request a booking closed, `cancelled` with `cancelled_by: "booking"` in `summary`
+    (`supersede_if_booked`), which says the visitor booked before the owner answered. Every other
+    state, a visitor's own cancel included, clears it. It isn't signed and never enters the summary,
+    so no ledger entry holds it."""
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     adapter = await adapters.resolve(ctx, row.desk_id, row.tool) if state == "executed" else None
@@ -425,6 +433,8 @@ async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str =
     owner_plain = None
     if state == "refused_at_execution":
         owner_plain = render.owner_line(owner_refusal_key(summary.get("reason"), summary.get("check")))
+    elif state == "cancelled" and summary.get("cancelled_by") == "booking":
+        owner_plain = render.owner_line(BOOKING_CLOSED_KEY)
     row.state = state
     row.visitor_plain = visitor_plain
     row.owner_plain = owner_plain
@@ -490,8 +500,9 @@ async def supersede_if_booked(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
     row. Ledgered `decide` `{decision_id, action_id, state, cancelled_by: "booking", booking_id,
     policy_version, auto_money_cap_cents}`, the Desk's active version and its cap as `_answers_now`
     reads them (both left out only when it has none), and re-signed; the visitor's line is the
-    state's own. The row is locked and checked again before it changes, so two readers cancel it
-    once."""
+    state's own, and the owner's (`owner_plain`, unsigned, on the owner's reads alone) says the
+    visitor booked before the owner answered. The row is locked and checked again before it changes,
+    so two readers cancel it once."""
     if await _superseding_booking(ctx, row) is None:
         return row
     locked = (await ctx.db.scalars(ctx.repo.scoped(

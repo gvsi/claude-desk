@@ -59,7 +59,7 @@ export const Board: Story = {
     // The vision note first: the Pill, then its line 12 px after it.
     const vision = one(content, '.board-settings__vision');
     const pill = one(vision, '.cd-pill');
-    await expect(pill).toHaveTextContent(/^Vision$/);
+    await expect(pill).toHaveTextContent(/^Mock$/);
     const note = page.getByText('In this prototype, alerts reach your Demo inbox.');
     expectComputed(note, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(note.getBoundingClientRect().left - pill.getBoundingClientRect().right)).toBe(12);

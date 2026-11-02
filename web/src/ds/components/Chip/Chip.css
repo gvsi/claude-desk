@@ -16,13 +16,12 @@
   cursor: pointer;
   transition:
     background-color var(--motion-instant) var(--motion-ease),
-    border-color var(--motion-instant) var(--motion-ease),
     transform var(--motion-fast) var(--motion-ease-emphasis);
 }
 
+/* Hover is the fill alone: the border stays at rest, so only keyboard focus changes it. */
 .cd-chip:hover {
   background: var(--fill-hover);
-  border-color: var(--line-control-hover);
 }
 
 .cd-chip:active {
@@ -49,7 +48,12 @@
 
 .cd-chip:disabled:not(.cd-chip--selected):hover {
   background: transparent;
-  border-color: var(--line-control);
+}
+
+/* Keyboard focus turns the chip's own border line-focus, selected or not; no ring and no edge inside. */
+.cd-chip:focus-visible {
+  border-color: var(--line-focus);
+  box-shadow: none;
 }
 
 .cd-chip__check {

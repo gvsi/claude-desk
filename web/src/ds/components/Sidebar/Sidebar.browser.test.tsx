@@ -14,7 +14,7 @@ declare global {
 }
 
 const HREFS = Object.fromEntries(
-  (['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'] as const).map((key) => [key, `#${key}`]),
+  (['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'profile', 'share', 'settings'] as const).map((key) => [key, `#${key}`]),
 ) as SidebarHrefs;
 
 const PROPS: SidebarProps = {
@@ -101,13 +101,13 @@ it('connectors_row_only_with_its_href', () => {
   const withConnectors = columns[1] as HTMLElement;
   const labels = (column: HTMLElement) => [...column.querySelectorAll('.cd-sidebar__nav .cd-sidebar__label')].map((label) => label.textContent);
   // Without its href there is no Connectors row, and no link without a destination.
-  expect(labels(without)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings']);
+  expect(labels(without)).toEqual(['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings']);
   expect([...without.querySelectorAll('.cd-sidebar__nav > a')].every((link) => link.getAttribute('href'))).toBe(true);
-  // With it, the eighth row, fifth.
-  expect(labels(withConnectors)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings']);
+  // With it, the tenth row, sixth.
+  expect(labels(withConnectors)).toEqual(['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Settings']);
   // The labels the rows draw are the ones exported for pages to name themselves by; people's row is the consumer's.
-  const { today, conversations, rules, connectors, safety, share, settings } = NAV_LABELS;
-  expect(labels(withConnectors)).toEqual([today, conversations, 'Customers', rules, connectors, safety, share, settings]);
+  const { today, conversations, knowledge, rules, connectors, safety, profile, share, settings } = NAV_LABELS;
+  expect(labels(withConnectors)).toEqual([today, conversations, 'Customers', knowledge, rules, connectors, safety, profile, share, settings]);
 
   // Nothing else moves: the top, the rows down to Rules and the pinned foot are where they were,
   // and the rows after Rules close up, one 38 px row apart as always, with no gap where it was.
@@ -121,10 +121,10 @@ it('connectors_row_only_with_its_href', () => {
   expect(boxes(without, fixed)).toEqual(boxes(withConnectors, fixed));
   const rowsWithout = boxes(without, '.cd-sidebar__nav > a');
   const rowsWith = boxes(withConnectors, '.cd-sidebar__nav > a');
-  expect(rowsWithout.slice(0, 4)).toEqual(rowsWith.slice(0, 4));
-  expect(rowsWithout.slice(4)).toEqual(rowsWith.slice(4, 7));
+  expect(rowsWithout.slice(0, 5)).toEqual(rowsWith.slice(0, 5));
+  expect(rowsWithout.slice(5)).toEqual(rowsWith.slice(5, 9));
   const tops = rowsWithout.map((box) => box[1] ?? 0);
-  expect(tops.slice(1).map((top, index) => top - (tops[index] ?? 0))).toEqual([38, 38, 38, 38, 38, 38]);
+  expect(tops.slice(1).map((top, index) => top - (tops[index] ?? 0))).toEqual([38, 38, 38, 38, 38, 38, 38, 38]);
 
   act(() => roots.forEach((root) => root.unmount()));
   columns.forEach((column) => column.remove());
@@ -142,7 +142,7 @@ it('only_connectors_may_be_left_out', () => {
   act(() => root.render(<Sidebar {...PROPS} hrefs={withoutSafety as SidebarHrefs} />));
 
   const labels = [...column.querySelectorAll('.cd-sidebar__nav .cd-sidebar__label')].map((label) => label.textContent);
-  expect(labels).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings']);
+  expect(labels).toEqual(['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings']);
 
   act(() => root.unmount());
   column.remove();

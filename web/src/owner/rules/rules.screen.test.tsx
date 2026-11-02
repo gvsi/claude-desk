@@ -24,7 +24,7 @@ import { mockStore } from '../../mocks/store.ts';
 import { EXTRA_RULES, type DeskRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard, expectTabOrderFromTop } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../../test/screen.ts';
 import { watchTop } from '../../test/watch.ts';
 import { REVIEWER_LINE } from './copy.ts';
 
@@ -251,15 +251,21 @@ describe('rules page', () => {
     await expect.element(button).toHaveFocus();
   });
 
-  it('rules_header_link_has_a_rounded_keyboard_focus_ring', async () => {
+  it('rules_header_link_shows_keyboard_focus_in_its_words', async () => {
+    // A text link shows keyboard focus in its words and underline, both the primary ink, the underline
+    // 2 px; no ring and no edge around it.
     const { screen } = await renderRoute(`${DESK}/rules`);
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     const link = screen.container.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
     await expectTabOrderFromTop([link]);
     link.focus();
     expect(link.matches(':focus-visible')).toBe(true);
-    expect(getComputedStyle(link).outlineStyle).toBe('solid');
-    expect(getComputedStyle(link).borderRadius).toBe('8px');
+    const style = getComputedStyle(link);
+    const primary = tokenColor('--text-primary');
+    // The underline's color eases in over motion-instant, as it does on hover.
+    await expect.poll(() => style.textDecorationColor).toBe(primary);
+    expect([style.color, style.textDecorationLine, style.textDecorationThickness]).toEqual([primary, 'underline', '2px']);
+    expect([style.outlineStyle, style.boxShadow]).toEqual(['none', 'none']);
   });
 
   it('rules_header_actions_share_the_phone_row_with_a_full_height_link', async () => {
@@ -623,9 +629,12 @@ describe('rules page', () => {
     expect(log.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     expect(desk().drafts.size).toBe(0);
 
-    // Another question from the panel's own composer goes on in the same conversation.
+    // Another question from the panel's own composer goes on in the same conversation, sent once
+    // the answer before it has come in.
     const box = screen.getByRole('textbox', { name: 'Ask Claude' });
+    const send = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('button', { name: 'Send', exact: true });
     await box.fill('What can you do?');
+    await expect.element(send).toBeEnabled();
     await userEvent.keyboard('{Enter}');
     await expect.element(log.getByText(/^I can explain what a rule does/)).toBeVisible();
     expect(log.getByText('Why was this quote held?', { exact: true }).elements()).toHaveLength(1);
@@ -636,6 +645,7 @@ describe('rules page', () => {
     const long = `Stop quoting on weekends ${'and holidays '.repeat(160)}`.trim();
     expect(long.length).toBeGreaterThan(2000);
     await box.fill(long);
+    await expect.element(send).toBeEnabled();
     await userEvent.keyboard('{Enter}');
     await expect.element(log.getByText("That's over 2,000 characters. Shorten it and try again.", { exact: true })).toBeVisible();
     await expect.element(log.getByText(long, { exact: true })).toBeInTheDocument();

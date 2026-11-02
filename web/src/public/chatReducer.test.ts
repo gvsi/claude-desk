@@ -29,6 +29,19 @@ function events(evs: SseEvent[], from = 1): ChatAction[] {
 }
 
 describe('chatReducer', () => {
+  it('marks_what_came_of_a_turn_but_not_a_receipt_before_it', () => {
+    const sent = run([{ type: 'sent', id: 'local-1', text: 'How much is drain clearing?' }]);
+    expect(sent.turnMarks).toBe(0);
+    // A receipt that comes before Claude starts writing says nothing of the turn.
+    const receipt = run(events([quoteReceipt]), sent);
+    expect(receipt.turnMarks).toBe(0);
+    // Writing, the reply and the turn's end each do, as do an error and the owner joining.
+    const answered = run(events([{ type: 'writing' }, quoteMessage, { type: 'turn_end' }], 2), receipt);
+    expect(answered.turnMarks).toBe(3);
+    expect(run(events([{ type: 'error', code: EV_ERROR_CODES[0]! }], 5), answered).turnMarks).toBe(4);
+    expect(run(events([ownerJoined], 5), answered).turnMarks).toBe(4);
+  });
+
   it('writing_then_message', () => {
     const writing = run(events([{ type: 'writing' }]));
     expect(writing.writing).toBe(true);

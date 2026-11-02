@@ -6,8 +6,8 @@
  * `no_invisible_characters_in_any_file` reads every text file, `danger_only_for_refusing_answers`
  * every file but the docs, so a story or fixture can't show the red look on anything but a refusal,
  * `caps_badge_only_in_the_lockup` every file but the docs too, so nothing but the lockup's badge
- * draws capitals, the clay and mark guards the canvas boards too, and `no_positive_dash_offsets`
- * every stylesheet.
+ * draws capitals, the clay and mark guards the canvas boards too, `no_positive_dash_offsets`
+ * every stylesheet, and the two focus guards every stylesheet in the web app.
  *
  * Each guard first proves its matcher on a known-bad sample, so it can't pass by matching nothing.
  */
@@ -284,6 +284,120 @@ function webSources(): Source[] {
 /** `text` without its comments, so a guard reads only code and the strings code holds. */
 function withoutComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+}
+
+/** Every stylesheet under `web/src/`, paths relative to it: the app's, the About pages' and the design system's. */
+function webStylesheets(): Source[] {
+  const src = path.join(DS, '..');
+  return filesUnder(src)
+    .filter((file) => file.endsWith('.css'))
+    .map((file) => ({ file, text: readFileSync(path.join(src, file), 'utf8') }));
+}
+
+/** An outline or shadow drawn in the link blue, with or without a fallback. */
+const BLUE_EDGE = /\b(?:outline(?:-color)?|box-shadow)\s*:[^;{}]*var\(\s*--(?:accent-blue|va-link)\s*(?:,[^)]*)?\)/g;
+
+function blueEdges(css: string): string[] {
+  return matches(BLUE_EDGE)(withoutComments(css));
+}
+
+// A selector for a state the pointer or the keyboard puts a control in.
+const FOCUS_OR_HOVER = /:(?:focus(?:-visible|-within)?|hover)(?![\w-])/;
+
+/**
+ * Declarations in focus or hover rules, retaining enclosing selectors through CSS nesting and
+ * at-rules. Parentheses and quoted strings may contain punctuation without ending a statement.
+ */
+function focusOrHoverRules(css: string): { selector: string; declarations: [string, string][] }[] {
+  const rules: ReturnType<typeof focusOrHoverRules> = [];
+  const selectors: string[] = [];
+  let statement = '';
+  let depth = 0;
+  let quote = '';
+  let escaped = false;
+  const declaration = () => {
+    const selector = selectors.at(-1) ?? '';
+    const colon = statement.indexOf(':');
+    if (colon !== -1 && FOCUS_OR_HOVER.test(selector)) {
+      rules.push({ selector, declarations: [[statement.slice(0, colon).trim().toLowerCase(), statement.slice(colon + 1).trim()]] });
+    }
+    statement = '';
+  };
+  for (const char of withoutComments(css)) {
+    if (quote) {
+      statement += char;
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = '';
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      statement += char;
+    } else if (char === '(' || char === '[') {
+      depth += 1;
+      statement += char;
+    } else if (char === ')' || char === ']') {
+      depth -= 1;
+      statement += char;
+    } else if (depth === 0 && char === '{') {
+      const parent = selectors.at(-1) ?? '';
+      const prelude = statement.trim();
+      selectors.push(prelude.startsWith('@') ? parent : `${parent} ${prelude}`.trim().replace(/\s+/g, ' '));
+      statement = '';
+    } else if (depth === 0 && (char === ';' || char === '}')) {
+      declaration();
+      if (char === '}') selectors.pop();
+    } else statement += char;
+  }
+  return rules;
+}
+
+/** A value's top-level comma-separated parts, so a color's own commas stay inside it. */
+function topLevelParts(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (const [i, char] of [...value].entries()) {
+    if (char === '(') depth += 1;
+    else if (char === ')') depth -= 1;
+    else if (char === ',' && depth === 0) {
+      parts.push(value.slice(start, i));
+      start = i + 1;
+    }
+  }
+  return [...parts, value.slice(start)].map((part) => part.trim());
+}
+
+/** `inset` must be a keyword of this shadow, not part of a variable or function argument. */
+function isInsetShadow(shadow: string): boolean {
+  let depth = 0;
+  let outside = '';
+  for (const char of shadow) {
+    if (char === '(') {
+      if (depth === 0) outside += char;
+      depth += 1;
+    } else if (char === ')') {
+      depth -= 1;
+      if (depth === 0) outside += char;
+    } else if (depth === 0) outside += char;
+  }
+  return /(?:^|\s)inset(?:\s|$)/i.test(outside);
+}
+
+/**
+ * Each declaration in a focus or hover rule that draws outside the control: an outline that isn't off
+ * (any `outline` or `outline-*` other than none or 0), or a shadow with a part that isn't inset.
+ */
+function ringsOnFocusOrHover(css: string): string[] {
+  return focusOrHoverRules(css).flatMap(({ selector, declarations }) =>
+    declarations
+      .filter(([property, value]) => {
+        if (/^outline(?:-[a-z]+)?$/.test(property)) return !/^(?:none|0(?:px)?)(?:\s*!important)?$/.test(value);
+        if (property !== 'box-shadow') return false;
+        if (/^none(?:\s*!important)?$/.test(value)) return false;
+        return topLevelParts(value).some((shadow) => !isInsetShadow(shadow));
+      })
+      .map(([property, value]) => `${selector} { ${property}: ${value} }`),
+  );
 }
 
 // A stylesheet that paints the selected row's ground, and a component that renders a Button.
@@ -739,14 +853,71 @@ describe('design system source guards', () => {
     expect(visionTags.flatMap(({ text }) => matches(/<ClaudeMessage\b/)(withoutComments(text))).length).toBeGreaterThanOrEqual(14);
   });
 
-  it('focus_rings_are_never_the_link_blue', () => {
-    // The owner, 2026-11-01: no blue focus border anywhere. A ring is the warm `ring-focus`, drawn as an
-    // outline or a shadow; neither may use the link blue, with or without a fallback.
-    const src = path.join(DS, '..');
-    const blue = filesUnder(src)
-      .filter((file) => file.endsWith('.css'))
-      .flatMap((file) => [...withoutComments(readFileSync(path.join(src, file), 'utf8')).matchAll(/\b(?:outline(?:-color)?|box-shadow)\s*:[^;{}]*var\(\s*--(?:accent-blue|va-link)\s*(?:,[^)]*)?\)/g)].map((m) => `${file}: ${m[0]}`));
-    expect(blue).toEqual([]);
+  it('focus_edges_are_never_the_link_blue', () => {
+    // The owner, 2026-11-01: no blue focus border anywhere. Focus is the warm `line-focus`, drawn as a
+    // border or an inset shadow; no outline or shadow may use the link blue, with or without a fallback.
+    expect(blueEdges('.a:focus-visible { box-shadow: inset 0 0 0 1px var(--accent-blue); } .b { outline-color: var( --va-link , #00f) }')).toEqual([
+      'box-shadow: inset 0 0 0 1px var(--accent-blue)',
+      'outline-color: var( --va-link , #00f)',
+    ]);
+    expect(blueEdges('.a:focus-visible { box-shadow: inset 0 0 0 1px var(--line-focus); color: var(--accent-blue); }')).toEqual([]);
+    expect(findAll(webStylesheets(), blueEdges)).toEqual([]);
+  });
+
+  it('focus_and_hover_draw_no_ring_outside_a_control', () => {
+    // The owner, 2026-11-01: "focus shouldn't add a new ring, just have it change the border color", and
+    // no outer ring on hover either. A rule for focus or hover may turn an outline off, and may draw a
+    // shadow only inset, inside the control's own box; never an outline, and never a shadow outside it.
+    expect(
+      ringsOnFocusOrHover(
+        ':focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }\n' +
+          '.a:hover { box-shadow: 0 0 0 2px var(--line-focus); }\n' +
+          '.b:focus-within { box-shadow: inset 0 0 0 1px var(--line-focus), 0 1px 2px rgba(0, 0, 0, 0.2) !important; }\n' +
+          '@media (min-width: 640px) { .c:focus::after { outline-color: var(--line-focus); } }',
+      ),
+    ).toEqual([
+      ':focus-visible { outline: 2px solid var(--line-focus) }',
+      ':focus-visible { outline-offset: 2px }',
+      '.a:hover { box-shadow: 0 0 0 2px var(--line-focus) }',
+      '.b:focus-within { box-shadow: inset 0 0 0 1px var(--line-focus), 0 1px 2px rgba(0, 0, 0, 0.2) !important }',
+      '.c:focus::after { outline-color: var(--line-focus) }',
+    ]);
+    // A ring nested inside a focus or hover rule (a child rule or an at-rule) is still a ring on focus or hover,
+    // and a custom property's name is not the `inset` keyword.
+    expect(
+      ringsOnFocusOrHover(
+        '.a:hover { &::after { box-shadow: 0 0 0 2px red; } }\n' +
+          '.a:focus-visible { @media (min-width: 640px) { outline: 2px solid red; } }\n' +
+          '.b:focus-visible { color: red; .c & { box-shadow: 0 1px 2px red, inset 0 0 0 1px red; } }\n' +
+          '.d:focus-visible { box-shadow: 0 0 0 2px var(--inset-color); }\n' +
+          '.e:hover { box-shadow: inset-shadow 0 0 0 2px red; }',
+      ),
+    ).toEqual([
+      '.a:hover &::after { box-shadow: 0 0 0 2px red }',
+      '.a:focus-visible { outline: 2px solid red }',
+      '.b:focus-visible .c & { box-shadow: 0 1px 2px red, inset 0 0 0 1px red }',
+      '.d:focus-visible { box-shadow: 0 0 0 2px var(--inset-color) }',
+      '.e:hover { box-shadow: inset-shadow 0 0 0 2px red }',
+    ]);
+    expect(
+      ringsOnFocusOrHover(
+        '.a:focus-visible { box-shadow: inset 0 0 0 1px var(--line-focus); &::after { box-shadow: INSET 0 0 0 1px var(--inset-color), inset 0 0 0 2px red; } }\n' +
+          '.b:hover { @media (min-width: 640px) { outline: none; background: var(--fill-hover); } }\n' +
+          '.c { &::after { box-shadow: 0 0 0 4px red; } @media (hover: hover) { outline: 2px solid red; } }',
+      ),
+    ).toEqual([]);
+    expect(
+      ringsOnFocusOrHover(
+        ':focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--line-focus); }\n' +
+          '.a:focus:not(:focus-visible) { outline: none } .b:hover { outline: 0; box-shadow: none; background: var(--fill-hover) }\n' +
+          '.c { outline: 2px solid; box-shadow: 0 0 0 4px var(--text-primary) } .d:focus-visible { outline-offset: 0 }\n' +
+          '/* .e:hover { box-shadow: 0 0 0 2px red } */',
+      ),
+    ).toEqual([]);
+    const css = webStylesheets();
+    // The scan reads the app's focus rules, so it can't pass by finding none.
+    expect(findAll(css, (text) => focusOrHoverRules(text).map(({ selector }) => selector)).length).toBeGreaterThan(20);
+    expect(findAll(css, ringsOnFocusOrHover)).toEqual([]);
   });
 
   // Importing the index transforms every component on first use. When the whole suite runs, the

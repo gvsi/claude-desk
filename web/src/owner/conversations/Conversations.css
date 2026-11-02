@@ -108,15 +108,36 @@
 }
 
 .cd-conversations__day {
-  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--text-tertiary);
+  font-weight: 520;
+}
+
+.cd-conversations__day::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-right: calc(-1 * var(--space-8));
+  background: var(--line-hairline);
+}
+
+.cd-conversations__group + .cd-conversations__group {
+  margin-top: var(--space-8);
 }
 
 .cd-conversations__items {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.cd-conversations__items > li {
+  min-width: 0;
 }
 
 /* The open conversation's pane keeps a minimum side gutter. Its transcript reaches across that
@@ -325,8 +346,9 @@
   margin-bottom: var(--space-16);
 }
 
-.cd-conversation__name:focus:not(:focus-visible) {
+.cd-conversation__name:focus {
   outline: none;
+  box-shadow: none;
 }
 
 /* The pane's shapes: the transcript's region opens at its end, as the chat's does, but never
