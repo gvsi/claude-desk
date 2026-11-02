@@ -114,13 +114,16 @@ def test_system_prompt_uses_the_business_policies():
         "show that policy with the policy clause",
         "Never make up a figure",
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
-        "at a time, before you take their details or book. Before booking, ask for what's missing of their name and a "
-        "phone number or email, reusing anything already given, and finish any intake questions, then save them with "
-        "native__capture_lead in the same turn if it's one of your tools; save a lead only once you have their name, "
-        "and keep its note short. If they'd rather not give contact details, or saving doesn't go through, still "
-        "book. Book only after they've answered that question: a time they pick without answering it isn't a no, so "
-        "ask once more, and book if they still don't give them. Ask only about their "
-        "request and these booking details: never for a password, "
+        "at a time, before you take their details or book. Before booking or proposing a deposit or payment, ask for "
+        "what's missing of their name and a phone number or email, and for a visit at their place their address, "
+        "reusing anything already given, and finish any intake questions, then save their name and contact with "
+        "native__capture_lead in the same turn if it's one of your tools, and pass them on the booking as its name "
+        "and contact, with the address if they gave one; save a lead only once you have their name, and keep its "
+        "note short. Unless they're verified, a booking needs their name and a phone number or email, and is refused "
+        "without them; an address isn't needed, so book without one if they don't give it. Book only once they've "
+        "given their name and contact: a time they pick without answering isn't a no, so ask once more. If they'd "
+        "rather not give their name and contact, don't book: offer a callback or a message to Mike Turner instead, "
+        "and keep helping. Ask only about their request and these booking details: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
         "otherwise native__request_callback. Beside its callback_confirmed card",
         "- When they describe something charter:policy:urgent treats as urgent, or an emergency happening now "
@@ -312,14 +315,22 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
             "business, never \"the owner\" or \"this business\", unless a name itself would trip the check, as "
             "above.") in lines
     intake = next(line for line in lines if line.startswith("- For a new request"))
-    assert "Before booking, ask for what's missing of their name and a phone number or email" in intake
+    assert ("Before booking or proposing a deposit or payment, ask for what's missing of their name and a phone "
+            "number or email, and for a visit at their place their address") in intake
     assert "reusing anything already given, and finish any intake questions" in intake
-    assert "then save them with native__capture_lead in the same turn if it's one of your tools" in intake
+    assert ("then save their name and contact with native__capture_lead in the same turn if it's one of your tools, "
+            "and pass them on the booking as its name and contact, with the address if they gave one") in intake
     assert "save a lead only once you have their name, and keep its note short" in intake
-    assert "If they'd rather not give contact details, or saving doesn't go through, still book." in intake
+    # the kernel refuses a booking with no name and contact (#740), so Claude asks first and never books without them;
+    # it requires no address, so a visitor who gives none is still booked
+    assert ("Unless they're verified, a booking needs their name and a phone number or email, and is refused without "
+            "them; an address isn't needed, so book without one if they don't give it.") in intake
+    assert "still book" not in intake and "book if they still don't give them" not in intake
     # picking a time without answering isn't a decline: the booking waits for the answer, then a second ask
-    assert ("Book only after they've answered that question: a time they pick without answering it isn't a no, so "
-            "ask once more, and book if they still don't give them.") in intake
+    assert ("Book only once they've given their name and contact: a time they pick without answering isn't a no, so "
+            "ask once more.") in intake
+    assert (f"If they'd rather not give their name and contact, don't book: offer a callback or a message to "
+            f"{RIVERA.owner_name} instead, and keep helping.") in intake
     assert ("- Use bullets, not numbered lists: numbers in your own words are blocked, list numbers included."
             in lines)
     assert "never for a password, a code, a card or account number or an ID number" in intake
