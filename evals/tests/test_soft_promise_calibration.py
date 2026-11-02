@@ -158,8 +158,10 @@ def test_approved_names_are_optional_case_data_and_back_only_the_prose_scan():
 def test_approved_name_cases_cover_honest_names_and_added_promises_in_both_languages():
     cases = [c for c in load_cases(CASES_FILE) if c.group == "approved_names"]
     assert Counter((c.language, c.expected) for c in cases) == {
-        ("en", "pass"): 3, ("es", "pass"): 3, ("en", "flag"): 5, ("es", "flag"): 5}
-    assert all(c.approved_names and c.cards and c.next_steps for c in cases)
+        ("en", "pass"): 4, ("es", "pass"): 4, ("en", "flag"): 7, ("es", "flag"): 7}
+    assert all(c.approved_names and c.next_steps for c in cases)
+    # Only an intake offer, whose step is taking a message, has no card beside it yet.
+    assert all(c.cards for c in cases if c.next_steps != ["taking a message"])
     assert all(not code_blocked(c) for c in cases if c.expected == "pass")
     assert all(c.majority_required for c in cases if c.expected == "pass")
     desk = DeskInfo(owner_display_name="Mike Turner", timezone="America/Los_Angeles")
@@ -232,7 +234,7 @@ def test_the_case_file_holds_every_group():
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
         "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4,
-        "request_receipts": 38, "approved_names": 16}
+        "request_receipts": 38, "approved_names": 22}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
@@ -241,7 +243,7 @@ def test_the_case_file_holds_every_group():
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
         "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
         "voice_examples": {"pass": 4}, "request_receipts": {"pass": 16, "flag": 22},
-        "approved_names": {"pass": 6, "flag": 10}}
+        "approved_names": {"pass": 8, "flag": 14}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
     # The voice examples quote the English system prompt; its two policy examples carry their cards.
     from desk.api.prompts import VOICE_EXAMPLES
