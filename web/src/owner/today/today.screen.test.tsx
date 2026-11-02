@@ -258,6 +258,7 @@ const WEEK_ZERO_LINES = [
   "You haven't stepped in.",
   'Nothing turned down in the last 7 days.',
   'Claude handled 0',
+  '$0 booked',
 ] as const;
 
 /** The zero lines "Last 7 days" shows now. */
@@ -1447,6 +1448,20 @@ describe('Today', () => {
       kept: ['You stepped in 2 times', '1 request'],
       held: ['No bookings in the last 7 days.', 'Claude handled 0'],
       bars: 0,
+    },
+    {
+      // A booking with no amount taken, as the API sends one: the count and its bar stay, the $0 doesn't.
+      name: 'a_week_with_a_booking_and_nothing_booked',
+      figures: week({
+        bookings: 1,
+        booked_cents: 0,
+        conversations: 1,
+        handled: 1,
+        days: ZERO_DAYS.map((d, i) => ({ ...d, bookings: i === 6 ? 1 : 0 })),
+      }),
+      kept: ['1 booking, 1 so far today', 'Claude handled 1'],
+      held: ["You haven't stepped in.", 'Nothing turned down in the last 7 days.', '$0 booked'],
+      bars: 7,
     },
   ])('this_week_keeps_its_figures_while_its_read_fails_$name', { timeout: 15_000 }, async ({ figures, kept, held, bars }) => {
     // A week with figures is read, then Today's refreshes fail. Its figures above zero stay, with

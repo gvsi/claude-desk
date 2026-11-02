@@ -66,11 +66,12 @@ function Bookings({ week, current }: PartProps) {
       </div>
     );
   }
-  // The booked amount is the headline when the API sends it; until then the count stands alone.
+  // The booked amount is the headline when the API sends it; until then the count stands alone,
+  // as it does for an amount of none while the read isn't current.
   const booked = week.booked_cents;
   return (
     <div className="cd-week__part">
-      {booked === undefined ? (
+      {booked === undefined || (booked === 0 && !current) ? (
         <h3 className="cd-week__title cd-type-control">Bookings</h3>
       ) : (
         <>
