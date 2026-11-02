@@ -39,7 +39,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
       ) : null}
       <div className="cd-public-shell__blocks">
         {[0, 1, 2, 3, 4].map((i) => (
-          <SkeletonCard key={i} padding={16} className="cd-reply-card">
+          <SkeletonCard key={i} padding={16} className="cd-reply-card" anchor={`about-card-${i}`}>
             <div className="cd-reply-card__label">
               <Skeleton shape="block" width={16} height={16} />
               <Skeleton shape="line" text="caption" width={70} />
@@ -48,7 +48,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
               <div className="cd-reply-card__headline">
                 <Skeleton shape="line" text="section" />
                 {i === 2 || i === 3 ? <Skeleton shape="line" text="section" width="75%" /> : null}
-                {i === 0 || i === 3 ? <Skeleton shape="line" text="section" width="65%" className="cd-public-shell-skeleton__beside-line" /> : null}
+                {i === 0 || i === 3 ? <Skeleton shape="line" text="section" width="65%" className={`cd-public-shell-skeleton__beside-line cd-public-shell-skeleton__${i === 0 ? 'hours' : 'deposit'}-wrap`} /> : null}
               </div>
               {i === 0 ? <Skeleton shape="line" text="meta" width="85%" className="cd-reply-card__detail" /> : null}
             </div>

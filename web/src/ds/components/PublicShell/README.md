@@ -201,6 +201,8 @@ meta line, the inline composer and three starter chips as wide as the fresh copy
 real fresh copy's five charter cards and two agents links: beside the chat from 900 px, and under
 the footer below that, as the first view does. In setup's fresh preview (`footer={false}`), there
 is no charter or footer, so neither is drawn.
+The Hours and deposit-policy placeholder wrap lines follow the About column's content width,
+so their cards keep their landed heights as the column grows.
 
 A first visit to a Desk with starters lands in place. A resumed chat keeps its head in place, and
 its composer moves down to the bottom as it lands. A Desk without starters lands on the greeting

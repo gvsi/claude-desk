@@ -56,6 +56,11 @@ it.each([[900, 768], [1024, 768], [1512, 982], [1800, 1000]])('public_chat_opens
       { name: 'about-title', page: '.cd-public-shell__about > h2' },
       { name: 'about-column', page: '.cd-public-shell__about', size: true },
       { name: 'about-status', page: '.cd-public-shell__about > .cd-public-shell__open-status', size: true },
+      ...(width >= 1512 ? Array.from({ length: 5 }, (_, index) => ({
+        name: `about-card-${index}`,
+        page: `.cd-public-shell__about .cd-public-shell__blocks > .cd-reply-card:nth-child(${index + 1})`,
+        size: true,
+      })) : []),
     ],
     open: async () => {
       await renderRoute(CHAT, { viewport: { width, height }, pollScale: 100 });

@@ -185,7 +185,11 @@ export const Board: Story = {
     expectComputed(header, { height: '76px', backgroundColor: 'rgb(45, 61, 76)', borderBottomColor: 'rgb(111, 139, 163)' });
     await expect(within(header).getByRole('heading', { level: 1 })).toHaveTextContent('Meridian Bay Permits');
     await expect(header).toHaveTextContent('City of Meridian Bay, Permit Center');
-    await expect(one(header, '.cd-public-shell__open-status')).toHaveTextContent('Open now, until 4:30 pm');
+    // Search the whole shell: the status is present once, in About on this wide board.
+    const status = one(canvasElement, '.cd-public-shell__open-status');
+    await expect(status).toHaveTextContent('Open now, until 4:30 pm');
+    await expect(status).toBeVisible();
+    await expect(header.querySelector('.cd-public-shell__open-status')).toBeNull();
     // A fictional office: no vision page names a real one.
     await expect(canvasElement.textContent).not.toMatch(/Oakland/);
 
@@ -272,6 +276,8 @@ export const Board: Story = {
 
     // The about column: the city's hours, who decides what needs a permit, and how to reach the Permit Center.
     const about = canvas.getByRole('complementary', { name: 'About Meridian Bay Permits' });
+    await expect(about.contains(status)).toBe(true);
+    await expect(status.getBoundingClientRect().top).toBe(one(about, 'h2').getBoundingClientRect().bottom + 8);
     const aboutCards = within(about).getAllByRole('article');
     await expect(aboutCards.map((card) => card.getAttribute('aria-label'))).toEqual(ABOUT_CARDS.map(([label]) => label));
     for (const [index, [label, words]] of ABOUT_CARDS.entries()) {

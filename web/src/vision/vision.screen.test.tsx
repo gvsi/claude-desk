@@ -482,7 +482,10 @@ describe('Vision pages against their boards', () => {
     expectComputed(header, { height: '76px', backgroundColor: 'rgb(45, 61, 76)', borderBottomColor: 'rgb(111, 139, 163)' });
     await expect.element(screen.getByRole('banner').getByRole('heading', { level: 1 })).toHaveTextContent('Meridian Bay Permits');
     expect(header.textContent).toContain('City of Meridian Bay, Permit Center');
-    expect(one(header, '.cd-public-shell__open-status').textContent).toContain('Open now, until 4:30 pm');
+    const status = one(root, '.cd-public-shell__open-status');
+    expect(status.textContent).toContain('Open now, until 4:30 pm');
+    await expect.element(status).toBeVisible();
+    expect(header.querySelector('.cd-public-shell__open-status')).toBeNull();
 
     // The page is the window's height, as every public page is: the header, the AI disclosure and
     // the composer stay in view, and only the conversation scrolls. Unrolled, the page is the one the
@@ -565,6 +568,8 @@ describe('Vision pages against their boards', () => {
 
     // The about column: the city's hours, who decides what needs a permit, and how to reach the Permit Center.
     const about = screen.getByRole('complementary', { name: 'About Meridian Bay Permits' });
+    expect(about.element().contains(status)).toBe(true);
+    expect(top(status)).toBe(bottom(one(about.element(), 'h2')) + 8);
     const aboutCards = about.getByRole('article').elements();
     expect(aboutCards.map((card) => card.getAttribute('aria-label'))).toEqual(CITY.about.map(([label]) => label));
     for (const [index, [label, words]] of CITY.about.entries()) {

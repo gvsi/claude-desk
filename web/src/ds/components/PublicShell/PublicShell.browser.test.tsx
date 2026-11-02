@@ -1798,3 +1798,30 @@ it('focus_moving_on_from_ask_scrolls_nothing', async () => {
     { composerDisabled: true, short: true, focused: true, readingMoved: 0, scrolledPastWhatTheHeadLost: 0 },
   ]);
 });
+
+it('open_status_shows_once_with_or_without_about_in_standalone_and_embedded_shells', async () => {
+  container.style.height = '820px';
+  for (const width of [1512, 900, 899]) {
+    for (const footer of [true, false]) {
+      for (const withAbout of [true, false]) {
+        act(() => root.render(null));
+        await page.viewport(width, 820);
+        act(() => root.render(
+          <PublicShell brand={brandOf(desk)} ownerName="Mike Turner" language="en" openStatus={OPEN_EN}
+            about={withAbout ? desk.charter : undefined} footer={footer} onAskForOwner={() => {}} composer={null}>
+            {null}
+          </PublicShell>,
+        ));
+        await vi.waitFor(() => {
+          const statuses = container.querySelectorAll('.cd-public-shell__open-status');
+          expect(statuses).toHaveLength(1);
+          const status = statuses[0]!;
+          expect(status.textContent).toBe(OPEN_EN.text);
+          const destination = width >= 900 && withAbout ? '.cd-public-shell__about' : '.cd-public-shell__brand';
+          expect(status.closest(destination)).not.toBeNull();
+        });
+        await expect.element(one('.cd-public-shell__open-status')).toBeVisible();
+      }
+    }
+  }
+});
