@@ -385,6 +385,32 @@ async def test_hand_back_answers_the_waiting_visitor_once(app, browser, fake, ke
     assert len(fake.called("POST /check_reply")) == 1
 
 
+async def test_hand_back_answers_a_waiting_line_and_a_whisper_in_one_turn(app, browser, fake, kernel_http, model,
+                                                                          engine):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                    json={"text": "Do you fix leaks?"})).status_code == 202
+    assert (await message(chat, "Offer a visit today.", "whisper")).status_code == 200
+    await app.state.runtime.runner.drain()
+    assert model.requests == []
+    model.add(response(reply("Yes, we can help with leaks. We could come by today.")))
+
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        assert (await mode_change(chat, "handback", 1)).status_code == 200
+        events = await stream.until(lambda events: "turn_end" in types(events))
+        await app.state.runtime.runner.drain()
+    await app.state.runtime.runner.drain()
+
+    (request,) = model.requests
+    sent = json.dumps(request.messages)
+    assert "<visitor_message>Do you fix leaks?</visitor_message>" in sent
+    assert "<owner_whisper>Offer a visit today.</owner_whisper>" in sent
+    assert types(events) == ["owner_joined", "owner_left", "writing", "message", "turn_end"]
+    assert len(fake.called("POST /check_reply")) == 1
+    assert await control_types(engine, chat.session_id) == ["run_resumable"]
+
+
 @pytest.mark.parametrize("latest", ["empty", "owner_answered", "owner", "claude"])
 async def test_hand_back_without_a_waiting_visitor_starts_nothing(app, browser, fake, kernel_http, model, engine,
                                                                latest):
