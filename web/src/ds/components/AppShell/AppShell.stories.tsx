@@ -38,6 +38,7 @@ const hrefs = {
   knowledge: '/app/desk-rivera-main/knowledge',
   rules: '/app/desk-rivera-main/rules',
   safety: '/app/desk-rivera-main/safety',
+  profile: '/app/desk-rivera-main/profile',
   share: '/app/desk-rivera-main/share',
   settings: '/app/desk-rivera-main/settings',
 } satisfies SidebarHrefs;
@@ -75,11 +76,11 @@ const sidebar = (
   />
 );
 
-/** The eight pages, including Knowledge, without Connectors. */
-const PAGES = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Share', 'Settings'];
+/** The nine pages, including Knowledge, without Connectors. */
+const PAGES = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings'];
 
-/** The nine pages with Knowledge after Customers and Connectors after Rules. */
-const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings'];
+/** The ten pages with Knowledge after Customers and Connectors after Rules. */
+const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Settings'];
 
 /** The words of each page row in a nav, in order (a row's count is read separately). */
 function pageNames(nav: HTMLElement): string[] {
@@ -149,7 +150,7 @@ export const OwnerToday: Story = {
     await expect(column.getBoundingClientRect().top).toBe(banner.getBoundingClientRect().bottom);
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expect(nav).toBeVisible();
-    // nav_order_is_fixed: the eight pages, each to its own route (no Connectors page here).
+    // nav_order_is_fixed: the nine pages, each to its own route (no Connectors page here).
     await expect(pageNames(nav)).toEqual(PAGES);
     await expect(within(nav).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(Object.values(hrefs));
     // It runs to the bottom of the window, so the Claude acts for you switch sits at the foot.
@@ -503,7 +504,7 @@ export const Skeleton: Story = {
         />
       </div>
       <div data-shaped-frame aria-hidden="true" ref={(element) => element?.setAttribute('inert', '')}>
-        <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={8} about={ABOUT.links.length} />}>
+        <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={9} about={ABOUT.links.length} />}>
           <div />
         </AppShell>
       </div>

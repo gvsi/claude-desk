@@ -21,6 +21,7 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.
 
 const DESK = `/app/${RIVERA.deskId}`;
 const SETTINGS = `${DESK}/settings`;
+const PROFILE = `${DESK}/profile`;
 const GENERAL = `${SETTINGS}/general`;
 const NOTIFICATIONS = `${SETTINGS}/notifications`;
 const BILLING = `${SETTINGS}/billing`;
@@ -93,7 +94,7 @@ describe('Settings', () => {
     // Its sections in order, General current once its page is drawn (SubNav's links are there
     // before, on the way from `settings` to General); nothing about connectors, which have their own tab.
     await expect.poll(() => subNav(screen).getByRole('link').elements().map((link) => link.textContent)).toEqual(SECTIONS);
-    await expect.element(main(screen).getByRole('region', { name: 'Your business' })).toBeVisible();
+    await expect.element(main(screen).getByRole('region', { name: 'Claude acts for you' })).toBeVisible();
     await expect.poll(() => currentSection(screen)).toEqual(['General']);
     expect(main(screen).element().textContent).not.toMatch(/Integrations|Connectors/);
 
@@ -101,7 +102,7 @@ describe('Settings', () => {
     for (const [name, path, region] of [
       ['Notifications', NOTIFICATIONS, 'Set for a plumber'],
       ['Billing', BILLING, 'Plan'],
-      ['General', GENERAL, 'Your business'],
+      ['General', GENERAL, 'Claude acts for you'],
     ] as const) {
       await subNav(screen).getByRole('link', { name }).click();
       await expect.poll(() => router.state.location.pathname).toBe(path);
@@ -118,8 +119,8 @@ describe('Settings', () => {
     }
   });
 
-  it('general_shows_the_business_details', async () => {
-    const { screen } = await renderRoute(GENERAL);
+  it('profile_shows_the_business_details', async () => {
+    const { screen } = await renderRoute(PROFILE);
     const business = main(screen).getByRole('region', { name: 'Your business' });
     await expect.element(business).toBeVisible();
 
@@ -141,7 +142,7 @@ describe('Settings', () => {
 
     // Another Desk's details are its own: its name and its hours. Its window is all day, which no
     // board draws, so it reads as Rules writes one, with the comma.
-    const emergencies = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/settings/general`, { seed: 'rivera_two_desks' });
+    const emergencies = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/profile`, { seed: 'rivera_two_desks' });
     const other = main(emergencies.screen).getByRole('region', { name: 'Your business' });
     await expect.element(other.getByText('Emergencies', { exact: true })).toBeVisible();
     expect(other.getByRole('definition').elements().map((value) => value.textContent)).toEqual([
@@ -438,14 +439,13 @@ describe('Settings against its boards', () => {
     // General as N-Run2-Settings-General draws it, at 1440 px: the page fills the main area and
     // centers its column, and Tab goes through SubNav, then the selected header colour, Answering and Delete this Desk.
     const { screen } = await renderRoute(GENERAL);
-    const business = main(screen).getByRole('region', { name: 'Your business' });
-    await expect.element(business).toBeVisible();
     const answering = main(screen).getByRole('switch', { name: 'Claude acts for you' });
+    await expect.element(answering).toBeVisible();
     const remove = main(screen).getByRole('button', { name: 'Delete this Desk' });
     await expectOwnerBoard(screen.container, {
       current: 'Settings',
       fill: true,
-      tabStops: [...links(screen), main(screen).getByRole('radio', { name: 'Teal', exact: true }).element() as HTMLElement, answering.element() as HTMLElement, remove.element() as HTMLElement],
+      tabStops: [...links(screen), answering.element() as HTMLElement, remove.element() as HTMLElement],
     });
     // Tabbing to Delete scrolls the now-longer General page. Measure its opening position.
     main(screen).element().scrollTop = 0;
@@ -455,17 +455,11 @@ describe('Settings against its boards', () => {
     // own card below Header colour, the card's look with its switch row 20 px in from its top and
     // bottom (the row pads its own sides, so its words line up with the details'); Delete this
     // Desk's heading 28 px under that, its neutral button at the column's right.
-    const card = one(business.element(), '.cd-card');
-    expect(round(top(card) - bottom(one(business.element(), 'h2')))).toBe(8);
-    expect(round(card.getBoundingClientRect().width)).toBe(720);
     const answeringCard = main(screen).getByRole('region', { name: 'Claude acts for you' }).element();
     expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
     const switchRow = answering.element();
     expect(round(top(switchRow) - top(answeringCard))).toBe(21);
     expect(round(bottom(answeringCard) - bottom(switchRow))).toBe(21);
-    const colourCard = main(screen).getByRole('region', { name: 'Header colour', exact: true }).element();
-    expect(round(top(colourCard) - bottom(card))).toBe(20);
-    expect(round(top(answeringCard) - bottom(colourCard))).toBe(20);
     const removal = main(screen).getByRole('region', { name: 'Delete this Desk' }).element();
     expect(round(top(one(removal, 'h2')) - bottom(answeringCard))).toBe(28);
     expectComputed(remove.element(), SPEC.secondaryMain);
@@ -533,14 +527,8 @@ describe('Settings against its boards', () => {
     expect(round(top(first as HTMLElement) - bottom(title.element()))).toBe(16);
     expect([round(nav.getBoundingClientRect().left), round(nav.getBoundingClientRect().width)]).toEqual([0, 390]);
     expect(round((first as HTMLElement).getBoundingClientRect().left)).toBe(16);
-    const details = main(phone.screen).getByRole('region', { name: 'Your business' }).element();
-    expect(round(top(details) - bottom(nav))).toBe(16);
-    const detailCard = one(details, '.cd-card');
-    expect([round(detailCard.getBoundingClientRect().left), round(detailCard.getBoundingClientRect().width)]).toEqual([16, 358]);
     const switchCard = main(phone.screen).getByRole('region', { name: 'Claude acts for you' }).element();
-    const phoneColour = main(phone.screen).getByRole('region', { name: 'Header colour', exact: true }).element();
-    expect(round(top(phoneColour) - bottom(detailCard))).toBe(16);
-    expect(round(top(switchCard) - bottom(phoneColour))).toBe(16);
+    expect(round(top(switchCard) - bottom(nav))).toBe(16);
     const deleting = main(phone.screen).getByRole('region', { name: 'Delete this Desk' });
     const heading = deleting.getByRole('heading', { name: 'Delete this Desk' }).element();
     const line = deleting.getByText(DELETE_LINE, { exact: true }).element();
@@ -553,38 +541,22 @@ describe('Settings against its boards', () => {
     expectNoHorizontalScroll();
   });
 
-  it('answering_lines_up_with_the_details', async () => {
-    // Answering's words start where the details' do, on a laptop and on a phone: its label under
-    // "Business", its line under "Turner Plumbing", and the switch's track as far in from the card's
-    // right edge as the words are from its left.
+  it('answering_words_keep_the_card_insets', async () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(GENERAL, { viewport });
-      const business = main(screen).getByRole('region', { name: 'Your business' });
-      await expect.element(business).toBeVisible();
       const answering = main(screen).getByRole('region', { name: 'Claude acts for you' });
-      const detailCard = one(business.element(), '.cd-card');
-      const words = (el: Element) => {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        return range.getBoundingClientRect().left;
-      };
-      const term = business.getByRole('term').first().element();
-      const value = business.getByRole('definition').first().element();
-      const label = answering.getByText('Claude acts for you', { exact: true }).element();
-      const line = answering.getByText(ANSWERING_LINE, { exact: true }).element();
-      const inset = words(term) - detailCard.getBoundingClientRect().left;
-      expect(Math.abs(words(label) - words(term)), `label at ${viewport}`).toBeLessThanOrEqual(1);
-      expect(Math.abs(words(line) - words(value)), `line at ${viewport}`).toBeLessThanOrEqual(1);
+      await expect.element(answering).toBeVisible();
       const card = answering.element().getBoundingClientRect();
+      const label = answering.getByText('Claude acts for you', { exact: true }).element().getBoundingClientRect();
       const track = one(answering.element(), '.cd-switch__track').getBoundingClientRect();
-      expect(Math.abs(card.right - track.right - inset), `track at ${viewport}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(label.left - card.left - (card.right - track.right))).toBeLessThanOrEqual(1);
     }
   });
 
   it('settings_have_no_jargon', async () => {
     // Each section: one footer, clean copy, no axe violations and no technical words.
     const { screen } = await renderRoute(GENERAL);
-    await expect.element(main(screen).getByRole('region', { name: 'Your business' })).toBeVisible();
+    await expect.element(main(screen).getByRole('region', { name: 'Claude acts for you' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     for (const [name, region] of [
       ['Notifications', 'Set for a plumber'],
@@ -625,7 +597,7 @@ describe('Settings against its boards', () => {
 function expectVisionNote(content: HTMLElement, words: string): HTMLElement {
   const first = content.firstElementChild as HTMLElement;
   const pill = one(first, '.cd-pill');
-  expect(pill.textContent).toBe('Vision');
+  expect(pill.textContent).toBe('Mock');
   const note = first.querySelector('p') as HTMLElement;
   expect(note.textContent).toBe(words);
   expectComputed(note, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });

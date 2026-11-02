@@ -905,12 +905,13 @@ describe('OwnerLayout', () => {
       'Knowledge',
       'Rules',
       'Safety',
+      'Profile',
       'Share',
       'Settings',
     ]);
     const base = `/app/${RIVERA.deskId}`;
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'share', 'settings'].map((page) => `${base}/${page}`),
+      ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'profile', 'share', 'settings'].map((page) => `${base}/${page}`),
     );
     await expect.element(nav.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
 
@@ -960,6 +961,7 @@ describe('OwnerLayout', () => {
       ['rules', 'Rules', 'Rules'],
       ['rules/all', 'All rules', 'All rules'],
       ['safety', 'Safety', 'Safety'],
+      ['profile', 'Profile', 'Profile'],
       ['share', 'Share', 'Share'],
       ['settings/general', 'Settings', 'Settings'],
       ['settings/notifications', 'Settings', 'Settings'],
@@ -994,6 +996,7 @@ describe('OwnerLayout', () => {
       ['Capability prediction', '/about/prediction'],
       ['Product proposal', '/about/proposal'],
       ['Vision', '/about/vision'],
+      ['GitHub', 'https://github.com/gvsi/claude-desk'],
     ];
     const rows = (nav: Element) => [...nav.querySelectorAll('a')].map((a) => [a.textContent.trim(), a.getAttribute('href')]);
 

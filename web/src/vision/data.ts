@@ -49,6 +49,7 @@ export const VISION_SIDEBAR_HREFS: SidebarHrefs = {
   rules: '#rules',
   connectors: '#connectors',
   safety: '#safety',
+  profile: '#profile',
   share: '#share',
   settings: '#settings',
 };

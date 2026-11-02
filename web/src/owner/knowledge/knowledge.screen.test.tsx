@@ -27,7 +27,7 @@ const KNOWLEDGE = `/app/${RIVERA.deskId}/knowledge`;
 const NOTE = 'We don’t service tankless water heaters older than 15 years. Suggest a replacement quote instead.';
 const NOTE_TITLE = 'We don’t service tankless water heaters older than 15…';
 
-const LEAD = 'Knowledge is what I answer from. It never changes your rules.';
+const LEAD = 'What Claude answers from. It never changes your rules.';
 const ADDED = 'Added. Only you can see it until you make it public.';
 
 /** The one instant the list's dates are read at: Friday, October 30, 12:30 pm in Los Angeles. */
@@ -104,9 +104,9 @@ describe('knowledge', () => {
     if (viewport === 'phone') await screen.getByRole('button', { name: 'Menu', exact: true }).click();
     const nav = screen.getByRole('navigation', { name: 'Main' });
     await expect.element(nav).toBeVisible();
-    expect(nav.element().querySelectorAll('.cd-sidebar__label').length).toBe(8);
+    expect(nav.element().querySelectorAll('.cd-sidebar__label').length).toBe(9);
     expect([...nav.element().querySelectorAll('.cd-sidebar__label')].map((row) => row.textContent)).toEqual([
-      'Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Share', 'Settings',
+      'Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings',
     ]);
     const link = nav.getByRole('link', { name: 'Knowledge', exact: true });
     await expect.element(link).toHaveAttribute('href', path);
@@ -138,12 +138,12 @@ describe('knowledge', () => {
   it('knowledge_fresh_copy_lists_the_public_setup_items', async () => {
     freezeClock();
     const { screen } = await renderRoute(KNOWLEDGE, { seed: 'rivera' });
-    const list = main(screen).getByRole('list', { name: 'What I know now' });
+    const list = main(screen).getByRole('list', { name: 'What Claude knows' });
     await expect.element(list).toBeVisible();
     // Oldest first: the kernel stores the website read, then the price list.
-    expect(list.getByRole('listitem').elements().map((row) => row.textContent)).toEqual([
-      'Your website, turner-plumbing.example, read during setupAdded Oct 30Customers can see this',
-      'Price list, from your answers in setupAdded Oct 30Customers can see this',
+    expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').map((row) => row.textContent)).toEqual([
+      'Your website, turner-plumbing.example, read during setupWebsite · Read during setup · Added Oct 30Customers can see this',
+      'Price list, from your answers in setupPrice list · Added Oct 30Customers can see this',
     ]);
     await expectScreenBasics(screen.container, { owner: true });
   });
@@ -166,7 +166,7 @@ describe('knowledge', () => {
     for (const [text, title] of cases) {
       await field.fill(text);
       await addButton.click();
-      const list = main(screen).getByRole('list', { name: 'What I know now' });
+      const list = main(screen).getByRole('list', { name: 'What Claude knows' });
       await expect.element(list.getByText(title, { exact: true })).toBeVisible();
       expect(posts().at(-1)?.title).toBe(title);
       expect([...posts().at(-1)!.title].length).toBeLessThanOrEqual(60);
@@ -199,7 +199,7 @@ describe('knowledge', () => {
     await expect.element(switchOf(screen)).toBeVisible();
     first.release();
     await expect.poll(() => mockStore.requests.filter((r) => r.key === 'knowledge').length).toBe(2);
-    await expect.element(main(screen).getByRole('list', { name: 'What I know now' }).getByText(NOTE_TITLE, { exact: true })).toBeVisible();
+    await expect.element(main(screen).getByRole('list', { name: 'What Claude knows' }).getByText(NOTE_TITLE, { exact: true })).toBeVisible();
   });
 
   it('knowledge_note_then_public', async () => {
@@ -220,12 +220,12 @@ describe('knowledge', () => {
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
     // Once added, the field clears; pressing Add again asks for words without posting a duplicate.
     await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue('');
-    const list = main(screen).getByRole('list', { name: 'What I know now' });
-    await expect.poll(() => list.getByRole('listitem').elements().length).toBe(3);
+    const list = main(screen).getByRole('list', { name: 'What Claude knows' });
+    await expect.poll(() => list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').length).toBe(3);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
     await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.emptyNote);
     expect(posts()).toHaveLength(1);
-    expect(list.getByRole('listitem').elements()).toHaveLength(3);
+    expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock')).toHaveLength(3);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Customers can see it: the same item posted again, public; the line no longer says only you can.
@@ -265,7 +265,7 @@ describe('knowledge', () => {
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
     expect(posts()[2]?.item_id).not.toBe(first.item_id);
     expect(mockStore.world.knowledge.get(`${RIVERA.deskId}:${first.item_id}`)?.item.label.readers).toEqual(['public']);
-    await expect.poll(() => main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').elements().length).toBe(4);
+    await expect.poll(() => main(screen).getByRole('list', { name: 'What Claude knows' }).getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').length).toBe(4);
   });
 
   it.each([429, 422])('knowledge_refused_switch_preserves_readers_%s', async (status) => {
@@ -289,9 +289,9 @@ describe('knowledge', () => {
     const screen = await addNote(NOTE, { retryScale: 0 });
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
     await expect.element(main(screen).getByText(ADDED, { exact: true })).toBeVisible();
-    const row = main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').filter({ hasText: 'A note only you can see' });
+    const row = main(screen).getByRole('list', { name: 'What Claude knows' }).getByRole('listitem').filter({ hasText: 'A note only you can see' });
     await expect.element(row).toBeVisible();
-    expect(row.element().textContent).toMatch(/^A note only you can seeAdded .+Only you$/);
+    expect(row.element().textContent).toMatch(/^A note only you can seeNote · Added .+Only you$/);
     expect(main(screen).getByText(NOTE_TITLE, { exact: true }).query()).toBeNull();
     // A lost publish that lands but is forced private is explained by the withheld title.
     mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
@@ -533,7 +533,7 @@ describe('knowledge', () => {
     expect(main(screen).getByText(KNOWLEDGE_COPY.keptPrivate, { exact: true }).query()).toBeNull();
     expect(reads()).toBe(3);
     // The list says so too: the late, cancelled read doesn't overwrite it.
-    const row = () => main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').filter({ hasText: NOTE_TITLE }).element().textContent;
+    const row = () => main(screen).getByRole('list', { name: 'What Claude knows' }).getByRole('listitem').filter({ hasText: NOTE_TITLE }).element().textContent;
     await expect.poll(() => row()?.endsWith('Customers can see this')).toBe(true);
   });
 
@@ -593,15 +593,15 @@ describe('knowledge', () => {
     }
   });
 
-  it('knowledge_unparseable_added_date_has_no_detail_line', async () => {
+  it('knowledge_unparseable_added_date_keeps_the_kind', async () => {
     mockStore.inject({ route: 'knowledge', status: 200, body: [
       { item_id: 'legacy', title: 'Your website', text: 'Your website', readers: ['public'], source: 'website', created_at: 'soon' },
     ] });
     const { screen } = await renderRoute(KNOWLEDGE);
-    const row = main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem');
+    const row = main(screen).getByRole('list', { name: 'What Claude knows' }).getByRole('listitem').filter({ hasText: 'Your website' });
     await expect.element(row).toBeVisible();
-    expect(row.element().querySelector('.cd-knowledge-list__detail')).toBeNull();
-    expect(row.element().textContent).toBe('Your websiteCustomers can see this');
+    expect(row.element().querySelector('.cd-knowledge-list__detail')?.textContent).toBe('Website · Read during setup');
+    expect(row.element().textContent).toBe('Your websiteWebsite · Read during setupCustomers can see this');
   });
 
   it('knowledge_keeps_api_order_and_handles_unknown_added_dates', async () => {
@@ -615,19 +615,19 @@ describe('knowledge', () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       mockStore.inject({ route: 'knowledge', status: 200, body: rows });
       const { screen } = await renderRoute(KNOWLEDGE, { viewport, pollScale: 100 });
-      const list = main(screen).getByRole('list', { name: 'What I know now' });
+      const list = main(screen).getByRole('list', { name: 'What Claude knows' });
       await expect.element(list).toBeVisible();
-      expect(list.getByRole('listitem').elements().map((row) => row.textContent)).toEqual([
-        'An older noteOnly you',
-        'A recent noteAdded Oct 30Customers can see this',
-        'A note only you can seeOnly you',
-        'An earlier noteAdded Oct 26Customers can see this',
+      expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').map((row) => row.textContent)).toEqual([
+        'An older noteNoteOnly you',
+        'A recent noteNote · Added Oct 30Customers can see this',
+        'A note only you can seeNoteOnly you',
+        'An earlier noteNote · Added Oct 26Customers can see this',
       ]);
-      expect(list.getByRole('listitem').elements().map((row) => row.querySelector('.cd-knowledge-list__detail')?.textContent ?? null)).toEqual([
-        null,
-        'Added Oct 30',
-        null,
-        'Added Oct 26',
+      expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').map((row) => row.querySelector('.cd-knowledge-list__detail')?.textContent ?? null)).toEqual([
+        'Note',
+        'Note · Added Oct 30',
+        'Note',
+        'Note · Added Oct 26',
       ]);
       expectNoHorizontalScroll();
       await expectScreenBasics(screen.container, { owner: true });
@@ -644,14 +644,14 @@ describe('knowledge', () => {
     know({ item_id: 'note-forced', source: 'setup', title: 'Dana’s gate code', text: 'Dana’s gate code is 4471.' }, ['owner'], 2, true);
     const { screen } = await renderRoute(KNOWLEDGE);
 
-    const known = main(screen).getByRole('region', { name: 'What I know now' });
-    const list = known.getByRole('list', { name: 'What I know now' });
+    const known = main(screen).getByRole('region', { name: 'What Claude knows' });
+    const list = known.getByRole('list', { name: 'What Claude knows' });
     await expect.element(list).toBeVisible();
-    const rows = list.getByRole('listitem').elements();
+    const rows = list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock');
     expect(rows.map((row) => row.textContent)).toEqual([
-      'Your websiteAdded Oct 26Customers can see this',
-      'Parking is on the street.Added Oct 27Only you',
-      'A note only you can seeAdded Oct 28Only you',
+      'Your websiteWebsite · Read during setup · Added Oct 26Customers can see this',
+      'Parking is on the street.Note · Added Oct 27Only you',
+      'A note only you can seeNote · Added Oct 28Only you',
     ]);
     // The withheld item: no title, no words, no switch, anywhere on the page.
     expect(main(screen).element().textContent).not.toContain('gate code');
@@ -659,17 +659,17 @@ describe('knowledge', () => {
     expect(switchOf(screen).query()).toBeNull();
     // The list sits above "Add something", under Claude's line.
     const add = main(screen).getByRole('region', { name: 'Add something' }).element();
-    expect(known.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(add.getBoundingClientRect().top);
+    expect(Math.round(known.element().getBoundingClientRect().top)).toBe(Math.round(add.getBoundingClientRect().top));
     await expectScreenBasics(screen.container, { owner: true });
 
     // A note just added joins the list, read again, with today's date and "Only you".
     await main(screen).getByRole('textbox', { name: 'A note' }).fill(NOTE);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
-    await expect.poll(() => list.getByRole('listitem').elements().length).toBe(4);
-    expect(list.getByRole('listitem').elements()[3]?.textContent).toBe(`${NOTE_TITLE}Added Oct 30Only you`);
+    await expect.poll(() => list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').length).toBe(4);
+    expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock')[3]?.textContent).toBe(`${NOTE_TITLE}Note · Added Oct 30Only you`);
     // Made public with its switch, its row says so.
     await switchOf(screen).click();
-    await expect.poll(() => list.getByRole('listitem').elements()[3]?.textContent).toBe(`${NOTE_TITLE}Added Oct 30Customers can see this`);
+    await expect.poll(() => list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock')[3]?.textContent).toBe(`${NOTE_TITLE}Note · Added Oct 30Customers can see this`);
   });
 
   it('knowledge_list_loads_fails_and_is_left_out_when_empty', async () => {
@@ -679,7 +679,7 @@ describe('knowledge', () => {
     await expect.element(main(empty.screen).getByRole('region', { name: 'Add something' })).toBeVisible();
     await expect.poll(() => mockStore.requests.filter((r) => r.key === 'knowledge').length).toBeGreaterThan(0);
     await expect.element(main(empty.screen).getByRole('status').filter({ hasText: 'Loading what I know' })).not.toBeInTheDocument();
-    expect(main(empty.screen).getByRole('region', { name: 'What I know now' }).query()).toBeNull();
+    expect(main(empty.screen).getByRole('list', { name: 'What Claude knows' }).getByRole('listitem').elements()).toHaveLength(4);
 
     // While the list is read: the loading line where it goes, until the answer lands.
     know({ item_id: 'website', source: 'website', title: 'Your website', text: 'Leaks and drains.' }, ['public'], 1);
@@ -689,18 +689,18 @@ describe('knowledge', () => {
     const slow = (await renderRoute(KNOWLEDGE, { pollScale: 100 })).screen;
     await expect.element(main(slow).getByRole('status').filter({ hasText: /^Loading what I know$/ })).toBeVisible();
     list.release();
-    await expect.element(main(slow).getByRole('list', { name: 'What I know now' })).toBeVisible();
+    await expect.element(main(slow).getByRole('list', { name: 'What Claude knows' })).toBeVisible();
 
     // A read that fails (and its one retry, at once): what went wrong and Try again, which reads it.
     mockStore.inject({ route: 'knowledge', status: 503, times: 2 });
     const { screen } = await renderRoute(KNOWLEDGE, { pollScale: 100, retryScale: 0 });
     await expect.element(main(screen).getByText('Something went wrong on our side. Try again in a moment.', { exact: true })).toBeVisible();
-    expect(main(screen).getByRole('list', { name: 'What I know now' }).query()).toBeNull();
+    expect(main(screen).getByRole('list', { name: 'What Claude knows' }).query()).toBeNull();
     // Adding still works while the list can't be read.
     await expect.element(main(screen).getByRole('button', { name: 'Add a note' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     await main(screen).getByRole('button', { name: 'Try again' }).click();
-    await expect.element(main(screen).getByRole('list', { name: 'What I know now' })).toBeVisible();
+    await expect.element(main(screen).getByRole('list', { name: 'What Claude knows' })).toBeVisible();
   });
 
   it('knowledge_matches_its_board', async () => {
@@ -709,19 +709,16 @@ describe('knowledge', () => {
     know({ item_id: 'website', source: 'website', title: 'Your website', text: 'Leaks and drains.' }, ['public'], 4);
     know({ item_id: 'note-forced', source: 'setup', title: 'A gate code', text: 'A gate code.' }, ['owner'], 3, true);
     const screen = await addNote();
-    const known = main(screen).getByRole('region', { name: 'What I know now' }).element();
+    const known = main(screen).getByRole('region', { name: 'What Claude knows' }).element();
     const add = main(screen).getByRole('region', { name: 'Add something' }).element();
     const added = main(screen).getByRole('region', { name: 'Added' }).element();
-    await expect.poll(() => known.querySelectorAll('li').length).toBe(3);
+    await expect.poll(() => known.querySelectorAll('li').length).toBe(7);
 
-    // N-Run2-Settings-Knowledge: Claude's line in serif leading the 720 px column, then the list,
-    // "Add something" and the "Added" card, 20 px apart; "Add a note" the view's one primary.
     const lead = main(screen).getByText(LEAD, { exact: true }).element();
-    expectComputed(lead, { fontFamily: /^"Source Serif 4"/, fontSize: '18px', lineHeight: '27px', fontWeight: '360' });
-    const content = lead.parentElement as HTMLElement;
-    expect(Math.round(content.getBoundingClientRect().width)).toBe(720);
-    const gap = (above: Element, below: Element) => Math.round(below.getBoundingClientRect().top - above.getBoundingClientRect().bottom);
-    expect([gap(lead, known), gap(known, add), gap(add, added)]).toEqual([20, 20, 20]);
+    const content = main(screen).element().querySelector('.cd-knowledge') as HTMLElement;
+    expectComputed(content, { columnGap: '40px' });
+    expect(Math.round(add.getBoundingClientRect().width)).toBe(320);
+    expect(Math.round(add.getBoundingClientRect().left - known.getBoundingClientRect().right)).toBe(40);
     // Move the pointer off "Add a note", then let its hover-exit transition finish before
     // measuring the resting fill: leaving hover starts the color change, rather than ending it.
     await userEvent.hover(lead);
@@ -737,6 +734,8 @@ describe('knowledge', () => {
         main(screen).getByRole('textbox', { name: 'A note' }).element() as HTMLElement,
         main(screen).getByRole('button', { name: 'Add a note' }).element() as HTMLElement,
         main(screen).getByRole('button', { name: 'Add a file' }).element() as HTMLElement,
+        main(screen).getByRole('textbox', { name: 'A website' }).element() as HTMLElement,
+        main(screen).getByRole('button', { name: 'Add a website' }).element() as HTMLElement,
         switchOf(screen).element() as HTMLElement,
       ],
     });

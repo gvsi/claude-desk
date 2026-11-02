@@ -1,20 +1,30 @@
-/* Keep Knowledge's content measure and spacing from its former Settings column. */
 .cd-knowledge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-32);
+  min-width: 0;
+}
+
+.cd-knowledge__known,
+.cd-knowledge__add { min-width: 0; }
+
+.cd-knowledge__previews {
   display: flex;
   flex-direction: column;
-  gap: var(--space-20);
+  gap: var(--space-32);
   min-width: 0;
-  max-width: calc(var(--size-content) - var(--size-sub-nav) - var(--space-40));
 }
 
 .cd-knowledge p,
-.cd-knowledge h2 {
-  margin: 0;
-}
+.cd-knowledge h2 { margin: 0; }
 
-@media (max-width: 767.98px) {
+@media (min-width: 1000px) {
   .cd-knowledge {
-    gap: var(--space-16);
-    max-width: none;
+    grid-template-columns: minmax(0, 1fr) var(--size-knowledge-add);
+    column-gap: var(--space-40);
+    align-items: start;
   }
+  .cd-knowledge__known { grid-column: 1; grid-row: 1; }
+  .cd-knowledge__add { grid-column: 2; grid-row: 1 / span 2; }
+  .cd-knowledge__previews { grid-column: 1; grid-row: 2; }
 }

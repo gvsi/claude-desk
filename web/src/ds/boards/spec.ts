@@ -357,7 +357,7 @@ export async function expectRulesPage(root: HTMLElement, chips: readonly string[
 }
 
 /** Settings' sections, in SubNav's order. */
-export const SETTINGS_SECTION_NAMES = ['General', 'Knowledge', 'Notifications', 'Channels', 'Billing'] as const;
+export const SETTINGS_SECTION_NAMES = ['General', 'Notifications', 'Channels', 'Billing'] as const;
 
 /**
  * A Settings board on a laptop: the owner frame with the sidebar's Connectors row after Rules and

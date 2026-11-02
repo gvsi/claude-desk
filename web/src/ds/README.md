@@ -170,3 +170,5 @@ On Share's printable card, the QR code's `qr-ink` modules read 13.8 on its `qr-t
 - No emoji, sparkles or "AI" icons, and no Claude or Anthropic logos.
 - No mono outside the full trace, a connector's quoted tool definition and the agents page's code.
 - No raw colors or durations in components: use the custom properties named after these tokens.
+
+The owner sidebar lists Today, Conversations, Customers, Knowledge, Rules, Safety, Profile, Share and Settings. Connectors appears after Rules when its page is available. Profile holds Your business and Header colour; General keeps Claude acts for you and Delete this Desk.

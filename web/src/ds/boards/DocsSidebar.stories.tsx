@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import { ABOUT_LINKS } from '../../about/links.ts';
 import { Sidebar } from '../components/Sidebar/Sidebar.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
@@ -9,11 +10,8 @@ import { SPEC, expectTabOrder, one } from './spec.ts';
 
 /** The documents behind the prototype, the owner reading the first. */
 const ABOUT = {
-  title: 'About this prototype',
-  links: [
-    { id: 'prediction', label: 'Capability prediction', href: '#docs/capability-prediction', current: true },
-    { id: 'proposal', label: 'Product proposal', href: '#docs/product-proposal' },
-  ],
+  ...ABOUT_LINKS,
+  links: ABOUT_LINKS.links.map((link) => ({ ...link, current: link.id === 'prediction' })),
 };
 
 /** The sidebar alone, in the column the AppShell gives it, with the "About this prototype" group. */
@@ -78,7 +76,7 @@ export const Board: Story = {
 
     // Its rows: nav rows like the main ones, the document icon, the open document current.
     const links = within(about).getAllByRole('link');
-    await expect(links.map((link) => link.textContent)).toEqual(['Capability prediction', 'Product proposal']);
+    await expect(links.map((link) => link.textContent)).toEqual(['Capability prediction', 'Product proposal', 'Vision', 'GitHub']);
     const { height, borderTopLeftRadius, fontSize, lineHeight, fontWeight } = SPEC.activeNavRow;
     const row = { height, borderTopLeftRadius, fontSize, lineHeight, fontWeight };
     for (const link of links) {
@@ -101,6 +99,7 @@ export const Board: Story = {
       'Rules',
       'Connectors',
       'Safety',
+      'Profile',
       'Share',
       'Settings',
     ]);

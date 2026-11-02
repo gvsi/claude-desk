@@ -47,7 +47,7 @@ export const Board: Story = {
     const page = within(canvas.getByRole('main'));
 
     const vision = one(content, '.board-settings__vision');
-    await expect(vision).toHaveTextContent(/^VisionNothing is billed in this prototype\.$/);
+    await expect(vision).toHaveTextContent(/^MockNothing is billed in this prototype\.$/);
 
     // The plan, 20 px under the note: its name, then each line 8 px under the one before.
     const plan = page.getByRole('region', { name: 'Plan' });

@@ -24,6 +24,7 @@ const hrefs = {
   knowledge: '#knowledge',
   rules: '#rules',
   safety: '#safety',
+  profile: '#profile',
   share: '#share',
   settings: '#settings',
 } satisfies SidebarHrefs;

@@ -1,6 +1,6 @@
 /**
  * Knowledge (N-Run2-Settings-Knowledge): what Claude answers from, which never changes
- * the owner's rules. "What I know now" lists what the owner may see, each item with when it was
+ * the owner's rules. "What Claude knows" lists what the owner may see, each item with when it was
  * added and who can see it; one the kernel forces owner-only comes with its title and text withheld
  * and reads "A note only you can see". Under it, a note or a text file is added for the owner only,
  * then the "Added" card's "Customers can see this" switch posts it again for customers or for the
@@ -17,11 +17,16 @@ import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, NAV_LABELS, Notice, P
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { firstDesk } from '../arrival/doneSignals.ts';
+import { VisionNote } from '../settings/VisionNote.tsx';
+import { MOCK_SOURCES, MORE_SOURCES, SAMPLE_QUESTIONS } from './previewSources.ts';
 import { useReadFailure } from '../useReadFailure.ts';
+import { useDesks } from '../useDesks.ts';
 
+import '../settings/Settings.css';
 import './Knowledge.css';
 
-const LEAD = 'Knowledge is what I answer from. It never changes your rules.';
+export const KNOWLEDGE_SUMMARY = 'What Claude answers from. It never changes your rules.';
 
 /** The largest file "Add a file" takes: 100 KB. */
 export const MAX_FILE_BYTES = 100 * 1024;
@@ -69,19 +74,28 @@ const knowledgeQuery = (deskId: string) =>
 function rowsOf(items: readonly KnowledgeRow[], timeZone: string): KnowledgeRowView[] {
   return items.map((item) => {
     const date = item.created_at === null ? '' : formatDate(item.created_at, timeZone);
+    const kind = item.source === 'website' || item.source === 'web_search' ? 'globe' : item.source === 'upload' ? 'document' : item.item_id === 'kn-price-list' ? 'list' : 'note';
+    const label = kind === 'globe' ? 'Website' : kind === 'document' ? 'File' : kind === 'list' ? 'Price list' : 'Note';
+    const fileTag = kind === 'document' && /\.pdf$/i.test(item.title ?? '') ? 'PDF' : kind === 'document' && /\.docx$/i.test(item.title ?? '') ? 'DOCX' : undefined;
     return {
       id: item.item_id,
+      kind,
+      ...(fileTag === undefined ? {} : { fileTag }),
       title: item.title === null || item.text === null ? null : item.title,
-      detail: date === '' ? null : `Added ${date}`,
+      detail: [label, ...(item.source === 'website' ? ['Read during setup'] : []), ...(date === '' ? [] : [`Added ${date}`])].join(' · '),
       readers: item.readers,
     };
   });
 }
 
-/** "What I know now": the list once read, the loading line while it is, and a failed read with Try again over it. */
+/** "What Claude knows": the list once read, the loading line while it is, and a failed read with Try again over it. */
 function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
   const list = useQuery(knowledgeQuery(deskId));
   const failure = useReadFailure(list);
+  const desks = useDesks(deskId, { passive: true });
+  const samples = desks.data !== undefined && firstDesk(desks.data) === deskId ? MOCK_SOURCES : [];
+  const rows = [...rowsOf(list.data ?? [], timeZone), ...samples];
+  const publicCount = rows.filter((item) => item.title !== null && item.readers.includes('public')).length;
   return (
     <>
       {failure === null ? null : (
@@ -103,7 +117,7 @@ function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
       ) : (
         // With nothing known yet, no list: the board never draws it empty. A failed read says so
         // over the list read before.
-        <KnowledgeList items={rowsOf(list.data, timeZone)} />
+        <KnowledgeList items={rows} caption={`${rows.length} ${rows.length === 1 ? 'source' : 'sources'}. Customers can see ${publicCount}.`} />
       )}
     </>
   );
@@ -313,10 +327,10 @@ export function KnowledgePage() {
 
   return (
     <>
-      <PageHeader title={NAV_LABELS.knowledge} />
+      <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} />
       <div className="cd-knowledge">
-        <p className="cd-type-summary">{LEAD}</p>
-        <WhatIKnow deskId={deskId} timeZone={business.timezone} />
+        <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} /></div>
+        <div className="cd-knowledge__add">
         <KnowledgeAdd
           note={note}
           onNoteChange={setNote}
@@ -334,7 +348,17 @@ export function KnowledgePage() {
                 },
               })}
         />
+        </div>
+        <KnowledgePreviews />
       </div>
     </>
   );
+}
+
+/** Static examples share the real source list’s card and row markup. */
+export function KnowledgePreviews() {
+  return <div className="cd-knowledge__previews">
+    <KnowledgeList title="Questions Claude couldn’t answer" items={SAMPLE_QUESTIONS} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} />
+    <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
+  </div>;
 }

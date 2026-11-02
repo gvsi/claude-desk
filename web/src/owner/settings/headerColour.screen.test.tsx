@@ -12,7 +12,7 @@ import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { BRAND_PALETTE, PALETTE_KEYS } from '../../public/palette.ts';
 
-const GENERAL = `/app/${RIVERA.deskId}/settings/general`;
+const GENERAL = `/app/${RIVERA.deskId}/profile`;
 
 it('keeps swatches enabled and stores the latest quick pick after a slow earlier save', async () => {
   const { screen } = await renderRoute(GENERAL);
@@ -135,9 +135,9 @@ it('moves through the radio group with arrow keys, wrapping at both ends', async
   }
 });
 
-it('restores the place on Settings when Back returns from another page', async () => {
+it('restores the place on Profile when Back returns from another page', async () => {
   const { screen, router } = await renderRoute(GENERAL, { viewport: { width: 390, height: 600 } });
-  await expect.element(screen.getByRole('region', { name: 'Delete this Desk' })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Header colour', exact: true })).toBeVisible();
   const main = screen.getByRole('main').element();
   const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
   main.scrollTop = 180;
@@ -183,9 +183,8 @@ it('fits all eight swatches on one phone line and uses the signed sizes', async 
     expect(getComputedStyle(swatches[1]!).boxShadow).not.toBe('none');
     const card = screen.getByRole('region', { name: 'Header colour', exact: true }).element();
     const previous = screen.getByRole('region', { name: 'Your business' }).element();
-    const next = screen.getByRole('main').getByRole('region', { name: 'Claude acts for you' }).element();
     expect(Math.round(card.getBoundingClientRect().top - previous.getBoundingClientRect().bottom)).toBe(viewport === 'phone' ? 16 : 20);
-    expect(Math.round(next.getBoundingClientRect().top - card.getBoundingClientRect().bottom)).toBe(viewport === 'phone' ? 16 : 20);
+    expect(screen.getByRole('main').getByRole('region', { name: 'Claude acts for you' }).query()).toBeNull();
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
   }
