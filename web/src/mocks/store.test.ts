@@ -1994,9 +1994,9 @@ describe('the owner in the chat', () => {
     expect(read.last_seq).toBe(events.at(-1)?.[0]);
   });
 
-  it('a_code_confirmed_while_the_owner_has_the_chat_verifies_without_waking_claude', async () => {
-    // As the API: the visitor is verified, but while the owner has the chat Claude takes no turn,
-    // so it doesn't answer for him and the chat stays his.
+  it('a_code_confirmed_while_the_owner_has_the_chat_waits_for_the_hand_back', async () => {
+    // As the API: the visitor is verified, but while the owner has the chat Claude takes no turn, so
+    // it doesn't answer for him and the chat stays his. Handed back, Claude goes on with the invoice, once.
     const { session, events } = await openChat();
     await send('Can you send my invoice?');
     await drain();
@@ -2007,6 +2007,37 @@ describe('the owner in the chat', () => {
     await drain();
     expect(typesOf(events.slice(before)).filter((type) => ['writing', 'message', 'turn_end'].includes(type))).toEqual([]);
     expect((await call('visitorSession', { params: { slug } })).body).toMatchObject({ state: { mode: 'owner' } });
+
+    const handedBack = events.length;
+    expect((await call('handback', { params: { session_id: session.session_id }, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    const after = events.slice(handedBack).map(([, ev]) => ev);
+    expect(after.map((ev) => ev.type)).toEqual(['owner_left', 'writing', 'receipt', 'message', 'turn_end']);
+    const reply = after.find((ev) => ev.type === 'message');
+    expect(reply?.type === 'message' && reply.blocks.map((b) => b.template)).toContain('document_link');
+    // A second hand-back after another take-over has nothing left to go on with.
+    const again = events.length;
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation + 2 } })).status).toBe(200);
+    expect((await call('handback', { params: { session_id: session.session_id }, body: { generation: session.generation + 3 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events.slice(again))).toEqual(['owner_joined', 'owner_left']);
+  });
+
+  it('a_code_confirmed_in_a_paused_chat_gets_the_kernels_handoff', async () => {
+    // As a message in a paused chat: no "writing" and no invoice, only the kernel's handoff card.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the chat is in the copy');
+    mockStore.world.pause(record);
+    const before = events.length;
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    const shown = events.slice(before).map(([, ev]) => ev);
+    expect(shown.map((ev) => ev.type)).toEqual(['message', 'turn_end']);
+    const [message] = shown;
+    expect(message?.type === 'message' && [message.author, message.handoff, message.blocks.map((b) => b.template)]).toEqual(['claude', true, ['handoff']]);
   });
 
   it('typing_shows_both_ways', async () => {

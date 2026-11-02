@@ -698,8 +698,12 @@ it('seeds How we help as customer-readable lines that pass the scan', async () =
 
 let cardRuns = 0;
 
-/** The CPA starter with its cards, each job card decided by `accept`, then on to the rules step. */
-async function cpaAtRulesDeciding(accept: (job: string) => boolean) {
+/**
+ * The CPA starter with its cards, then on to the rules step. Each job card is decided by `decide`, given
+ * the job and how many of its cards came before (a changed card is a new one): true or false is the
+ * card's buttons, with an amount for a retainer, and a string is typed as the answer to the card.
+ */
+async function cpaAtRulesDeciding(decide: (job: string, before: number) => boolean | string) {
   const query = { cards: '1' };
   const started = await mockStore.dispatch('startSetup', { query, body: {
     description: START_EXAMPLES.en.examples[3]!.description,
@@ -714,10 +718,14 @@ async function cpaAtRulesDeciding(accept: (job: string) => boolean) {
   };
   let state = await next('setupConsent', { allow: true });
   state = await next('setupAnswer', { question: state.question, text: 'Both, about evenly' });
+  const seen = new Map<string, number>();
   while (state.pending_card) {
-    const card = state.messages.at(-1)!.card!;
-    const yes = card.job === null || accept(card.job.job);
-    state = await next('setupProposal', yes && card.job?.job === 'payment' ? { accept: true, amount_cents: 50000 } : { accept: yes }, card.proposal_id);
+    const card = state.messages.findLast((message) => message.card?.proposal_id === state.pending_card)!.card!;
+    const before = seen.get(card.job?.job ?? '') ?? 0;
+    if (card.job) seen.set(card.job.job, before + 1);
+    const answer = card.job === null || decide(card.job.job, before);
+    if (typeof answer === 'string') state = await next('setupAnswer', { question: null, card: card.proposal_id, text: answer });
+    else state = await next('setupProposal', answer && card.job?.job === 'payment' ? { accept: true, amount_cents: 50000 } : { accept: answer }, card.proposal_id);
   }
   if (state.step !== 'tools') state = await next('setupSuggestions', {});
   await mockStore.dispatch('setupRules', { params });
@@ -734,6 +742,20 @@ it('leaves out of How we help the job the owner turned down, and the line when t
   expect((await cpaAtRulesDeciding((job) => job !== 'payment'))?.text).toBe([booking, intake].join('\n'));
   expect((await cpaAtRulesDeciding((job) => job !== 'intake'))?.text).toBe([booking, retainer].join('\n'));
   expect(await cpaAtRulesDeciding(() => false)).toBeUndefined();
+});
+
+it('reads How we help from the current card and the owner’s typed answer, and keeps the sentence of a retainer setup declined for having no amount', async () => {
+  const booking = 'New clients book a short introductory call.';
+  const intake = 'Before their call, new clients answer three short questions.';
+  const retainer = 'Clients get a secure link to pay a retainer before work starts.';
+  // A changed intro call, then "Not now" on the changed card: the booking's sentence goes; accepted, it stays.
+  const changeThen = (yes: boolean) => (job: string, before: number) => job !== 'schedule' || (before === 0 ? 'Make it 30 minutes' : yes);
+  expect((await cpaAtRulesDeciding(changeThen(false)))?.text).toBe([intake, retainer].join('\n'));
+  expect((await cpaAtRulesDeciding(changeThen(true)))?.text).toBe([booking, intake, retainer].join('\n'));
+  // "Not now" typed on the retainer's card is the owner's no.
+  expect((await cpaAtRulesDeciding((job) => job !== 'payment' || 'Not now'))?.text).toBe([booking, intake].join('\n'));
+  // A typed yes on a retainer with no amount is setup's decline, not the owner's: its sentence stays (#855).
+  expect((await cpaAtRulesDeciding((job) => job !== 'payment' || 'Yes, please'))?.text).toBe([booking, intake, retainer].join('\n'));
 });
 
 it('scans read-only How we help before confirmation and public publication', async () => {

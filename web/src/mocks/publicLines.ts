@@ -17,8 +17,10 @@ const CPA_LINES = [
 ] as const;
 
 /**
- * The signed How we help line, one sentence per job. As in the API, which lists only the jobs the owner took
- * on, a job whose card the owner turned down leaves its sentence out, and turning down every job leaves no line.
+ * The signed How we help line, one sentence per job. A job whose card the owner turned down leaves its
+ * sentence out, and turning down every job leaves no line. Narrower than the API, which lists only accepted
+ * jobs: setup's own decline of a retainer with no amount keeps its sentence here, until the loading shapes
+ * can draw a shorter line (#855).
  */
 const CPA_HOW_WE_HELP: readonly (readonly [JobProposal['job'], string])[] = [
   ['schedule', 'New clients book a short introductory call.'],

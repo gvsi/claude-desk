@@ -280,6 +280,9 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
+/** Chats whose visitor confirmed a code while the owner had the chat: the API's wake that waits for the hand-back. */
+const VERIFIED_WHILE_TAKEN_OVER = new WeakSet<SessionRecord>();
+
 /**
  * The visitor's or visiting agent's latest line when nothing answered it after, as the API's hand-back
  * looks for one: mode markers, whispers and annotations aren't answers.
@@ -631,9 +634,12 @@ const SERVED: ServedRoutes = {
     if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
     const state = sv.world.handBack(session);
     // A line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and an
-    // agent's on its next request, the only time an agent's turn runs.
+    // agent's on its next request, the only time an agent's turn runs. With no such line, a code the visitor
+    // confirmed meanwhile has Claude go on with what they asked for, once.
     const waiting = waitingLine(session);
+    const verified = VERIFIED_WHILE_TAKEN_OVER.delete(session);
     if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
+    else if (verified) sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
     return ok(state);
   },
   resume(sv, req) {
@@ -882,9 +888,12 @@ const SERVED: ServedRoutes = {
     const { session } = visitor;
     // One answer for a wrong, expired or used-up code, so a refusal never says which.
     if (!sv.world.checkCode(session, code)) return failWith(422, 'kernel', { code: 'invalid' });
-    // The API wakes Claude, which goes on with what the visitor asked for, but only while it has the
-    // chat, as for a message: after the owner took over, the chat stays his and Claude stays quiet.
+    // The API notes the code and wakes Claude, which goes on with what the visitor asked for. As for a
+    // message, a paused chat's turn is the kernel's handoff, and while the owner has the chat Claude
+    // stays quiet: the note waits for the hand-back, which wakes it then (`handback`).
     if (session.state.mode === 'ai') sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
+    else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, '');
+    else VERIFIED_WHILE_TAKEN_OVER.add(session);
     return ok({ state: session.state } satisfies VerifyChecked);
   },
   visitorInbox(sv, req) {
