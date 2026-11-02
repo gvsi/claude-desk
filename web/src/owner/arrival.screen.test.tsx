@@ -1760,6 +1760,27 @@ describe('Things to try ticks off', () => {
   });
 
   it.each([
+    ['a_booking', 'The visitor booked before you answered, so this request closed.', 'The visitor booked before you answered, so this request closed.'],
+    ['the_visitor', null, 'The visitor cancelled before you answered. Nothing was done.'],
+  ] as const)('a_late_answer_to_a_request_%s_closed_says_why_on_the_card', async (_, owner_plain, cardLine) => {
+    // The answer comes back 409, cancelled. The kernel's owner line says when the visitor's booking
+    // closed it; without one, the visitor cancelled it, and the card's own line says so.
+    const { screen } = await renderRoute(TODAY);
+    const card = heldCard(screen);
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    const held = seededHoldNow();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...held, state: 'cancelled', answers: [], owner_plain } } });
+    await card.getByRole('button', { name: 'Allow this time' }).click();
+
+    await expect.element(card.getByText(cardLine, { exact: true })).toBeVisible();
+    const lines = ['The visitor booked before you answered, so this request closed.', 'The visitor cancelled before you answered. Nothing was done.'];
+    for (const other of lines.filter((words) => words !== cardLine)) {
+      expect(card.getByText(other, { exact: true }).elements()).toHaveLength(0);
+    }
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+  });
+
+  it.each([
     ['failed', "You allowed this, but it didn't go through. Nothing was done."],
     ['refused_at_execution', "Your rules changed before this ran, so it wasn't done."],
   ] as const)('an_answer_that_ended_%s_settles_without_a_tick', async (state, line) => {
