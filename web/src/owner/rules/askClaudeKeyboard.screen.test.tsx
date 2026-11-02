@@ -74,7 +74,8 @@ describe('ask claude opened from a suggestion by keyboard', () => {
   it.each(CASES)('closing_with_%s_gives_focus_back_to_the_suggestion %s', async (closing, place) => {
     const { chip, panel } = await openFromSuggestionByKeyboard(place, 'Quote water heater installs up to $600');
     await closeByKeyboard(panel, closing);
-    expect(document.activeElement, 'the suggestion that opened it').toBe(chip.element());
+    // Focus comes back on the frame after the panel closes, which can land after the panel has gone.
+    await expect.element(chip).toHaveFocus();
   });
 
   it.each(CASES)('closing_with_%s_once_its_change_applies_gives_focus_to_the_composer %s', async (closing, place) => {
