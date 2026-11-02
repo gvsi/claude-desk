@@ -71,3 +71,10 @@ export const UNCOUNTED_ANSWER_LINES = {
   unknown: 'You allowed this. Still confirming whether it went through.',
   refused_at_execution: "Your rules changed before this ran, so it wasn't done.",
 } as const satisfies Record<UncountedAnswer, string>;
+
+/**
+ * The longest line "Answer a held request" can end on, whose room the row keeps while an answer
+ * waits, so ending doesn't grow it. An execution refusal's own owner_plain can still run longer.
+ */
+export const ANSWER_ROOM: string = Object.values(UNCOUNTED_ANSWER_LINES).reduce((longest, line) =>
+  line.length > longest.length ? line : longest);

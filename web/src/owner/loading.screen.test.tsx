@@ -504,7 +504,7 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
   // Each card's line wraps in its third of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 2, 3, 3, 3] : [2, 2, 3, 3, 2]).forEach((count, i) => {
+  (viewport === 'phone' ? [2, 2, 3, 1, 3] : [2, 2, 3, 1, 2]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
@@ -514,7 +514,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
   lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
-  lines('.cd-today-skeleton__rule .cd-skeleton-line', '.cd-today-skeleton__rule', viewport === 'phone' ? ['100%', '75%'] : ['100%']);
+  // The seed's hold went past an automatic rule's limit, so its card names no rule.
+  expect(today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__held-by')).toBeNull();
   lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', ['100%', '100%', '75%']);
   lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', ['75%']);
   for (const child of [1, 2]) {
@@ -532,6 +533,19 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['100%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--meta', '.cd-week__part:last-child', ['65%', '30%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--control', '.cd-week__part:last-child', ['70%']);
+
+  // "Answer a held request" is fourth, after "Watch a demo visitor".
+  const heldRow = '.cd-things__item:nth-child(4)';
+  const skeletonHeight = today.querySelector(heldRow)!.getBoundingClientRect().height;
+  desks.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const landed = landedElement(heldRow)!;
+  const detail = landed.querySelector('.cd-things__detail')!;
+  const words = document.createRange();
+  words.selectNodeContents(detail.querySelector('.cd-things__detail-now') ?? detail);
+  // One line in its row on a phone, and in its third of the band on a laptop.
+  expect(new Set([...words.getClientRects()].map((rect) => rect.top)).size, 'the landed waiting line').toBe(1);
+  expect(Math.abs(landed.getBoundingClientRect().height - skeletonHeight), 'the held row lands at its skeleton height').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
 });
 
 it('today_reload_resizes_from_1440_to_620_before_landing', async () => {

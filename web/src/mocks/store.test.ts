@@ -427,7 +427,8 @@ describe('the scripted Desk', () => {
       answers: ['allow_once', 'deny_once'],
     });
     expect(item?.decision?.decision_id).toBe(held?.type === 'held' ? held.decision_id : 'none');
-    expect(item?.held_by).toBe('Quotes from your price list, at list price.');
+    // Past rv-quote's automatic limit: held_by names only an ask card's reason.
+    expect(item?.held_by).toBeNull();
     expect(item?.from_the_visitor).toBe('Can I get 50% off if I pay cash?');
     expect(item?.session).toMatchObject({ session_id: session.session_id, kind: 'visitor', verified: false });
 
@@ -1433,9 +1434,21 @@ describe('the scripted Desk', () => {
     record.decision.card_ids = [defaultAsk.card_id, 'rv-refund'];
     expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
 
-    // Held by the default ask alone, it names the default ask.
+    // Held by the default ask alone, it names no rule: no rule of the owner's decided it, and the
+    // headline already says so.
     record.decision.card_ids = [defaultAsk.card_id];
-    expect((await read())?.held_by).toBe(defaultAsk.reason);
+    expect((await read())?.held_by).toBeNull();
+  });
+
+  it('held_by_names_no_rule_past_an_automatic_limit', async () => {
+    // As the API reads it (`owner_reads._held_by`): the seed's quote at 15% off went past the
+    // automatic list-price quote card, so Needs you names no rule. The mock keeps the fixture's headline.
+    const quote = rivera.ruleCards['rv-quote'];
+    expect(quote.mode).toBe('auto');
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const seeded = items.find((item) => item.decision?.card_ids.includes(quote.card_id));
+    expect(seeded?.decision?.card_ids).toContain('rv-quote');
+    expect(seeded?.held_by).toBeNull();
   });
 
   it.each([

@@ -421,7 +421,9 @@ class Handoff(BaseModel):
 
 class NeedsYouItem(BaseModel):
     """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
-    applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
+    applies expiry, with `held_by`, the reason of the owner's ask card that held it, none for a hold past an automatic
+    card's limit or one only the default ask decided, whose headline already says why, and `held_at`, when it was
+    decided) or
     an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
     wrote (`from_the_visitor`: at most two messages; a held request quotes only the visitor's lines since Claude's
     last reply before its held status (a request whose status isn't in the chat quotes the chat's latest).
