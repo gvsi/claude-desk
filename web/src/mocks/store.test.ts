@@ -1197,11 +1197,12 @@ describe('the scripted Desk', () => {
       [true, 'card', 'done', null],
       [false, 'callback', 'open', CALLBACK_WINDOW],
     ]);
-    // Its closing entry names the call-back that replaced it, which the owner's own mark of done doesn't.
+    // Its closing entry names the call-back that replaced it; the next entry opens that call-back.
     const callback = mine()[1]?.handoff_id;
-    const closed = desk.ledger.slice(ledgered).map((entry) => entry.event).filter((event) => event.kind === 'desk_data');
-    expect(closed).toEqual([
+    const handoffs = desk.ledger.slice(ledgered).map((entry) => entry.event).filter((event) => event.kind === 'desk_data');
+    expect(handoffs).toEqual([
       { kind: 'desk_data', origin: 'kernel', session_id: null, ref_id: null, summary: { part: 'handoffs', refs: [card], replaced_by: callback } },
+      { kind: 'desk_data', origin: 'kernel', session_id: session.session_id, ref_id: null, summary: { part: 'handoffs', refs: [callback], kind: 'callback' } },
     ]);
     const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(items.filter((item) => item.handoff?.session_id === session.session_id).map((item) => item.handoff?.kind)).toEqual(['callback']);
