@@ -34,7 +34,7 @@ from .test_reply_check import (assert_handed_off, assert_offered, checked, claus
 VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
     "native.request_callback", "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
     "native.quote", "native.start_verification")]
-# Rivera's one business tool name, "Emergency callback", lends no free word, so no reply sends it.
+# Turner's one business tool name, "Emergency callback", lends no free word, so no reply sends it.
 VISITOR_APPROVED_NAMES: list[str] = []
 
 SONNET = "claude-sonnet-5-5"
