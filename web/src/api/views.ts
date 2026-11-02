@@ -370,6 +370,14 @@ export interface Attempt {
    * refusal the API can't place. The API sends it on every entry, and only a refused one may have one.
    */
   cause: RefusalCause | null;
+  /**
+   * What the visitor (or visiting agent) wrote in the turn that made a refused request: at most two
+   * of their lines since Claude's last reply before the refusal's receipt in the chat, each with
+   * whitespace collapsed and, past 200 characters, cut to 199 and "…", joined with " · "; if that
+   * window is empty, the newest line before the receipt. Null for a held request, a stopped draft,
+   * and a refusal whose receipt isn't in the chat. Untrusted.
+   */
+  from_the_visitor: string | null;
 }
 
 /** `GET /api/health`. */

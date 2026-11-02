@@ -8486,6 +8486,17 @@
               }
             ],
             "title": "Cause"
+          },
+          "from_the_visitor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From The Visitor"
           }
         },
         "type": "object",
@@ -8498,10 +8509,11 @@
           "created_at",
           "triage",
           "ledger_seq",
-          "cause"
+          "cause",
+          "from_the_visitor"
         ],
         "title": "Attempt",
-        "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`\nand the session's verified state;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals."
+        "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`\nand the session's verified state;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals.\n`from_the_visitor` is what the visitor (or visiting agent) wrote in the turn that made a refused request, read as\nNeeds you reads a held request's: at most two of their lines since Claude's last reply before the refusal's\nreceipt in the chat, each a one-line glimpse of at most 200 characters, joined with \" \u00b7 \"; if that window is\nempty, the newest line before the receipt. It is their own untrusted words, for the owner alone. It is null for\nheld requests and stopped drafts, and for a refusal whose receipt isn't in the chat: an entry can be days old, so\nthe chat's latest lines would quote something else."
       },
       "Briefing": {
         "properties": {

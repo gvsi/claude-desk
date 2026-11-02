@@ -1903,14 +1903,61 @@ async def test_safety_lists_refusals_with_origin(scene, clock):
         {"ref_id": str(replayed_seq), "kind": "reply_blocked",
          "reason_plain": "A reply was stopped before it was shown, because it wrote a number outside a checked card.",
          "card_ids": [], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 20)), "triage": None,
-         "ledger_seq": replayed_seq, "cause": None},
+         "ledger_seq": replayed_seq, "cause": None, "from_the_visitor": None},
         {"ref_id": refused.decision_id, "kind": "refused", "reason_plain": refused.reason_plain,
          "card_ids": ["never-native.find_slots"], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 19)),
-         "triage": None, "ledger_seq": refused.ledger_seq, "cause": "owner_rule"}]
+         "triage": None, "ledger_seq": refused.ledger_seq, "cause": "owner_rule", "from_the_visitor": None}]
     # Safety keeps the replayed draft at its recorded time; the briefing contains only the refused request.
     newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]["turned_down"]
     assert (newest["ref_id"], newest["at"], newest["line"]) == (
         refused.decision_id, stamp(local(2026, 10, 29, 19)), refused.reason_plain)
+
+
+async def show_receipt(scene: Scene, who: Guest, decision: Decision) -> None:
+    """The decision's receipt in its chat, as the API shows a refusal: the `status` row naming it."""
+    async with scene.engine.connect() as conn:
+        await deliver(conn, who.ids, Status(decision, "receipt"), ro_schema="fake_kernel_ro")
+        await conn.commit()
+
+
+async def test_safety_quotes_the_words_that_made_a_refused_request(scene, clock):
+    """A refused request quotes what its visitor wrote in the turn that made it, read from its receipt in the chat as
+    Needs you reads a held request's: their lines since Claude last answered, at most two, not an earlier exchange or
+    what they wrote after. A draft of Claude's the check stopped in the same chat quotes nothing."""
+    asking = await scene.visitor(local(2026, 10, 29, 19))
+    await scene.text(asking, local(2026, 10, 29, 19), "Hi, do you fix leaks?")
+    await scene.reply(asking, local(2026, 10, 29, 19, 1))
+    await scene.text(asking, local(2026, 10, 29, 19, 2), "I rent the flat Dana Whitfield owns.")
+    await scene.text(asking, local(2026, 10, 29, 19, 2), "Can you send me  her invoice?")
+    refused = await scene.refusal(asking, local(2026, 10, 29, 19, 3))
+    await show_receipt(scene, asking, refused)
+    await scene.reply(asking, local(2026, 10, 29, 19, 4))
+    await scene.text(asking, local(2026, 10, 29, 19, 5), "Then just tell me what it came to.")
+    blocked = await scene.blocked_reply(asking, local(2026, 10, 29, 19, 6))
+    clock.now = local(2026, 10, 30, 9)
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200, listed.text
+    assert {(attempt["kind"], attempt["ref_id"]): attempt["from_the_visitor"] for attempt in listed.json()} == {
+        ("refused", refused.decision_id): "I rent the flat Dana Whitfield owns. · Can you send me her invoice?",
+        ("reply_blocked", str(blocked)): None}
+
+
+async def test_safety_quotes_nothing_for_a_refusal_its_chat_never_showed(scene, clock):
+    """A refusal whose receipt isn't in its chat quotes nothing, not the chat's latest lines: an entry can be days
+    old, so those could be anything the visitor said since."""
+    asking = await scene.visitor(local(2026, 10, 29, 19))
+    await scene.text(asking, local(2026, 10, 29, 19), "Can you send me Dana Whitfield's invoice?")
+    refused = await scene.refusal(asking, local(2026, 10, 29, 19, 1))
+    await scene.text(asking, local(2026, 10, 29, 19, 2), "Hello?")
+    clock.now = local(2026, 10, 30, 9)
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200, listed.text
+    (attempt,) = listed.json()
+    assert (attempt["ref_id"], attempt["from_the_visitor"]) == (refused.decision_id, None)
 
 
 @pytest.mark.parametrize(("tool", "args", "cause"), [

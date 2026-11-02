@@ -2068,7 +2068,9 @@ const SAFETY_ANCHORS: readonly SkeletonAnchor[] = [
     ['safety-detail-status', '.cd-attempt__status'], ['safety-detail-title', '.cd-attempt__reason'],
     ['safety-claim', '.cd-attempt__claim'], ['safety-origin', '.cd-attempt__origin'],
     ['safety-replayed', '.cd-attempt__what .cd-attempt__origin:last-child'],
-    ['safety-summary-label', '.cd-attempt__label'], ['safety-summary', '.cd-attempt__summary'],
+    // Claude's summary label, not the visitor's words' label above it on a refused request.
+    ['safety-summary-label', '.cd-attempt__part:has(> .cd-attempt__summary) > .cd-attempt__label'],
+    ['safety-summary', '.cd-attempt__summary'],
     ['safety-toggle-0', '.cd-attempt__toggle:first-child'], ['safety-toggle-1', '.cd-attempt__toggle:nth-of-type(2)'],
     ['safety-conversation', '.cd-attempt__conversation'],
   ].map(([name, page]) => ({ name: name!, page: page!, dimensions: ['bottom', 'height'] as const })),
