@@ -244,6 +244,31 @@ describe('Demo visitor', () => {
     await expect.element(opened.screen.getByRole('link', { name: /^Riley Demo visitor/ })).toBeVisible();
   });
 
+  it('a_run_the_api_no_longer_keeps_ends_the_note', async () => {
+    const { session_id: sessionId } = await startOne('gone');
+    const { screen } = await renderRoute(`${LIST}/${sessionId}`);
+    await expect.element(demoNote(screen)).toMatchTextContent(NOTE);
+    // The API restarted, or its record of the run expired: the run reads 404 from now on. The note
+    // says it has ended, with no Stop that can't work.
+    mockStore.inject({ route: 'demoVisitorRun', status: 404, times: 10_000 });
+    await expect.element(demoNote(screen)).toHaveTextContent(FINISHED);
+    expect(demoNote(screen).getByRole('button').elements()).toHaveLength(0);
+  });
+
+  it('a_run_stopped_here_still_says_so_once_the_api_no_longer_keeps_it', async () => {
+    const { session_id: sessionId } = await startOne('stopped-then-gone');
+    const { screen, router } = await renderRoute(`${LIST}/${sessionId}`);
+    await demoNote(screen).getByRole('button', { name: STOP, exact: true }).click();
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+    // Its record goes; the conversation, opened again in this tab, reads 404 and still says the owner stopped it.
+    mockStore.inject({ route: 'demoVisitorRun', status: 404, times: 10_000 });
+    await router.navigate(LIST);
+    await expect.element(screen.getByText('Choose a conversation to read it.')).toBeVisible();
+    await router.navigate(`${LIST}/${sessionId}`);
+    await expect.poll(() => requests('demoVisitorRun').filter((r) => r.path.includes('/demo_visitor/visitor-')).length).toBeGreaterThan(1);
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+  });
+
   it('an_older_conversation_keeps_its_own_ending', async () => {
     // The first demo visitor is stopped; a second one runs on the Desk now.
     const first = await startOne('first');

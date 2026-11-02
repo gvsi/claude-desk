@@ -70,7 +70,9 @@ export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boole
     queryKey: demoVisitorRunKey(deskId, learned ?? ''),
     queryFn: () => request('demoVisitorRun', { params: { desk_id: deskId, run_id: learned ?? '' } }),
     enabled: demo && learned !== null,
-    refetchInterval: (query) => (query.state.data === undefined || query.state.data.state === 'running' ? pollMs('conversation') : false),
+    // Read again while it runs; not once it has ended, or once the API no longer keeps it.
+    refetchInterval: (query) =>
+      !notFound(query.state.error) && (query.state.data === undefined || query.state.data.state === 'running') ? pollMs('conversation') : false,
   });
 
   if (!demo) return { phase: 'unknown' };
@@ -79,9 +81,11 @@ export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boole
     const ended = newestRead !== null && (notFound(newestRead.error) || (newestRead.data !== undefined && !newestIsThisChat));
     return ended ? { phase: 'ended', ended: null } : { phase: 'unknown' };
   }
+  // No longer kept (the API restarted, or its hour passed): it has ended, whatever an earlier read
+  // said. It was stopped only when a read this tab made says the owner stopped it.
+  if (notFound(run.error)) return { phase: 'ended', ended: run.data?.ended === 'stopped_by_owner' ? 'stopped_by_owner' : null };
   if (run.data !== undefined) return run.data.state === 'running' ? { phase: 'running', run: run.data } : { phase: 'ended', ended: run.data.ended };
-  // No longer kept: it has ended.
-  return notFound(run.error) ? { phase: 'ended', ended: null } : { phase: 'unknown' };
+  return { phase: 'unknown' };
 }
 
 export interface DemoVisitorNoteProps {
