@@ -191,7 +191,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   });
   if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
   const requested = visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
-  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused;
+  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused && readFailure === null;
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
@@ -269,7 +269,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               deskId={deskId}
               business={desk.business_name}
               today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
-              heldCount={needsYou.data === undefined || needsYou.errorUpdatedAt > needsYou.dataUpdatedAt || needsYou.isPaused ? undefined : listed.length}
+              heldCount={readWorked ? listed.length : undefined}
               firstHeldId={firstHeld?.decision.decision_id ?? null}
             />
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />

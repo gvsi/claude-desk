@@ -2820,6 +2820,37 @@ describe("Today's How your Desk works", () => {
     expect(how.element().querySelector('.cd-how__today')).toBeNull();
   });
 
+  it('how_your_desk_works_keeps_counts_hidden_until_the_reconnected_read_succeeds', async () => {
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    const read = holdReads(needsYouPath);
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
+
+    mockStore.world.decisions.clear();
+    onlineManager.setOnline(true);
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.fetchStatus).toBe('fetching'));
+    await nextFrames();
+    expect(how.element().querySelector('.cd-how__today')).toBeNull();
+    read.release();
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0);
+
+    // An ordinary refresh keeps the current line while its response is pending.
+    const poll = holdReads(needsYouPath);
+    const refresh = queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(poll.held()).toBeGreaterThan(0));
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    poll.release();
+    await refresh;
+  });
+
   it('how_your_desk_works_hides_kept_counts_when_a_refresh_fails', async () => {
     const mounted = vi.spyOn(QueryClient.prototype, 'mount');
     const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
