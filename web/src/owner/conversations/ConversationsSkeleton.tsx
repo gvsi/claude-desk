@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { CARD_CHROME, ConceptFooter, RECORDED_NOTE, Skeleton, SkeletonCard } from '../../ds/index.ts';
+import { CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { publicLink } from '../customerLink.ts';
@@ -246,13 +246,13 @@ function useOpensAtTheEnd() {
 
 /**
  * The open conversation's pane as shapes, from its own classes, as a fresh copy's held chat (what
- * Today's "Open the request" opens) draws: the head's name, level pill and latest line, followed
- * by its opening lines and hairline; the visitor's bubble at the right; Claude's handoff card at
- * the left with its two receipt lines; and the held request's card, each part as tall as it lands.
- * The transcript's region opens at its end, as the chat's does, over the room the owner's
- * controls take. A replayed chat adds its recorded-history line and has no owner controls.
+ * Today's "Open the request" opens) draws: who it is with (their name, the level pill and the
+ * latest line); the transcript's header lines; the visitor's bubble at the right; Claude's
+ * handoff card at the left with its two receipt lines; and the held request's card, each part as
+ * tall as it lands. The transcript's region opens at its end, as the chat's does, over the room
+ * the owner's controls take.
  */
-export function ConversationSkeleton({ recorded = false }: { recorded?: boolean }) {
+export function ConversationSkeleton() {
   const region = useOpensAtTheEnd();
   return (
     <div className="cd-conversation cd-conversation-skeleton">
@@ -260,31 +260,23 @@ export function ConversationSkeleton({ recorded = false }: { recorded?: boolean 
         <Skeleton shape="line" text="section" width={64} anchor="conversation-name" />
         <Skeleton shape="block" measure={{ label: 'Public', className: 'cd-pill cd-type-pill', tagName: 'span' }} height="var(--space-20)" radius="full" />
         <Skeleton shape="line" text="meta" width={200} />
-        <div className="cd-conversation__about" data-skeleton-anchor="conversation-about">
-          {recorded ? (
-            <div className="cd-recorded-note cd-type-caption">
-              <Skeleton shape="block" width={14} height={14} className="cd-conversation-skeleton__recorded-icon" />
-              <MeasuredLines
-                parts={[RECORDED_NOTE]}
-                className="cd-type-caption"
-                text="caption"
-                width="75%"
-                boxClassName="cd-recorded-note__text"
-              />
-            </div>
-          ) : null}
-          <MeasuredLines
-            parts={[`Today at 12:00 pm, web chat from ${FRESH_LINK}`]}
-            className="cd-conversation__line cd-type-caption"
-            text="caption"
-            fallback={1}
-            width="70%"
-          />
-          <MeasuredLines parts={[TRANSCRIPT_NOTE]} className="cd-conversation__line cd-type-caption" text="caption" fallback={1} width="65%" />
-        </div>
       </div>
       <div ref={region} className="cd-conversation__scroll">
         <div className="cd-transcript">
+          <div className="cd-transcript-row cd-transcript-header" data-skeleton-anchor="transcript-head">
+            <div className="cd-transcript-row__main">
+              <MeasuredLines
+                parts={[`Today at 12:00 pm, web chat from ${FRESH_LINK}`]}
+                className="cd-transcript-header__caption cd-type-caption"
+                text="caption"
+                fallback={1}
+                width="70%"
+              />
+            </div>
+            <div className="cd-transcript-row__margin">
+              <MeasuredLines parts={[TRANSCRIPT_NOTE]} className="cd-transcript-header__caption cd-type-caption" text="caption" fallback={1} width="65%" />
+            </div>
+          </div>
           <VisitorShape words={HELD_CHAT.question} anchor="first-message" />
           <div className="cd-transcript-row">
             <div className="cd-transcript-row__main">
@@ -298,7 +290,7 @@ export function ConversationSkeleton({ recorded = false }: { recorded?: boolean 
           <HeldCardShape anchor="held-card" />
         </div>
       </div>
-      {recorded ? null : <ControlsRoom />}
+      <ControlsRoom />
     </div>
   );
 }

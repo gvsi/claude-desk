@@ -1346,9 +1346,8 @@ const SEEDED_HOLD = 'ses-visitor-web';
 const conversationRead = (sessionId: string) => ROUTES.conversation.path.replace('{session_id}', sessionId);
 
 /**
- * A fresh copy's list, which replays recorded history into the copy: the mock's own list with
- * another chat marked replayed, so the page says "Includes recorded history" under its title while
- * the held chat stays live, with the owner controls the pane's loading tests exercise.
+ * A fresh copy's list, which replays recorded history into the copy: the mock's own list with the
+ * seeded hold's chat marked replayed, so the page says "Includes recorded history" under its title.
  */
 async function withRecordedHistory(now = new Date()): Promise<void> {
   const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
@@ -1369,7 +1368,7 @@ async function withRecordedHistory(now = new Date()): Promise<void> {
     status: 200,
     times: 10_000,
     // Keep all three rows on Today even around midnight, preserving the seed's order.
-    body: list.map((s, i) => ({ ...s, last_activity: new Date(noon - i * 1_000).toISOString(), ...(s.session_id === 'ses-dana-web' ? { replayed: true } : {}) })),
+    body: list.map((s, i) => ({ ...s, last_activity: new Date(noon - i * 1_000).toISOString(), ...(s.session_id === SEEDED_HOLD ? { replayed: true } : {}) })),
   });
 }
 
@@ -1406,7 +1405,7 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
 /** Each part of the fresh copy's held chat, by the shape that stands for it and the part itself. */
 const CHAT_PARTS = {
   name: { name: 'conversation-name', page: '.cd-conversation__name', dimensions: ['height', 'bottom'] },
-  head: { name: 'conversation-about', page: '.cd-conversation .cd-conversation__head > .cd-conversation__about', dimensions: ['height', 'bottom'] },
+  head: { name: 'transcript-head', page: '.cd-conversation .cd-transcript > .cd-transcript-header', dimensions: ['height', 'bottom'] },
   visitor: { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message', dimensions: ['height', 'bottom'] },
   reply: { name: 'reply-card', page: '.cd-conversation .cd-transcript .cd-reply-card', dimensions: ['height', 'bottom'] },
   receipt0: { name: 'receipt-0', page: '.cd-conversation .cd-transcript .cd-transcript-row__margin > :first-child', dimensions: ['height', 'bottom'] },

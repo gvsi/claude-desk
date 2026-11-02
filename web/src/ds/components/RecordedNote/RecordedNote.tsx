@@ -3,7 +3,7 @@ import { Icon } from '../../icons/index.tsx';
 import './RecordedNote.css';
 
 /** The line, word for word: the ledger's explanation is titled with its first sentence. */
-export const RECORDED_NOTE = 'Recorded history, replayed into your copy. It happened before you arrived.';
+const RECORDED_NOTE = 'Recorded history, replayed into your copy. It happened before you arrived.';
 
 /** It takes no props: the line is fixed English, as the owner app is English only. */
 export type RecordedNoteProps = Record<string, never>;

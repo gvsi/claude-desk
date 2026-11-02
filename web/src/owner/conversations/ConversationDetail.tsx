@@ -22,6 +22,7 @@ import {
   StatusDot,
   TakeOverBar,
   Transcript,
+  TranscriptHeader,
   TranscriptRow,
   WritingIndicator,
 } from '../../ds/index.ts';
@@ -118,7 +119,7 @@ function FailedRead({ failure }: { failure: ReadFailure }) {
 }
 
 /**
- * What the head says about where the chat came from: "Today at 12:04 pm, web chat from …". An
+ * What the page says about where the chat came from: "Today at 12:04 pm, web chat from …". An
  * agent's name is the name it gave, so it reads as its own words.
  */
 function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timezone: string): ReactNode {
@@ -211,7 +212,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
     }
   }, [loading, chat.data]);
   const pane = (content: ReactNode) => (
-    <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton recorded={summary?.replayed === true} />} className="cd-conversation-pane">
+    <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
       {content}
     </SkeletonScreen>
   );
@@ -326,13 +327,12 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
         ) : null}
         {state.assurance === 'demo_code' ? <span className="cd-conversation__quiet cd-type-caption">Simulated verification</span> : null}
         {latest !== null ? <p className="cd-conversation__latest cd-type-meta">Latest: {latest}</p> : null}
-        {/* Where the chat came from, under the name and Latest, so the transcript starts with the chat itself. */}
-        <div className="cd-conversation__about">
-          {read.replayed === true ? <RecordedNote /> : null}
-          <p className="cd-conversation__line cd-type-caption">{started ?? 'No messages yet.'}</p>
-          <p className="cd-conversation__line cd-type-caption">{TRANSCRIPT_NOTE}</p>
-        </div>
       </header>
+      {read.replayed === true ? (
+        <div className="cd-conversation__recorded">
+          <RecordedNote />
+        </div>
+      ) : null}
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
@@ -346,6 +346,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
           </div>
         ) : null}
         <Transcript label={`Conversation with ${who}`} logRef={transcriptRef}>
+          <TranscriptHeader left={started ?? 'No messages yet.'} right={TRANSCRIPT_NOTE} />
           <OwnerTranscript
             items={read.items}
             focusTarget={transcriptRef}

@@ -225,7 +225,7 @@ export { MarginNote, type MarginNoteProps } from './components/MarginNote/Margin
 
 // Recorded history
 export { RecordedTag, type RecordedTagProps } from './components/RecordedTag/RecordedTag.tsx';
-export { RecordedNote, RECORDED_NOTE, type RecordedNoteProps } from './components/RecordedNote/RecordedNote.tsx';
+export { RecordedNote, type RecordedNoteProps } from './components/RecordedNote/RecordedNote.tsx';
 export {
   RecordedHistoryLink,
   type RecordedHistoryLinkProps,
