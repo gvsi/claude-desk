@@ -198,7 +198,8 @@ export function stillToday(opened: Date, readAt: Date): StillToday {
     {
       decision: held,
       handoff: null,
-      held_by: rivera.ruleCards['rv-quote'].reason,
+      // Past the list-price quote card's limit: the headline quotes that card, so no rule is named.
+      held_by: null,
       held_at: heldAt,
       session: { session_id: held.session_id, kind: 'visitor', display_name: null, verified: false, assurance: 'none' },
       from_the_visitor: visitorTurn?.kind === 'visitor' ? visitorTurn.text : null,

@@ -358,12 +358,6 @@
   overflow: hidden;
 }
 
-/* The held request's rule, beside its icon, as wide as the row leaves it. */
-.cd-conversation-skeleton__rule {
-  flex: 1;
-  min-width: 0;
-}
-
 /* A line's room in its type's line box, with nothing drawn in it. */
 .cd-conversation-skeleton__room-line {
   height: 1lh;

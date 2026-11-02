@@ -185,6 +185,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             title={ANSWER.title}
             held={answerWaits}
             detail={answerWaits ? heldLine(firstHeld?.held_by) : TODAY_COPY.heldNone}
+            detailRoom={answerWaits ? UNCOUNTED_ANSWER_LINES.failed : undefined}
             end={answerEnd}
             step={answerWaits ? { label: 'Open the request', onClick: onFocusRequest } : null}
           />
@@ -224,6 +225,8 @@ interface ThingProps {
   /** A held dot beside the title: something is waiting. */
   held?: boolean;
   detail: ReactNode;
+  /** Keep room for the longest end line while an answer waits, so ending never grows the row. */
+  detailRoom?: string;
   /** Shown under the detail, across the row. */
   below?: ReactNode;
   /** Set once the row has ended: it ticks off when its thing is done, or settles with its line alone. */
@@ -355,7 +358,7 @@ function useTickInPlace(done: boolean, eases: boolean) {
  * comes in, when the row ends in view; a row that ended at load, or before it was drawn (a list
  * shown again), is drawn still.
  */
-function Thing({ icon, title, held = false, detail, below, end = null, step }: ThingProps) {
+function Thing({ icon, title, held = false, detail, detailRoom, below, end = null, step }: ThingProps) {
   const titleId = useId();
   const detailId = useId();
   // Ended when it was drawn: drawn still. A row that waits again (a new request held) ends in view next time.
@@ -377,8 +380,8 @@ function Thing({ icon, title, held = false, detail, below, end = null, step }: T
           {title}
           {held && end === null ? <StatusDot tone="held" /> : null}
         </h3>
-        <p id={detailId} className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}>
-          {end?.line ?? detail}
+        <p id={detailId} className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'} data-room={end === null ? detailRoom : undefined}>
+          <span className="cd-things__detail-now">{end?.line ?? detail}</span>
         </p>
       </div>
       {/* A settled row has no next step and no pill, so no place for one either; nor has a row with no step yet. */}

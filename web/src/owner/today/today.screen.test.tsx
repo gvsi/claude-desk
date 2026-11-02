@@ -55,7 +55,6 @@ const CUSTOMERS = `/app/${RIVERA.deskId}/people`;
 const LA = 'America/Los_Angeles';
 
 const SEEDED_REASON = rivera.decisions.held.reason_plain;
-const SEEDED_RULE = 'Quotes from your price list, at list price.';
 const REFUND_REASON = rivera.heldRefund.reason_plain;
 
 const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
@@ -364,10 +363,11 @@ describe('Today', () => {
       .filter((text) => ['Needs you', 'Live now', 'Since last night'].includes(text ?? ''));
     expect(order).toEqual(['Needs you', 'Live now', 'Since last night']);
 
-    // One held request, with the rule that held it and what was asked.
+    // One held request, with what was asked. It went past an automatic rule's limit, so there is
+    // no "Held by your rule" line. The mock keeps the fixture's headline, which doesn't quote it.
     await expect.element(needs.getByRole('img', { name: '1 needs you' })).toBeVisible();
     const card = heldCard(screen, SEEDED_REASON);
-    await expect.element(card.getByText(`Held by your rule: ${SEEDED_RULE}`, { exact: true })).toBeVisible();
+    expect(card.element().textContent).not.toContain('Held by your rule');
     // A limit hold offers the two one-time answers, each its own plain button.
     const answers = card.getByRole('group', { name: 'Your answer' }).getByRole('button');
     expect(answers.elements().map((b) => b.textContent)).toEqual(['Allow this time', 'Deny this time']);
@@ -394,7 +394,7 @@ describe('Today', () => {
     const cards = needs.getByRole('article').elements().map((a) => a.getAttribute('aria-label'));
     expect(cards).toEqual([`Held for you: ${SEEDED_REASON}`, 'Held for you: A visitor asked to book Sunday at 10:00 pm.']);
     await expect
-      .element(things.getByText(`A request is waiting for your answer. Held by your rule: ${SEEDED_RULE}`, { exact: true }))
+      .element(things.getByText('A request is waiting for your answer.', { exact: true }))
       .toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
     await things.getByRole('button', { name: 'Open the request' }).click();
@@ -2897,7 +2897,7 @@ describe("Today's top band", () => {
     // Once something is held, the same card in the same place shows the dot and its next step.
     await visitorSays('Can I get 50% off if I pay cash?');
     await expect
-      .element(things.getByText('A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.', { exact: true }), { timeout: 3_000 })
+      .element(things.getByText('A request is waiting for your answer.', { exact: true }), { timeout: 3_000 })
       .toBeVisible();
     expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
     expect(row().querySelector('.cd-status-dot--held')).not.toBeNull();

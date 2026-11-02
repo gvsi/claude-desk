@@ -84,7 +84,7 @@ After an answer or an event, the final line takes the place of "Waiting for your
 ## What the consumer provides
 
 - `decision` as the kernel returned it. The card never decides which answers apply: `state` and `answers` do.
-- `heldBy`: `NeedsYouItem.held_by`, the reason on the rule card that held it, shown as the owner's words.
+- `heldBy`: `NeedsYouItem.held_by`, the reason on the ask card that held it, shown as the owner's words. A hold past an automatic rule's limit has none, since `reason_plain` already quotes that rule, so the line is left out.
 - `context`: "From the visitor: “{from_the_visitor}”", with the visitor's words in a `data-copy="user"` span. The visitor's own words only, never AI-written text such as a triage summary: a visitor could steer one to sway the answer, so it is never in an approval card.
 - `waiting`: where and when it was held, formatted by the screen.
 - `personName`: `NeedsYouItem.session.display_name` when the session is verified, so Allow's rule answer names the person. Leave it out for an agent or an unverified visitor. It is shown as user text (`.cd-user-name`, `data-copy="user"`).

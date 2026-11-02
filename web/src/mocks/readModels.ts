@@ -344,6 +344,14 @@ function holdingCard(cards: readonly RuleCard[], cardIds: readonly string[]): Ru
 }
 
 /**
+ * The rule Needs you names for a hold, as the API names it (`owner_reads._held_by`): an ask card's
+ * reason. A hold past an automatic card's limit names none, since its headline already quotes that card.
+ */
+function heldBy(card: RuleCard | null): string | null {
+  return card?.mode === 'ask' ? card.reason : null;
+}
+
+/**
  * Every held request and open handoff, oldest first. Each quotes what its visitor wrote
  * (`fromTheVisitor`): a held request the words that made it, a handoff the chat's latest, as of
  * this read. A handoff also carries its chat's newest triage
@@ -363,7 +371,7 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
         item: {
           decision: d.decision,
           handoff: null,
-          held_by: holdingCard(cards, d.decision.card_ids)?.reason ?? null,
+          held_by: heldBy(holdingCard(cards, d.decision.card_ids)),
           held_at: isoTime(d.createdAt),
           session: needsYouSession(session, d.decision.session_id),
           from_the_visitor: fromTheVisitor(session, d.decision.decision_id),
