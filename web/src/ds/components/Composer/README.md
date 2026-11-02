@@ -1,6 +1,6 @@
 # Composer
 
-`Composer` is the text box people write in: a raised surface at the composer radius that grows with the text up to six lines, with a round send button.
+`Composer` is the text box people write in: a raised surface at the composer radius that grows with the text up to six lines, with a round send button. A screen may hide it for a while (setup does, while a question docks); shown again, it fits its words, including words given back while it was hidden.
 
 ## When to use
 
