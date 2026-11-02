@@ -77,7 +77,7 @@ After an answer or an event, the final line takes the place of "Waiting for your
 | `refused_at_execution` | The kernel's `decision.owner_plain`, verbatim. When null or absent: "Your rules changed before this ran, so it wasn't done." | refused |
 | `denied` | "You denied this." | refused |
 | `expired` | "This request expired before you answered. Nothing was done." | info |
-| `cancelled` | "The visitor cancelled before you answered. Nothing was done." | info |
+| `cancelled` | "The visitor cancelled before you answered. Nothing was done." When the visitor's booking closed it, the kernel's `decision.owner_plain`, verbatim ("The visitor booked before you answered, so this request closed."). | info |
 | `allowed` | "Your rules allowed this." | handled |
 | `refused` | "Your rules refused this." | refused |
 

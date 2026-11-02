@@ -9,6 +9,7 @@ does, and reads the outcome back through `GET /decisions/{decision_id}` and the 
 """
 
 import asyncio
+import json
 import logging
 import re
 from typing import get_args
@@ -34,6 +35,10 @@ from .test_compiler import card
 from .test_decide import (PASS, Visitor, by_call, decided, desk_with, open_visitor, payment_link, priced, set_mode,
                           set_session, verify_signature)
 from .test_execute import activate, change_records, committed, executed, reservations
+
+# The owner's line for a held request a booking closed (`render.owner_line("cancelled_by_booking")`), the owner's
+# own words; a request the visitor cancelled has none.
+BOOKED_LINE = "The visitor booked before you answered, so this request closed."
 
 
 async def post_answer(client: httpx.AsyncClient, headers: dict[str, str], decision_id: str,
@@ -270,7 +275,9 @@ async def test_answers_after_cancel_are_409(app, client):
 
     response = await post_answer(client, copy.owner, held.decision_id, "allow_once")
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    # the visitor withdrew it themselves, so the owner's read has no owner line: the card's own line says so
     assert await read_id(client, copy.owner, held.decision_id) == cancelled
+    assert cancelled.owner_plain is None
     assert await approvals_of(app, copy.copy_id) == []
     assert await rows_of(app, copy.copy_id, select(Quote)) == []
     entries = [(e.event.kind, e.event.session_id, e.event.summary) for e in await ledger_rows(app, copy)
@@ -313,7 +320,11 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(app, c
     decision = await read_id(client, visitor.headers, held.decision_id)
     assert (decision.state, decision.visitor_plain, decision.answers) == ("cancelled", "Cancelled", [])
     verify_signature(await public_key(client), decision)
-    assert await read_id(client, copy.owner, held.decision_id) == decision
+    # the owner alone reads that a booking closed it, not the visitor; the line isn't signed, so the owner's read
+    # verifies with the same signature
+    owner_read = await read_id(client, copy.owner, held.decision_id)
+    assert owner_read == decision.model_copy(update={"owner_plain": BOOKED_LINE})
+    verify_signature(await public_key(client), owner_read)
     # nothing ran: no approval, no quote, and the booking's is the only execution
     assert await approvals_of(app, copy.copy_id) == []
     assert await rows_of(app, copy.copy_id, select(Quote)) == []
@@ -330,6 +341,15 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(app, c
                                           "refused": "cancelled"}),
     ]
     assert decision.ledger_seq == entries[0].seq
+    # no answer to the visitor's session carries the owner's line: its read by ID and by call, and its cancel, now
+    # refused; nor does any ledger entry
+    for response in (await client.get(f"/decisions/{held.decision_id}", headers=visitor.headers),
+                     await by_call(client, visitor.session_id, held.call_id, visitor.headers)):
+        assert response.status_code == 200 and response.json()["owner_plain"] is None, response.text
+        assert BOOKED_LINE not in response.text
+    refused = await post_cancel(client, visitor, held.decision_id)
+    assert (refused.status_code, refused.json()) == (409, {"code": "conflict"})
+    assert BOOKED_LINE not in json.dumps([e.event.summary for e in await ledger_rows(app, copy)])
 
 
 @pytest.mark.parametrize("case", ["booked_first", "another_session", "list_price", "not_confirmed"])

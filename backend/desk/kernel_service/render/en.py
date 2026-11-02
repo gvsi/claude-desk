@@ -35,12 +35,13 @@ STATUS: dict[str, str] = {
     "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
 }
 
-# Owner-only, key for key with `es.OWNER_STATUS`: why an approved or allowed action was refused at
-# execution, a decision's `owner_plain`. An approved release of private data whose session no
+# Owner-only, key for key with `es.OWNER_STATUS`: a decision's `owner_plain`. Why an approved or
+# allowed action was refused at execution: an approved release of private data whose session no
 # longer stood for its person says why the session ended; otherwise the Desk was deleted, the rules
-# changed (a failed re-check), or, for anything else, a line that names no cause. A decision's
-# status line reaches the visitor, who mustn't read why their session ended, so these are kept out
-# of `STATUS` and no status line can render one.
+# changed (a failed re-check), or, for anything else, a line that names no cause. And a held
+# request the visitor's own booking closed (`cancelled_by_booking`), which a visitor's own cancel
+# never takes. A decision's status line reaches the visitor, who mustn't read why their session
+# ended, so these are kept out of `STATUS` and no status line can render one.
 OWNER_STATUS: dict[str, str] = {
     "refused_contact_changed": "Not shared: their session ended when their contact changed",
     "refused_person_removed": "Not shared: they were removed from your records",
@@ -48,6 +49,7 @@ OWNER_STATUS: dict[str, str] = {
     "refused_rules_changed": "Your rules changed before this ran, so it wasn't done.",
     "refused_desk_deleted": "This Desk was deleted before this ran, so it wasn't done.",
     "refused_fallback": "This couldn't run, so it wasn't done.",
+    "cancelled_by_booking": "The visitor booked before you answered, so this request closed.",
 }
 
 # What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a
