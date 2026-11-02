@@ -30,8 +30,8 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
   const otherRef = useRef<HTMLInputElement>(null);
   /**
    * What the owner has typed on a highlighted row since they last moved or sent: row digits that may be
-   * the start of their words ("12 clients"), and whether a word has begun. A key that isn't a character
-   * starts afresh.
+   * the start of their words ("12 clients"), and whether a word has begun. It ends when focus leaves the
+   * dock, or on a key that moves or picks (see the reset in the key handler).
    */
   const typed = useRef({ digits: '', word: false });
   const questionId = useId();
@@ -42,9 +42,10 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       if (!(target instanceof HTMLElement)) return;
       const inside = root.current?.contains(target);
       // What was typed on a row ends once the owner leaves it, or presses a key that isn't a character.
-      // Shift and Caps Lock are part of typing ("2FA"), and on the memory question so is Enter, which picks
-      // nothing after typed words, however often it's pressed.
-      const keeps = event.key === 'Shift' || event.key === 'CapsLock' || (event.key === 'Enter' && !offersOther);
+      // Shift and Caps Lock are part of typing ("2FA"). On the memory question so are Enter and the editing
+      // keys: after typed words, Enter picks nothing, however often it's pressed and whatever was erased.
+      const editing = ['Enter', 'Backspace', 'Delete', 'Dead', 'Process'].includes(event.key);
+      const keeps = event.key === 'Shift' || event.key === 'CapsLock' || (editing && !offersOther);
       if ((!inside && target !== document.body) || (event.key.length !== 1 && !keeps)) typed.current = { digits: '', word: false };
       if (event.key === 'Escape' && (inside || target === document.body || target.closest('.cd-setup-dock textarea'))) {
         event.preventDefault(); onDismiss(); return;
@@ -117,7 +118,10 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
   }, [active, choices, disabled, maxLength, onChoose, onDismiss, other, offersOther, rows]);
   return (
     <div className="cd-setup-question-panel"><Card as="section" labelledBy={questionId} padding={16}>
-      <div className="cd-setup-q3" ref={root}>
+      {/* Digits typed on a row are forgotten once focus leaves the dock, so a later answer doesn't start with them. */}
+      <div className="cd-setup-q3" ref={root} onBlur={(event) => {
+        if (!root.current?.contains(event.relatedTarget as Node | null)) typed.current = { ...typed.current, digits: '' };
+      }}>
         <div className="cd-setup-q3__scroll">
         <div className="cd-setup-q3__head">
           <div id={questionId} className="cd-setup-q3__question cd-type-reply"><ChatMarkdown text={question} links="open" /></div>

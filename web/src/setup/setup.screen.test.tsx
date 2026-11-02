@@ -4729,6 +4729,24 @@ describe('consultant setup', () => {
     expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: words });
   });
 
+  it('digits_typed_before_focus_left_the_question_are_forgotten', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.first().element() as HTMLElement).focus();
+    await userEvent.keyboard('1');
+    (document.activeElement as HTMLElement | null)?.blur();
+    await userEvent.keyboard('2 clients');
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveValue('2 clients');
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: '2 clients' });
+  });
+
   it('space_on_a_choice_still_sends_it', async () => {
     const state = await consultantAt();
     const question = state.messages.findLast((message) => message.choices?.length)!;
