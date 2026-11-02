@@ -42,7 +42,7 @@
 - `ruleSentence(card: RuleCard, words: { business: BusinessTools; people?: PeopleOut | null; agents?: AgentNames }): SentencePart[]`:
   - **Lead by mode:** `auto` "Claude can ", `ask` "Claude asks you before ", `never` "Claude never ".
   - **Tool phrase** from `TOOL_PHRASES`: per built-in tool and effect group, a `can` phrase and a `before` phrase, in the boards' words. Examples:
-    - `native.quote`: "send quotes from your price list", before "any discount";
+    - `native.quote`: "send quotes from your price list", before "any discount" for the discount hold past a list-price quote rule, and "any quote" for an ask card on every quote (listed for the owner's sign-off, since no board draws it);
     - `native.book`: "book visits";
     - `native.create_payment_link`: "send payment links";
     - `native.charge_mandate`: "take agent payments";
@@ -69,10 +69,10 @@
   - the sentence, with key parts in `<strong>` (medium weight, tabular figures);
   - under it the meta line, with tool names set off as the owner's text (as #849 does) and " · " before who;
   - an optional outcome at the right (a dot plus the word, `OUTCOME_TONE`), stacked under the sentence on a phone.
-- **`<EffectTags effects reversible>`:** small fixed tags "Money", "Can't undo" and "Private data", as C4 draws them. They replace the effect sentences ("Changes something. Can be undone.") wherever a tool shows.
+- **`<EffectTags effects reversible>`:** small fixed tags "Money", "Can't be undone" and "Private data", as C4 draws them with the design review's v339 wording (matching the tool line and the signed N-Conn-19), 8 px after the tool title and 4 px between tags. They replace the effect sentences ("Changes something. Can be undone.") wherever a tool shows.
 
 **Tests:**
-- `ruleSentence` and `ruleMeta` on the Rivera fixture's cards give C1's exact rows, for example:
+- `ruleSentence` and `ruleMeta` on the Turner Plumbing fixture's cards give C1's exact rows, for example:
   - "Claude can send quotes from your price list, at **list price**" with meta "Quote · Anyone";
   - "Claude can send payment links up to **$300**" with meta "Payment link · Anyone".
 - A business tool reads "Claude can use {title}".
@@ -94,7 +94,7 @@
 
 **Removed:** "Anything else here: ask me.", the per-connector $500 lines, the "Version N…" line and the three-column tool rows.
 
-**Tests:** update `rules.screen.test.tsx`, `hub.test.ts` and `landing.test.ts`. Rivera's mock page gives C1's rows in C1's order. Keep Back and review-exit place restore (`reachPlace`) and the first-load wait.
+**Tests:** update `rules.screen.test.tsx`, `hub.test.ts` and `landing.test.ts`. Turner Plumbing's mock page gives C1's rows in C1's order. Keep Back and review-exit place restore (`reachPlace`) and the first-load wait.
 
 ## Task C: All rules (`/rules/all`), as "Your tools"
 
@@ -112,7 +112,7 @@
   - **Verified wording** follows C1 (", once they've confirmed it's them"). The PR flags C4's ", once verified" for the owner.
 - The reviewer note and "Anything else here: ask me." go.
 
-**Tests:** a screen test for Rivera's Payments and Stripe cards with C4's exact lines, and one that a shared rule shows in full once.
+**Tests:** a screen test for Turner Plumbing's Payments and Stripe cards with C4's exact lines, and one that a shared rule shows in full once.
 
 ## Task D: change review and preset review
 

@@ -158,11 +158,45 @@ function thirdPerson(parts: SentencePart[]): SentencePart[] {
   return [{ ...first, text: `${conjugated}${tail}` }, ...rest];
 }
 
-/** The cards of one row, at least one. */
+/** Two windows with the same days, in the same order, and the same start and end; or neither. */
+function sameHours(a: RuleCard['hours'], b: RuleCard['hours']): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  return a.start === b.start && a.end === b.end && a.days.length === b.days.length && a.days.every((day, i) => day === b.days[i]);
+}
+
+/** Who a card is for, as its fields and its words say it ("Anyone" and "Signed agents" differ). */
+function audience(card: RuleCard): string {
+  const named = whoWords(card, null, undefined).map((word) => word.text);
+  return JSON.stringify([card.who, card.person_id ?? null, card.agent_key_id ?? null, named]);
+}
+
+/**
+ * Whether these cards read as one rule, one sentence over all their tools: the same outcome, the
+ * same audience, the same amount and discount limits and the same hours. A row that joins cards
+ * that differ in any of these would drop one card's limit or audience, so `ruleSentence` and
+ * `ruleMeta` refuse it; a screen groups its cards with this first.
+ */
+export function canJoin(cards: readonly RuleCard[]): boolean {
+  const [first, ...rest] = cards;
+  if (first === undefined) return false;
+  return rest.every(
+    (card) =>
+      card.mode === first.mode &&
+      audience(card) === audience(first) &&
+      (card.max_amount_cents ?? null) === (first.max_amount_cents ?? null) &&
+      (card.max_discount_bp ?? 0) === (first.max_discount_bp ?? 0) &&
+      sameHours(card.hours, first.hours),
+  );
+}
+
+/** The cards of one row, at least one, that read as one rule (`canJoin`); any other set is refused, never joined. */
 function asCards(card: RuleCard | readonly RuleCard[]): [RuleCard, ...RuleCard[]] {
   const cards: readonly RuleCard[] = Array.isArray(card) ? card : [card as RuleCard];
   const [first, ...rest] = cards;
   if (first === undefined) throw new Error('a rule sentence needs a card');
+  if (!canJoin(cards)) {
+    throw new Error("cards that differ in outcome, audience, limits or hours can't read as one rule: give each its own sentence");
+  }
   return [first, ...rest];
 }
 
@@ -186,8 +220,9 @@ function hoursRuns(hours: NonNullable<RuleCard['hours']>): SentencePart[] {
 const forVerified = (cards: readonly RuleCard[]) => cards.some((card) => card.who === 'verified' || card.who === 'record_owner');
 
 /**
- * A rule's sentence, from its card (or the cards of one row that reads as one, as C1 joins Find
- * open times with Book a visit; each condition then comes from the first card that has it):
+ * A rule's sentence, from its card, or from the cards of one row that read as one rule
+ * (`canJoin`: the same outcome, audience, limits and hours), as C1 joins leads and callbacks.
+ * Cards that differ are refused with an error, never joined:
  * - led by its mode: `auto` "Claude can ", `ask` "Claude asks you before ", `never` "Claude never ";
  * - then its tool's phrase (`TOOL_PHRASES`, `JOINED_PHRASES`; a business tool "use {title}");
  * - then its conditions, each value set off: " up to **$300**"; on an automatic quote ", at **list
@@ -204,15 +239,15 @@ export function ruleSentence(card: RuleCard | readonly RuleCard[], words: Senten
   else if (first.mode === 'ask') parts.push({ text: 'Claude asks you before ' }, ...runs(phrase.before));
   else parts.push({ text: 'Claude never ' }, ...thirdPerson(runs(phrase.can)));
 
-  const amount = cards.find((c) => c.max_amount_cents != null)?.max_amount_cents;
+  const amount = first.max_amount_cents;
   if (amount != null) parts.push({ text: ' up to ' }, key(formatCents(amount)));
   if (phrase.after !== undefined) parts.push({ text: phrase.after });
   if (first.mode === 'auto') {
-    const discount = cards.find((c) => (c.max_discount_bp ?? 0) > 0)?.max_discount_bp ?? 0;
+    const discount = first.max_discount_bp ?? 0;
     if (discount > 0) parts.push({ text: ' with up to ' }, key(percent(discount)), { text: ' off' });
     else if (targets.includes('native.quote')) parts.push({ text: ', at ' }, key('list price'));
   }
-  const hours = cards.find((c) => c.hours != null)?.hours;
+  const hours = first.hours;
   if (hours != null) parts.push(...hoursRuns(hours));
   if (first.mode === 'auto' && forVerified(cards)) parts.push({ text: ", once they've confirmed it's them" });
   return merged(parts);
@@ -247,8 +282,9 @@ function whoLine(card: RuleCard, words: SentenceWords): string {
 /**
  * The line under a rule's sentence (`RuleMeta`): the tools it covers by their titles, "Find open
  * times and Book a visit", or for a rule on an effect group the Desk's tools with that effect
- * (`words.tools`), else the group in the app's words; then who it is for, from its (first) card,
- * as Rules has always said it ("Anyone", "Signed agents", "The record's owner, verified").
+ * (`words.tools`), else the group in the app's words; then who it is for, as Rules has always said
+ * it ("Anyone", "Signed agents", "The record's owner, verified"). Cards that can't read as one
+ * rule (`canJoin`) are refused with an error.
  */
 export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWords): RuleMeta {
   const cards = asCards(card);
@@ -290,6 +326,19 @@ export function holdSentence(cards: readonly RuleCard[]): SentencePart[] | null 
   });
   if (each.length === 0) return null;
   return merged([{ text: 'Claude asks you before ' }, ...joinRuns(each, 'or')]);
+}
+
+/**
+ * The line under `holdSentence`: the tools of the automatic cards with an amount limit, each named
+ * once, and "Anyone", since past a rule's limit the owner is asked whoever the request is from.
+ * Null when none has a limit.
+ */
+export function holdMeta(cards: readonly RuleCard[], words: SentenceWords): RuleMeta | null {
+  const limited = cards.filter((card) => limitOf(card) !== null);
+  if (limited.length === 0) return null;
+  const titles = [...new Set(limited.map((card) => toolDisplayName(card.applies_to, words.business) ?? targetWords(card.applies_to, words.business)))];
+  const named = limited.every((card) => toolDisplayName(card.applies_to, words.business) !== null);
+  return { tools: named ? { titles } : listWords(titles), who: 'Anyone' };
 }
 
 /**

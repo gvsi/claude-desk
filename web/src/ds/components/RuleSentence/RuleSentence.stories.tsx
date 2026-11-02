@@ -142,3 +142,32 @@ export const Changed: Story = {
     expectComputed(after, { borderLeftWidth: '2px', borderLeftStyle: 'solid', borderLeftColor: 'rgb(111, 168, 89)' });
   },
 };
+
+/** The same change on a phone: both lines, both outcomes under their sentences, and nothing wider than the window. */
+export const ChangedPhone: Story = {
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  render: Changed.render,
+  play: async ({ canvas, canvasElement }) => {
+    const width = window.innerWidth;
+    await expect(width).toBe(390);
+    const before = canvasElement.querySelector<HTMLElement>('.cd-rule-sentence--before');
+    const after = canvasElement.querySelector<HTMLElement>('.cd-rule-sentence--after');
+    if (!before || !after) throw new Error('no sides');
+    expectComputed(before, { borderLeftWidth: '2px', borderLeftStyle: 'solid', borderLeftColor: 'rgb(220, 130, 144)' });
+    expectComputed(after, { borderLeftWidth: '2px', borderLeftStyle: 'solid', borderLeftColor: 'rgb(111, 168, 89)' });
+    // Each side's outcome shows, stacked under its own meta line.
+    const outcomes = canvas.getAllByText('Allow');
+    await expect(outcomes).toHaveLength(2);
+    for (const side of [before, after]) {
+      const metaLine = side.querySelector<HTMLElement>('.cd-rule-sentence__meta');
+      const outcome = side.querySelector<HTMLElement>('.cd-rule-sentence__outcome');
+      if (!metaLine || !outcome) throw new Error('no meta line or outcome');
+      await expect(outcome).toBeVisible();
+      await expect(outcome.getBoundingClientRect().top).toBeGreaterThanOrEqual(metaLine.getBoundingClientRect().bottom);
+    }
+    // Nothing overflows the window, and nothing scrolls sideways.
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
+    await expect(tooWide).toEqual([]);
+  },
+};
