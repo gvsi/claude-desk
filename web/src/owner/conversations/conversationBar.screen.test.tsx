@@ -440,7 +440,8 @@ describe('the open conversation bar', () => {
     const taken = await mockStore.dispatch('takeover', { params: { session_id: DANA_LIVE }, body: { generation: chat.state.generation } });
     expect('network' in taken ? 0 : taken.status).toBe(200);
     await expect.element(takeOver).not.toBeInTheDocument();
-    await expect.element(screen.getByText("You're in this chat", { exact: true })).toBeVisible();
+    // The bar says so; the list's row may say it too once the list reads the chat again, so look in the bar.
+    await expect.poll(() => landed('.cd-conversation__bar').textContent).toContain("You're in this chat");
     // Take over went without focus on it, so focus stays where she was.
     expect(document.activeElement).toBe(receipt.element());
   });
