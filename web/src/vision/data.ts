@@ -17,6 +17,8 @@ import { VISION_ARTICLE } from '../about/links.ts';
 import type { DecisionState, PublicDesk } from '../api/contracts.ts';
 import { cardBlock, meridian, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import type { FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
+import { NO_BUSINESS_TOOLS } from '../owner/connectors/catalog.ts';
+import { heldRule } from '../owner/rules/requestRule.ts';
 
 /** Where each vision page lives (`paths.ts`). The Vision article's picture cards lead to each. */
 export { VISION_PATHS } from './paths.ts';
@@ -330,7 +332,8 @@ export const PHONE_TODAY = {
   business: rivera.business.name,
   greeting: 'Good morning, Mike',
   held: rivera.decisions.held,
-  heldBy: rivera.ruleCards['rv-quote'].reason,
+  // The rule that held it, as Today's held card names it: 15% off went past the list-price quote rule.
+  rule: heldRule({ decision: rivera.decisions.held, held_by: null }, Object.values(rivera.ruleCards), { business: NO_BUSINESS_TOOLS }) ?? undefined,
   waiting: 'Web chat, 2 min ago',
   liveTitle: 'Live now',
   live: [

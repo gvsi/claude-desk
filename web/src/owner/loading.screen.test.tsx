@@ -591,11 +591,14 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   });
   lines('.cd-things__vision .cd-skeleton-line', '.cd-things__vision', ['75%']);
   for (const child of [1, 2, 3]) lines(`.cd-today__main > .cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__main > .cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
-  lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
+  lines('[data-skeleton-anchor="held-card"] .cd-today-skeleton__approval-top .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
   lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
-  // The seed's hold went past an automatic rule's limit, so its card names no rule.
-  expect(today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__held-by')).toBeNull();
+  // The seed's hold went past an automatic rule's limit: its card names that rule in its "Your rule"
+  // box (REV-RULES-B5), its label, sentence, line and outcome drawn as shapes.
+  const ruleBox = today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__rule');
+  expect(ruleBox, 'the held card draws its rule box').not.toBeNull();
+  expect(ruleBox!.querySelectorAll('.cd-skeleton').length).toBeGreaterThanOrEqual(4);
   lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', ['100%', '100%', '75%']);
   lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', ['75%']);
   for (const child of [1, 2]) {

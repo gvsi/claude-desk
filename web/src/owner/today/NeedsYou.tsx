@@ -5,6 +5,7 @@ import { HeldRequest, type AnsweredFocus } from '../approvals/HeldRequest.tsx';
 import type { HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { ReadFailed } from '../ReadFailed.tsx';
+import type { RequestRules } from '../rules/useRequestRules.ts';
 import { heldOldestFirst } from '../useDesks.ts';
 import { useTodayNow } from './todayClock.ts';
 
@@ -31,6 +32,8 @@ export interface NeedsYouProps {
   answers: UseAnswer;
   /** When Needs you was last read (its `dataUpdatedAt`), which tells whether `held` shows a request as it stands since a conflict. */
   readAt: number;
+  /** The active rules, once read, which name the rule that held each request. */
+  rules: RequestRules | null;
   /** Called with each request's card as it mounts and unmounts, so "Open the request" and a request's address can focus it. */
   registerCard: (decisionId: string, el: HTMLElement | null) => void;
   /** `useAnsweredFocus` over `answers.answered`, kept by the page so a request's address can find its answered card. */
@@ -53,7 +56,7 @@ export interface NeedsYouProps {
  * each open handoff. A request answered here stays where it was answered, with its final line and
  * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
-export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, retryRef, sectionRef, onDismiss, onDone }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, readAt, rules, registerCard, answeredFocus, readFailure, retryRef, sectionRef, onDismiss, onDone }: NeedsYouProps) {
   const titleId = useId();
   const now = useTodayNow();
   const open = held.length + callbacks.length;
@@ -89,7 +92,7 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
             const id = item.decision.decision_id;
             return (
               <li key={id} className="cd-needs-you__item">
-                <HeldRequest item={item} answers={answers} readAt={readAt} now={now} registerCard={register}>
+                <HeldRequest item={item} answers={answers} readAt={readAt} now={now} rules={rules} registerCard={register}>
                   {answers.answered.has(id) ? (
                     <div className="cd-needs-you__dismiss">
                       <Button variant="ghost" onClick={() => dismiss(id)}>

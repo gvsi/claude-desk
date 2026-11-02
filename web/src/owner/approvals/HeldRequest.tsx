@@ -13,6 +13,8 @@ import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import { ApprovalCard, Button, Notice } from '../../ds/index.ts';
 import { aboveMoneyCapCopy, relativeWait } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { heldRule } from '../rules/requestRule.ts';
+import type { RequestRules } from '../rules/useRequestRules.ts';
 import type { AnswerDraftState, Answered, HeldItem, UseAnswer } from './useAnswer.ts';
 
 const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
@@ -22,12 +24,16 @@ export function withNoAnswers(decision: Decision): Decision {
   return { ...decision, answers: [] };
 }
 
-/** What the approval card shows about a held request beyond the decision itself, wherever it is answered. */
-export function aboutTheRequest(item: HeldItem, now: Date) {
+/**
+ * What the approval card shows about a held request beyond the decision itself, wherever it is
+ * answered. The rule that held it is named only once the active rules are read (`rules`), and only
+ * when they hold that rule (`heldRule`): never a guess.
+ */
+export function aboutTheRequest(item: HeldItem, now: Date, rules: RequestRules | null) {
   const { session } = item;
   const name = session.display_name?.trim() ? session.display_name : undefined;
   return {
-    heldBy: item.held_by ?? undefined,
+    rule: rules === null ? undefined : (heldRule(item, rules.cards, rules.words) ?? undefined),
     // Only the visitor's own words, labelled as theirs: a held request draws no AI-written summary
     // (`claude_summary`), since a visitor could steer one to sway the owner's answer. The API never
     // sends one on a held request; its `NeedsYouItem` docstring says why.
@@ -56,6 +62,8 @@ export interface HeldRequestProps {
   /** When Needs you was last read (its `dataUpdatedAt`): after a conflict, only a read since shows the request as it stands. */
   readAt: number;
   now: Date;
+  /** The active rules, once read (`useRequestRules`), which name the rule that held it. */
+  rules: RequestRules | null;
   /** Called with the card as it mounts and unmounts, so "Open the request" can focus it. */
   registerCard?: (decisionId: string, el: HTMLElement | null) => void;
   /** What follows the card once it is answered here, under the rule it drafted: Today's Dismiss. */
@@ -71,7 +79,7 @@ export interface HeldRequestProps {
  * a read since then offers; until one lands, it offers none. Focus that fell to the page as the
  * answers changed (the one pressed may no longer be offered) goes to the request, once per conflict.
  */
-export function HeldRequest({ item, answers, readAt, now, registerCard, children }: HeldRequestProps) {
+export function HeldRequest({ item, answers, readAt, now, rules, registerCard, children }: HeldRequestProps) {
   const id = item.decision.decision_id;
   const answered = answers.answered.get(id);
   const pending = answers.pending.has(id);
@@ -110,7 +118,7 @@ export function HeldRequest({ item, answers, readAt, now, registerCard, children
       {conflict !== undefined ? <Notice tone="error">{conflict.line}</Notice> : null}
       <ApprovalCard
         decision={decision}
-        {...aboutTheRequest(item, now)}
+        {...aboutTheRequest(item, now, rules)}
         onAnswer={(a) => answers.answer(item, a)}
         pending={pending}
         error={answers.errorFor(id)}

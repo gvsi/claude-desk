@@ -12,6 +12,7 @@ import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
 import { customerLink, publicLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { useRequestRules } from '../rules/useRequestRules.ts';
 import { firstName, heldOldestFirst, isLive, needsYouKey, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ContinueSetup } from './ContinueSetup.tsx';
@@ -81,6 +82,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   }, [opening, reachPlace, location.key]);
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
+  // The rules each held card names (Today opens once they are in, with a request held).
+  const rules = useRequestRules(deskId, { retryOnMount: false });
   const answers = useAnswer(deskId);
   // An answered card stays where it was answered, and focus that fell to the page follows it.
   const answeredFocus = useAnsweredFocus(answers.answered);
@@ -315,6 +318,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                 callbacks={callbacks}
                 answers={answers}
                 readAt={readAt}
+                rules={rules.rules}
                 registerCard={registerCard}
                 answeredFocus={answeredFocus}
                 readFailure={readFailure}

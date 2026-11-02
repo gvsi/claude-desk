@@ -475,14 +475,17 @@ describe('the open conversation bar', () => {
   });
 
   // After Take over, the seeded held request's card fits whole in the transcript's own region, or
-  // the open conversation scrolls as one under its bar: never a region too short for the card.
+  // the open conversation scrolls as one under its bar: never a region too short for the card. The
+  // card names its rule in a "Your rule" box, so the column scrolls as one up to a taller window.
   it.each([
     [390, 780, true],
-    [390, 860, false],
-    [390, 890, false],
-    [430, 858, false],
-    [1024, 700, true],
-    [1024, 740, false],
+    [390, 890, true],
+    [390, 960, false],
+    [430, 858, true],
+    [430, 960, false],
+    [1024, 740, true],
+    [1024, 800, false],
+    [1280, 700, true],
     [1440, 650, true],
     [1440, 740, false],
     [1440, 900, false],

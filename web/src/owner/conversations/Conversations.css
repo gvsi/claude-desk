@@ -278,16 +278,16 @@
 /* A column too short to leave the transcript room for a held request's card under the bar and
    above the owner's controls after Take over: the transcript takes its own height, and the column
    scrolls as a whole under the pinned bar, so there is one scroll region, never one inside another.
-   Measured with the app's fonts, against the pane's content box: from 1024 px the bar takes 32 px
-   of it (the rest of its 56 is the pane's top padding), the controls 214, the seeded held card 261
-   at its narrowest, the gaps 12 (16 less the transcript's 4 px margin) and the card's focus ring
-   8 more: 527 px, well inside 37.5 rem. In the single column "All conversations" and its gap take
-   34, the bar's two lines 69, the controls 214 and the card 306: 643 px, so 41 rem leaves the
-   transcript a little room to spare.
+   Measured with the app's fonts after Take over, against the open conversation's content box (its
+   height less its 44 px of padding): everything but the transcript, then the seeded held card with
+   its "Your rule" box and its 8 px focus ring. From 1280 px the card is 304 px and the column needs
+   570 px, inside 37.5 rem; from 1024 px, beside the list, the card is 376 px and the column needs
+   642 px, inside 42 rem; in the single column, from 360 px, the card is 376 px and the column needs
+   713 px, inside 46 rem.
 
    Scrolled as one, the handoff cards the chat opens at stop under the bar, with 4 px for a focus
    ring: under its 56 px from 1024 px, its 69 px under. */
-@media (min-width: 1024px) {
+@media (min-width: 1280px) {
   @container cd-open-conversation (max-height: 37.5rem) {
     .cd-conversation__scroll {
       flex: none;
@@ -300,8 +300,21 @@
   }
 }
 
+@media (min-width: 1024px) and (max-width: 1279.98px) {
+  @container cd-open-conversation (max-height: 42rem) {
+    .cd-conversation__scroll {
+      flex: none;
+      overflow: visible;
+    }
+
+    .cd-conversation__handoffs {
+      scroll-margin-top: calc(var(--size-control) + var(--space-28));
+    }
+  }
+}
+
 @media (max-width: 1023.98px) {
-  @container cd-open-conversation (max-height: 41rem) {
+  @container cd-open-conversation (max-height: 46rem) {
     .cd-conversation__scroll {
       flex: none;
       overflow: visible;

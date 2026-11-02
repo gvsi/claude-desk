@@ -132,22 +132,22 @@
   color: var(--text-secondary);
 }
 
-.cd-approval-card__held-by {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-8);
-  margin: var(--space-14) 0 0;
+/* The rule that held it, as REV-RULES-B5 draws it: a box on the card line, 12 px under what was
+   asked and 12 px over the answers, its label in secondary caption type over the rule's sentence. */
+.cd-approval-card__rule {
+  margin: var(--space-12) 0 0;
+  padding: var(--space-12);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+}
+
+.cd-approval-card__rule-label {
+  margin: 0 0 var(--space-6);
   color: var(--text-secondary);
 }
 
-/* The 16 px icon sits on the middle of the 18 px meta line. */
-.cd-approval-card__held-by-icon {
-  flex: none;
-  margin-top: 1px;
-}
-
-.cd-approval-card__rule {
-  color: var(--text-primary);
+.cd-approval-card__rule + .cd-approval-card__answers {
+  margin-top: var(--space-12);
 }
 
 /* The answers measure their own width, so a narrow card lays them out for a phone whatever the

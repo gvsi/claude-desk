@@ -29,7 +29,7 @@ import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, foc
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
-// A phone whose open conversation's pane stays under the single column's 41rem, so the pane scrolls as one.
+// A phone whose open conversation's pane stays under the single column's 46rem, so the pane scrolls as one.
 const SHORT_PHONE = { width: 390, height: 780 };
 const LA = 'America/Los_Angeles';
 const OWNER = rivera.business.ownerName;
@@ -594,7 +594,7 @@ describe('Conversations', () => {
     const chat = named(DANA_LIVE, DANA);
     lengthen(chat);
     mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
-    // A phone short enough that the open conversation's pane is under 41rem, so it scrolls as one.
+    // A phone short enough that the open conversation's pane is under 46rem, so it scrolls as one.
     const { screen } = await renderRoute(LIST, { viewport: viewport === 'phone' ? SHORT_PHONE : viewport, pollScale: 100 });
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
     await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
@@ -664,6 +664,21 @@ describe('Conversations', () => {
     await expect.element(card).not.toBeInTheDocument();
     expect(requests('needsYou').length).toBeGreaterThan(reads);
     await expect.element(log(screen).getByText('I can help with that.', { exact: true })).toBeVisible();
+  });
+
+  it('held_card_names_the_rule_that_held_it', async () => {
+    // REV-RULES-B5, as on Today: the held quote went past the list-price quote rule, so its card's
+    // "Your rule" box names that rule, led by Claude, with its tool, who and outcome; the receipt
+    // above it names the state alone, the card's headline giving the reason.
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const held = heldCard(screen, SEEDED_REASON);
+    const rule = held.getByRole('group', { name: 'Your rule', exact: true });
+    await expect.element(rule).toBeVisible();
+    expect(rule.element().textContent).toBe('Your ruleClaude asks you before any discountQuote · AnyoneAsk me first');
+    expect(rule.element().querySelector('strong')?.textContent).toBe('any discount');
+    expect(held.element().textContent).not.toContain('Held by your rule');
+    await expect.element(receipt(screen, 'Held for you')).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it('denied_request_hands_off_with_claudes_summary', async () => {
@@ -2503,7 +2518,7 @@ describe('Conversations', () => {
   it('conversations_fit_a_phone', async () => {
     const last = lengthen(named(DANA_LIVE, DANA));
     mockStore.world.addHeldRefund();
-    // A phone short enough that the open conversation's pane is under 41rem, so it scrolls as one.
+    // A phone short enough that the open conversation's pane is under 46rem, so it scrolls as one.
     const { screen, router } = await renderRoute(LIST, { viewport: SHORT_PHONE });
 
     // The list has the page to itself.

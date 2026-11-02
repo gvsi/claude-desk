@@ -56,7 +56,7 @@ function OwnerPhone() {
           <h2 className="cd-type-greeting cd-vision-phone__greeting">{PHONE_TODAY.greeting}</h2>
         </div>
         {/* A vision page sends nothing: the answers keep their look and do nothing. */}
-        <ApprovalCard decision={PHONE_TODAY.held} heldBy={PHONE_TODAY.heldBy} waiting={PHONE_TODAY.waiting} onAnswer={noop} inertAnswers />
+        <ApprovalCard decision={PHONE_TODAY.held} rule={PHONE_TODAY.rule} waiting={PHONE_TODAY.waiting} onAnswer={noop} inertAnswers />
         <section aria-labelledby={liveId}>
           <h3 id={liveId} className="cd-type-control cd-vision-phone__live-title">
             {PHONE_TODAY.liveTitle}

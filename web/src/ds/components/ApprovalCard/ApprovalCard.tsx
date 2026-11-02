@@ -12,13 +12,13 @@ import {
 } from 'react';
 
 import type { ApprovalAnswer, Decision, DecisionState } from '../../../api/contracts.ts';
-import { Icon } from '../../icons/index.tsx';
 import { Button, type ButtonVariant } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
 import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { OWNER_STATE_WORDS, receiptTone } from '../MarginReceipt/receiptTone.ts';
 import { errorCopy } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
+import { RuleSentence, type RuleSentenceProps } from '../RuleSentence/RuleSentence.tsx';
 import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
 
 import './ApprovalCard.css';
@@ -76,6 +76,15 @@ const STATUS_LINES = {
   refused: 'Your rules refused this.',
 } as const satisfies Record<DecisionState, string>;
 
+/** The label over the rule that held the request. */
+const RULE_LABEL = 'Your rule';
+
+/**
+ * The rule that held a request, as the screen words it (`heldRule`): one rule sentence led by
+ * Claude, the tools it covers and who, and its outcome. The design system words none of it.
+ */
+export type ApprovalRule = Pick<RuleSentenceProps, 'parts' | 'meta' | 'outcome'>;
+
 const SENDING_LINE = 'Sending your answer';
 const ERROR_LINE = "We couldn't confirm your answer. Try again, or reload to see where it stands.";
 
@@ -88,8 +97,12 @@ const SETTLE_SLACK_MS = 100;
 export interface ApprovalCardProps {
   /** The held request, as the kernel returned it. Its `state` and `answers` decide what the card offers. */
   decision: Decision;
-  /** The rule that held it (`NeedsYouItem.held_by`), shown as "Held by your rule: {heldBy}", in the owner's words. */
-  heldBy?: string;
+  /**
+   * The rule that held it, as REV-RULES-B5 draws it: a "Your rule" box under what was asked, with
+   * the rule's sentence, the tools it covers and who, and its outcome. Leave it out when no rule of
+   * the owner's held it (only the default ask did, or its rule has changed): there is no box then.
+   */
+  rule?: ApprovalRule;
   /**
    * One line of context in meta type; mark a visitor's own words with `data-copy="user"`. The
    * visitor's own words only: never AI-written text such as a triage summary, which a visitor could
@@ -246,7 +259,7 @@ function transitionMs(el: Element): number {
  */
 export function ApprovalCard({
   decision,
-  heldBy,
+  rule,
   context,
   waiting,
   personName,
@@ -449,7 +462,7 @@ export function ApprovalCard({
 
   const sides = sidesOf(offered);
 
-  const words = { heldBy, context, waiting };
+  const words = { rule, context, waiting };
   const regionClass = ['cd-approval-card', settle ? 'cd-approval-card--settling' : '', settle?.pulse ? 'cd-approval-card--pulse' : '']
     .filter(Boolean)
     .join(' ');
@@ -539,15 +552,28 @@ export function ApprovalCard({
 interface RequestWordsProps {
   decision: Decision;
   tone: StatusTone;
-  heldBy: string | undefined;
+  rule: ApprovalRule | undefined;
   context: ReactNode;
   waiting: string;
   /** The answered layer's status line: the one `role="status"` node, which takes focus when the answers go. */
   statusRef?: RefObject<HTMLSpanElement>;
 }
 
+/** The rule that held the request, in a box of its own under what was asked, named by its label. */
+function HeldRule({ rule }: { rule: ApprovalRule }) {
+  const labelId = useId();
+  return (
+    <div role="group" aria-labelledby={labelId} className="cd-approval-card__rule">
+      <p id={labelId} className="cd-approval-card__rule-label cd-type-caption">
+        {RULE_LABEL}
+      </p>
+      <RuleSentence {...rule} />
+    </div>
+  );
+}
+
 /** What the card says: its status line and when it was held, what was asked, and the rule that held it. */
-function RequestWords({ decision, tone, heldBy, context, waiting, statusRef }: RequestWordsProps) {
+function RequestWords({ decision, tone, rule, context, waiting, statusRef }: RequestWordsProps) {
   return (
     <>
       <div className="cd-approval-card__top cd-type-caption">
@@ -565,17 +591,7 @@ function RequestWords({ decision, tone, heldBy, context, waiting, statusRef }: R
       </div>
       <p className="cd-approval-card__reason cd-type-summary">{decision.reason_plain}</p>
       {context ? <p className="cd-approval-card__context cd-type-meta">{context}</p> : null}
-      {heldBy ? (
-        <p className="cd-approval-card__held-by cd-type-meta">
-          <Icon name="rules" size={16} className="cd-approval-card__held-by-icon" />
-          <span>
-            Held by your rule:{' '}
-            <span className="cd-approval-card__rule" data-copy="user">
-              {heldBy}
-            </span>
-          </span>
-        </p>
-      ) : null}
+      {rule === undefined ? null : <HeldRule rule={rule} />}
     </>
   );
 }

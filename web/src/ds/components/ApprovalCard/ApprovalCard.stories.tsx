@@ -6,6 +6,7 @@ import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
 import { chen, rivera } from '../../fixtures/index.ts';
 import { ANIMATION_DEADLINE_MS, animationLabel, animationWithin } from '../../test/animationWithin.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { fixtureHeldRule } from '../../test/heldRule.ts';
 import { Button } from '../Button/Button.tsx';
 import { Notice } from '../Notice/Notice.tsx';
 import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
@@ -35,6 +36,13 @@ const heldRefund = rivera.heldRefund;
 const heldConsultation = chen.heldConsultation;
 const DANA = rivera.people.dana.name;
 
+/** The held quote's rule: 15% off went past the list-price quote rule, so B5's "any discount". */
+const quoteRule = fixtureHeldRule(held);
+/** The rule box as a line: its label, the sentence, the tools and who, then the outcome. */
+const QUOTE_RULE_TEXT = 'Your ruleClaude asks you before any discountQuote · AnyoneAsk me first';
+/** The box's frame, as B5 draws it: the card line, the control radius and 12 px inside. */
+const RULE_BOX = { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.14)', borderTopLeftRadius: '8px', paddingTop: '12px', paddingLeft: '12px' };
+
 /** The visitor's own words, quoted as Plan 04's Today does, and marked as someone else's text. */
 const fromTheVisitor = (
   <>
@@ -45,20 +53,21 @@ const fromTheVisitor = (
 /** Each held request with its rule, as Today passes them, with the person's name when she is verified. */
 const consultationArgs = {
   decision: heldConsultation,
-  heldBy: chen.ruleCards['cc-consult'].reason,
+  rule: fixtureHeldRule(heldConsultation, chen.ruleCards['cc-consult'].reason, Object.values(chen.ruleCards)),
   context: undefined,
   waiting: 'Web chat, 5 min ago',
 } satisfies Partial<ApprovalCardProps>;
 const saturdayArgs = {
   decision: heldVerified,
-  heldBy: rivera.ruleCards['rv-book-sat'].reason,
+  // Past the Saturday rule's hours, not an amount or a discount, and no ask card held it: no rule box.
+  rule: undefined,
   context: undefined,
   waiting: 'Web chat, just now',
   personName: DANA,
 } satisfies Partial<ApprovalCardProps>;
 const refundArgs = {
   decision: heldRefund,
-  heldBy: rivera.ruleCards['rv-refund'].reason,
+  rule: fixtureHeldRule(heldRefund, rivera.ruleCards['rv-refund'].reason),
   context: undefined,
   waiting: 'Web chat, 1 min ago',
   personName: DANA,
@@ -125,9 +134,9 @@ async function expectAnswersInside(card: HTMLElement): Promise<void> {
   }
 }
 
-/** The card's one status dot. */
+/** The card's one status dot, on its status line (the rule box's outcome has a dot of its own). */
 function dotIn(root: HTMLElement): HTMLElement {
-  const dots = root.querySelectorAll<HTMLElement>('.cd-status-dot');
+  const dots = root.querySelectorAll<HTMLElement>('.cd-approval-card__status .cd-status-dot');
   if (dots.length !== 1) throw new Error(`expected one status dot, found ${dots.length}`);
   return dots[0] as HTMLElement;
 }
@@ -144,7 +153,7 @@ async function expectFinal(root: HTMLElement, decision: Decision, line: string, 
   await expect(card).toHaveTextContent(line);
   await expect(card).not.toHaveTextContent('Waiting for your answer');
   await expect(dotIn(card)).toHaveClass(`cd-status-dot--${tone}`);
-  await expect(card.querySelector('[role="group"]')).toBeNull();
+  await expect(card.querySelector('[role="group"][aria-label="Your answer"]')).toBeNull();
   await expect(card.querySelector('[role="menu"]')).toBeNull();
   await expect(card.querySelectorAll('button')).toHaveLength(0);
   for (const words of ANSWER_WORDS) await expect(card).not.toHaveTextContent(words);
@@ -506,7 +515,7 @@ const meta = {
   component: ApprovalCard,
   args: {
     decision: held,
-    heldBy: rivera.ruleCards['rv-quote'].reason,
+    rule: quoteRule,
     context: fromTheVisitor,
     waiting: 'Web chat, 2 min ago',
     onAnswer: fn(),
@@ -523,7 +532,7 @@ const meta = {
     layout: 'padded',
     canvas: 'N-Today-Run1',
     canvasNote:
-      "The board's held request is the Turner fixture's held quote, and its held-by line names the rule card's reason.",
+      "The board's held request is the Turner fixture's held quote. Its rule is drawn as REV-RULES-B5 draws it: a \"Your rule\" box with the rule's sentence and its outcome.",
   },
 } satisfies Meta<typeof ApprovalCard>;
 
@@ -540,10 +549,21 @@ export const TwoPlainButtons: Story = {
     await expect(card).toHaveTextContent('Waiting for your answer');
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
     await expect(canvas.getByText('Web chat, 2 min ago')).toBeVisible();
-    // The kernel's reason for the hold is in serif; the rule that held it follows.
+    // The kernel's reason for the hold is in serif; the visitor's words, then the rule that held it.
     expectComputed(canvas.getByText(held.reason_plain), { fontFamily: /Source Serif 4/, fontSize: '18px', lineHeight: '27px' });
-    await expect(card).toHaveTextContent(`Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`);
     await expect(card).toHaveTextContent('From the visitor: “How much to clear a clogged drain? Can I get 15% off if I pay cash?”');
+    // rule_box_is_b5s: "Your rule", the sentence led by Claude with its key words set off, the tool
+    // and who, and the outcome; no "Held by your rule" line.
+    const box = within(card).getByRole('group', { name: 'Your rule' });
+    await expect(box).toHaveTextContent(QUOTE_RULE_TEXT);
+    await expect(within(box).getByText('any discount').tagName).toBe('STRONG');
+    expectComputed(box, RULE_BOX);
+    expectComputed(within(box).getByText('Your rule'), { color: 'rgba(250, 249, 245, 0.64)', marginBottom: '6px' });
+    await expect(card).not.toHaveTextContent('Held by your rule');
+    const context = canvasElement.querySelector('.cd-approval-card__context')!;
+    await expect(Math.round(box.getBoundingClientRect().top - context.getBoundingClientRect().bottom)).toBe(12);
+    const row = canvasElement.querySelector('.cd-approval-card__row')!;
+    await expect(Math.round(row.getBoundingClientRect().top - box.getBoundingClientRect().bottom)).toBe(12);
 
     // only_offered_answers: one answer on each side, so two plain buttons with their full words.
     const group = canvas.getByRole('group', { name: 'Your answer' });
@@ -660,7 +680,9 @@ export const DenyMenu: Story = {
   play: async ({ canvas, canvasElement }) => {
     // Linda's card holds every booking, whoever asks, and its reason says no less.
     await expect(chen.ruleCards['cc-consult'].who).toBe('anyone');
-    await expect(canvas.getByRole('article')).toHaveTextContent('Held by your rule: Bookings wait for your answer.');
+    await expect(within(canvas.getByRole('article')).getByRole('group', { name: 'Your rule' })).toHaveTextContent(
+      'Your ruleClaude asks you before any bookingBook a visit · AnyoneAsk me first',
+    );
 
     // Allow has one answer, a plain button; Deny has two, so it opens a menu: its word, then a chevron.
     const buttons = answerButtons(canvasElement);
@@ -687,7 +709,7 @@ export const DenyMenuOpen: Story = {
   render: (args) => (
     <div style={{ display: 'grid', rowGap: 'var(--space-12)' }}>
       <ApprovalCard {...args} />
-      <ApprovalCard {...args} decision={held} heldBy={rivera.ruleCards['rv-quote'].reason} waiting="Web chat, 2 min ago" />
+      <ApprovalCard {...args} decision={held} rule={quoteRule} waiting="Web chat, 2 min ago" />
     </div>
   ),
   parameters: {
@@ -752,6 +774,9 @@ export const AllowMenu: Story = {
     expectComputed(deny, DANGER);
     await expect(new Set(tops(buttons)).size).toBe(1);
     await expect(canvas.queryByRole('menu')).toBeNull();
+    // no_rule_no_box: a hold no rule of the owner's names shows no box.
+    await expect(canvas.queryByRole('group', { name: 'Your rule' })).toBeNull();
+    await expect(canvas.getByRole('article')).not.toHaveTextContent('Your rule');
   },
 };
 
