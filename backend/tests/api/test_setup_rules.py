@@ -1116,6 +1116,46 @@ async def test_only_the_consultants_calls_at_the_test_client_offer_say_the_plan_
     assert not any(setup.SETUP_OFFER_ANSWER_LINE in request_text(request) for request in [*earlier, *later])
 
 
+async def test_a_job_turned_down_earlier_can_come_back_at_the_test_client_offer(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    owner, state = await offered(app, browser, kernel_http, model, cards=True)
+    interview_id = state["interview_id"]
+    # The plan already holds the retainer job, turned down by the owner before the plan closed.
+    earlier = ProposalCard(proposal_id="p-00000000000d", kind="job", state="declined", connector=None,
+                           job=JobProposal.model_validate({**RETAINER, "can_do_today": setup.CAPABILITIES["payment"],
+                                                           "config": {**RETAINER["config"], "amount_cents": None}}))
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id, lock=True)
+        offer = max(index for index, entry in enumerate(interview.transcript) if entry.question == setup.TEST_CLIENT)
+        interview.transcript[offer:offer] = [
+            setup.Entry(role="claude", text="", planned=[earlier.model_copy(deep=True)]),
+            setup.Entry(role="claude", text="", card=earlier.model_copy(deep=True), owner_decided=True)]
+        await setup._save(conn, interview)
+    reopened_id_first(monkeypatch)
+    model.add(consultant(REOPENED_LINE, add_jobs=[RETAINER]),
+              next_step("what_you_do", next={"kind": "job", "job": REOPENED_ID}, question=REOPENED_ASK))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                     json={"question": "test_client", "text": REQUEST})
+    assert reply.status_code == 200, reply.text
+    # Asked for again, it comes back as a new card with a new id; the earlier one stays declined.
+    shown = reply.json()
+    assert shown["pending_card"] == REOPENED_ID != earlier.proposal_id
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+    statuses = {item["id"]: item["status"] for item in setup._setup_plan(interview)["items"]}
+    assert (statuses[earlier.proposal_id], statuses[REOPENED_ID]) == ("declined", "shown")
+    # Accepted with its amount, it is one accepted job.
+    model.add(next_step("what_you_do", reply="Retainer links it is.", next={"kind": "done"}),
+              next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{REOPENED_ID}?cards=1",
+                                     json={"accept": True, "amount_cents": 25_000})
+    assert reply.status_code == 200, reply.text
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+    assert [job.title for job in setup.accepted_jobs(interview)].count(RETAINER["title"]) == 1
+
+
 async def test_an_app_named_at_the_test_client_offer_reopens_the_plan_on_its_card(
         app, browser, fake, kernel_http, model, monkeypatch):
     finished = watch_after_finish(monkeypatch)

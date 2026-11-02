@@ -644,14 +644,16 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
         assert "documents_and_payments (a limit): whether the Desk may send customers their own documents" in system
 
 
-def test_a_closed_plans_cards_stay_as_decided():
-    # Setup points an owner who wants a decided card changed back to it, but not once the plan is closed: at the
-    # test-client offer every card is closed, and no later screen changes a job.
-    assert "Once the plan is closed, its cards are closed too, so don't point to one." in SETUP_NEXT_SYSTEM
-    assert "point them to its card" in SETUP_NEXT_SYSTEM
+def test_decided_cards_stay_as_decided():
+    # No decided card can be decided again, before the plan closes or after: setup never points the owner back to one.
+    for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert "a job they accepted stays as they chose, and one they turned down can come back as a new job" in (
+            " ".join(system.split()))
+        assert "point them to its card" not in system
     for words in ("A yes to that offer puts the owner on record", "never point to a card or another place",
                   "an app it already lists can't be proposed again", "A job they turned down, or one left out, can "
-                  "come back", "If they also said yes to the offer, don't say you've added them"):
+                  "come back", "If they also said yes to the offer, don't say you've added them",
+                  "payments through Stripe can still be connected on the Tools step"):
         assert words in SETUP_OFFER_ANSWER_LINE
 
 
