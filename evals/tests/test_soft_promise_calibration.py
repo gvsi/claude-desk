@@ -194,7 +194,8 @@ def test_the_case_file_holds_every_group():
     assert Counter(c.group for c in cases) == {
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
-        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4}
+        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4,
+        "request_receipts": 20}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
@@ -202,7 +203,7 @@ def test_the_case_file_holds_every_group():
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
         "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
-        "voice_examples": {"pass": 4}}
+        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 10, "flag": 10}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
     # The voice examples quote the English system prompt; its two policy examples carry their cards.
     from desk.api.prompts import VOICE_EXAMPLES
@@ -278,6 +279,34 @@ def test_the_case_file_holds_every_group():
     # the file holds the replies' text and cards: no path, and nothing that names a session
     text = CASES_FILE.read_text(encoding="utf-8")
     assert not re.search(r"/(?:Users|private|tmp|home|var)/|session_id", text)
+
+
+def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
+    """The session's request receipts reach the check after the reply's cards, each as the kernel's receipt
+    label and a decision's status line in the case's language (`render.receipt_check_text`), so each case
+    holds the receipt it leans on as the kernel would send it, and its other cards with their kinds' labels."""
+    from desk.kernel_service.render import receipt_check_text
+
+    cases = {c.id: c for c in load_cases(CASES_FILE) if c.group == "request_receipts"}
+    status = {"en": render_en.STATUS, "es": render_es.STATUS}
+    receipts = {receipt_check_text(status[language][key].format(owner="Mike Turner")): language
+                for language in ("en", "es") for key in ("held", "cancelled")}
+    for case_ in cases.values():
+        assert [receipts[card] for card in case_.cards if card in receipts] == [case_.language], case_.id
+        assert all(card in receipts or card.startswith("Booking confirmed card: ") for card in case_.cards), case_.id
+        assert not code_blocked(case_), case_.id
+    # the held status line alone backs saying the request waits for approval, in each language
+    held = {language: receipt_check_text(status[language]["held"].format(owner="Mike Turner"))
+            for language in ("en", "es")}
+    assert held == {"en": "Request receipt card: Waiting for Mike Turner to approve",
+                    "es": "Request receipt card: Esperando la aprobación de Mike Turner"}
+    assert {(c.language, c.prose, c.expected): c.cards for c in cases.values() if c.id.endswith("waiting-approval")} == {
+        ("en", "This is waiting for approval; you can see where it stands in this chat.", "pass"): [held["en"]],
+        ("es", "Esto está esperando aprobación; puede consultar su estado en este chat.", "pass"): [held["es"]]}
+    # a cancelled request's receipt backs that it closed, beside the booking that closed it, and no promise
+    closed = [c for c in cases.values() if c.cards[-1].endswith(("Cancelled", "Cancelado"))]
+    assert sorted((c.language, c.expected, len(c.cards)) for c in closed) == [
+        ("en", "flag", 1), ("en", "pass", 2), ("es", "flag", 1), ("es", "pass", 2)]
 
 
 def uncovered(cases: list[Case], expected: tuple[str, ...] = ("flag", "flag_ai")) -> set[tuple[str, str]]:
