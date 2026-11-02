@@ -111,7 +111,7 @@ export function useToday(deskId: string, { retryOnMount = true }: ReadOptions = 
 export function useNeedsYou(deskId: string, { retryOnMount = true, readOnOpen = false }: ReadOptions & { readOnOpen?: boolean } = {}) {
   const queryClient = useQueryClient();
   // The Desk whose Needs you this page has read as it opened: StrictMode runs the effect below twice
-  // for one opening, and the second run joins the first run's read rather than cancel it for another.
+  // for one opening, and the second run must not cancel that opening's read for another.
   const opened = useRef<string | null>(null);
   // Declared before the query, so it runs before the page subscribes to it (a component's effects
   // run in order): the cancel below can only reach a read sent before the page opened.
@@ -122,9 +122,10 @@ export function useNeedsYou(deskId: string, { retryOnMount = true, readOnOpen = 
       opened.current = deskId;
       void queryClient.cancelQueries({ queryKey: key, exact: true });
     }
-    // The page's own read. With nothing read yet, React Query leaves the query to the page's
-    // subscription just after, which sends it. StrictMode's second run joins the read the first run
-    // sent, which puts back the retries its rehearsed unmount stopped.
+    // The page's own read. With a read kept, it goes out here, and StrictMode's second run joins it,
+    // which puts back the retries its rehearsed unmount stopped. With nothing read yet, React Query
+    // leaves the query to the page's subscription just after, which sends the read, and StrictMode's
+    // second subscription joins it.
     void queryClient.refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: false });
   }, [readOnOpen, queryClient, deskId]);
   return useQuery({

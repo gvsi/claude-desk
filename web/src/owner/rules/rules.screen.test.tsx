@@ -1567,8 +1567,9 @@ describe("Ask Claude's question about a hold", () => {
   });
 
   it('hold_question_does_not_use_a_read_sent_on_today', async () => {
-    // A poll on Today is still out as the owner moves to Rules, and the quote is answered meanwhile.
-    // When the poll comes back, its answer, from before Rules opened, asks nothing about the quote.
+    // A poll on Today is still out as the owner moves to Rules. Meanwhile the quote is answered and
+    // Dana's refund held. When the poll comes back, its answer, from before Rules opened, asks
+    // nothing about the quote; Rules' own read, once it comes back, asks about the refund.
     const { screen, router } = await renderRoute(`${DESK}/today`);
     await expect.element(screen.getByRole('region', { name: 'Needs you' })).toBeVisible();
     const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
@@ -1581,6 +1582,7 @@ describe("Ask Claude's question about a hold", () => {
     const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
     if (!held) throw new Error('the seed holds a quote');
     mockStore.world.answer(held, 'deny_once');
+    mockStore.world.addHeldRefund();
 
     const current = holdNeedsYou();
     let answered = 0;
@@ -1594,11 +1596,9 @@ describe("Ask Claude's question about a hold", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
 
-    // Rules' own read, once it comes back, finds the quote answered.
     current.release();
-    await expect.poll(() => answered).toBeGreaterThan(1);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+    await expect.element(group.getByRole('button', { name: 'Why was this refund held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this refund held?']);
   });
 
   it('hold_question_goes_while_needs_you_cannot_be_read', async () => {
