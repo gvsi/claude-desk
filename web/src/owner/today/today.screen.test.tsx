@@ -401,6 +401,32 @@ describe('Today', () => {
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
   });
 
+  it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
+    // The greeting says the owner's first name after the time of day. An owner who gave no name has
+    // setup's fallback, "Owner", in its place, and a blank name is none either: the greeting then
+    // names no one, rather than greeting them as "Owner" or ending on a comma.
+    const greeting = (screen: RenderResult) => screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening)/ });
+    const seen = [];
+
+    const { screen: named } = await renderRoute(TODAY);
+    await expect.element(greeting(named)).toBeVisible();
+    seen.push(greeting(named).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+    await cleanup();
+
+    const { deskId } = await liveSetupDeskIds('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const { screen: fallback } = await renderRoute(`/app/${deskId}/today`);
+    await expect.element(greeting(fallback)).toBeVisible();
+    seen.push(greeting(fallback).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+    await cleanup();
+
+    await injectToday((today) => ({ ...today, greeting_name: '  ' }));
+    const { screen: empty } = await renderRoute(TODAY);
+    await expect.element(greeting(empty)).toBeVisible();
+    seen.push(greeting(empty).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+
+    expect(seen).toEqual(['Good …, Mike', 'Good …', 'Good …']);
+  });
+
   it('reload_opens_today_drawn', async () => {
     // Opened at Today's address, as a reload does, the owner's loading page stays until what Today
     // first shows is read too, and Today then opens drawn: one loading step, never the frame with
