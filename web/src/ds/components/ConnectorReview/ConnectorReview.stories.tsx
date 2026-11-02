@@ -276,6 +276,16 @@ export const BusinessJobPhone: Story = {
   },
 };
 
+/** Setup's line for a job the owner chose to let run on its own, in place of the no-rule line, beside what stays true. */
+async function expectChosenOnItsOwn({ canvas }: { canvas: ReturnType<typeof within> }) {
+  const tools = canvas.getByRole('region', { name: 'Tools' });
+  await expect(within(tools).getByText(SETUP_COPY.tools.chosenOnItsOwn, { exact: true })).toBeVisible();
+  await expect(within(tools).queryByText(/No rule of yours/)).toBeNull();
+  // Both still true until the rules are confirmed: the badge and the owner's next step.
+  await expect(within(tools).getByText('Ask me first', { exact: true })).toBeVisible();
+  await expect(within(canvas.getByRole('region', { name: 'How it’s set up' })).getByText('You approve each request in Needs you')).toBeVisible();
+}
+
 /**
  * A job the owner chose in setup to let run on its own. It still starts at Ask me first, since its
  * own rule comes from the card the owner confirms at the Rules step, and setup's line says so in
@@ -290,18 +300,21 @@ export const BusinessJobChoseOnItsOwn: Story = {
   },
   play: async (context) => {
     await BusinessJob.play?.(context);
-    const tools = context.canvas.getByRole('region', { name: 'Tools' });
-    await expect(within(tools).getByText(SETUP_COPY.tools.chosenOnItsOwn, { exact: true })).toBeVisible();
-    await expect(within(tools).queryByText(/No rule of yours/)).toBeNull();
-    // Both still true until the rules are confirmed: the badge and the owner's next step.
-    await expect(within(tools).getByText('Ask me first', { exact: true })).toBeVisible();
-    await expect(within(context.canvas.getByRole('region', { name: 'How it’s set up' })).getByText('You approve each request in Needs you')).toBeVisible();
+    await expectChosenOnItsOwn(context);
   },
 };
 
 export const BusinessJobChoseOnItsOwnPhone: Story = {
   ...BusinessJobChoseOnItsOwn,
   globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'No board draws this line yet; the nearest is the signed D4 board p09-d4review-390, whose no-rule line it replaces for a job the owner chose to let run on its own.',
+  },
+  play: async (context) => {
+    await BusinessJobPhone.play?.(context);
+    await expectChosenOnItsOwn(context);
+  },
 };
 
 const intakeQuestions: [string, string, string] = ['Which tax year is this for?', 'Is it for a business?', 'Who did your books last year?'];
@@ -321,6 +334,8 @@ export const IntakeJob: Story = {
     const list = setup.querySelector('dd > ol');
     await expect(list).not.toBeNull();
     await expect([...list!.querySelectorAll('li')].map((item) => item.textContent)).toEqual(intakeQuestions);
+    // With no line of the screen's own, the job keeps the no-rule line.
+    await expect(within(canvas.getByRole('region', { name: 'Tools' })).getByText('No rule of yours covers this yet, so it starts at Ask me first.', { exact: true })).toBeVisible();
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };
