@@ -1105,8 +1105,8 @@ def call_back_offer(language: render.Language) -> RenderedBlock:
 
 
 def status_line(language: render.Language) -> RenderedBlock:
-    """The status line: "Please check the request status in this chat." in the reply's language, as
-    prose the kernel writes (the API's signed `STATUS_LINES["check_status"]`)."""
+    """The status line: "This is waiting for approval; you can see where it stands in this chat." in the reply's
+    language, as prose the kernel writes (the API's signed `STATUS_LINES["check_status"]`)."""
     return RenderedBlock(kind="prose", text=render.status("check_status", language))
 
 

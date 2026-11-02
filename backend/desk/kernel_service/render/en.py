@@ -86,7 +86,7 @@ MESSAGES: dict[str, str] = {
     "inbox_code_body": ("Your {business} code is {code}. It expires in ten minutes. "
                         "If you didn't ask for it, ignore this message."),
     "offer_callback": "Would you like me to arrange a callback?",
-    "check_status": "Please check the request status in this chat.",
+    "check_status": "This is waiting for approval; you can see where it stands in this chat.",
 }
 
 # Owner-only, in English: the preview line of a Demo inbox alert.
