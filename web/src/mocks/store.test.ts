@@ -1359,6 +1359,35 @@ describe('the scripted Desk', () => {
     expect((await read())?.held_by).toBe(defaultAsk.reason);
   });
 
+  it.each(['changed', 'removed'] as const)('held_by_keeps_the_deciding_version_when_the_rule_is_%s', async (change) => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    const competing: RuleCard = {
+      card_id: 'a-refund-effect', applies_to: 'effect:pay_out', mode: 'ask', who: 'anyone',
+      reason: 'Payouts ask first.',
+    };
+    const initial = world.draft(main, [competing]);
+    expect(world.confirmDraft(main, initial.version)).toMatchObject({ version: initial.version });
+    const refundRule = main.policy.cards.find((card) => card.card_id === 'rv-refund')!;
+    const refund = world.addHeldRefund();
+    // All matching hold cards are stored; the tool card outranks the effect card.
+    refund.card_ids = [competing.card_id, refundRule.card_id];
+    expect(refund.policy_version).toBe(initial.version);
+    const read = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+        (item) => item.decision?.decision_id === refund.decision_id,
+      );
+    expect((await read())?.held_by).toBe(refundRule.reason);
+
+    const next = world.draftCards(main, main.policy.cards.flatMap((card) =>
+      card.card_id !== refundRule.card_id ? [card] : change === 'removed' ? [] : [{ ...card, reason: 'New refund rule.' }],
+    ));
+    expect(world.confirmDraft(main, next.version)).toMatchObject({ version: initial.version + 1 });
+
+    expect((await read())?.decision?.state).toBe('held');
+    expect((await read())?.held_by).toBe(refundRule.reason);
+  });
+
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
     // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
     // kernel's handoff, which its check stops as paused (`session_paused`, no attempt anyone made)

@@ -1460,6 +1460,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
   const desk: DeskRecord = {
     summary: { desk_id: deskId, slug: slugFor(world, business), name: 'Main line', business_name: business, hours: [], answering: false },
     policy: firstVersion(deskId),
+    versions: new Map(),
     ledger: [],
     openStatus: null,
     drafts: new Map(),

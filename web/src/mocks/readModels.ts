@@ -350,7 +350,7 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
         item: {
           decision: d.decision,
           handoff: null,
-          held_by: holdingCard(desk.policy.cards, d.decision.card_ids)?.reason ?? null,
+          held_by: holdingCard(desk.versions.get(d.decision.policy_version) ?? desk.policy.cards, d.decision.card_ids)?.reason ?? null,
           held_at: isoTime(d.createdAt),
           session: needsYouSession(session, d.decision.session_id),
           from_the_visitor: fromTheVisitor(session),

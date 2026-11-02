@@ -134,6 +134,8 @@ export interface DeskRecord {
   summary: Omit<DeskSummary, 'setup'>;
   /** The active rules version, with its money cap. */
   policy: PolicyVersionOut;
+  /** Confirmed versions' cards, retained for decisions made before the active rules changed. */
+  versions: Map<number, RuleCard[]>;
   ledger: LedgerEntry[];
   /** The kernel's open status for the Desk's public page, by language; null when it makes no claim. */
   openStatus: Record<Language, OpenStatus> | null;
@@ -373,6 +375,7 @@ export class MockWorld {
       brand: { ...BUSINESS.brand },
       summary: { ...summary, business_name: BUSINESS.name, answering: true },
       policy,
+      versions: new Map(),
       ledger: [],
       openStatus,
       drafts: new Map(),
@@ -1243,6 +1246,7 @@ export class MockWorld {
   /** Adds `cards` to the Desk's active rules, as if the owner had confirmed them earlier. */
   addActiveRules(desk: DeskRecord, cards: readonly RuleCard[]): void {
     desk.policy = { ...desk.policy, cards: [...desk.policy.cards, ...cards.map((card) => ({ ...card }))] };
+    desk.versions.set(desk.policy.version, structuredClone(desk.policy.cards));
   }
 
   /**
@@ -1338,7 +1342,10 @@ export class MockWorld {
       return tool === undefined || entry.definition_sha256 !== listedHash(tool);
     });
     if (drifted) return 'conflict';
+    // Preserve the seeded active version too, before its first replacement.
+    desk.versions.set(desk.policy.version, structuredClone(desk.policy.cards));
     desk.policy = this.versionOf(desk, record, 'active');
+    desk.versions.set(version, structuredClone(desk.policy.cards));
     desk.drafts.delete(version);
     for (const entry of record.enables) {
       desk.tools = desk.tools.map((tool) =>
