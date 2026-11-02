@@ -892,9 +892,11 @@ async def mark_read(session_id: SessionId, body: ReadThroughIn,
     """The owner has seen the conversation through the transcript cursor `through` (the `n` of the last item their
     screen showed): its read marker moves there, held at the session's newest row, and never moves back, so a stale or
     replayed call marks nothing unread again and a message that arrived after the screen drew stays unread. A session
-    that isn't a visitor's or an agent's on one of the copy's Desks is 404. No kernel call and no ledger entry: the
-    marker is the API's own row, for the owner's reads alone."""
+    that isn't a visitor's or an agent's on one of the copy's Desks is 404, and so is the owner's own preview, which is
+    never unread. No kernel call and no ledger entry: the marker is the API's own row, for the owner's reads alone."""
     ids = await _conversation(ctx, session_id)
+    if (await ctx.ro.session(session_id))["preview"]:
+        raise ApiProblem(404, "not_found")
     conn = ctx.ro.conn
     try:
         await conversation_reads.mark_read(conn, ids, body.through)

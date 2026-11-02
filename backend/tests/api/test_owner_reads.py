@@ -1914,6 +1914,9 @@ async def test_another_copys_conversation_is_not_found_and_a_preview_is_never_un
         (True, False)]
     assert await unread(scene.owner) == set()
     assert await unread_count(scene.owner) == 0
+    refused = await mark_read(scene.owner, preview.session_id, 10**6)   # nor can it be marked read
+    assert (refused.status_code, refused.json()) == (404, {"error": "not_found"})
+    assert db.execute("SELECT count(*) FROM app.conversation_reads").fetchone() == (0,)
 
 
 async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
