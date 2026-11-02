@@ -633,13 +633,18 @@ const SERVED: ServedRoutes = {
     if (isFailure(session)) return session;
     if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
     const state = sv.world.handBack(session);
-    // A line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and an
-    // agent's on its next request, the only time an agent's turn runs. With no such line, a code the visitor
-    // confirmed meanwhile has Claude go on with what they asked for, once.
+    // A code the visitor confirmed while the owner had the chat has Claude go on with what they asked for,
+    // as the API's note tells it to, whatever they wrote since. It's used up once that turn starts: a
+    // take-over before then fences the turn off and leaves the code for the next hand-back. Otherwise a
+    // line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and
+    // an agent's on its next request, the only time an agent's turn runs.
     const waiting = waitingLine(session);
-    const verified = VERIFIED_WHILE_TAKEN_OVER.delete(session);
-    if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
-    else if (verified) sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
+    if (VERIFIED_WHILE_TAKEN_OVER.has(session)) {
+      sv.runTurn(session, () => {
+        VERIFIED_WHILE_TAKEN_OVER.delete(session);
+        return afterVerify(hasAllTools(sv.world, session));
+      }, session.language, '');
+    } else if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
     return ok(state);
   },
   resume(sv, req) {

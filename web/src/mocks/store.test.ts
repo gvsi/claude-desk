@@ -2023,6 +2023,28 @@ describe('the owner in the chat', () => {
     expect(typesOf(events.slice(again))).toEqual(['owner_joined', 'owner_left']);
   });
 
+  it('a_code_held_for_the_hand_back_survives_a_take_over_before_its_turn_and_comes_before_a_waiting_line', async () => {
+    // The owner takes the chat back before Claude's turn starts: that turn never runs, and the next
+    // hand-back has the code still. A line the visitor wrote meanwhile doesn't use it up: Claude goes
+    // on with the invoice, once.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    const at = (step: number) => ({ params: { session_id: session.session_id }, body: { generation: session.generation + step } });
+    expect((await call('takeover', at(0))).status).toBe(200);
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await send('Did it work?');
+    const before = events.length;
+    expect((await call('handback', at(1))).status).toBe(200);
+    expect((await call('takeover', at(2))).status).toBe(200);
+    await drain();
+    expect((await call('handback', at(3))).status).toBe(200);
+    await drain();
+    const replies = events.slice(before).flatMap(([, ev]) => (ev.type === 'message' ? [ev.blocks.map((b) => b.template)] : []));
+    expect(replies.filter((templates) => templates.includes('document_link'))).toHaveLength(1);
+    expect(replies).toHaveLength(1);
+  });
+
   it('a_code_confirmed_in_a_paused_chat_gets_the_kernels_handoff', async () => {
     // As a message in a paused chat: no "writing" and no invoice, only the kernel's handoff card.
     const { session, events } = await openChat();
