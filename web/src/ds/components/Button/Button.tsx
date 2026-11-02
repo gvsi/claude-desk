@@ -16,7 +16,9 @@ const BUSY_SPINNER = <Spinner className="cd-button__spinner" />;
 interface ButtonBaseProps {
   /**
    * `primary` (inverted neutral, at most one per view), `secondary` or `ghost`; `danger` (a soft red
-   * fill) and `danger-ghost` (red words only) only for answers that refuse, such as "Deny this time".
+   * fill) for refusals ("Deny this time") and deletes that cannot be undone ("Delete this Desk",
+   * "Delete Desk"); `danger-ghost` (red words only) for quieter refusals. The owner decision of
+   * 2026-11-02 replaces the earlier neutral-delete rule.
    */
   variant: ButtonVariant;
   /** `inline` is `size-control` tall (the default); `main` is `size-control-main`, a screen's main action. */

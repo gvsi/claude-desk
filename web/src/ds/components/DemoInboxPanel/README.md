@@ -5,7 +5,7 @@
 ## When to use
 
 - Beside a visitor's chat, with `viewer="visitor"`, so they can read the code the Desk sent to the contact on record.
-- With `viewer="owner"`, for codes, alerts and ledger checkpoints across the demo copy, as the owner's sheet board draws it. The owner app's Notifications page draws the same entries as page rows of its own.
+- With `viewer="owner"`, for codes, alerts and ledger checkpoints across the demo copy, as the owner's sheet board draws it. The owner app's Notifications page draws the same entries as page rows of its own, except ledger checkpoints, which the owner app leaves out (its `ownerInboxQuery`).
 - Not for chat messages or checkpoint results. Those are messages and margin receipts.
 
 ## What it shows
