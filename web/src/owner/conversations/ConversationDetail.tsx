@@ -31,6 +31,7 @@ import {
 } from '../../ds/index.ts';
 import { fillComposer } from '../../lib/composer.ts';
 import { formatStarted } from '../../lib/format.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
@@ -146,6 +147,9 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
 
 export function ConversationDetail({ sessionId, summary, listRead, notice, sampleDesk, demoVisitorRun = null }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
+  // Who the owner is in this chat's lines ("{owner} joined the chat", "{owner} said") and on their own
+  // messages' avatar: their name, or the business's when they gave none (owner, 2026-11-02).
+  const ownerShown = givenOwnerName(business.owner_display_name) ?? business.name;
   const deskId = desk.desk_id;
   const titleId = useId();
   const nameRef = useRef<HTMLHeadingElement>(null);
@@ -442,7 +446,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
             items={read.items}
             focusTarget={transcriptRef}
             agentName={who}
-            ownerName={business.owner_display_name}
+            ownerName={ownerShown}
             timezone={business.timezone}
             deskId={deskId}
             heldIds={heldIds}
@@ -466,7 +470,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
           <TakeOverBar
             mode={state.mode}
             visitorName={who}
-            ownerName={business.owner_display_name}
+            ownerName={ownerShown}
             agent={state.kind === 'agent'}
             takeOverAbove
             offerTakeOver={!demoEnded}
