@@ -2,7 +2,7 @@ import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 
-import { AdvancedDetails, type AdvancedDetailsProps } from './AdvancedDetails.tsx';
+import { AdvancedDetails, DetailsSlot, type AdvancedDetailsProps } from './AdvancedDetails.tsx';
 
 const RULE: Omit<AdvancedDetailsProps, 'children'> = {
   fields: [
@@ -37,4 +37,19 @@ it('collapsed_by_default_with_the_button_where_the_row_puts_it', () => {
   expect(panel.hasAttribute('hidden')).toBe(true);
   expect(panel.textContent).toBe('');
   expect(el.textContent).not.toContain('rv-link');
+});
+
+it('a_row_without_details_keeps_an_empty_slot_its_width', () => {
+  // REV-RULES-D v351: every status dot sits in one column just left of Details, so a row with no
+  // Details (an always-on rule) keeps an empty slot the button's width: drawn as the button is, but
+  // unseen, unread and never focused.
+  const host = document.createElement('div');
+  host.innerHTML = renderToStaticMarkup(createElement(DetailsSlot));
+  const slot = host.firstElementChild!;
+  expect(slot.getAttribute('aria-hidden')).toBe('true');
+  expect(slot.classList.contains('cd-advanced-details__toggle')).toBe(true);
+  expect(slot.classList.contains('cd-advanced-details__slot')).toBe(true);
+  expect(slot.classList.contains('cd-type-control')).toBe(true);
+  expect(slot.textContent).toBe('Details');
+  expect(host.querySelector('button, a, [tabindex]')).toBeNull();
 });

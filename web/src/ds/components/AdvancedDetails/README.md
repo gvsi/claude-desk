@@ -27,6 +27,11 @@
   - The tint: keys in `accent-blue`, strings in `text-primary`, numbers, booleans and null in `text-secondary`, and punctuation in `text-tertiary`. No status color, since nothing in the block is a verdict. Every pair reads 4.5:1 on `fill-secondary` over `bg-surface` (`contrast.ts`).
 - **After a press:** CopyField's line: "Copied.", or "Copy didn’t work. The text is selected, so copy it yourself." with the block's text selected (`useCopyText`, `copyResultLine`). It sits beside the Copy button, as a `status`, and only the latest copy on the page shows it.
 
+## A row without Details
+
+- `DetailsSlot` is the place Details takes, left empty, for a row that has none, such as an always-on rule or "Anything not listed here". Every status dot then sits in one column just left of Details, as REV-RULES-D v351 draws it.
+- It is drawn as the button is, with the same words and chevron, so it is the same width, but it is `visibility: hidden` and `aria-hidden`: never seen, read or focused.
+
 ## The JSON
 
 - `jsonText(value)` gives a 2-space indent and one field per line. A list of plain values stays on one line (`["charge"]`); a list holding objects or lists puts one entry per line.
@@ -42,3 +47,5 @@
 | `code` | `DetailsCode` | `{ label: string; value: unknown }`. Left out, no block is drawn. |
 | `onCopy` | `(text: string) => Promise<void> \| void` | Required. Copies the block's text. |
 | `describedBy` | `string` | The id of the row's words. |
+
+`DetailsSlot` takes no props.

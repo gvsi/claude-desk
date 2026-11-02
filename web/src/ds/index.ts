@@ -253,7 +253,7 @@ export { RuleRow, ruleWordsLine, type RuleRowProps, type RuleWord } from './comp
 export { ToolTitleList, type ToolTitles } from './components/RuleRow/ToolTitles.tsx';
 export { RuleSentence, type RuleMeta, type RuleSentenceProps, type SentencePart } from './components/RuleSentence/RuleSentence.tsx';
 export { EffectTags, effectTags, type EffectTagsProps } from './components/EffectTags/EffectTags.tsx';
-export { AdvancedDetails, type AdvancedDetailsProps, type DetailsCode, type DetailsField } from './components/AdvancedDetails/AdvancedDetails.tsx';
+export { AdvancedDetails, DetailsSlot, type AdvancedDetailsProps, type DetailsCode, type DetailsField } from './components/AdvancedDetails/AdvancedDetails.tsx';
 export { jsonText } from './components/AdvancedDetails/detailsJson.ts';
 export { PersonRules, type PersonRuleView, type PersonRulesProps } from './components/PersonRules/PersonRules.tsx';
 export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';

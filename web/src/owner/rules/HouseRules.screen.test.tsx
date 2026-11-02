@@ -171,6 +171,10 @@ it.each(['desktop', 'phone'] as const)('at %s, every tool and rule has Details, 
   expect(toggles).toHaveLength(rows);
   expect(toggles.every((toggle) => toggle.getAttribute('aria-expanded') === 'false')).toBe(true);
   expect(screen.container.querySelector('.cd-advanced-details__panel')).toBeNull();
+  // Every rule's status dot sits in one column, just left of its Details (REV-RULES-D v351).
+  const dots = [...screen.container.querySelectorAll('.cd-house-rules__rule-actions > .cd-status-dot')];
+  expect(new Set(dots.map((dot) => Math.round(dot.getBoundingClientRect().left))).size).toBe(1);
+  expect(new Set(toggles.map((toggle) => Math.round(toggle.getBoundingClientRect().right))).size).toBe(1);
 
   // A tool's Details follows its title; Enter opens its panel above its rules, Space closes it.
   const toolToggle = link.element().querySelector<HTMLElement>('.cd-house-rules__tool-header > button')!;

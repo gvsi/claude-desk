@@ -39,6 +39,27 @@ export interface AdvancedDetailsProps {
   children: (toggle: ReactElement) => ReactNode;
 }
 
+/** The button's words and chevron, shared by the button and the empty slot, so both are one width. */
+const TOGGLE_FACE = (
+  <>
+    Details
+    <Icon name="chevron-right" size={14} className="cd-advanced-details__chevron" />
+  </>
+);
+
+/**
+ * The place a row's Details takes, left empty, for a row that has none (an always-on rule): every
+ * status dot then sits in one column just left of Details (REV-RULES-D v351). It is drawn as the
+ * button is but unseen, so it is never read or focused.
+ */
+export function DetailsSlot() {
+  return (
+    <span className="cd-advanced-details__toggle cd-advanced-details__slot cd-type-control" aria-hidden="true">
+      {TOGGLE_FACE}
+    </span>
+  );
+}
+
 /** The pretty JSON, tinted by token: keys, strings, other values and punctuation; the layout stays plain text. */
 function JsonBlock({ label, value, onCopy }: DetailsCode & Pick<AdvancedDetailsProps, 'onCopy'>) {
   const labelId = useId();
@@ -83,8 +104,7 @@ export function AdvancedDetails({ fields, code, onCopy, describedBy, children }:
       aria-describedby={describedBy}
       onClick={() => setOpen((was) => !was)}
     >
-      Details
-      <Icon name="chevron-right" size={14} className="cd-advanced-details__chevron" />
+      {TOGGLE_FACE}
     </button>
   );
   return (

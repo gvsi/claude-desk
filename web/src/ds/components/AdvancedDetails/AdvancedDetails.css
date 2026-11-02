@@ -18,6 +18,12 @@
   transition: background-color var(--motion-instant) var(--motion-ease);
 }
 
+/* A row with no Details keeps its place, empty, so its dot lines up with the others'. */
+.cd-advanced-details__slot {
+  visibility: hidden;
+  cursor: default;
+}
+
 /* Open, it keeps the hover fill, so the panel under the row reads as its own. */
 .cd-advanced-details__toggle:hover,
 .cd-advanced-details__toggle[aria-expanded='true'] {

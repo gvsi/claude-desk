@@ -3,7 +3,7 @@ import { expect, fn, waitFor } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
 import { StatusDot, StatusLabel } from '../StatusDot/StatusDot.tsx';
-import { AdvancedDetails, type AdvancedDetailsProps } from './AdvancedDetails.tsx';
+import { AdvancedDetails, DetailsSlot, type AdvancedDetailsProps } from './AdvancedDetails.tsx';
 import { jsonText } from './detailsJson.ts';
 
 /** REV-RULES-D's Payment link, as Your tools lists it. */
@@ -173,5 +173,47 @@ export const Phone: Story = {
     const pre = canvasElement.querySelector<HTMLElement>('pre')!;
     await expect(pre.scrollWidth).toBeGreaterThan(pre.clientWidth);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
+  },
+};
+
+/** v351: a row with no Details (an always-on rule) keeps the slot empty, so every dot sits in one column. */
+export const DotsInOneColumn: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  render: (args) => {
+    const row = { display: 'flex', alignItems: 'center', gap: 'var(--space-12)', padding: 'var(--space-8) 0' } as const;
+    const end = { display: 'flex', alignItems: 'center', gap: 'var(--space-8)' } as const;
+    const words = { flex: 1, minWidth: 0, margin: 0, color: 'var(--text-secondary)' } as const;
+    return (
+      <ul role="list" style={{ maxWidth: 738, margin: 0, padding: 0, listStyle: 'none' }}>
+        <li>
+          <AdvancedDetails {...RULE} onCopy={args.onCopy}>
+            {(toggle) => (
+              <div style={row}>
+                <p id="story-rule" className="cd-type-body" style={words}>Claude can send payment links up to <strong>$300</strong></p>
+                <span style={end}><StatusDot tone="handled" />{toggle}</span>
+              </div>
+            )}
+          </AdvancedDetails>
+        </li>
+        <li>
+          <div style={row}>
+            <p className="cd-type-body" style={words}>Claude never says it’s anything but an AI</p>
+            <span style={end}><StatusDot tone="refused" /><DetailsSlot /></span>
+          </div>
+        </li>
+      </ul>
+    );
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const toggle = canvas.getByRole('button', { name: 'Details' });
+    const slot = canvasElement.querySelector<HTMLElement>('.cd-advanced-details__slot')!;
+    // The slot is the button's width and height, unseen and out of the accessibility tree.
+    await expect(slot.getBoundingClientRect().width).toBe(toggle.getBoundingClientRect().width);
+    await expect(slot.getBoundingClientRect().height).toBe(toggle.getBoundingClientRect().height);
+    expectComputed(slot, { visibility: 'hidden' });
+    await expect(canvas.getAllByRole('button')).toHaveLength(1);
+    // So the two dots share one column.
+    const [first, second] = [...canvasElement.querySelectorAll('.cd-status-dot')].map((dot) => dot.getBoundingClientRect().left);
+    await expect(first).toBe(second);
   },
 };
