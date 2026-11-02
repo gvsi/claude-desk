@@ -576,6 +576,12 @@ class Interview:
         return sum(entry.reopen_key is not None for entry in self.transcript)
 
     @property
+    def reopening(self) -> bool:
+        """Whether the turn running now is the change that reopened the questions: its owner's message, staged and
+        still pending, carries the send's key."""
+        return any(entry.pending is not None and entry.reopen_key is not None for entry in self.transcript)
+
+    @property
     def connected_apps(self) -> list[ConnectorKey]:
         """The simulated apps kept with the owner's opening description, absent on older interviews."""
         if not self.transcript:
@@ -2242,15 +2248,15 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
 
 
 def _next_ask(interview: Interview, source, available: list[ProposalCard]) -> QuestionKey | ProposalCard | None:
-    """Honor one fitting ask, otherwise ordinary topics first, then the hidden plan in order. Once "Change something"
-    reopened the questions (`reopen`), a topic covered before can be asked again when Claude names it, but for the one
-    being answered, so a change reaches the question that records it."""
+    """Honor one fitting ask, otherwise ordinary topics first, then the hidden plan in order. On the turn of the change
+    that reopened the questions (`reopen`) alone, a topic covered before can be asked again when Claude names it, but
+    for the one being answered, so a change reaches the question that records it; the turns after it ask none again."""
     unshown = [card for card in available if card.proposal_id not in interview.dropped] if interview.shows_cards else []
     proposed = source.next if source is not None else None
     if proposed is not None:
         answering = interview.latest_ask.question if interview.latest_ask is not None else None
         if proposed.kind == "topic" and (proposed.topic not in interview.covered
-                                         or (interview.reopens and proposed.topic != answering)):
+                                         or (interview.reopening and proposed.topic != answering)):
             return proposed.topic
         if proposed.kind in {"job", "connector"}:
             found = next((card for card in unshown if _names_card(source, card)), None)

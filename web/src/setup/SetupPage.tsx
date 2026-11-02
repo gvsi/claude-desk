@@ -274,10 +274,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
   // goes back to the step the API has the interview at. The API's step stays where it is until the
   // owner sends a change, which the API's reopen takes back to the questions. Until then the change
   // runs busy at the step it was sent from (no other turn runs past the questions), so a page opened
-  // or come back to while one runs follows it in the chat too, whatever its address says.
+  // or come back to while one runs follows it in the chat too, whatever its address says. A live
+  // Desk is changed in the owner app, never here: the page shows it live, whatever the address.
   const chatOpen = opensSetupChat(search);
   const changeRuns = state !== undefined && state.busy === true && state.step !== 'questions';
-  const changing = state !== undefined && state.step !== 'questions' && (chatOpen || changeRuns);
+  const changing = state !== undefined && state.step !== 'questions' && state.step !== 'live' && (chatOpen || changeRuns);
   // A change may close the questions in one turn and return tools directly. Remember where this
   // chat opened, or where a running change was found, so both that response and a read of the landed
   // turn clear the old drafts and show the new plan.
@@ -380,7 +381,8 @@ function SetupInterview({ setupId }: { setupId: string }) {
   return (
     <SetupShell
       business={business}
-      step={STEP_INDEX[shownStep]}
+      // The chat over a later step changes nothing until a change lands: the bar keeps the steps done.
+      step={STEP_INDEX[changing ? state.step : shownStep]}
       live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
       exitTo={todayPath(state.desk_id)}
       wide={state.step === 'preview' && !changing}

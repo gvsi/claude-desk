@@ -1983,7 +1983,8 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Change something' }).click();
     await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(changeSomethingPath(state.interview_id));
     await expect.element(screen.getByRole('log', { name: 'Setup questions' })).toBeVisible();
-    expect(screen.getByRole('list', { name: 'Set up your Desk' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
+    // Nothing is changed yet: the bar stays at the rules, the steps before them done.
+    expect(screen.getByRole('list', { name: 'Set up your Desk' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
     const read = await mockStore.dispatch('setup', { params: { id: state.interview_id } });
     expect('network' in read ? null : (read.body as SetupState).step).toBe('rules');
 
@@ -2230,6 +2231,44 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Check real situations' }).click();
     await expect.element(screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem').first()).toBeVisible();
     await expect.poll(() => requests('setupSituations').length).toBeGreaterThan(tried);
+  });
+
+  it('a_change_refused_because_the_desk_went_live_shows_the_live_desk', async () => {
+    // The Desk went live in another tab while this one had "Change something" open: the send is refused, and
+    // rather than taking the words back again and again, the page shows the live Desk, changed in the owner app.
+    const { state } = await interviewAtSafety();
+    const id = state.interview_id;
+    const { screen } = await renderRoute(changeSomethingPath(id));
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeVisible();
+    await mockStore.dispatch('setupConfirm', { params: { id } });
+    await mockStore.dispatch('goLive', { params: { id } });
+    await box.fill('Closed Saturdays.');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /is live/ })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Your answer' }).elements()).toHaveLength(0);
+  });
+
+  it('change_something_keeps_the_steps_setup_has_done_until_a_change_lands', async () => {
+    // The chat over Real situations changes nothing yet: the bar keeps Questions and Tools done, at the
+    // rules, until a change sent from it takes the API's interview back to the questions.
+    const { state } = await interviewAtRules();
+    const id = state.interview_id;
+    await mockStore.dispatch('setupSituations', { params: { id } });
+    const { screen } = await renderRoute(changeSomethingPath(id));
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeVisible();
+    const steps = setupSteps(screen);
+    await expect.element(steps.nth(0)).toHaveTextContent('Questions, done');
+    await expect.element(steps.nth(1)).toHaveTextContent('Tools, done');
+    expect(steps.nth(2).element().getAttribute('aria-current')).toBe('step');
+
+    // Sent: once the API has the questions again, setup is back on its first step.
+    await box.fill('Closed Saturdays.');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.element(screen.getByText(REOPEN_REPLY, { exact: true })).toBeVisible();
+    expect(steps.nth(0).element().getAttribute('aria-current')).toBe('step');
+    expect(steps.nth(1).element().textContent).not.toContain('done');
   });
 
   it('tools_start_at_the_outcome_rules_shows', async () => {
@@ -2869,18 +2908,21 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' })).toBeVisible();
     expect(requests('setupConfirm', mark)).toHaveLength(2);
     expect(requests('confirmRules', mark)).toHaveLength(0);
+    // Setup never changed here, so the new draft needs no safety check the owner wouldn't see.
+    expect(requests('setupSafetyCheck', mark)).toHaveLength(0);
     expect(desk.summary.answering).toBe(false);
     expect(requests('goLive', mark)).toHaveLength(0);
   });
 
   it('a_conflicted_draft_after_reopening_is_checked_again_before_confirmation', async () => {
+    // After "Change something", the API confirms a draft only once its safety check has run: the confirm is
+    // tried first, and its 409 runs the check on the new draft, then confirms once more.
     const { screen } = await openConflictReview(true);
     const mark = mockStore.requests.length;
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' })).toBeVisible();
-    const calls = mockStore.requests.slice(mark).map(({ key }) => key);
-    expect(calls.indexOf('setupSafetyCheck')).toBeGreaterThanOrEqual(0);
-    expect(calls.indexOf('setupConfirm')).toBeGreaterThan(calls.indexOf('setupSafetyCheck'));
+    const calls = mockStore.requests.slice(mark).map(({ key }) => key).filter((key) => key === 'setupConfirm' || key === 'setupSafetyCheck');
+    expect(calls).toEqual(['setupConfirm', 'setupSafetyCheck', 'setupConfirm']);
   });
 
   it('go_live_shows_the_link', async () => {

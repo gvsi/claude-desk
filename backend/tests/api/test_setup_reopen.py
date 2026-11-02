@@ -417,6 +417,20 @@ async def test_a_change_to_a_limit_is_asked_on_the_limits_own_question(app, brow
     assert (await stored(engine, state["interview_id"]))["answers"]["quote_auto_max_cents"] == 100_000
 
 
+async def test_only_the_change_itself_can_ask_a_finished_topic_again(app, browser, kernel_http, model, engine):
+    # The change's own turn may bring a topic covered before back (`_next_ask`). The turns after it can't, as no turn
+    # in setup can: once Claude has nothing more to ask, setup closes again rather than walking back through its
+    # questions.
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(turn("Closed on Saturdays, noted. Should weekday hours stay the same?", step_done=False))
+    changed = await reopen(owner, state)
+    assert changed.status_code == 200 and changed.json()["question"] == setup.REOPEN_TOPIC, changed.text
+    reply = await answer(owner, model, state["interview_id"], "Yes, the same as before.",
+                         turn(next={"kind": "topic", "topic": "quote_limit"}))
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+
+
 async def test_proving_work_from_before_a_change_never_lands_after_it(app, browser, kernel_http, model, engine, fake,
                                                                       monkeypatch):
     # A rules draft still running when the owner reopens the questions: its cards and version are about the answers
