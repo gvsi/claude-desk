@@ -169,12 +169,14 @@
   --size-sidebar: 264px;
   --size-content: 960px;
   --size-reading: 640px;
+  --size-public-about: clamp(300px, 22vw, 400px);
   --size-conversation: 768px;
   --size-margin: 220px;
   --size-control: 32px;
   --size-control-main: 40px;
   --size-touch: 44px;
   --size-nav-row: 36px;
+  --size-caption-line: 17px;
   --size-icon: 20px;
   --size-dot: 6px;
   --size-spinner: 16px;

@@ -48,6 +48,18 @@ export const VISITOR_NO_MESSAGES = 'No messages yet';
 export const visitorCalledBack = (ownerFirstName: string): string => `${ownerFirstName} called back`;
 
 /**
+ * The whisper box's line: Claude reads a whisper in its next reply, which runs while the visitor
+ * is in the chat, or else when they next write. `name` is the one the conversation's bar shows,
+ * null when it has none. The owner's preview is never an agent.
+ */
+export function whisperHelper(name: string | null, here: boolean, agent: boolean): string {
+  const who = name ?? (agent ? 'The agent' : 'The visitor');
+  return here
+    ? `${who} is in the chat now. Claude will use your whisper in its reply right away.`
+    : `${who} isn't in the chat now. Claude will use your whisper when ${agent ? 'it next writes' : 'they next write'}.`;
+}
+
+/**
  * The note over a demo visitor's conversation (an AI the owner started to play a customer): while it
  * runs, what it is and what to try, with Stop; once it ends, how it ended. Stopped by the owner is
  * said so; a failure or the day's model budget stopped it early; every other ending (its goal met,

@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { request } from '../../api/http.ts';
 import { PageHeader } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { ShareKit } from './ShareKit.tsx';
@@ -44,7 +45,7 @@ export function SharePage() {
       <ShareKit
         publicUrl={publicLink(desk.slug)}
         business={business.name}
-        ownerName={business.owner_display_name}
+        ownerName={givenOwnerName(business.owner_display_name)}
         urgentCallback={current && tools.data !== undefined && urgentCallbackOn(tools.data.tools)}
       />
     </div>

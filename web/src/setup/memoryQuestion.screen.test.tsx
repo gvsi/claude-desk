@@ -1,8 +1,9 @@
 /**
  * The memory question in a real browser against the mock API at 1440 and 390 px: Claude's ask
- * docks with its two answers like every setup question, above the message box; a press puts the
- * answer in the conversation at once with Claude's writing dots; then the reads' labels and Claude's
- * opening arrive through the turn's stream, and the first question docks once the turn is saved.
+ * docks with its two answers like every setup question, with the message box hidden until Esc or
+ * "No, I'll type it" brings it back; a press puts the answer in the conversation at once with
+ * Claude's writing dots; then the reads' labels and Claude's opening arrive through the turn's
+ * stream, and the first question docks once the turn is saved.
  */
 import { http } from 'msw';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -47,7 +48,7 @@ function gate(): { until: Promise<void>; release: () => void } {
 const growing = () => document.querySelector<HTMLElement>('.cd-setup-growing');
 
 describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewport: Viewport) => {
-  it('docks_the_ask_with_its_two_answers_above_the_message_box', async () => {
+  it('docks_the_ask_with_its_two_answers_and_hides_the_message_box', async () => {
     const { state, ask } = await waitingInterview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
     await expect.element(screen.getByRole('heading', { level: 1, name: TITLE, exact: true })).toBeVisible();
@@ -56,11 +57,12 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(panel.getByRole('button').elements().map((button) => button.getAttribute('aria-label'))).toEqual([YES, NO]);
     expect([...panel.element().querySelectorAll('.cd-setup-q3__row kbd')].map((key) => key.textContent)).toEqual(['1', '2']);
     expect([...panel.element().querySelectorAll('.cd-setup-q3__hint kbd')].map((key) => key.textContent)).toEqual(['1–2', 'Enter', 'Esc']);
-    // Its two answers are all it offers: no dismiss and no "Something else…", since the message box stays.
+    // Its two answers are all it offers: no dismiss and no "Something else…".
     expect(panel.getByRole('textbox').elements()).toHaveLength(0);
-    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
-    await expect.element(box).toBeEnabled();
-    expect(box.element().getAttribute('placeholder')).toBe('Answer in your own words');
+    expect(panel.getByRole('checkbox').elements()).toHaveLength(0);
+    // The message box is hidden while it docks, as under every question.
+    expect(screen.getByRole('textbox', { name: 'Your answer', exact: true }).elements()).toHaveLength(0);
+    expect(document.querySelector('.cd-setup-dock textarea')?.checkVisibility()).toBe(false);
     // The ask lives in the panel, not twice; the two big buttons are gone.
     expect(screen.getByRole('log', { name: 'Setup questions' }).getByText(ask, { exact: true }).elements()).toHaveLength(0);
     expect(screen.container.querySelector('.cd-setup-step__actions')).toBeNull();
@@ -147,12 +149,32 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: false }]);
   });
 
+  it('no_ill_type_it_brings_the_message_box_back_while_the_turn_runs', async () => {
+    const { state } = await waitingInterview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    const held = gate();
+    worker.use(
+      http.post(`/api/owner/setup/${state.interview_id}/consent`, async () => {
+        await held.until;
+        return undefined;
+      }),
+    );
+    expect(screen.getByRole('textbox', { name: 'Your answer', exact: true }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: NO, exact: true }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeVisible();
+    held.release();
+    // The first question docks, and the box is hidden under it again.
+    await expect.element(screen.getByRole('region', { name: CPA_COPY.first, exact: true })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Your answer', exact: true }).elements()).toHaveLength(0);
+  });
+
   it('answers_by_keys_as_the_other_questions_do', async () => {
     const { state, ask } = await waitingInterview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
     await expect.element(screen.getByRole('region', { name: ask, exact: true })).toBeVisible();
-    // Esc goes to the message box; the ask stays docked, as it is the only way to answer it.
+    // Esc brings the message box back, with focus; the ask stays docked, as its answers are the only way to say yes.
     await userEvent.keyboard('{Escape}');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeVisible();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveFocus();
     await expect.element(screen.getByRole('region', { name: ask, exact: true })).toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
@@ -166,6 +188,7 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
   it.each([
     [YES, 'sure', '1'],
     [YES, 'no thanks', '2'],
+    [YES, 'no', '2'],
     [NO, 'no thanks', '2'],
   ])('typing_on_%s_picks_nothing_until_an_answer_is_picked: %s', async (answer, words, pick) => {
     // Its answers are the only way to answer it: words typed with one highlighted go nowhere, and neither a
@@ -184,10 +207,26 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     await userEvent.keyboard('s{Backspace}{Enter}{Home}{Enter}{End}{Enter}{ArrowRight}{Enter}{Alt>}{Enter}{/Alt}{Control>} {/Control}{Alt>} {/Alt}');
     await new Promise((resolve) => setTimeout(resolve, 300));
     await expect.element(row).toHaveFocus();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveValue('');
+    // Nor does the hidden message box take them: it comes back only by Esc or "No, I'll type it".
+    expect(screen.getByRole('textbox', { name: 'Your answer', exact: true }).elements()).toHaveLength(0);
+    expect(document.querySelector<HTMLTextAreaElement>('.cd-setup-dock textarea')?.value).toBe('');
     expect(requests('setupConsent')).toHaveLength(0);
     await userEvent.keyboard(`${pick}{Enter}`);
     await expect.poll(() => requests('setupConsent').map((r) => r.body)).toEqual([{ allow: pick === '1' }]);
+  });
+
+  it.each(['no thanks', 'no'])('typing_%s_from_the_page_picks_nothing_and_keeps_the_box_hidden', async (words) => {
+    const { state, ask } = await waitingInterview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    const panel = screen.getByRole('region', { name: ask, exact: true });
+    await expect.poll(() => panel.element().contains(document.activeElement)).toBe(true);
+    (document.activeElement as HTMLElement | null)?.blur();
+    await userEvent.keyboard(`${words}{Enter}`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(requests('setupConsent')).toHaveLength(0);
+    await expect.element(panel).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Your answer', exact: true }).elements()).toHaveLength(0);
+    expect(document.querySelector<HTMLTextAreaElement>('.cd-setup-dock textarea')?.value).toBe('');
   });
 
   it('takes_focus_on_its_panel_as_it_docks_so_its_keys_work_at_once', async () => {
@@ -208,7 +247,8 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
     const panel = screen.getByRole('region', { name: ask, exact: true });
     await expect.poll(() => panel.element().contains(document.activeElement)).toBe(true);
-    // The owner goes to the message box and types: the page redraws, and focus stays there.
+    // The owner goes to the message box by Esc and types: the page redraws, and focus stays there.
+    await userEvent.keyboard('{Escape}');
     const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
     await box.click();
     await userEvent.keyboard('We do tax');
@@ -251,8 +291,10 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
   });
 
   it('keeps_typed_words_for_the_first_question_and_reads_nothing', async () => {
-    const { state } = await waitingInterview();
+    const { state, ask } = await waitingInterview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await expect.element(screen.getByRole('region', { name: ask, exact: true })).toBeVisible();
+    await userEvent.keyboard('{Escape}');
     const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
     await box.fill('Mostly individuals, some small businesses.');
     await userEvent.keyboard('{Enter}');
