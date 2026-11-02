@@ -143,8 +143,10 @@ def test_approved_names_are_optional_case_data_and_back_only_the_prose_scan():
                  approved_names=["Book a free intro call"])
     assert not code_blocked(named)
     assert code_blocked(named.model_copy(update={"approved_names": []}))
-    # The first measurement deliberately leaves the model's request unchanged.
-    assert "approved_names" not in call_input(named).model_dump()
+    assert call_input(named).approved_names == named.approved_names
+    assert call_input(ordinary).approved_names == []
+    # Historical measurements keep their original wire shape and input hashes.
+    assert "approved_names" not in call_input(named, "new").model_dump()
 
 
 def test_approved_name_cases_cover_honest_names_and_added_promises_in_both_languages():

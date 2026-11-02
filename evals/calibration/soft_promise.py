@@ -159,8 +159,8 @@ RESULTS_ABOUT = (
     "One run of the soft-promise check: its answers to each case. Each case's expected, code_blocked and outcome "
     "are as of the run, from the case file and the code check as they were then. `python -m "
     "evals.calibration.soft_promise --rescore <this file>` scores the answers against the case file as it is now "
-    "and is the authority; a case whose input_sha256 (of its arm's language, prose, cards and, in the new shape, "
-    "next_steps) the case "
+    "and is the authority; a case whose input_sha256 (of its arm's language, prose, cards, next_steps and "
+    "approved_names where that shape includes them) the case "
     "file no longer matches is stale there, and its answers aren't scored.")
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 API_KEY = re.compile(r"[!-~]+")          # one run of printable ASCII, as the kernel takes a key
@@ -359,12 +359,24 @@ class OldSoftPromiseInput(BaseModel):
     cards: list[str]
 
 
-def call_input(case: Case, shape: Literal["old", "new"] = "new") -> SoftPromiseInput | OldSoftPromiseInput:
+class NextStepsSoftPromiseInput(OldSoftPromiseInput):
+    """The historical next-steps request, before approved service names were included."""
+
+    next_steps: list[str] = Field(default_factory=list)
+
+
+InputShape = Literal["old", "new", "approved_names"]
+
+
+def call_input(case: Case, shape: InputShape = "approved_names") -> SoftPromiseInput | OldSoftPromiseInput:
     """What the kernel's check reads for the case: its language, its prose as the scan reads it, and
     its cards' texts."""
     data = dict(language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards))
-    return (OldSoftPromiseInput(**data) if shape == "old"
-            else SoftPromiseInput(**data, next_steps=list(case.next_steps)))
+    if shape == "old":
+        return OldSoftPromiseInput(**data)
+    if shape == "new":
+        return NextStepsSoftPromiseInput(**data, next_steps=list(case.next_steps))
+    return SoftPromiseInput(**data, next_steps=list(case.next_steps), approved_names=list(case.approved_names))
 
 
 def request_message(data: SoftPromiseInput | OldSoftPromiseInput) -> str:
@@ -507,7 +519,7 @@ class RunResult(BaseModel):
     over_cap: bool              # the spend went past --max-usd: a call cost more than its bound
     spend_row: str
     cases: list[CaseResult]
-    input_shape: Literal["old", "new"] = "old"
+    input_shape: InputShape = "old"
     call_usage: list[CallUsage] = Field(default_factory=list)
 
 
@@ -521,7 +533,7 @@ class Config(BaseModel):
     prompt_file: Path | None = None
     label: str | None = None
     concurrency: int = Field(4, ge=1)
-    input_shape: Literal["old", "new"] = "new"
+    input_shape: InputShape = "approved_names"
     candidate: Candidate = "sonnet"
 
 
@@ -766,7 +778,7 @@ class _SavedRun(BaseModel):
     calls: int = Field(ge=0)
     prompt: PromptRecord
     cases: list[_SavedCase]
-    input_shape: Literal["old", "new"] = "old"
+    input_shape: InputShape = "old"
 
 
 def rescore(saved: Path, cases_file: Path) -> list[str]:

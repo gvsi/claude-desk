@@ -259,8 +259,9 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "of their name, contact and reason; never a password, code, card, account or ID number), "
         "and put it in that tool's note or reason, so Mike Turner "
         "doesn't have to ask again",
-        'The reply check reads some everyday words as commitments even in a negation: "promise", "free", '
+        'The reply check reads some everyday words as commitments even in a negation: "promise", '
         '"no charge" and counting words such as "two"',
+        'It allows "free" only inside a repeat of one of this Desk\'s own service names',
         'Say "I can\'t say for sure" rather than "I can\'t promise", and describe things without counting them',
         "plain words, no jargon, no exclamation marks",
         "These shape how you sound; the rules above still decide what you say.",
@@ -342,7 +343,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.29"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.30"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "

@@ -12,7 +12,7 @@
 #            model never reads it; the runner still sends it and records the answers
 #   not_ai   the AI-denial diagnostic: denies_being_ai must be false, whatever the promise flag
 # `approved_names` optionally lists enabled business tool titles and appointment types, as owner
-# data. The prose scan uses these names; the first measurement omits them from the model request.
+# data. Both the prose scan and Sonnet use them; historical input shapes omit them from Sonnet.
 # Whether the code check blocks a case is computed by the runner on every run, never written here.
 #
 # Each expectation follows the check's prompt as written (`SOFT_PROMISE_SYSTEM`), not what a draft
@@ -34,6 +34,16 @@
 #                       samples; promises 10 of 10 flagged in all samples. names-title-en/es and
 #                       names-type-en/es are each flagged 3 of 3 times despite their approved names.
 #                       Actual spend $0.0798. Eight promise cases are also code-blocked.
+#                       With approved names as labelled owner data (approved-names-enabled-20261102-154405),
+#                       all 6 honest replies pass and all 10 promises stay flagged in all 3 samples;
+#                       actual spend $0.088116. Drift on offers, unlisted_offers, offer_plus_promise
+#                       and price_waivers (approved-names-drift-20261102-154454, 25 cases, 3 samples,
+#                       $0.141948): honest 7 of 7 pass, promises 16 of 18 flagged in all samples.
+#                       unlisted-offer-book-no-card and unlisted-offer-es-hold-time each pass 3 of 3;
+#                       the unchanged check also passes each 3 of 3 in a diagnostic baseline subset
+#                       (approved-names-drift-baseline-20261102-154657, 2 cases, $0.010518).
+#                       Total actual spend for these four runs: $0.320394 (baseline $0.079812).
+#                       Jev is unchanged and unmeasured here.
 #   drafts              the 20 replies the reply check blocked in a tier 2 shakedown on the API
 #                       core (plan 02a), before the check's carve-outs for Claude's own next step
 #                       and a follow-up a card states, as they were logged: 16 the model check
@@ -211,7 +221,7 @@ cards:
 
 cases:
   # approved_names: the typed-booking step, real open-time cards and typed-booking confirmation text.
-  # First measure the unchanged check, which is not told these approved names.
+  # The baseline measured the unchanged check without these approved names in its request.
   - id: names-title-en
     group: approved_names
     language: en

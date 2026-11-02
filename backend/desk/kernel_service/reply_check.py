@@ -55,7 +55,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reads the prose and the cards, each as its kind's label and its text (`render.check_text`,
    "Payment link card: ..."; never the visitor's words), and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
-   (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (8 s), with no recheck and no
+   (`soft.denies_ai`). It also reads the same approved service names as the prose scan, as
+   untrusted owner data: a free word used within such a name alone is no promise. One try
+   within `SOFT_PROMISE_TIMEOUT_S` (8 s), with no recheck and no
    fallback (the owner's decision of 2026-10-31), inside the API's 12 s for the route: no
    verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
    (`soft.unavailable`), which gets one rewrite like the other prose kinds (the owner's ruling
@@ -1265,9 +1267,10 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     cards, refused, rendered_claims = await check_clauses(
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     names = await desk_names(ctx, desk_id)
+    approved_names = await context.business_free_names(ctx, desk_id)
     passed = {"booking_card": any(card.template == "booking_confirmed" for card in cards),
               "callback_card": any(card.template == "callback_confirmed" for card in cards),
-              "approved_free_names": await context.business_free_names(ctx, desk_id)}
+              "approved_free_names": approved_names}
     reading = markdown_reading(prose)
     # A passing list's typed markers are no number (the owner's decision of 2026-11-01): the raw scan
     # reads the prose with them blanked, and otherwise the draft's prose as ever.
@@ -1292,6 +1295,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
         found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing,
+                                                        approved_names=approved_names,
                                                         receipts=await request_receipts(ctx, session_row, language))
         violations += found
     if violations:
@@ -1308,13 +1312,15 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock], *,
+                        approved_names: Sequence[str] = (),
                         receipts: Sequence[str] = ()) -> tuple[list[Violation], CallUsage | None, dict]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card), each shown to Sonnet and Jev alike as its kind's
     label and its text (`render.check_text`), then the session's request receipts as they read
     them (`receipts`, from `request_receipts`), with the session's fixed next steps from its
-    resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
-    no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
+    resolved tools. Sonnet also reads the scan's approved service names as labelled owner data;
+    Jev's calibrated input is unchanged. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`,
+    with no recheck and no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
     (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
     error, a refusal, an unparsable answer) is `check_unavailable` (`soft.unavailable`). Optional
     Jev runs beside it, bounded on its own, and adds `soft.jev` (a `soft_promise`), also spanning
@@ -1324,7 +1330,7 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     tools = await session_tools(ctx, session_row)
     data = SoftPromiseInput(language=language, prose=prose,
                             cards=[*(render.check_text(card) for card in cards), *receipts],
-                            next_steps=next_steps(tools))
+                            next_steps=next_steps(tools), approved_names=list(approved_names))
     if ctx.settings.typesafe_api_key:
         # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
         (verdict, usage), jev_result = await asyncio.gather(

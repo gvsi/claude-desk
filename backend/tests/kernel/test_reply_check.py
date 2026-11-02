@@ -1159,7 +1159,8 @@ async def test_a_booking_claim_beside_its_booking_card_passes_by_the_owners_deci
     assert (prose_block.text, card.template, card.fact_id) == (prose, "booking_confirmed", booking.fact_id)
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose,
                                                      cards=[f"Booking confirmed card: {card.text}"],
-                                                     next_steps=VISITOR_NEXT_STEPS)]
+                                                     next_steps=VISITOR_NEXT_STEPS,
+                                                     approved_names=["Emergency callback"])]
 
 
 @pytest.mark.parametrize(("prose", "language", "span"), [
@@ -2022,7 +2023,8 @@ async def test_a_policy_restated_beside_its_card_is_shown_by_the_owners_decision
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", SERVICE_AREA), ("card", SERVICE_AREA)]
     assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[f"Policy card: {SERVICE_AREA}"],
-                                                     next_steps=VISITOR_NEXT_STEPS)]
+                                                     next_steps=VISITOR_NEXT_STEPS,
+                                                     approved_names=["Emergency callback"])]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
@@ -2088,7 +2090,8 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (reply_check.shown(prose), "quote", quote.fact_id)
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=reply_check.shown(prose),
-                                                     cards=[f"Quote card: {card.text}"], next_steps=VISITOR_NEXT_STEPS)]
+                                                     cards=[f"Quote card: {card.text}"], next_steps=VISITOR_NEXT_STEPS,
+                                                     approved_names=["Emergency callback"])]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
     assert link not in json.dumps(entry.event.summary)
