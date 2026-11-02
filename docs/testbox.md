@@ -91,8 +91,9 @@ All lanes on a laptop share one connection, and Session Manager carries uploads 
 The client allows ten minutes for one before closing the connection. If the connection
 dies anyway, Session Manager can keep sshd's end open, and the dead connection's calls
 keep their lane locks. sshd closes such a connection after ten minutes without a
-keepalive reply, which ends those calls and frees their lanes. A call that waits longer
-than that for its lane is stuck: tell the CI lane.
+keepalive reply, which ends those calls and frees their lanes: on the live machine, a
+silenced connection's lane was free 11 to 12 minutes later. A call that waits more than
+about 15 minutes for its lane is stuck: tell the CI lane.
 
 A connection can also go silent without closing, after a dropped network or when the
 laptop wakes from sleep. Every lane's calls then hang until the keepalives give up, up to
