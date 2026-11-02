@@ -19,6 +19,7 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
   const [failure, setFailure] = useState<string | null>(null);
   const pickCounter = useRef(0);
   const unconfirmed = useRef(false);
+  const uncertainSave = useRef(false);
   const selected = optimistic ?? paletteKey(business.brand);
   const shown = optimistic === null ? business.brand ?? {} : paletteBrand(optimistic);
   const { brand } = brandFrom({ business_name: business.name, desk_name: desk.name, owner_display_name: business.owner_display_name, brand: shown });
@@ -33,9 +34,10 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
     }),
     onMutate: () => queryClient.cancelQueries({ queryKey: DESKS_KEY }),
     onError: async (err, { palette, pick }) => {
+      if (isUncertain(err)) uncertainSave.current = true;
       if (pick !== pickCounter.current) return;
       let previous = paletteKey(queryClient.getQueryData<BusinessOut[]>(DESKS_KEY)?.find((item) => item.business_id === business.business_id)?.brand ?? business.brand);
-      if (isUncertain(err)) {
+      if (uncertainSave.current) {
         // A lost response can follow a committed write. Only a fresh read can confirm a rollback.
         await queryClient.cancelQueries({ queryKey: DESKS_KEY });
         const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
@@ -75,6 +77,7 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
 
   function pick(palette: BrandPalette) {
     if (palette === selected && !unconfirmed.current) return;
+    if (!save.isPending) uncertainSave.current = false;
     unconfirmed.current = false;
     setFailure(null);
     setOptimistic(palette);

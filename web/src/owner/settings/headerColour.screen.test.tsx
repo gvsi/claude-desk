@@ -434,3 +434,34 @@ it('keeps a confirmed rollback when the settle read cannot reach the server', as
   expect(reads).toBeGreaterThan(1);
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'teal' });
 });
+
+
+it.each([false, true])('reads the stored colour after a superseded uncertain save and a rejected last pick (%s)', async (readWorks) => {
+  const { screen } = await renderRoute(GENERAL, { retryScale: 0, pollScale: 100 });
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  let release!: () => void;
+  const until = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(() => release());
+  mockStore.inject({ route: 'setBusiness', status: 'network', afterCommit: true, until });
+  mockStore.inject({ route: 'setBusiness', status: 422 });
+  // Even a working final read must not get Clay from the earlier settle refetch.
+  let rejected = false;
+  worker.use(http.put(ROUTES.setBusiness.path.replace('{desk_id}', ':desk_id'), async ({ request }) => {
+    const body = await request.clone().json() as { brand_palette: string };
+    if (body.brand_palette === 'navy') rejected = true;
+    return undefined;
+  }));
+  worker.use(http.get(ROUTES.desks.path, () => readWorks && rejected ? undefined : HttpResponse.error()));
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'setBusiness').length).toBe(1);
+  await group.getByRole('radio', { name: 'Navy', exact: true }).click();
+  release();
+  await mockDrain.waitForIdle();
+  await expect.element(card.getByRole('alert')).toHaveTextContent(readWorks
+    ? "That didn't save, so your header is still Clay."
+    : "We couldn't reach Claude Desk. Check your connection, then try again.");
+  expect(card.getByText("That didn't save, so your header is still Teal.", { exact: true }).query()).toBeNull();
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
+});
