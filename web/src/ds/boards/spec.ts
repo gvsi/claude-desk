@@ -52,6 +52,8 @@ export const SPEC = {
   },
   receipt: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
   dot: { width: '6px', height: '6px' },
+  /** Share's More channels: four rows in one card, separated by hairlines. */
+  shareChannelRow: { paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' },
   card: {
     backgroundColor: 'rgba(250, 249, 245, 0.03)',
     borderTopWidth: '1px',
@@ -216,6 +218,13 @@ export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<nu
   return rows.length;
 }
 
+/** The footer's one link, the author's name, under `root`. */
+export function footerLink(root: ParentNode): HTMLElement {
+  const link = root.querySelector<HTMLElement>('[data-ds="concept-footer"] a');
+  if (!link) throw new Error('the footer draws the author\'s name as a link');
+  return link;
+}
+
 /**
  * focus_order_is_logical: Tab from the top of the page reaches each of `stops` in this order
  * (other stops may come between them). Returns every stop Tab reached, in order.
@@ -322,7 +331,7 @@ export async function expectRulesComposer(
   const composer = within(root).getByRole('textbox', { name: placeholder });
   await expect(composer).toHaveAttribute('placeholder', placeholder);
   expectComputed(composer.closest<HTMLElement>('.cd-composer__box') as HTMLElement, SPEC.composer);
-  await expect(within(root).getByText('Claude shows you the change and example situations before anything applies.')).toBeVisible();
+  await expect(within(root).getByText('Claude shows you the change before anything applies.')).toBeVisible();
   const group = within(root).getByRole('group', { name: 'Suggestions' });
   const buttons = within(group).getAllByRole('button');
   await expect(buttons.map((chip) => chip.textContent)).toEqual([...chips]);
@@ -357,7 +366,7 @@ export async function expectRulesPage(root: HTMLElement, chips: readonly string[
 }
 
 /** Settings' sections, in SubNav's order. */
-export const SETTINGS_SECTION_NAMES = ['General', 'Knowledge', 'Notifications', 'Channels', 'Billing'] as const;
+export const SETTINGS_SECTION_NAMES = ['General', 'Notifications', 'Channels', 'Billing'] as const;
 
 /**
  * A Settings board on a laptop: the owner frame with the sidebar's Connectors row after Rules and
@@ -396,12 +405,12 @@ export async function expectSettingsPage(root: HTMLElement, current: (typeof SET
 }
 
 /**
- * The agents page's AI disclosure under its title: `DisclosureLine`'s sentence for Rivera
+ * The agents page's AI disclosure under its title: `DisclosureLine`'s sentence for Turner
  * Plumbing, once, in its meta type and the secondary ink, 16 px under the title.
  */
 export async function expectAgentsDisclosure(root: HTMLElement): Promise<void> {
   const line = one(root, '.cd-disclosure-line');
-  await expect(line.textContent).toBe('Rivera Plumbing answers with Claude, an AI.');
+  await expect(line.textContent).toBe('Turner Plumbing answers with Claude, an AI.');
   await expect(line).toHaveAttribute('lang', 'en');
   expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
   const title = within(root).getByRole('heading', { level: 1 });

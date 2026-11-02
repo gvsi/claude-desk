@@ -10,7 +10,6 @@
   - a rule draft and its change;
   - the Demo inbox's open sheet (not the aside's button, which Today's skeleton draws);
   - the connector review inside setup's tools step;
-  - setup's "Connecting Stripe";
   - setup's live step on a reload, while the Desks it names the business from are read ("Opening your setup");
   - the agents page's run panel, whose line is an action at work, not a page loading.
 - Not for a button whose click is in flight, which shows its own spinner in place of its label (`Button` `busy`), and not for someone typing (`WritingIndicator`).

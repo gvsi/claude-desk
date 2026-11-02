@@ -13,7 +13,7 @@ const REPLY = [
   '**Replace** is usually better when:',
   "1. there's rust in the hot water, or water around the base\n2. the tank is past about 12 years, like yours",
   '| | Repair | Replace |\n| --- | --- | --- |\n| What changes | One worn part | The whole tank |\n| Best when | No leaks, newer tank | Rust, leaks or 12+ years |',
-  'The age is on the label on the side of the tank, and the [Energy Saver guide to water heaters](https://www.energy.gov/energysaver/water-heating) explains the options. Would you like Maria to take a look?',
+  'The age is on the label on the side of the tank, and the [Energy Saver guide to water heaters](https://www.energy.gov/energysaver/water-heating) explains the options. Would you like Mike to take a look?',
 ].join('\n\n');
 
 /** Ask Claude's answer on N-MD-05, as the stream has it so far. */

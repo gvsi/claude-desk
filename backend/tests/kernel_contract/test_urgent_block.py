@@ -59,7 +59,7 @@ async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner
     # Mark done closes, for a day
     assert (fact.expires_at is None) != preview
     receipt = await read_decision(session, allowed.decision_id)
-    assert receipt.visitor_plain == '“Urgent help”: urgent request sent to Maria Rivera'
+    assert receipt.visitor_plain == '“Urgent help”: urgent request sent to Mike Turner'
     expected_body = 'Reported as urgent through “Urgent help”. ' + claudes_note((args['name'], args['contact'], args['reason']))
     inbox = await owner.call('GET /demo_inbox')
     assert len([entry for entry in inbox if entry.body == expected_body and entry.to == 'owner' and entry.kind == 'alert']) == (0 if preview else 1)
@@ -79,9 +79,9 @@ async def test_reviewed_urgent_callback_alerts_now_and_configuration_stays_owner
 
 @pytest.mark.kernel_plan('01c')
 async def test_a_fresh_copy_handles_an_emergency_through_the_seeded_urgent_tool(kernel, ro_read):
-    """An emergency on a new copy is urgent: the Rivera seed's `desk.emergency-callback` is enabled,
+    """An emergency on a new copy is urgent: the Turner seed's `desk.emergency-callback` is enabled,
     given to a stranger beside the native callback, allowed by the seed's `rv-urgent` card, and
-    alerts Maria at once with the seed's notification settings as they are."""
+    alerts Mike at once with the seed's notification settings as they are."""
     http, schema, _ = kernel
     copy = await new_copy(http)
     desk_id = copy.desk_ids[0]
@@ -90,7 +90,7 @@ async def test_a_fresh_copy_handles_an_emergency_through_the_seeded_urgent_tool(
     assert (row['desk_id'], row['tool'], row['status'], row['review_reason']) == (
         desk_id, 'desk.emergency-callback', 'enabled', None)
     assert row['business'] == {'title': 'Emergency callback',
-                               'description': 'Asks Maria to call back urgently about an emergency.',
+                               'description': 'Asks Mike to call back urgently about an emergency.',
                                'config': {'block': 'urgent', 'urgent_when':
                                           'A burst or leaking pipe, flooding, a sewage backup, or no water'}}
     # written as the owner's replacement writes it, then turned on by the seed's version 1
@@ -113,7 +113,7 @@ async def test_a_fresh_copy_handles_an_emergency_through_the_seeded_urgent_tool(
     result = await execute(session, allowed, visitor.state.generation)
     assert result.state == 'succeeded' and result.inbox == []
     receipt = await read_decision(session, allowed.decision_id)
-    assert receipt.visitor_plain == '“Emergency callback”: urgent request sent to Maria Rivera'
+    assert receipt.visitor_plain == '“Emergency callback”: urgent request sent to Mike Turner'
     alerts = [entry for entry in await owner.call('GET /demo_inbox') if entry.to == 'owner' and entry.kind == 'alert'
               and entry.body.startswith('Reported as urgent through “Emergency callback”. ')]
     assert len(alerts) == 1

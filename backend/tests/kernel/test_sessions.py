@@ -86,7 +86,7 @@ async def test_visitor_session_is_created_with_a_hashed_token(app, client):
 
 async def test_unknown_slug_is_404(app, client):
     await make_copy_rows(app)
-    response = await client.post("/sessions", json={"desk_slug": "rivera-plumbing-zzzzzz", "kind": "visitor"})
+    response = await client.post("/sessions", json={"desk_slug": "turner-plumbing-zzzzzz", "kind": "visitor"})
     assert (response.status_code, response.json()) == (404, {"code": "not_found"})
 
 

@@ -85,7 +85,7 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
       {
         chip: 'A plumber in Oakland',
         description:
-          'I’m Maria Rivera. Rivera Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
+          'I’m Mike Turner. Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
       },
       {
         chip: 'Apartments in Sacramento',
@@ -109,9 +109,9 @@ export const START_EXAMPLES: Readonly<Record<CopyLanguage, StartExamples>> = {
           'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage. Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.',
       },
       {
-        chip: 'Una plomera en Oakland',
+        chip: 'Un plomero en Oakland',
         description:
-          'Soy Maria Rivera. Rivera Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
+          'Soy Mike Turner. Turner Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
       },
       {
         chip: 'Departamentos en Sacramento',
@@ -149,6 +149,8 @@ export const SETUP_COPY = {
   /** Stands in for the business's name until the API names it. */
   yourBusiness: 'your business',
   saveAndExit: 'Save and exit',
+  /** The bar's lockup, a link that leaves as "Save and exit" does: the product's name, then what it does. */
+  brandHome: 'Claude Desk, save and exit',
 
   start: {
     title: 'Tell me about your business',
@@ -208,7 +210,6 @@ export const SETUP_COPY = {
     turnOnTitle: (connector: string) => `Turn on ${connector}`,
     turnOnSubtitle: "Here's exactly what changes on your Desk. Nothing changes until you confirm.",
     changedSince: 'Your rules changed since this was drafted. Check the new version.',
-    connecting: 'Connecting Stripe',
   },
 
   rules: {
@@ -225,7 +226,7 @@ export const SETUP_COPY = {
   situations: {
     title: 'Real situations',
     /** Around the business's name, which is the owner's own words. */
-    subtitle: ['How your draft rules handle things that really happen at ', '. Nothing here is real.'],
+    subtitle: ['How your rules will handle things that really happen at ', '. Nothing here is real.'],
     loading: 'Trying real situations on your draft rules',
     empty: 'No situations to show',
     emptyBody: 'Your draft rules are still checked against tricks people use in the next step.',
@@ -282,8 +283,7 @@ export const SETUP_COPY = {
     open: 'Open',
     goToToday: 'Go to Today',
     shareIt: 'Share it',
-    websiteEmbed: 'Website embed',
-    websiteEmbedLine: 'The same chat on your own site.',
     comingLater: 'Coming later',
+    moreChannels: 'More channels',
   },
 } as const;

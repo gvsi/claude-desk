@@ -10,7 +10,7 @@ import { ConnectorSection, type ConnectorSectionProps, type ToolSummaryView } fr
 
 const sections: readonly ConnectorSectionProps[] = rivera.connectors.sections;
 const [quotes, , , , , payments, stripe] = sections;
-if (!quotes || !payments || !stripe) throw new Error('The Rivera hub fixture lost a section');
+if (!quotes || !payments || !stripe) throw new Error('The Turner hub fixture lost a section');
 
 const meta = {
   title: 'Connectors/ConnectorSection',

@@ -203,9 +203,9 @@ export function RulesPage() {
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const location = useLocation();
-  const { ask, open: asking } = useAskClaude();
+  const { ask, open: asking, busy: answering } = useAskClaude();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
-  // Rivera's fixed examples, less any whose change is already in effect: all of them until the rules are read.
+  // Turner's fixed examples, less any whose change is already in effect: all of them until the rules are read.
   const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? rulesChipsToOffer(rules.data?.active.cards) : [];
   const people = useQuery(peopleQuery(deskId));
   const suggestions = useQuery({ ...suggestionsQuery(deskId), refetchInterval: pollMs('rules') });
@@ -215,7 +215,7 @@ export function RulesPage() {
   // page reads it as it opens, so the question doesn't wait for the first poll.
   const needsYou = useNeedsYou(deskId, { readOnOpen: true });
   const hidesChips = useSyncExternalStore(subscribeChipsHidden, chipsHidden, () => false);
-  // Rivera's fixed suggestions let the first draw skip waiting for Needs you only once the rules are
+  // Turner's fixed suggestions let the first draw skip waiting for Needs you only once the rules are
   // read: all of them show meanwhile, but the rules may leave none, like another business's page.
   const keepsFixedChips = fixedChips.length > 0 && (rules.data !== undefined || rules.isError);
   const waitingForNeedsYou = !hidesChips && !keepsFixedChips && !needsYou.isFetchedAfterMount && !needsYou.isPaused;
@@ -330,7 +330,9 @@ export function RulesPage() {
   // page's body or the panel sliding out, and the page doesn't scroll to it.
   const askRow = useRef<HTMLDivElement>(null);
   const openedBy = useRef<string | null>(null);
+  // While an answer comes in, a suggestion waits in its place, as the composer's Send does.
   const pickChip = (words: string) => {
+    if (answering) return;
     if (!asking) openedBy.current = words;
     ask(words);
   };
@@ -505,8 +507,8 @@ export function RulesPage() {
       </div>
       {presetSaid === null ? null : <Notice tone={presetSaid.tone}>{presetSaid.line}</Notice>}
       <div ref={askRow} className="cd-rules__ask">
-        <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
-        {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={pickChip} />}
+        <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} sendHeld={answering} onSend={ask} />
+        {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} disabled={answering} onPick={pickChip} />}
       </div>
       {readError}
       <SkeletonScreen loading={loading} status="Reading your rules" skeleton={<RulesSkeleton withHeader={false} />} className="cd-rules__region">

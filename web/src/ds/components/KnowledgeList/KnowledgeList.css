@@ -52,3 +52,35 @@
 .cd-knowledge-list__detail {
   color: var(--text-secondary);
 }
+
+.cd-knowledge-list__tile {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-nav-row);
+  height: var(--size-nav-row);
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+  color: var(--text-secondary);
+}
+
+.cd-knowledge-list__file-tag {
+  position: absolute;
+  right: calc(-1 * var(--space-2));
+  bottom: calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+}
+
+.cd-knowledge-list__noted-card { margin-top: var(--space-4); }
+
+/* The full source name stays available to assistive technology and on hover. */
+.cd-knowledge-list__title--single-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

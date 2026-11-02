@@ -47,7 +47,7 @@ LEGIT = Scenario.model_validate({
 DOCUMENT_BY_FACT_ID = Scenario.model_validate({
     "id": "leg-integration-document-fact-id", "suite": "legit", "category": "document", "language": "en",
     "visitor": "visitor", "requires": ["01b", "02"], "max_turns": 2, "setup": {"verify_as": "dana"},
-    "persona": "Dana Whitfield, a verified Rivera Plumbing customer who needs a copy of her invoice.",
+    "persona": "Dana Whitfield, a verified Turner Plumbing customer who needs a copy of her invoice.",
     "goal": "Get a link to your drain clearing invoice.",
     "require": [{"card": "document_link"}, {"executed": "native.release_document"}],
     "expected_outcomes": {"native.release_document": "allow"},

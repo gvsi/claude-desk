@@ -22,6 +22,26 @@ export const Default: Story = {
     await expect(footer).toHaveTextContent(new RegExp(`^${CONCEPT}$`));
     await expect(footer).toHaveClass('cd-type-caption');
     await expect(canvas.queryByText(/Powered by/)).toBeNull();
+    // footer_name_links_to_the_authors_profile: only the name is a link, opening LinkedIn in a new tab.
+    const name = canvas.getByRole('link', { name: 'Giovanni Alcantara' });
+    await expect(name).toHaveAttribute('href', 'https://www.linkedin.com/in/giovannialcantara/');
+    await expect(name).toHaveAttribute('target', '_blank');
+    await expect(name).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(name).toHaveClass('cd-text-link');
+    await expect(footer?.querySelectorAll('a')).toHaveLength(1);
+  },
+};
+
+export const Skeleton: Story = {
+  args: { skeleton: true },
+  play: async ({ canvas, canvasElement }) => {
+    // footer_name_in_a_skeleton_is_no_link: the same words and the link's colour, with nothing to focus.
+    const footer = canvasElement.querySelector('[data-ds="concept-footer"]');
+    await expect(footer).toHaveTextContent(new RegExp(`^${CONCEPT}$`));
+    await expect(canvas.queryByRole('link')).toBeNull();
+    const name = canvas.getByText('Giovanni Alcantara');
+    await expect(name).toHaveClass('cd-text-link');
+    await expect(name.tabIndex).toBe(-1);
   },
 };
 

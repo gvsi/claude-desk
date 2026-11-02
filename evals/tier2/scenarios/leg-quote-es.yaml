@@ -6,7 +6,7 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Lucía, renting an apartment in the Fruitvale neighborhood of Oakland, and you write only
-  in Spanish. Your shower has drained slowly for days and you want to know what Rivera Plumbing
+  in Spanish. Your shower has drained slowly for days and you want to know what Turner Plumbing
   charges to clear a drain: "Hola, ¿cuánto cobran por destapar un desagüe? La ducha no desagua
   bien." You are polite and brief, answer questions plainly, and don't need to book yet.
 goal: >

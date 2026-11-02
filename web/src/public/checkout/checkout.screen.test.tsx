@@ -21,7 +21,7 @@ const CHAT = `/d/${RIVERA.slug}`;
 /** This browser's record of each payment link's chat, as `storage.ts` keeps it. */
 const PAY_CHATS = 'claude-desk.pay-chats';
 
-/** Every event this browser's chat with Rivera has carried, in order. */
+/** Every event this browser's chat with Turner has carried, in order. */
 function chatEvents(): { seq: number; ev: SseEvent }[] {
   return mockStore.visitorSession(RIVERA.slug)?.events ?? [];
 }
@@ -35,13 +35,13 @@ async function ready(screen: RenderResult): Promise<void> {
 }
 
 /**
- * Asks Rivera's chat for the deposit and waits for the payment link card: the token its button
+ * Asks Turner's chat for the deposit and waits for the payment link card: the token its button
  * opens. The link belongs to this browser's chat.
  */
 async function linkFromTheChat(): Promise<string> {
   const { screen } = await renderRoute(CHAT);
   await ready(screen);
-  await screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).fill('How do I pay the deposit?');
+  await screen.getByRole('textbox', { name: 'Message Turner Plumbing' }).fill('How do I pay the deposit?');
   await screen.getByRole('button', { name: 'Send' }).click();
   const open = screen.getByRole('link', { name: 'Open payment page' });
   await expect.element(open).toBeVisible();
@@ -53,11 +53,11 @@ async function linkFromTheChat(): Promise<string> {
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
-/** A payment link for a new chat with Rivera's Desk: its token. */
+/** A payment link for a new chat with Turner's Desk: its token. */
 function issueLink(language: Language = 'en', amountCents = 2000): string {
   const { world } = mockStore;
   const desk = world.desk(RIVERA.deskId);
-  if (!desk) throw new Error("the copy has Rivera's main Desk");
+  if (!desk) throw new Error("the copy has Turner's main Desk");
   const session = world.addSession(desk);
   return world.issueLink(session, { title: language === 'es' ? 'Depósito de visita de servicio' : 'Service call deposit', amountCents, language });
 }
@@ -83,7 +83,7 @@ describe('mock checkout', () => {
     await expect.element(en.screen.getByText('This page is part of a chat with Claude, an AI.')).toBeVisible();
     await expect.element(en.screen.getByText('Test mode')).toBeVisible();
     await expect.element(en.screen.getByText('Test payment, no money moves')).toBeVisible();
-    await expect.element(en.screen.getByText('Rivera Plumbing')).toBeVisible();
+    await expect.element(en.screen.getByText('Turner Plumbing')).toBeVisible();
     await expectScreenBasics(en.screen.container, { owner: false });
 
     // The page follows the link's language, whatever the browser's.
@@ -105,10 +105,10 @@ describe('mock checkout', () => {
     document.title = 'Claude Desk';
     const en = await renderRoute(`/pay/${issueLink('en')}`);
     await expect.element(en.screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
-    expect(document.title).toBe('Service call deposit · Rivera Plumbing');
+    expect(document.title).toBe('Service call deposit · Turner Plumbing');
     const es = await renderRoute(`/pay/${issueLink('es')}`, { language: 'en-US' });
     await expect.element(es.screen.getByRole('heading', { name: 'Depósito de visita de servicio' })).toBeVisible();
-    expect(document.title).toBe('Depósito de visita de servicio · Rivera Plumbing');
+    expect(document.title).toBe('Depósito de visita de servicio · Turner Plumbing');
 
     // Without the business's name, the payment's alone; before a link shows, the app's own name.
     const token = issueLink('en');
@@ -162,12 +162,12 @@ describe('mock checkout', () => {
     // name on the test card as the kernel gives it, read-only.
     const { world } = mockStore;
     const desk = world.desk(RIVERA.deskId);
-    if (!desk) throw new Error("the copy has Rivera's main Desk");
+    if (!desk) throw new Error("the copy has Turner's main Desk");
     const danasChat = world.addSession(desk);
     world.verify(danasChat, rivera.people.dana);
     const named = world.issueLink(danasChat, { title: 'Service call deposit', amountCents: 2000, language: 'en' });
     const { screen } = await renderRoute(`/pay/${named}`);
-    const merchant = screen.getByText('Rivera Plumbing', { exact: true });
+    const merchant = screen.getByText('Turner Plumbing', { exact: true });
     await expect.element(merchant).toBeVisible();
     expect(merchant.element().closest('.cd-checkout__top')).not.toBeNull();
     await expect.element(screen.getByRole('group', { name: 'Name on card' }).getByText('Dana W.', { exact: true })).toBeVisible();
@@ -226,7 +226,7 @@ describe('mock checkout', () => {
 
     // The page names no business of its own: not the mock's, not the Desk's, not a placeholder.
     const desk = mockStore.world.desk(RIVERA.deskId);
-    if (!desk) throw new Error("the copy has Rivera's main Desk");
+    if (!desk) throw new Error("the copy has Turner's main Desk");
     const shown = screen.container.textContent ?? '';
     expect(shown).not.toContain(BUSINESS.name);
     expect(shown).not.toContain(desk.summary.name);
@@ -292,7 +292,8 @@ describe('mock checkout', () => {
     const line = screen.container.querySelector('.cd-checkout__state');
     expect(line?.textContent).toBe('Paid. Go back to the chat to see it there.');
     expect(back.element().closest('.cd-checkout__state')).toBe(line);
-    expect(screen.container.querySelectorAll('a')).toHaveLength(1);
+    // The footer's author link aside, the only link on the page.
+    expect(screen.container.querySelectorAll('a:not([data-ds="concept-footer"] a)')).toHaveLength(1);
 
     // It opens the chat in this tab: no new tab, and a plain click is left to the browser to
     // follow (the test stops it there, so this page stays loaded).
@@ -336,7 +337,7 @@ describe('mock checkout', () => {
     const unknown = await renderRoute(`/pay/${issueLink('es')}`, { language: 'en-US' });
     await unknown.screen.getByRole('button', { name: 'Pagar $20.00' }).click();
     await expect.element(unknown.screen.getByText('Pagado. Vuelve al chat para verlo allí.', { exact: true })).toBeVisible();
-    expect(unknown.screen.container.querySelectorAll('a')).toHaveLength(0);
+    expect(unknown.screen.container.querySelectorAll('a:not([data-ds="concept-footer"] a)')).toHaveLength(0);
   });
 
   it('paid_line_without_a_known_chat_has_no_link', async () => {
@@ -347,7 +348,7 @@ describe('mock checkout', () => {
       await screen.getByRole('button', { name: 'Pay $20.00' }).click();
       await expect.element(screen.getByText(PAID, { exact: true })).toBeVisible();
       expect(screen.container.querySelector('.cd-checkout__state')?.textContent, why).toBe(PAID);
-      expect(screen.container.querySelectorAll('a'), why).toHaveLength(0);
+      expect(screen.container.querySelectorAll('a:not([data-ds="concept-footer"] a)'), why).toHaveLength(0);
     }
 
     // No chat showed this link in this browser: today's line, with no link.
@@ -358,7 +359,7 @@ describe('mock checkout', () => {
     await paidWithoutALink(issueLink(), "another token's entry");
 
     // A record for this link that holds anything but a public chat's own path.
-    for (const path of ['https://evil.example/d/rivera', '//evil.example', `${CHAT}?preview=${RIVERA.deskId}`, `${CHAT}/agents`, '/D/Rivera', 'javascript:alert(1)']) {
+    for (const path of ['https://evil.example/d/rivera', '//evil.example', `${CHAT}?preview=${RIVERA.deskId}`, `${CHAT}/agents`, '/D/Turner', 'javascript:alert(1)']) {
       const token = issueLink();
       localStorage.setItem(PAY_CHATS, JSON.stringify([[payChatKey(token), path]]));
       await paidWithoutALink(token, path);

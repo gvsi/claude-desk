@@ -1,23 +1,23 @@
 {
-  "about": "The simulated Claude memory that setup reads in this prototype: what Maria Rivera's memory would hold about her business. It comes from no real account.",
+  "about": "The simulated Claude memory that setup reads in this prototype: what Mike Turner's memory would hold about his business. It comes from no real account.",
   "items": [
     {
       "id": "business",
       "title": "Business",
       "topics": ["business", "name", "owner", "company"],
-      "text": "Maria Rivera owns Rivera Plumbing in Oakland, California, and answers its phone herself between jobs."
+      "text": "Mike Turner owns Turner Plumbing in Oakland, California, and answers its phone himself between jobs."
     },
     {
       "id": "trade",
       "title": "Trade",
       "topics": ["trade", "services", "work", "plumbing"],
-      "text": "Rivera Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."
+      "text": "Turner Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."
     },
     {
       "id": "service-area",
       "title": "Service area",
       "topics": ["area", "cities", "where"],
-      "text": "Rivera Plumbing works in Oakland, Berkeley, Alameda and Emeryville."
+      "text": "Turner Plumbing works in Oakland, Berkeley, Alameda and Emeryville."
     },
     {
       "id": "hours",
@@ -29,7 +29,7 @@
       "id": "website",
       "title": "Website",
       "topics": ["website", "site", "web", "online"],
-      "text": "The business's website is https://rivera-plumbing.example."
+      "text": "The business's website is https://turner-plumbing.example."
     }
   ]
 }

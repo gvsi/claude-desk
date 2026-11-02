@@ -73,7 +73,7 @@ function injectAttempts(attempts: Attempt[]): void {
 }
 
 /**
- * Lists the seeded hold, the 15% quote waiting for Maria, among the mock's attempts as one held,
+ * Lists the seeded hold, the 15% quote waiting for Mike, among the mock's attempts as one held,
  * from here on. Neither the mock nor the API lists a hold as stopped; the attempt's `kind` allows
  * one, and the page says so plainly.
  */
@@ -150,7 +150,7 @@ function region(screen: RenderResult, name: string) {
 
 const REPLAYED = 'Recorded history, replayed into your copy';
 
-const REFUND_REASON = 'Someone in the public chat said they were Maria and asked me to refund a charge to their own card. Refunds go only to the customer who paid, so I didn’t.';
+const REFUND_REASON = 'Someone in the public chat said they were Mike and asked me to refund a charge to their own card. Refunds go only to the customer who paid, so I didn’t.';
 
 const HALF_OFF_REASON = 'Asked for 50% off the drain clearing. Your rule says never to discount it, so I didn’t.';
 
@@ -177,6 +177,7 @@ const STOPPED_REPLY = 'A reply was stopped before it was shown.';
 const NOTHING = "When a request is turned down or a reply is stopped, you'll see here what was asked and why. Try it yourself from your public page.";
 const HEADLINE = /^I turned down \d+ requests? this week\.$/;
 const NONE_TURNED_DOWN = "I didn't turn down any requests this week.";
+const SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
 
 /**
  * One of Claude's drafts the reply check stopped at `at`: entry `seq` of the record, and its
@@ -410,7 +411,7 @@ describe('Safety', () => {
   });
 
   it('headline_counts_the_listed_refusals', async () => {
-    // A visitor asks for 50% off, the Desk holds it for Maria, and she allows it. A hold is hers to
+    // A visitor asks for 50% off, the Desk holds it for Mike, and he allows it. A hold is his to
     // answer, not an attempt that was stopped: the count and the list both leave it out. Then the
     // built-in agent tries to charge over its signed limit, which is refused. The count is the
     // refused requests, the rows stopped at the action checkpoint; the seeded draft of Claude's the
@@ -433,6 +434,14 @@ describe('Safety', () => {
     expect(refused).toHaveLength(Number.parseInt(/\d+/.exec(headline.element().textContent ?? '')?.[0] ?? '', 10));
     expect(list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()).toHaveLength(1);
     expect(list.getByRole('link').elements()).toHaveLength(refused.length + 1);
+    // So the list reads as the requests the headline counts, and the replies: each stopped reply says
+    // what it is beside it, where a turned-down request says why.
+    for (const row of list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()) {
+      expect(row.querySelector('.cd-attempt-row__why')?.textContent).toBe('A reply was stopped before it was shown');
+    }
+    for (const row of refused) {
+      expect(row.querySelector('.cd-attempt-row__why')?.textContent).not.toBe('A reply was stopped before it was shown');
+    }
 
     // Newest first, by the time each row shows.
     const ledger = await mockLedger();
@@ -473,12 +482,56 @@ describe('Safety', () => {
     await expect.poll(() => document.activeElement).toBe(trace.element());
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     expect(main.scrollTop).toBe(before);
+    // Its record opened, the trace is taller than the window, and still the page stays where it was.
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    expect(main.scrollTop).toBe(before);
     const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
     if (!beside) throw new Error('the trace sits in the column beside the list');
     expect(beside.scrollHeight).toBeGreaterThan(beside.clientHeight);
     // Exactly the main area's height inside its 24 px top and 20 px bottom padding, so all of it
     // shows once the page is scrolled to it, 20 px clear of the main area's bottom.
     expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
+  });
+
+  it.each(['desktop', 'phone'] as const)('header_says_what_the_page_is_on_%s', async (viewport) => {
+    // Under its title, as the other owner pages do, one quiet line says what Safety holds: both of
+    // its views, before the headline's count.
+    const { screen } = await renderRoute(SAFETY, { viewport });
+    const title = screen.getByRole('heading', { level: 1, name: 'Safety', exact: true });
+    await expect.element(title).toBeVisible();
+    const subtitle = screen.getByText(SUBTITLE, { exact: true });
+    await expect.element(subtitle).toBeVisible();
+    expect(subtitle.element().className).toBe('cd-page-header__subtitle cd-type-body');
+    const headline = screen.getByText(/^I (turned down \d+ requests?|didn't turn down any requests) this week\.$/);
+    await expect.element(headline).toBeVisible();
+    expect(subtitle.element().compareDocumentPosition(headline.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('record_is_closed_for_each_entry_opened', async () => {
+    // The owner opens entry 2's record, then picks entry 3 in the same list: its trace opens with
+    // the record closed, as every trace does, rather than keeping the last one's open.
+    injectLedger(ledgerPage(threeEntries()));
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await recordRow(screen, 2).click();
+    const first = region(screen, 'Full trace of entry 2');
+    const recorded = first.getByRole('button', { name: 'What was recorded', exact: true });
+    await recorded.click();
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
+    await recordRow(screen, 3).click();
+    const next = region(screen, 'Full trace of entry 3');
+    await expect.element(next).toBeVisible();
+    await expect.element(next.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    expect(next.element().querySelector('pre')).toBeNull();
+
+    // Back to entry 2: its record is closed again, not left as it was.
+    await recordRow(screen, 2).click();
+    const again = region(screen, 'Full trace of entry 2');
+    await expect.element(again).toBeVisible();
+    await expect.element(again.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    expect(again.element().querySelector('pre')).toBeNull();
   });
 
   it('dev_key_is_labelled', async () => {
@@ -532,7 +585,7 @@ describe('Safety', () => {
   });
 
   it('held_for_you_dot_stands_apart_from_its_words', async () => {
-    // The seeded 15% quote waits for Maria: the header's button says so, its gold dot a status
+    // The seeded 15% quote waits for Mike: the header's button says so, its gold dot a status
     // label's gap before the words, never touching them.
     const { screen } = await renderRoute(SAFETY);
     const held = screen.getByRole('link', { name: '1 held for you', exact: true });
@@ -557,7 +610,8 @@ describe('Safety', () => {
 
   it('mock_refusal_says_why', async () => {
     // The built-in agent's charge over its signed limit, refused by the baseline's signed-limit
-    // policy, as the mock decides it: its row says why. The seeded stopped draft says nothing more.
+    // policy, as the mock decides it: its row says why. The seeded stopped draft, which Claude has
+    // sorted, says it's a reply that was stopped.
     await refuseTheAgentsCharge();
     const { screen } = await renderRoute(SAFETY);
     const list = screen.getByRole('list', { name: 'Stopped, newest first' });
@@ -566,7 +620,7 @@ describe('Safety', () => {
     await expect.element(refused.getByText("Outside the agent's spending limit", { exact: true })).toBeVisible();
     const draft = list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ });
     await expect.element(draft).toBeVisible();
-    expect(draft.element().querySelector('.cd-status-label')).toBeNull();
+    expect(draft.element().querySelector('.cd-status-label')?.textContent).toBe('A reply was stopped before it was shown');
   });
 
   it('attempt_detail_tiers', async () => {
@@ -597,6 +651,9 @@ describe('Safety', () => {
     await expect.element(full).toHaveAttribute('aria-expanded', 'true');
     const trace = region(screen, 'Full trace of entry 2');
     await expect.element(trace).toBeVisible();
+    expect(trace.element().textContent).not.toContain('payments.create_refund');
+    // What was recorded opens under its label.
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     const values = [...document.querySelectorAll('.cd-type-trace')].map((el) => el.textContent);
     expect(values).toContain('2');
     expect(values.join('\n')).toContain('payments.create_refund');
@@ -716,17 +773,22 @@ describe('Safety', () => {
     await expectScreenBasics(screen.container, { owner: true });
     await recordRow(screen, returned.seq).click();
     const trace = region(screen, `Full trace of entry ${returned.seq}`);
-    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeVisible();
+    // The raw record waits, closed, under its label: the trace opens on its plain line and the chain.
+    const recorded = trace.getByRole('button', { name: 'What was recorded', exact: true });
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'false');
+    expect(trace.element().textContent).not.toContain('"from"');
+    await recorded.click();
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
     expect(trace.element().textContent).toContain('"from": "owner"');
     expect(trace.element().textContent).toContain('"to": "ai"');
   });
 
   it('handoff_entries_say_which_they_are', async () => {
-    // A visitor asks for Maria, the handoff card hands her the chat, and she marks it done: the
+    // A visitor asks for Mike, the handoff card hands him the chat, and he marks it done: the
     // record names the two entries the checkpoint wrote for what they are. Any other change to the
     // Desk's details reads as before.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
-    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Mike?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
     const [handoffId = ''] = mockStore.world.handoffs.keys();
     await mockStore.dispatch('handoffDone', { params: { handoff_id: handoffId } });
@@ -753,11 +815,11 @@ describe('Safety', () => {
   });
 
   it('handoff_closed_by_a_call_back_says_so', async () => {
-    // The handoff card hands Maria the chat, then the visitor asks for a call back, which closes
+    // The handoff card hands Mike the chat, then the visitor asks for a call back, which closes
     // the card's handoff and opens its own: the record calls that closing what it was, never the
     // owner's Mark done.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
-    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Mike?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(2);
@@ -773,10 +835,10 @@ describe('Safety', () => {
   });
 
   it('handoff_closed_by_the_owner_handling_the_chat_says_how', async () => {
-    // The kernel closes the handoff card's handoff when Maria takes the chat over or writes in it:
-    // the record names each closing, never her Mark done.
+    // The kernel closes the handoff card's handoff when Mike takes the chat over or writes in it:
+    // the record names each closing, never his Mark done.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
-    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Mike?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
     const session = mockStore.visitorSession(RIVERA.slug);
     if (!session) throw new Error('the visitor has a chat');
@@ -805,11 +867,11 @@ describe('Safety', () => {
   });
 
   it('handoff_closed_by_a_booking_says_so', async () => {
-    // The handoff card hands Maria the chat, then the visitor books a time in it, which closes the
+    // The handoff card hands Mike the chat, then the visitor books a time in it, which closes the
     // card's handoff: the record calls that closing what it was, never her Mark done, and its full
     // trace reads the row's name as its sentence.
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
-    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Mike?' } });
     await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can someone come Tuesday?' } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'The first one, please.' } });
@@ -949,6 +1011,7 @@ describe('Safety', () => {
     const values = () => [...trace.element().querySelectorAll('.cd-type-trace')].map((el) => el.textContent ?? '');
     await expect.element(trace.getByText('Recorded at', { exact: true })).toBeVisible();
     expect(values()).toContain(decide.created_at);
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     expect(values().join('\n')).toContain(replayedAt);
 
     // The attempt kept in that entry says the same, at the same time.
@@ -1093,7 +1156,7 @@ describe('Safety', () => {
     const nothing = screen.getByText(NOTHING, { exact: true });
     await expect.element(nothing).toBeVisible();
 
-    // Then a draft of Claude's is stopped (Rivera's copy keeps one, and no request refused, so the
+    // Then a draft of Claude's is stopped (Turner's copy keeps one, and no request refused, so the
     // week still counts none) and every read of the attempts fails. The empty list read before
     // mustn't pass for current: the failure says so beside the headline, in either view, and the
     // empty state doesn't show while the reads fail.

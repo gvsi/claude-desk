@@ -28,12 +28,13 @@ row, which the route holds locked until the decision commits:
 Everything a decision writes commits in the caller's transaction: the action, the decision, its
 ledger entries (`review`, `decide`, `breaker`) and the owner's alerts. A decision is signed over
 its state and status line (`sign_decision`), and every later state change ledgers and re-signs it
-(`set_state`). Expiry is lazy (`expire_if_due`). A call refused before it has a decision (that
-call ID or those args), or failed by anything but a refusal once its session is known (a
-`KernelRepo` refusal, a database error: 500 `internal`), still gets its `decide` entry, written
-after the transaction has rolled back. Every new decision's `decide` entry, a refusal before any
-action included, names the rules version it was decided under and that version's money cap
-(`policy_version`, `auto_money_cap_cents`), unless the Desk has no active version.
+(`set_state`). Expiry is lazy (`expire_if_due`), and so is a booking's cancelling the earlier held
+quotes with a discount in its session (`supersede_if_booked`). A call refused before it has a
+decision (that call ID or those args), or failed by anything but a refusal once its session is
+known (a `KernelRepo` refusal, a database error: 500 `internal`), still gets its `decide` entry,
+written after the transaction has rolled back. Every new decision's `decide` entry, a refusal
+before any action included, names the rules version it was decided under and that version's money
+cap (`policy_version`, `auto_money_cap_cents`), unless the Desk has no active version.
 
 A call's free-text arguments are Claude's wording and untrusted (they may repeat what a visitor
 said, or not), and reach the decision only as data: the reviewer sees them under `untrusted_args`,
@@ -75,7 +76,7 @@ from desk.contracts import (
     money_tool,
 )
 from desk.db.models import Action as ActionRow
-from desk.db.models import Business, Desk, Execution, Person, Tool
+from desk.db.models import Booking, Business, Desk, Execution, Person, Tool
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
@@ -393,11 +394,16 @@ def owner_refusal_key(reason: str | None, check: str | None) -> str:
     return "refused_fallback"
 
 
-# Every line `owner_refusal_key` picks is an owner line, checked at import: a missing one would raise in
-# `set_state` and leave a refusal at execution without its line (in T2, an action settled `unknown`).
+# The key of the owner's line for a held request a booking closed (`supersede_if_booked`, `set_state`).
+BOOKING_CLOSED_KEY = "cancelled_by_booking"
+
+# Every line `owner_refusal_key` picks is an owner line, and so is a booking's, checked at import: a missing one
+# would raise in `set_state` and leave a refusal at execution without its line (in T2, an action settled `unknown`).
 if not {owner_refusal_key(reason, check) for reason in ("session_ended", "rules_changed", None)
         for check in (*SESSION_ENDED_CHECKS, *RECHECK_CHECKS, "desk", None)} <= render.OWNER_STATUS_KEYS:
     raise RuntimeError("every refusal at execution has an owner line")
+if BOOKING_CLOSED_KEY not in render.OWNER_STATUS_KEYS:
+    raise RuntimeError("a held request a booking closed has an owner line")
 
 
 async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str = "decide",
@@ -411,10 +417,13 @@ async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str =
     transaction rolls back; in T2, `execute._run` settles the action `unknown`, with nothing
     delivered.
 
-    The owner's line (`owner_plain`) is set for `refused_at_execution` alone, picked by the
-    refusal's own `reason` and `check` in `summary` (`owner_refusal_key`, which always picks one)
-    and rendered in the owner's language (`render.owner_line`), never the session's; every other
-    state clears it. It isn't signed and never enters the summary, so no ledger entry holds it."""
+    The owner's line (`owner_plain`) is set in two cases, each rendered in the owner's language
+    (`render.owner_line`), never the session's: `refused_at_execution`, picked by the refusal's own
+    `reason` and `check` in `summary` (`owner_refusal_key`, which always picks one), and a held
+    request a booking closed, `cancelled` with `cancelled_by: "booking"` in `summary`
+    (`supersede_if_booked`), which says the visitor booked before the owner answered. Every other
+    state, a visitor's own cancel included, clears it. It isn't signed and never enters the summary,
+    so no ledger entry holds it."""
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     adapter = await adapters.resolve(ctx, row.desk_id, row.tool) if state == "executed" else None
@@ -424,6 +433,8 @@ async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str =
     owner_plain = None
     if state == "refused_at_execution":
         owner_plain = render.owner_line(owner_refusal_key(summary.get("reason"), summary.get("check")))
+    elif state == "cancelled" and summary.get("cancelled_by") == "booking":
+        owner_plain = render.owner_line(BOOKING_CLOSED_KEY)
     row.state = state
     row.visitor_plain = visitor_plain
     row.owner_plain = owner_plain
@@ -458,6 +469,54 @@ async def expire_if_due(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
         .execution_options(populate_existing=True)))).one()
     if await _expiry_due(ctx, locked):
         await set_state(ctx, locked, "expired", summary={"decision_id": locked.decision_id, "state": "expired"})
+    return locked
+
+
+async def _superseding_booking(ctx: KernelCtx, row: DecisionRow) -> str | None:
+    """The booking that makes a held quote with a discount stale: the first `confirmed` booking its
+    own session made on its Desk whose decision was made after the quote's (`created_at` strictly
+    later). None for any other decision, for a held quote at list price, or when every booking of
+    the session came before the discount was asked."""
+    if row.state != "held" or row.tool != "native.quote" or row.action_id is None:
+        return None
+    discount_bp = (await ctx.db.execute(ctx.repo.scoped(select(ActionRow.discount_bp).where(
+        ActionRow.action_id == row.action_id)))).scalar_one_or_none()
+    if not discount_bp:
+        return None
+    return (await ctx.db.execute(ctx.repo.scoped(
+        select(Booking.booking_id).join(DecisionRow, DecisionRow.action_id == Booking.action_id).where(
+            Booking.desk_id == row.desk_id, Booking.session_id == row.session_id, Booking.status == "confirmed",
+            DecisionRow.created_at > row.created_at)
+        .order_by(DecisionRow.created_at, Booking.booking_id).limit(1)))).scalar_one_or_none()
+
+
+async def supersede_if_booked(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
+    """A booking supersedes its session's earlier held discount quotes ("Decision lifecycle"),
+    settled lazily on every read, as expiry is: a held quote with a discount becomes `cancelled`
+    once the same session has a confirmed booking decided after it. The visitor booked at list
+    price meanwhile, so approving the discount now would hand them a cheaper quote for a job they
+    booked without it; a booking made before the discount was asked leaves it a real question. It
+    only ever closes a request, never runs one, and the booking's own transaction takes no decision
+    row. Ledgered `decide` `{decision_id, action_id, state, cancelled_by: "booking", booking_id,
+    policy_version, auto_money_cap_cents}`, the Desk's active version and its cap as `_answers_now`
+    reads them (both left out only when it has none), and re-signed; the visitor's line is the
+    state's own, and the owner's (`owner_plain`, unsigned, on the owner's reads alone) says the
+    visitor booked before the owner answered. The row is locked and checked again before it changes,
+    so two readers cancel it once."""
+    if await _superseding_booking(ctx, row) is None:
+        return row
+    locked = (await ctx.db.scalars(ctx.repo.scoped(
+        select(DecisionRow).where(DecisionRow.decision_id == row.decision_id).with_for_update()
+        .execution_options(populate_existing=True)))).one()
+    booking_id = await _superseding_booking(ctx, locked)
+    if booking_id is None:
+        return locked
+    summary: dict[str, Any] = {"decision_id": locked.decision_id, "action_id": locked.action_id, "state": "cancelled",
+                               "cancelled_by": "booking", "booking_id": booking_id}
+    version_row = await activation.active_version(ctx, locked.desk_id)
+    if version_row is not None:
+        summary.update(policy_version=version_row.version, auto_money_cap_cents=activation.version_cap(version_row))
+    await set_state(ctx, locked, "cancelled", summary=summary)
     return locked
 
 
@@ -903,7 +962,8 @@ async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
     if row.call_sha256 != sha:
         raise AuthError(409, "conflict", "call_conflict", route=DECIDE_ROUTE,
                         named=Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id))
-    return await decision_contract(ctx, await refresh_answers(ctx, await expire_if_due(ctx, row)))
+    return await decision_contract(ctx, await refresh_answers(
+        ctx, await supersede_if_booked(ctx, await expire_if_due(ctx, row))))
 
 
 def _rules_decided(call: _Call, outcome: str, evaluation: Evaluation) -> tuple[str, Sequence[str]]:
@@ -1190,7 +1250,8 @@ async def _decision_row(ctx: KernelCtx, decision_id: str, copy_id: str | None = 
 
 
 async def _read(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
-    """A decision as a read settles it: an orphaned execution reconciled, then lazy expiry
+    """A decision as a read settles it: an orphaned execution reconciled, then lazy expiry, then a
+    held discount quote its session's later booking made stale cancelled
     (`execute.refresh_decision`)."""
     from desk.kernel_service import execute     # execute builds on this module
 

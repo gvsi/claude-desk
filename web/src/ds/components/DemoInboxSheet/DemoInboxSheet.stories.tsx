@@ -16,7 +16,7 @@ const CODE_ENTRY: DemoInboxEntry = {
   entry_id: 'inbox-code-dana',
   to: '•••• 0143',
   kind: 'verification_code',
-  body: 'Your Rivera Plumbing code is 482913. It works for 10 minutes.',
+  body: 'Your Turner Plumbing code is 482913. It works for 10 minutes.',
   created_at: '2026-10-30T10:46:00Z',
   decision_id: null,
 };

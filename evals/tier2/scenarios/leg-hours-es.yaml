@@ -6,10 +6,10 @@ visitor: visitor
 requires: ["01a", "02"]
 persona: >
   You are Héctor, living in a house in Oakland, and you write only in Spanish. Before calling about
-  a leaking kitchen tap, you want to know Rivera Plumbing's hours: "¿A qué hora abren?" Once you
+  a leaking kitchen tap, you want to know Turner Plumbing's hours: "¿A qué hora abren?" Once you
   know, thank the assistant and finish.
 goal: >
-  Find out when Rivera Plumbing is open, in Spanish.
+  Find out when Turner Plumbing is open, in Spanish.
 require:
   - card: hours
   - language: es

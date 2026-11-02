@@ -1,7 +1,7 @@
 """The sample week: a hosted copy opens on a hand-written week of finished conversations (`seed.seed_sample_week`).
 
 The kernel writes it only with `SAMPLE_WEEK=1` in its environment and a copy request that asks for history
-(`replay_night`, which the hosted API sends). It is history and nothing else: every row terminal, no person, every
+(`replay_night`, which the hosted API sends). It is history: terminal rows, one archived sample-only person, every
 ledger entry marked `replayed` inside its signature, and nothing a session, the owner or another copy can act on.
 """
 
@@ -20,13 +20,14 @@ from desk.api import owner_reads
 from desk.api.ro import KernelRO
 from desk.api.routes.owner import store_replayed_night
 from desk.contracts import CopyCreated, Decision, LedgerPage, Review
-from desk.db.models import (ActorSession, AgentKey, Approval, Booking, CalendarSlot, DemoInboxEntry, Desk, Execution,
-                             Fact, Handoff, Lead, MandateReservation, Person, Quote, VerificationChallenge)
+from desk.db.models import (ActorSession, AgentKey, Approval, Booking, CalendarSlot, DemoInboxEntry, Desk, Document,
+                             DocumentLink, Execution, Fact, Handoff, Lead, MandateReservation, PaymentLink, Person,
+                             Quote, VerificationChallenge)
 from desk.db.models import Decision as DecisionRow
 from desk.db.session import API_CONNECT_OPTIONS, database_url
-from desk.kernel_service import auth, decide, reply_check, sample_week, seed
+from desk.kernel_service import activation, auth, decide, payments, reply_check, sample_week, seed, verification
 
-from .helpers import rows_of, verify_session
+from .helpers import kernel_ctx, rows_of, verify_session
 from .test_decide import verify_signature
 
 TZ = ZoneInfo("America/Los_Angeles")
@@ -125,6 +126,259 @@ async def today_of(app, created: CopyCreated, now: datetime):
         await engine.dispose()
 
 
+async def reports_of(app, created: CopyCreated, now: datetime):
+    engine = create_async_engine(database_url("API"), connect_args={"options": API_CONNECT_OPTIONS})
+    try:
+        async with KernelHttp("http://kernel", transport=httpx.ASGITransport(app)) as kernel, engine.connect() as conn:
+            ctx = OwnerCtx(copy_id=created.copy_id, desk_ids=tuple(created.desk_ids),
+                           owner_session_id=created.owner_session.session_id, owner_generation=0,
+                           kernel=kernel.owner(created.owner_token), ro=KernelRO(conn, created.copy_id))
+            return await owner_reads.reports(ctx, created.desk_ids[0], now, 7)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("hour,minute", [(0, 30), (3, 30), (9, 0), (17, 59), (23, 30)])
+async def test_since_last_night_has_two_answers_and_one_refusal(week_on, app, client, frozen_clock, hour, minute):
+    now = datetime(2026, 11, 1, hour, minute, tzinfo=TZ)
+    frozen_clock.travel(now)
+    created = await create_copy(client, replay_night=True)
+    assert created.replay_id == RECORDING
+    _, today, _, needs_you, _ = await today_of(app, created, now)
+    assert today.briefing.answers + today.briefing.bookings == 2
+    assert today.briefing.bookings == 0
+    assert today.briefing.turned_down == 1
+    assert today.needs_you_count == len(needs_you) == 1
+    since = datetime(2026, 10, 31, 18, tzinfo=TZ)
+    visitors = [event for event in created.replayed_messages if event.kind == "visitor_message"
+                and since <= datetime.fromisoformat(event.shown_at) < now]
+    assert {event.text for event in visitors} == {sample.said for sample in seed.RIVERA_SAMPLE_WEEK[:3]}
+    assert len(visitors) == 3
+    expected_date = (now.date() - timedelta(days=1)) if hour < 3 else now.date()
+    assert {datetime.fromisoformat(event.shown_at).astimezone(TZ).date() for event in visitors} == {expected_date}
+    if hour >= 3:
+        for event, minutes in zip(sorted(visitors, key=lambda event: event.shown_at), (180, 135, 90), strict=True):
+            assert datetime.fromisoformat(event.shown_at) == now.astimezone(UTC) - timedelta(minutes=minutes)
+
+
+async def test_elena_cannot_be_verified_or_read_by_a_fresh_visitor(week_on, app, client, frozen_clock):
+    from .test_context import context_of, fact_ids
+
+    created = await create_copy(client, replay_night=True)
+    [person] = await rows_of(app, created.copy_id, select(Person).where(Person.ref == seed.SAMPLE_CUSTOMER["ref"]))
+    [document] = await rows_of(app, created.copy_id, select(Document).where(Document.ref == seed.SAMPLE_INVOICE["ref"]))
+    assert person.removed_at < frozen_clock.now()
+    [challenge] = await rows_of(app, created.copy_id, select(VerificationChallenge))
+    assert challenge.person_id == document.record_owner_person_id == person.person_id
+    assert challenge.status == "consumed" and challenge.expires_at < frozen_clock.now()
+    assert challenge.failed_at == [] and challenge.code_hash == ""
+    assert not verification.code_matches(challenge, "000000")
+    [session] = await rows_of(app, created.copy_id, select(ActorSession).where(
+        ActorSession.session_id == challenge.session_id))
+    assert (session.person_id, session.verified, session.assurance) == (person.person_id, True, "demo_code")
+    assert session.closed_at < frozen_clock.now()
+    [release] = await rows_of(app, created.copy_id, select(DecisionRow).where(
+        DecisionRow.session_id == session.session_id, DecisionRow.tool == "native.release_document"))
+    assert (release.state, release.card_ids, release.policy_ids) == ("executed", ["rv-docs"], ["A.auto.rv-docs"])
+    [link] = await rows_of(app, created.copy_id, select(DocumentLink))
+    assert link.voided_at < frozen_clock.now() and link.expires_at < frozen_clock.now()
+    assert (await client.get(f"/document_links/{link.token}")).status_code == 404
+    [desk] = await rows_of(app, created.copy_id, select(Desk))
+    opened = (await client.post("/sessions", json={"desk_slug": desk.slug, "kind": "visitor"})).json()
+    session_id, headers = opened["state"]["session_id"], {auth.SESSION_HEADER: opened["session_token"]}
+    context = await context_of(client, session_id, headers)
+    assert f"document:{document.document_id}" not in fact_ids(context.facts)
+    response = await client.post("/verify/start", headers=headers,
+                                 json={"session_id": session_id, "contact": seed.SAMPLE_CUSTOMER["contact"]})
+    assert response.status_code == 200 and response.json()["inbox"] == []
+    response = await client.post("/verify/check", headers=headers, json={"session_id": session_id, "code": "000000"})
+    assert response.status_code == 422
+    assert await rows_of(app, created.copy_id, select(VerificationChallenge).where(
+        VerificationChallenge.session_id == session_id)) == []
+    response = await client.post("/decide", headers=headers, json={"session_id": session_id, "generation": 0,
+        "call": {"call_id": "invoice", "tool": "native.release_document",
+                 "args": {"document_id": document.document_id}}})
+    assert response.status_code == 200 and response.json()["state"] == "refused"
+    [live] = await rows_of(app, created.copy_id, select(ActorSession).where(ActorSession.session_id == session_id))
+    assert (live.person_id, live.verified, live.assurance) == (None, False, "none")
+    assert await rows_of(app, created.copy_id, select(DemoInboxEntry).where(
+        DemoInboxEntry.person_id == person.person_id)) == []
+
+
+async def test_unverified_document_refusal_matches_the_live_path(week_on, app, client, frozen_clock):
+    from .test_decide import Visitor, decided
+
+    created = await create_copy(client, replay_night=True)
+    [sample] = await rows_of(app, created.copy_id, select(DecisionRow).where(
+        DecisionRow.tool == "native.release_document", DecisionRow.state == "refused"))
+    [desk] = await rows_of(app, created.copy_id, select(Desk))
+    opened = (await client.post("/sessions", json={"desk_slug": desk.slug, "kind": "visitor"})).json()
+    visitor = Visitor(opened["state"]["session_id"], opened["session_token"])
+    live = await decided(client, visitor, "native.release_document", seed.RIVERA_SAMPLE_WEEK[2].calls[0].args)
+    assert live.reason_plain == sample.reason_plain
+    assert live.policy_ids == sample.policy_ids == []
+    assert live.card_ids == sample.card_ids == []
+    assert live.action is sample.action_id is None
+    entries = {entry.seq: entry for entry in (await ledger_page(client, created)).entries}
+    sample_summary = {key: value for key, value in entries[sample.ledger_seq].event.summary.items() if key != "replayed"}
+    assert sample_summary == entries[live.ledger_seq].event.summary
+    assert sample_summary["reason"] == "not_given" and "check" not in sample_summary
+    _, _, _, _, attempts = await today_of(app, created, frozen_clock.now())
+    [attempt] = [attempt for attempt in attempts if attempt.ref_id == sample.decision_id]
+    assert attempt.cause == "tool_not_available"
+
+
+async def test_sample_payment_is_terminal_and_never_calls_the_provider(week_on, app, client, frozen_clock,
+                                                                      monkeypatch):
+    created = await create_copy(client, replay_night=True)
+    [link] = await rows_of(app, created.copy_id, select(PaymentLink))
+    assert (link.state, link.amount_cents, link.mandate_id) == ("paid", 2_000, None)
+    assert link.created_at < link.completion_started_at < link.updated_at
+    assert link.created_at < link.updated_at < link.expires_at < frozen_clock.now()
+    [decision] = await rows_of(app, created.copy_id, select(DecisionRow).where(
+        DecisionRow.action_id == link.action_id))
+    assert (decision.state, decision.card_ids, decision.policy_ids) == ("executed", ["rv-link"], ["A.auto.rv-link"])
+    assert decision.review == sample_week.SAMPLE_REVIEW
+    [quote] = await rows_of(app, created.copy_id, select(Quote).where(Quote.quote_id == link.quote_id))
+    assert quote.status == "paid" and quote.amount_cents == link.amount_cents
+    [paid] = [entry for entry in (await ledger_page(client, created)).entries
+              if entry.event.kind == "payment" and entry.event.summary.get("state") == "paid"]
+    summary = {key: value for key, value in paid.event.summary.items() if key != "replayed"}
+    assert set(summary) == {"link_id", "state", "charge_id", "policy_version", "auto_money_cap_cents"}
+    assert summary["link_id"] == link.link_id and summary["auto_money_cap_cents"] == seed.RIVERA_MONEY_CAP_CENTS
+    [charge] = await rows_of(app, created.copy_id, select(Fact).where(
+        Fact.fact_id == f"charge:{summary['charge_id']}"))
+    assert charge.created_at == link.updated_at
+    assert (paid.event.session_id, paid.event.ref_id) == (link.session_id, link.link_id)
+    card = next(block for event in created.replayed_messages if event.verdict for block in event.verdict.blocks
+                if block.template == "payment_link")
+    assert card.href is not None and card.href.endswith(link.token)
+
+    def no_provider(*args, **kwargs):
+        pytest.fail("terminal sample link contacted the provider")
+
+    real_provider = payments.provider
+    monkeypatch.setattr(payments, "provider", no_provider)
+    response = await client.get(f"/payment_links/{link.token}")
+    assert response.status_code == 200 and response.json()["state"] == "paid"
+    for operation in ("complete", "cancel"):
+        response = await client.post(f"/payment_links/{link.token}/{operation}", json={})
+        assert response.status_code == 409
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(created.copy_id)
+        assert await payments.reconcile_link(ctx, link.link_id) is False
+        await payments.settle_link(ctx, link.link_id)
+        assert await payments.quote_unpayable(ctx, quote) == "quote_paid"
+        assert await payments.open_link_fact(ctx, quote) is None
+        version = await activation.active_version(ctx, link.desk_id)
+        assert await payments.cancel_disallowed_links(ctx, link.desk_id, version) == []
+        assert await payments._desk_links(ctx, link.desk_id) == []
+        assert await payments.cancelled_links(ctx, link.desk_id, version.version) == []
+    assert await payments.reconcile_links_at_startup(app.state.kernel) == []
+    from .test_payment_links import checkouts
+    assert checkouts(created) == []
+    [desk] = await rows_of(app, created.copy_id, select(Desk))
+    [dana] = await rows_of(app, created.copy_id, select(Person).where(Person.ref == "dana"))
+    opened = (await client.post("/sessions", json={"desk_slug": desk.slug, "kind": "visitor"})).json()
+    await verify_session(app, created.copy_id, opened["state"]["session_id"], dana.person_id)
+    # The sample charge was never made at the payments server, so a verified customer's refund of it is refused
+    # there like any unknown charge, and nothing is refunded.
+    monkeypatch.setattr(payments, "provider", real_provider)
+    response = await client.post("/decide", headers={auth.SESSION_HEADER: opened["session_token"]}, json={
+        "session_id": opened["state"]["session_id"], "generation": 0,
+        "call": {"call_id": "sample-refund", "tool": "payments.create_refund",
+                 "args": {"charge_id": summary["charge_id"]}}})
+    assert response.status_code == 200 and response.json()["state"] == "refused"
+    await today_of(app, created, frozen_clock.now())
+    assert (await reports_of(app, created, frozen_clock.now())).paid_cents == 2_000
+
+
+async def test_the_owners_conversations_list_shows_each_sample_outcome(week_on, app, client, frozen_clock):
+    """Through the owner's own Conversations read (`owner_reads.conversations`, `visitor_outcomes`): each sample
+    conversation previews its visitor's words, is marked replayed and shows the outcome it was written to show."""
+    created = await create_copy(client, replay_night=True)
+    _, _, conversations, _, _ = await today_of(app, created, frozen_clock.now())
+    shown = {summary.latest_visitor_text: summary for summary in conversations}
+    expected = ("quoted", None, "turned_down", "visit_booked", "document_sent", "deposit_paid", "called_back",
+                "owner_declined", "lead_captured", "turned_down")
+    for sample, outcome in zip(seed.RIVERA_SAMPLE_WEEK, expected, strict=True):
+        summary = shown[sample.said]
+        assert (summary.latest_outcome, summary.replayed) == (outcome, True), sample.said
+
+
+async def test_each_sample_session_ends_with_its_conversations_outcome(week_on, app, client):
+    created = await create_copy(client, replay_night=True)
+    page = await ledger_page(client, created)
+    entries = {entry.seq: entry.model_dump(mode="json") for entry in page.entries}
+    decisions = await rows_of(app, created.copy_id, select(DecisionRow))
+    links = {row.link_id: row for row in await rows_of(app, created.copy_id, select(PaymentLink))}
+    handoffs = {row.handoff_id: row for row in await rows_of(app, created.copy_id, select(Handoff))}
+    expected = ("quote", None, "refused", "booking", "document released", "deposit paid",
+                "callback handled", "owner declined", "lead", "refused")
+    tools = {"native.quote": "quote", "native.book": "booking", "native.release_document": "document released",
+             "native.capture_lead": "lead"}
+    for sample, outcome in zip(seed.RIVERA_SAMPLE_WEEK, expected, strict=True):
+        [visitor] = [event for event in created.replayed_messages
+                     if event.kind == "visitor_message" and event.text == sample.said]
+        candidates = []
+        for decision in decisions:
+            if decision.session_id != visitor.session_id:
+                continue
+            entry = entries[decision.ledger_seq]
+            assert entry["event"]["ref_id"] == decision.decision_id
+            assert entry["event"]["kind"] == {"executed": "execute", "denied": "approval", "refused": "decide"}[
+                decision.state]
+            value = ("refused" if decision.state == "refused" else "owner declined"
+                     if decision.state == "denied" else tools.get(decision.tool)
+                     if decision.state == "executed" else None)
+            candidates.append((owner_reads.entry_time(entry), entry["seq"], value))
+        for entry in entries.values():
+            event, summary = entry["event"], entry["event"]["summary"]
+            link = links.get(summary.get("link_id"))
+            if (event["kind"] == "payment" and link is not None and link.session_id == visitor.session_id
+                    and link.state == summary.get("state") == "paid" and not summary.get("refused")):
+                candidates.append((owner_reads.entry_time(entry), entry["seq"], "deposit paid"))
+            if event["kind"] == "desk_data" and summary.get("part") == "handoffs":
+                for ref in summary.get("refs", []):
+                    handoff = handoffs.get(ref)
+                    if handoff is not None and handoff.session_id == visitor.session_id:
+                        assert event["session_id"] is None and event["ref_id"] is None
+                        assert {key: value for key, value in summary.items() if key != "replayed"} == {
+                            "part": "handoffs", "refs": [handoff.handoff_id]}
+                        candidates.append((owner_reads.entry_time(entry), entry["seq"],
+                                           "callback handled" if handoff.status == "done" else None))
+        assert (max(candidates)[2] if candidates else None) == outcome, sample.said
+
+
+async def test_only_the_deposits_final_reply_is_authored_by_the_desk(week_on, app, client):
+    created = await create_copy(client, replay_night=True)
+    [deposit] = [event for event in created.replayed_messages
+                 if event.kind == "visitor_message" and event.text == seed.RIVERA_SAMPLE_WEEK[5].said]
+    replies = [event for event in created.replayed_messages if event.kind == "reply"]
+    last = max((event for event in replies if event.session_id == deposit.session_id), key=lambda event: event.shown_at)
+    assert last.author == "desk"
+    assert [block.template for block in last.verdict.blocks] == ["payment_confirmed"]
+    assert all(event.author == "claude" for event in replies if event is not last)
+    assert all(event.author == "claude" for event in created.replayed_messages if event.kind != "reply")
+
+
+@pytest.mark.parametrize("now", NOWS)
+async def test_booking_bars_use_the_two_conversations_dates(week_on, app, client, frozen_clock, now):
+    frozen_clock.travel(now)
+    created = await create_copy(client, replay_night=True)
+    _, today, _, _, _ = await today_of(app, created, now)
+    expected = {now.astimezone(TZ).date() - timedelta(days=back): 1 for back in (6, 5)}
+    assert {day.date: day.bookings for day in today.this_week.days if day.bookings} == expected
+    assert today.this_week.bookings == 2
+    assert next(day.bookings for day in today.this_week.days if day.date == now.astimezone(TZ).date()) == 0
+    sessions = {row.session_id: row for row in await sample_sessions(app, created)}
+    entries = {entry.seq: entry.model_dump(mode="json") for entry in (await ledger_page(client, created)).entries}
+    bookings = await rows_of(app, created.copy_id, select(DecisionRow).where(DecisionRow.tool == "native.book"))
+    for booking in bookings:
+        assert owner_reads.entry_time(entries[booking.ledger_seq]).astimezone(TZ).date() == (
+            sessions[booking.session_id].created_at.astimezone(TZ).date())
+
+
 @pytest.mark.parametrize("now", NOWS, ids=lambda now: now.strftime("%a-%m-%d-%H%M"))
 async def test_a_hosted_copy_opens_on_a_sample_week(week_on, app, client, frozen_clock, now):
     frozen_clock.travel(now)
@@ -138,8 +392,8 @@ async def test_a_hosted_copy_opens_on_a_sample_week(week_on, app, client, frozen
     stored, today, conversations, needs_you, attempts = await today_of(app, created, now)
     assert stored == len(created.replayed_messages)
     week = today.this_week
-    assert len({day.date for day in week.days if day.bookings}) >= 3
-    assert week.bookings >= 3 and week.booked_cents > 0
+    assert len({day.date for day in week.days if day.bookings}) == 2
+    assert week.bookings == 2 and week.booked_cents > 0
     assert week.handled > 1 and week.stopped >= 2
     assert today.recorded_history.this_week is True and today.recorded_history.needs_you is False
     # "Needs you" holds the seeded hold alone, live; nothing sample asks the owner for anything
@@ -155,7 +409,7 @@ async def test_a_hosted_copy_opens_on_a_sample_week(week_on, app, client, frozen
     local_today = now.astimezone(TZ).date()
     for event in created.replayed_messages:
         shown = datetime.fromisoformat(event.shown_at)
-        assert local_today - timedelta(days=6) <= shown.astimezone(TZ).date() < local_today
+        assert local_today - timedelta(days=6) <= shown.astimezone(TZ).date() <= local_today
         assert shown <= now - timedelta(hours=1)
 
 
@@ -239,7 +493,7 @@ async def test_the_ledger_verifies_and_every_sample_entry_is_marked(week_on, app
     marks = [entry for entry in page.entries if "replayed" in entry.event.summary]
     assert sample and sample == marks                  # every sample entry is marked, and only those are
     assert {entry.event.kind for entry in sample} == {"session", "decide", "execute", "approval", "reply",
-                                                      "desk_data"}
+                                                      "desk_data", "verify", "document_link", "payment"}
     for entry in sample:
         assert entry.event.origin == "kernel"
         assert marked(entry)["recording"] == RECORDING
@@ -283,12 +537,16 @@ async def test_signed_verdicts_and_cards_are_the_kernels(week_on, app, client):
         digest = hashlib.sha256(desk_kernel.canonical_json(json.dumps(body)).encode()).digest()
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key)).verify(
             bytes.fromhex(verdict.signature), b"desk-verdict-v1\0" + digest)
+        templates |= {block.template for block in verdict.blocks if block.kind == "card"}
         prose = [block for block in verdict.blocks if block.kind == "prose"]
+        if any(block.template == "payment_confirmed" for block in verdict.blocks):
+            assert prose == []
+            continue
         assert len(prose) == 1 and reply_check.scan_prose(
             prose[0].text, booking_card=any(block.template == "booking_confirmed" for block in verdict.blocks),
             callback_card=any(block.template == "callback_confirmed" for block in verdict.blocks)) == []
-        templates |= {block.template for block in verdict.blocks if block.kind == "card"}
-    assert templates == {"quote", "booking_confirmed", "callback_confirmed"}
+    assert templates == {"quote", "booking_confirmed", "callback_confirmed", "document_link", "payment_link",
+                         "payment_confirmed"}
     # each card's numbers are the copy's own: a quote's total is its quote row's, a booking's date its booking's
     quotes = {f"quote:{row.quote_id}": row for row in await rows_of(app, created.copy_id, select(Quote))}
     bookings = {f"booking:{row.booking_id}": row for row in await rows_of(app, created.copy_id, select(Booking))}
@@ -312,17 +570,18 @@ async def test_every_sample_row_is_finished(week_on, app, client):
         assert row.closed_at < created_at(created)
     decisions = await rows_of(app, created.copy_id, select(DecisionRow).where(DecisionRow.session_id.in_(ids)))
     assert {row.state for row in decisions} == {"executed", "refused", "denied"}
-    assert {row.status for row in await rows_of(app, created.copy_id, select(Quote))} == {"expired"}
+    assert {row.status for row in await rows_of(app, created.copy_id, select(Quote))} == {"expired", "paid"}
     assert {row.status for row in await rows_of(app, created.copy_id, select(Handoff))} == {"done"}
     [approval] = await rows_of(app, created.copy_id, select(Approval))
     assert (approval.answer, approval.nonce, approval.binding_sha256) == ("deny_once", None, None)
     assert approval.consumed_at is not None
     facts = await rows_of(app, created.copy_id, select(Fact).where(Fact.session_id.in_(ids)))
     assert {(row.kind, row.status) for row in facts} == {("quote", "expired"), ("booking", "committed"),
-                                                         ("handoff", "expired")}
-    # nothing that runs, waits or pays: no execution, challenge or Demo inbox entry of the week
+                                                         ("handoff", "expired"), ("document", "expired"),
+                                                         ("payment_link", "expired"), ("charge", "committed")}
+    # Nothing that runs, waits or pays: one consumed challenge, no execution or Demo inbox entry of the week.
     assert await rows_of(app, created.copy_id, select(Execution)) == []
-    assert await rows_of(app, created.copy_id, select(VerificationChallenge)) == []
+    assert {row.status for row in await rows_of(app, created.copy_id, select(VerificationChallenge))} == {"consumed"}
     inbox = await rows_of(app, created.copy_id, select(DemoInboxEntry))
     assert [row.kind for row in inbox if row.kind != "head_checkpoint"] == ["alert"]   # the seeded hold's alone
 
@@ -395,7 +654,7 @@ async def test_nothing_in_the_week_can_be_acted_on(week_on, tokens, app, client)
     assert not slots & {row.slot_id for row in bookings}
 
 
-# ---- No person -----------------------------------------------------------------------------------------------------
+# ---- No seeded person; one archived sample-only customer -------------------------------------------------------------
 
 SEEDED_PEOPLE = ("Dana", "Whitfield", "Bob", "Okafor", "dana@", "bob@")
 
@@ -404,7 +663,7 @@ def test_the_written_week_names_no_one():
     """The sample's own words name no seeded person, and neither the owner nor the business, whose names come from
     the seed's own values (so renaming the seed renames them); its replies pass the reply check's prose scan."""
     business, _ = seed.rivera_seed(datetime(2026, 10, 30, tzinfo=UTC))
-    banned = (*SEEDED_PEOPLE, *business.owner_display_name.split(), *business.name.split(), "Maria", "Rivera",
+    banned = (*SEEDED_PEOPLE, *business.owner_display_name.split(), *business.name.split(), "Mike", "Turner",
               "Mike", "Turner")
     for sample in seed.RIVERA_SAMPLE_WEEK:
         texts = [sample.said, sample.prose, *(str(call.args) for call in sample.calls)]
@@ -414,15 +673,22 @@ def test_the_written_week_names_no_one():
                                       callback_card="callback_confirmed" in sample.cards) == [], sample.prose
 
 
-async def test_the_week_carries_no_person(week_on, app, client):
+async def test_the_week_carries_only_the_archived_sample_person(week_on, app, client):
     created = await create_copy(client, replay_night=True)
     sessions = await sample_sessions(app, created)
     ids = {row.session_id for row in sessions}
+    [person] = await rows_of(app, created.copy_id, select(Person).where(Person.ref == seed.SAMPLE_CUSTOMER["ref"]))
+    assert person.removed_at is not None
+    assert sum(row.verified for row in sessions) == 1
     for row in sessions:
-        assert (row.person_id, row.verified, row.assurance, row.agent_key_id, row.mandate_id) == (
-            None, False, "none", None, None)
+        expected = (person.person_id, True, "demo_code") if row.verified else (None, False, "none")
+        assert (row.person_id, row.verified, row.assurance) == expected
+        assert (row.agent_key_id, row.mandate_id) == (None, None)
     for row in await rows_of(app, created.copy_id, select(Fact).where(Fact.session_id.in_(ids))):
-        assert (row.readers, row.record_owner) == (["owner", f"session:{row.session_id}"], None)
+        if row.kind == "document":
+            assert (row.readers, row.record_owner) == (["owner", f"person:{person.person_id}"], person.person_id)
+        else:
+            assert (row.readers, row.record_owner) == (["owner", f"session:{row.session_id}"], None)
     assert {row.person_id for row in await rows_of(app, created.copy_id, select(Booking))} == {None}
     texts = []
     for model in (DecisionRow, Lead, Handoff, Quote, Fact):
@@ -443,7 +709,8 @@ async def test_a_visitor_verified_as_dana_reads_none_of_it(week_on, app, client)
     await verify_session(app, created.copy_id, session_id, dana.person_id)
     facts = await rows_of(app, created.copy_id, select(Fact).where(
         Fact.session_id.in_({row.session_id for row in await sample_sessions(app, created)})))
-    template = {"quote": "quote", "booking": "booking_confirmed", "handoff": "callback_confirmed"}
+    template = {"quote": "quote", "booking": "booking_confirmed", "handoff": "callback_confirmed",
+                "document": "document_link", "payment_link": "payment_link", "charge": "charges"}
     for fact in facts:
         response = await client.post("/check_reply", headers={auth.SESSION_HEADER: opened["session_token"]}, json={
             "draft": {"session_id": session_id, "generation": 0, "prose": "Here it is.",
@@ -485,6 +752,106 @@ def either(request, monkeypatch) -> bool:
     return request.param
 
 
+async def test_live_verification_limits_are_identical_with_or_without_the_week(either, app, client, frozen_clock):
+    created = await create_copy(client, replay_night=True)
+    assert created.replay_id == (RECORDING if either else None)
+    [desk] = await rows_of(app, created.copy_id, select(Desk))
+    [dana] = await rows_of(app, created.copy_id, select(Person).where(Person.ref == "dana"))
+    opened = (await client.post("/sessions", json={"desk_slug": desk.slug, "kind": "visitor"})).json()
+    session_id, headers = opened["state"]["session_id"], {auth.SESSION_HEADER: opened["session_token"]}
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(created.copy_id)
+        assert await verification._challenges_in_hour(ctx, dana.person_id, frozen_clock.now()) == 0
+        assert await verification._failures_in_hour(ctx, dana.person_id, frozen_clock.now()) == 0
+        assert await verification._live(ctx, session_id=session_id) == []
+    response = await client.post("/verify/start", headers=headers,
+                                 json={"session_id": session_id, "contact": "new.customer@example.com"})
+    assert response.status_code == 200 and response.json()["inbox"] == []
+    assert await rows_of(app, created.copy_id, select(VerificationChallenge).where(
+        VerificationChallenge.session_id == session_id)) == []
+    notices = []
+    for _ in range(verification.MAX_CHALLENGES_PER_HOUR + 1):
+        response = await client.post("/verify/start", headers=headers,
+                                     json={"session_id": session_id, "contact": dana.contact})
+        assert response.status_code == 200
+        notices.append(len(response.json()["inbox"]))
+    assert notices == [1, 1, 1, 1, 1, 0]
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(created.copy_id)
+        assert await verification._challenges_in_hour(ctx, dana.person_id, frozen_clock.now()) == 5
+        assert await verification._failures_in_hour(ctx, dana.person_id, frozen_clock.now()) == 0
+        assert await verification._live(ctx, session_id=session_id) == []
+    inbox = await rows_of(app, created.copy_id, select(DemoInboxEntry).where(
+        DemoInboxEntry.person_id == dana.person_id))
+    assert len([row for row in inbox if row.kind == "verification_code"]) == 5
+    assert len([row for row in inbox if row.kind == "alert"]) == 1
+
+
+async def test_live_payment_limits_and_quote_reads_are_unchanged(either, app, client, reviewer, frozen_clock):
+    from .test_decide import Visitor, decided
+    from .test_execute import executed
+    from .test_payment_links import checkouts, quoted
+
+    created = await create_copy(client, replay_night=True)
+    assert created.replay_id == (RECORDING if either else None)
+    assert checkouts(created) == []
+    [desk] = await rows_of(app, created.copy_id, select(Desk))
+    opened = (await client.post("/sessions", json={"desk_slug": desk.slug, "kind": "visitor"})).json()
+    visitor = Visitor(opened["state"]["session_id"], opened["session_token"])
+    reviewer.answer = sample_week.SAMPLE_REVIEW
+    quote_id = await quoted(client, visitor, ("deposit", 1))
+    [quote] = await rows_of(app, created.copy_id, select(Quote).where(Quote.quote_id == quote_id))
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(created.copy_id)
+        version = await activation.active_version(ctx, desk.desk_id)
+        assert activation.version_cap(version) == seed.RIVERA_MONEY_CAP_CENTS
+        assert await payments.quote_unpayable(ctx, quote) is None
+        assert await payments.open_link_fact(ctx, quote) is None
+    decision = await decided(client, visitor, "native.payment_link", {"quote_id": quote_id})
+    assert (decision.outcome, decision.card_ids, decision.action.amount_cents) == ("allow", ["rv-link"], 2_000)
+    assert (await executed(client, visitor, decision)).state == "succeeded"
+    [link] = await rows_of(app, created.copy_id, select(PaymentLink).where(PaymentLink.quote_id == quote_id))
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(created.copy_id)
+        assert (await payments.open_link_fact(ctx, quote)).fact_id == f"payment_link:{link.link_id}"
+    response = await client.get(f"/payment_links/{link.token}")
+    assert response.status_code == 200 and response.json()["state"] == "issued"
+    response = await client.post(f"/payment_links/{link.token}/complete", json={})
+    assert response.status_code == 200 and response.json()["state"] == "paid"
+    assert len(checkouts(created)) == 1
+    large_quote = await quoted(client, visitor, ("leak", 3), call_id="large-quote")
+    held = await decided(client, visitor, "native.payment_link", {"quote_id": large_quote}, call_id="large-link")
+    assert held.outcome == "hold" and "allow_person" not in held.answers
+    await today_of(app, created, frozen_clock.now())
+    assert (await reports_of(app, created, frozen_clock.now())).paid_cents == 2_000 * (2 if either else 1)
+
+
+async def test_live_urgent_alerts_are_unchanged(either, app, client):
+    from .test_decide import Visitor, decided
+    from .test_execute import executed
+
+    created = await create_copy(client, replay_night=True)
+    assert created.replay_id == (RECORDING if either else None)
+    [desk] = await rows_of(app, created.copy_id, select(Desk))
+    opened = (await client.post("/sessions", json={"desk_slug": desk.slug, "kind": "visitor"})).json()
+    visitor = Visitor(opened["state"]["session_id"], opened["session_token"])
+    sample_call = seed.RIVERA_SAMPLE_WEEK[6].calls[0]
+    for n in range(2):
+        decision = await decided(client, visitor, sample_call.tool, sample_call.args, call_id=f"urgent-{n}")
+        assert decision.outcome == "allow" and decision.card_ids == ["rv-urgent"]
+        assert (await executed(client, visitor, decision)).state == "succeeded"
+    alerts = await rows_of(app, created.copy_id, select(DemoInboxEntry).where(
+        DemoInboxEntry.preview == "Urgent callback requested"))
+    assert len(alerts) == 2
+    live = await rows_of(app, created.copy_id, select(Handoff).where(Handoff.session_id == visitor.session_id))
+    assert sorted(row.status for row in live) == ["done", "open"]
+    assert all(row.callback_window is None for row in live)
+    if either:
+        [sample] = await rows_of(app, created.copy_id, select(Handoff).where(
+            Handoff.session_id != visitor.session_id))
+        assert sample.status == "done" and all(row.reason == sample.reason for row in live)
+
+
 async def test_a_new_conversation_trips_the_breaker_as_on_an_empty_copy(either, app, client, reviewer):
     """The breaker counts a session's own strikes, so the week's closed sessions spend none of a new one's: the same
     three flagged requests pause it on a copy with the week as on one without."""
@@ -494,11 +861,13 @@ async def test_a_new_conversation_trips_the_breaker_as_on_an_empty_copy(either, 
 
 
 async def test_the_week_uses_up_no_limit(week_on, app, client):
-    """Nothing the kernel counts over a window or per Desk is spent by the week: no execution (the web search cap),
-    verification challenge (code limits), demo agent key, mandate reservation or owner alert of its own."""
+    """No execution (the web search cap), live/recent challenge (code limits), demo agent key, mandate reservation
+    or owner alert of the week's own."""
     created = await create_copy(client, replay_night=True)
-    for model in (Execution, VerificationChallenge):
+    for model in (Execution,):
         assert await rows_of(app, created.copy_id, select(model)) == []
+    [challenge] = await rows_of(app, created.copy_id, select(VerificationChallenge))
+    assert challenge.status == "consumed" and challenge.failed_at == []
     for model in (AgentKey, MandateReservation):
         assert await rows_of(app, created.copy_id, select(model)) == []
     inbox = [row.kind for row in await rows_of(app, created.copy_id, select(DemoInboxEntry))]
@@ -515,12 +884,12 @@ async def test_the_week_takes_no_open_time(either, app, client, frozen_clock):
         Booking.status == "confirmed"))}
     open_future = sorted(row.slot_id for row in slots if row.starts_at > now and row.slot_id not in booked)
     assert open_future == sorted(slot.slot_id for slot in seed.calendar_slots(now))
-    assert len(booked) == (3 if either else 0)
+    assert len(booked) == (2 if either else 0)
     for row in await rows_of(app, created.copy_id, select(Booking)):
         assert row.starts_at < now
 
 
-async def test_the_week_leaves_no_open_handoff_and_no_urgent_call(week_on, app, client):
+async def test_the_urgent_callback_is_done_without_an_inbox_entry(week_on, app, client):
     created = await create_copy(client, replay_night=True)
     ids = {row.session_id for row in await sample_sessions(app, created)}
     handoffs = await rows_of(app, created.copy_id, select(Handoff))
@@ -528,9 +897,21 @@ async def test_the_week_leaves_no_open_handoff_and_no_urgent_call(week_on, app, 
     assert {row.session_id for row in handoffs} <= ids
     tools = {row.tool for row in await rows_of(app, created.copy_id, select(DecisionRow).where(
         DecisionRow.session_id.in_(ids)))}
-    assert tools == {"native.quote", "native.book", "native.payment_link", "native.request_callback",
-                     "native.capture_lead"}
-    assert "emergency" not in repr(seed.RIVERA_SAMPLE_WEEK)
+    assert tools == {"native.quote", "native.book", "native.payment_link", "native.release_document",
+                     "desk.emergency-callback", "native.capture_lead"}
+    [handoff] = handoffs
+    assert (handoff.callback_window, handoff.window_start, handoff.window_end) == (None, None, None)
+    assert handoff.reason == "Sam · (510) 555-0178 · Water pouring from under the kitchen sink; cannot find the shut-off"
+    [callback] = await rows_of(app, created.copy_id, select(DecisionRow).where(
+        DecisionRow.tool == "desk.emergency-callback"))
+    assert (callback.state, callback.card_ids, callback.policy_ids) == ("executed", ["rv-urgent"], ["A.auto.rv-urgent"])
+    [session] = await rows_of(app, created.copy_id, select(ActorSession).where(
+        ActorSession.session_id == handoff.session_id))
+    [handled] = [entry for entry in (await ledger_page(client, created)).entries
+                 if entry.event.summary.get("refs") == [handoff.handoff_id]]
+    assert datetime.fromisoformat(marked(handled)["at"]) == session.created_at + timedelta(minutes=15)
+    inbox = await rows_of(app, created.copy_id, select(DemoInboxEntry))
+    assert [row.decision_id for row in inbox if row.kind == "alert"] == [created.seeded_chat.decision.decision_id]
 
 
 async def test_copy_creation_with_the_week_stays_under_three_seconds(week_on, app, client):

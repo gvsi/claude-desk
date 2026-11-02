@@ -1,6 +1,6 @@
 """The golden Desk the decide table runs on, and the steps a row takes before its call.
 
-`golden_desk(k)` travels to Tuesday 2026-11-03 10:00 business time and makes a fresh Rivera copy,
+`golden_desk(k)` travels to Tuesday 2026-11-03 10:00 business time and makes a fresh Turner copy,
 naming its seed entries by role: item `drain` (price P), slots `wk` (a weekday 10:00 slot) and
 `sat` (a Saturday slot), people `dana` and `bob`, Dana's invoice and, from Plan 01c, her $250
 charge. It needs no Desk writes, so it runs from Plan 01a. `custom=True` (Plan 01b) replaces the
@@ -56,9 +56,9 @@ from evals.tier1.stub import STUB_SLUG
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 
-# Time and the seed ("Rivera seed")
+# Time and the seed ("Turner seed")
 
-TIMEZONE = "America/Los_Angeles"   # the Rivera seed's business time zone
+TIMEZONE = "America/Los_Angeles"   # the Turner seed's business time zone
 _TZ = ZoneInfo(TIMEZONE)
 START = datetime(2026, 11, 3, 10, 0, tzinfo=_TZ)   # Tuesday 10:00 business time, when a golden copy is made
 P = 18_000   # the seed's drain clearing price, in cents: the table's P
@@ -124,7 +124,7 @@ STUB_CODE = "000000"   # the code a stub case sends: the stub's inbox holds gene
 
 @dataclass
 class GoldenDesk:
-    """A fresh Rivera copy's first Desk, with its seed entries by role."""
+    """A fresh Turner copy's first Desk, with its seed entries by role."""
 
     copy: CopyCreated
     desk_id: str
@@ -145,7 +145,7 @@ class GoldenDesk:
 
 
 async def golden_desk(k: KernelHarness, custom: bool = False) -> GoldenDesk:
-    """A fresh Rivera copy made at START, its seed entries named by role; `custom` (Plan 01b) adds
+    """A fresh Turner copy made at START, its seed entries named by role; `custom` (Plan 01b) adds
     CUSTOM_ITEMS and CUSTOM_SLOTS to its price list and calendar."""
     k.clock.travel(START)
     desk = await desk_of(k, await k.new_copy())

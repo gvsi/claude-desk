@@ -18,6 +18,7 @@ import { conversationsKey } from '../conversations/ConversationsPage.tsx';
 import { conversationKey } from '../conversations/useTakeOver.ts';
 import { attemptsQuery, ledgerQuery } from '../safety/queries.ts';
 import { useDesks } from '../useDesks.ts';
+import { keptByApp } from './keptCopy.ts';
 import {
   THINGS,
   answeredInView,
@@ -31,7 +32,6 @@ import {
   restoreKept,
   stoppedInPreview,
   uncountedAnswer,
-  type Kept,
   type Reading,
   type Thing,
   type UncountedAnswer,
@@ -47,6 +47,8 @@ export interface DoneSignals {
   done: Readonly<Partial<Record<Thing, Done>>>;
   /** How many of the four are done. */
   count: number;
+  /** Whether the list shows the Desk the copy started with. */
+  onStartingDesk: boolean;
   /** How the answer given on this page last ended, when "Answer a held request" doesn't count it. */
   uncounted: UncountedAnswer | null;
 }
@@ -105,9 +107,6 @@ function useFreshReads(queryClient: QueryClient) {
     return read.status === 'success' && fetchesEnded(queryClient, queryKey) > wait;
   };
 }
-
-/** Per app (its query client, so a reload starts afresh), what the list last kept of its copy. */
-const keptByApp = new WeakMap<QueryClient, Kept>();
 
 export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSignalsOptions): DoneSignals {
   const queryClient = useQueryClient();
@@ -198,6 +197,7 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
   return {
     done: remembered.done,
     count: THINGS.filter((thing) => remembered.done[thing] !== undefined).length,
+    onStartingDesk: deskId === seeded,
     uncounted: uncountedAnswer(latest, reading && deskId === seeded),
   };
 }

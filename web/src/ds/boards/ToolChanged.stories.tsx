@@ -41,7 +41,7 @@ export const Today: Story = {
   render: () => (
     <RiveraFrame current="today" counts={COUNTS}>
       <BoardPage>
-        <Greeting text="Good morning, Maria" presence={{ line: 'Quiet right now.', people: [] }} />
+        <Greeting text="Good morning, Mike" presence={{ line: 'Quiet right now.', people: [] }} />
         <section className="board-page-section" aria-labelledby="board-needs-you">
           <SectionHeader id="board-needs-you" title="Needs you" count={{ n: 2, label: '2 need you' }} />
           <ToolChangedItem
@@ -85,7 +85,7 @@ export const Today: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect(window.innerWidth).toBe(1512);
     await expectOwnerFrame(canvasElement, 'Today');
-    expectComputed(canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria' }), SPEC.greeting);
+    expectComputed(canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' }), SPEC.greeting);
     // tool_changed_item_says_what_and_why: first under Needs you, with its held dot and its Mock words.
     const item = canvas.getByRole('article', { name: TOOL_CHANGED });
     const approval = canvas.getByRole('article', { name: `Held for you: ${rivera.decisions.held.reason_plain}` });

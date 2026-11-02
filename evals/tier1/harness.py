@@ -647,7 +647,7 @@ class KernelHarness(Protocol):
         ...
 
     async def new_copy(self) -> CopyCreated:
-        """A fresh copy of the Rivera seed."""
+        """A fresh copy of the Turner seed."""
         ...
 
     async def visitor(self, copy: CopyCreated) -> SessionCreated:

@@ -258,11 +258,11 @@ describe('answer a held request, in this view', () => {
 });
 
 function desk(deskId: string): DeskSummary {
-  return { desk_id: deskId, slug: deskId, name: deskId, business_name: 'Rivera Plumbing', hours: [], answering: true, setup: null };
+  return { desk_id: deskId, slug: deskId, name: deskId, business_name: 'Turner Plumbing', hours: [], answering: true, setup: null };
 }
 
 function business(businessId: string, desks: DeskSummary[]): BusinessOut {
-  return { business_id: businessId, name: businessId, owner_display_name: 'Maria Rivera', timezone: 'America/Los_Angeles', desks };
+  return { business_id: businessId, name: businessId, owner_display_name: 'Mike Turner', timezone: 'America/Los_Angeles', desks };
 }
 
 describe('the Desk the copy started with', () => {

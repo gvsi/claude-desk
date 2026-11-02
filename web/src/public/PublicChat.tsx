@@ -42,16 +42,20 @@ import { breakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
+import { useTopFade } from '../lib/useTopFade.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { usePaymentLinks } from './usePaymentLinks.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
 import { messageReceiptVisible } from './messageReceipt.ts';
+import { OwnerPreviewBar } from './OwnerPreviewBar.tsx';
+import { useOwnerPreviewBack } from './ownerPreview.ts';
 import { useVisitorChat, type ChatStatus } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
 import { VerifyInline } from './verify/VerifyInline.tsx';
+import { showsWritingLine } from './writingLine.ts';
 
 import './PublicChat.css';
 
@@ -123,12 +127,14 @@ interface RowProps {
   ownerName: string;
   language: CopyLanguage;
   onResend: (id: string) => void;
+  /** A reply is on its way: "Try again" waits, as Send does. */
+  resendHeld?: boolean;
   /** What goes under the row's receipts: "Cancel this request" for each open hold it holds. */
   after?: ReactNode[];
 }
 
 /** One row: the message and its visible receipts, exactly as the kernel wrote them. */
-function ChatRowView({ row, ownerPreview, ownerName, language, onResend, paymentBlock, after = [] }: RowProps) {
+function ChatRowView({ row, ownerPreview, ownerName, language, onResend, resendHeld = false, paymentBlock, after = [] }: RowProps) {
   const { item } = row;
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
@@ -150,7 +156,7 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, payment
     const failed = item.status === 'failed' && item.failure !== 'session';
     const retry =
       item.failure === 'too_long' ? undefined : (
-        <Button variant="ghost" onClick={() => onResend(item.id)}>
+        <Button variant="ghost" waiting={resendHeld} onClick={() => onResend(item.id)}>
           {copy.tryAgain}
         </Button>
       );
@@ -209,19 +215,23 @@ function scrollerOf(el: Element): Element {
 
 /**
  * Where the conversation is scrolled: the element whose scrolling moves it, how far down, and the
- * size of the shell around it ("390x844"), which tells whether the page has changed size since.
+ * size of the shell around it with its composer area's height ("390x844/96"), which tells whether
+ * the page has changed size since.
  */
 interface ScrollerAt {
   scroller: Element;
   top: number;
-  shellSize: string;
+  layoutSize: string;
 }
 
 /** Where the element whose scrolling moves `el` stands now. */
 function scrollerAt(el: Element): ScrollerAt {
   const scroller = scrollerOf(el);
-  const shell = el.closest(SHELL)?.getBoundingClientRect();
-  return { scroller, top: scroller.scrollTop, shellSize: shell ? `${Math.round(shell.width)}x${Math.round(shell.height)}` : '' };
+  const shell = el.closest(SHELL);
+  const box = shell?.getBoundingClientRect();
+  const area = shell?.querySelector(COMPOSER_AREA)?.getBoundingClientRect();
+  const layoutSize = box ? `${Math.round(box.width)}x${Math.round(box.height)}/${Math.round(area?.height ?? 0)}` : '';
+  return { scroller, top: scroller.scrollTop, layoutSize };
 }
 
 /** The design system's classes for the shell around the page and its composer area, which stays at the bottom of the window. */
@@ -231,22 +241,62 @@ const COMPOSER_AREA = '.cd-public-shell__composer';
 /**
  * Whether a visitor who was at the end, where the page last knew they were (`seen`), has moved
  * away from it to stand where the conversation is now: only by moving it up, in the same scroller,
- * with the shell the same size. The page changing size moves the conversation too, before the page
- * hears of the new size: the browser's scroll anchoring moves it down or up as the rows rewrap, and
- * the shell switching scrollers leaves it where the new scroller was. Nothing lies below the end.
+ * with the shell and its composer area the same size. The page changing size moves the conversation
+ * too, before the page hears of the new size: the browser's scroll anchoring moves it down or up as
+ * the rows rewrap, and the shell switching scrollers leaves it where the new scroller was. And the
+ * browser moves it up on its own, its event coming only with the next frame, as a row that landed
+ * rising settles at the bottom: a composer that grew in between hides the end, and that scroll
+ * still isn't the visitor leaving it. Nothing lies below the end.
  */
 function leftTheEnd(seen: ScrollerAt, now: ScrollerAt): boolean {
-  return now.scroller === seen.scroller && now.shellSize === seen.shellSize && now.top < seen.top;
+  return now.scroller === seen.scroller && now.layoutSize === seen.layoutSize && now.top < seen.top;
 }
 
 /**
- * How much of the conversation, up to `end`, is hidden under the composer that stays at the bottom
- * of the window: measured to the top of the shell's composer area around `composer`, whose top
- * padding counts.
+ * The room left under `end`, above the composer, once the conversation is scrolled to its end: the
+ * bottom padding of the conversation that `end` closes (PublicChat.css).
+ */
+function roomUnder(end: HTMLElement): number {
+  const conversation = end.parentElement;
+  return conversation === null ? 0 : Number.parseFloat(getComputedStyle(conversation).paddingBottom) || 0;
+}
+
+/**
+ * How much of the conversation, up to `end` and the room under it, is hidden under the composer
+ * that stays at the bottom of the window: measured to the top of the shell's composer area around
+ * `composer`, whose top padding counts.
  */
 function hiddenUnderComposer(end: HTMLElement, composer: HTMLElement): number {
   const area = composer.closest(COMPOSER_AREA) ?? composer;
-  return end.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
+  return end.getBoundingClientRect().bottom + roomUnder(end) - area.getBoundingClientRect().top;
+}
+
+/**
+ * A reply of Claude's still coming in: its words being revealed or its cards fading in after them
+ * (ClaudeMessage), or the receipts attached under it landing after those, while its row is still
+ * arriving (TranscriptRow).
+ */
+const REPLY_COMING_IN = '.cd-claude-message[aria-busy="true"], .cd-transcript-row--live .cd-claude-message';
+
+/**
+ * Whether a reply of Claude's in the conversation `end` closes is still coming in, kept up to date
+ * as it does: checked as each render draws a reply, and as its words and cards settle after it.
+ */
+function useReplyComingIn(endRef: RefObject<HTMLElement | null>, drawn: boolean): boolean {
+  const [comingIn, setComingIn] = useState(false);
+  const check = useCallback(() => {
+    setComingIn(endRef.current?.parentElement?.querySelector(REPLY_COMING_IN) != null);
+  }, [endRef]);
+  // Before the first paint of a reply that has just arrived, so Send never shows ready in between.
+  useLayoutEffect(check);
+  useEffect(() => {
+    const conversation = endRef.current?.parentElement;
+    if (!drawn || !conversation) return undefined;
+    const observer = new MutationObserver(check);
+    observer.observe(conversation, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy', 'class'] });
+    return () => observer.disconnect();
+  }, [drawn, endRef, check]);
+  return comingIn;
 }
 
 /** The design system's classes for a reply of Claude's whose words are being revealed, and for its prose. */
@@ -264,19 +314,19 @@ function visibleTop(scroller: Element): number {
 }
 
 /**
- * How much of the newest part of the conversation is hidden under the composer. That is its end,
- * except while a reply's words are being revealed: its cards, still to come, wait unseen below
- * them, so it is the last of those words, and never more than would take the reply's own start
- * above the top of the view, when the reply is taller than what the view shows.
+ * How much of the newest part of the conversation, with the room under it, is hidden under the
+ * composer. That is its end, except while a reply's words are being revealed: its cards, still to
+ * come, wait unseen below them, so it is the last of those words, and never more than would take
+ * the reply's own start above the top of the view, when the reply is taller than what the view shows.
  */
 function newestHidden(end: HTMLElement, composer: HTMLElement): number {
   const reply = [...(end.parentElement?.querySelectorAll(REVEALING) ?? [])].at(-1);
   const words = reply === undefined ? undefined : [...reply.querySelectorAll(PROSE)].at(-1);
   if (reply === undefined || words === undefined) return hiddenUnderComposer(end, composer);
   const area = composer.closest(COMPOSER_AREA) ?? composer;
-  const hidden = words.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
-  const room = reply.getBoundingClientRect().top - visibleTop(scrollerOf(end));
-  return Math.min(hidden, Math.max(0, room));
+  const hidden = words.getBoundingClientRect().bottom + roomUnder(end) - area.getBoundingClientRect().top;
+  const upTo = reply.getBoundingClientRect().top - visibleTop(scrollerOf(end));
+  return Math.min(hidden, Math.max(0, upTo));
 }
 
 /**
@@ -308,11 +358,12 @@ interface NewestInView {
 /**
  * Keeps the newest message in view, as a chat does: while the visitor is at the end of the
  * conversation, whatever arrives (a reply, its receipts, "Claude is writing", a notice) scrolls up
- * to sit just above the composer, and so does the end when the page changes size (the window
- * narrows and the rows rewrap, the composer grows). While a reply's words are being revealed, its
- * newest words sit there instead, with its cards, still to come, waiting below, and the reply's
- * start never scrolls above the top of the view; once its words are whole, the end comes back. A
- * visitor who has scrolled back to read stays where they are until they send.
+ * to sit above the composer, with the conversation's room under it (`roomUnder`), and so does the
+ * end when the page changes size (the window narrows and the rows rewrap, the composer grows).
+ * While a reply's words are being revealed, its newest words sit there instead, with its cards,
+ * still to come, waiting below, and the reply's start never scrolls above the top of the view; once
+ * its words are whole, the end comes back. A visitor who has scrolled back to read stays where they
+ * are until they send.
  *
  * Where the visitor is comes from the page's scroll events, and again just before each change the
  * page makes (`beforeChange`) if the conversation has scrolled since the page last knew: a scroll
@@ -324,11 +375,12 @@ interface NewestInView {
  * anchoring moves the conversation down or up to keep the rows on screen where they were. And the
  * shell can switch which of its parts scrolls the conversation (going short or tall), which leaves
  * it where the new scroller was; the shell says so with its own event, and the end comes back. So
- * while the visitor is at the end, only a move up of the same scroller, with the shell the same
- * size, counts as them leaving it (`leftTheEnd`); once they have moved back, any move counts. Only
- * the conversation's own scroller counts at all, looked up afresh each time: not the about column
- * beside the chat, the composer's text box, or a part of the shell that has just stopped scrolling
- * the conversation. The trade-off: a visitor's scroll up in the very frame the shell changes size,
+ * while the visitor is at the end, only a move up of the same scroller, with the shell and its
+ * composer area the same size, counts as them leaving it (`leftTheEnd`); once they have moved back,
+ * any move counts. Only the conversation's own scroller counts at all, looked up afresh each time:
+ * not the about column beside the chat, the composer's text box, or a part of the shell that has
+ * just stopped scrolling the conversation. The trade-off: a visitor's scroll up in the very frame
+ * the shell or its composer area changes size,
  * before the page has seen the new size, is taken for the browser's and the end comes back once; a
  * scroll gesture goes on past that frame and is followed from there.
  *
@@ -673,10 +725,14 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const [language] = useState(browserLanguage);
   const copy = PUBLIC_COPY[language];
   const { openStatus, desk } = useOpenStatus(slug, chat.desk);
+  // The owner's way back from their own preview, read with their session; never in setup's preview,
+  // which sits inside the owner's app already.
+  const back = useOwnerPreviewBack(slug, embedded ? undefined : previewDeskId);
   // The first session/history read shapes the opening view too. Keep the shell's first header
-  // (including the served hours) together with that view rather than landing it in stages.
+  // (including the served hours, and the owner's preview bar) together with that view rather than
+  // landing it in stages.
   const opening =
-    (desk === null || (chat.session === null && chat.status === 'loading')) &&
+    (desk === null || (chat.session === null && chat.status === 'loading') || !back.settled) &&
     chat.status !== 'not_found' && chat.status !== 'unavailable';
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -733,6 +789,19 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // A row that arrived live lands as it is first drawn. Once the transcript has drawn it, the chat
   // stops calling it live, so a remount (the visitor leaving the page and coming back) draws it still.
   const drawn = !opening && chat.status !== 'not_found' && desk !== null;
+  const replyComingIn = useReplyComingIn(endRef, drawn);
+  // The turn's marks when the visitor last sent, and the message sent again (null: the newest),
+  // until the stream says what came of that turn (Claude writing, a reply, its end, an error), or
+  // the owner is in the chat: she answers in her own time. A receipt or a held request's outcome
+  // that comes first doesn't end it.
+  const [pending, setPending] = useState<{ marks: number; id: string | null } | null>(null);
+  const turnMarks = chat.state.turnMarks;
+  const ownerInChatNow = chat.ownerInChat;
+  useEffect(() => {
+    if (pending !== null && (turnMarks !== pending.marks || ownerInChatNow)) setPending(null);
+  }, [pending, turnMarks, ownerInChatNow]);
+  // Messages fade where they scroll under the chat's head, once the conversation is scrolled from its top.
+  useTopFade(endRef, '.cd-public-shell__scroll', drawn);
   const { shown } = chat;
   useEffect(() => {
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
@@ -752,19 +821,19 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
   // when nothing else has it, so a visitor who moved on while the chat opened stays where they are.
   // The idea speaks as this Desk's owner, by the name the Desk carries; there is a composer to
-  // type it into only once the Desk is read.
+  // type it into only once the page has opened (the Desk read, and on the owner's preview, the bar).
   const carried = useRef<Carried | null>(idea === undefined ? null : { text: { idea }, focus: 'if_free' });
   const ideaOwner = desk === null ? null : brandFrom(desk).ownerName;
   useEffect(() => {
     const words = carried.current;
     const box = composerRef.current?.querySelector('textarea');
-    if (!ready || words === null || !box) return;
+    if (opening || !ready || words === null || !box) return;
     carried.current = null;
     const text = typeof words.text === 'string' ? words.text : breakItIdea(words.text.idea, ideaOwner);
     if (text === null) return;
     const free = document.activeElement === null || document.activeElement === document.body;
     fillComposer(box, text, { focus: words.focus === 'always' || free });
-  }, [ready, ideaOwner]);
+  }, [opening, ready, ideaOwner]);
 
   const present = (children?: ReactNode) => (
     <>
@@ -811,6 +880,22 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const { brand, ownerName } = brandFrom(desk);
   const { state } = chat;
   const ended = state.error === 'session';
+  // Claude's reply is on its way: from the visitor's message until the stream says what came of its
+  // turn, unless it didn't send or the owner is in the chat; then while Claude writes and the
+  // kernel checks the reply; then while its words are revealed and its cards and receipts come in.
+  // The visitor can type meanwhile, and Send waits.
+  const waitedOn = pending === null ? undefined : state.rows.findLast(({ item }) => item.kind === 'visitor' && (pending.id === null || item.id === pending.id))?.item;
+  const pendingTurn =
+    pending !== null &&
+    state.turnMarks === pending.marks &&
+    !chat.ownerInChat &&
+    waitedOn?.kind === 'visitor' &&
+    waitedOn.status !== 'failed';
+  // Start the existing dots with Send, and keep the same line when Claude's writing event arrives.
+  const writing = showsWritingLine({ writing: state.writing, ready, error: state.error, connection: state.connection, turnPending: pendingTurn });
+  const replyOnItsWay = pendingTurn && state.connection === 'open' && waitedOn?.kind === 'visitor' && waitedOn.status === 'sent';
+  // While the stream is down, reconnecting or given up, no reply can be heard: nothing waits for one.
+  const sendHeld = ready && (replyOnItsWay || (state.writing && state.connection === 'open') || replyComingIn);
   // "Cancel this request" under each message that holds an open hold's receipt, once it is there,
   // so it stays with the request however far the chat goes on. One cancel is out at a time: while
   // it is, the others wait, their words shown and their clicks ignored, so none goes unanswered.
@@ -863,11 +948,13 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
             language={language}
             onSubmit={chat.verify}
             onAskForOwner={chat.ownerInChat ? closeVerify : askForOwner}
+            askWaits={!chat.ownerInChat && sendHeld}
           />,
         ]
       : [];
 
   const startNewChat = () => {
+    setPending(null);
     const unsent = unsentWhenEnded(state.rows);
     // Words that didn't send go back in the new chat's box; with none, an idea still waiting stays.
     carried.current = unsent.length > 0 ? { text: unsent.join('\n'), focus: 'always' } : carried.current;
@@ -905,13 +992,21 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const turnNotice =
     state.error !== null && !ended ? <Notice tone="error">{evErrorCopy({ code: state.error }, language)}</Notice> : null;
   // What the visitor sends brings the end of the conversation back into view.
+  // Everything that posts a message (Send, "Ask for {owner}", "I can't get the code") waits too.
   const send = (text: string) => {
+    if (sendHeld) return;
     newest.follow();
     visitorTyping.sent();
+    // While the owner has the chat she answers, in her own time: nothing waits on Claude.
+    if (!chat.ownerInChat) setPending({ marks: state.turnMarks, id: null });
     chat.send(text);
   };
+  // Sent again, a message waits for a reply on its way and holds Send until its own starts, as a
+  // new one does.
   const resend = (id: string) => {
+    if (sendHeld) return;
     newest.follow();
+    if (!chat.ownerInChat) setPending({ marks: state.turnMarks, id });
     chat.resend(id);
   };
 
@@ -939,6 +1034,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         language={language}
         openStatus={openStatus}
         onAskForOwner={askForOwner}
+        askWaits={sendHeld}
         // While the owner has taken the chat over, the head says so in the disclosure's place, still
         // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
         // session mode, as it is: nothing on the page decides it.
@@ -950,6 +1046,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}
+        banner={back.href === null ? undefined : <OwnerPreviewBar backHref={back.href} />}
         firstView={!conversationStarted(state, chat.status)}
         starters={{
           words: (desk.starters ?? []).slice(0, 3),
@@ -972,6 +1069,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
                 sendLabel={copy.send}
                 maxLength={MESSAGE_MAX_LENGTH}
                 disabled={!ready}
+                sendHeld={sendHeld}
                 onSend={send}
               />
             </div>
@@ -1000,10 +1098,11 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               ownerName={desk.owner_display_name}
               language={language}
               onResend={resend}
+              resendHeld={sendHeld}
               after={[...cancelsUnder(shownReceipts(row, ownerPreview)), ...verifyUnder(row)]}
             />
           ))}
-          {state.writing ? <WritingIndicator language={language} /> : null}
+          {writing ? <WritingIndicator language={language} /> : null}
           {/* The owner typing after a take-over: her initials, her name and three dots, until her words come. */}
           {state.ownerTyping !== null ? (
             <TranscriptRow>

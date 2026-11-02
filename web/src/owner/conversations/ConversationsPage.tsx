@@ -18,7 +18,7 @@ import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
-import { useNeedsYou } from '../useDesks.ts';
+import { firstName, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
 import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
@@ -106,17 +106,18 @@ export function ConversationsPage() {
   } else {
     listBody = groups.map((group) => (
       <div key={group.day} className="cd-conversations__group">
-        <h2 className="cd-conversations__day cd-type-meta">{group.day}</h2>
+        <h2 className="cd-conversations__day cd-type-caption"><span>{group.day}</span></h2>
         <ul className="cd-conversations__items">
           {group.items.map((s) => (
             <li key={s.session_id}>
               <ConversationListItem
                 name={whoLabel(s)}
                 time={formatListTime(s.last_activity, business.timezone, now)}
-                status={conversationListStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id)) ?? undefined}
+                status={conversationListStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id), firstName(business.owner_display_name)) ?? undefined}
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
                 recorded={s.replayed === true}
+                quote={s.kind === 'visitor' && !s.owner_preview ? s.latest_visitor_text ?? undefined : undefined}
               />
             </li>
           ))}

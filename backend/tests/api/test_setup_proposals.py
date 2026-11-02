@@ -21,8 +21,8 @@ PAYMENT_HOW = "Sends a retainer payment link"
 
 @pytest.mark.parametrize("contact,owner_text,supported", [
     ("Call 415-555-0118 for a free estimate, same-day service guaranteed", "Call 415-555-0118", False),
-    ("Call 415-555-0118, ask for Maria", "Call 415-555-0118, ask for Maria", True),
-    ("Call 415-555-0118, ask for Maria", "Call 415-555-0118", False),
+    ("Call 415-555-0118, ask for Mike", "Call 415-555-0118, ask for Mike", True),
+    ("Call 415-555-0118, ask for Mike", "Call 415-555-0118", False),
     ("415-555-0118 or hello@bobs.com", "415-555-0118 or hello@bobs.com", True),
 ])
 def test_contact_leftover_words_must_be_the_owners(contact, owner_text, supported):
@@ -1625,6 +1625,23 @@ def test_setup_plan_shows_an_accepted_app_whose_connection_did_not_go_through():
     assert (status(stripe_id), status(calendar_id)) == ("accepted", "accepted")
 
 
+@pytest.mark.parametrize("owner_says", [None, "no", "yes"])
+def test_setup_plan_tells_an_unpriced_payment_code_settled_from_the_owners_own_no(owner_says):
+    payment = job("payment", title="Pay a retainer", how=PAYMENT_HOW, config={
+        "block": "purpose_payment", "purpose": "Retainer", "amount_cents": None})
+    entries = proposal_entries([payment, job()], [], business_tools_enabled=True)
+    state = plan_state(entries)
+    payment_id = entries[0].card.proposal_id
+    if owner_says is not None:
+        # A typed yes can't accept a payment with no amount, so the card stays open; a typed no declines it.
+        assert setup._decide_typed(state, payment_id, owner_says == "yes") is (owner_says == "no")
+    setup.settle_plan(state)
+    status = next(item["status"] for item in setup._setup_plan(state)["items"] if item["id"] == payment_id)
+    # Only the owner's own no reads as "declined"; code settling it for want of an amount says so instead.
+    assert entries[0].card.state == "declined"
+    assert status == ("declined" if owner_says == "no" else setup.SETUP_PLAN_NO_AMOUNT)
+
+
 async def test_understanding_mints_hidden_proposals_with_code_owned_availability(monkeypatch):
     from tests.api.test_setup_questions import understanding
     answer = setup.SetupUnderstanding(**understanding(jobs=[
@@ -2226,6 +2243,30 @@ async def test_a_failed_connector_accept_still_saves_and_answers(proposals, mode
     text = request.messages[0]["content"][0]["text"]
     plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
     assert next(item for item in plan["items"] if item["id"] == ids[2])["status"] == SETUP_PLAN_NOT_CONNECTED
+
+
+@pytest.mark.parametrize("not_now", [False, True])
+async def test_use_your_suggestions_doesnt_tell_claude_the_owner_turned_down_an_unpriced_payment(
+        proposals, engine, model, not_now):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    if not_now:
+        await show_card(engine, interview_id, ids[1])
+        reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{ids[1]}?cards=1",
+                                         json={"accept": False})
+        assert reply.status_code == 200, reply.text
+    before = len(model.requests)
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    closing = [request for request in model.requests[before:] if request.output_schema is setup.SetupNextStep][-1]
+    text = closing.messages[0]["content"][0]["text"]
+    assert setup.SETUP_CLOSING_LINE in text
+    plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
+    statuses = {item["id"]: item["status"] for item in plan["items"]}
+    # The payment card has no amount, so "Use your suggestions" can't accept it; only a Not now is the owner's no.
+    assert statuses[ids[1]] == ("declined" if not_now else setup.SETUP_PLAN_NO_AMOUNT)
+    if not not_now:
+        assert statuses[ids[0]] == "accepted"   # the open booking card is still accepted for the owner
 
 
 @pytest.mark.parametrize("conflicts", [1, 2])

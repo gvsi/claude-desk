@@ -49,8 +49,8 @@ describe('assertCleanCopy', () => {
       expect(check(`<p>About the ${acronym} here</p>`)).not.toThrow();
     }
     expect(check('<p>I can send both PDFs by SMS.</p>')).not.toThrow();
-    // Spanish writes AI as IA: "una IA que responde por Rivera Plumbing".
-    expect(check('<p lang="es">Estás hablando con Claude, una IA que responde por Rivera Plumbing.</p>')).not.toThrow();
+    // Spanish writes AI as IA: "una IA que responde por Turner Plumbing".
+    expect(check('<p lang="es">Estás hablando con Claude, una IA que responde por Turner Plumbing.</p>')).not.toThrow();
     // Someone else's words are shown as they wrote them.
     expect(check('<p data-copy="user">PLEASE CALL ME</p>')).not.toThrow();
   });
@@ -109,13 +109,13 @@ describe('assertCleanCopy', () => {
   });
 
   it('ignores_aria_hidden_subtrees', () => {
-    expect(check('<span aria-hidden="true">MR</span><span>Maria Rivera</span>')).not.toThrow();
+    expect(check('<span aria-hidden="true">MT</span><span>Mike Turner</span>')).not.toThrow();
     expect(check('<div aria-hidden="true"><span title="NEW">SEND →!</span></div>')).not.toThrow();
     // Only aria-hidden="true" hides; "false" and a missing value are still read.
-    expect(check('<span aria-hidden="false">MR</span>')).toThrow(/all caps "MR"/);
-    expect(check('<span aria-hidden="">MR</span>')).toThrow(/all caps "MR"/);
+    expect(check('<span aria-hidden="false">MT</span>')).toThrow(/all caps "MT"/);
+    expect(check('<span aria-hidden="">MT</span>')).toThrow(/all caps "MT"/);
     // Style and script text is never shown, in HTML or inside an SVG.
-    expect(check('<svg><style>.a{fill:none} /* NOTE -> */</style><title>Rivera Plumbing</title></svg>')).not.toThrow();
+    expect(check('<svg><style>.a{fill:none} /* NOTE -> */</style><title>Turner Plumbing</title></svg>')).not.toThrow();
     expect(check('<svg><title>NEW</title></svg>')).toThrow(/all caps "NEW"/);
   });
 
@@ -167,6 +167,8 @@ describe('assertCleanCopy', () => {
     expect(check(`<p data-ds="concept-footer">${exact}.</p>`)).toThrow(/concept footer reads/);
     expect(check(`<p data-ds="concept-footer" aria-hidden="true">${exact}</p>`)).toThrow(/concept footer reads ""/);
     expect(check('<p data-ds="concept-footer">Concept prototype by <b>Giovanni</b> Alcantara<span>,</span> not an Anthropic product</p>')).not.toThrow();
+    // The author's name as a link reads the same.
+    expect(check('<p data-ds="concept-footer">Concept prototype by <a href="https://example.test/">Giovanni Alcantara</a>, not an Anthropic product</p>')).not.toThrow();
   });
 
   it('lists_every_problem_in_one_error', () => {

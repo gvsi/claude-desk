@@ -341,6 +341,25 @@ it('a_click_on_text_in_the_sheet_keeps_focus_in_it', async () => {
   }
 });
 
+it('a_click_on_the_composers_empty_row_in_the_sheet_focuses_its_text', async () => {
+  // The sheet takes focus itself (tabIndex -1), yet the composer's empty row still hands a click to
+  // its text box, with the caret at the end.
+  await page.viewport(PHONE.width, PHONE.height);
+  act(() => root.render(<Phone />));
+  await userEvent.click(page.getByRole('button', { name: 'Ask Claude to change a rule' }));
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
+  const box = panel().querySelector<HTMLTextAreaElement>('.cd-ask-claude__composer textarea');
+  const tools = panel().querySelector<HTMLElement>('.cd-ask-claude__composer .cd-composer__tools');
+  if (!box || !tools) throw new Error('No composer in the sheet');
+  await userEvent.click(box);
+  await userEvent.keyboard('Weekends too');
+  await userEvent.click(panel().querySelector<HTMLElement>('h2')!);
+  expect(document.activeElement).not.toBe(box);
+  await userEvent.click(tools);
+  expect(document.activeElement).toBe(box);
+  expect(box.selectionStart).toBe('Weekends too'.length);
+});
+
 it('a_click_on_the_scrim_keeps_the_sheet_and_its_focus', async () => {
   // Closing on a scrim click would throw away a half-written question, so the click changes
   // nothing: the sheet stays open, focus stays on the composer, and Escape still closes it.

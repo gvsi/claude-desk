@@ -197,6 +197,60 @@ function latestAgentOutcome(world: MockWorld, session: SessionRecord): Conversat
   return events.at(-1)?.outcome ?? null;
 }
 
+/** Visitor outcomes follow kernel ledger time, never transcript text or shown cards. */
+function latestVisitorOutcome(world: MockWorld, session: SessionRecord): ConversationSummary['latest_outcome'] {
+  if (session.state.kind !== 'visitor' || session.ownerPreview) return null;
+  type Outcome = ConversationSummary['latest_outcome'];
+  const done: Partial<Record<string, Outcome>> = {
+    'native.quote': 'quoted', 'native.book': 'visit_booked',
+    'native.capture_lead': 'lead_captured', 'native.release_document': 'document_sent',
+  };
+  const ledger = world.desk(session.deskId)?.ledger ?? [];
+  const entryTime = (entry: LedgerEntry): number => {
+    const replayed = entry.event.summary.replayed;
+    if (typeof replayed === 'object' && replayed !== null && 'at' in replayed && typeof replayed.at === 'string') {
+      const recorded = Date.parse(replayed.at);
+      if (!Number.isNaN(recorded)) return recorded;
+    }
+    return Date.parse(entry.created_at);
+  };
+  const events: { at: number; seq: number; outcome: Outcome }[] = [];
+  for (const { decision, createdAt } of world.decisions.values()) {
+    if (decision.session_id !== session.state.session_id) continue;
+    const { state } = decision;
+    const outcome = state === 'executed' ? done[decision.action?.tool ?? ''] :
+      state === 'refused' || state === 'refused_at_execution' ? 'turned_down' :
+      state === 'denied' ? 'owner_declined' : undefined;
+    if (outcome !== undefined || ['held', 'expired', 'cancelled'].includes(state)) {
+      const entry = ledger.find((e) => e.seq === decision.ledger_seq);
+      events.push({ at: entry ? entryTime(entry) : createdAt, seq: decision.ledger_seq, outcome: outcome ?? null });
+    }
+  }
+  const paid = new Set([...world.links].filter(([, link]) =>
+    link.sessionId === session.state.session_id && link.view.state === 'paid').map(([token]) => token));
+  const callbacks = new Set([...world.handoffs.values()].filter(({ handoff }) =>
+    handoff.session_id === session.state.session_id && handoff.kind === 'callback' && handoff.status === 'done')
+    .map(({ handoff }) => handoff.handoff_id));
+  for (const entry of ledger) {
+    const { event } = entry;
+    const { summary } = event;
+    // The mock identifies its links by ref_id; each paid transition counts once, never a refused retry.
+    if (event.kind === 'payment' && summary.state === 'paid' && !summary.refused && paid.delete(event.ref_id ?? '')) {
+      events.push({ at: entryTime(entry), seq: entry.seq, outcome: 'deposit_paid' });
+    }
+    if (event.kind !== 'desk_data' || summary.part !== 'handoffs' || !Array.isArray(summary.refs)) continue;
+    if (summary.kind === 'card' || summary.kind === 'callback') {
+      if (event.session_id === session.state.session_id) events.push({ at: entryTime(entry), seq: entry.seq, outcome: null });
+    } else if (!('replaced_by' in summary) && !('closed_by' in summary)) {
+      for (const id of summary.refs) {
+        if (typeof id === 'string' && callbacks.delete(id)) events.push({ at: entryTime(entry), seq: entry.seq, outcome: 'called_back' });
+      }
+    }
+  }
+  events.sort((a, b) => a.at - b.at || a.seq - b.seq);
+  return events.at(-1)?.outcome ?? null;
+}
+
 export function conversationSummary(world: MockWorld, session: SessionRecord): ConversationSummary {
   const counts: Partial<Record<DecisionState, number>> = {};
   for (const { decision } of world.decisions.values()) {
@@ -212,7 +266,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
     latest_visitor_text: latestVisitorText(session),
-    latest_outcome: latestAgentOutcome(world, session),
+    latest_outcome: session.state.kind === 'agent' ? latestAgentOutcome(world, session) : latestVisitorOutcome(world, session),
   };
 }
 
@@ -800,7 +854,7 @@ export const HEALTH: HealthOut = {
 
 /**
  * The preset the owner cards came from: the one whose cards they are, exactly, as a Desk with these
- * opening hours drafts it (`presetCards`), else null. It is provenance only, and Rivera's own rules
+ * opening hours drafts it (`presetCards`), else null. It is provenance only, and Turner's own rules
  * match neither.
  */
 function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[]): RulesPreset | null {

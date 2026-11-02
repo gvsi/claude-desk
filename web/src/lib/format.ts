@@ -1,6 +1,6 @@
 /**
  * How owner screens write times, amounts and the few lines built from them. Every time is read in
- * the business's time zone (its IANA name, `BusinessOut.timezone`), never the browser's: Maria's
+ * the business's time zone (its IANA name, `BusinessOut.timezone`), never the browser's: Mike's
  * morning is Los Angeles' morning wherever the reviewer sits. Visitor surfaces never use this file;
  * they show the kernel's text. The one exception is the mock checkout's amount, which the page
  * writes from the link's `amount_cents` with `formatMoneyExact`.
@@ -149,12 +149,18 @@ export function conversationDay(iso: string, timeZone: string, now: Date): Conve
   return days <= 6 ? 'Earlier this week' : 'Earlier';
 }
 
-/** A list row's time: the clock for today and yesterday, "10:46 am"; the date before that, "Oct 27". */
+/**
+ * A list row's time: the clock for today and yesterday, "10:46 am"; the weekday for the rest of the
+ * last 7 days, as "Earlier this week" groups them, "Tue"; the date before that, "Oct 22".
+ */
 export function formatListTime(iso: string, timeZone: string, now: Date): string {
   const at = readDate(iso);
   if (at === null) return '';
   const local = localTime(at, timeZone);
-  return daysBefore(at, now, timeZone) <= 1 ? clock(local) : `${MONTHS[local.month - 1] ?? ''} ${local.day}`;
+  const days = daysBefore(at, now, timeZone);
+  if (days <= 1) return clock(local);
+  if (days <= 6) return local.weekday.slice(0, 3);
+  return `${MONTHS[local.month - 1] ?? ''} ${local.day}`;
 }
 
 /** When a conversation started: "Today at 12:04 pm", "Yesterday at 10:10 pm", "Oct 27 at 9:52 am". */

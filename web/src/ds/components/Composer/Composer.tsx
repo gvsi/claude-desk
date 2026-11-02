@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { IconButton } from '../IconButton/IconButton.tsx';
@@ -16,7 +16,7 @@ export type ComposerVariant = 'owner' | 'visitor' | 'whisper';
 
 export interface ComposerProps {
   variant: ComposerVariant;
-  /** The text box's name, read by screen readers: "Message Rivera Plumbing". */
+  /** The text box's name, read by screen readers: "Message Turner Plumbing". */
   label: string;
   /** Shown in the empty text box. */
   placeholder: string;
@@ -25,6 +25,11 @@ export interface ComposerProps {
   /** The send button's name; "Send" (`owner`, `visitor`) or "Send whisper" (`whisper`) by default. */
   sendLabel?: string;
   disabled?: boolean;
+  /**
+   * A reply is coming in: typing works and the text box keeps focus, but Send is disabled and Enter
+   * does nothing. The text stays.
+   */
+  sendHeld?: boolean;
   /** Caps the text at this many characters, with a counter from 90% of it. */
   maxLength?: number;
   /** Called with the trimmed text, never empty; the composer then clears. */
@@ -76,6 +81,9 @@ const COUNTER_FROM = 0.9;
 /** Safari reports the Enter that confirms an IME word as key code 229, after compositionend. */
 const IME_KEY_CODE = 229;
 
+/** What on the box keeps its own click: its text box and controls, and the counter. */
+const OWN_CLICK = 'textarea, button, a, input, select, label, [role="button"], [tabindex], .cd-composer__counter';
+
 /**
  * The text box people write in: a raised surface that grows with the text up to six lines. Enter
  * sends, Shift+Enter starts a new line, and an Enter that confirms an IME word does neither.
@@ -87,6 +95,7 @@ export function Composer({
   helper,
   sendLabel,
   disabled = false,
+  sendHeld = false,
   maxLength,
   onSend,
   onAttach,
@@ -113,7 +122,7 @@ export function Composer({
   }
 
   const text = value.trim();
-  const canSend = !disabled && text !== '';
+  const canSend = !disabled && !sendHeld && text !== '';
   const showCounter = maxLength !== undefined && value.length >= maxLength * COUNTER_FROM;
   const inputId = `${id}-input`;
   const helperId = helper ? `${id}-helper` : undefined;
@@ -138,8 +147,34 @@ export function Composer({
     ownFocusAtSwap.current = false;
     if (!follow) return;
     if (isFailed) failedBoxRef.current?.querySelector<HTMLElement>('button')?.focus();
-    else inputRef.current?.focus();
-  }, [isFailed]);
+    // Sent again and its reply still on its way, the box takes no focus of its own (a phone's
+    // keyboard would open): the screen places it once the reply has come in.
+    else if (!sendHeld) inputRef.current?.focus();
+  }, [isFailed, sendHeld]);
+
+  // A click on the box away from its controls (its padding, the row under the text) puts the caret
+  // at the end of the text, as on claude.ai. Only a press that starts there counts, so a selection
+  // made in the text box and released outside it stays, and the press itself moves no focus.
+  const pressedBox = useRef(false);
+  // A control of the box's own: one outside it (a page or sheet that takes focus itself) doesn't count.
+  const ownClick = (event: MouseEvent<HTMLDivElement>) => {
+    const control = event.target instanceof Element ? event.target.closest(OWN_CLICK) : null;
+    return !(event.target instanceof Element) || (control !== null && event.currentTarget.contains(control));
+  };
+  const handleBoxMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    pressedBox.current = event.button === 0 && !disabled && !ownClick(event);
+    if (pressedBox.current) event.preventDefault();
+  };
+  const handleBoxClick = (event: MouseEvent<HTMLDivElement>) => {
+    const pressed = pressedBox.current;
+    pressedBox.current = false;
+    const box = inputRef.current;
+    if (!pressed || disabled || !box || ownClick(event)) return;
+    // Words already selected in the text box stay selected.
+    if (document.activeElement === box && box.selectionStart !== box.selectionEnd) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  };
 
   const send = () => {
     if (!canSend) return;
@@ -240,7 +275,7 @@ export function Composer({
   if (variant === 'owner') {
     return (
       <div ref={rootRef} className="cd-composer cd-composer--owner">
-        <div className="cd-composer__box cd-composer__box--stacked">
+        <div className="cd-composer__box cd-composer__box--stacked" onMouseDown={handleBoxMouseDown} onClick={handleBoxClick}>
           {labelElement}
           {input}
           <div className="cd-composer__tools">
@@ -258,7 +293,7 @@ export function Composer({
 
   return (
     <div ref={rootRef} className={`cd-composer cd-composer--${variant}`}>
-      <div className="cd-composer__box cd-composer__box--inline">
+      <div className="cd-composer__box cd-composer__box--inline" onMouseDown={handleBoxMouseDown} onClick={handleBoxClick}>
         {labelElement}
         {attach}
         {input}

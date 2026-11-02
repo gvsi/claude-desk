@@ -2,7 +2,7 @@
 was replayed into it as owner-only data at the moments it happened, and Today says which of its sections count it.
 
 The app runs on FakeKernel, which replays the night a test records (`record_night`) into a copy that asks. Times are
-Rivera Plumbing's (America/Los_Angeles): the API's clock and the fake's stand at 10:00 on Friday 2026-10-30 there, so
+Turner Plumbing's (America/Los_Angeles): the API's clock and the fake's stand at 10:00 on Friday 2026-10-30 there, so
 "since last night" runs from 18:00 on Thursday and "last 7 days" from Saturday 2026-10-24.
 """
 
@@ -46,7 +46,7 @@ RIVERA = ZoneInfo("America/Los_Angeles")
 
 
 def local(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime:
-    """A wall-clock time at Rivera Plumbing, as a UTC instant."""
+    """A wall-clock time at Turner Plumbing, as a UTC instant."""
     return datetime(year, month, day, hour, minute, tzinfo=RIVERA).astimezone(UTC)
 
 
@@ -58,7 +58,7 @@ def booked_visit(at: datetime) -> RecordedSession:
     """A visitor asks, Claude answers and books an open time."""
     return RecordedSession(steps=(
         RecordedStep("said", at, "Hi, my kitchen sink drains slowly. Can someone come?"),
-        RecordedStep("replied", at + timedelta(seconds=20), "Maria can clear that. Here's an open time."),
+        RecordedStep("replied", at + timedelta(seconds=20), "Mike can clear that. Here's an open time."),
         RecordedStep("booked", at + timedelta(seconds=60))))
 
 
@@ -68,7 +68,7 @@ def agent_visit(at: datetime) -> RecordedSession:
     return RecordedSession(kind="agent", steps=(
         RecordedStep("said", at, "I'm asking for my client: what does a drain clearing cost?"),
         RecordedStep("blocked", at + timedelta(seconds=10)),
-        RecordedStep("replied", at + timedelta(seconds=20), "Maria can give your client a quote."),
+        RecordedStep("replied", at + timedelta(seconds=20), "Mike can give your client a quote."),
         RecordedStep("refused", at + timedelta(seconds=40)),
         RecordedStep("denied", at + timedelta(seconds=90))))
 
@@ -174,6 +174,39 @@ async def test_demo_copy_stores_the_replayed_night(db, fake, api_settings, clock
         (live_due,) = db.execute("SELECT session_id, type FROM app.run_events WHERE kind <> 'sse'").fetchall()
         assert live_due[1] == "decision_due" and live_due[0] not in {event.session_id for event in events}
         assert fake.sessions[live_due[0]].closed_at is None      # only the live seeded hold can become due
+
+
+@pytest.mark.parametrize("desk_authored", [False, True], ids=["default-claude", "desk-confirmation"])
+async def test_replayed_reply_preserves_authorship(db, fake, api_settings, clock, browser, monkeypatch, desk_authored):
+    from desk.api.deliver import Reply
+    from desk.api.routes import owner
+
+    fake.record_night(booked_visit(LAST_NIGHT))
+    original_store, original_deliver = owner.store_replayed_night, owner.deliver
+    delivered = []
+
+    async def store(conn, created, **kwargs):
+        if desk_authored:
+            created = changed(created, "reply", author="desk")
+        return await original_store(conn, created, **kwargs)
+
+    async def deliver(conn, ids, item, **kwargs):
+        if isinstance(item, Reply):
+            delivered.append((item.author, item.via))
+        return await original_deliver(conn, ids, item, **kwargs)
+
+    monkeypatch.setattr(owner, "store_replayed_night", store)
+    monkeypatch.setattr(owner, "deliver", deliver)
+    async with running(api_settings, fake, clock) as app:
+        response = await browser(app).post("/api/owner/copies", json={"passcode": PASSCODE})
+        assert response.status_code == 201
+        copy_id = response.json()["copy_id"]
+    author, via = ("desk", "kernel") if desk_authored else ("claude", "api")
+    assert delivered == [(author, via)]
+    assert db.execute("SELECT author FROM app.messages WHERE copy_id = %s AND kind = 'delivered'"
+                      " AND replay_id IS NOT NULL", (copy_id,)).fetchall() == [(author,)]
+    assert db.execute("SELECT payload->>'author' FROM app.run_events WHERE copy_id = %s AND type = 'message'"
+                      " AND replay_id IS NOT NULL", (copy_id,)).fetchall() == [(author,)]
 
 
 async def test_replayed_rows_never_reach_a_model_context(db, api_conn, ids):
@@ -363,7 +396,7 @@ async def test_owner_cant_step_into_a_replayed_conversation(db, fake, api_settin
         before = app_rows(db, copy["copy_id"])
         answers = [await client.post(f"{path}/takeover", json={"generation": 0}),
                    await client.post(f"{path}/messages", json={"kind": "whisper", "text": "Offer her Monday."}),
-                   await client.post(f"{path}/messages", json={"kind": "say", "text": "Hi, it's Maria."}),
+                   await client.post(f"{path}/messages", json={"kind": "say", "text": "Hi, it's Mike."}),
                    await client.post(f"{path}/typing", json={"generation": 0})]
     assert [(answer.status_code, answer.json()) for answer in answers] == [
         (409, {"error": "kernel", "code": "closed"}), (409, {"error": "kernel", "code": "closed"}),
@@ -519,7 +552,7 @@ async def words_with_a_verdict(night: CopyCreated, kernel: Tampering) -> CopyCre
 
 
 async def a_reply_with_text_and_no_verdict(night: CopyCreated, kernel: Tampering) -> CopyCreated:
-    return changed(night, "reply", text="Maria can clear that.", verdict=None)
+    return changed(night, "reply", text="Mike can clear that.", verdict=None)
 
 
 async def a_receipt_without_its_decision(night: CopyCreated, kernel: Tampering) -> CopyCreated:

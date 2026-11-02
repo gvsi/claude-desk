@@ -49,7 +49,7 @@ from evals.tier1.golden_desk import (
 from evals.tier1.harness import KERNEL_PLANS, PLANS, Auth, Expect, KernelHarness
 from evals.tier1.targets import SOFT_PROMISE_MODEL, SOFT_PROMISE_PASS
 
-OWNER = "Maria Rivera"   # the seed's owner_display_name, which the handoff clause names
+OWNER = "Mike Turner"   # the seed's owner_display_name, which the handoff clause names
 CLEAN_EN = "I can help with that. Which day works for you?"
 CLEAN_ES = "Con gusto le ayudo. ¿Qué día le viene bien?"
 QUOTE_PROSE = "Here is your quote."
@@ -60,7 +60,7 @@ STAND_IN_CANARY = "cdk-0000000000000000"   # the stub's document canary, shaped 
 KEEP_ALIVE_S = 12 * 3600   # a hop well inside the 24 hours a visitor session may sit idle before it closes
 HANDED_OFF = ["handoff"]
 # A failure only of the prose with no card at all (none to keep, no drafted handoff) asks the visitor first: the
-# kernel's call-back offer, as prose, since the golden Desk (a Rivera copy) offers visitors a call back (the owner's
+# kernel's call-back offer, as prose, since the golden Desk (a Turner copy) offers visitors a call back (the owner's
 # decision of 2026-11-01). A checker outage (`check_unavailable`) hands off.
 OFFERED = ["prose"]
 OFFER = STATUS_LINES["offer_callback"]
@@ -306,6 +306,13 @@ def offered(caller: Caller, kind: str, language: str = "en") -> Expect:
     kernel's call-back offer to show, as prose in `language`."""
     return Expect(fields={"ok": False, "generation": caller.state.generation, "violations.0.kind": kind,
                           **shown_blocks(OFFERED), "blocks.0.text": OFFER[language]})
+
+
+def status_lined(caller: Caller, kind: str, language: str = "en") -> Expect:
+    """A check failed only for its prose, with no card to keep, while a held request awaits the owner: a `kind`
+    violation, and only the kernel's status line to show, as prose in `language`."""
+    return Expect(fields={"ok": False, "generation": caller.state.generation, "violations.0.kind": kind,
+                          **shown_blocks(OFFERED), "blocks.0.text": STATUS_LINES["check_status"][language]})
 
 
 async def owner_says(k: KernelHarness, desk: GoldenDesk, session: Caller, text: str, *, expect: Expect) -> Any:
@@ -643,7 +650,7 @@ async def test_soft_promise_check_runs_on_sonnet_once_per_draft(k: KernelHarness
     assert SOFT_PROMISE_MODEL == "claude-sonnet-5-5"
     desk = await golden_desk(k)
     visitor = await open_caller(k, desk, "visitor")
-    for prose in (CLEAN_EN, "You may want to ask Maria about that."):   # plain ASCII, so it reads back from the request
+    for prose in (CLEAN_EN, "You may want to ask Mike about that."):   # plain ASCII, so it reads back from the request
         all_before, before = len(fake.calls()), len(fake.calls(SOFT_PROMISE_MODEL, schema="SoftPromiseVerdict"))
         await check_reply(k, visitor, prose, expect=passes(visitor, ["prose"]))
         if k.is_real:
@@ -663,7 +670,7 @@ async def test_visitor_bound_kernel_text_has_no_digits(k: KernelHarness, fake: F
     quote = await make_quote_fact(k, desk, visitor, "drain")
     verdicts = [
         await check_reply(k, visitor, CLEAN_EN, expect=passes(visitor, ["prose"])),
-        await check_reply(k, visitor, NUMBER_PROSE, expect=offered(visitor, "number_in_prose")),
+        await check_reply(k, visitor, NUMBER_PROSE, expect=status_lined(visitor, "number_in_prose")),   # held
         await check_reply(k, visitor, QUOTE_PROSE, [{"template": "quote", "fact_id": quote}],
                           expect=passes(visitor, ["prose", "quote"])),
     ]

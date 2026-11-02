@@ -48,10 +48,12 @@ export interface AgentRunStarted {
 }
 /**
  * Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
- * the business type setup stored for it (`other` without one). A key, never words: the page holds every word.
+ * the business type setup stored for it (`other` without one). Tasks are listed in page order; the payment tasks
+ * need an enabled agent payment tool. Keys, never words: the page holds every word.
  */
 export interface AgentTasks {
   task_set: "rivera" | "trade" | "office" | "landlord" | "other";
+  tasks: ("book_visit" | "quote_and_deposit" | "push_the_limit")[];
 }
 /**
  * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
@@ -335,10 +337,15 @@ export interface ConnectorProposal {
  * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
  * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
  * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
- * written yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,
+ * written yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose
+ * or positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,
  * checked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual
- * refusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff
- * clearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null.
+ * refusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never
+ * the owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger
+ * entries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release
+ * (`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the
+ * owner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later
+ * request still held, expired or cancelled, or a handoff card opening, clears it to null.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -352,7 +359,18 @@ export interface ConversationSummary {
   };
   owner_preview: boolean;
   latest_visitor_text: string | null;
-  latest_outcome: ("visit_booked" | "deposit_paid" | "turned_down") | null;
+  latest_outcome:
+    | (
+        | "visit_booked"
+        | "deposit_paid"
+        | "turned_down"
+        | "quoted"
+        | "lead_captured"
+        | "owner_declined"
+        | "called_back"
+        | "document_sent"
+      )
+    | null;
   replayed?: boolean;
 }
 /**

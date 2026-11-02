@@ -11,7 +11,7 @@ import {
 import { ClaudeWords, noop, VisionFrame } from './VisionFrame.tsx';
 
 /**
- * `/vision/claude-account` (N-R2-Vision-ClaudeAccount): Dana, a returning customer, back on Rivera
+ * `/vision/claude-account` (N-R2-Vision-ClaudeAccount): Dana, a returning customer, back on Turner
  * Plumbing's public page signed in with her Claude account. Claude asks to use the account for this
  * visit, it matches her contact on record, Claude welcomes her back beside her last visit's booking
  * card, and her invoice comes as a document card only for her; the receipts say both the match and

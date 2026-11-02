@@ -37,7 +37,7 @@
     "/api/owner/copies": {
       "post": {
         "summary": "Create Copy",
-        "description": "A fresh copy of the Rivera seed for whoever holds the passcode, and the owner cookie for it.",
+        "description": "A fresh copy of the Turner seed for whoever holds the passcode, and the owner cookie for it.",
         "operationId": "owner_create_copy",
         "requestBody": {
           "content": {
@@ -4952,7 +4952,7 @@
     "/api/public/desks/{slug}/agent_tasks": {
       "get": {
         "summary": "Agent Tasks",
-        "description": "Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from\n(`agents.demo_task_set`): the business type setup stored for the Desk, or Rivera's on the copy's own Desk. A key\nthe page words its task chips by, never text of the Desk's. Read with the visitor's session; never cached.",
+        "description": "Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from\n(`agents.demo_task_set`): the business type setup stored for the Desk, or Turner's on the copy's own Desk. A key\nthe page words its task chips by, never text of the Desk's. The ordered tasks fit the Desk's enabled tools.\nRead with the visitor's session; never cached.",
         "operationId": "public_agent_tasks",
         "parameters": [
           {
@@ -5012,7 +5012,7 @@
     "/api/public/desks/{slug}/send_agent": {
       "post": {
         "summary": "Send Agent",
-        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.\n\nThe agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Rivera's\nfor the copy's own Desk), read before anything is claimed.",
+        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nEach send carries an `idempotency_key`, one per click (422 without one, as for any missing field). A repeat in\nthe copy within the hour answers the run the first started (its ID; poll it for its state) and starts nothing, and\na repeat that finds the key never counts on the limit. One with another task, or from another session or to\nanother Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request\nthrough, before the kernel mints the agent. A request is admitted (looked up, counted and claimed) under its key's\nlock in this process, so a repeat sent meanwhile waits for that admission, then answers the run; another process\nadmits on its own, so during a deploy's overlap a repeat routed to the other task can be counted twice. Keys live\nin this process's memory, like the runs, each for its run's hour; while 1000 are held, a new one is 429\n`rate_limited` until the oldest one's hour ends.\n\nA request that fails before anything is made (refused by the limit or the budget, or the kernel refused to mint the\nagent with a 4xx) frees its key, so the same request can be sent again. Once the kernel may have minted the agent\n(no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a\nnew click sends a new key.\n\nThe agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Turner's\nfor the copy's own Desk), read before anything is claimed.",
         "operationId": "public_send_agent",
         "parameters": [
           {
@@ -8052,14 +8052,27 @@
               "other"
             ],
             "title": "Task Set"
+          },
+          "tasks": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "book_visit",
+                "quote_and_deposit",
+                "push_the_limit"
+              ]
+            },
+            "type": "array",
+            "title": "Tasks"
           }
         },
         "type": "object",
         "required": [
-          "task_set"
+          "task_set",
+          "tasks"
         ],
         "title": "AgentTasks",
-        "description": "Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else\nthe business type setup stored for it (`other` without one). A key, never words: the page holds every word."
+        "description": "Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else\nthe business type setup stored for it (`other` without one). Tasks are listed in page order; the payment tasks\nneed an enabled agent payment tool. Keys, never words: the page holds every word."
       },
       "AgentTurn": {
         "properties": {
@@ -9115,7 +9128,12 @@
                 "enum": [
                   "visit_booked",
                   "deposit_paid",
-                  "turned_down"
+                  "turned_down",
+                  "quoted",
+                  "lead_captured",
+                  "owner_declined",
+                  "called_back",
+                  "document_sent"
                 ]
               },
               {
@@ -9144,7 +9162,7 @@
           "latest_outcome"
         ],
         "title": "ConversationSummary",
-        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff\nclearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null."
+        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose\nor positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never\nthe owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger\nentries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release\n(`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the\nowner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later\nrequest still held, expired or cancelled, or a handoff card opening, clears it to null."
       },
       "CopyOut": {
         "properties": {

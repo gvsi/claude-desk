@@ -244,9 +244,9 @@ const meta = {
   args: {
     title: 'A Claude front desk for your business',
     intro:
-      'You’re Maria Rivera today, owner of Rivera Plumbing. Her Desk answers customers and their agents under her rules. Try it, then try to break it.',
+      'You’re Mike Turner today, owner of Turner Plumbing. His Desk answers customers and their agents under his rules. Try it, then try to break it.',
     thingsToTry: [
-      { title: 'Chat as a customer', detail: 'Rivera’s public page opens in a new tab.', icon: 'person' },
+      { title: 'Chat as a customer', detail: 'Turner’s public page opens in a new tab.', icon: 'person' },
       { title: 'Try to break it', detail: 'Ask for a discount or someone else’s details.', icon: 'safety' },
       { title: 'Answer a held request', detail: 'One is waiting for you on Today.', icon: 'check' },
       { title: 'Create your own Desk', detail: 'It gets a live link you can share.', icon: 'plus' },
@@ -281,7 +281,7 @@ export const Default: Story = {
     // A main-action-tall field whose outline, its boundary, reaches 3:1 (line-field); with focus, as
     // here, one step stronger (line-field-focus), with no ring.
     expectComputed(field, { height: '40px', borderTopLeftRadius: '8px', borderTopWidth: '1px' });
-    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.6)', borderBottomColor: 'rgba(250, 249, 245, 0.6)', outlineStyle: 'none' });
+    expectComputed(field, { borderTopColor: 'rgba(250, 249, 245, 0.6)', borderBottomColor: 'rgba(250, 249, 245, 0.6)', outlineStyle: 'none', boxShadow: 'none' });
     await expect(field).not.toHaveAttribute('aria-invalid');
     await expect(field).not.toHaveAttribute('aria-describedby');
     await expect(canvas.queryByRole('alert')).toBeNull();
@@ -313,13 +313,19 @@ export const Default: Story = {
     // The page behind doesn't scroll while the dialog is open.
     expectComputed(document.documentElement, { overflowX: 'hidden', overflowY: 'hidden' });
 
-    // focus_stays_inside: Tab and Shift+Tab cycle between the field and the button, and nowhere else.
+    // focus_stays_inside: Tab and Shift+Tab cycle through the field, the button and the footer's author
+    // link, and nowhere else.
+    const author = canvas.getByRole('link', { name: 'Giovanni Alcantara' });
     await userEvent.type(field, 'rivera-demo');
     await expect(button).toBeEnabled();
     await userEvent.tab();
     await expect(button).toHaveFocus();
     await userEvent.tab();
+    await expect(author).toHaveFocus();
+    await userEvent.tab();
     await expect(field).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    await expect(author).toHaveFocus();
     await userEvent.tab({ shift: true });
     await expect(button).toHaveFocus();
     await userEvent.tab({ shift: true });
@@ -568,6 +574,8 @@ export const StartingFlow: Story = {
     await userEvent.click(button);
     await userEvent.keyboard('{Enter}');
     await expect(button).toHaveFocus();
+    await userEvent.tab();
+    await expect(canvas.getByRole('link', { name: 'Giovanni Alcantara' })).toHaveFocus();
     await userEvent.tab();
     await expect(field).toHaveFocus();
     await userEvent.keyboard('{Enter}');

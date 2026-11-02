@@ -29,8 +29,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    there `FOR NO KEY UPDATE` too when its verdict rechecks cards (`reply_check.recheck_cards`),
    shows the handoff card (`reply_check.open_card_handoff`) or passed on an open handoff's card
    (`reply_check.handoff_still_open`), before it looks for the session's open handoffs;
-2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
-   reconciliation;
+2. the decision row, `FOR UPDATE`: lazy expiry, a read cancelling a held discount quote a later
+   booking superseded (the bookings read without a lock), an answer, a cancel, each step of an
+   execution, reconciliation;
 3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;
 4. the Desk's active `policy_versions` row, `FOR SHARE`, which issuing a payment link takes
    (Plan 01c);

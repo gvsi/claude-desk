@@ -1,10 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, SetupState, WentLive } from '../api/views.ts';
 import { Button, Card, Notice, PageHeader, Pill, StatusDot, StatusLabel } from '../ds/index.ts';
+import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
+import { COMING_LATER_CHANNELS, WEBSITE_EMBED } from '../lib/channels.ts';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { QrCode } from '../owner/share/QrCode.tsx';
 import { DESKS_KEY, withAnswering } from '../owner/useDesks.ts';
@@ -46,8 +48,9 @@ function publicLink(wentLive: WentLive | null, slug: string): string {
  * Answering stays off and only the owner sees the preview, and "Go live", which turns it on. Live:
  * "Acting for you now" under the title, its handled dot breathing, while the Desk answers; the link to
  * share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as N-R2-Setup-14-Live
- * draws it: the link's QR code, and the website embed, coming later. It is built from the link
- * alone; the printable card and the ready-made words are on Share.
+ * draws it: the link's QR code, and the website embed, coming later; then "More channels", each
+ * coming later (`COMING_LATER_CHANNELS`). It is built from the link alone; the printable card and
+ * the ready-made words are on Share.
  */
 export function LiveStep({ state, business, answering, onLive, reread }: LiveStepProps) {
   const queryClient = useQueryClient();
@@ -55,6 +58,9 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
   const [wentLive, setWentLive] = useState<WentLive | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The preview's composer takes focus once its chat can be written in, for the owner to try it at once.
+  const preview = useRef<HTMLDivElement>(null);
+  useFocusOnArrival(preview, '.cd-public-shell__composer textarea');
 
   const goLive = async () => {
     setPending(true);
@@ -125,12 +131,26 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
             </div>
             <div className="cd-setup-live__embed">
               <div className="cd-setup-live__embed-text">
-                <p className="cd-setup-live__embed-title cd-type-body">{copy.websiteEmbed}</p>
-                <p className="cd-setup-live__embed-line cd-type-meta">{copy.websiteEmbedLine}</p>
+                <p className="cd-setup-live__embed-title cd-type-body">{WEBSITE_EMBED.name}</p>
+                <p className="cd-setup-live__embed-line cd-type-meta">{WEBSITE_EMBED.line}</p>
               </div>
               <Pill>{copy.comingLater}</Pill>
             </div>
           </div>
+        </Card>
+        <Card as="section" label={copy.moreChannels} padding={16}>
+          <h2 className="cd-setup-live__share-title cd-type-control">{copy.moreChannels}</h2>
+          <ul role="list" className="cd-setup-live__channels">
+            {COMING_LATER_CHANNELS.map((channel) => (
+              <li key={channel.key} className="cd-setup-live__embed cd-setup-live__channel">
+                <div className="cd-setup-live__embed-text">
+                  <p className="cd-setup-live__embed-title cd-type-body">{channel.name}</p>
+                  <p className="cd-setup-live__embed-line cd-type-meta">{channel.line}</p>
+                </div>
+                <Pill>{copy.comingLater}</Pill>
+              </li>
+            ))}
+          </ul>
         </Card>
       </div>
     );
@@ -139,7 +159,7 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.previewTitle} />
-      <div className="cd-setup-live__preview">
+      <div className="cd-setup-live__preview" ref={preview}>
         <PublicChat slug={state.slug} previewDeskId={state.desk_id} embedded />
       </div>
       {error === null ? null : <Notice tone="error">{error}</Notice>}

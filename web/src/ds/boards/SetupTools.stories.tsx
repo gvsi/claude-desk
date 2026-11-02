@@ -8,11 +8,11 @@ import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../test/expectMockBadges.ts';
 import { SetupFrame } from './parts.tsx';
-import { SPEC, expectFooter, expectFooterAtFoot, expectTabOrder } from './spec.ts';
+import { SPEC, expectFooter, expectFooterAtFoot, expectTabOrder, footerLink } from './spec.ts';
 
 const { views } = rivera.connectors;
 
-/** Rivera Plumbing's tools step as the board draws it: four built in, two to add, Stripe and its two tools to connect. */
+/** Turner Plumbing's tools step as the board draws it: four built in, two to add, Stripe and its two tools to connect. */
 const BUILT_IN: SetupToolsRow[] = [
   { connector: views.quotes, state: 'on' },
   { connector: views.bookings, state: 'on' },
@@ -85,10 +85,10 @@ export const Board: Story = {
     await expect(Math.round(yours.getBoundingClientRect().top)).toBe(675);
     expectComputed(builtIn, { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' });
 
-    // Where each connector stands, or its button; no row is a link.
+    // Where each connector stands, or its button; no row is a link, and the footer's author name is the page's one link.
     const ends = (region: HTMLElement) => within(region).getAllByRole('listitem').map((row) => row.querySelector('.cd-setup-tools__end'));
     await expect(ends(builtIn).map((end) => end?.querySelector('.cd-status-dot') !== null)).toEqual([true, true, true, true, false, false]);
-    await expect(canvas.queryAllByRole('link')).toEqual([]);
+    await expect(canvas.queryAllByRole('link')).toEqual([footerLink(canvasElement)]);
     await expect(expectMockBesideExternalNames(yours)).toBe(1);
     // Stripe brings its two tools, as on the Connectors boards, where this board draws three.
     await expect(within(yours).getByText('2 tools')).toBeVisible();

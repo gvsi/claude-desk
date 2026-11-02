@@ -62,7 +62,7 @@ def slug_of(fake) -> str:
 
 
 async def new_slug(kernel_http, fake) -> str:
-    """A fresh Rivera copy's Desk slug, made straight on the kernel."""
+    """A fresh Turner copy's Desk slug, made straight on the kernel."""
 
     copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
     return fake.desks[copy.desk_ids[0]].slug
@@ -626,7 +626,7 @@ async def test_visitor_transcript_shows_only_delivered_items_and_own_text(app, b
     _, _, other = await open_session(app, browser, slug)
     # Claude's response: text beside its calls (kept only in the model's history), a held quote and a reply.
     model.add(response(text_block("That comes to $89 before the discount."),
-                       tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria.")))
+                       tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike.")))
     sent = await client.post(f"/api/public/desks/{slug}/messages", json={"text": "Can I get 15% off a drain?"})
     assert sent.status_code == 202
     await app.state.runtime.runner.drain()
@@ -650,7 +650,7 @@ async def test_visitor_transcript_shows_only_delivered_items_and_own_text(app, b
     held, message = body["items"][1]["event"], body["items"][2]["event"]
     assert (held["type"], held["state"]) == ("held", "held")
     assert (message["type"], message["author"], message["blocks"][0]["text"]) == ("message", "claude",
-                                                                                 "I've asked Maria.")
+                                                                                 "I've asked Mike.")
     for hidden in ("$89", "Whisper", "A note only Claude reads", "Triage", "Translated for the owner",
                    "Another visitor", "owner_translation", "triage"):
         assert hidden not in read.text, hidden
@@ -952,7 +952,7 @@ async def test_due_decision_is_surfaced_with_the_visitor_credential(app, browser
     async with engine.begin() as conn:                                  # as Task 8's job leaves them, IDs only
         due = await append_control(conn, ids, "decision_due", {"decision_id": expiring})
         not_yet = await append_control(conn, ids, "decision_due", {"decision_id": waiting})
-    model.add(response(reply("That request has run out of time, so I can ask Maria again.")))
+    model.add(response(reply("That request has run out of time, so I can ask Mike again.")))
     fake.calls.clear()
 
     async with Stream(app, events_path(slug), headers=[cookie(token)]) as stream:
@@ -1180,7 +1180,7 @@ async def test_cancel_held_decision(app, browser, fake, kernel_http, model, engi
     slug = await new_slug(kernel_http, fake)
     client, token, opened = await open_session(app, browser, slug)
     session_id = opened["state"]["session_id"]
-    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria.")))
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike.")))
     async with Stream(app, events_path(slug), headers=[cookie(token)]) as stream:
         await client.post(f"/api/public/desks/{slug}/messages", json={"text": "Can I get 15% off a drain?"})
         events = await stream.until(lambda events: "turn_end" in types(events))

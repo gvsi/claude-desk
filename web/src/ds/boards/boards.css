@@ -529,7 +529,7 @@
   border-top: 1px solid var(--line-hairline);
 }
 
-/* Ask for Maria: the public page in two states side by side, a hairline between them. */
+/* Ask for Mike: the public page in two states side by side, a hairline between them. */
 .board-handoff {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1352,35 +1352,6 @@
   display: grid;
   gap: var(--space-8);
   min-width: 0;
-}
-
-/* Coming later: an outline with no fill, its pill at the right, 20 px under the words. */
-.board-share__later {
-  display: flex;
-  align-items: center;
-  gap: var(--space-16);
-  margin-top: var(--space-12);
-  padding: var(--space-14) var(--space-16);
-  border: 1px solid var(--line-card);
-  border-radius: var(--radius-card);
-}
-
-.board-share__later-text {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.board-share__later-text p {
-  margin: 0;
-}
-
-.board-share .board-share__later-title {
-  font-weight: 520;
-}
-
-.board-share__later-text .board-share__later-line {
-  margin-top: var(--space-2);
-  color: var(--text-secondary);
 }
 
 .board-share > .cd-concept-footer {

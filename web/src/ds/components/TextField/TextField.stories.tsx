@@ -29,7 +29,7 @@ const meta = {
   component: TextField,
   args: {
     label: 'Business name',
-    value: 'Rivera Plumbing',
+    value: 'Turner Plumbing',
     hint: 'Customers see this name at the top of your public page.',
     onChange: fn(),
   },
@@ -73,9 +73,9 @@ export const Default: Story = {
 
     // Typing reports each change; the field shows what the form passes back.
     await userEvent.clear(field);
-    await userEvent.type(field, 'Rivera');
-    await expect(args.onChange).toHaveBeenLastCalledWith('Rivera');
-    await expect(field).toHaveValue('Rivera');
+    await userEvent.type(field, 'Turner');
+    await expect(args.onChange).toHaveBeenLastCalledWith('Turner');
+    await expect(field).toHaveValue('Turner');
   },
 };
 
@@ -125,7 +125,7 @@ export const Multiline: Story = {
   args: {
     label: 'Your business',
     multiline: true,
-    value: 'I run Rivera Plumbing in Oakland. ',
+    value: 'I run Turner Plumbing in Oakland. ',
     hint: 'Include your first name as customers should see it.',
     maxLength: 1500,
   },
@@ -141,8 +141,8 @@ export const Multiline: Story = {
 
     // Enter adds a line; nothing submits from a multiline field.
     await userEvent.click(field);
-    await userEvent.keyboard('{End}{Enter}Maria');
-    await expect(args.onChange).toHaveBeenLastCalledWith('I run Rivera Plumbing in Oakland. \nMaria');
+    await userEvent.keyboard('{End}{Enter}Mike');
+    await expect(args.onChange).toHaveBeenLastCalledWith('I run Turner Plumbing in Oakland. \nMike');
 
     // A long word wraps inside the field instead of widening it.
     const box = field.getBoundingClientRect();
@@ -174,13 +174,13 @@ export const ReadOnly: Story = {
   render: (args) => (
     <>
       <Controlled {...args} />
-      <Controlled {...args} label="Business name" multiline={false} value="Rivera Plumbing" hint="Customers see this name at the top of your public page." maxLength={undefined} />
+      <Controlled {...args} label="Business name" multiline={false} value="Turner Plumbing" hint="Customers see this name at the top of your public page." maxLength={undefined} />
     </>
   ),
   args: {
     label: 'Your business',
     multiline: true,
-    value: "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland.",
+    value: "Turner Plumbing. I'm Mike, a licensed plumber in Oakland.",
     hint: 'Include your first name as customers should see it.',
     maxLength: 1500,
     readOnly: true,
@@ -192,7 +192,7 @@ export const ReadOnly: Story = {
   play: async ({ args, canvas, userEvent }) => {
     const multiline = canvas.getByRole('textbox', { name: 'Your business' }) as HTMLTextAreaElement;
     const singleLine = canvas.getByRole('textbox', { name: 'Business name' }) as HTMLInputElement;
-    for (const [field, value] of [[multiline, args.value], [singleLine, 'Rivera Plumbing']] as const) {
+    for (const [field, value] of [[multiline, args.value], [singleLine, 'Turner Plumbing']] as const) {
       await expect(field).toHaveAttribute('readonly');
       await expect(field).not.toBeDisabled();
       expectComputed(field, {
@@ -216,14 +216,15 @@ export const ReadOnly: Story = {
       await expect([field.selectionStart, field.selectionEnd]).toEqual([0, value.length]);
     }
 
-    // Both stay in the tab order. A held field has no caret, so keyboard focus rings it in the warm
-    // `ring-focus` (the secondary ink), as any other control; its border doesn't change.
+    // Both stay in the tab order. A held field has no caret, so keyboard focus draws the warm
+    // `line-focus` edge (the secondary ink) 1 px inside it, as on any other borderless control; its
+    // border doesn't change, and nothing rings it.
     multiline.focus();
     await userEvent.tab();
     await expect(singleLine).toHaveFocus();
-    expectComputed(singleLine, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'none' });
+    expectComputed(singleLine, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
     await userEvent.tab({ shift: true });
     await expect(multiline).toHaveFocus();
-    expectComputed(multiline, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'none' });
+    expectComputed(multiline, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
   },
 };

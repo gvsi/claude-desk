@@ -55,11 +55,6 @@
   background: var(--fill-hover);
 }
 
-/* The focus ring sits just inside the item, so it clears the menu's edge and the next item. */
-.cd-preset-menu__item:focus-visible {
-  outline-offset: -2px;
-}
-
 .cd-preset-menu__title {
   color: var(--text-primary);
 }

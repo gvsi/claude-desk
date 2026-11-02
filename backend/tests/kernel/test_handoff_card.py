@@ -1,6 +1,6 @@
 """The handoff card opens a handoff the owner sees (the owner's decision of 2026-10-30).
 
-The kernel's handoff card tells the visitor "Let me check with Maria Rivera. Maria Rivera will reply
+The kernel's handoff card tells the visitor "Let me check with Mike Turner. Mike Turner will reply
 here." When `/check_reply` answers with it, in place of a draft its checks blocked or because Claude's
 own draft cited it, the kernel opens an owner handoff for the session in the verdict's transaction:
 kind `card`, no call-back window, a reason the kernel writes, and an owner alert in the Demo inbox
@@ -16,7 +16,7 @@ Desk offers a call back: the kernel's call-back offer replaces the handoff card,
 on a Desk with its call-back tool turned off (`without_call_backs`), or cite the card in Claude's
 own reply (`hand_over`).
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), whose
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), whose
 notification defaults alert the owner of a handoff at once.
 """
 
@@ -54,8 +54,8 @@ BLOCKED = "That will be $180."                                   # a number: the
 BLOCKED_ES = "Le hago el cincuenta por ciento de descuento, con gusto."
 CLEAN = "I can help with that."
 FLAGGED = SoftPromiseVerdict(promises_beyond_cards=True, denies_being_ai=False)
-HANDOFF_CARD = {"en": "Let me check with Maria Rivera.\nMaria Rivera will reply here.",
-                "es": "Déjame consultarlo con Maria Rivera.\nMaria Rivera te responderá aquí."}
+HANDOFF_CARD = {"en": "Let me check with Mike Turner.\nMike Turner will reply here.",
+                "es": "Déjame consultarlo con Mike Turner.\nMike Turner te responderá aquí."}
 
 
 async def hand_over(client, visitor: Visitor) -> ReplyVerdict:
@@ -67,12 +67,12 @@ async def hand_over(client, visitor: Visitor) -> ReplyVerdict:
 
 
 @pytest.mark.parametrize(("prose", "clauses", "final", "ok", "templates", "receipt"), [
-    ("", [clause("handoff")], True, True, ["handoff"], "Passed to Maria Rivera to answer"),
-    ("Je peux vous aider avec ça.", [], True, False, ["handoff"], "Passed to Maria Rivera to answer"),
-    (BLOCKED, [], True, False, [None], "Reply checked against Maria Rivera's rules"),   # the call-back offer
+    ("", [clause("handoff")], True, True, ["handoff"], "Passed to Mike Turner to answer"),
+    ("Je peux vous aider avec ça.", [], True, False, ["handoff"], "Passed to Mike Turner to answer"),
+    (BLOCKED, [], True, False, [None], "Reply checked against Mike Turner's rules"),   # the call-back offer
     (BLOCKED, [clause("hours", "charter:hours")], True, False, ["hours"],
-     "Reply checked against Maria Rivera's rules"),
-    (BLOCKED, [], False, False, [], "Passed to Maria Rivera to answer"),
+     "Reply checked against Mike Turner's rules"),
+    (BLOCKED, [], False, False, [], "Passed to Mike Turner to answer"),
 ], ids=["passing-handoff", "final-handoff", "final-offer", "final-kept-card", "unshown-first-attempt"])
 async def test_reply_receipt_follows_the_shown_handoff_clause(app, client, prose, clauses, final, ok, templates,
                                                             receipt):
@@ -107,7 +107,7 @@ async def test_final_prose_failure_keeps_only_checked_cards(app, client, reviewe
     assert not verdict.ok
     assert {v.kind for v in verdict.violations} == {"number_in_prose"}
     assert [(b.template, b.fact_id) for b in verdict.blocks] == [(c["template"], c["fact_id"]) for c in clauses]
-    assert verdict.visitor_plain == "Reply checked against Maria Rivera's rules"
+    assert verdict.visitor_plain == "Reply checked against Mike Turner's rules"
     assert await handoffs_of(app, copy) == []
     assert await handoff_alerts(app, copy) == []
     assert handoff_entries(await ledger_rows(app, copy)) == []
@@ -184,8 +184,8 @@ async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewe
     opened = shown and drafted
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == ([("card", "open")] if opened else [])
     assert len(await handoff_alerts(app, copy)) == int(opened)
-    assert verdict.visitor_plain == ("Passed to Maria Rivera to answer" if opened or not shown
-                                     else "Reply checked against Maria Rivera's rules")
+    assert verdict.visitor_plain == ("Passed to Mike Turner to answer" if opened or not shown
+                                     else "Reply checked against Mike Turner's rules")
     verify_verdict(await public_key(client), visitor.session_id, verdict)
 
 
@@ -198,7 +198,7 @@ async def test_prose_only_blocks_keep_cards_only_when_shown(app, client, reviewe
 async def test_a_prose_only_block_with_nothing_to_keep_offers_a_call_back(app, client, reviewer, prose, soft_answer,
                                                                           kind, language):
     """Self-serve first: a shown block failing only for its prose, with no checked card to keep,
-    asks the visitor before involving the owner. On a Desk that offers call backs (Rivera's seed
+    asks the visitor before involving the owner. On a Desk that offers call backs (Turner's seed
     gives visitors `native.request_callback`), the kernel shows its signed call-back offer in the
     reply's language in place of the handoff card, so no owner handoff opens and no alert goes out
     (the owner's decision of 2026-11-01)."""
@@ -420,7 +420,7 @@ async def test_claudes_own_draft_citing_the_handoff_card_opens_one(app, client, 
     verdict = await checked(client, visitor, prose, [clause("handoff")])
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [block.template or block.kind for block in verdict.blocks] == blocks
-    assert verdict.visitor_plain == "Passed to Maria Rivera to answer"
+    assert verdict.visitor_plain == "Passed to Mike Turner to answer"
     [handoff] = await handoffs_of(app, copy)
     assert (handoff.session_id, handoff.kind, handoff.status, handoff.callback_window) == (
         visitor.session_id, "card", "open", None)
@@ -522,7 +522,7 @@ async def test_another_copys_owner_sees_neither_the_handoff_nor_the_alert(app, c
 
 async def test_an_owner_say_opens_none(app, client):
     copy, visitor = await visitor_of(app, client)
-    await set_mode(client, copy, visitor.session_id, "owner", 0)                     # Maria takes over
+    await set_mode(client, copy, visitor.session_id, "owner", 0)                     # Mike takes over
     assert (await sent(client, copy, visitor.session_id, "I'll come by and look at it myself.")).verdict.ok
     assert (await sent(client, copy, visitor.session_id, "Offer the Tuesday slot.", "whisper")).verdict is None
     await set_mode(client, copy, visitor.session_id, "ai", 1)                        # and hands back
@@ -625,7 +625,7 @@ async def test_a_draft_the_api_will_rewrite_opens_no_handoff(app, client, review
     if soft_answer is not None:
         reviewer.soft_answer = soft_answer
     verdict = await checked_as(client, visitor, prose, final=False)
-    assert (verdict.ok, verdict.blocks, verdict.visitor_plain) == (False, [], "Passed to Maria Rivera to answer")
+    assert (verdict.ok, verdict.blocks, verdict.visitor_plain) == (False, [], "Passed to Mike Turner to answer")
     assert {violation.kind for violation in verdict.violations} == {kind}
     verify_verdict(await public_key(client), visitor.session_id, verdict)
     assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
@@ -633,7 +633,7 @@ async def test_a_draft_the_api_will_rewrite_opens_no_handoff(app, client, review
     [entry] = await reply_entries(app, copy)
     assert (entry.seq, entry.event.summary["final"]) == (verdict.ledger_seq, False)
     reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
-    assert (await checked_as(client, visitor, "Maria Rivera will reply here.")).ok
+    assert (await checked_as(client, visitor, "Mike Turner will reply here.")).ok
     assert reviewer.soft_inputs[-1].cards == []                   # no handoff backs it
 
 
@@ -741,7 +741,7 @@ async def test_the_owners_preview_callback_keeps_its_card_and_reconciliation_wit
         [block] = verdict.blocks
         assert (block.template, block.fact_id, block.title, block.lines) == (
             "callback_confirmed", fact.fact_id,
-            "Maria Rivera will call you back on Friday, October 30, between 11:00 am and 12:00 pm", [])
+            "Mike Turner will call you back on Friday, October 30, between 11:00 am and 12:00 pm", [])
     assert await owner_alerts(client, copy) == before
 
     # An ordinary visitor still leaves one open call-back and alerts the owner.
@@ -954,12 +954,15 @@ async def held_quote(client, visitor):
 async def test_a_held_request_awaiting_the_owner_is_the_conversations_item(app, client, frozen_clock, ends):
     """While the session has a held request awaiting the owner, the owner already has that
     request's alert and item for the conversation: a card shown meanwhile opens no handoff and
-    sends no alert, so the owner sees one item and gets one alert. Once the hold has an end
-    (the owner's answer, the visitor's cancel, or its expiry), the next card opens one as usual."""
+    sends no alert, so the owner sees one item and gets one alert, and a draft blocked only for its
+    prose shows the kernel's status line instead of the card. Once the hold has an end (the owner's
+    answer, the visitor's cancel, or its expiry), the next blocked draft shows the card, which opens
+    one as usual."""
     copy, visitor = await visitor_of(app, client)
     await without_call_backs(app, copy)                          # so the blocked drafts show the handoff card
     held = await held_quote(client, visitor)
-    assert_handed_off(await checked(client, visitor, BLOCKED))
+    status = await checked(client, visitor, BLOCKED)             # the visitor is told to check the request
+    assert [(block.kind, block.text) for block in status.blocks] == [("prose", STATUS_LINE["en"])]
     assert (await checked(client, visitor, "", [clause("handoff")])).ok          # nor a card Claude cites
     assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
     assert handoff_entries(await ledger_rows(app, copy)) == []
@@ -1056,7 +1059,7 @@ async def test_the_owners_first_message_closes_the_cards_handoff(app, client):
     card = await card_handoff(app, client, copy, visitor)
     await sent(client, copy, visitor.session_id, "Let me look at that for you.", kind="whisper")
     assert [row.status for row in await handoffs_of(app, copy)] == ["open"]
-    said = await sent(client, copy, visitor.session_id, "Hi, this is Maria. I can help with that.")
+    said = await sent(client, copy, visitor.session_id, "Hi, this is Mike. I can help with that.")
     assert said.verdict is not None and said.verdict.ok
     assert [row.status for row in await handoffs_of(app, copy)] == ["done"]
     assert closing_summaries(await ledger_rows(app, copy)) == [
@@ -1087,7 +1090,7 @@ async def test_the_owner_handling_the_conversation_leaves_a_call_back_open(app, 
     if how == "takeover":
         await set_mode(client, copy, visitor.session_id, "owner", 0)
     else:
-        await sent(client, copy, visitor.session_id, "Hi, this is Maria.")
+        await sent(client, copy, visitor.session_id, "Hi, this is Mike.")
     assert [(row.handoff_id, row.kind, row.status) for row in await handoffs_of(app, copy)] == [
         (requested, "callback", "open")]
     assert closing_summaries(await ledger_rows(app, copy)) == []
@@ -1239,3 +1242,94 @@ async def test_a_booking_that_fails_closes_nothing(app, client, reviewer, monkey
     assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "open")]
     assert closing_summaries(await ledger_rows(app, copy)) == []
     assert visitor.session_id not in {row.session_id for row in await rows_of(app, copy.copy_id, select(Booking))}
+
+
+# The kernel's status line, the API's signed `STATUS_LINES["check_status"]`.
+STATUS_LINE = {"en": "Please check the request status in this chat.",
+               "es": "Consulte el estado de la solicitud en este chat."}
+SERVICE_AREA_CLAUSE = ("policy", "charter:policy:service_area")
+
+
+@pytest.mark.parametrize("cited", [True, False], ids=["policy-card", "no-card"])
+@pytest.mark.parametrize(("prose", "soft_answer", "kind", "language"), [
+    ("I guarantee it.", None, "promise_word", "en"),
+    ("Eso es gratis.", None, "promise_word", "es"),
+    (CLEAN, FLAGGED, "soft_promise", "en"),
+], ids=["promise-en", "promise-es", "soft-en"])
+async def test_a_held_request_shows_the_status_line_when_only_the_prose_is_blocked(app, client, reviewer, prose,
+                                                                                  soft_answer, kind, language, cited):
+    """While a held request awaits the owner, a final draft blocked only for its prose still gives the visitor
+    words: the kept checked cards, if any, then the kernel's status line in the reply's language, in place of the
+    call-back offer. No owner handoff opens and no handoff alert goes out."""
+    from desk.contracts import RenderedBlock
+
+    from .test_approvals import held_quote
+
+    copy, visitor, _ = await held_quote(app, client)
+    if soft_answer is not None:
+        reviewer.soft_answer = soft_answer
+    alerts_before = len(await handoff_alerts(app, copy))
+    verdict = await checked(client, visitor, prose, [clause(*SERVICE_AREA_CLAUSE)] if cited else [])
+    assert not verdict.ok and {v.kind for v in verdict.violations} == {kind}
+    assert [(block.kind, block.template) for block in verdict.blocks[:-1]] == (
+        [("card", "policy")] if cited else [])
+    assert verdict.blocks[-1] == RenderedBlock(kind="prose", text=STATUS_LINE[language])
+    assert verdict.language == language
+    assert await handoffs_of(app, copy) == []
+    assert len(await handoff_alerts(app, copy)) == alerts_before
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("cited", [True, False], ids=["policy-card", "no-card"])
+@pytest.mark.parametrize("ending", ["none", "answered", "cancelled"])
+async def test_without_a_held_request_awaiting_the_owner_a_prose_block_is_unchanged(app, client, cited, ending):
+    """With no held request, or one the owner answered or the visitor cancelled, a final draft blocked only for its
+    prose keeps its checked cards alone, or, with none, shows the call-back offer, as before."""
+    from .test_approvals import held_quote
+    from .test_reply_check import assert_kept
+
+    if ending == "none":
+        copy, visitor = await visitor_of(app, client)
+    else:
+        copy, visitor, held = await held_quote(app, client)
+        if ending == "answered":
+            await answered(client, copy.owner, held.decision_id, "deny_once")
+        else:
+            assert (await post_cancel(client, visitor, held.decision_id)).status_code == 200
+    verdict = await checked(client, visitor, "I guarantee it.", [clause(*SERVICE_AREA_CLAUSE)] if cited else [])
+    assert {v.kind for v in verdict.violations} == {"promise_word"}
+    if cited:
+        assert_kept(verdict, [SERVICE_AREA_CLAUSE])
+    else:
+        assert_offered(verdict)
+    assert await handoffs_of(app, copy) == []
+
+
+async def test_a_held_request_leaves_a_first_attempt_the_api_rewrites_unshown(app, client):
+    """A first attempt blocked only for kinds a rewrite can fix is never shown, held request or not: no blocks."""
+    from .test_approvals import held_quote
+
+    copy, visitor, _ = await held_quote(app, client)
+    verdict = await checked(client, visitor, "I guarantee it.", [clause(*SERVICE_AREA_CLAUSE)], final=False)
+    assert {v.kind for v in verdict.violations} == {"promise_word"}
+    assert verdict.blocks == []
+    assert await handoffs_of(app, copy) == []
+
+
+@pytest.mark.parametrize("session", ["checker outage", "drafted handoff"])
+async def test_a_held_request_never_replaces_a_handoff(app, client, reviewer, session):
+    """A checker outage (`check_unavailable`) hands off, and a handoff clause Claude drafted is honoured, held
+    request or not: the handoff card, with no status line."""
+    from .test_approvals import held_quote
+
+    copy, visitor, _ = await held_quote(app, client)
+    prose, clauses = BLOCKED, []
+    if session == "checker outage":
+        prose, reviewer.soft_answer = CLEAN, None                 # the soft check gives no verdict
+    else:
+        clauses = [clause("handoff")]
+    verdict = await checked(client, visitor, prose, clauses)
+    assert {v.kind for v in verdict.violations} == {"check_unavailable" if session == "checker outage"
+                                                    else "number_in_prose"}
+    assert_handed_off(verdict)
+    assert STATUS_LINE["en"] not in [block.text for block in verdict.blocks]

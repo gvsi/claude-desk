@@ -230,7 +230,7 @@ export const GoogleCalendar: Story = {
   },
   play: async ({ canvas, canvasElement, userEvent }) => {
     const main = await expectConnectorPage(canvasElement, ['Connectors', 'Google Calendar'], 'Google Calendar');
-    // Its promise under the header: Claude sees only when Maria is busy.
+    // Its promise under the header: Claude sees only when Mike is busy.
     await expect(within(main).getByText(rivera.googleCalendar.promise.title)).toBeVisible();
     const disconnect = canvas.getByRole('button', { name: 'Disconnect' });
     const crumbs = within(canvas.getByRole('navigation', { name: 'Breadcrumb' })).getAllByRole('link');

@@ -16,9 +16,9 @@ function IntroArrival() {
       <TodayNeedsYou reviewer={false} />
       <IntroDialog
         title={TITLE}
-        intro="You’re Maria Rivera today, owner of Rivera Plumbing. Her Desk answers customers and their agents under her rules. Try it, then try to break it."
+        intro="You’re Mike Turner today, owner of Turner Plumbing. His Desk answers customers and their agents under his rules. Try it, then try to break it."
         thingsToTry={[
-          { title: 'Chat as a customer', detail: 'Rivera’s public page opens in a new tab.', icon: 'person' },
+          { title: 'Chat as a customer', detail: 'Turner’s public page opens in a new tab.', icon: 'person' },
           { title: 'Try to break it', detail: 'Ask for a discount or someone else’s details.', icon: 'safety' },
           { title: 'Answer a held request', detail: 'One is waiting for you on Today.', icon: 'check' },
           { title: 'Create your own Desk', detail: 'It gets a live link you can share.', icon: 'plus' },
@@ -54,7 +54,7 @@ export const Board: Story = {
     // A modal dialog named by its title, over Today, which it makes inert.
     const dialog = canvas.getByRole('dialog', { name: TITLE });
     await expect(dialog.matches(':modal')).toBe(true);
-    await expect(canvas.getByRole('heading', { level: 1, name: 'Good morning, Maria', hidden: true })).toBeInTheDocument();
+    await expect(canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike', hidden: true })).toBeInTheDocument();
     expectComputed(within(dialog).getByRole('heading', { name: TITLE }), {
       fontFamily: /^"Source Serif 4"/,
       fontSize: '28px',
@@ -77,11 +77,17 @@ export const Board: Story = {
     await expect(illustration.getBoundingClientRect().right).toBe(panel.right);
 
     // focus_order_is_logical: focus starts in the passcode field, and with the field empty (Start
-    // the demo disabled) Tab stays on it: nothing behind the dialog is reachable.
+    // the demo disabled) Tab goes only to the footer's author link and back: nothing behind the
+    // dialog is reachable.
     const field = within(dialog).getByLabelText('Passcode');
+    const author = dialog.querySelector<HTMLElement>('[data-ds="concept-footer"] a');
     await expect(field).toHaveFocus();
     await userEvent.tab();
+    await expect(author).toHaveFocus();
+    await userEvent.tab();
     await expect(field).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    await expect(author).toHaveFocus();
     await userEvent.tab({ shift: true });
     await expect(field).toHaveFocus();
     const start = within(dialog).getByRole('button', { name: 'Start the demo' });

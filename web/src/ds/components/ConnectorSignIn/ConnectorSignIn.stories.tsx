@@ -69,13 +69,16 @@ export const GoogleCalendar: Story = {
     await expect(dialog.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], textarea')).toHaveLength(0);
     // A radio group named by the question, one choice per option, the screen's value checked and focused.
     const group = within(dialog).getByRole('radiogroup', { name: "Which calendar shows when you're busy?" });
-    const jobs = within(group).getByRole('radio', { name: /^Rivera Plumbing jobs/ });
+    const jobs = within(group).getByRole('radio', { name: /^Turner Plumbing jobs/ });
     const personal = within(group).getByRole('radio', { name: /^Personal/ });
     await expect(jobs).toBeChecked();
     await expect(jobs).toHaveFocus();
-    await expect(jobs).toHaveAccessibleName('Rivera Plumbing jobs maria@riveraplumbing.example');
-    // The checked choice's box takes the accent border.
-    expectComputed(jobs.closest('label') as Element, { borderTopColor: 'rgb(126, 174, 218)' });
+    await expect(jobs).toHaveAccessibleName('Turner Plumbing jobs mike@turnerplumbing.example');
+    // The dialog's initial focus can count as keyboard focus. Read the selected border away from
+    // focus, after its transition finishes. Native pointer and keyboard styles are covered in
+    // focus.browser.test.tsx, since synthetic clicks don't set the browser's focus modality.
+    jobs.blur();
+    await waitFor(() => expectComputed(jobs.closest('label') as Element, { borderTopColor: 'rgb(126, 174, 218)' }));
     // Choosing another calls onChange; Continue sends the screen's value.
     await userEvent.click(personal);
     await expect(args.onChange).toHaveBeenCalledWith('personal');

@@ -122,8 +122,8 @@ async def store_replayed_night(conn: AsyncConnection, created: CopyCreated, *, r
     """Store the night the kernel replayed into a new copy (Plan 01d) in the copy's transcripts, in the caller's
     transaction, and return how many events it stored. Each event, in shown order, is written at the moment it was
     shown with the copy's `replay_id`: a visitor's words as `visitor_text` (an agent's as `agent_text`), a reply
-    through `deliver()` as Claude's, and a receipt through `deliver()` as its final decision. A copy without a
-    `replay_id` stores nothing. An event that doesn't fit fails the whole night: a session that isn't one of the
+    through `deliver()` as Claude's via the API or the Desk's via the kernel, and a receipt as its final decision.
+    A copy without a `replay_id` stores nothing. An event that doesn't fit fails the whole night: a session that isn't one of the
     copy's closed visitor or agent sessions, an event without the one record its kind carries, a decision that isn't
     final or is another session's, or an event deliver() wouldn't show."""
     if created.replay_id is None:
@@ -147,7 +147,8 @@ async def store_replayed_night(conn: AsyncConnection, created: CopyCreated, *, r
             await append_message(conn, ids, REPLAYED_TEXT[session["kind"]], text=event.text, replayed=replayed)
             continue
         if event.kind == "reply":
-            item: Reply | Status = Reply(event.verdict, author="claude", via="api")
+            item: Reply | Status = Reply(event.verdict, author=event.author,
+                                         via="kernel" if event.author == "desk" else "api")
         else:
             decision = event.decision
             if decision.session_id != event.session_id or decision.state in NOT_FINAL:
@@ -228,7 +229,7 @@ async def _create_copy(state: Runtime) -> CopyCreated:
 
 
 async def _new_copy(state: Runtime, response: Response) -> CopyOut:
-    """A new copy of the Rivera seed, read back through its own owner token, which goes only into the cookie. It asks
+    """A new copy of the Turner seed, read back through its own owner token, which goes only into the cookie. It asks
     for the recorded night when the settings do (`replay_night`). The seeded hold's chat commits first, then the
     replayed night in its own transaction, so either can be stored even if the other fails."""
     created = await _create_copy(state)
@@ -242,7 +243,7 @@ async def _new_copy(state: Runtime, response: Response) -> CopyOut:
 
 @router.post("/copies", status_code=201, response_model=CopyOut, responses=error_responses(401, 422, 429, 503))
 async def create_copy(body: CopyRequest, request: Request, response: Response) -> CopyOut:
-    """A fresh copy of the Rivera seed for whoever holds the passcode, and the owner cookie for it."""
+    """A fresh copy of the Turner seed for whoever holds the passcode, and the owner cookie for it."""
     state = runtime(request).started()
     ip = client_ip(request)
     await state.limiter.enforce("passcode", ip)          # counts the attempt; a right passcode gives it back

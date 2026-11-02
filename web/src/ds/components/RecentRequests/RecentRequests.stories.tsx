@@ -65,16 +65,14 @@ export const Refund: Story = {
     // The outcome sits at the right of the request's words.
     const outcome = within(first).getByText(row.outcome);
     await expect(outcome.getBoundingClientRect().left).toBeGreaterThan(within(first).getByRole('link').getBoundingClientRect().right);
-    // By keyboard, the row's overlay draws the focus ring: 2 px of ring-focus, 2 px outside the row.
+    // By keyboard, the row's overlay draws the focus edge: 1 px of line-focus just inside the row, at
+    // the control radius, and no ring outside it; the words' own link draws nothing around them.
     await userEvent.tab();
     const firstLink = within(first).getByRole('link');
     await expect(firstLink).toHaveFocus();
-    const ring = getComputedStyle(firstLink, '::after');
-    await expect([ring.outlineStyle, ring.outlineWidth, ring.outlineColor, ring.outlineOffset]).toEqual(['solid', '2px', 'rgba(250, 249, 245, 0.64)', '2px']);
-    // Nothing between the row and the page clips the ring.
-    for (let el: HTMLElement | null = first; el !== null && el !== canvasElement; el = el.parentElement) {
-      await expect([getComputedStyle(el).overflowX, getComputedStyle(el).overflowY]).toEqual(['visible', 'visible']);
-    }
+    const edge = getComputedStyle(firstLink, '::after');
+    await expect([edge.outlineStyle, edge.boxShadow, edge.borderTopLeftRadius]).toEqual(['none', 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset', '8px']);
+    await expect([getComputedStyle(firstLink).outlineStyle, getComputedStyle(firstLink).boxShadow]).toEqual(['none', 'none']);
   },
 };
 

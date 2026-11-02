@@ -15,9 +15,9 @@ reply blocked only for its prose shows in place of the handoff card. A session r
 in its `last_language`, else English (`language`): the language of the visitor's latest message,
 recorded at turn start (`turn`), or of Claude's last reply (`reply_check.finalize`). Owner alert
 previews (`owner_preview`) are English and owner-only. The owner-only lines (`OWNER_STATUS`: why an
-action was refused at execution, a decision's `owner_plain`) sit apart from the status lines, so
-`status` can't render one into any visitor text; `owner_line` renders them in the owner's language
-(`OWNER_LANGUAGE`).
+action was refused at execution, or that the visitor's booking closed a held request, a decision's
+`owner_plain`) sit apart from the status lines, so `status` can't render one into any visitor text;
+`owner_line` renders them in the owner's language (`OWNER_LANGUAGE`).
 
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
 they are rendered by code from a fact, never from text a model wrote; the `owner_said` card holds
@@ -64,8 +64,8 @@ DECISION_STATUS_KEYS = STATUS_KEYS - RECEIPT_KEYS
 MESSAGES: dict[str, dict[str, str]] = {"en": en.MESSAGES, "es": es.MESSAGES}
 MESSAGE_KEYS = frozenset(en.MESSAGES)
 EXECUTED: dict[str, dict[str, str]] = {"en": en.EXECUTED, "es": es.EXECUTED}
-# Owner-only lines (why an action was refused at execution: a decision's `owner_plain`, `owner_line`):
-# outside `STATUS_KEYS`, so no decision's status line can take one.
+# Owner-only lines (why an action was refused at execution, or that a booking closed a held request: a
+# decision's `owner_plain`, `owner_line`): outside `STATUS_KEYS`, so no decision's status line can take one.
 OWNER_STATUS: dict[str, dict[str, str]] = {"en": en.OWNER_STATUS, "es": es.OWNER_STATUS}
 OWNER_STATUS_KEYS = frozenset(en.OWNER_STATUS)
 # The language the owner reads the owner-only lines in. The kernel keeps no owner language, so this is
@@ -108,7 +108,7 @@ def status(key: str, lang: str, *, owner: str | None = None, **fields: str) -> s
 
 def executed_status(tool: str, lang: str, *, owner: str, business: BusinessToolDef | None = None) -> str:
     """What an executed `tool` did, in `lang`, naming `owner`: the receipt a visitor or agent sees
-    for an action that ran ("Quoted from Maria Rivera's price list"). A tool without a line raises
+    for an action that ran ("Quoted from Mike Turner's price list"). A tool without a line raises
     KeyError: there is no generic fallback, so execution checks for the line before anything runs."""
     from desk.contracts import is_business_tool
     if is_business_tool(tool):

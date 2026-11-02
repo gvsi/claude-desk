@@ -9,7 +9,7 @@ import { expectComputed } from '../test/expectComputed.ts';
 import { SetupFrame } from './parts.tsx';
 import { SPEC, expectFooter, expectFooterAtFoot, expectTabOrder, one } from './spec.ts';
 
-/** The situations the check ran on Rivera Plumbing's draft rules, as the board writes them. */
+/** The situations the check ran on Turner Plumbing's draft rules, as the board writes them. */
 const SITUATIONS: SituationRowProps[] = [
   { title: 'A visitor wants a drain cleared on Tuesday afternoon', who: 'A visitor, not verified', outcome: 'allow', dependsOnReview: false, reason: 'Books weekday visits in your hours.', matches: true },
   { title: 'A visitor asks for 10% off if they pay cash', who: 'A visitor, not verified', outcome: 'hold', dependsOnReview: false, reason: 'Discounts ask you first.', matches: true },
@@ -22,7 +22,7 @@ const SITUATIONS: SituationRowProps[] = [
 function SetupSituations() {
   return (
     <SetupFrame business={rivera.business.name}>
-      <PageHeader title="Real situations" subtitle="How your draft rules handle things that really happen at Rivera Plumbing. Nothing here is real." />
+      <PageHeader title="Real situations" subtitle="How your rules will handle things that really happen at Turner Plumbing. Nothing here is real." />
       <ul role="list" className="board-setup__rows" aria-label="Real situations">
         {SITUATIONS.map((situation) => (
           <li key={situation.title}>

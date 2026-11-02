@@ -3,7 +3,7 @@ owner, conversations and their transcripts, Safety's attempts, the verified ledg
 
 The app runs on FakeKernel. Activity is made the way the kernel makes it, through a visitor's own kernel calls at a
 time the test sets on the fake's clock; the transcript rows the API writes are appended through the store and then
-dated, as desk_admin, to the moment they stand for. Times are the business's: Rivera Plumbing is in
+dated, as desk_admin, to the moment they stand for. Times are the business's: Turner Plumbing is in
 America/Los_Angeles.
 """
 
@@ -192,7 +192,7 @@ RIVERA = ZoneInfo("America/Los_Angeles")
 
 
 def local(year: int, month: int, day: int, hour: int, minute: int = 0, second: int = 0, *, fold: int = 0) -> datetime:
-    """A wall-clock time at Rivera Plumbing, as a UTC instant (`fold=1`: the second of a repeated hour)."""
+    """A wall-clock time at Turner Plumbing, as a UTC instant (`fold=1`: the second of a repeated hour)."""
     return datetime(year, month, day, hour, minute, second, tzinfo=RIVERA, fold=fold).astimezone(UTC)
 
 
@@ -338,7 +338,7 @@ class Scene:
 
 
 async def new_scene(app, browser, fake, kernel_http, engine, db, made: datetime) -> Scene:
-    """A Rivera Plumbing copy made at `made` (its calendar runs two weeks on from there)."""
+    """A Turner Plumbing copy made at `made` (its calendar runs two weeks on from there)."""
     fake.now = made
     return Scene(owner=await new_owner(app, browser, fake, kernel_http), fake=fake, kernel_http=kernel_http,
                  engine=engine, admin=db)
@@ -346,7 +346,7 @@ async def new_scene(app, browser, fake, kernel_http, engine, db, made: datetime)
 
 @pytest.fixture
 async def scene(app, browser, fake, kernel_http, engine, db) -> Scene:
-    """Rivera Plumbing's copy, made on 2026-10-28 at noon, Rivera time."""
+    """Turner Plumbing's copy, made on 2026-10-28 at noon, Turner time."""
     return await new_scene(app, browser, fake, kernel_http, engine, db, local(2026, 10, 28, 12))
 
 
@@ -367,10 +367,10 @@ async def test_switcher_lists_only_this_copys_businesses(app, browser, fake, ker
     assert listed.status_code == 200, listed.text
     desk = fake.desks[owner.desk_id]
     assert listed.json() == [{
-        "business_id": desk.business_id, "name": "Rivera Plumbing", "owner_display_name": "Maria Rivera",
+        "business_id": desk.business_id, "name": "Turner Plumbing", "owner_display_name": "Mike Turner",
         "timezone": "America/Los_Angeles", "brand": {"palette": "teal", "primary": "#1F4E4A", "accent": "#B87333"},
         "desks": [{"desk_id": owner.desk_id, "slug": owner.slug, "name": "Main line",
-                   "business_name": "Rivera Plumbing",
+                   "business_name": "Turner Plumbing",
                    "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True,
                    "setup": None}]}]
     assert other.desk_id not in listed.text and fake.desks[other.desk_id].business_id not in listed.text
@@ -789,6 +789,31 @@ async def test_expired_hold_refreshes_on_read(app, browser, fake, kernel_http, r
     assert today.status_code == 200 and today.json()["needs_you_count"] == 0
 
 
+async def test_a_booking_takes_its_sessions_earlier_discount_quote_off_needs_you(app, browser, fake, kernel_http,
+                                                                                ro_schema, api_conn):
+    # A visitor asks for half off, which the rules hold for Mike, then books at list price: the held discount is
+    # stale, so the kernel's read cancels it and Needs you no longer offers it. The seed's own hold, in a session
+    # with no booking, stays.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    seeded = seeded_hold(fake, owner)
+    neighbour = await guest(kernel_http, fake, owner)
+    asked = await neighbour.decide("native.quote", discounted_quote(fake, owner, 5000))
+    assert asked.state == "held"
+    fake.now += timedelta(minutes=2)
+    desk = fake.desks[owner.desk_id]
+    slot = min(slot.slot_id for slot in desk.slots.values() if slot.starts_at > fake.now)
+    await neighbour.run("native.book", {"slot_id": slot})
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    assert [item["decision"]["decision_id"] for item in listed.json() if item["decision"]] == [seeded]
+    ro = KernelRO(api_conn, owner.copy_id, ro_schema)
+    assert (await ro.one("decisions", decision_id=asked.decision_id))["state"] == "cancelled"
+    assert (await owner.get(f"decisions/{asked.decision_id}")).json()["visitor_plain"] == "Cancelled"
+    assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["needs_you_count"] == 1
+
+
 async def test_briefing_answers_after_a_stopped_draft(scene, clock):
     who = await scene.visitor(local(2026, 10, 29, 19))
     await scene.text(who, local(2026, 10, 29, 19))
@@ -945,7 +970,7 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
 
     assert read.status_code == 200, read.text
     today = read.json()
-    assert today["greeting_name"] == "Maria"
+    assert today["greeting_name"] == "Mike"
     assert [summary["session_id"] for summary in today["live"]] == [handed_off.session_id]
     brief = today["briefing"]
     assert brief["since"] == stamp(local(2026, 10, 29, 18)) == "2026-10-30T01:00:00Z"
@@ -1104,6 +1129,8 @@ async def test_an_intake_block_counts_as_neither_a_callback_nor_a_booking(scene,
     async with owner_context(app.state.runtime.started(), owner.token) as ctx:
         done = await owner_reads.activity(ctx, owner.desk_id, when)
     assert done.callbacks == done.bookings == []
+    listed = (await owner.get(f"desks/{owner.desk_id}/conversations")).json()
+    assert [row["latest_outcome"] for row in listed if row["session_id"] == caller.session_id] == ["lead_captured"]
 
 
 @pytest.mark.parametrize("business", [
@@ -1132,6 +1159,8 @@ async def test_a_malformed_business_tool_counts_as_neither_a_callback_nor_a_book
     async with owner_context(app.state.runtime.started(), owner.token) as ctx:
         done = await owner_reads.activity(ctx, owner.desk_id, when)
     assert done.callbacks == done.bookings == []
+    listed = (await owner.get(f"desks/{owner.desk_id}/conversations")).json()
+    assert [row["latest_outcome"] for row in listed if row["session_id"] == caller.session_id] == [None]
 
 
 async def test_block_counts_use_only_the_current_desks_tool_definition(scene, clock, app):
@@ -1227,6 +1256,8 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     [item] = (await owner.get(f'desks/{owner.desk_id}/briefing')).json()['items']
     assert (item['kind'], item['ref_id']) == ('booking', decision.decision_id)
     assert 'Claude\'s note: “Use the side entrance.”' in item['line']
+    listed = (await owner.get(f'desks/{owner.desk_id}/conversations')).json()
+    assert [row['latest_outcome'] for row in listed if row['session_id'] == visitor.session_id] == ['visit_booked']
 
 
 

@@ -2,7 +2,7 @@ import { useRef } from 'react';
 
 import { chainLine, PageHeaderSkeleton, Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
-import { CATEGORY_LABELS, NOT_SORTED, REPLAYED_LABEL, originCopy, turnedDownHeadline } from './copy.ts';
+import { CATEGORY_LABELS, NOT_SORTED, REPLAYED_LABEL, SAFETY_SUBTITLE, originCopy, turnedDownHeadline } from './copy.ts';
 
 import './Safety.css';
 
@@ -141,11 +141,16 @@ function Detail() {
   );
 }
 
-/** Safety's first view, in its own responsive layout, with its header added on a reload. */
+/**
+ * Safety's first view, in its own responsive layout, with its header added on a reload: its subtitle
+ * in as many lines as its words take at the column's width in this browser's fonts.
+ */
 export function SafetySkeleton({ withHeader }: { withHeader: boolean }) {
+  const page = useRef<HTMLDivElement>(null);
+  const subtitleLines = useTextLines(page, { parts: [SAFETY_SUBTITLE], className: 'cd-page-header__subtitle cd-type-body' }, 1);
   return (
-    <div className="cd-safety">
-      {withHeader ? <PageHeaderSkeleton subtitleLines={0} actions /> : null}
+    <div ref={page} className="cd-safety">
+      {withHeader ? <PageHeaderSkeleton subtitleLines={subtitleLines} actions /> : null}
       <Lines words={turnedDownHeadline(0)} className="cd-safety__headline cd-type-summary" text="summary" anchor="safety-headline" />
       <Bar />
       <div className="cd-safety__split">
@@ -160,6 +165,10 @@ export function SafetySkeleton({ withHeader }: { withHeader: boolean }) {
               <div className="cd-attempt-row__grid">
                 <Skeleton shape="line" text="meta" className="cd-attempt-row__time" width="80%" />
                 <div className="cd-attempt-row__what">
+                  {/* A fresh copy's first stopped attempt is a reply Claude has summarised: its label first. */}
+                  <span className="cd-attempt-row__why cd-type-meta">
+                    <Skeleton shape="line" text="meta" width="60%" />
+                  </span>
                   <Skeleton shape="line" text="control" className="cd-attempt-row__title" />
                   <div className="cd-attempt-row__from">
                     <Skeleton shape="line" text="caption" width="90%" />

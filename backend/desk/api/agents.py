@@ -3,7 +3,7 @@
 A visitor on a Desk's public page can send Alex Kim's assistant, an AI agent this process runs, to do one of three
 tasks on the Desk (`DEMO_TASKS`): book, pay up front within its spending limit, or ask for a charge above that limit.
 Each task is a fixed line from the Desk's set (plan 09, C2): code picks it by the business type setup stored for the
-Desk, or Rivera's for the copy's own Desk (`demo_task_set`), so the agent asks a CPA's Desk for a consult and a
+Desk, or Turner's for the copy's own Desk (`demo_task_set`), so the agent asks a CPA's Desk for a consult and a
 landlord's for a viewing, and no business's, owner's or visitor's words reach its model through its task. The kernel
 mints the agent for the visitor's session (`POST /agents/demo`): an Ed25519 key and a spending limit (a mandate) its
 demo wallet signs.
@@ -156,7 +156,7 @@ def signed_headers(key: Ed25519PrivateKey, agent_key_id: str, desk_slug: str, ra
 async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> DemoTaskSet:
     """Which fixed task lines the agent reads on the Desk (`DEMO_TASKS`): the business type setup stored for it, on the
     newest of the copy's setup interviews that made it (`other` when that one has none); with no such interview, the
-    copy's own Desk, its oldest (the Rivera seed), reads `rivera` and any other `other`. Only that closed type and which
+    copy's own Desk, its oldest (the Turner seed), reads `rivera` and any other `other`. Only that closed type and which
     Desk is the copy's oldest decide the set; no business's, owner's or visitor's words reach the agent."""
     found = await conn.execute(select(INTERVIEWS.c.business_type).where(
         INTERVIEWS.c.copy_id == ro.copy_id, INTERVIEWS.c.desk_id == desk_id).order_by(
@@ -166,6 +166,14 @@ async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> De
         return row.business_type if row.business_type in BUSINESS_TYPES else "other"
     desks = await ro.desks()
     return "rivera" if desks and desks[0]["desk_id"] == desk_id else "other"
+
+
+async def demo_tasks(ro: KernelRO, desk_id: str) -> list[DemoTask]:
+    """The page's tasks in order: booking always, payments only with an enabled agent payment tool."""
+    enabled = {row["tool"] for row in await ro.rows("tools", desk_id=desk_id, status="enabled")}
+    if enabled & {"native.payment_link", "native.charge_mandate"}:
+        return ["book_visit", "quote_and_deposit", "push_the_limit"]
+    return ["book_visit"]
 
 
 # One run ------------------------------------------------------------------------------------------------------

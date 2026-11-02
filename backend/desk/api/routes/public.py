@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import func, select
 from sse_starlette import EventSourceResponse
 
-from desk.api.agents import DemoAgents, KeyReused, KeysFull, demo_task_set
+from desk.api.agents import DemoAgents, KeyReused, KeysFull, demo_task_set, demo_tasks
 from desk.api.cookies import VISITOR_COOKIE, set_visitor_cookie
 from desk.api.deliver import Status, deliver
 from desk.api.deps import (
@@ -397,12 +397,14 @@ async def agent_key(request: Request, response: Response,
 @router.get("/desks/{slug}/agent_tasks", response_model=AgentTasks, responses=error_responses(401, 422, 503))
 async def agent_tasks(response: Response, ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> AgentTasks:
     """Which words the built-in agent's tasks take on the visitor's Desk, the set its first message comes from
-    (`agents.demo_task_set`): the business type setup stored for the Desk, or Rivera's on the copy's own Desk. A key
-    the page words its task chips by, never text of the Desk's. Read with the visitor's session; never cached."""
+    (`agents.demo_task_set`): the business type setup stored for the Desk, or Turner's on the copy's own Desk. A key
+    the page words its task chips by, never text of the Desk's. The ordered tasks fit the Desk's enabled tools.
+    Read with the visitor's session; never cached."""
     task_set = await demo_task_set(ctx.conn, ctx.ro, ctx.ids.desk_id)
+    tasks = await demo_tasks(ctx.ro, ctx.ids.desk_id)
     await ctx.conn.commit()
     response.headers["Cache-Control"] = NO_STORE
-    return AgentTasks(task_set=task_set)
+    return AgentTasks(task_set=task_set, tasks=tasks)
 
 
 class SendAgentIn(BaseModel):
@@ -451,7 +453,7 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     (no answer came back, or a 5xx) or the run started, the key keeps the run however it ends, a failed one too, and a
     new click sends a new key.
 
-    The agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Rivera's
+    The agent's task is the fixed line of the Desk's set (`agents.demo_task_set`: its setup business type, or Turner's
     for the copy's own Desk), read before anything is claimed."""
     state = runtime(request).started()
     key = body.idempotency_key

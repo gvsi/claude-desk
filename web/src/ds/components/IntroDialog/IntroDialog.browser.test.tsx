@@ -39,13 +39,19 @@ it('tab_stays_inside_even_inside_an_inert_wrapper', async () => {
     const field = host.querySelector('input');
     const button = host.querySelector('button');
     expect(dialog?.open).toBe(true);
+    const author = host.querySelector('[data-ds="concept-footer"] a');
     expect(document.activeElement).toBe(field);
     await userEvent.keyboard('rivera-demo');
     expect(button?.disabled).toBe(false);
     await userEvent.keyboard('{Tab}');
     expect(document.activeElement).toBe(button);
+    // The footer's author link, inside the dialog, then round to the field.
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).toBe(author);
     await userEvent.keyboard('{Tab}');
     expect(document.activeElement).toBe(field);
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(document.activeElement).toBe(author);
     await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
     expect(document.activeElement).toBe(button);
   } finally {
@@ -78,13 +84,18 @@ it('escape_never_closes_it_with_a_real_keyboard', async () => {
 });
 
 it('tab_stays_inside_with_a_real_keyboard', async () => {
-  const { field, button } = await openDialog();
+  const { dialog, field, button } = await openDialog();
+  const author = dialog.querySelector('[data-ds="concept-footer"] a');
   await userEvent.keyboard('rivera-demo');
   expect(button.disabled).toBe(false);
   await userEvent.keyboard('{Tab}');
   expect(document.activeElement).toBe(button);
   await userEvent.keyboard('{Tab}');
+  expect(document.activeElement).toBe(author);
+  await userEvent.keyboard('{Tab}');
   expect(document.activeElement).toBe(field);
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  expect(document.activeElement).toBe(author);
   await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
   expect(document.activeElement).toBe(button);
   await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
@@ -156,7 +167,7 @@ it('the_exit_closes_at_once_under_reduced_motion', async () => {
 
 it('an_item_without_icon_or_detail_shows_neither', async () => {
   const dialog = await runWith({
-    thingsToTry: [{ title: 'Look around' }, { title: 'Chat as a customer', detail: 'Rivera’s public page opens in a new tab.', icon: 'person' }],
+    thingsToTry: [{ title: 'Look around' }, { title: 'Chat as a customer', detail: 'Turner’s public page opens in a new tab.', icon: 'person' }],
   });
   const items = [...dialog.querySelectorAll('li')];
   expect(items).toHaveLength(2);
@@ -164,7 +175,7 @@ it('an_item_without_icon_or_detail_shows_neither', async () => {
   expect(items[0]?.querySelector('.cd-intro__thing-detail')).toBeNull();
   expect(items[0]?.textContent).toBe('Look around');
   expect(items[1]?.querySelector('svg')).not.toBeNull();
-  expect(items[1]?.querySelector('.cd-intro__thing-detail')?.textContent).toBe('Rivera’s public page opens in a new tab.');
+  expect(items[1]?.querySelector('.cd-intro__thing-detail')?.textContent).toBe('Turner’s public page opens in a new tab.');
 });
 
 it('an_unknown_error_code_reads_as_unreachable', async () => {

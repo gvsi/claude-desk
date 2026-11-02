@@ -1,8 +1,8 @@
 /**
  * The Vision article's words: the article itself and the four phone screens drawn inside it. The businesses and
- * people are fictional, and nothing here is live. On every screen a visitor or a member of the team reads, the
- * header says Claude, an AI, is answering; prices, dates, statuses, codes and documents sit in cards, never in
- * Claude's own words; and an outcome that was held or declined shows as a receipt under the message.
+ * people are fictional, and nothing here is live. On every screen a visitor or a colleague reads, the header says
+ * Claude, an AI, is answering; prices, dates, statuses, codes and documents sit in cards, never in Claude's own
+ * words; and an outcome that was held or declined shows as a receipt under the message.
  */
 import { VISION_PATHS } from '../../vision/paths.ts';
 import { minutesToRead, wordCount } from '../readTime.ts';
@@ -24,7 +24,7 @@ export interface ChatScreen {
   kind: 'chat';
   /** What the screen shows, read in place of it. */
   label: string;
-  /** The header's color: the City's or Rivera Plumbing's. */
+  /** The header's color. */
   field: 'city' | 'rivera';
   /** The header's initials, beside the name written out. */
   monogram: string;
@@ -79,44 +79,45 @@ export const CITY: ChatScreen = {
   composer: 'Message the Permit Center',
 };
 
-export const TEAM: ChatScreen = {
+/** Sam Patel's own Desk at Lumen Labs, a colleague asking under Sam's rules: half an hour on his calendar, then a request held for him. */
+export const WORK: ChatScreen = {
   kind: 'chat',
-  label: 'A plumber’s phone: the team Desk shows his job card with the gate code and declines to share a colleague’s pay.',
+  label: 'A colleague’s phone: Sam Patel’s Desk holds half an hour on Sam’s calendar in a card and asks Sam before sharing the Q4 budget.',
   field: 'rivera',
-  monogram: 'R',
-  name: 'Rivera Plumbing team',
-  sub: 'Luis Ortega, plumber',
-  ai: 'Claude, an AI, answers the team under Maria’s rules.',
+  monogram: 'S',
+  name: 'Sam Patel’s Desk',
+  sub: 'Lumen Labs · Jordan Lee is asking',
+  ai: 'Claude, an AI, answers colleagues under Sam’s rules.',
   parts: [
-    { kind: 'visitor', text: 'Heading to Ana Ruiz in Eastshore. What’s the history there?' },
-    { kind: 'claude', text: 'Here’s her job card. The gate code is on it.' },
+    { kind: 'visitor', text: 'Can I grab 30 minutes with Sam this week?' },
+    { kind: 'claude', text: 'Sam has a slot open. I’ve held it for you.' },
     {
       kind: 'card',
-      label: 'Job card',
-      head: 'Friday, October 30, 10:30 am',
-      lines: ['Ana Ruiz, Eastshore: water heater check', 'Gate code 2580, at the side gate'],
+      label: 'Calendar hold',
+      head: 'Thursday, November 5, 2:00 pm',
+      lines: ['30 minutes with Sam Patel: launch review'],
     },
-    { kind: 'receipt', tone: 'done', text: 'Open to Luis: he’s assigned to this visit.' },
-    { kind: 'visitor', text: 'What did Ben make on Harbor Street?' },
-    { kind: 'claude', text: 'I can’t share pay. Payroll is open to Maria and Grace only.' },
-    { kind: 'receipt', tone: 'declined', text: 'Declined by team access. No pay was shared.' },
+    { kind: 'receipt', tone: 'done', text: 'Open to colleagues: Sam lets them hold 30 minutes.' },
+    { kind: 'visitor', text: 'Can you send me the Q4 budget?' },
+    { kind: 'claude', text: 'That one is Sam’s to share. I’ve asked him for you.' },
+    { kind: 'receipt', tone: 'held', text: 'Held for Sam. Nothing was shared.' },
   ],
-  composer: 'Ask the team Desk',
+  composer: 'Ask Sam’s Desk',
 };
 
 export const ACCOUNT: ChatScreen = {
   kind: 'chat',
   label: 'A returning customer’s phone: she confirms it’s her with her Claude account, for this visit only, and her invoice opens.',
   field: 'rivera',
-  monogram: 'R',
-  name: 'Rivera Plumbing',
+  monogram: 'T',
+  name: 'Turner Plumbing',
   sub: 'Main line',
-  ai: 'You’re chatting with Claude, an AI answering for Rivera Plumbing.',
+  ai: 'You’re chatting with Claude, an AI answering for Turner Plumbing.',
   parts: [
     { kind: 'system', text: 'Signed in with your Claude account' },
     {
       kind: 'claude',
-      text: 'Your Claude account’s verified email matches the contact Rivera Plumbing has for you. Use it to confirm it’s you, for this visit?',
+      text: 'Your Claude account’s verified email matches the contact Turner Plumbing has for you. Use it to confirm it’s you, for this visit?',
     },
     { kind: 'choices', primary: 'Yes, for this visit', other: 'Send me a code' },
     { kind: 'visitor', text: 'Yes, for this visit' },
@@ -124,14 +125,14 @@ export const ACCOUNT: ChatScreen = {
     { kind: 'card', label: 'Document, only for Dana', head: 'Invoice, drain clearing', lines: ['Tuesday, October 20'] },
     { kind: 'receipt', tone: 'done', text: 'Matched by her Claude account, with her consent for this visit.' },
   ],
-  composer: 'Message Rivera Plumbing',
+  composer: 'Message Turner Plumbing',
 };
 
 export const OWNER: OwnerScreen = {
   kind: 'owner',
-  label: 'The owner’s phone: a held discount request waits for her answer, with Allow this time and Deny this time.',
-  business: 'Rivera Plumbing',
-  greeting: 'Good morning, Maria',
+  label: 'The owner’s phone: a held discount request waits for his answer, with Allow this time and Deny this time.',
+  business: 'Turner Plumbing',
+  greeting: 'Good morning, Mike',
   held: {
     label: 'Waiting for your answer',
     ask: 'A visitor asked for 15% off a drain clearing: $153.00 instead of $180.00.',
@@ -146,7 +147,7 @@ export const OWNER: OwnerScreen = {
 };
 
 /** The four screens in the order the article shows them, which the cover band peeks at too. */
-export const SCREENS: Screen[] = [CITY, TEAM, ACCOUNT, OWNER];
+export const SCREENS: Screen[] = [CITY, WORK, ACCOUNT, OWNER];
 
 /** A screen in the article, its caption's lead and text, and the side its phone sits on at a laptop's width. */
 export interface Figure {
@@ -182,42 +183,42 @@ export const SECTIONS: Section[] = [
     },
   },
   {
-    heading: 'A Desk for the team, not just the customers',
+    heading: 'A Desk for everyone at work',
     passages: [
-      'Rivera Plumbing has three plumbers and an office manager. They ask the questions customers do, from the van: what’s the history at this address, where’s the warranty, what’s the gate code. A team Desk answers from job records, and each person sees only what their role allows.',
-      'Luis can open job cards and warranties for the visits he’s assigned. He can’t open payroll, and when he asks what Ben made last week, the Desk says so plainly and offers his own hours instead.',
+      'At Lumen Labs every employee has a Desk of their own, and colleagues chat with it before they interrupt the person: is Sam free this week, where’s the checklist, who owns this. Each Desk answers from its owner’s calendar, docs and notes, under rules its owner set.',
+      'Jordan gets half an hour on Thursday because Sam lets colleagues hold time. The Q4 budget is Sam’s to share, so his Desk asks him and shares nothing until he says yes.',
     ],
     figure: {
-      screen: TEAM,
+      screen: WORK,
       side: 'right',
-      lead: 'Luis, between jobs.',
-      caption: 'The gate code is on his job card because he’s assigned to the visit. Payroll stays closed, and the Desk says why.',
+      lead: 'Jordan, looking for Sam.',
+      caption: 'Time on Sam’s calendar is open to colleagues. The Q4 budget waits for Sam.',
     },
   },
   {
     heading: 'Recognized, with your permission',
     passages: [
       'Today a returning customer proves who they are with a code sent to the contact on record. If they’ve signed in with a Claude account whose verified email matches that contact, the Desk can ask instead: use it, for this visit?',
-      'Dana says yes and gets her invoice without a code. Rivera Plumbing learns nothing about her account beyond the match, and the next visit asks again.',
+      'Dana says yes and gets her invoice without a code. Turner Plumbing learns nothing about her account beyond the match, and the next visit asks again.',
     ],
     figure: {
       screen: ACCOUNT,
       side: 'left',
       lead: 'Dana comes back for her invoice.',
-      caption: 'Her Claude account matches the contact Maria has on file. She agrees for this visit only, and the invoice opens.',
+      caption: 'Her Claude account matches the contact Mike has on file. She agrees for this visit only, and the invoice opens.',
     },
   },
   {
     heading: 'In your pocket',
     passages: [
-      'Maria doesn’t sit at a desk. Her Desk’s requests reach her phone: a visitor asking for 15% off, a callback, an agent at its spending limit. She answers in one tap, and the answer applies only this time unless she makes it a rule.',
-      'Her customers get the same chat on their phones, with a card whenever something’s booked or quoted, and the same line at the top saying it’s Claude, an AI.',
+      'Mike doesn’t sit at a desk. His Desk’s requests reach his phone: a visitor asking for 15% off, a callback, an agent at its spending limit. He answers in one tap, and the answer applies only this time unless he makes it a rule.',
+      'His customers get the same chat on their phones, with a card whenever something’s booked or quoted, and the same line at the top saying it’s Claude, an AI.',
     ],
     figure: {
       screen: OWNER,
       side: 'right',
-      lead: 'A request waits for Maria.',
-      caption: 'Allow or deny applies once. Making it a rule would apply it every time, and that stays her call.',
+      lead: 'A request waits for Mike.',
+      caption: 'Allow or deny applies once. Making it a rule would apply it every time, and that stays his call.',
     },
   },
   {
@@ -245,9 +246,10 @@ export const PICTURE_CARDS = {
   lead: 'Each idea has its own page, drawn as it would work.',
   cards: [
     { screen: CITY, name: 'A city office that answers after hours', line: 'Meridian Bay Permits, after five', href: VISION_PATHS.cityOffice },
-    { screen: TEAM, name: 'A Desk for the team', line: 'Rivera Plumbing’s plumbers, from the van', href: VISION_PATHS.teamDesk },
+    // Sam's Desk on the card; the page it opens is still the team Desk drawn for Turner Plumbing.
+    { screen: WORK, name: 'A Desk for everyone at work', line: 'Lumen Labs colleagues, asking Sam’s Desk', href: VISION_PATHS.teamDesk },
     { screen: ACCOUNT, name: 'Recognized, with your permission', line: 'Dana, signed in with her Claude account', href: VISION_PATHS.claudeAccount },
-    { screen: OWNER, name: 'In your pocket', line: 'Maria’s requests on her phone', href: VISION_PATHS.phone },
+    { screen: OWNER, name: 'In your pocket', line: 'Mike’s requests on his phone', href: VISION_PATHS.phone },
   ] satisfies PictureCard[],
 } as const;
 
@@ -256,10 +258,10 @@ export const ARTICLE = {
   kicker: 'Vision',
   date: { text: 'October 30, 2026', iso: '2026-10-30' },
   title: 'A front desk that never closes',
-  dek: 'Today a Desk answers for one plumber in Oakland. The same idea fits a city permit office, a team in the field, a customer who’s already signed in and an owner who’s never at a desk. Here’s what that could look like, and the rules that wouldn’t change.',
+  dek: 'Today a Desk answers for one plumber in Oakland. The same idea fits a city permit office, a Desk for every person at work, a customer who’s already signed in and an owner who’s never at a desk. Here’s what that could look like, and the rules that wouldn’t change.',
   note: 'Vision, not the prototype. Nothing on this page is live.',
   intro: [
-    'Most of the questions a business gets are the same questions, asked at the wrong time. What does it cost? Can you come Tuesday? Where’s my invoice? Rivera Plumbing’s Desk answers them at any hour, from Maria’s own price list and calendar, and asks her before it does anything her rules don’t cover.',
+    'Most of the questions a business gets are the same questions, asked at the wrong time. What does it cost? Can you come Tuesday? Where’s my invoice? Turner Plumbing’s Desk answers them at any hour, from Mike’s own price list and calendar, and asks him before it does anything his rules don’t cover.',
     'That shape isn’t special to plumbing. Anywhere a person answers the same questions under rules they already know, a Desk can take the first conversation and hand off the rest. Here are four places we think it goes next.',
   ],
   end: 'Vision, not in the prototype. Nothing on this page is live; the businesses and people are fictional.',

@@ -1,7 +1,7 @@
 """MCP connection, pins and drift (master plan, "Payments (mocked)" and "Activation gate").
 
 The kernel connects the mock payments server's two MCP tools, `payments.list_charges` and
-`payments.create_refund`, and pins each by the hash of its listed definition. A Rivera copy starts
+`payments.create_refund`, and pins each by the hash of its listed definition. A Turner copy starts
 with both pinned at the seed's hashes and enabled; a new Desk connects them through
 `/tools/connect` and turns them on only through a proved rules draft. A changed or delisted
 definition puts the tool back to "needs review" until the owner confirms the hash they read.
@@ -103,9 +103,9 @@ def test_payments_tools_have_closed_schemas_and_signed_receipts():
     assert refund.profile.input_schema["additionalProperties"] is False
     assert [(p.effects, p.reversible, p.resource_kind) for p in (charges.profile, refund.profile)] == [
         (["private_data"], True, "charge"), (["pay_out", "private_data"], False, "charge")]
-    assert [render.executed_status(tool, lang, owner="Maria Rivera") for tool in PAYMENTS for lang in ("en", "es")] == [
+    assert [render.executed_status(tool, lang, owner="Mike Turner") for tool in PAYMENTS for lang in ("en", "es")] == [
         "Refunded to the original payment", "Reembolsado al pago original",
-        "Charges read from Maria Rivera's payments", "Cargos tomados de los pagos de Maria Rivera"]
+        "Charges read from Mike Turner's payments", "Cargos tomados de los pagos de Mike Turner"]
     # each MCP action applies to the session kinds the tool is ever given to, and nothing else is profiled
     assert mcp_pins.MCP_OPERATIONS == OPERATIONS
     kinds = {"Visitor": "visitor", "Agent": "agent"}
@@ -114,7 +114,7 @@ def test_payments_tools_have_closed_schemas_and_signed_receipts():
 
 
 async def new_lopez_desk(app: FastAPI, client) -> Rivera:
-    """A Rivera copy with a new Desk from `POST /desks` (cap 0, the ask_first preset, no connections),
+    """A Turner copy with a new Desk from `POST /desks` (cap 0, the ask_first preset, no connections),
     answering, and the copy's owner token."""
     copy = await rivera(app, client)
     response = await post_desk(client, copy, new_desk())
@@ -302,7 +302,7 @@ async def test_drift_disables_the_tool(app, client, monkeypatch, edit):
         assert row.pending_sha256 == found.sha256 == mcp_client.pin_sha256(changed) != pinned
         assert json.loads(row.pending_definition_text) == changed       # the exact entry, for the owner to read
         body = "Refunds changed. Review it before Claude uses it again."
-    # the owner is alerted at once, though a tool change isn't in Rivera's notification "now" list
+    # the owner is alerted at once, though a tool change isn't in Turner's notification "now" list
     alerts = owner_alerts(await rows_of(app, copy.copy_id, select(DemoInboxEntry)))
     assert ("A connected tool changed", body) in alerts
     assert found.notice is not None and found.notice.to == "owner"

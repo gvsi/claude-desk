@@ -56,7 +56,7 @@ export const Disconnect: Story = {
   },
   parameters: {
     canvas: 'none',
-    canvasNote: "Claude's card for disconnecting Rivera's Stripe; no board draws it (nearest: N-Conn-12-Chat). It leads into the plain confirm, never past it.",
+    canvasNote: "Claude's card for disconnecting Turner's Stripe; no board draws it (nearest: N-Conn-12-Chat). It leads into the plain confirm, never past it.",
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);

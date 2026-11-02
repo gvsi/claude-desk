@@ -18,13 +18,13 @@ import { SPEC, expectConversationType, expectFooter, expectOwnerFrame, expectRec
 
 const lucia = rivera.conversations.lucia;
 const OWNER = rivera.business.ownerName;
-/** From Lucía asking for Maria on; her question and the quote before it fold into one line. */
-const FROM = lucia.turns.findIndex((turn) => turn.kind === 'visitor' && turn.text.startsWith('¿Puedo hablar con Maria?'));
+/** From Lucía asking for Mike on; her question and the quote before it fold into one line. */
+const FROM = lucia.turns.findIndex((turn) => turn.kind === 'visitor' && turn.text.startsWith('¿Puedo hablar con Mike?'));
 const shown = lucia.turns.slice(FROM);
 
 /** Claude's translations of what Lucía wrote, as the owner's screen shows them under her words. */
 const ENGLISH: Record<string, string> = {
-  '¿Puedo hablar con Maria? También gotea la llave de paso.': 'Can I talk to Maria? The shut-off valve is dripping too.',
+  '¿Puedo hablar con Mike? También gotea la llave de paso.': 'Can I talk to Mike? The shut-off valve is dripping too.',
   'Perfecto. ¿Cuándo pueden venir?': 'Perfect. When can you come?',
 };
 const TRANSLATIONS = Object.fromEntries(
@@ -39,7 +39,7 @@ const STRIP: ListedConversation[] = [
   { name: rivera.conversations.alexAgent.name, time: '11:42', status: { tone: 'handled', text: 'Agent, booked Thu 9:00' } },
 ];
 
-/** Lucía's chat after Maria took it over: her own messages as "You", the bar to hand back, her composer. */
+/** Lucía's chat after Mike took it over: his own messages as "You", the bar to hand back, his composer. */
 function ConversationTakeOver() {
   return (
     <RiveraFrame
@@ -101,8 +101,8 @@ const meta = {
     canvas: 'N-Conv-TakeOver',
     canvasNote: [
       'The board’s page: the title with the day’s count, today’s conversations across the top, the open chat’s head across the page, then its messages in the reading column. Receipts sit under each message, signed after this board, where it draws a margin column.',
-      'The chat is the Rivera fixture’s with Lucía from her ask for Maria: a callback, then Maria’s message, shown as it was delivered, in Spanish, under “You” beside her initials. The board’s folded line names a garbage disposal quote; the board’s English original with “Lucía saw:”, the translated composer line and “Claude suggests” with its reply to use are static vision.',
-      'Maria joining is a status line with her initials and no time, as no contract carries one; Hand back to Claude sits above the composer, as TakeOverBar places it, where the board puts it beside the composer, in the margin column.',
+      'The chat is the Turner fixture’s with Lucía from her ask for Mike: a callback, then Mike’s message, shown as it was delivered, in Spanish, under “You” beside his initials. The board’s folded line names a garbage disposal quote; the board’s English original with “Lucía saw:”, the translated composer line and “Claude suggests” with its reply to use are static vision.',
+      'Mike joining is a status line with his initials and no time, as no contract carries one; Hand back to Claude sits above the composer, as TakeOverBar places it, where the board puts it beside the composer, in the margin column.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -131,19 +131,19 @@ export const Board: Story = {
     await expect(await expectReceiptsUnderMessages(log)).toBeGreaterThanOrEqual(3);
     await expect(within(log).getByText('Perfect. When can you come?')).toBeVisible();
 
-    // Maria joined: a status line, with no time.
+    // Mike joined: a status line, with no time.
     const joined = within(log)
       .getAllByRole('status')
       .find((line) => line.textContent?.includes(`${OWNER} joined the chat`));
     await expect(joined).toBeDefined();
     await expect(joined?.textContent).not.toMatch(/\d/);
 
-    // Her own message reads "You", beside her own initials, hidden from screen readers.
+    // His own message reads "You", beside his own initials, hidden from screen readers.
     const mine = one(log, '.cd-person-message');
     await expect(within(mine).getByText('You', { exact: true })).toBeVisible();
     const avatar = one(mine, '.cd-person-message__avatar');
     await expect(avatar).toHaveAttribute('aria-hidden', 'true');
-    await expect(avatar.textContent).toBe('MR');
+    await expect(avatar.textContent).toBe('MT');
 
     // Owner mode: Hand back to Claude, then her composer.
     const handBack = canvas.getByRole('button', { name: 'Hand back to Claude' });

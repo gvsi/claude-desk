@@ -24,7 +24,7 @@ import { mockStore } from '../../mocks/store.ts';
 import { EXTRA_RULES, type DeskRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard, expectTabOrderFromTop } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../../test/screen.ts';
 import { watchTop } from '../../test/watch.ts';
 import { REVIEWER_LINE } from './copy.ts';
 
@@ -95,7 +95,7 @@ async function expectTurnOpensAtTheOwnersWords(log: Locator, words: string, at: 
   }
 }
 
-/** A rule Maria's answers suggest: Dana's refunds up to $50 without asking. */
+/** A rule Mike's answers suggest: Dana's refunds up to $50 without asking. */
 const DANA_REFUNDS: Suggestion = {
   tool: 'payments.create_refund',
   count: 3,
@@ -116,7 +116,7 @@ const DANA_REFUNDS: Suggestion = {
   },
 };
 
-/** Rivera's suggestions under Ask Claude, in order; a question about a hold may follow them. */
+/** Turner's suggestions under Ask Claude, in order; a question about a hold may follow them. */
 const FIXED_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
 
 /** The words of each suggestion in `group`, in order. */
@@ -164,7 +164,7 @@ function failNeedsYou(): { failed: () => number; recover: () => void } {
   };
 }
 
-/** Rivera's payment limit, atop Payments and Stripe. */
+/** Turner's payment limit, atop Payments and Stripe. */
 const LIMIT_500 = 'No payment over $500 goes through without asking you, whatever the rules below say.';
 
 const CANCELS_LINKS = "Open payment links I made on my own that the new rules don't allow will be cancelled.";
@@ -251,15 +251,21 @@ describe('rules page', () => {
     await expect.element(button).toHaveFocus();
   });
 
-  it('rules_header_link_has_a_rounded_keyboard_focus_ring', async () => {
+  it('rules_header_link_shows_keyboard_focus_in_its_words', async () => {
+    // A text link shows keyboard focus in its words and underline, both the primary ink, the underline
+    // 2 px; no ring and no edge around it.
     const { screen } = await renderRoute(`${DESK}/rules`);
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     const link = screen.container.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
     await expectTabOrderFromTop([link]);
     link.focus();
     expect(link.matches(':focus-visible')).toBe(true);
-    expect(getComputedStyle(link).outlineStyle).toBe('solid');
-    expect(getComputedStyle(link).borderRadius).toBe('8px');
+    const style = getComputedStyle(link);
+    const primary = tokenColor('--text-primary');
+    // The underline's color eases in over motion-instant, as it does on hover.
+    await expect.poll(() => style.textDecorationColor).toBe(primary);
+    expect([style.color, style.textDecorationLine, style.textDecorationThickness]).toEqual([primary, 'underline', '2px']);
+    expect([style.outlineStyle, style.boxShadow]).toEqual(['none', 'none']);
   });
 
   it('rules_header_actions_share_the_phone_row_with_a_full_height_link', async () => {
@@ -351,7 +357,7 @@ describe('rules page', () => {
     const reached = await expectTabOrderFromTop([...changes, all.element() as HTMLElement]);
     expect(reached.filter((el) => sections.contains(el))).toEqual(changes);
 
-    // All rules draws each tool's name and line without a link too: Rivera's urgent job first, then
+    // All rules draws each tool's name and line without a link too: Turner's urgent job first, then
     // the connectors' eleven tools.
     const house = await renderRoute(`${DESK}/rules/all`);
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
@@ -409,7 +415,7 @@ describe('rules page', () => {
     expect(router.state.location.pathname).toBe(`${DESK}/rules/drafts/${version}`);
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
-    // Quotes stay automatic: the preset's own quote rule is the same as Rivera's, so no row names
+    // Quotes stay automatic: the preset's own quote rule is the same as Turner's, so no row names
     // Quote, alone or among the tools a shared rule covers, and none moves it to "Ask me first".
     const rows = reviewRows(screen);
     expect(rows.length).toBeGreaterThan(0);
@@ -623,9 +629,12 @@ describe('rules page', () => {
     expect(log.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     expect(desk().drafts.size).toBe(0);
 
-    // Another question from the panel's own composer goes on in the same conversation.
+    // Another question from the panel's own composer goes on in the same conversation, sent once
+    // the answer before it has come in.
     const box = screen.getByRole('textbox', { name: 'Ask Claude' });
+    const send = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('button', { name: 'Send', exact: true });
     await box.fill('What can you do?');
+    await expect.element(send).toBeEnabled();
     await userEvent.keyboard('{Enter}');
     await expect.element(log.getByText(/^I can explain what a rule does/)).toBeVisible();
     expect(log.getByText('Why was this quote held?', { exact: true }).elements()).toHaveLength(1);
@@ -636,6 +645,7 @@ describe('rules page', () => {
     const long = `Stop quoting on weekends ${'and holidays '.repeat(160)}`.trim();
     expect(long.length).toBeGreaterThan(2000);
     await box.fill(long);
+    await expect.element(send).toBeEnabled();
     await userEvent.keyboard('{Enter}');
     await expect.element(log.getByText("That's over 2,000 characters. Shorten it and try again.", { exact: true })).toBeVisible();
     await expect.element(log.getByText(long, { exact: true })).toBeInTheDocument();
@@ -751,7 +761,7 @@ describe('rules page', () => {
   });
 
   it('house_rules_show_limits', async () => {
-    // Payment links up to $400, refunds never, and no rule of Maria's on quotes.
+    // Payment links up to $400, refunds never, and no rule of Mike's on quotes.
     desk().policy = {
       ...desk().policy,
       cards: desk()
@@ -943,7 +953,7 @@ describe('rules page', () => {
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 
-  it.each(['Rivera Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
+  it.each(['Turner Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
     renameBusiness(business);
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     const payments = screen.getByRole('region', { name: 'Payments' });
@@ -1072,7 +1082,7 @@ describe('rules page', () => {
     const row = main.querySelector('.cd-suggestion-chips') as HTMLElement;
     expect(top(box) - bottom(header)).toBe(20);
     expect(top(row) - bottom(box)).toBe(10);
-    // Then the Desk's own jobs (Rivera's urgent callback) 20 px under them, and the connectors'
+    // Then the Desk's own jobs (Turner's urgent callback) 20 px under them, and the connectors'
     // summary 20 px under those, at the page's own gap.
     const jobs = main.querySelector('.cd-business-jobs') as HTMLElement;
     expect(top(jobs) - bottom(row)).toBe(20);
@@ -1080,7 +1090,7 @@ describe('rules page', () => {
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(menu.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     expect(top(menu) - top(title)).toBe(4);
-    await expect.element(screen.getByText('Claude shows you the change and example situations before anything applies.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Claude shows you the change before anything applies.', { exact: true })).toBeVisible();
   });
 
   it('rules_have_no_jargon', async () => {
@@ -1447,7 +1457,7 @@ describe("Ask Claude's question about a hold", () => {
 
   it('hold_question_only_while_a_request_is_held', async () => {
     // A copy with no hold: once Needs you has been read and drawn (a second read starts only after
-    // the first one's answer), only Rivera's fixed suggestions remain.
+    // the first one's answer), only Turner's fixed suggestions remain.
     const quiet = await renderRoute(`${DESK}/rules`, { seed: 'rivera_quiet' });
     const none = quiet.screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(none.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
@@ -1567,11 +1577,11 @@ describe("Ask Claude's question about a hold", () => {
   });
 });
 
-describe("Rivera's fixed suggestions", () => {
+describe("Turner's fixed suggestions", () => {
   type Screen = Awaited<ReturnType<typeof renderRoute>>['screen'];
 
   /**
-   * On Rules, presses Rivera's suggestion `words`, confirms the change Claude drafts from it in Ask
+   * On Rules, presses Turner's suggestion `words`, confirms the change Claude drafts from it in Ask
    * Claude beside the page, and waits for the receipt; returns the suggestions and the panel.
    */
   async function confirmSuggestion(screen: Screen, words: string) {
@@ -1691,7 +1701,7 @@ describe("Rivera's fixed suggestions", () => {
     await expect.element(group.getByRole('button', { name: FIXED_CHIPS[1], exact: true })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
-    // Rivera's rules have neither change, so both stay once they are drawn.
+    // Turner's rules have neither change, so both stay once they are drawn.
     releaseRules();
     await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
@@ -1738,7 +1748,7 @@ describe("Rivera's fixed suggestions", () => {
     expect(main.scrollTop).toBe(place);
   });
 
-  /** Rivera's active rules with both suggestions' changes in effect: quotes on their own only on weekdays, and water heater installs up to $600. */
+  /** Turner's active rules with both suggestions' changes in effect: quotes on their own only on weekdays, and water heater installs up to $600. */
   function bothChangesInEffect(): void {
     const main = desk();
     const weekdays: RuleCard['hours'] = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' };
@@ -1774,7 +1784,7 @@ describe("Rivera's fixed suggestions", () => {
 
     rules.release();
     await expect.poll(() => finished.has('rules')).toBe(true);
-    // The rules leave no suggestion of Rivera's own, so the page waits for Needs you, as another business's does.
+    // The rules leave no suggestion of Turner's own, so the page waits for Needs you, as another business's does.
     await expect.element(group).not.toBeInTheDocument();
     expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();

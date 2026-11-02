@@ -396,7 +396,7 @@ async def test_the_mirror_is_copy_scoped_and_read_only(fake, api_conn):
 
 
 async def test_the_mirror_holds_each_rules_versions_money_cap(fake, api_conn):
-    """The Rivera seed's rules carry its $500 money cap, as the kernel's seed does (`DeskSeed`), and a
+    """The Turner seed's rules carry its $500 money cap, as the kernel's seed does (`DeskSeed`), and a
     version the owner confirms keeps the Desk's cap."""
     http, state = fake
     copy, _ = await copy_and_visitor(http, state)
@@ -413,7 +413,7 @@ async def test_the_mirror_holds_each_rules_versions_money_cap(fake, api_conn):
 
 async def test_a_money_hold_offers_allow_person_only_within_the_desks_cap(fake, monkeypatch):
     """A held money request offers "Allow for this person" only when its amount is within the Desk's
-    money cap (the Rivera seed's $500), never up to the $10,000 ceiling, as the kernel's `answers_for`
+    money cap (the Turner seed's $500), never up to the $10,000 ceiling, as the kernel's `answers_for`
     does; a money call with no amount, or an amount of 0, is refused outright, as the kernel's baseline
     (`money_has_amount`) refuses it: the fake is never looser than the kernel. Payment links normalize
     only once Plan 01c brings quotes to pay, so here one is normalized at the amount under test."""

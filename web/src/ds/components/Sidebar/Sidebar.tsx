@@ -10,7 +10,7 @@ import { ACTING_SWITCH_COPY } from '../Switch/copy.ts';
 import './Sidebar.css';
 
 /** The owner app's pages, in the sidebar's fixed order. */
-export type NavKey = 'today' | 'conversations' | 'people' | 'rules' | 'connectors' | 'safety' | 'share' | 'settings';
+export type NavKey = 'today' | 'conversations' | 'people' | 'knowledge' | 'rules' | 'connectors' | 'safety' | 'profile' | 'share' | 'settings';
 
 /**
  * Where each row goes. Every page needs its href but Connectors: an app without a Connectors page
@@ -34,6 +34,9 @@ export interface SidebarAboutLink {
   href: string;
   /** The document open now: its row is the current page, and the main nav marks none. */
   current?: boolean;
+  /** Opens an external page in a new tab, named explicitly for assistive technology. */
+  external?: boolean;
+  icon?: IconName;
 }
 
 /** The group of links above the Answering block: its caption title, then one row per link. */
@@ -50,7 +53,7 @@ export interface NavCount {
 }
 
 export interface SidebarProps {
-  /** The current business's name: "Rivera Plumbing". */
+  /** The current business's name: "Turner Plumbing". */
   business: string;
   /** Opens the business switcher (`SwitcherMenu`). */
   onSwitchBusiness: () => void;
@@ -88,9 +91,11 @@ export interface SidebarProps {
 export const NAV_LABELS = {
   today: 'Today',
   conversations: 'Conversations',
+  knowledge: 'Knowledge',
   rules: 'Rules',
   connectors: 'Connectors',
   safety: 'Safety',
+  profile: 'Profile',
   share: 'Share',
   settings: 'Settings',
 } as const satisfies Record<Exclude<NavKey, 'people'>, string>;
@@ -102,7 +107,9 @@ const NAV_ROWS = [
   { key: 'rules', icon: 'rules', label: NAV_LABELS.rules },
   { key: 'connectors', icon: 'connectors', label: NAV_LABELS.connectors },
   { key: 'safety', icon: 'safety', label: NAV_LABELS.safety },
+  { key: 'profile', icon: 'store', label: NAV_LABELS.profile },
   { key: 'share', icon: 'share', label: NAV_LABELS.share },
+  { key: 'knowledge', icon: 'knowledge', label: NAV_LABELS.knowledge },
   { key: 'settings', icon: 'settings', label: NAV_LABELS.settings },
 ] as const satisfies readonly { key: NavKey; icon: IconName; label: string | null }[];
 
@@ -110,7 +117,7 @@ function PlainLink({ children, ...props }: SidebarLinkProps) {
   return <a {...props}>{children}</a>;
 }
 
-/** The first letter of the first and last words, as written: "Maria Rivera" is "MR". */
+/** The first letter of the first and last words, as written: "Mike Turner" is "MT". */
 export function initialsOf(name: string): string {
   const words = name.trim().split(/\s+/).filter((word) => word !== '');
   const first = words[0];
@@ -195,14 +202,19 @@ export function Sidebar({
             <p id={aboutId} className="cd-sidebar__about-title cd-type-caption">
               {about.title}
             </p>
-            {about.links.map((link) => (
+            {about.links.map((link) => link.external ? (
+              <a key={link.id} href={link.href} target="_blank" rel="noreferrer" aria-label={`${link.label} (opens in a new tab)`} className="cd-sidebar__row cd-type-control">
+                <Icon name={link.icon ?? 'document'} />
+                <span className="cd-sidebar__label">{link.label}</span>
+              </a>
+            ) : (
               <Link
                 key={link.id}
                 href={link.href}
                 className="cd-sidebar__row cd-type-control"
                 {...(link.current === true ? { 'aria-current': 'page' as const } : {})}
               >
-                <Icon name="document" />
+                <Icon name={link.icon ?? 'document'} />
                 <span className="cd-sidebar__label">{link.label}</span>
               </Link>
             ))}

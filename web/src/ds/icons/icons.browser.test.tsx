@@ -86,3 +86,27 @@ it('history_is_lucides_history_at_the_effective_stroke', () => {
   act(() => root.unmount());
   container.remove();
 });
+
+it.each([
+  ['store', 5, 'm2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7'],
+  ['github', 2, 'M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4'],
+  ['globe', 3, 'M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20'],
+  ['list', 6, 'M3 12h.01'],
+  ['note', 2, 'M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z'],
+] as const)('source_and_sidebar_icon_%s_uses_lucides_grid_and_stroke', (name, shapes, firstPath) => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  act(() => root.render(<Icon name={name} />));
+  const svg = container.querySelector('svg')!;
+  expect(svg.getAttribute('viewBox')).toBe('0 0 24 24');
+  expect(svg.getAttribute('stroke-width')).toBe('1.8');
+  expect(svg.getAttribute('stroke-linecap')).toBe('round');
+  expect(svg.getAttribute('stroke-linejoin')).toBe('round');
+  expect(svg.getAttribute('aria-hidden')).toBe('true');
+  expect(svg.children).toHaveLength(shapes);
+  expect(svg.querySelector('path')?.getAttribute('d')).toBe(firstPath);
+  act(() => root.unmount());
+  container.remove();
+});

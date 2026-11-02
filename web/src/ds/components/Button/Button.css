@@ -128,6 +128,12 @@
   background: var(--button-danger-fill-hover);
 }
 
+/* Keyboard focus: every variant takes the base edge, 1 px of line-focus just inside it, but the
+   primary, whose cream fill hides the warm line: its edge is 2 px of the page's own dark. */
+.cd-button--primary:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--bg-app);
+}
+
 .cd-button:active {
   transform: scale(0.98);
 }

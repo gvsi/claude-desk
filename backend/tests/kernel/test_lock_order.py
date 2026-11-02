@@ -7,7 +7,8 @@ Two tests race requests that once took a pair of rows in opposite orders: the se
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
 transaction of a path takes (`LockLog`) and check that they come in that order: executions and
 their reconciliation (a private action's too, once its session closed: its adapter asked, then
-the action withheld, refused or left unknown by what it answers), answers, cancels and reads, a
+the action withheld, refused or left unknown by what it answers), answers, cancels and reads (one
+cancelling a held discount quote its session's booking superseded), a
 verification start allowed or approved, a right code checked, a document link opened, a person
 removed or given another contact, a Desk deleted, a reply check that opens a handoff for its card,
 a booking that closes the card's handoff, and a handoff closed, after the Desk row an owner's write
@@ -35,7 +36,7 @@ from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, Ada
 
 from .fakes import FakeAdapter
 from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
-from .test_adapters import book, rivera, visitor_of
+from .test_adapters import book, quote_args, rivera, visitor_of
 from .test_approvals import ASK_QUOTES, answered, held_on, post_answer, post_cancel
 from .test_calendar_refresh import setup_calendar, setup_desk
 from .test_compiler import card
@@ -344,7 +345,7 @@ async def test_a_run_that_raises_settles_in_the_lock_order(app, client, registry
 
 async def test_a_stale_execute_is_recorded_in_the_lock_order(app, client, registry):
     _, rows, visitor, allowed = await fake_quote_desk(app, client)
-    await set_mode(client, rows, visitor.session_id, "owner", 0)            # Maria takes over
+    await set_mode(client, rows, visitor.session_id, "owner", 0)            # Mike takes over
     with lock_log(app) as log:
         response = await post_execute(client, visitor, allowed)
     assert (response.status_code, response.json()) == (409, {"code": "stale_generation"})
@@ -381,6 +382,21 @@ async def test_a_sessions_decision_read_keeps_the_lock_order(app, client, regist
     with lock_log(app) as log:
         assert (await read(client, visitor.headers, allowed)).state == "expired"
     # the session is proved, and seen, in the transaction that read the decision, before it expires it
+    assert log.transactions == [["sessions", "decisions", "ledger_heads"]]
+
+
+async def test_a_read_cancelling_a_quote_a_booking_superseded_keeps_the_lock_order(app, client, reviewer, frozen_clock):
+    _, visitor = await visitor_of(app, client)
+    held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=5000))
+    frozen_clock.advance(60)
+    reviewer.answer = PASS
+    booking = await book(client, visitor, "S-20261102-1000")
+    assert (await executed(client, visitor, booking)).state == "succeeded"
+    frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written
+    with lock_log(app) as log:
+        assert (await read(client, visitor.headers, held)).state == "cancelled"
+    # the session is seen, then the quote's decision held while the session's bookings are read without a lock,
+    # then the cancel is ledgered
     assert log.transactions == [["sessions", "decisions", "ledger_heads"]]
 
 
@@ -430,7 +446,7 @@ async def test_a_reply_backed_by_an_open_handoff_keeps_the_lock_order(app, clien
     assert not (await checked(client, visitor, OTHER_LANGUAGE)).ok          # the card opens a handoff
     frozen_clock.advance(1)
     with lock_log(app) as log:
-        assert (await checked(client, visitor, "Maria Rivera will reply here.")).ok
+        assert (await checked(client, visitor, "Mike Turner will reply here.")).ok
     # a reply that passed on the open handoff's card: the session row, then that handoff FOR SHARE, held to the
     # commit, then the verdict's entry
     assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
@@ -593,7 +609,7 @@ async def test_the_owner_handling_a_conversation_closes_its_card_handoff_in_the_
         if how == "takeover":
             await set_mode(client, copy, visitor.session_id, "owner", 0)
         else:
-            await sent(client, copy, visitor.session_id, "Hi, this is Maria.")
+            await sent(client, copy, visitor.session_id, "Hi, this is Mike.")
     # the session row the route holds, then the card's handoff and its fact (none), then the ledger head
     assert log.transactions == [["sessions", "handoffs", "facts", "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))

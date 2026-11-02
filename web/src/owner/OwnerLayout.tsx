@@ -15,9 +15,10 @@ import {
 } from 'react';
 import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, useParams } from 'react-router';
 
-import { ABOUT_LINKS } from '../about/links.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, CopyOut, DeskSummary } from '../api/views.ts';
+import { startingDeskFor } from './arrival/keptCopy.ts';
+import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import {
   AppShell,
@@ -110,7 +111,7 @@ export function useOwnerDesk(): OwnerDeskContext {
   return value;
 }
 
-const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'];
+const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'profile', 'share', 'settings'];
 
 /**
  * The pages that lay out their own columns across the main area (`AppShell` `fill`), each with the
@@ -189,6 +190,7 @@ function DeskGate({ deskId }: { deskId: string }) {
   // The demo bar's Demo inbox is read with the Desks, so the bar draws it with the frame: nothing
   // waits for it, and the bar's own read finds it read, or on its way.
   const queryClient = useQueryClient();
+  if (desks.data !== undefined) startingDeskFor(queryClient, desks.data);
   useEffect(() => {
     void queryClient.prefetchQuery({ ...ownerInboxQuery(), staleTime: FRESH_MS });
   }, [queryClient]);
@@ -485,7 +487,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       {confirming ? (
         <Dialog
           title="Start over with a fresh copy?"
-          body="You'll get a new copy of Rivera Plumbing. This copy, its chats and its rules are left behind."
+          body="You'll get a new copy of Turner Plumbing. This copy, its chats and its rules are left behind."
           confirmLabel="Start over"
           cancelLabel="Keep this copy"
           pending={startOver.isPending}
@@ -539,7 +541,7 @@ export function OwnerSidebar(props: OwnerSidebarProps) {
         onAnsweringChange={props.onAnsweringChange}
         owner={{ name: business.owner_display_name, status: 'Available for chats' }}
         linkComponent={RouterLink}
-        about={ABOUT_LINKS}
+        about={SIDEBAR_ABOUT}
       />
       {props.switching ? (
         <BesideTheBusinessRow container={ref}>

@@ -21,8 +21,8 @@ from sqlalchemy import text
 
 from desk.api.jobs import RESUME_AFTER_ANSWER, surface_due_decisions
 from desk.api.main import create_app
-from desk.contracts import Claim, Fact, Label
-from desk.kernel_api import AnswerRequest, CreateCopyRequest
+from desk.contracts import Claim, Fact, Label, ToolCall
+from desk.kernel_api import AnswerRequest, CreateCopyRequest, DecideRequest, ExecuteRequest
 from tests.api.fakes import ScriptedModel, response, tool_use
 from tests.api.test_jobs import session_rows
 from tests.api.test_public_chat import DISCOUNTED_QUOTE, Stream, cookie, events_path, open_session, reply, types
@@ -71,7 +71,7 @@ async def held_request(app, browser, fake, kernel_http, model) -> Held:
     owner = browser(app)
     owner.cookies.set("desk_owner", copy.owner_token, domain="desk.test", path="/api/owner")
     visitor, token, opened = await open_session(app, browser, slug)
-    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Maria to look at this.")))
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")))
     sent = await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": "Can I get a discount on a drain?"})
     assert sent.status_code == 202
     await app.state.runtime.runner.drain()
@@ -122,7 +122,7 @@ async def test_allow_once_resumes_with_the_visitor_credential(app, browser, fake
         put(record)
 
     monkeypatch.setattr(fake, "_put_decision", remember)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     fake.calls.clear()
 
     answered = await answer(held, "allow_once")
@@ -154,7 +154,7 @@ async def test_allow_once_resumes_with_the_visitor_credential(app, browser, fake
     assert types(events) == ["writing", "held", "message", "turn_end", "receipt", "resolved", "writing",
                              "message", "turn_end"]
     assert [event.model_dump(mode="json") for _, event in events if event.type in ("receipt", "resolved")] == expected
-    assert events[7][1].blocks[0].text == "Good news: Maria said yes."
+    assert events[7][1].blocks[0].text == "Good news: Mike said yes."
     follow_up = json.dumps(model.requests[1].messages)
     assert (f'<action_update decision_id=\\"{held.decision_id}\\" state=\\"executed\\" result_fact_ids=' in follow_up)
     after = fake.calls[answered_at:]
@@ -340,7 +340,7 @@ async def test_answer_after_expiry_or_cancel(app, browser, fake, kernel_http, mo
     fake.now += timedelta(hours=13)
     assert (await expired.visitor.get(f"/api/public/desks/{expired.slug}/session")).status_code == 200
     fake.now += timedelta(hours=12)                                  # the hold is past its day; the visitor isn't idle
-    model.add(response(reply("Maria didn't get to your request in time; shall I ask again?")))
+    model.add(response(reply("Mike didn't get to your request in time; shall I ask again?")))
     late = await answer(expired, "allow_once")
     assert late.status_code == 409
     assert (late.json()["error"], late.json()["decision"]["state"]) == ("already_resolved", "expired")
@@ -362,7 +362,7 @@ async def test_answer_without_an_approved_snapshot_shows_only_the_outcome(app, b
                                                                          engine, choice, final_state):
     held = await held_request(app, browser, fake, kernel_http, model)
     fake.never(fake.sessions[held.session_id].desk_id, "native.quote")     # the owner said never for quotes since
-    model.add(response(reply("Maria's rules have changed, so I can't offer that one.")))
+    model.add(response(reply("Mike's rules have changed, so I can't offer that one.")))
 
     answered = await answer(held, choice)
 
@@ -464,6 +464,82 @@ async def test_owner_reason_is_cleared_before_resume_crossings(app, browser, fak
     assert fake.decisions[held.decision_id].decision.owner_plain == owner_line
 
 
+# The owner's line for a held request a booking closed (the kernel's `render.owner_line("cancelled_by_booking")`).
+BOOKED_LINE = "The visitor booked before you answered, so this request closed."
+
+
+async def test_a_booking_closed_line_stays_on_owner_reads(app, browser, fake, kernel_http, model, engine,
+                                                         jobs_connector, monkeypatch):
+    # The visitor's discount waits for Mike, then they book a time at list price: the kernel closes the stale request,
+    # and Mike's late answer reads why. Only his reads carry that line; the visitor's own read, the resume job, the
+    # chat's events and stored rows, and what Claude reads carry the signed state's line ("Cancelled") alone.
+    from desk.api import jobs
+    from desk.api.routes import owner
+
+    held = await held_request(app, browser, fake, kernel_http, model)
+    visitor = kernel_http.session(held.token)
+    desk = fake.desks[fake.sessions[held.session_id].desk_id]
+    slot = min(slot.slot_id for slot in desk.slots.values() if slot.starts_at > fake.now)
+    booking = await visitor.call("POST /decide", DecideRequest(
+        session_id=held.session_id, generation=0,
+        call=ToolCall(call_id="book-1", tool="native.book", args={"slot_id": slot})))
+    assert booking.state == "allowed", booking.reason_plain
+    await visitor.call("POST /execute", ExecuteRequest(decision_id=booking.decision_id, session_id=held.session_id,
+                                                       generation=0))
+    deferred, delivered = [], []
+    defer, deliver = owner.defer_resume_after_answer, jobs.deliver
+
+    async def defer_seen(app, ids, decision, approved=None, result_fact_ids=None):
+        deferred.append(decision.owner_plain)
+        await defer(app, ids, decision, approved, result_fact_ids=result_fact_ids)
+
+    async def deliver_seen(conn, ids, item, **kwargs):
+        delivered.append(item.decision.owner_plain)
+        return await deliver(conn, ids, item, **kwargs)
+
+    monkeypatch.setattr(owner, "defer_resume_after_answer", defer_seen)
+    monkeypatch.setattr(jobs, "deliver", deliver_seen)
+    model.add(response(reply("You're booked in, so there's nothing more to wait for on that discount.")))
+
+    late = await answer(held, "allow_once")
+
+    assert late.status_code == 409, late.text
+    decision = late.json()["decision"]
+    assert (late.json()["error"], decision["state"], decision["owner_plain"]) == (
+        "already_resolved", "cancelled", BOOKED_LINE)
+    read = await held.owner.get(f"/api/owner/decisions/{held.decision_id}")
+    assert read.status_code == 200 and read.json() == decision
+    visitor_read = await visitor.call("GET /decisions/{id}", path={"id": held.decision_id})
+    assert visitor_read.owner_plain is None and BOOKED_LINE not in visitor_read.model_dump_json()
+    # the line is the only difference: the signed fields the visitor reads are the owner's, unchanged
+    assert visitor_read.model_copy(update={"owner_plain": BOOKED_LINE}).model_dump(mode="json") == decision
+    (shown,) = await resolved(engine, held.session_id)
+    assert shown == signed(decision)
+    (job,) = await resume_jobs(jobs_connector)
+    assert BOOKED_LINE not in json.dumps(job["args"]) and "owner_plain" not in json.dumps(job["args"])
+    assert deferred == [None]
+    assert delivered == [None]
+
+    async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
+        events = await stream.until(lambda events: types(events).count("turn_end") == 2)
+    await app.state.runtime.runner.drain()
+    transcript = await held.visitor.get(f"/api/public/desks/{held.slug}/session")
+    assert transcript.status_code == 200
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT row_to_json(m)::text FROM app.messages m WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(e)::text FROM app.run_events e WHERE session_id = :s"),
+            {"s": held.session_id})).scalars().all()
+        updates = (await conn.execute(text(
+            "SELECT text FROM app.messages WHERE session_id = :s AND kind = 'action_update'"),
+            {"s": held.session_id})).scalars().all()
+    assert updates == ["Cancelled"]
+    for serialized in (transcript.text, json.dumps([event.model_dump(mode="json") for _, event in events]),
+                       json.dumps(rows), json.dumps(model.requests[-1].messages)):
+        assert BOOKED_LINE not in serialized
+        assert "owner_plain" not in serialized
+
+
 async def test_owner_status_and_tool_history_include_refusal_reason(app, browser, fake, kernel_http, model, engine):
     held = await held_request(app, browser, fake, kernel_http, model)
     desk_id = fake.sessions[held.session_id].desk_id
@@ -502,7 +578,7 @@ async def test_lost_answer_response_still_resumes(app, browser, fake, kernel_htt
     (shown,) = await resolved(engine, held.session_id)
     assert shown == signed(executed.model_dump(mode="json"))
     await jobs_done(jobs_connector)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
         events = await stream.until(lambda events: types(events).count("turn_end") == 2)
     await app.state.runtime.runner.drain()
@@ -571,7 +647,7 @@ async def test_lost_answer_while_approved_keeps_an_unknown_outcome_pending(
     assert len(model.requests) == 1
 
     final = fake.reconcile(held.decision_id)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
         events = await stream.until(lambda events: types(events).count("turn_end") == 2)
     await app.state.runtime.runner.drain()
@@ -644,7 +720,7 @@ async def test_answer_resumes_in_the_request_when_the_queue_cant_take_the_job(ap
         raise ConnectorException("the job queue's database can't be reached")
 
     monkeypatch.setattr(jobs_connector, "defer_jobs_all", unreachable)
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     calls = len(fake.calls)
 
     answered = await answer(held, "allow_once")
@@ -729,7 +805,7 @@ async def test_answer_during_take_over_executes_and_waits_for_hand_back(app, bro
     assert [tuple(row) for row in waiting] == [(True, None)] and resumable == [True]
 
     fake.set_mode(held.session_id, "ai")                             # handed back: Claude follows up
-    model.add(response(reply("Good news: Maria said yes.")))
+    model.add(response(reply("Good news: Mike said yes.")))
     async with Stream(app, events_path(held.slug, "after=6"), headers=[cookie(held.token)]) as stream:
         events = await stream.until(lambda events: "turn_end" in types(events))
     await app.state.runtime.runner.drain()

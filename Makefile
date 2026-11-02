@@ -36,7 +36,7 @@ api-serve:
 	cd backend && uv run --env-file ../.env env -u TYPESAFE_API_KEY -u MOCKPAY_KEY uvicorn --factory desk.api.main:app_factory \
 		--host 127.0.0.1 --port 8700 --timeout-keep-alive 310 --no-access-log
 
-# Prove the Rivera seed's cards and the starter presets with desk-prove and write their reports to
+# Prove the Turner seed's cards and the starter presets with desk-prove and write their reports to
 # kernel/cedar/proofs/, which the kernel activates them from (run it in any commit that changes
 # cards, adapter profiles, the schema, baseline, invariants, compiler output or thresholds).
 # check-presets proves them again and fails unless every shipped report matches; CI runs it.
@@ -160,9 +160,11 @@ infra-check:
 # The docs check CI runs: relative links resolve across README.md, AGENTS.md and docs/, the shipped
 # docs carry the required disclosures, and they and docs/images/*.svg carry no private reference.
 # FINAL=1 also refuses placeholders ([measured: …], [owner: …]), for the docs as they ship.
+# Then no tracked file brings back the old demo owner's name (tools/rename_demo_owner.py).
 .PHONY: docs-check
 docs-check:
 	uv run --project tools python -m desk_tools.check_docs $(if $(FINAL),--final)
+	python3 tools/rename_demo_owner.py --check
 
 .PHONY: cvc5 setup dev
 # cvc5 1.4.2, the static build for this machine, checked against tools/cvc5.sha256 and unpacked to
@@ -278,7 +280,7 @@ evals-tier1:
 # Tier 2 evals: a simulated visitor drives the API and kernel in this process, built from this tree.
 # evals-tier2 runs every scenario RUNS times for at most MAX_USD dollars and writes the results file
 # evals/results/<inputs>.json, which is committed with the change; scenarios whose plans aren't in
-# landed.toml are pending, and with none left to run it writes a run-free file with no model calls.
+# landed.toml are pending, and with none left to run it writes no file: nothing was evaluated.
 # evals-key prints <inputs>, the hash of the gated inputs. evals-results-check is the one tier 2 check
 # CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
 # rate or results file changed since BASE (renames count both paths), else when the committed file for

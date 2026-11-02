@@ -44,7 +44,7 @@ async function expectDisclosure(root: HTMLElement, words: string, language: 'en'
 export const WithBusiness: Story = {
   play: async ({ canvasElement }) => {
     // disclosure_line_en_es: with the business's name, in English.
-    await expectDisclosure(canvasElement, 'Rivera Plumbing answers with Claude, an AI.', 'en');
+    await expectDisclosure(canvasElement, 'Turner Plumbing answers with Claude, an AI.', 'en');
   },
 };
 
@@ -55,6 +55,6 @@ export const Spanish: Story = {
   },
   play: async ({ canvasElement }) => {
     // disclosure_line_en_es: with the business's name, in Spanish.
-    await expectDisclosure(canvasElement, 'Rivera Plumbing responde con Claude, una IA.', 'es');
+    await expectDisclosure(canvasElement, 'Turner Plumbing responde con Claude, una IA.', 'es');
   },
 };

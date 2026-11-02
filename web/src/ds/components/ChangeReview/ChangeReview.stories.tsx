@@ -624,7 +624,7 @@ export const AskMeFirst: Story = {
   parameters: {
     canvas: 'N-Conn-18-Preset-Review',
     canvasNote:
-      "Rivera's eight own rules, Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw, and the board's shared rule for Alex Kim's assistant, an illustrative card that isn't in Rivera's seed.",
+      "Turner's eight own rules, Dana Whitfield's personal booking rule, which the owner's \"Allow only for Dana Whitfield, always\" adds and the board doesn't draw, and the board's shared rule for Alex Kim's assistant, an illustrative card that isn't in Turner's seed.",
   },
   play: async ({ canvas, canvasElement }) => {
     // Each of the owner's rules goes, personal and shared ones included, and its tool falls to the default ask.
@@ -742,7 +742,7 @@ export const RecommendedRules: Story = {
   parameters: {
     canvas: 'N-Conn-18-Preset-Review',
     canvasNote:
-      "The review of Recommended rules on Rivera's Desk, drafted in her own weekday hours, which no board draws; the nearest is the Ask me first review. A rule goes to the preset's rule that covers its whole scope, or to the default ask; a preset rule nothing goes to is added; a rule the preset keeps as it is doesn't show.",
+      "The review of Recommended rules on Turner's Desk, drafted in his own weekday hours, which no board draws; the nearest is the Ask me first review. A rule goes to the preset's rule that covers its whole scope, or to the default ask; a preset rule nothing goes to is added; a rule the preset keeps as it is doesn't show.",
   },
   play: async ({ canvas }) => {
     const rows = within(canvas.getByRole('region', { name: 'Changes' })).getAllByRole('listitem');
@@ -750,7 +750,7 @@ export const RecommendedRules: Story = {
     const kind = (item: HTMLElement) => item.querySelector('.cd-change-review__tag')?.textContent;
     const side = (item: HTMLElement, name: 'Before' | 'After') => within(item).queryByRole('group', { name });
     const outcome = (item: HTMLElement) => side(item, 'After')?.querySelector('.cd-change-review__side-outcome');
-    // The rows, in Rivera's order; the preset adds none.
+    // The rows, in Turner's order; the preset adds none.
     await expect(rows.map((item) => [kind(item), title(item)])).toEqual([
       ['Changed', 'Book a visit'],
       ['Changed', 'Book a visit'],
@@ -759,8 +759,8 @@ export const RecommendedRules: Story = {
       ['Changed', 'See charges'],
       ['Changed', 'Refund'],
     ]);
-    // unchanged_rules_are_left_out: the preset quotes at list price, books weekdays in Rivera's own
-    // hours and words, and shares documents with verified customers, as her rules already do, so none
+    // unchanged_rules_are_left_out: the preset quotes at list price, books weekdays in Turner's own
+    // hours and words, and shares documents with verified customers, as his rules already do, so none
     // shows: the two booking rows are Saturday's and Dana's.
     await expect(rows.map(title)).not.toContain('Quote');
     await expect(rows.map(title)).not.toContain('Share a document');

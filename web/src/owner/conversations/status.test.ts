@@ -71,7 +71,7 @@ describe('conversationStatus', () => {
     expect(conversationStatus(summary({ mode: 'paused' }), 0)).toEqual({ tone: 'held', text: 'Paused after blocked attempts' });
 
     // Who it is with: the preview by name, else their name as given, else what they are.
-    expect(whoLabel(summary({ owner_preview: true, display_name: 'Maria Rivera' }))).toBe('Your preview');
+    expect(whoLabel(summary({ owner_preview: true, display_name: 'Mike Turner' }))).toBe('Your preview');
     expect(whoLabel(summary({ display_name: 'Dana Whitfield', verified: true }))).toBe('Dana Whitfield');
     expect(whoLabel(summary({ kind: 'agent' }))).toBe('Agent');
     expect(whoLabel(summary({ verified: true }))).toBe('Verified customer');
@@ -82,6 +82,82 @@ describe('conversationStatus', () => {
 
 
 describe('conversationListStatus', () => {
+  it.each([
+    ['quoted', 'Quoted', 'handled'],
+    ['turned_down', 'Turned down', 'info'],
+    ['lead_captured', 'New lead', 'info'],
+    ['owner_declined', 'You declined', 'info'],
+    ['called_back', 'Mike called back', 'handled'],
+    ['deposit_paid', 'Deposit paid', 'handled'],
+    ['document_sent', 'Verified · Invoice sent', 'handled'],
+    ['visit_booked', 'Booked', 'handled'],
+  ] as const)('shows_a_visitors_%s_outcome', (latest_outcome, text, tone) => {
+    const chat = summary({ latest_outcome, verified: true });
+    expect(conversationListStatus(chat, 0, false, 'Mike')).toEqual({ text, tone });
+    expect(conversationStatus(chat, 0)).toBeNull();
+    const named = { ...chat, display_name: 'Dana Whitfield' };
+    expect(conversationListStatus(named, 0, false, 'Mike')).toEqual({ text, tone });
+    expect(conversationStatus(named, 0)).toEqual({ tone: 'handled', text: 'Verified customer' });
+    expect(conversationListStatus(chat, 1, true, 'Mike')).toEqual({ tone: 'held', text: 'Needs you' });
+    expect(conversationListStatus({ ...chat, mode: 'paused' }, 0, true, 'Mike'))
+      .toEqual({ tone: 'held', text: 'Paused after blocked attempts' });
+    expect(conversationListStatus(chat, 0, true, 'Mike')).toEqual({ tone: 'held', text: 'Wants you' });
+    expect(conversationListStatus({ ...chat, mode: 'owner' }, 0, false, 'Mike'))
+      .toEqual({ tone: 'info', text: "You're in this chat" });
+    expect(conversationListStatus({ ...chat, owner_preview: true }, 0, false, 'Mike'))
+      .toEqual({ tone: 'info', text: 'Your own preview' });
+  });
+
+  it('doesnt_call_back_as_setups_stand_in_owner_name', () => {
+    const chat = summary({ latest_outcome: 'called_back', latest_visitor_text: 'Please call me.' });
+    expect(conversationListStatus(chat, 0, false, 'Owner')).toEqual(conversationStatus(chat, 0));
+    expect(conversationListStatus(chat, 0, false, 'Mike')).toEqual({ tone: 'handled', text: 'Mike called back' });
+  });
+
+  it('says_no_messages_yet_for_a_visitor_who_hasnt_written', () => {
+    const silent = summary({ latest_visitor_text: null });
+    expect(conversationListStatus(silent, 0, false, 'Mike')).toEqual({ tone: 'info', text: 'No messages yet' });
+    expect(conversationListStatus({ ...silent, latest_visitor_text: '  ' }, 0, false, 'Mike')).toEqual({ tone: 'info', text: 'No messages yet' });
+    expect(conversationListStatus({ ...silent, display_name: 'Dana Whitfield', verified: true }, 0, false, 'Mike'))
+      .toEqual({ tone: 'info', text: 'No messages yet' });
+    // An outcome, an attention status and the owner's preview still win; Today's line is unchanged.
+    expect(conversationListStatus({ ...silent, latest_outcome: 'quoted' }, 0, false, 'Mike')).toEqual({ tone: 'handled', text: 'Quoted' });
+    expect(conversationListStatus(silent, 0, true, 'Mike')).toEqual({ tone: 'held', text: 'Wants you' });
+    expect(conversationListStatus({ ...silent, owner_preview: true }, 0, false, 'Mike')).toEqual({ tone: 'info', text: 'Your own preview' });
+    expect(conversationStatus(silent, 0)).toBeNull();
+    // A visitor who wrote, or a reply without the field, draws the row as before.
+    expect(conversationListStatus(summary({ latest_visitor_text: 'Hi' }), 0, false, 'Mike')).toBeNull();
+    expect(conversationListStatus(summary(), 0, false, 'Mike')).toBeNull();
+    // Agents keep their own line.
+    const agent = summary({ kind: 'agent', latest_visitor_text: null });
+    expect(conversationListStatus(agent, 0, false, 'Mike')).toEqual(conversationStatus(agent, 0));
+  });
+
+  it('uses_the_supplied_owner_first_name_and_requires_verification_for_an_invoice', () => {
+    expect(conversationListStatus(summary({ latest_outcome: 'called_back' }), 0, false, 'Giovanni'))
+      .toEqual({ tone: 'handled', text: 'Giovanni called back' });
+    for (const display_name of [null, 'Marcus Bell']) {
+      const chat = summary({ display_name, latest_outcome: 'document_sent' });
+      expect(conversationListStatus(chat, 0, false, 'Mike')).toEqual(conversationStatus(chat, 0));
+    }
+  });
+
+  it.each([undefined, null, 'future_outcome', 'constructor'])('keeps_todays_line_for_%s', (code) => {
+    for (const verified of [false, true]) {
+      for (const display_name of [null, '   ', 'Dana Whitfield']) {
+        const chat = summary({ verified, display_name, latest_outcome: code as ConversationSummary['latest_outcome'] });
+        expect(conversationListStatus(chat, 0, false, 'Mike')).toEqual(conversationStatus(chat, 0));
+      }
+    }
+  });
+
+  it.each(['quoted', 'lead_captured', 'owner_declined', 'called_back', 'document_sent'] as const)(
+    'keeps_agent_rows_unchanged_for_%s', (latest_outcome) => {
+      const agent = summary({ kind: 'agent', display_name: "Alex Kim's assistant", latest_outcome });
+      expect(conversationListStatus(agent, 0, false, 'Mike')).toEqual({ tone: 'info', text: 'Agent' });
+    },
+  );
+
   it.each([null, '   '])('shows_an_unnamed_agents_outcome_with_display_name_%s', (display_name) => {
     const agent = summary({ kind: 'agent', display_name });
     for (const [latest_outcome, words] of [

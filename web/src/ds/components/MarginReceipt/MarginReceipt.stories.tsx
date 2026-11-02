@@ -144,7 +144,7 @@ const meta = {
     layout: 'padded',
     canvas: 'N-Conv-Run1',
     canvasNote:
-      "The board's receipts are owner notes written for the board; these show the kernel's visitor_plain lines from the Rivera fixture, as the conversation view passes them.",
+      "The board's receipts are owner notes written for the board; these show the kernel's visitor_plain lines from the Turner fixture, as the conversation view passes them.",
   },
 } satisfies Meta<typeof MarginReceipt>;
 
@@ -324,7 +324,7 @@ export const OwnerReason: Story = {
   ),
   parameters: {
     canvasNote:
-      "The board's receipts are owner notes written for the board; here each decision's receipt leads with the owner's words for its state, then the decision's reason_plain from the Rivera fixture.",
+      "The board's receipts are owner notes written for the board; here each decision's receipt leads with the owner's words for its state, then the decision's reason_plain from the Turner fixture.",
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(quoteRan.state).toBe('executed');
@@ -370,7 +370,7 @@ export const HeldWithCardBelow: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     const hold = rivera.decisions.held;
-    if (heldQuestion === undefined) throw new Error('the Rivera fixture has no visitor question');
+    if (heldQuestion === undefined) throw new Error('the Turner fixture has no visitor question');
 
     // held_receipt_with_card_below: the words alone, with no period, and nothing of the reason.
     const receipt = canvas.getByRole('button', { name: 'Held for you Open the full trace.' });

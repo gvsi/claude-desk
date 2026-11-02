@@ -12,7 +12,7 @@ export interface TakeOverBarProps {
   mode: SessionMode;
   /** The visitor as the owner's screen names them: "Dana Whitfield", "Visitor". */
   visitorName: string;
-  /** `owner_display_name`, the name the visitor sees: "Maria Rivera". */
+  /** `owner_display_name`, the name the visitor sees: "Mike Turner". */
   ownerName: string;
   /** An agent's session: no line about what the visitor sees, because agents never receive it. */
   agent?: boolean;

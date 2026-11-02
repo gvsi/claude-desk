@@ -21,12 +21,14 @@ from desk.db.session import API_CONNECT_OPTIONS, database_url
 from tests.kernel_contract.test_contract import (
     BLOCKED_PROSE,
     HANDED_TO_YOU,
+    decide,
     desk_slug,
     ledger_page,
     new_copy,
     new_visitor,
     issue_payment_link,
     item_id,
+    quote_args,
     session_handoffs,
     turn,
 )
@@ -130,7 +132,7 @@ async def test_a_final_prose_failure_delivers_the_kept_card_then_the_drafted_han
 
 
 OFFER = {"en": "Would you like me to arrange a callback?", "es": "¿Quiere que solicite una llamada?"}
-RECEIPT = {"en": "Reply checked against Maria Rivera's rules", "es": "Respuesta revisada con las reglas de Maria Rivera"}
+RECEIPT = {"en": "Reply checked against Mike Turner's rules", "es": "Respuesta revisada con las reglas de Mike Turner"}
 
 
 @pytest.mark.kernel_plan("01b")
@@ -161,6 +163,39 @@ async def test_a_final_prose_failure_with_nothing_to_keep_delivers_the_call_back
     assert not payload["handoff"]
     assert [block["text"] for block in payload["blocks"]] == [OFFER[language]]
     assert payload["visitor_plain"] == RECEIPT[language]
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+    assert await handed_to_you(http, copy) == 0
+
+
+# The kernel's status line, the API's signed `STATUS_LINES["check_status"]`.
+STATUS_LINE = {"en": "Please check the request status in this chat.",
+               "es": "Consulte el estado de la solicitud en este chat."}
+
+
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("language", ["en", "es"])
+async def test_a_final_prose_failure_while_a_request_is_held_delivers_the_status_line(kernel, ro_read, conn,
+                                                                                     language):
+    """Only the prose fails on the final check while the visitor's quote is held for the owner: the kernel's status
+    line is shown as a reply, in place of the call-back offer, and no owner handoff opens. Claude reads `delivered`
+    with `prose_shown` false and the line's words as `shown_instead`, so it knows what the visitor saw."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    visitor = await new_visitor(http, slug)
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    view = http.session(visitor.session_token)
+    held = await decide(view, session_id, 0, "call-held-quote", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    if language == "es":                    # the visitor writes Spanish, so a draft too short to tell speaks it
+        assert (await turn(view, session_id, 0, "Hola, ¿me puede ayudar con una fuga?")).language == "es"
+    draft = {"prose": "It comes to $89 for the visit." if language == "en" else "$89.", "clauses": []}
+    outcome = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_status_line")
+    assert outcome.result == {"outcome": "delivered", "message_id": outcome.message_id, "prose_shown": False,
+                              "shown_instead": STATUS_LINE[language]}
+    assert outcome.delivered == "reply" and not outcome.is_error
+    assert await delivered(conn, session_id) == [[None]]
     assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
     assert await handed_to_you(http, copy) == 0
 

@@ -7,7 +7,7 @@ within a day (`GET /document_links/{token}`, which the API proxies at `/api/d/{t
 stays in that table: Claude is told only that the link is ready, and the visitor sees it only in
 the `href` of a signed `document_link` card.
 
-Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), where
+Tests run on Turner Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), where
 `rv-docs` auto-allows a record owner's own documents. Visitors confirm who they are with the code
 from their Demo inbox, as the verify card does.
 """
@@ -43,7 +43,7 @@ from .test_reply_check import assert_handed_off, checked, clause, keep_alive_unt
 from .test_verification import api_rows, check, code_in, entry_of, session_inbox, started
 
 TOOL = "native.release_document"
-DANA, BOB = "dana@example.com", "bob@example.com"      # the contacts on record in the Rivera seed
+DANA, BOB = "dana@example.com", "bob@example.com"      # the contacts on record in the Turner seed
 
 
 async def confirmed(client: httpx.AsyncClient, copy: Rivera, contact: str) -> Visitor:
@@ -211,7 +211,7 @@ async def test_link_opens_once(app, client, frozen_clock):
         (dana.session_id, {"link_id": link.link_id, "opened": True}),
         (dana.session_id, {"link_id": link.link_id, "refused": True})]
 
-    # its fact expired as it opened, so citing the link now hands the reply to Maria
+    # its fact expired as it opened, so citing the link now hands the reply to Mike
     assert (await fact_row(app, copy, fact.fact_id)).status == "expired"
     verdict = await checked(client, dana, "Here is your invoice.", [clause("document_link", fact.fact_id)])
     assert violations(verdict) == [("stale_fact", "not_current", [fact.fact_id])]
@@ -289,7 +289,7 @@ async def test_link_dies_with_its_desk_or_person(app, client, frozen_clock):
     dana_link, bob_link = by_person[docs["dana-invoice"].record_owner_person_id], by_person[
         docs["bob-warranty"].record_owner_person_id]
 
-    # Maria removes Dana: Dana's link is void, and her fact with it; Bob's stands
+    # Mike removes Dana: Dana's link is void, and her fact with it; Bob's stands
     frozen_clock.advance(60)
     await updated(client, copy, "people", {"remove": ["dana"]})
     by_person = {link.person_id: link for link in await links(app, copy)}

@@ -71,7 +71,7 @@ PLAIN_VALUES = ("str", "int", "float", "bool")   # the Faker value types a bare 
 
 # A rule card that passes RuleCard's validator, for responses whose expectations need one.
 STUB_CARD = RuleCard(
-    card_id="stub-ask-quote", applies_to="native.quote", mode="ask", who="anyone", reason="Maria checks quotes first."
+    card_id="stub-ask-quote", applies_to="native.quote", mode="ask", who="anyone", reason="Mike checks quotes first."
 )
 # A probe that passes Probe's validator (only a scoped caller names a subject).
 STUB_PROBE = Probe(
@@ -79,7 +79,7 @@ STUB_PROBE = Probe(
 )
 # An open status that passes OpenStatus's validator (an open one names only `until`, after `as_of`;
 # `refresh_at` is after `as_of`, at or before the boundary and within 25 hours): a Tuesday morning
-# in the Rivera seed's time zone, open until five.
+# in the Turner seed's time zone, open until five.
 _STUB_TZ = ZoneInfo("America/Los_Angeles")
 STUB_OPEN_STATUS = OpenStatus(
     open=True, until=datetime(2026, 11, 3, 17, 0, tzinfo=_STUB_TZ), opens_at=None, text="Open until five this afternoon",
@@ -89,7 +89,7 @@ STUB_OPEN_STATUS = OpenStatus(
 # signs (a fixed test key, not a secret). The stub's Desks share one slug.
 STUB_SESSION_TOKEN = "stub-session-token"
 STUB_AGENT_KEY_HEX = hashlib.sha256(b"claude desk contract stub agent").hexdigest()
-STUB_SLUG = "rivera-plumbing-stub00"
+STUB_SLUG = "turner-plumbing-stub00"
 
 # The error code for a status when the expectation names none ("Session state responses"); every
 # 5xx is "internal".

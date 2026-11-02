@@ -1,7 +1,7 @@
 """FakeKernel: the kernel HTTP API v2 in this process, for the API's tests (never in an image).
 
 `fake_kernel_app(state)` is an ASGI app that answers the master plan's "Kernel HTTP API v2" routes the
-API uses, with the behavior Plan 02a relies on: a Rivera Plumbing copy, sessions with hashed tokens,
+API uses, with the behavior Plan 02a relies on: a Turner Plumbing copy, sessions with hashed tokens,
 "Session state responses" in order, decisions, executions, approvals, reply checks and the ledger.
 tests/kernel_contract/test_contract.py runs the same tests against it and the real kernel, so the
 API's tests can't lean on a behavior the kernel doesn't have. Later tasks add routes here, each with a
@@ -39,7 +39,8 @@ contract test, before the task that first uses them.
   call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
   mark of done on a closed one is 409. A booking, native or typed, closes the session's open handoffs of kind `card`
   as the owner's mark of done does, each ledgered `desk_data` naming it with `closed_by: "booking"`; a call-back
-  stays open.
+  stays open. A booking also makes the session's earlier held quotes with a discount stale: the next read of one
+  cancels it, as lazy expiry does, and the owner's reads of it carry the owner's line for a request a booking closed.
   `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
@@ -83,7 +84,7 @@ contract test, before the task that first uses them.
   a `charge` fact rendered `charge_confirmed`. Keys stay in memory; the mirror has the sessions' `agent_key_id` and
   `mandate_id` and the mandates' amounts.
 - The owner's Desks and setup (Plans 01b and 01c): `POST /desks` makes a Desk in the owner's copy through the same
-  seed path as the Rivera copy (native tools only, the `ask_first` preset's auto cards active), and
+  seed path as the Turner copy (native tools only, the `ask_first` preset's auto cards active), and
   `PUT /desks/{id}/business` renames its business; each refuses an owner name outside Plan 01a's pattern or an
   unknown time zone. `PUT /desks/{id}/people` (Plan 01b) upserts and removes people by `ref`, refusing a contact that
   looks masked (422). `DELETE /desks/{id}` (Plan 01b) closes the Desk's sessions; then its public page is 404, the
@@ -91,7 +92,7 @@ contract test, before the task that first uses them.
   its ledger stays. A preview (`POST /sessions` with `preview: true`) needs the owner of the slug's copy; its
   call-back writes its handoff already `done`, keeping its fact but leaving no Needs-you item. An owner
   session is given the setup tools alone, on any Desk of its copy, and executes its own setup decisions:
-  `native.read_memory` answers from the Desk's stored simulated memory (only the Rivera seed falls back to
+  `native.read_memory` answers from the Desk's stored simulated memory (only the Turner seed falls back to
   `MEMORY_ITEMS`; other unwritten Desks read nothing) and `native.fetch_website` reads any
   `.example` site as `WEBSITE_TEXT` (the fetch guard refuses every other address, so the call fails), each storing
   owner-only knowledge; `/context` serves the knowledge a session's labels read.
@@ -124,6 +125,7 @@ contract test, before the task that first uses them.
 import asyncio
 import hashlib
 import hmac
+import itertools
 import json
 import re
 import secrets
@@ -268,6 +270,7 @@ IDLE_LIMIT = timedelta(hours=24)        # a visitor or agent session closes afte
 GENESIS = "0" * 64
 KEY_ID = "fake-kernel"
 PUBLIC_KEY_HEX = "00" * 32           # no real key: fake signatures verify against nothing
+_DECISION_ORDER = itertools.count()   # the order decisions are made in, for times `now` doesn't tell apart
 
 class Refusal(Exception):
     """A non-2xx answer: its status and `KernelError.code`."""
@@ -303,7 +306,7 @@ def new_id(prefix: str) -> str:
     return f"{prefix}-{secrets.token_hex(5)}"
 
 
-# The master plan's "Rivera seed", with Plan 01a's specifics.
+# The master plan's "Turner seed", with Plan 01a's specifics.
 RIVERA_TZ = ZoneInfo("America/Los_Angeles")
 RIVERA_HOURS = [HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), end=time(18)),
                 HoursWindow(days=["sat"], start=time(9), end=time(13))]
@@ -317,28 +320,28 @@ RIVERA_PRICES = [PriceItem(item_id="deposit", title="Service call deposit", unit
                  PriceItem(item_id="short-notice", title="Short-notice fee", unit_cents=5000)]
 RIVERA_KNOWLEDGE = [
     KnowledgeItem(item_id="kn-website", source="website",
-                  title="Your website, rivera-plumbing.example, read during setup",
-                  text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                  title="Your website, turner-plumbing.example, read during setup",
+                  text="Turner Plumbing is Mike Turner's home plumbing business: drain clearing, leak repair and "
                        "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
                   label=Label(readers=["public"])),
     KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
-                  text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                  text="The price list Mike gave in setup covers the service call deposit, drain clearing, a "
                        "water heater flush, leak repair, pipe repair (starting price) and a short-notice fee. "
-                       "The short-notice fee is added to an urgent visit that Maria fits in at short notice. Each price is given in a quote from this list.",
+                       "The short-notice fee is added to an urgent visit that Mike fits in at short notice. Each price is given in a quote from this list.",
                   label=Label(readers=["public"])),
 ]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]
 RIVERA_DOCUMENTS = [  # (ref, title, record owner, body): the kernel ends each body with a fresh canary
     ("dana-invoice", "Invoice, drain clearing", "dana",
-     "Rivera Plumbing\nInvoice, drain clearing\nBilled to Dana Whitfield\nDrain clearing: $180.00\n"),
+     "Turner Plumbing\nInvoice, drain clearing\nBilled to Dana Whitfield\nDrain clearing: $180.00\n"),
     ("bob-warranty", "Warranty, water heater flush", "bob",
-     "Rivera Plumbing\nWarranty, water heater flush\nIssued to Bob Okafor\nCovers the flush for a year.\n")]
+     "Turner Plumbing\nWarranty, water heater flush\nIssued to Bob Okafor\nCovers the flush for a year.\n")]
 RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:service_area", kind="text",
                         value="We work in Oakland, Berkeley, Alameda and Emeryville."),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
-                  Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
+                  Claim(key="policy:arrival", kind="text", value="Mike texts before he arrives.")]
 RIVERA_STARTERS = {
     "en": ["How much is drain clearing?", "Can someone come Tuesday?", "Do you work in Alameda?"],
     "es": ["¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"],
@@ -354,17 +357,17 @@ def is_starter_fact(fact_id: str) -> bool:
 NOTIFICATIONS = {"now": ["approval", "callback", "breaker", "lockout", "handoff"],
                  "briefing": ["lead", "booking"]}
 # The seed's simulated notes, matching fixtures/memory.json (not read from another Desk).
-MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Rivera notes.", "items": [
+MEMORY_ITEMS = DeskMemoryRequest.model_validate({"about": "Simulated Turner notes.", "items": [
     {"id": "business", "title": "Business", "topics": ["business", "name", "owner", "company"],
-     "text": "Maria Rivera owns Rivera Plumbing in Oakland, California, and answers its phone herself between jobs."},
+     "text": "Mike Turner owns Turner Plumbing in Oakland, California, and answers its phone himself between jobs."},
     {"id": "trade", "title": "Trade", "topics": ["trade", "services", "work", "plumbing"],
-     "text": "Rivera Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."},
+     "text": "Turner Plumbing does home plumbing: drain clearing, leak repair and water heater flushes."},
     {"id": "service-area", "title": "Service area", "topics": ["area", "cities", "where"],
-     "text": "Rivera Plumbing works in Oakland, Berkeley, Alameda and Emeryville."},
+     "text": "Turner Plumbing works in Oakland, Berkeley, Alameda and Emeryville."},
     {"id": "hours", "title": "Hours", "topics": ["hours", "open", "opening", "schedule", "when"],
      "text": "Open Monday to Friday, 8 am to 6 pm, and Saturday, 9 am to 1 pm. Closed on Sundays."},
     {"id": "website", "title": "Website", "topics": ["website", "site", "web", "online"],
-     "text": "The business's website is https://rivera-plumbing.example."}]})
+     "text": "The business's website is https://turner-plumbing.example."}]})
 OWNER_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")   # Plan 01a's owner_display_name pattern
 # A fetched page (the kernel's fetch guard reads the real one): here any `.example` site reads as this, and any
 # other address is refused.
@@ -402,7 +405,7 @@ RIVERA_CARDS = [
 # by the seed's rules version, so `rv-urgent` allows it for anyone given the native callback.
 RIVERA_BUSINESS_TOOLS = [
     {"tool": "desk.emergency-callback", "title": "Emergency callback",
-     "description": "Asks Maria to call back urgently about an emergency.",
+     "description": "Asks Mike to call back urgently about an emergency.",
      "config": {"block": "urgent", "urgent_when": "A burst or leaking pipe, flooding, a sewage backup, or no water"}},
 ]
 
@@ -500,6 +503,9 @@ OWNER_REFUSAL_TEXT = {
     "rules_changed": "Your rules changed before this ran, so it wasn't done.",
     "fallback": "This couldn't run, so it wasn't done.",
 }
+# The owner-only line for a held request the visitor's own booking closed (the kernel's
+# `render.en.OWNER_STATUS["cancelled_by_booking"]`); a visitor's own cancel has none.
+OWNER_BOOKING_CLOSED_TEXT = "The visitor booked before you answered, so this request closed."
 # What a visitor's or an agent's executed action did, by tool (the kernel's `render.en.EXECUTED` and
 # `render.es.EXECUTED`, Plans 01b and 01c), in place of the generic executed line.
 EXECUTED_TEXT = {
@@ -548,7 +554,7 @@ BOUNDED_CASES = 1_200
 COUNTEREXAMPLE = "A visitor could get something done without asking you that your cards don't allow."
 DEFAULT_REASON = "Anything your rules don't cover waits for you."
 # Verification is always on (Plan 01b): no owner card may change starting one. The tools of the always-on baseline,
-# and the presets' own card for each (auto, for anyone, on the tool), which every preset and the Rivera seed carry.
+# and the presets' own card for each (auto, for anyone, on the tool), which every preset and the Turner seed carry.
 ALWAYS_ON_TOOLS = ("native.start_verification",)
 ALWAYS_ON_CARDS = tuple(card for card in PRESETS["ask_first"] if card.applies_to in ALWAYS_ON_TOOLS)
 
@@ -869,14 +875,16 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "verify": "Enter the code sent to the contact on record.", "hours": "Opening hours",
                      "owner_said": "Written by {owner}",
                      "owner_say_blocked": "Not sent: it included text from a private document",
-                     "offer_callback": "Would you like me to arrange a callback?"},
+                     "offer_callback": "Would you like me to arrange a callback?",
+                     "check_status": "Please check the request status in this chat."},
               "es": {"handoff": "Déjame consultarlo con {owner}.",
                      "checked": "Respuesta revisada con las reglas de {owner}",
                      "handed_off": "Pasado a {owner} para responder",
                      "verify": "Escribe el código enviado al contacto registrado.", "hours": "Horario",
                      "owner_said": "Escrito por {owner}",
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado",
-                     "offer_callback": "¿Quiere que solicite una llamada?"}}
+                     "offer_callback": "¿Quiere que solicite una llamada?",
+                     "check_status": "Consulte el estado de la solicitud en este chat."}}
 # A session's tools offer a call back when they offer this next step (`native.request_callback`, or a business tool
 # of block `urgent`), as the kernel's `reply_check.offers_call_back` reads them.
 CALL_BACK_STEP = NEXT_STEPS["native.request_callback"]
@@ -1394,6 +1402,7 @@ class DecisionRecord:
     created_at: datetime
     result: ExecResult | None = None
     running: bool = False                       # its execution began and hasn't ended (`in_flight`)
+    order: int = field(default_factory=lambda: next(_DECISION_ORDER))   # when it was made, among equal `created_at`s
 
 
 @dataclass
@@ -1506,6 +1515,7 @@ class FakeKernelState:
         self.document_links: dict[str, DocumentLink] = {}   # link_id -> its link, tokens in memory only
         self.payment_links: dict[str, PaymentLink] = {}     # link_id -> its link, tokens in memory only
         self.quotes: dict[str, dict] = {}               # quote_id -> its kernel_ro row
+        self.bookings: dict[str, dict] = {}             # booking_id -> its Desk, session, action and status
         self._by_call: dict[tuple[str, int, str], str] = {}   # (session_id, generation, call_id) -> decision_id
         self._token_hashes: dict[str, str] = {}        # sha256(token) -> session_id
         self._failures: dict[str, list] = {}           # route -> [kind, times left or None]
@@ -1875,10 +1885,10 @@ class FakeKernelState:
             **envelope, "hash": entry.hash, "signature": entry.signature, "key_id": entry.key_id})
         return entry
 
-    # The Rivera seed -----------------------------------------------------------------------------
+    # The Turner seed -----------------------------------------------------------------------------
 
     def _seed_rivera(self, copy_id: str) -> Desk:
-        business = BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera", timezone=RIVERA_TZ.key,
+        business = BusinessSeed(name="Turner Plumbing", owner_display_name="Mike Turner", timezone=RIVERA_TZ.key,
                                 brand={"palette": "teal", **BRAND_PALETTE["teal"]})
         seed = DeskSeed(
             name="Main line", charter=list(RIVERA_CHARTER), hours=list(RIVERA_HOURS), price_items=list(RIVERA_PRICES),
@@ -2267,7 +2277,7 @@ class FakeKernelState:
                       key_id=KEY_ID, unproved_seeds=[])
 
     def create_copy(self, request: Request, body: CreateCopyRequest) -> CopyCreated:
-        """A Rivera Plumbing copy with its seeded hold and, when it asks and a night is recorded, the night replayed
+        """A Turner Plumbing copy with its seeded hold and, when it asks and a night is recorded, the night replayed
         into it (`_replay`)."""
         if self._no_seeded_night and "replay_night" in body.model_fields_set:
             raise Refusal(422, "invalid")
@@ -2682,7 +2692,7 @@ class FakeKernelState:
             recipient=recipient, starts_at=starts_at)
 
     def _rule(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[str, list[str], str | None]:
-        """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
+        """The Turner cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
         a refusal by the always-on baseline the `@id` of its forbid in `kernel/cedar/baseline.cedar`."""
         tool = action.tool
         if not tool.startswith('desk.') and self._never(desk, tool):
@@ -2885,7 +2895,8 @@ class FakeKernelState:
             "ledger_seq": decision.ledger_seq, "created_at": record.created_at, "policy_ids": decision.policy_ids})
 
     def _transition(self, record: DecisionRecord, state: str, kind: str = "decide", **summary) -> Decision:
-        """Move a decision to `state`: ledgered, re-signed, mirrored."""
+        """Move a decision to `state`: ledgered, re-signed, mirrored. The owner's line (`owner_plain`, unsigned) is set
+        for a refusal at execution and for a held request a booking closed, and cleared in every other state."""
         desk = self.desks[record.desk_id]
         decision = record.decision
         session = self.sessions[decision.session_id]
@@ -2899,6 +2910,8 @@ class FakeKernelState:
             owner_plain = OWNER_REFUSAL_TEXT[
                 "rules_changed" if summary.get("reason") == "rules_changed"
                 and summary.get("check") in {"tool", "profile", "pin", "policy"} else "fallback"]
+        elif state == "cancelled" and summary.get("cancelled_by") == "booking":
+            owner_plain = OWNER_BOOKING_CLOSED_TEXT
         record.decision = self._signed(decision.model_copy(update={
             "state": state, "visitor_plain": line, "owner_plain": owner_plain,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))
@@ -2906,12 +2919,36 @@ class FakeKernelState:
         return record.decision
 
     def _refresh(self, record: DecisionRecord) -> Decision:
-        """Lazy expiry: an allow lasts 60 s, a hold 24 h."""
+        """Lazy expiry: an allow lasts 60 s, a hold 24 h. Then a held quote with a discount is cancelled once its own
+        session has a confirmed booking decided after it, ledgered with the booking and the Desk's version and cap (the
+        kernel's `decide.supersede_if_booked`)."""
         decision = record.decision
         if (decision.state in ("allowed", "held") and record.result is None and not record.running
                 and self.now > decision.expires_at):
             return self._transition(record, "expired")
+        booking_id = self._superseding_booking(record)
+        if booking_id is not None:
+            desk = self.desks[record.desk_id]
+            return self._transition(record, "cancelled", action_id=decision.action.action_id, cancelled_by="booking",
+                                    booking_id=booking_id, policy_version=desk.policy_version,
+                                    auto_money_cap_cents=min(desk.auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS))
         return decision
+
+    def _superseding_booking(self, record: DecisionRecord) -> str | None:
+        """The first confirmed booking of a held discount quote's own session on its Desk whose decision came after the
+        quote's: a later `created_at`, or, since `now` stands still between calls, the same one and made later."""
+        decision = record.decision
+        if (decision.state != "held" or record.tool != "native.quote" or decision.action is None
+                or not decision.action.discount_bp):
+            return None
+        by_action = {made.decision.action.action_id: made for made in self.decisions.values()
+                     if made.decision.action is not None}
+        later = sorted((made.created_at, made.order, booking_id) for booking_id, booking in self.bookings.items()
+                       if booking["desk_id"] == record.desk_id and booking["session_id"] == decision.session_id
+                       and booking["status"] == "confirmed"
+                       and (made := by_action.get(booking["action_id"])) is not None
+                       and (made.created_at, made.order) > (record.created_at, record.order))
+        return later[0][2] if later else None
 
     def _own_decision(self, request: Request, session_id: str | None,
                       decision_id: str) -> tuple[Session, DecisionRecord]:
@@ -3086,6 +3123,8 @@ class FakeKernelState:
             self._put("bookings", (booking_id,), {
                 "booking_id": booking_id, **ids, "slot_id": slot.slot_id, "starts_at": slot.starts_at,
                 "person_id": session.person_id, "lead_id": None, "status": "confirmed"})
+            self.bookings[booking_id] = {"desk_id": desk.desk_id, "session_id": action.session_id,
+                                         "action_id": action.action_id, "status": "confirmed"}
             self._close_card_handoffs(session, desk, closed_by="booking")
             facts.append(Fact(fact_id=f"booking:{booking_id}", kind="booking", status="committed", source="kernel",
                               label=label, claims=[
@@ -3523,9 +3562,11 @@ class FakeKernelState:
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
                  message_id: str | None = None, final: bool = True) -> ReplyVerdict:
-        """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) the checked cards, then the handoff
-        clause when the draft has one; with no card at all, the kernel's call-back offer as prose when
-        `_offers_call_back` (the owner's decision of 2026-11-01); else the handoff alone, ledgered and signed. An
+        """Step 7: for a failure only of the prose (`desk.rewrites.PROSE_ONLY`) on a final draft while a held request
+        awaits the owner (`_status_line_fits`), the checked cards then the kernel's status line as prose; else the
+        checked cards, then the handoff clause when the draft has one; with no card at all, the kernel's call-back
+        offer as prose when `_offers_call_back` (the owner's decision of 2026-11-01); else the handoff alone, ledgered
+        and signed. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
@@ -3539,7 +3580,9 @@ class FakeKernelState:
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             handoff = RenderedBlock(kind="card", template="handoff", text=text, title=text)
             prose_only = all(violation.kind in PROSE_ONLY for violation in violations)
-            if kept and prose_only:
+            if prose_only and final and author == "claude" and self._status_line_fits(session, blocks, violations):
+                blocks = kept + [RenderedBlock(kind="prose", text=REPLY_TEXT[language]["check_status"])]
+            elif kept and prose_only:
                 drafted = any(block.kind == "card" and block.template == "handoff" for block in blocks)
                 blocks = kept + ([handoff] if drafted else [])   # a drafted handoff follows the kept cards
             elif prose_only and self._offers_call_back(session, desk, blocks, violations):
@@ -3572,6 +3615,20 @@ class FakeKernelState:
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
 
+    def _awaits_the_owner(self, session: Session) -> bool:
+        """Whether the session has a held request awaiting the owner: one neither answered, cancelled nor expired."""
+        return any(record.decision.session_id == session.session_id and record.decision.state == "held"
+                   and record.decision.expires_at > self.now for record in self.decisions.values())
+
+    def _status_line_fits(self, session: Session, blocks: list[RenderedBlock], violations: list[Violation]) -> bool:
+        """Whether a final draft blocked only for its prose shows the kept cards then the kernel's status line, as the
+        kernel's `reply_check.status_line_shown` decides: no checker outage (`check_unavailable`, which hands off), no
+        handoff clause Claude drafted (which is honoured), and a held request awaiting the owner. It takes precedence
+        over the call-back offer and opens no owner handoff."""
+        return (not any(violation.kind == "check_unavailable" for violation in violations)
+                and not any(block.kind == "card" and block.template == "handoff" for block in blocks)
+                and self._awaits_the_owner(session))
+
     def _offers_call_back(self, session: Session, desk: Desk, blocks: list[RenderedBlock],
                           violations: list[Violation]) -> bool:
         """Whether a draft blocked only for its prose shows the kernel's call-back offer, as the kernel's
@@ -3593,8 +3650,7 @@ class FakeKernelState:
         waiting, and `desk_data {part: "handoffs", refs, kind: "card"}` on the session. Returns its ID, or None."""
         if session.preview or self._open_handoff(session) is not None:
             return None
-        if any(record.decision.session_id == session.session_id and record.decision.state == "held"
-               and record.decision.expires_at > self.now for record in self.decisions.values()):
+        if self._awaits_the_owner(session):
             return None
         handoff_id = new_id("handoff")
         self.handoffs[handoff_id] = {

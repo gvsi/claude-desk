@@ -1,4 +1,4 @@
-// Rivera Plumbing, the demo business, as the master plan's Rivera seed describes it: Maria Rivera's
+// Turner Plumbing, the demo business, as the master plan's Turner seed describes it: Mike Turner's
 // Desk "Main line", Dana and Bob on record, Alex Kim's assistant visiting as a signed agent, and
 // Lucía Herrera writing in Spanish. Card text follows the kernel's clause rendering; status lines
 // are the kernel's visitor templates, word for word, except that an executed receipt has its tool's
@@ -67,22 +67,22 @@ const sha256 = (label: string) => placeholderHex(`sha256:${label}`, 32);
 
 const COPY_ID = 'copy-demo-7f3a';
 const DESK_ID = 'desk-rivera-main';
-const OWNER = 'Maria Rivera';
+const OWNER = 'Mike Turner';
 /** The built-in visiting agent's key: Alex Kim's assistant. */
 const DEMO_AGENT_KEY_ID = 'demo-agent';
 
 /**
- * Rivera Plumbing's money cap, $500: the most its active rules version lets an auto card take or pay
- * out in one action without asking (the master plan's "Money cap", at the Rivera seed's value). Allow
+ * Turner Plumbing's money cap, $500: the most its active rules version lets an auto card take or pay
+ * out in one action without asking (the master plan's "Money cap", at the Turner seed's value). Allow
  * only for this person on a money request needs an amount within it.
  */
 export const RIVERA_MONEY_CAP_CENTS = 50_000;
 
 const business = {
-  name: 'Rivera Plumbing',
+  name: 'Turner Plumbing',
   deskName: 'Main line',
   ownerName: OWNER,
-  slug: 'rivera-plumbing-k3x9q2',
+  slug: 'turner-plumbing-k3x9q2',
   brand: { primary: '#1F4E4A', accent: '#B87333' },
 } as const;
 
@@ -91,38 +91,38 @@ const people = {
   bob: { personId: 'per-bob', name: 'Bob Okafor', maskedContact: 'b•••@example.com' },
 } as const;
 
-// Visitor status lines: the kernel's en/es templates for Maria Rivera's Desk. An action that ran has
+// Visitor status lines: the kernel's en/es templates for Mike Turner's Desk. An action that ran has
 // no line here: its receipt says what ran (`executedLine`).
 const plain = {
   en: {
-    allowed: "Checked against Maria Rivera's rules",
-    held: 'Waiting for Maria Rivera to approve',
+    allowed: "Checked against Mike Turner's rules",
+    held: 'Waiting for Mike Turner to approve',
     refused: 'Not something I can do here',
-    approved: 'Maria Rivera approved this',
-    denied: 'Maria Rivera decided not to go ahead',
+    approved: 'Mike Turner approved this',
+    denied: 'Mike Turner decided not to go ahead',
     expired: 'This request timed out',
     cancelled: 'Cancelled',
     failed: "That didn't go through",
     unknown: 'Still confirming this',
     refused_at_execution: "The rules changed, so this didn't go ahead",
-    reply_checked: "Reply checked against Maria Rivera's rules",
-    reply_handed_off: 'Passed to Maria Rivera to answer',
-    owner_said: 'Written by Maria Rivera',
+    reply_checked: "Reply checked against Mike Turner's rules",
+    reply_handed_off: 'Passed to Mike Turner to answer',
+    owner_said: 'Written by Mike Turner',
   },
   es: {
-    allowed: 'Revisado con las reglas de Maria Rivera',
-    held: 'Esperando la aprobación de Maria Rivera',
+    allowed: 'Revisado con las reglas de Mike Turner',
+    held: 'Esperando la aprobación de Mike Turner',
     refused: 'No es algo que pueda hacer aquí',
-    approved: 'Maria Rivera lo aprobó',
-    denied: 'Maria Rivera decidió no seguir adelante',
+    approved: 'Mike Turner lo aprobó',
+    denied: 'Mike Turner decidió no seguir adelante',
     expired: 'Esta solicitud venció',
     cancelled: 'Cancelado',
     failed: 'No se pudo completar',
     unknown: 'Todavía lo estamos confirmando',
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
-    reply_checked: 'Respuesta revisada con las reglas de Maria Rivera',
-    reply_handed_off: 'Pasado a Maria Rivera para responder',
-    owner_said: 'Escrito por Maria Rivera',
+    reply_checked: 'Respuesta revisada con las reglas de Mike Turner',
+    reply_handed_off: 'Pasado a Mike Turner para responder',
+    owner_said: 'Escrito por Mike Turner',
   },
 } as const satisfies Bilingual<
   Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
@@ -205,12 +205,12 @@ const cards = {
     en: cardBlock('booking_confirmed', {
       fact_id: 'booking:B-77',
       title: 'Tuesday, November 3',
-      lines: ['2:00 pm to 4:00 pm', 'With Maria Rivera'],
+      lines: ['2:00 pm to 4:00 pm', 'With Mike Turner'],
     }),
     es: cardBlock('booking_confirmed', {
       fact_id: 'booking:B-77',
       title: 'martes 3 de noviembre',
-      lines: ['De 14:00 a 16:00', 'Con Maria Rivera'],
+      lines: ['De 14:00 a 16:00', 'Con Mike Turner'],
     }),
   },
   payment_link: {
@@ -267,13 +267,13 @@ const cards = {
   handoff: {
     en: cardBlock('handoff', {
       fact_id: null,
-      title: 'Let me check with Maria Rivera.',
-      lines: ['Maria Rivera will reply here.'],
+      title: 'Let me check with Mike Turner.',
+      lines: ['Mike Turner will reply here.'],
     }),
     es: cardBlock('handoff', {
       fact_id: null,
-      title: 'Déjame consultarlo con Maria Rivera.',
-      lines: ['Maria Rivera te responderá aquí.'],
+      title: 'Déjame consultarlo con Mike Turner.',
+      lines: ['Mike Turner te responderá aquí.'],
     }),
   },
   verify_prompt: {
@@ -289,7 +289,7 @@ const cards = {
     es: cardBlock('owner_said', {
       fact_id: 'owner:M-9002',
       title:
-        'Hola Lucía, soy Maria. Vi tu mensaje y prefiero escribirte ahora en vez de esperar a la llamada del martes. Si gotea por la unión, normalmente basta con cambiar la junta. Unos $250 con la visita.',
+        'Hola Lucía, soy Mike. Vi tu mensaje y prefiero escribirte ahora en vez de esperar a la llamada del martes. Si gotea por la unión, normalmente basta con cambiar la junta. Unos $250 con la visita.',
     }),
   },
   charges: {
@@ -315,11 +315,11 @@ const cards = {
   callback_confirmed: {
     en: cardBlock('callback_confirmed', {
       fact_id: 'handoff:H-12',
-      title: 'Maria Rivera will call you back on Tuesday, November 3, between 4:00 pm and 5:00 pm',
+      title: 'Mike Turner will call you back on Tuesday, November 3, between 4:00 pm and 5:00 pm',
     }),
     es: cardBlock('callback_confirmed', {
       fact_id: 'handoff:H-12',
-      title: 'Maria Rivera te llamará el martes 3 de noviembre, entre las 16:00 y las 17:00',
+      title: 'Mike Turner te llamará el martes 3 de noviembre, entre las 16:00 y las 17:00',
     }),
   },
   payment_confirmed: {
@@ -332,12 +332,12 @@ const cards = {
     en: cardBlock('link_cancelled', {
       fact_id: 'payment_link:L-3301',
       title: '$20.00',
-      lines: ['Service call deposit', "This payment link was cancelled because Maria Rivera's rules changed. Ask again if you still want to pay."],
+      lines: ['Service call deposit', "This payment link was cancelled because Mike Turner's rules changed. Ask again if you still want to pay."],
     }),
     es: cardBlock('link_cancelled', {
       fact_id: 'payment_link:L-3301',
       title: '$20.00',
-      lines: ['Service call deposit', 'Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera. Pídelo de nuevo si todavía quieres pagar.'],
+      lines: ['Service call deposit', 'Este enlace de pago se canceló porque cambiaron las reglas de Mike Turner. Pídelo de nuevo si todavía quieres pagar.'],
     }),
   },
 } satisfies Record<ClauseTemplate, Bilingual<CardBlock>>;
@@ -346,12 +346,12 @@ const cards = {
 // is booked, paid or priced, in either language.
 const proseBlocks = {
   quoteIntro: {
-    en: proseBlock("Here's the price for clearing a drain, from Maria's price list."),
-    es: proseBlock('Este es el precio para destapar un desagüe, según la lista de precios de Maria.'),
+    en: proseBlock("Here's the price for clearing a drain, from Mike's price list."),
+    es: proseBlock('Este es el precio para destapar un desagüe, según la lista de precios de Mike.'),
   },
   bookingAsk: {
-    en: proseBlock("These times are open on Maria's calendar. Which of them works for you?"),
-    es: proseBlock('Estos horarios están libres en el calendario de Maria. ¿Cuál te viene bien?'),
+    en: proseBlock("These times are open on Mike's calendar. Which of them works for you?"),
+    es: proseBlock('Estos horarios están libres en el calendario de Mike. ¿Cuál te viene bien?'),
   },
   // Leads into a card that reports what was done; the card, not the prose, says it.
   details: {
@@ -390,7 +390,7 @@ const sessions = {
   demoCode: { session_id: 'ses-dana-verified', kind: 'visitor', verified: true, assurance: 'demo_code', mode: 'ai', generation: 1 },
   /** Alex Kim's assistant, a signed visiting agent. */
   agent: { session_id: 'ses-alex-agent', kind: 'agent', verified: false, assurance: 'none', mode: 'ai', generation: 1 },
-  /** Lucía's chat after Maria took it over; take-over bumped the generation. */
+  /** Lucía's chat after Mike took it over; take-over bumped the generation. */
   ownerMode: { session_id: 'ses-lucia-web', kind: 'visitor', verified: false, assurance: 'none', mode: 'owner', generation: 2 },
   /** A chat the breaker paused after repeated blocked attempts. */
   paused: { session_id: 'ses-repeat-web', kind: 'visitor', verified: false, assurance: 'none', mode: 'paused', generation: 1 },
@@ -500,7 +500,7 @@ const handoffReply = message('msg-visitor-handoff', {
   ledger_seq: 3,
 });
 const ownerJoined = { type: 'owner_joined', name: OWNER } satisfies SseEvent;
-/** Maria's name with three dots, shown until `until` or until her message replaces them. */
+/** Mike's name with three dots, shown until `until` or until his message replaces them. */
 const ownerTyping = { type: 'owner_typing', name: OWNER, until: '2026-10-30T17:21:10Z' } satisfies SseEvent;
 
 const errorEvents = (['kernel_unavailable', 'session', 'rate_limited', 'internal'] as const).map(
@@ -512,9 +512,9 @@ const events = {
   /** A quote: the action's receipt, the writing state, then the checked reply. */
   quoteTurn: [danaQuoteReceipt, writing, danaQuote, turnEnd],
   quoteTurnEs: [luciaQuoteReceipt, writing, luciaQuote, turnEnd],
-  /** The seeded hold: the discount waits for Maria, and the reply hands off to her. */
+  /** The seeded hold: the discount waits for Mike, and the reply hands off to him. */
   heldTurn: [heldReceipt, writing, handoffReply, turnEnd],
-  /** Maria allowed the discount: the resolved receipt, then Claude's follow-up with the quote. */
+  /** Mike allowed the discount: the resolved receipt, then Claude's follow-up with the quote. */
   resolvedTurn: [
     ran('resolved', 'dec-held-quote', 'native.quote', 'en', 6),
     writing,
@@ -526,7 +526,7 @@ const events = {
     }),
     turnEnd,
   ],
-  /** Maria joins, types, speaks in her own words, then hands back to Claude. */
+  /** Mike joins, types, speaks in his own words, then hands back to Claude. */
   takeOver: [
     ownerJoined,
     ownerTyping,
@@ -609,7 +609,7 @@ const conversations = {
         event: message('msg-alex-quote', {
           language: 'en',
           blocks: [
-            proseBlock("Here's the service call deposit from Maria's price list."),
+            proseBlock("Here's the service call deposit from Mike's price list."),
             cardBlock('quote', {
               fact_id: 'quote:Q-1050',
               title: '$20.00',
@@ -641,7 +641,7 @@ const conversations = {
       { kind: 'visitor', text: '¿Cuánto cuesta destapar el desagüe del fregadero?' },
       { kind: 'event', event: luciaQuoteReceipt },
       { kind: 'event', event: luciaQuote },
-      { kind: 'visitor', text: '¿Puedo hablar con Maria? También gotea la llave de paso.' },
+      { kind: 'visitor', text: '¿Puedo hablar con Mike? También gotea la llave de paso.' },
       // A callback needs her name and number, so Claude asks; she gives them in her own message.
       {
         kind: 'event',
@@ -664,7 +664,7 @@ const conversations = {
           ledger_seq: 35,
         }),
       },
-      // Maria takes the chat over (ledger entry 36) without waiting for the callback time.
+      // Mike takes the chat over (ledger entry 36) without waiting for the callback time.
       { kind: 'event', event: ownerJoined },
       {
         kind: 'event',
@@ -836,6 +836,16 @@ const decisions = {
 } satisfies Record<DecisionState, Decision>;
 
 /**
+ * The held quote once the visitor booked a time at list price before Mike answered: the kernel
+ * closed the stale discount request (`cancelled`), and the owner's read says why in `owner_plain`.
+ * The line isn't signed, so the visitor's read is `decisions.cancelled`, word for word, without it.
+ */
+const cancelledByBooking = {
+  ...decisions.cancelled,
+  owner_plain: 'The visitor booked before you answered, so this request closed.',
+} satisfies Decision;
+
+/**
  * Verified Dana asks for a Saturday afternoon visit, after the Saturday card's morning hours. Both
  * booking cards' hold twins match, since a hold twin drops its card's hours; the Saturday card, the
  * one the reason names, comes first. Hours hold it, not the tool, so Deny always isn't offered;
@@ -880,7 +890,7 @@ const heldVerified = {
 } satisfies Decision;
 
 /**
- * Verified Dana asks for her drain clearing payment back. The refund card asks Maria about every
+ * Verified Dana asks for her drain clearing payment back. The refund card asks Mike about every
  * refund, so the tool itself is held and Deny always is offered; she is verified and the amount is
  * within the rules' money cap, so Allow only for this person is too: all four answers.
  */
@@ -1287,7 +1297,7 @@ const hubSections = [
   },
 ] satisfies HubSection[];
 
-/** Rivera Plumbing's Rules hub: six built-in connectors and Stripe, in the hub's order. */
+/** Turner Plumbing's Rules hub: six built-in connectors and Stripe, in the hub's order. */
 const connectors = {
   views: connectorViews,
   summary: '6 built-in connectors and 1 you connected · Version 7, checked against the always-on rules',
@@ -1352,7 +1362,7 @@ const recentRequests = {
       key: 'dec-dana-quote',
       when: 'Today, 8:12 am',
       what: 'Dana Whitfield asked how much drain clearing costs.',
-      why: "Quoted from Maria Rivera's price list.",
+      why: "Quoted from Mike Turner's price list.",
       tone: 'handled',
       outcome: 'Automatic',
       href: '/safety/dec-dana-quote',
@@ -1370,7 +1380,7 @@ const recentRequests = {
       key: 'dec-alex-quote',
       when: 'Yesterday',
       what: "Alex Kim's assistant asked for a water heater install quote.",
-      why: "Quoted from Maria Rivera's price list.",
+      why: "Quoted from Mike Turner's price list.",
       tone: 'handled',
       outcome: 'Automatic',
       href: '/safety/dec-alex-quote',
@@ -1412,8 +1422,8 @@ const paymentsConnection = {
 /** Stripe, connected: the connection's details as the screen words them, and what disconnecting stops. */
 const stripeConnection = {
   details: [
-    { label: 'Account', value: 'Rivera Plumbing, test mode (mock)' },
-    { label: 'Connected', value: 'Oct 28 by Maria Rivera' },
+    { label: 'Account', value: 'Turner Plumbing, test mode (mock)' },
+    { label: 'Connected', value: 'Oct 28 by Mike Turner' },
     { label: 'Customers it can see', value: 'Only the verified person Claude is talking to' },
     { label: 'Tool definitions', value: 'Unchanged since you confirmed them. A change turns that tool off until you review it.' },
   ],
@@ -1447,13 +1457,13 @@ const googleCalendar = {
   promise: {
     title: "Claude sees only when you're busy, never what the event is: no titles, guests or notes.",
     detail:
-      'It reads busy time ranges from Rivera Plumbing jobs, so open times never clash with a visit you already have. Nothing is ever added to or changed on your calendar.',
+      'It reads busy time ranges from Turner Plumbing jobs, so open times never clash with a visit you already have. Nothing is ever added to or changed on your calendar.',
   },
   /** The end of its page (N-Conn-04): the connection's details and what disconnecting stops. */
   connection: {
     details: [
-      { label: 'Calendar', value: 'Rivera Plumbing jobs (mock)' },
-      { label: 'Connected', value: 'Today by Maria Rivera' },
+      { label: 'Calendar', value: 'Turner Plumbing jobs (mock)' },
+      { label: 'Connected', value: 'Today by Mike Turner' },
       { label: 'Tool definitions', value: 'Unchanged since you confirmed them.' },
     ],
     consequence: 'Disconnecting stops Claude from checking your calendar. It then offers only the open times you set on Bookings.',
@@ -1462,18 +1472,18 @@ const googleCalendar = {
       rules: ["Claude checks when you're busy before offering open times."],
     },
   },
-  /** The mock sign-in (N-Conn-08): which calendar shows when Maria is busy. Nothing is typed. */
+  /** The mock sign-in (N-Conn-08): which calendar shows when Mike is busy. Nothing is typed. */
   signIn: {
     provider: 'Google',
     question: "Which calendar shows when you're busy?",
     choices: [
-      { id: 'rivera-jobs', label: 'Rivera Plumbing jobs', detail: 'maria@riveraplumbing.example' },
+      { id: 'rivera-jobs', label: 'Turner Plumbing jobs', detail: 'mike@turnerplumbing.example' },
       { id: 'personal', label: 'Personal', detail: 'Busy times only, like the other' },
     ],
     value: 'rivera-jobs',
     steps: { label: 'Connect Google Calendar', steps: ['Choose', 'Sign in', 'Review tools', 'Confirm'], current: 1 },
   },
-  /** Reviewing its one tool before it turns on (N-Conn-09): no rule of Maria's covers it yet. */
+  /** Reviewing its one tool before it turns on (N-Conn-09): no rule of Mike's covers it yet. */
   review: {
     intro: "Claude sees only when you're busy, never what the event is: no titles, guests or notes.",
     tools: [
@@ -1526,7 +1536,7 @@ const googleCalendar = {
     },
   } satisfies { rows: ChangeRowView[]; checks: ChangeReviewProps['checks'] },
   /**
-   * "Add a connector" on Rivera's Connectors page (N-Conn-07): every built-in connector is added and
+   * "Add a connector" on Turner's Connectors page (N-Conn-07): every built-in connector is added and
    * Stripe is connected, so Google Calendar is the one to connect. Verification is never listed.
    */
   picker: {
@@ -1552,7 +1562,7 @@ const googleCalendar = {
 // The payment limit and the preset review (N-Conn-17 to N-Conn-20), as the Rules page words them.
 
 /**
- * Rivera's payment limit (`RIVERA_MONEY_CAP_CENTS`, $500), as the Payments and Stripe groups show
+ * Turner's payment limit (`RIVERA_MONEY_CAP_CENTS`, $500), as the Payments and Stripe groups show
  * it, and the words for a Desk with none set. The screen formats the amounts.
  */
 const paymentLimit = {
@@ -1562,7 +1572,7 @@ const paymentLimit = {
 };
 
 /**
- * The setup interview's draft rules for Rivera, by outcome, in the setup board's words: what Claude
+ * The setup interview's draft rules for Turner, by outcome, in the setup board's words: what Claude
  * does and who it's for (N-R2-Setup-08-Rules, signed on 2026-10-30).
  */
 const setupOutcomes = {
@@ -1589,13 +1599,13 @@ const defaultAsk = {
   words: [word('who', 'Anyone')],
 } satisfies ChangeRowView['after'];
 
-/** A card of Rivera's on one side of a change: its outcome, limit, reason and words. */
+/** A card of Turner's on one side of a change: its outcome, limit, reason and words. */
 function cardSide(id: keyof typeof ruleWords, card: RuleCard): NonNullable<ChangeRowView['before']> {
   const limits: Partial<Record<keyof typeof ruleWords, string>> = ruleLimits;
   return { mode: card.mode, limit: limits[id], reason: card.reason, words: ruleWords[id] };
 }
 
-/** Each of Rivera's rule targets' effects, as the master plan's tool table lists them. */
+/** Each of Turner's rule targets' effects, as the master plan's tool table lists them. */
 const TOOL_EFFECTS: Partial<Record<AnyToolName, Effect[]>> = {
   'native.quote': ['change'],
   'native.book': ['change'],
@@ -1607,10 +1617,10 @@ const TOOL_EFFECTS: Partial<Record<AnyToolName, Effect[]>> = {
 };
 
 /**
- * Sample copies of plan 01a's presets as Rivera's Desk drafts them (`desk.presets.preset_cards`), in
+ * Sample copies of plan 01a's presets as Turner's Desk drafts them (`desk.presets.preset_cards`), in
  * their words. Both let Claude show open times, take leads and callbacks, start verifications and
  * read the owner's material on its own (`utilityCards`); Recommended rules adds quotes at list price,
- * weekday bookings in her weekday hours (8:00 am to 6:00 pm), customers' own documents and an ask
+ * weekday bookings in his weekday hours (8:00 am to 6:00 pm), customers' own documents and an ask
  * before money moves. Sample data for the reviews: the description check reads the presets' own
  * cards from their export.
  */
@@ -1648,7 +1658,7 @@ const recommendedCards = [
 
 const presetSamples = { ask_first: utilityCards, auto: [...utilityCards, ...recommendedCards] } satisfies Record<RulesPreset, RuleCard[]>;
 
-/** Rivera's rules in the order the reviews list them, with each row's title and connector. */
+/** Turner's rules in the order the reviews list them, with each row's title and connector. */
 const reviewOrder = [
   ['rv-quote', 'Quote', connectorViews.quotes],
   ['rv-book-wk', 'Book a visit', connectorViews.bookings],
@@ -1664,7 +1674,7 @@ const reviewOrder = [
 type ReviewId = (typeof reviewOrder)[number][0];
 
 /**
- * Rivera's cards before a preset applies: the starter preset's cards, which the seed keeps as it
+ * Turner's cards before a preset applies: the starter preset's cards, which the seed keeps as it
  * started with them, its own cards and Dana Whitfield's booking rule (`personalBookingCard`).
  */
 const riveraCardsById: Record<ReviewId, RuleCard> = { ...ruleCards, 'rv-dana-book': personalBookingCard };
@@ -1692,7 +1702,7 @@ function presetSide(card: RuleCard, moved: boolean): NonNullable<ChangeRowView['
 }
 
 /**
- * A preset's review of Rivera's rules, as the web app builds it: `reviewChanges` pairs each card the
+ * A preset's review of Turner's rules, as the web app builds it: `reviewChanges` pairs each card the
  * preset drops with the preset's card that covers its whole scope, or the default ask, and lists
  * the preset's cards nothing maps to as added; this gives each side its words.
  */
@@ -1725,7 +1735,7 @@ function presetReview(preset: readonly RuleCard[]): ChangeRowView[] {
 }
 
 /**
- * Choosing "Ask me first" (N-Conn-18-Preset-Review): each of Rivera's own cards goes, personal ones
+ * Choosing "Ask me first" (N-Conn-18-Preset-Review): each of Turner's own cards goes, personal ones
  * included (Dana Whitfield's booking rule), and nothing in the preset governs its tool, so each
  * falls to the default ask. The after side replaces the whole rule, which the row's "Changed" tag
  * says; within it only a new outcome is tagged, as the board draws it, so Refund, which already
@@ -1756,8 +1766,8 @@ const sharedChargeReviewRow: ChangeRowView = {
  * preset's rules for every tool that charges money or sends it out, which ask. Saturdays, Dana's
  * any-time rule and See charges fall to the default ask, since no card of the preset covers their
  * whole scope. Nothing is added. Quotes, weekday bookings and documents have no row: the preset's
- * rules for them are Rivera's own in all but their ids, its weekday booking rule in her hours
- * (8:00 am to 6:00 pm) and her words.
+ * rules for them are Turner's own in all but their ids, its weekday booking rule in his hours
+ * (8:00 am to 6:00 pm) and his words.
  */
 const recommendedReview = presetReview(presetSamples.auto);
 
@@ -1773,7 +1783,7 @@ function directoryRow(section: HubSection): DirectoryRowView {
 }
 
 /**
- * Rivera Plumbing's Connectors page (N-Conn-23-Connectors): the six built-in connectors, Stripe
+ * Turner Plumbing's Connectors page (N-Conn-23-Connectors): the six built-in connectors, Stripe
  * connected with its test account, and Google Calendar, catalog-only in the demo, so coming soon
  * with no "Connect".
  */
@@ -1784,7 +1794,7 @@ const directory = {
     .map((section) => (section.connector.id === 'verification' ? { ...directoryRow(section), note: 'Always on' } : directoryRow(section))),
   connected: hubSections
     .filter((section) => section.connector.source.kind === 'external')
-    .map((section) => ({ ...directoryRow(section), connection: 'Rivera Plumbing, test mode (mock)' })),
+    .map((section) => ({ ...directoryRow(section), connection: 'Turner Plumbing, test mode (mock)' })),
   available: [{ connector: googleCalendarView, tools: 1, note: 'Coming soon in this demo' }] as DirectoryRowView[],
 };
 
@@ -1847,7 +1857,7 @@ const driftedRefundDefinition = `{
 const toolProfiles = {
   listCharges: listChargesProfile,
   createRefund: createRefundProfile,
-  /** The refund tool after its definition changed on the server: off until Maria reviews it. */
+  /** The refund tool after its definition changed on the server: off until Mike reviews it. */
   createRefundChanged: {
     ...createRefundProfile,
     pending_definition_text: driftedRefundDefinition,
@@ -1947,7 +1957,7 @@ const publicDesk = {
         fact_id: 'charter:policy:first_visit',
         title: 'The service call deposit is credited to the repair if you go ahead.',
       }),
-      cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Maria texts before she arrives.' }),
+      cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Mike texts before he arrives.' }),
     ],
     starters: ['How much is drain clearing?', 'Can someone come Tuesday?', 'Do you work in Alameda?'],
     agent_card: [],
@@ -1965,7 +1975,7 @@ const publicDesk = {
         fact_id: 'charter:policy:first_visit',
         title: 'The service call deposit is credited to the repair if you go ahead.',
       }),
-      cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Maria texts before she arrives.' }),
+      cardBlock('policy', { fact_id: 'charter:policy:arrival', title: 'Mike texts before he arrives.' }),
     ],
     starters: ['¿Cuánto cuesta destapar un desagüe?', '¿Puede venir alguien el martes?', '¿Trabajan en Alameda?'],
     agent_card: [],
@@ -2043,6 +2053,7 @@ export const rivera = {
   conversations,
   events,
   decisions,
+  cancelledByBooking,
   heldVerified,
   heldRefund,
   ruleCards,

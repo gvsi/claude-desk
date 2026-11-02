@@ -54,7 +54,7 @@ def fixture(name: str) -> list[dict]:
 # send_reply.
 TOOLS = fixture("test_tool_removal_then_continue")[0]["request"]["tools"]
 # A model context's system prompt, as the loop renders it: one cached text block.
-SYSTEM = [{"type": "text", "text": "You are Claude, answering for Rivera Plumbing.",
+SYSTEM = [{"type": "text", "text": "You are Claude, answering for Turner Plumbing.",
            "cache_control": {"type": "ephemeral"}}]
 
 
@@ -567,7 +567,7 @@ async def test_a_context_freezes_the_system_prompt_it_opened_with(api_conn, ids)
     assert await context_system(api_conn, ids.session_id) == SYSTEM
 
     # a fresh context freezes its own prompt; each call of it sends that one
-    renamed = [{**SYSTEM[0], "text": "You are Claude, answering for Rivera Plumbing & Sons."}]
+    renamed = [{**SYSTEM[0], "text": "You are Claude, answering for Turner Plumbing & Sons."}]
     await start_fresh_context(api_conn, ids, TOOLS, system=renamed)
     assert (await prepare_model_input(api_conn, ids.session_id)).system == renamed
     assert await context_system(api_conn, ids.session_id) == renamed
@@ -726,7 +726,7 @@ async def test_the_owner_joining_and_leaving_hold_their_event(api_conn, ids):
     for kind in ("owner_joined", "owner_left"):
         with pytest.raises(ValueError):
             await append_message(api_conn, ids, kind)
-    joined, left = EvOwnerJoined(type="owner_joined", name="Maria Rivera"), EvOwnerLeft(type="owner_left")
+    joined, left = EvOwnerJoined(type="owner_joined", name="Mike Turner"), EvOwnerLeft(type="owner_left")
     await append_message(api_conn, ids, "owner_joined", event_seq=await emit(api_conn, ids, joined))
     await append_message(api_conn, ids, "owner_left", event_seq=await emit(api_conn, ids, left))
     for audience in ("visitor", "owner"):

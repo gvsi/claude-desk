@@ -20,7 +20,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE } from '../../mocks/world.ts';
-import { SPEC, expectTabOrder } from '../../ds/boards/spec.ts';
+import { SPEC, expectTabOrder, footerLink } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { holdReads } from '../../test/holdReads.ts';
@@ -140,14 +140,14 @@ function voicemailIn(root: HTMLElement): string | null {
 /** The sentence a voicemail says only with an urgent callback tool on. */
 const EMERGENCY = 'For an emergency, leave a message';
 
-/** Turns Rivera's urgent callback tool on or off on the Desk, as the owner would elsewhere. */
+/** Turns Turner's urgent callback tool on or off on the Desk, as the owner would elsewhere. */
 function riverasUrgentTool(status: 'enabled' | 'disabled'): void {
   const desk = mockStore.world.desk(RIVERA.deskId);
   if (!desk) throw new Error('the mock has the main Desk');
   desk.tools = desk.tools.map((row) => (row.tool === 'desk.emergency-callback' ? { ...row, status, review_reason: null } : row));
 }
 
-/** Rivera's business and owner, as the share kit names them. */
+/** Turner's business and owner, as the share kit names them. */
 const RIVERA_BUSINESS = rivera.business.name;
 const RIVERA_OWNER = rivera.business.ownerName;
 
@@ -170,7 +170,7 @@ function stubClipboard() {
 
 /** A setup interview made through the mock, its rules confirmed, at the owner's preview before going live. */
 async function setupAtPreview(): Promise<SetupState> {
-  const description = "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
+  const description = "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
   const started = await mockStore.dispatch('startSetup', { body: { description, timezone: LA, idempotency_key: newIdempotencyKey() } });
   // A new interview answers 201, as the API's does.
   if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
@@ -352,7 +352,7 @@ describe('customers', () => {
     expect(screen.getByRole('list', { name: 'Leads' }).getByRole('link').elements()).toEqual([]);
     await expectOwnerBoard(screen.container, { current: 'Customers', cards: false });
     const reached = await expectTabOrder(userEvent, [...people, caption]);
-    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption]);
+    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption, footerLink(screen.container)]);
   });
 
   it('empty_people_is_kind', async () => {
@@ -542,6 +542,47 @@ describe('a person outside the list', () => {
 });
 
 describe('share', () => {
+  it('more_channels_matches_the_signed_section_on_desktop_and_phone', async () => {
+    const channels = [
+      ['Website embed', 'The same chat on your own site.'],
+      ['WhatsApp', 'Customers message your Desk from WhatsApp.'],
+      ['iMessage', 'The same chat in Messages on iPhone.'],
+      ['Phone calls', 'Your Desk answers your business line by voice.'],
+    ];
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(`${DESK}/share`, { viewport });
+      const section = screen.getByRole('region', { name: 'More channels' });
+      await expect.element(section).toBeVisible();
+      const heading = section.getByRole('heading', { level: 2, name: 'More channels' }).element();
+      expect(heading.classList).toContain('cd-share-kit__heading');
+      const cards = section.element().querySelectorAll('.cd-card');
+      expect(cards).toHaveLength(1);
+      const card = cards[0] as HTMLElement;
+      expect(getComputedStyle(card).padding).toBe('0px');
+      const words = screen.getByRole('list', { name: 'Ready-made words' }).element();
+      expect(Math.round(heading.getBoundingClientRect().top - words.getBoundingClientRect().bottom)).toBe(8);
+      expect(Math.round(card.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12);
+      const rows = section.getByRole('listitem').elements();
+      expect(rows.map((row) => [row.querySelector('.cd-share-kit__later-title')?.textContent, row.querySelector('.cd-share-kit__later-line')?.textContent, row.querySelector('.cd-pill')?.textContent])).toEqual(
+        channels.map(([name, line]) => [name, line, 'Coming later']),
+      );
+      for (const [index, row] of rows.entries()) {
+        const style = getComputedStyle(row);
+        expect(style.padding).toBe('16px');
+        expect(style.borderTopWidth).toBe(index === 0 ? '0px' : '1px');
+        if (index > 0) expect(style.borderTopColor).toBe('rgba(250, 249, 245, 0.12)');
+        expect(row.querySelector('button, a, input, [tabindex]')).toBeNull();
+        for (const text of row.querySelectorAll('p, .cd-pill')) {
+          expect(text.scrollWidth).toBeLessThanOrEqual(text.clientWidth);
+        }
+        const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
+        const text = row.querySelector('.cd-share-kit__later-text')!.getBoundingClientRect();
+        expect(pill.left).toBeGreaterThanOrEqual(text.right);
+      }
+      expectNoHorizontalScroll();
+    }
+  });
+
   it('share_page_uses_the_desk_slug', async () => {
     const { screen } = await renderRoute(`${DESK}/share`);
     const url = `${window.location.origin}/d/${RIVERA.slug}`;
@@ -605,8 +646,8 @@ describe('share', () => {
     await expect.element(card.getByText(displayLink(url), { exact: true })).toBeVisible();
     await expect.element(card.getByText(`Answered by Claude, an AI. Ask for ${owner} any time.`, { exact: true })).toBeVisible();
 
-    // The ready-made words, each with its Copy, which copies its words. Rivera's urgent callback
-    // tool is on, so once the Desk's tools are read the voicemail says Maria calls back about an
+    // The ready-made words, each with its Copy, which copies its words. Turner's urgent callback
+    // tool is on, so once the Desk's tools are read the voicemail says Mike calls back about an
     // emergency.
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Ready-made words' })).toBeVisible();
     const blocks = SHARE_COPY(business, owner, url, { urgentCallback: true });
@@ -656,7 +697,7 @@ describe('share', () => {
     expect(voicemail(ofLinda.screen.container)).toBe(lindaWords);
     await cleanup();
 
-    // Rivera's Desk, whose urgent callback tool the seed turns on as the kernel's does: the voicemail
+    // Turner's Desk, whose urgent callback tool the seed turns on as the kernel's does: the voicemail
     // word for word, emergency callback included, once its tools are read. Until then it is drawn
     // without that sentence, so it never draws a promise and takes it back.
     const rivera = mockStore.world.desk(RIVERA.deskId);
@@ -670,13 +711,13 @@ describe('share', () => {
     expect(voicemail(ofRivera.screen.container)).toBe(SHARE_COPY(RIVERA_BUSINESS, RIVERA_OWNER, url, { urgentCallback: false })[2]?.text);
     held.release();
     await expect.poll(() => voicemail(ofRivera.screen.container)).toBe(
-      'You’ve reached Rivera Plumbing. For quotes and bookings, visit ' +
-        `${window.location.host} slash d slash ${RIVERA.slug}, where Claude, an AI, answers any time. For an emergency, leave a message and Maria Rivera will call you back.`,
+      'You’ve reached Turner Plumbing. For quotes and bookings, visit ' +
+        `${window.location.host} slash d slash ${RIVERA.slug}, where Claude, an AI, answers any time. For an emergency, leave a message and Mike Turner will call you back.`,
     );
   });
 
   it('a_cached_emergency_promise_waits_for_shares_own_read', async () => {
-    // Rules read with Rivera's urgent callback on, a read the app keeps; then the tool goes off
+    // Rules read with Turner's urgent callback on, a read the app keeps; then the tool goes off
     // elsewhere. Share, in the same app, leaves the promise out while its own read is out, and
     // after it lands with the tool off.
     const { screen, router } = await renderRoute(`${DESK}/rules`);
@@ -855,15 +896,15 @@ describe('share', () => {
     const { screen } = await renderRoute(`${DESK}/share`, { viewport: 'phone' });
     await expect.element(screen.getByRole('img', { name: /^QR code for/ })).toBeVisible();
     // N-Run2-Share-Phone: 16 px between the header, the link card, the printable card and Print
-    // card, the ready-made words and the website embed.
+    // card and the ready-made words; More channels follows 8 px under the words.
     const header = screen.container.querySelector('.cd-page-header')!.getBoundingClientRect();
     const link = screen.getByRole('region', { name: 'Your link' }).element().getBoundingClientRect();
     const card = screen.getByRole('figure').element().getBoundingClientRect();
     const print = screen.getByRole('button', { name: 'Print card' }).element().getBoundingClientRect();
     const heading = screen.getByRole('heading', { level: 2, name: 'Ready-made words' }).element().getBoundingClientRect();
     const words = screen.getByRole('list', { name: 'Ready-made words' }).element().getBoundingClientRect();
-    const later = screen.container.querySelector('.cd-share-kit__later')!.getBoundingClientRect();
-    expect([link.top - header.bottom, card.top - link.bottom, heading.top - print.bottom, later.top - words.bottom].map(Math.round)).toEqual([16, 16, 16, 16]);
+    const later = screen.getByRole('heading', { level: 2, name: 'More channels' }).element().getBoundingClientRect();
+    expect([link.top - header.bottom, card.top - link.bottom, heading.top - print.bottom, later.top - words.bottom].map(Math.round)).toEqual([16, 16, 16, 8]);
   });
 });
 

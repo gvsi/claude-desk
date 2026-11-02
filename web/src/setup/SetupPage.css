@@ -44,6 +44,16 @@
   flex: none;
   align-items: center;
   gap: var(--space-10);
+  /* Clear the bell and Preview badge with the inset edge, keeping the lockup in place at rest. */
+  padding: var(--space-6);
+  margin: calc(-1 * var(--space-6));
+  /* A link home that keeps the lockup's look: its own ink, no underline, and no change on hover.
+     Keyboard focus is the base edge, 1 px of line-focus just inside it at the control radius; a click
+     shows none. */
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 .cd-setup__business {
@@ -482,6 +492,29 @@
 .cd-setup-live__embed-text .cd-setup-live__embed-line {
   margin-top: var(--space-2);
   color: var(--text-secondary);
+}
+
+/* "More channels": each a row laid out as the embed is, 12 px above and below, a hairline between. */
+.cd-setup-live__channels {
+  margin: var(--space-10) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-setup-live__channel {
+  padding-block: var(--space-12);
+}
+
+.cd-setup-live__channel:first-child {
+  padding-top: 0;
+}
+
+.cd-setup-live__channel:last-child {
+  padding-bottom: 0;
+}
+
+.cd-setup-live__channel + .cd-setup-live__channel {
+  border-top: 1px solid var(--line-hairline);
 }
 
 

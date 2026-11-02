@@ -9,7 +9,7 @@ import { TRANSCRIPT_NOTE } from './copy.ts';
 import './Conversations.css';
 
 /** The fresh copy's link, as Today's skeleton measures it: the slug isn't known before the read lands. */
-const FRESH_LINK = publicLink('rivera-plumbing-abc123').replace(/^https?:\/\//, '');
+const FRESH_LINK = publicLink('turner-plumbing-abc123').replace(/^https?:\/\//, '');
 
 /** The fresh copy's held chat is with a visitor who gave no name, so the page calls them this. */
 const VISITOR = { text: 'Visitor', className: 'cd-user-name' } as const;
@@ -205,7 +205,7 @@ function ControlsRoom() {
             <div className="cd-conversation-skeleton__button" />
           </div>
           <MeasuredLines
-            parts={[VISITOR, ' sees “Maria Rivera joined the chat.”']}
+            parts={[VISITOR, ' sees “Mike Turner joined the chat.”']}
             className="cd-take-over__line cd-type-caption"
             text="caption"
             fallback={1}
@@ -295,11 +295,11 @@ export function ConversationSkeleton() {
   );
 }
 
-/** A fresh copy's first rows, as the list draws them: one with no status line, then two with one. */
+/** A fresh copy's first rows: two visitor previews, one booked and one held, then an agent's status without a preview. */
 const ROWS = [
-  { name: '50%', status: null },
-  { name: '40%', status: '45%' },
-  { name: '75%', status: '25%' },
+  { name: '50%', preview: '75%', status: '20%' },
+  { name: '40%', preview: '85%', status: '45%' },
+  { name: '75%', preview: null, status: '25%' },
 ] as const;
 
 /** Day groups enough to fill a tall window's list column; what the column can't show is cut off. */
@@ -317,8 +317,8 @@ function ListShapes() {
       </div>
       {Array.from({ length: GROUPS }, (_, group) => (
         <div key={group} className="cd-conversations__group">
-          <div className="cd-conversations__day" data-skeleton-anchor={group === 0 ? 'conversations-day-0' : undefined}>
-            <Skeleton shape="line" text="meta" width={group === 0 ? 40 : 72} />
+          <div className="cd-conversations__day cd-type-caption" data-skeleton-anchor={group === 0 ? 'conversations-day-0' : undefined}>
+            <Skeleton shape="line" text="caption" width={group === 0 ? 40 : 72} />
           </div>
           <div className="cd-conversations__items">
             {ROWS.map((row, i) => (
@@ -327,6 +327,11 @@ function ListShapes() {
                   <Skeleton shape="line" text="control" width={row.name} />
                   <Skeleton shape="line" text="caption" width={44} />
                 </span>
+                {row.preview === null ? null : (
+                  <span className="cd-conversation-item__quote cd-type-meta">
+                    <Skeleton shape="line" text="meta" width={row.preview} />
+                  </span>
+                )}
                 {row.status === null ? null : (
                   <span className="cd-conversation-item__status">
                     <Skeleton shape="circle" size={6} />
@@ -373,7 +378,7 @@ export function ConversationsSkeleton({ withHeader, open }: { withHeader: boolea
         ) : null}
       </div>
       <div className="cd-conversations__footer">
-        <ConceptFooter />
+        <ConceptFooter skeleton />
       </div>
     </div>
   );

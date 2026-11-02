@@ -1,7 +1,7 @@
 """Proving: the startup selftest, `desk-prove` runs, the proof cache and loaded versions.
 
 The kernel proves rule sets with `desk-prove` (SymCC and cvc5) when its startup selftest passes
-(`symcc` mode) and falls back to the bounded check when it doesn't (`bounded` mode). The Rivera
+(`symcc` mode) and falls back to the bounded check when it doesn't (`bounded` mode). The Turner
 seed and the starter presets are proved in CI and shipped as reports; a copy activates them only
 from that cache, in either mode, and never proves inline.
 """
@@ -325,7 +325,7 @@ def kernel_row_counts(*tables: str) -> dict[str, int]:
 
 @pytest.mark.parametrize("patched", ["cedar_sha256", "cards_sha256"])   # other Cedar, or the same Cedar from other cards
 async def test_an_uncached_seed_is_503_in_either_mode(patched, monkeypatch, frozen_clock, tmp_path, caplog, mockpay):
-    compiled = shipped("rivera").cedar_sha256                     # what the kernel compiles Rivera's cards to
+    compiled = shipped("rivera").cedar_sha256                     # what the kernel compiles Turner's cards to
     # the shipped reports, each with one hash patched, so nothing the kernel compiles has a report
     for preset in activation.SHIPPED_PRESETS:
         report = shipped(preset).model_copy(update={patched: "0" * 64})
@@ -497,7 +497,7 @@ def test_prove_presets_check_passes(desk_prove):
 
 def test_prove_latency_writes_its_inputs_at_the_rivera_cap(monkeypatch, capsys):
     """The latency script up to the image: it writes `desk-prove`'s inputs for both of its sets at
-    the money cap the Rivera seed is proved at (`make proofs`), then hands them to docker, which is
+    the money cap the Turner seed is proved at (`make proofs`), then hands them to docker, which is
     stubbed here, so nothing is proved."""
     mounted = {}
 

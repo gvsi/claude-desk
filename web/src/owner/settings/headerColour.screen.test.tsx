@@ -7,11 +7,101 @@ import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea }
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { mockDrain } from '../../test/mockDrain.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { BRAND_PALETTE, PALETTE_KEYS } from '../../public/palette.ts';
 
-const GENERAL = `/app/${RIVERA.deskId}/settings/general`;
+const GENERAL = `/app/${RIVERA.deskId}/profile`;
+
+it('keeps swatches enabled and stores the latest quick pick after a slow earlier save', async () => {
+  const { screen } = await renderRoute(GENERAL);
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  let release!: () => void;
+  const until = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(() => release());
+  mockStore.inject({ route: 'setBusiness', status: 200, afterCommit: true, until });
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'setBusiness').length).toBe(1);
+  for (const radio of group.getByRole('radio').elements()) {
+    expect(radio.hasAttribute('disabled')).toBe(false);
+    expect(radio.getAttribute('aria-disabled')).not.toBe('true');
+  }
+  await expect.element(group).not.toHaveAttribute('aria-busy', 'true');
+  await group.getByRole('radio', { name: 'Navy', exact: true }).click();
+  await expect.element(group.getByRole('radio', { name: 'Navy', exact: true })).toHaveAttribute('aria-checked', 'true');
+  expect(getComputedStyle(card.element().querySelector('.cd-header-colour__preview')!).backgroundColor).toBe('rgb(31, 58, 92)');
+  release();
+  await expect.poll(() => mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'navy' });
+  await expect.element(group.getByRole('radio', { name: 'Navy', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
+});
+
+it.each([200, 422, 500])('ignores a superseded save response (%s) while the latest keyboard pick saves', async (status) => {
+  const { screen } = await renderRoute(GENERAL);
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  let releaseFirst!: () => void;
+  const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  let releaseLast!: () => void;
+  const last = new Promise<void>((resolve) => { releaseLast = resolve; });
+  onTestFinished(() => { releaseFirst(); releaseLast(); });
+  let received = false;
+  worker.use(http.put(ROUTES.setBusiness.path.replace('{desk_id}', ':desk_id'), async ({ request, cookies }) => {
+    if (received) return undefined;
+    received = true;
+    mockStore.inject({ route: 'setBusiness', status, afterCommit: status === 200 });
+    const answer = await mockStore.dispatch('setBusiness', {
+      params: { desk_id: RIVERA.deskId }, body: await request.json(), cookies,
+    });
+    await first;
+    if ('network' in answer) return HttpResponse.error();
+    return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+  }));
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'setBusiness').length).toBe(1);
+  mockStore.inject({ route: 'setBusiness', status: 200, afterCommit: true, until: last });
+  await userEvent.keyboard('{ArrowRight}');
+  const navy = group.getByRole('radio', { name: 'Navy', exact: true });
+  await expect.element(navy).toHaveFocus();
+  await expect.element(navy).toHaveAttribute('aria-checked', 'true');
+  releaseFirst();
+  await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'setBusiness').length).toBe(2);
+  await expect.element(navy).toHaveAttribute('aria-checked', 'true');
+  await expect.element(group).not.toHaveAttribute('aria-busy', 'true');
+  expect(group.getByRole('radio').elements().every((radio) => !radio.hasAttribute('disabled') && radio.getAttribute('aria-disabled') !== 'true')).toBe(true);
+  await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
+  releaseLast();
+  await mockDrain.waitForIdle();
+  await expect.element(navy).toHaveAttribute('aria-checked', 'true');
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'navy' });
+  await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
+});
+
+it.each([422, 500])('reverts only a failed final pick (%s) to the colour saved by the earlier pick', async (status) => {
+  const { screen } = await renderRoute(GENERAL);
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  let release!: () => void;
+  const until = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(() => release());
+  mockStore.inject({ route: 'setBusiness', status: 200, afterCommit: true, until });
+  mockStore.inject({ route: 'setBusiness', status });
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'setBusiness').length).toBe(1);
+  await group.getByRole('radio', { name: 'Navy', exact: true }).click();
+  await expect.element(group.getByRole('radio', { name: 'Navy', exact: true })).toHaveAttribute('aria-checked', 'true');
+  release();
+  await mockDrain.waitForIdle();
+  await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect.element(card.getByRole('alert')).toHaveTextContent("That didn't save, so your header is still Clay.");
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
+  expect(mockStore.requests.filter(({ key }) => key === 'setBusiness')).toHaveLength(2);
+});
 
 it('picks a header colour immediately and saves the whole business', async () => {
   const { screen } = await renderRoute(GENERAL);
@@ -25,7 +115,7 @@ it('picks a header colour immediately and saves the whole business', async () =>
   await group.getByRole('radio', { name: 'Clay', exact: true }).click();
   await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect.poll(() => mockStore.requests.filter((r) => r.key === 'setBusiness').map((r) => r.body)).toEqual([{
-    name: 'Rivera Plumbing', owner_display_name: 'Maria Rivera', timezone: 'America/Los_Angeles',
+    name: 'Turner Plumbing', owner_display_name: 'Mike Turner', timezone: 'America/Los_Angeles',
     brand_palette: 'clay', brand: {},
   }]);
   await expect.poll(() => getComputedStyle(card.element().querySelector('.cd-header-colour__preview')!).backgroundColor).toBe('rgb(119, 54, 36)');
@@ -37,7 +127,7 @@ it('moves through the radio group with arrow keys, wrapping at both ends', async
   await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
   (group.getByRole('radio', { name: 'Teal', exact: true }).element() as HTMLElement).focus();
   for (const [key, name] of [['ArrowRight', 'Clay'], ['ArrowDown', 'Navy'], ['ArrowUp', 'Clay'], ['ArrowLeft', 'Teal'], ['ArrowLeft', 'No colour'], ['ArrowLeft', 'Slate'], ['ArrowRight', 'No colour']] as const) {
-    await expect.element(group).toHaveAttribute('aria-busy', 'false');
+    await mockDrain.waitForIdle();
     await userEvent.keyboard(`{${key}}`);
     await expect.element(group.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true');
     await expect.element(group.getByRole('radio', { name, exact: true })).toHaveFocus();
@@ -45,9 +135,9 @@ it('moves through the radio group with arrow keys, wrapping at both ends', async
   }
 });
 
-it('restores the place on Settings when Back returns from another page', async () => {
+it('restores the place on Profile when Back returns from another page', async () => {
   const { screen, router } = await renderRoute(GENERAL, { viewport: { width: 390, height: 600 } });
-  await expect.element(screen.getByRole('region', { name: 'Delete this Desk' })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Header colour', exact: true })).toBeVisible();
   const main = screen.getByRole('main').element();
   const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
   main.scrollTop = 180;
@@ -72,7 +162,7 @@ it('restores a failed pick with the previous colour named in the notice', async 
   await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect.poll(() => getComputedStyle(document.querySelector('.cd-header-colour__preview')!).backgroundColor).toBe('rgb(31, 78, 74)');
   await group.getByRole('radio', { name: 'No colour', exact: true }).click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await mockDrain.waitForIdle();
   await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
   mockStore.inject({ route: 'setBusiness', status: 500 });
   await group.getByRole('radio', { name: 'Teal', exact: true }).click();
@@ -93,9 +183,8 @@ it('fits all eight swatches on one phone line and uses the signed sizes', async 
     expect(getComputedStyle(swatches[1]!).boxShadow).not.toBe('none');
     const card = screen.getByRole('region', { name: 'Header colour', exact: true }).element();
     const previous = screen.getByRole('region', { name: 'Your business' }).element();
-    const next = screen.getByRole('main').getByRole('region', { name: 'Claude acts for you' }).element();
     expect(Math.round(card.getBoundingClientRect().top - previous.getBoundingClientRect().bottom)).toBe(viewport === 'phone' ? 16 : 20);
-    expect(Math.round(next.getBoundingClientRect().top - card.getBoundingClientRect().bottom)).toBe(viewport === 'phone' ? 16 : 20);
+    expect(screen.getByRole('main').getByRole('region', { name: 'Claude acts for you' }).query()).toBeNull();
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
   }
@@ -117,11 +206,11 @@ it('draws the public header in every picked palette, including No colour', async
   for (const palette of PALETTE_KEYS) {
     expect(await mockStore.dispatch('setBusiness', {
       params: { desk_id: RIVERA.deskId },
-      body: { name: 'Rivera Plumbing', owner_display_name: 'Maria Rivera', timezone: 'America/Los_Angeles', brand_palette: palette, brand: {} },
+      body: { name: 'Turner Plumbing', owner_display_name: 'Mike Turner', timezone: 'America/Los_Angeles', brand_palette: palette, brand: {} },
     })).toMatchObject({ status: 200 });
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(`/d/${RIVERA.slug}`, { viewport });
-      await expect.element(screen.getByRole('heading', { name: 'Rivera Plumbing', exact: true })).toBeVisible();
+      await expect.element(screen.getByRole('heading', { name: 'Turner Plumbing', exact: true })).toBeVisible();
       const header = document.querySelector('.cd-public-shell__brand')!;
       const probe = document.createElement('div');
       const colors = BRAND_PALETTE[palette];
@@ -137,20 +226,25 @@ it('draws the public header in every picked palette, including No colour', async
 });
 
 
-it('uses the shared warm focus ring without changing the selected ring', async () => {
+it('turns the swatch edge warm on keyboard focus without changing the selected ring', async () => {
   const { screen } = await renderRoute(GENERAL);
   const teal = screen.getByRole('radio', { name: 'Teal', exact: true });
   await expect.element(teal).toHaveAttribute('aria-checked', 'true');
   const selectedRing = getComputedStyle(teal.element()).boxShadow;
+  const box = teal.element().getBoundingClientRect().toJSON();
   await userEvent.keyboard('{Tab}');
   (teal.element() as HTMLElement).focus();
   expect(teal.element().matches(':focus-visible')).toBe(true);
   const probe = document.createElement('span');
-  probe.style.color = 'var(--ring-focus)';
+  probe.style.color = 'var(--line-focus)';
   document.body.append(probe);
   try {
-    expect(getComputedStyle(teal.element()).outlineColor).toBe(getComputedStyle(probe).color);
-    expect(getComputedStyle(teal.element()).boxShadow).toBe(selectedRing);
+    // The swatch's own 1 px edge turns line-focus: no outline, the selected ring as it was, and the
+    // swatch no bigger.
+    const style = getComputedStyle(teal.element());
+    expect([style.borderTopWidth, style.borderTopStyle, style.borderTopColor]).toEqual(['1px', 'solid', getComputedStyle(probe).color]);
+    expect([style.outlineStyle, style.boxShadow]).toEqual(['none', selectedRing]);
+    expect(teal.element().getBoundingClientRect().toJSON()).toEqual(box);
   } finally {
     probe.remove();
   }
@@ -164,7 +258,7 @@ it.each(['network', 500] as const)('reads back a committed pick when its save re
   await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
   mockStore.inject({ route: 'setBusiness', status, afterCommit: true });
   await group.getByRole('radio', { name: 'Clay', exact: true }).click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await mockDrain.waitForIdle();
   await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
@@ -179,7 +273,7 @@ it('keeps an unconfirmed pick when the save response and reread both fail', asyn
   mockStore.inject({ route: 'setBusiness', status: 'network', afterCommit: true });
   mockStore.inject({ route: 'desks', status: 'network', times: 10 });
   await group.getByRole('radio', { name: 'Clay', exact: true }).click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await mockDrain.waitForIdle();
   await expect.element(card.getByRole('alert')).toHaveTextContent("We couldn't reach Claude Desk. Check your connection, then try again.");
   await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
@@ -195,7 +289,7 @@ it('retries the selected unconfirmed colour without duplicating an in-flight sav
   let connected = false;
   worker.use(http.get(ROUTES.desks.path, () => connected ? undefined : HttpResponse.error()));
   await clay.click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await mockDrain.waitForIdle();
   await expect.element(card.getByRole('alert')).toHaveTextContent("We couldn't reach Claude Desk. Check your connection, then try again.");
   await expect.element(clay).toHaveAttribute('aria-checked', 'true');
 
@@ -203,17 +297,19 @@ it('retries the selected unconfirmed colour without duplicating an in-flight sav
   let release!: () => void;
   const until = new Promise<void>((resolve) => { release = resolve; });
   onTestFinished(() => release());
+  let saving = false;
   worker.use(http.put(ROUTES.setBusiness.path.replace('{desk_id}', ':desk_id'), async () => {
+    saving = true;
     await until;
     return undefined;
   }));
   await clay.click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'true');
+  await expect.poll(() => saving).toBe(true);
   await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
-  // Bypass aria-disabled to exercise the in-flight guard on the selected swatch itself.
-  (clay.element() as HTMLButtonElement).click();
+  // Repeating the current pick does not enqueue another write.
+  await clay.click();
   release();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await mockDrain.waitForIdle();
   await expect.element(clay).toHaveAttribute('aria-checked', 'true');
   expect(mockStore.requests.filter(({ key }) => key === 'setBusiness')).toHaveLength(2);
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
@@ -235,7 +331,7 @@ it('settles an unconfirmed pick after refocus reads the unchanged server colour 
     return HttpResponse.error();
   }));
   await clay.click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await mockDrain.waitForIdle();
   await expect.element(card.getByRole('alert')).toHaveTextContent("We couldn't reach Claude Desk. Check your connection, then try again.");
   await expect.element(clay).toHaveAttribute('aria-checked', 'true');
   expect(failedReads).toBe(4); // Both readbacks, each with the query's one retry.
@@ -248,7 +344,7 @@ it('settles an unconfirmed pick after refocus reads the unchanged server colour 
   await expect.element(teal).toHaveAttribute('aria-checked', 'true');
   await expect.element(card.getByRole('alert')).not.toBeInTheDocument();
   await clay.click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await mockDrain.waitForIdle();
   await expect.element(clay).toHaveAttribute('aria-checked', 'true');
   expect(mockStore.requests.filter(({ key }) => key === 'setBusiness')).toHaveLength(2);
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
@@ -278,19 +374,20 @@ it('keeps the server pick when an earlier response returns after leaving and com
   await group.getByRole('radio', { name: 'Navy', exact: true }).click();
   await expect.poll(() => committed).toBe(true);
   await expect.element(group.getByRole('radio', { name: 'Navy', exact: true })).toHaveAttribute('aria-checked', 'true');
-  // The same-mount guard also prevents another write while Navy's response is held.
-  (group.getByRole('radio', { name: 'Clay', exact: true }).element() as HTMLButtonElement).click();
+  // New picks stay interactive while their writes wait behind Navy.
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.element(group.getByRole('radio', { name: 'Clay', exact: true })).toHaveAttribute('aria-checked', 'true');
   expect(mockStore.requests.filter(({ key }) => key === 'setBusiness')).toHaveLength(1);
-  await router.navigate(`/app/${RIVERA.deskId}/settings/knowledge`);
+  await router.navigate(`/app/${RIVERA.deskId}/knowledge`);
   await expect.element(group).not.toBeInTheDocument();
   await router.navigate(GENERAL);
   await expect.element(group).toBeVisible();
   await group.getByRole('radio', { name: 'Plum', exact: true }).click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
   await expect.element(group.getByRole('radio', { name: 'Plum', exact: true })).toHaveAttribute('aria-checked', 'true');
   const reads = mockStore.requests.filter(({ key }) => key === 'desks').length;
   release();
   await expect.poll(() => returned).toBe(true);
+  await mockDrain.waitForIdle();
   await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'desks').length).toBeGreaterThan(reads);
   await expect.element(group.getByRole('radio', { name: 'Plum', exact: true })).toHaveAttribute('aria-checked', 'true');
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'plum' });
@@ -318,7 +415,7 @@ it('takes coarse-pointer taps 4 px outside every drawn phone swatch without over
     await cdp().send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: own.right + 4, y: own.top + own.height / 2 }] });
     await cdp().send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await expect.element(group.getByRole('radio', { name: swatch.getAttribute('aria-label')!, exact: true })).toHaveAttribute('aria-checked', 'true');
-    await expect.element(group).toHaveAttribute('aria-busy', 'false');
+    await mockDrain.waitForIdle();
   }
 });
 
@@ -336,9 +433,40 @@ it('keeps a confirmed rollback when the settle read cannot reach the server', as
     return reads === 1 ? undefined : HttpResponse.error();
   }));
   await group.getByRole('radio', { name: 'Clay', exact: true }).click();
-  await expect.element(group).toHaveAttribute('aria-busy', 'false');
+  await mockDrain.waitForIdle();
   await expect.element(card.getByRole('alert')).toHaveTextContent("That didn't save, so your header is still Teal.");
   await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
   expect(reads).toBeGreaterThan(1);
   expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'teal' });
+});
+
+
+it.each([false, true])('reads the stored colour after a superseded uncertain save and a rejected last pick (%s)', async (readWorks) => {
+  const { screen } = await renderRoute(GENERAL, { retryScale: 0, pollScale: 100 });
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  let release!: () => void;
+  const until = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(() => release());
+  mockStore.inject({ route: 'setBusiness', status: 'network', afterCommit: true, until });
+  mockStore.inject({ route: 'setBusiness', status: 422 });
+  // Even a working final read must not get Clay from the earlier settle refetch.
+  let rejected = false;
+  worker.use(http.put(ROUTES.setBusiness.path.replace('{desk_id}', ':desk_id'), async ({ request }) => {
+    const body = await request.clone().json() as { brand_palette: string };
+    if (body.brand_palette === 'navy') rejected = true;
+    return undefined;
+  }));
+  worker.use(http.get(ROUTES.desks.path, () => readWorks && rejected ? undefined : HttpResponse.error()));
+  await group.getByRole('radio', { name: 'Clay', exact: true }).click();
+  await expect.poll(() => mockStore.requests.filter(({ key }) => key === 'setBusiness').length).toBe(1);
+  await group.getByRole('radio', { name: 'Navy', exact: true }).click();
+  release();
+  await mockDrain.waitForIdle();
+  await expect.element(card.getByRole('alert')).toHaveTextContent(readWorks
+    ? "That didn't save, so your header is still Clay."
+    : "We couldn't reach Claude Desk. Check your connection, then try again.");
+  expect(card.getByText("That didn't save, so your header is still Teal.", { exact: true }).query()).toBeNull();
+  expect(mockStore.world.desks[0]?.brand).toMatchObject({ palette: 'clay' });
 });

@@ -21,8 +21,10 @@ const hrefs = {
   today: '#today',
   conversations: '#conversations',
   people: '#customers',
+  knowledge: '#knowledge',
   rules: '#rules',
   safety: '#safety',
+  profile: '#profile',
   share: '#share',
   settings: '#settings',
 } satisfies SidebarHrefs;
@@ -101,7 +103,7 @@ export const RiveraTwoDesks: Story = {
     });
 
     // The businesses, then New business last. No Desks: the sidebar's Desk picker has those.
-    const riveraRow = within(menu).getByRole('menuitemradio', { name: 'Rivera Plumbing 2 Desks' });
+    const riveraRow = within(menu).getByRole('menuitemradio', { name: 'Turner Plumbing 2 Desks' });
     const chenRow = within(menu).getByRole('menuitemradio', { name: 'Chen & Co. CPA 1 Desk' });
     const newBusiness = within(menu).getByRole('menuitem', { name: 'New business' });
     const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]')];
@@ -144,7 +146,7 @@ export const RiveraTwoDesks: Story = {
     // Opened from the business row, Escape returns focus to the row.
     const opener = canvas.getByRole('button', { name: OPENER });
     await userEvent.click(opener);
-    await expect(within(canvas.getByRole('menu')).getByRole('menuitemradio', { name: 'Rivera Plumbing 2 Desks' })).toHaveFocus();
+    await expect(within(canvas.getByRole('menu')).getByRole('menuitemradio', { name: 'Turner Plumbing 2 Desks' })).toHaveFocus();
     await userEvent.keyboard('{ArrowDown}{Escape}');
     await expect(args.onClose).toHaveBeenCalledTimes(2);
     await expect(canvas.queryByRole('menu')).toBeNull();

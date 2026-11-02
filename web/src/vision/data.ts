@@ -5,9 +5,9 @@
  * together.
  *
  * What the vision pages show, in the signed boards' words (the "Run 2 · vision" boards,
- * N-R2-Vision-*): a resident on a fictional city permits office's public Desk, Rivera Plumbing's
+ * N-R2-Vision-*): a resident on a fictional city permits office's public Desk, Turner Plumbing's
  * team Desk, a returning visitor signed in with a Claude account, and the app on a phone. Fixed data
- * only: no page reads anything from the API. Rivera's own facts and the city's public Desk come from
+ * only: no page reads anything from the API. Turner's own facts and the city's public Desk come from
  * the design system's fixtures, as the first visit's still preview of Today does.
  *
  * Fees, dates, statuses, documents and bookings sit only in cards, never in Claude's words, as on
@@ -45,9 +45,11 @@ export const VISION_SIDEBAR_HREFS: SidebarHrefs = {
   today: '#today',
   conversations: '#conversations',
   people: '#people',
+  knowledge: '#knowledge',
   rules: '#rules',
   connectors: '#connectors',
   safety: '#safety',
+  profile: '#profile',
   share: '#share',
   settings: '#settings',
 };
@@ -151,7 +153,7 @@ export const CITY_SUGGESTIONS = ['Book an inspection', 'Pay the fee', 'Talk to s
 export const CITY_SOURCES = { checked: CHECKED, executed: decided('executed'), held: decided('held') } as const;
 
 // ---------------------------------------------------------------------------------------------
-// The team Desk (N-R2-Vision-TeamDesk): Rivera Plumbing's team asking its own Desk.
+// The team Desk (N-R2-Vision-TeamDesk): Turner Plumbing's team asking its own Desk.
 
 export const TEAM_OWNER: VisionOwner = {
   business: rivera.business.name,
@@ -238,7 +240,7 @@ export const TEAM_TURNS: readonly TeamTurn[] = [
   },
   {
     asked: 'Also, what did Ben make on the Harbor Street job last week?',
-    reply: 'I can’t share pay. Payroll is open to Maria and Grace only. Here are your own logged hours.',
+    reply: 'I can’t share pay. Payroll is open to Mike and Grace only. Here are your own logged hours.',
     facts: [{ label: 'Your logged hours', icon: 'clock', title: 'Monday, October 19 to Friday, October 23', lines: ['38.5 hours over 5 days'] }],
     receipts: [
       { source: decided('refused'), plain: 'Declined by team access: payroll is owner and office manager only. No pay was shared.' },
@@ -258,12 +260,12 @@ export const LUIS_ACCESS = {
 export const TEAM_TODAY = 'Today: 12 team conversations, 9 answered from job records, 3 documents shared, 1 payroll request declined.';
 
 // ---------------------------------------------------------------------------------------------
-// The Claude account (N-R2-Vision-ClaudeAccount): Dana, back on Rivera's public page, signed in.
+// The Claude account (N-R2-Vision-ClaudeAccount): Dana, back on Turner's public page, signed in.
 
-/** Rivera Plumbing's public page, as the kernel would serve it. */
+/** Turner Plumbing's public page, as the kernel would serve it. */
 export const RIVERA_PUBLIC_DESK = rivera.publicDesk.en;
 
-/** The about column as the board draws it: hours, the service area and the phone, Rivera's own facts. */
+/** The about column as the board draws it: hours, the service area and the phone, Turner's own facts. */
 export const CLAUDE_ACCOUNT_ABOUT = [rivera.blocks.hours.en, rivera.blocks.policy.en, rivera.blocks.contact.en];
 
 /**
@@ -274,14 +276,14 @@ export const CLAUDE_ACCOUNT_ABOUT = [rivera.blocks.hours.en, rivera.blocks.polic
  */
 export const CLAUDE_ACCOUNT_TURNS = {
   signedIn: 'Signed in with your Claude account.',
-  ask: 'Your Claude account has a verified email. If it matches the contact Rivera Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
+  ask: 'Your Claude account has a verified email. If it matches the contact Turner Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
   yes: 'Yes, use it',
   matched: 'Welcome back, Dana. How did the drain clearing go?',
   matchedReceipt: 'Matched to Dana Whitfield: the Claude account’s verified email is her contact on record, and she agreed for this visit',
   invoice: 'All fixed, thanks. Can you send me the invoice?',
   sent: 'Glad to hear it. Here’s your invoice. You let me use your Claude account for this visit, so no code was needed.',
   releasedReceipt: 'Released to Dana Whitfield, matched by her Claude account with her consent for this visit',
-  checked: 'Reply checked against Maria Rivera’s rules',
+  checked: 'Reply checked against Mike Turner’s rules',
 } as const;
 
 /**
@@ -291,7 +293,7 @@ export const CLAUDE_ACCOUNT_TURNS = {
 const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-61',
   title: 'Tuesday, October 20',
-  lines: ['10:00 am to 12:00 pm', 'With Maria Rivera'],
+  lines: ['10:00 am to 12:00 pm', 'With Mike Turner'],
 });
 
 /** Claude's welcome back: its words, then her last visit's booking card. */
@@ -326,7 +328,7 @@ export const PHONE_TAB_HREFS: Record<PhoneTab, string> = { today: '#today', chat
 /** Today on the owner's phone: the greeting, the held quote, and who is talking to the Desk. */
 export const PHONE_TODAY = {
   business: rivera.business.name,
-  greeting: 'Good morning, Maria',
+  greeting: 'Good morning, Mike',
   held: rivera.decisions.held,
   heldBy: rivera.ruleCards['rv-quote'].reason,
   waiting: 'Web chat, 2 min ago',
@@ -337,11 +339,11 @@ export const PHONE_TODAY = {
   ] satisfies readonly { name: string; kind: string; tone: StatusTone }[],
 } as const;
 
-/** The visitor's booking on the phone, as the kernel renders a booking card: the day, when Maria arrives, and who. */
+/** The visitor's booking on the phone, as the kernel renders a booking card: the day, when Mike arrives, and who. */
 const PHONE_BOOKING = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-77',
   title: 'Tuesday, November 3',
-  lines: ['2:00 pm to 4:00 pm', 'With Maria Rivera'],
+  lines: ['2:00 pm to 4:00 pm', 'With Mike Turner'],
 });
 
 /**
@@ -350,12 +352,12 @@ const PHONE_BOOKING = cardBlock('booking_confirmed', {
  * time, and Claude's words promise nothing it doesn't back.
  */
 export const PHONE_CHAT = {
-  disclosureUnderName: 'Claude, an AI, answers for Maria Rivera',
+  disclosureUnderName: 'Claude, an AI, answers for Mike Turner',
   asked: 'Can someone come Tuesday afternoon?',
   /** Claude's words, then the booking card, as one message. */
   reply: [proseBlock('You’re all set. Here’s your visit.'), PHONE_BOOKING],
-  receipt: { source: decided('executed'), plain: 'Booked on Maria Rivera’s calendar' } satisfies VisionReceipt,
-  composer: 'Message Rivera Plumbing',
+  receipt: { source: decided('executed'), plain: 'Booked on Mike Turner’s calendar' } satisfies VisionReceipt,
+  composer: 'Message Turner Plumbing',
   disclosure: 'This chat is with Claude, an AI.',
 } as const;
 

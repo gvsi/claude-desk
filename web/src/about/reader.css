@@ -37,6 +37,10 @@
 
 .cd-about-fignum {
   flex: none;
+}
+
+.cd-about-fignum,
+.cd-about-arch__tech {
   font-weight: 520;
   color: var(--text-primary);
 }
@@ -398,6 +402,12 @@
 
 .cd-about-arch__check > .cd-about-arch__box {
   flex: 43 1 0;
+}
+
+/* A check's two lines, what code decides and then what the models may do, wrap evenly where the box is narrow, so
+   neither leaves a word alone on its last line. */
+.cd-about-arch__check .cd-about-arch__line {
+  text-wrap: balance;
 }
 
 .cd-about-arch__outcomes {
@@ -877,7 +887,9 @@
 .cd-about-contents__link {
   display: flex;
   gap: var(--space-14);
-  padding: var(--space-10) 0;
+  /* Give the inset edge room beside the numbers without moving the contents at rest. */
+  padding: var(--space-10) var(--space-8);
+  margin-inline: calc(-1 * var(--space-8));
   color: var(--text-primary);
   text-decoration: none;
 }
@@ -974,9 +986,10 @@
   margin-top: 0;
 }
 
-/* Focus lands on a heading when the contents list's link to it is followed; it is not a control, so no ring. */
+/* Focus lands on a heading when the contents list's link to it is followed; it is not a control, so it draws nothing. */
 .cd-about-article > h2:focus {
   outline: none;
+  box-shadow: none;
 }
 
 .cd-about-article strong {
@@ -1024,9 +1037,42 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+  padding-right: calc(var(--space-20) + var(--size-icon) + var(--space-16));
   transition: border-color var(--motion-instant) var(--motion-ease);
 }
 
+/* The arrow at the card's trailing edge: quiet at rest, a step toward the next page when the card is pointed
+   at or its link has keyboard focus. */
+.cd-about-next__arrow {
+  position: absolute;
+  pointer-events: none; /* a click on it goes to the card's link beneath */
+  top: 50%;
+  right: var(--space-20);
+  margin-top: calc(var(--size-icon) / -2);
+  color: var(--text-secondary);
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+
+.cd-about-next:hover .cd-about-next__arrow,
+.cd-about-next:has(.cd-about-next__link:focus-visible) .cd-about-next__arrow {
+  color: var(--text-primary);
+  transform: translateX(var(--space-4));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-about-next__arrow {
+    transition: none;
+  }
+
+  .cd-about-next:hover .cd-about-next__arrow,
+  .cd-about-next:has(.cd-about-next__link:focus-visible) .cd-about-next__arrow {
+    transform: none;
+  }
+}
+
+/* The About pages' one exception to "hover is a fill" (owner, 2026-11-01): Read next darkens its border. */
 .cd-about-next:hover .cd-card {
   border-color: var(--line-control-hover);
 }
@@ -1047,13 +1093,14 @@
   border-radius: var(--radius-card);
 }
 
+/* With keyboard focus the overlay, which lies over the card's border box, draws 1 px of line-focus just
+   inside it, over the card's own border; the title's own link draws nothing around its words. */
 .cd-about-next__link:focus-visible {
-  outline: none;
+  box-shadow: none;
 }
 
 .cd-about-next__link:focus-visible::after {
-  outline: 2px solid var(--ring-focus);
-  outline-offset: 2px;
+  box-shadow: inset 0 0 0 1px var(--line-focus);
 }
 
 .cd-about-next__summary {

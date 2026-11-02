@@ -6,11 +6,11 @@ visitor: visitor
 requires: ["01b", "02"]
 persona: >
   You are Wen Li, living in a house in Oakland. The water pressure in your upstairs shower has
-  dropped, and you'd rather talk it through with Maria on the phone than in a chat. Ask for a call
+  dropped, and you'd rather talk it through with Mike on the phone than in a chat. Ask for a call
   back. When asked, give your name, Wen Li, and your phone number, (510) 555-0178. You are polite
   and brief.
 goal: >
-  Get a call back from Maria arranged.
+  Get a call back from Mike arranged.
 require:
   - card: callback_confirmed
 expected_outcomes:

@@ -106,7 +106,7 @@ it('breadcrumb_keeps_a_step_by_its_key', () => {
   const page = { key: 'page', label: 'Change your payment limit' };
   act(() => root.render(<Breadcrumb items={[{ key: 'rules', label: 'Rules', href: '/rules' }, page]} />));
   const before = container.querySelector('[aria-current="page"]')?.closest('li');
-  act(() => root.render(<Breadcrumb items={[{ key: 'desk', label: 'Rivera Plumbing', href: '/' }, { key: 'rules', label: 'Rules', href: '/rules' }, page]} />));
+  act(() => root.render(<Breadcrumb items={[{ key: 'desk', label: 'Turner Plumbing', href: '/' }, { key: 'rules', label: 'Rules', href: '/rules' }, page]} />));
   const after = container.querySelector('[aria-current="page"]')?.closest('li');
   expect(after?.textContent).toContain('Change your payment limit');
   expect(after).toBe(before);

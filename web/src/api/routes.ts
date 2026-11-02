@@ -22,11 +22,11 @@ import type {
   SessionState,
   ToolProfile,
 } from './contracts.ts';
+import type { AgentTasks } from './openapi.gen.ts';
 import type {
   AgentCardOut,
   AgentRunStarted,
   AgentTaskBody,
-  AgentTasks,
   AnswerBody,
   AnsweringBody,
   ApprovalAnswerOut,
