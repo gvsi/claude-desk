@@ -149,6 +149,8 @@ export const SETUP_COPY = {
   /** Stands in for the business's name until the API names it. */
   yourBusiness: 'your business',
   saveAndExit: 'Save and exit',
+  /** Back to the chat with Claude from Real situations or the closing plan, to change what setup drafted. */
+  changeSomething: 'Change something',
   /** The bar's lockup, a link that leaves as "Save and exit" does: the product's name, then what it does. */
   brandHome: 'Claude Desk, save and exit',
 

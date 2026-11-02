@@ -45,7 +45,9 @@ from desk.api.prompts import (
     CARD_ERRORS,
     CARDS_REFUSED,
     DRAFT_RETRY,
+    OWNER_ANSWER_TAG,
     QUESTION_KEYS,
+    SETUP_NEXT_SYSTEM,
     SITUATIONS_SYSTEM,
     SITUATION_TOOLS_BY_WHO,
     DraftedRules,
@@ -59,6 +61,7 @@ from desk.api.prompts import (
     SituationDraft,
     SituationTool,
     dollars,
+    wrap,
 )
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
@@ -89,13 +92,14 @@ from desk.kernel_api import (
 from desk.kernel_service.activation import _probe_principal
 from desk.kernel_service.decide import tools_given
 from desk.presets import PRESETS
-from tests.api.fakes import ScriptedModel, gated, response
+from tests.api.fakes import ScriptedModel, gated, response, unavailable
 from tests.api.fakes import text as text_block
 from tests.api.test_kernel_client import ScriptedKernel
 from tests.api.test_setup_questions import (
     Owner,
     answer,
     begin,
+    card_answer,
     consent,
     cut_short,
     idle_in_transaction,
@@ -231,14 +235,14 @@ def unparseable() -> object:
 
 async def answered(app, browser, kernel_http, model: ScriptedModel, *, business_type: str = "trade",
                    owner_display_name: str | None = "Mike Turner", said: dict[str, str] | None = None,
-                   **changes) -> tuple[Owner, dict]:
+                   cards: bool = False, **changes) -> tuple[Owner, dict]:
     """An owner whose setup answered every question (consent declined), and the state as it then stands: waiting on
     the test-client offer when the owner typed their own contact on the contact question, else at step `tools`.
     `changes` replace a patched field's value (None leaves it unanswered); `said` replaces what the owner typed on
-    the questions it names."""
+    the questions it names; `cards` is a client that shows cards."""
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type=business_type, owner_display_name=owner_display_name)
-    await consent(owner, state["interview_id"], False, model)
+    await consent(owner, state["interview_id"], False, model, cards=cards)
     for key in QUESTION_KEYS:
         patch = {name: changes.get(name, value) for name, value in PATCHES[key].items()}
         # The fixture is a completed owner interview: structured facts must be typed, not just model patches.
@@ -699,7 +703,8 @@ async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards:
 
 
 # The test-client offer: at the plan's end, setup offers to put the owner on record as a client, with the contact they
-# typed themselves, so they can try verification as a client would. Code asks it and reads the answer.
+# typed themselves, so they can try verification as a client would. Code asks it and reads a yes or a no; anything else
+# goes to setup's consultant, which can reopen the plan on a new card before the Tools step.
 
 OWNER_EMAIL = "mike@turner-plumbing.example"
 CONTACT_SAID = f"Mike Turner. Email {OWNER_EMAIL} or call (510) 555-0142, and take a message after hours."
@@ -714,14 +719,19 @@ def owner_line(text: str) -> dict:
     return {"role": "owner", "text": text, "choices": [], "card": None}
 
 
+def claude_line(text: str) -> dict:
+    return {"role": "claude", "text": text, "choices": [], "card": None}
+
+
 def kernel_writes(fake) -> list[tuple[str, object]]:
     """The fake kernel's calls since it was last cleared, but its reads (the owner's `GET /whoami` on each request)."""
     return [(call.path, call.body) for call in fake.calls if not call.route.startswith("GET ")]
 
 
-async def offered(app, browser, kernel_http, model: ScriptedModel) -> tuple[Owner, dict]:
+async def offered(app, browser, kernel_http, model: ScriptedModel, *, cards: bool = False) -> tuple[Owner, dict]:
     """An owner who typed their own contact on the contact question: setup waits on the test-client offer."""
-    owner, state = await answered(app, browser, kernel_http, model, said={"contact_and_after_hours": CONTACT_SAID})
+    owner, state = await answered(app, browser, kernel_http, model, said={"contact_and_after_hours": CONTACT_SAID},
+                                  cards=cards)
     assert (state["step"], state["question"], state["busy"]) == ("questions", "test_client", False)
     return owner, state
 
@@ -787,6 +797,97 @@ def test_a_test_client_phone_is_one_number_without_the_hours(said, contact):
     assert setup._owner_contact(contact_interview(said)) == contact
 
 
+@pytest.mark.parametrize("said, read", [
+    # Each branch of `TEST_CLIENT_REQUEST` on its own: an answer that asks for something besides the offer is neither a
+    # yes nor a no, whatever yes or no words it holds.
+    ("Yes, and add deposits too", None), ("Yes, and how about adding deposits", None),      # adding something
+    ("Sí, quiero agregar depósitos", None),
+    ("Yes please, a booking job too", None), ("Yes, and a booking job too", None),          # a job
+    ("Yes, and connect Stripe", None), ("Not now, connect Google Calendar first", None),    # an app or a change
+    ("Not now, I'd rather get Stripe connected first", None), ("Yes, and remove the booking", None),
+    ("Sí, y conecta Stripe", None), ("No, primero quiero conectar Stripe", None), ("Sí, cambia el horario", None),
+    ("Sí, y quita las reservas", None), ("Sí, y elimina el depósito", None),
+    ("Sí, también cobra depósitos", None), ("Sí, y también cobra depósitos", None),         # "también"
+    ("Yes, also deposits please", None),                                                    # "also" and a word
+    ("Yes, but I want to take deposits too", None),                                          # a yes or a no, and
+    ("Yes please, and take retainer payments", None), ("Yes, but I'd like changes to the booking", None),
+    ("No, pero cambia los precios", None), ("No, pero añade un trabajo de reservas", None),
+    ("Please send retainer payment links too, no Stripe yet", None),                        # more than 8 words
+    # The offer itself, praise, the owner's own contact, or turning everything down stays a yes or a no.
+    ("Sí, agrégame", True), ("Vale, añádeme", True), ("Yes, add me", True), ("Yes, add myself", True),
+    ("Sure, set me up", True), ("Sure, set it up", True), ("Yes, set that up", True), ("Yes please", True),
+    ("Yes, set up the test client", True), ("Great job, add me", True), ("Nice job, yes please", True),
+    ("Yes, add my email", True), ("Sí, agrega mi correo", True),
+    ("No, don't add anything", False), ("No thanks, I don't want to change anything", False),
+    ("No, don't add anyone", False), ("No thanks, don't add any test clients", False),
+    ("No, don't set up anything", False), ("No, do not set up anything", False),
+    ("No thanks, maybe later", False), ("Not now", False), ("Skip", False),
+    # One word at a time: each answer below fires one word of `TEST_CLIENT_REQUEST` and nothing else.
+    ("Yes, add gift vouchers", None), ("Yes, adding gift vouchers", None), ("Sí, añade cupones", None),
+    ("Sí, quiero añadir cupones", None), ("Sí, agrega cupones", None), ("Sí, quiero agregar cupones", None),
+    ("Yes, set up gift vouchers", None), ("Yes, create gift vouchers", None), ("Sí, crea cupones", None),
+    ("Sí, quiero crear cupones", None), ("Sí, configura cupones", None), ("Sí, quiero configurar cupones", None),
+    ("Yes please, configure gift vouchers", None), ("Yes please, one more job", None), ("Sí, conecta Stripe", None),
+    ("Yes, I'd like changes", None), ("Yes, changing my hours", None), ("Yes, remove the gift vouchers", None),
+    ("Sí, quita los cupones", None), ("Sí, elimina los cupones", None), ("Sí, un trabajo más", None),
+    ("Sí, tambien cupones", None), ("Yes, also gift vouchers", None),
+    ("Yes, take deposits too", None), ("Sure, send payment links too", None), ("Yes please, retainers too", None),
+    ("Yes, invoices too", None), ("Yes, bookings too", None), ("Sí, depósitos por favor", None),
+    ("Sí, pagos por favor", None), ("Sí, reservas por favor", None), ("Sí, quiero cobrar", None),
+    # A short request after a comma, with no "add": the Desk's own jobs, or wanting a change.
+    ("Yes please, take retainer payments too", None), ("No, take deposits instead", None),
+    ("Sí, cobra depósitos", None), ("Sí, quiero cobrar depósitos", None), ("Yes, please configure payments", None),
+    ("Yes, add deposits too", None), ("Yes, set up deposits", None), ("Sí, añade depósitos", None),
+    ("Yes, remove the booking", None), ("Sí, quita las reservas", None), ("Sí, elimina el depósito", None),
+    ("Yes, I want to change my hours", None), ("No, I want to change my hours first", None),
+    # More after a yes or a no, with no request word: each word that joins it, after "please" or "thanks" too.
+    ("Sí, y una cosa más", None), ("No, pero una cosa más", None), ("Not now, but one more thing", None),
+    ("Yes please, and one more thing", None), ("No thanks, but one more thing", None),
+    ("Yes, thank you, and one more thing", None), ("Sí, gracias, y una cosa más", None),
+    ("Sí, por favor, y una cosa más", None), ("No, but thanks, one more thing", None),
+    # The offer named in a longer answer, a polite ending, and the other words a request leaves out.
+    ("No, I don't want to be a test client", False), ("Sure, go ahead and add me as a test client", True),
+    ("Yes please, set me up as a test client", True), ("No, no quiero ser un cliente de prueba ahora mismo", False),
+    ("Not now, but maybe later", False), ("No, but thanks", False), ("Yes, and thank you!", True),
+    ("Sí, y gracias", True), ("No, pero gracias", False), ("No thanks, but maybe later", False),
+    ("No, but later", False), ("No, pero más tarde", False),
+    ("No, I do not want to change anything", False), ("No, do not add anyone", False),
+    ("No, don't connect anything", False), ("Good job, yes", True), ("Yes, add us", True), ("Sure, add it", True),
+    ("Yes, add that", True), ("Yes, add this", True), ("Yes, add my number", True), ("Yes, add my phone", True),
+    ("Yes, add my contact", True), ("Sí, agrega mi número", True), ("Sí, agrega mi teléfono", True),
+    ("Sí, agrega mi contacto", True), ("Yes, add a test client", True), ("Yes, add my test client", True),
+    ("Yes, I'd also like that", True), ("Yes, I'll also try it", True), ("Yes, I'll also check it", True),
+    ("Nope, I'll add anything else later", False), ("Sí, también cupones", None),
+    # More than 8 words is no plain answer, but the offer's own words aren't counted.
+    ("Sure, send gift voucher links too, no Stripe for now", None),
+    ("No thanks, I really don't want to be a test client", False),
+    ("No thanks, I really don't need the test client right now", False),
+    ("Yes please, I'd like you to set up my test client", True),
+])
+def test_a_request_besides_the_offer_is_neither_a_yes_nor_a_no(said, read):
+    assert setup._reads_yes(said) is read
+
+
+@pytest.mark.parametrize("opening", setup.TEST_CLIENT_TYPED_YES + setup.TEST_CLIENT_TYPED_NO)
+def test_any_yes_or_no_word_that_goes_on_is_neither(opening):
+    # Each yes or no code reads, with more after it, so the words that open an answer can't drift from those lists.
+    assert setup._reads_yes(f"{opening}, and one more thing") is None
+
+
+@pytest.mark.parametrize("said, again", [
+    ("Not now", False), ("Yes please", False), ("Please add a retainer job.", True), ("What does that mean?", True),
+])
+def test_closing_the_plan_again_offers_again_until_a_yes_or_a_no(said, again):
+    interview = contact_interview("mike@example.test")
+    setup._ask_test_client(interview)
+    interview.transcript += [setup.Entry(role="owner", text=said), setup.Entry(role="claude", text="Got it.")]
+    asked = len(interview.transcript)
+    setup._offer_test_client(interview)
+    assert len(interview.transcript) == asked + int(again)
+    if again:
+        assert (interview.question, interview.transcript[-1].text) == ("test_client", setup.TEST_CLIENT_OFFER)
+
+
 @pytest.mark.parametrize("yes", [True, False])
 async def test_a_test_client_is_put_only_when_the_owner_says_yes(app, browser, fake, kernel_http, model, engine, yes):
     owner, state = await offered(app, browser, kernel_http, model)
@@ -821,34 +922,256 @@ async def test_a_test_client_is_put_only_when_the_owner_says_yes(app, browser, f
     assert (again.status_code, again.json()) == (409, {"error": "conflict"})
 
 
+CONSULTANT_REPLY = "It puts you on record as a client with your own contact, so you can try verification yourself."
+
+
+def consultant(reply: str = CONSULTANT_REPLY, **fields) -> Callable:
+    """Setup's consultant answering what the owner typed at the test-client offer: its reply, and by default nothing
+    added to the plan."""
+    return next_step("what_you_do", reply=reply, next={"kind": "done"}, **fields)
+
+
 @pytest.mark.parametrize("typed, read", [
     ("yes", "yes"), ("Yes please!", "yes"), ("Sure, go ahead", "yes"), ("OK, add me", "yes"),
     ("Yes, add me as a test client", "yes"), ("Sí", "yes"), ("vale", "yes"),
     ("no", "no"), ("No, not now", "no"), ("don't add me", "no"), ("Maybe later", "no"), ("No gracias", "no"),
-    ("what does that mean?", "again"), ("Can you change my hours first?", "again"),
+    # Adding the owner, or the test client, is the offer itself, no other request.
+    ("Yes, add the test client", "yes"), ("Maybe add me later", "no"), ("No thanks", "no"),
+    ("what does that mean?", "other"), ("Can you change my hours first?", "other"),
     # A question, or a yes only on a condition, is no yes, whatever words it holds.
-    ("What does add me as a test client mean?", "again"), ("What happens if I say yes?", "again"),
-    ("If it's free, yes", "again"),
+    ("What does add me as a test client mean?", "other"), ("What happens if I say yes?", "other"),
+    ("If it's free, yes", "other"),
+    # A request besides the offer is no yes or no either, whatever yes or no words it holds.
+    ("Please add a retainer job, but don't connect Stripe yet", "other"),
+    ("Add a deposit job too; I'll set the amount later", "other"), ("Also add a booking job, no deposits", "other"),
+    ("Add a retainer payment link, not connected to Stripe yet", "other"),
+    ("Yes please, and add a retainer job", "other"),
+    # Any yes or no code reads, going on with a request; the same yes alone stays a yes.
+    ("Yup, and take retainer payments", "other"), ("Dale, y cobra depósitos", "other"),
+    ("Sounds good, and send payment links", "other"), ("Go ahead, but take deposits too", "other"),
+    ("Yup", "yes"), ("Dale", "yes"), ("Sounds good", "yes"), ("Go ahead", "yes"),
 ])
 async def test_a_typed_answer_to_the_test_client_offer_is_read_by_code(app, browser, fake, kernel_http, model,
                                                                        typed, read):
     owner, state = await offered(app, browser, kernel_http, model)
     fake.calls.clear()
     asked = len(model.requests)
+    if read == "other":
+        model.add(consultant())
     reply = await say(owner, state, typed)
     assert reply.status_code == 200, reply.text
     done = reply.json()
-    assert len(model.requests) == asked                   # read word by word by code, a "no" word winning
+    # A yes or a no is read word by word by code, a "no" word winning; anything else goes to setup's consultant once,
+    # which reads it as the owner's answer.
+    assert len(model.requests) == asked + int(read == "other")
     assert len(fake.called("PUT /desks/{id}/people")) == int(read == "yes")
-    if read == "again":
-        # Neither a yes nor a no: the same offer again, with its choices, and nothing written.
+    if read == "other":
+        sent = model.requests[-1]
+        assert sent.system[0]["text"] == SETUP_NEXT_SYSTEM
+        assert wrap(OWNER_ANSWER_TAG, typed) in sent.messages[0]["content"][0]["text"]
+        # Claude's reply, then the same offer again, with its choices, and nothing written.
         assert (done["step"], done["question"]) == ("questions", "test_client")
-        assert done["messages"][-3:] == [OFFER, owner_line(typed), OFFER]
+        assert done["messages"][-4:] == [OFFER, owner_line(typed), claude_line(CONSULTANT_REPLY), OFFER]
         assert (await say(owner, state, setup.TEST_CLIENT_YES)).json()["messages"][-1] == ADDED
         assert len(fake.called("PUT /desks/{id}/people")) == 1
+        assert len(model.requests) == asked + 1
     else:
         assert done["step"] == "tools"
         assert done["messages"][-2:] == ([owner_line(typed), ADDED] if read == "yes" else [OFFER, owner_line(typed)])
+
+
+# A request typed at the offer reopens the plan before the Tools step: Claude's reply, then the job it added as a card.
+REQUEST = ("Please add a retainer payment link job for an agreed engagement, with every payment asking me first; "
+           "leave Stripe disconnected for now")
+RETAINER = {"job": "payment", "title": "Retainer payment link", "who": "Clients with an agreed engagement",
+            "why": "Start agreed work without chasing payment", "how": "Sends a secure link to pay an agreed retainer.",
+            "autonomy": "ask", "config": {"block": "purpose_payment", "purpose": "Retainer"}}
+REOPENED_ID = "p-0123456789ab"
+REOPENED_LINE = "I'll add a retainer payment link, and every payment will ask you first."
+REOPENED_ASK = "Want the Desk to send retainer payment links?"
+SECOND_PLAN = "Your Desk will take customer requests and send retainer links once you approve each one."
+
+
+def watch_after_finish(monkeypatch) -> list[str]:
+    """The steps the post-finish work (`after_finish`: business tools and the rest) ran at, running it as usual."""
+    finished, after_finish = [], setup.after_finish
+
+    async def watched(ctx, interview):
+        finished.append(interview.step)
+        await after_finish(ctx, interview)
+
+    monkeypatch.setattr(setup, "after_finish", watched)
+    return finished
+
+
+def reopened_id_first(monkeypatch) -> None:
+    """The next card minted takes `REOPENED_ID`, and every one after it a new ID as usual, so two never share one."""
+    minted, mint = iter([REOPENED_ID]), setup.new_proposal_id
+    monkeypatch.setattr(setup, "new_proposal_id", lambda: next(minted, None) or mint())
+
+
+async def reopened(app, browser, kernel_http, model, engine, monkeypatch, *,
+                   job: dict = RETAINER) -> tuple[Owner, dict, setup.Interview]:
+    """An owner with cards and business tools whose request typed at the test-client offer reopened the plan:
+    Claude's reply, then the job it added, shown as a waiting card by the next planning call. Also the interview as it
+    stood before, while the offer waited."""
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    owner, state = await offered(app, browser, kernel_http, model, cards=True)
+    async with engine.connect() as conn:
+        before = await setup._load(conn, owner.copy_id, state["interview_id"])
+    reopened_id_first(monkeypatch)
+    asked = len(model.requests)
+    model.add(consultant(REOPENED_LINE, add_jobs=[job]),
+              next_step("what_you_do", next={"kind": "job", "job": REOPENED_ID}, question=REOPENED_ASK))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/answer?cards=1",
+                                     json={"question": "test_client", "text": REQUEST})
+    assert reply.status_code == 200, reply.text
+    assert len(model.requests) == asked + 2 and not model.script
+    return owner, reply.json(), before
+
+
+async def test_a_request_typed_at_the_test_client_offer_reopens_the_plan_on_its_card(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    finished = watch_after_finish(monkeypatch)
+    owner, state, before = await reopened(app, browser, kernel_http, model, engine, monkeypatch)
+    path = f"/api/owner/setup/{state['interview_id']}"
+    # Claude's reply, then the job it added as a card that waits; the setup interview stays at its questions step.
+    assert (state["step"], state["question"], state["pending_card"]) == ("questions", None, REOPENED_ID)
+    assert state["messages"][-5:-1] == [OFFER, owner_line(REQUEST), claude_line(REOPENED_LINE),
+                                        claude_line(REOPENED_ASK)]
+    card = state["messages"][-1]["card"]
+    assert (card["proposal_id"], card["state"], card["job"]["title"]) == (REOPENED_ID, "proposed", RETAINER["title"])
+    assert finished == [] and not fake.called("PUT /desks/{id}/business_tools")
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 409    # the card waits, not the offer
+    # A payment needs its amount: accepting without one is refused, and a typed yes gets the amount line.
+    refused = await owner.browser.post(f"{path}/proposals/{REOPENED_ID}?cards=1", json={"accept": True})
+    assert (refused.status_code, refused.json()) == (422, {"error": "amount_required"})
+    model.add(card_answer("accept", reply="Retainer links it is.", next={"kind": "done"}, question=""))
+    typed = await owner.browser.post(f"{path}/answer?cards=1", json={"card": REOPENED_ID, "text": "Yes"})
+    assert typed.status_code == 200, typed.text
+    assert (typed.json()["pending_card"], typed.json()["question"]) == (REOPENED_ID, None)
+    assert typed.json()["messages"][-2:] == [owner_line("Yes"), claude_line(setup.AMOUNT_FIRST_LINE)]
+    # Accepted with its amount, and Claude's next step is done: a second closing plan, then the offer again.
+    model.add(next_step("what_you_do", reply="Retainer links it is.", next={"kind": "done"}),
+              next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    reply = await owner.browser.post(f"{path}/proposals/{REOPENED_ID}?cards=1",
+                                     json={"accept": True, "amount_cents": 25_000})
+    assert reply.status_code == 200, reply.text
+    closed = reply.json()
+    assert (closed["step"], closed["question"], closed["pending_card"]) == ("questions", "test_client", None)
+    assert closed["messages"][-3:] == [claude_line("Retainer links it is."), claude_line(SECOND_PLAN), OFFER]
+    assert finished == [] and not fake.called("PUT /desks/{id}/business_tools") and not model.script
+    # Finishing again adds the retainer to what the Desk helps with, and changes no other answer or covered topic.
+    async with engine.connect() as conn:
+        after = await setup._load(conn, owner.copy_id, state["interview_id"])
+    assert after.answers.model_dump(exclude={"how_we_help"}) == before.answers.model_dump(exclude={"how_we_help"})
+    assert after.covered == before.covered
+    assert after.answers.how_we_help == "\n".join(filter(None, [before.answers.how_we_help, RETAINER["how"]]))
+    # "Not now" reaches the Tools step: the post-finish work runs once, with the retainer among the accepted jobs.
+    done = await say(owner, state, setup.TEST_CLIENT_NO)
+    assert (done.status_code, done.json()["step"]) == (200, "tools")
+    assert finished == ["tools"]
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, state["interview_id"])
+    assert RETAINER["title"] in [job.title for job in setup.accepted_jobs(interview)]
+    assert RETAINER["how"] in interview.answers.how_we_help
+    (write,) = fake.called("PUT /desks/{id}/business_tools")
+    assert {"tool": "desk.retainer-payment-link", "title": RETAINER["title"], "description": RETAINER["how"],
+            "config": {"block": "purpose_payment", "purpose": "Retainer", "amount_cents": 25_000}} in (
+        write.body["tools"])
+
+
+async def test_an_app_named_at_the_test_client_offer_reopens_the_plan_on_its_card(
+        app, browser, fake, kernel_http, model, monkeypatch):
+    finished = watch_after_finish(monkeypatch)
+    owner, state = await offered(app, browser, kernel_http, model, cards=True)
+    reopened_id_first(monkeypatch)
+    path = f"/api/owner/setup/{state['interview_id']}"
+    asked = len(model.requests)
+    model.add(next_step("what_you_do", reply="It can keep your visits in one place.",
+                        next={"kind": "connector", "connector": "google_calendar"},
+                        question="Connect Google Calendar?"))
+    typed = "Can you connect my Google Calendar too?"
+    reply = await owner.browser.post(f"{path}/answer?cards=1", json={"question": "test_client", "text": typed})
+    assert reply.status_code == 200, reply.text
+    shown = reply.json()
+    # One planning call: the app it names is a card that waits, after Claude's reply and its line.
+    assert len(model.requests) == asked + 1 and not model.script
+    assert (shown["step"], shown["question"], shown["pending_card"]) == ("questions", None, REOPENED_ID)
+    assert shown["messages"][-4:-1] == [owner_line(typed), claude_line("It can keep your visits in one place."),
+                                        claude_line("Connect Google Calendar?")]
+    assert shown["messages"][-1]["card"]["connector"]["app"] == "google_calendar"
+    # Not now: the plan closes again with a second closing plan, then the offer.
+    model.add(next_step("what_you_do", reply="I'll leave the calendar for now.", next={"kind": "done"}),
+              next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    reply = await owner.browser.post(f"{path}/proposals/{REOPENED_ID}?cards=1", json={"accept": False})
+    assert reply.status_code == 200, reply.text
+    closed = reply.json()
+    assert (closed["step"], closed["question"]) == ("questions", "test_client")
+    assert closed["messages"][-3:] == [claude_line("I'll leave the calendar for now."), claude_line(SECOND_PLAN), OFFER]
+    assert finished == [] and not model.script
+
+
+async def test_using_the_suggestions_while_a_reopened_card_waits_closes_and_offers_again(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    finished = watch_after_finish(monkeypatch)
+    intake = {"job": "intake", "title": "Take engagement requests", "who": "", "why": "Start agreed work sooner",
+              "how": "Takes the details of each new engagement.", "autonomy": "auto",
+              "config": {"block": "intake", "questions": ["What do you need help with?"]}}
+    owner, state, _ = await reopened(app, browser, kernel_http, model, engine, monkeypatch, job=intake)
+    assert state["pending_card"] == REOPENED_ID
+    # The waiting card settles as accepted, the plan closes again with a second closing plan, and the offer is asked
+    # again: the Tools step and its post-finish work still wait for the offer's answer.
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions?cards=1", json={})
+    assert reply.status_code == 200, reply.text
+    closed = reply.json()
+    assert (closed["step"], closed["question"], closed["pending_card"]) == ("questions", "test_client", None)
+    assert closed["messages"][-3:] == [owner_line("Use your suggestions"), claude_line(SECOND_PLAN), OFFER]
+    card = next(message["card"] for message in closed["messages"]
+                if message["card"] and message["card"]["proposal_id"] == REOPENED_ID)
+    assert card["state"] == "accepted"
+    assert finished == [] and not model.script
+    assert (await say(owner, state, setup.TEST_CLIENT_NO)).json()["step"] == "tools"
+    assert finished == ["tools"]
+    (write,) = fake.called("PUT /desks/{id}/business_tools")
+    assert intake["title"] in [tool["title"] for tool in write.body["tools"]]
+
+
+async def test_an_unavailable_claude_asks_the_test_client_offer_again(app, browser, fake, kernel_http, model):
+    owner, state = await offered(app, browser, kernel_http, model)
+    asked = len(model.requests)
+    model.add(unavailable())
+    reply = await say(owner, state, REQUEST)
+    assert reply.status_code == 200, reply.text
+    done = reply.json()
+    # As before Claude read such answers: the same offer again, with no reply, and nothing written.
+    assert len(model.requests) == asked + 1 and not model.script
+    assert (done["step"], done["question"]) == ("questions", "test_client")
+    assert done["messages"][-3:] == [OFFER, owner_line(REQUEST), OFFER]
+    assert not fake.called("PUT /desks/{id}/people")
+
+
+async def test_a_request_typed_at_the_offer_shows_no_card_to_a_client_without_cards(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    finished = watch_after_finish(monkeypatch)
+    owner, state = await offered(app, browser, kernel_http, model)
+    async with engine.connect() as conn:
+        planned = (await setup._load(conn, owner.copy_id, state["interview_id"])).planned
+    asked = len(model.requests)
+    model.add(consultant(REOPENED_LINE, add_jobs=[RETAINER]))
+    reply = await say(owner, state, REQUEST)
+    assert reply.status_code == 200, reply.text
+    done = reply.json()
+    # One planning call, Claude's reply, then the offer again: no card, and no second call to show one.
+    assert len(model.requests) == asked + 1 and not model.script
+    assert (done["step"], done["question"], done["pending_card"]) == ("questions", "test_client", None)
+    assert done["messages"][-4:] == [OFFER, owner_line(REQUEST), claude_line(REOPENED_LINE), OFFER]
+    assert finished == []
+    # Nothing the call added is kept: a job no card can show would never settle.
+    async with engine.connect() as conn:
+        assert (await setup._load(conn, owner.copy_id, state["interview_id"])).planned == planned
 
 
 @pytest.mark.parametrize("failure", ["422", "500", "connect"])
@@ -2199,7 +2522,7 @@ async def test_safety_check_keeps_long_price_titles_out_of_tries(monkeypatch):
          "unit_cents": 30_000},
     ]
     answers = SetupAnswers(summary="Bookkeeping.", owner_display_name="Mike Turner")
-    interview = SimpleNamespace(desk_id="desk-1", step="rules", draft_version=2, answers=answers)
+    interview = SimpleNamespace(desk_id="desk-1", step="rules", draft_version=2, answers=answers, reopens=0, busy=False)
     owner = OwnerCtx(copy_id="copy-1", desk_ids=("desk-1",), owner_session_id="owner-session", owner_generation=1,
                      kernel=None, ro=SimpleNamespace(rows=AsyncMock(return_value=listed)))
     monkeypatch.setattr(setup, "_load", AsyncMock(return_value=interview))

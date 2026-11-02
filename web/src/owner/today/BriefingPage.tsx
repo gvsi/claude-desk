@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { ownerErrorCopy, request } from '../../api/http.ts';
 import { Button, Card, Notice, PageHeader, TextLink } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { followInAppLinks } from '../inAppLinks.ts';
+import { followInAppLinks, returnThroughHistory } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { todayPath } from '../useDesks.ts';
 import { BriefingRows, QuietNight } from './SinceLastNight.tsx';
@@ -22,6 +22,7 @@ export function BriefingPage() {
   useDocumentTitle(inApp(TITLE));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
+  const location = useLocation();
   const briefing = useQuery({
     queryKey: ['briefing', deskId],
     queryFn: () => request('briefing', { params: { desk_id: deskId } }),
@@ -56,7 +57,7 @@ export function BriefingPage() {
 
   const quiet = briefing.data !== undefined && briefing.data.items.length === 0;
   return (
-    <div className="cd-briefing-page" onClick={followInAppLinks(navigate)}>
+    <div className="cd-briefing-page" onClick={followInAppLinks(navigate)} onClickCapture={returnThroughHistory(navigate, todayPath(deskId), location.state?.fromToday === true)}>
       <PageHeader title={TITLE} />
       <Card>{body}</Card>
       {quiet ? null : <div className="cd-briefing-page__back cd-type-meta">{back}</div>}

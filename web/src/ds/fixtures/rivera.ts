@@ -32,7 +32,7 @@ import type {
 } from '../../api/contracts';
 import type { Bilingual, ConversationFixture, ProseBlock } from './index';
 import type { ConnectorView } from '../components/ConnectorName/ConnectorName';
-import type { ChangeReviewProps, ChangeRowView } from '../components/ChangeReview/ChangeReview';
+import type { ChangeReviewProps, ChangeRowView, RuleTarget } from '../components/ChangeReview/ChangeReview';
 import type { ConnectorPickerProps } from '../components/ConnectorPicker/ConnectorPicker';
 import type { ReviewToolView } from '../components/ConnectorReview/ConnectorReview';
 import type { ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection';
@@ -1034,7 +1034,13 @@ const sharedChargeCard = rule({
   reason: "Alex Kim's assistant can pay up to $20 from its signed limit.",
 });
 
-/** The screen's words for what the shared rule covers, shown under each tool it governs. */
+/**
+ * What the shared rule covers, as the screen hands it to `RuleRow`: its group in the app's words and
+ * the titles of the tools it covers, each shown as user text.
+ */
+const sharedChargeShared = { lead: 'Applies to every tool that charges money', titles: ['Payment link', 'Charge within a signed limit'] };
+
+/** That line's words as they read under each tool the shared rule governs. */
 const sharedChargeAppliesTo = 'Applies to every tool that charges money: Payment link and Charge within a signed limit.';
 
 /**
@@ -1505,7 +1511,7 @@ const googleCalendar = {
       {
         key: 'calendar.free_busy',
         change: 'added',
-        title: "See when you're free",
+        title: { titles: ["See when you're free"] },
         connector: googleCalendarView,
         before: null,
         after: {
@@ -1518,7 +1524,7 @@ const googleCalendar = {
       {
         key: 'native.find_slots',
         change: 'changed',
-        title: 'Find open times',
+        title: { titles: ['Find open times'] },
         connector: connectorViews.bookings,
         before: { mode: 'auto', reason: 'Open times from your opening hours.', words: [word('who', 'Anyone')] },
         after: { mode: 'auto', reason: 'Open times from your opening hours, skipping anything already on your calendar.', words: [word('who', 'Anyone')] },
@@ -1681,15 +1687,20 @@ const riveraCardsById: Record<ReviewId, RuleCard> = { ...ruleCards, 'rv-dana-boo
 const riveraBeforePreset = [...utilityCards, ...reviewOrder.map(([id]) => riveraCardsById[id])];
 
 /** The words the web app shows for each Recommended rules card: its row, what it applies to and what it enforces. */
-const presetViews: Record<string, { title: string; connector?: ConnectorView; appliesTo: string; words: RuleWord[] }> = {
-  'preset-quote': { title: 'Quote', connector: connectorViews.quotes, appliesTo: 'Quote', words: [word('who', 'Anyone'), word('limits', 'No discounts')] },
+const presetViews: Record<string, { title: RuleTarget; connector?: ConnectorView; appliesTo: RuleTarget; words: RuleWord[] }> = {
+  'preset-quote': { title: { titles: ['Quote'] }, connector: connectorViews.quotes, appliesTo: { titles: ['Quote'] }, words: [word('who', 'Anyone'), word('limits', 'No discounts')] },
   'preset-book-weekday': {
-    title: 'Book a visit',
+    title: { titles: ['Book a visit'] },
     connector: connectorViews.bookings,
-    appliesTo: 'Book a visit',
+    appliesTo: { titles: ['Book a visit'] },
     words: [word('who', 'Anyone'), word('hours', 'Weekdays, 8:00 am to 6:00 pm'), word('review', 'Checked by the reviewer')],
   },
-  'preset-documents': { title: 'Share a document', connector: connectorViews.documents, appliesTo: 'Share a document', words: [word('who', "The record's owner, verified")] },
+  'preset-documents': {
+    title: { titles: ['Share a document'] },
+    connector: connectorViews.documents,
+    appliesTo: { titles: ['Share a document'] },
+    words: [word('who', "The record's owner, verified")],
+  },
   'preset-charge-ask': { title: 'Every tool that charges money', appliesTo: 'Every tool that charges money', words: [word('who', 'Anyone')] },
   'preset-pay-out-ask': { title: 'Every tool that sends money out', appliesTo: 'Every tool that sends money out', words: [word('who', 'Anyone')] },
 };
@@ -1718,7 +1729,8 @@ function presetReview(preset: readonly RuleCard[]): ChangeRowView[] {
     const id = row.before.card_id as ReviewId;
     const label = reviewOrder.find(([key]) => key === id);
     if (label === undefined) throw new Error(`No row for ${id}`);
-    const [, title, connector] = label;
+    const [, name, connector] = label;
+    const title = { titles: [name] };
     const before = cardSide(id, row.before);
     if (row.after === null) return { key: id, change: 'changed', title, connector, before, after: defaultAsk, changed: row.fields };
     const moved = row.after.applies_to !== row.before.applies_to;
@@ -1753,7 +1765,7 @@ const askFirstReview = presetReview(presetSamples.ask_first);
 const sharedChargeReviewRow: ChangeRowView = {
   key: sharedChargeCard.card_id,
   change: 'changed',
-  title: 'Payment link and Charge within a signed limit',
+  title: { titles: ['Payment link', 'Charge within a signed limit'] },
   connector: connectorViews.payments,
   shared: true,
   before: cardSide('rv-agent-charges', sharedChargeCard),
@@ -2058,6 +2070,7 @@ export const rivera = {
   heldRefund,
   ruleCards,
   sharedChargeCard,
+  sharedChargeShared,
   sharedChargeAppliesTo,
   personalBookingCard,
   ruleWords,

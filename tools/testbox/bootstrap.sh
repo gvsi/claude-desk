@@ -22,17 +22,25 @@ install -d -o root -g root /opt/testbox
 # connection's sshd process may hold (about two per session). Reload only when the setting changes: a reload keeps
 # open connections, and each new connection gets the new limits. sshd keeps the first value it reads, so confirm
 # the one in effect; on any failure remove the file, so a retry sees a change and checks again.
+# A laptop's connection can die while Session Manager keeps sshd's local socket open. sshd then keeps that
+# connection's processes, and the lane locks they hold, so every later call to those lanes waits. ClientAlive closes
+# a connection whose client stops answering for ten minutes, long enough for a live connection's reply queued behind
+# slow uploads.
 cat > /tmp/desk-testbox-sshd.conf <<'SSHD'
 MaxSessions 256
 MaxStartups 200:30:400
+ClientAliveInterval 60
+ClientAliveCountMax 10
 SSHD
 if ! cmp -s /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf; then
   install -m 644 /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf
   # The check needs sshd's runtime directory, which only a started ssh.service creates (it starts on first connection).
   install -d -o root -g root -m 0755 /run/sshd
-  if ! { sshd -t && sshd -T | grep -qx 'maxsessions 256' && systemctl try-reload-or-restart ssh.service; }; then
+  if ! { sshd -t && effective=$(sshd -T) && grep -qx 'maxsessions 256' <<<"$effective" \
+         && grep -qx 'clientaliveinterval 60' <<<"$effective" && grep -qx 'clientalivecountmax 10' <<<"$effective" \
+         && systemctl try-reload-or-restart ssh.service; }; then
     rm -f /etc/ssh/sshd_config.d/90-testbox.conf
-    echo "testbox bootstrap: sshd rejected or overrode the session limits" >&2
+    echo "testbox bootstrap: sshd rejected or overrode the session limits or keepalive" >&2
     exit 1
   fi
 fi

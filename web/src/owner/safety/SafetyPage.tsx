@@ -22,6 +22,7 @@ import {
   anythingTurnedDownIn,
   attemptTime,
   categoryLabel,
+  heldForYou,
   originCopy,
   rowLabel,
   stoppedBy,
@@ -148,7 +149,7 @@ function HeldForYou({ deskId }: { deskId: string }) {
   if (held === 0) return null;
   return (
     <Button variant="secondary" href={todayPath(deskId)}>
-      <StatusLabel tone="held">{held} held for you</StatusLabel>
+      <StatusLabel tone="held">{heldForYou(held)}</StatusLabel>
     </Button>
   );
 }

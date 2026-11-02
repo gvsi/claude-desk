@@ -44,6 +44,7 @@ from desk.api.schemas import (
     SetupPublicLineIn,
     SetupPublicLines,
     SetupPublicLinesConfirmIn,
+    SetupReopenIn,
     SetupSuggestionsIn,
     SetupStartIn,
     SetupState,
@@ -208,6 +209,34 @@ async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, 
     return answer
 
 
+@router.post("/{id}/reopen", response_model=SetupState,
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
+async def setup_reopen(interview_id: InterviewId, body: SetupReopenIn, request: Request,
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
+    """"Change something": take setup back to its chat from a step after the questions (`tools`, `rules`,
+    `situations`, `safety_check` or `preview`), with the owner's message as the next owner turn. The interview
+    returns to `questions`, and what was drafted from the answers is dropped: the rules draft, the situations and the
+    safety check are drafted again on the way forward, and the rules can't be confirmed until the safety check has run
+    again. Answered as `/answer` is: 200 with the landed state, or 202 `SetupState` with `busy: true` past the wait.
+
+    Each send carries an `idempotency_key`. A repeat with the same key and text answers the interview as it stands and
+    runs nothing; the same key with other text is 409 `conflict`. 409 `conflict` while a turn runs, at the questions
+    step, and once the Desk is live (changes are then made in the owner app). A turn that fails or is abandoned
+    leaves the interview at the step it was at, so the same send can be tried again. 503 `model_unavailable` when
+    Claude couldn't answer."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    answer = await setup.reopen(ctx, state.database(), state.model, interview_id, body.text, body.idempotency_key,
+                                runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
+                                cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
+
+
 @router.post("/{id}/suggestions", response_model=SetupState,
              responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn, request: Request,
@@ -229,7 +258,9 @@ async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn,
 @router.get("/{id}/tools", response_model=SetupTools, responses=error_responses(401, 404, 422, 503))
 async def setup_tools(interview_id: InterviewId, request: Request,
                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupTools:
-    """The new Desk's tools, and the mock payments server while it isn't connected."""
+    """The new Desk's tools, and the mock payments server while it isn't connected. The payment tools of a Stripe
+    connection "Change something" took away are switched off first, when publishing the plan couldn't: 503 when the
+    kernel can't do it now, so a retry tries again."""
     state = runtime(request).started()
     return await setup.setup_tools(ctx, state.database(), interview_id,
                                    business_tools_enabled=state.settings.business_tools_enabled)
@@ -341,14 +372,16 @@ ALWAYS_ON_RESPONSES: dict[int | str, dict[str, Any]] = {422: {"model": ChangesAl
 
 async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, started: float,
                          admit: Callable[[], Awaitable[None]], body: BaseModel | None = None,
-                         changes_rules: bool = False, owner_stream: bool = False, stream: bool = False) -> Any:
+                         changes_rules: bool = False, owner_stream: bool = False, stream: bool = False,
+                         reopens: int = 0) -> Any:
     """Run `work` through the process's proving tasks, keyed by the Desk, the path and the body: its answer, or 202
     `ProvingPending` naming the same request (path and JSON body) once `PROVING_WAIT_S` has passed since `started`.
     `admit` (the route's limits) runs for new work only; a re-post that joins it isn't counted again. The work runs
     on its own database connection, since it may outlive the request. Work that `changes_rules` drops the Desk's other
     kept answers once it ends, since they were about the rules before. Cards the work's draft refused before the
     kernel was asked, for changing starting a verification (`versions.ChangesAlwaysOn`), are 422 `changes_always_on`
-    naming them."""
+    naming them. A setup interview's work is kept apart for each time "Change something" reopened its questions
+    (`reopens`), so a send after one never joins or takes work about the answers before it."""
     state = runtime(request).started()
     payload = None if body is None else body.model_dump(mode="json")
 
@@ -360,7 +393,7 @@ async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Wo
             if changes_rules:
                 state.proving.forget(desk_id)
 
-    key = (desk_id, request.url.path, body_sha256(payload))
+    key = (desk_id, request.url.path, body_sha256(payload) + (f":{reopens}" if reopens else ""))
     if stream:
         events = await state.proving.stream(key, run, admit=admit)
         return stream_response(events)
@@ -380,13 +413,13 @@ async def _proving(request: Request, ctx: OwnerCtx, interview_id: str, work: Wor
     """Run `work` for the interview's Desk through `proving_answer`, with no body. New work counts on the setup turn
     limit (and the model budget, when it calls the model)."""
     started = monotonic()
-    desk_id = await setup.interview_desk(ctx, runtime(request).started().database(), interview_id)
+    desk_id, reopens = await setup.interview_scope(ctx, runtime(request).started().database(), interview_id)
 
     async def admit() -> None:
         await _moving_on(request, ctx, model=model)
 
     return await proving_answer(request, ctx, desk_id, work, started=started, admit=admit,
-                                changes_rules=changes_rules)
+                                changes_rules=changes_rules, reopens=reopens)
 
 
 @policy_router.post("/{id}/rules", response_model=RulesDraft, responses={**PROVING_RESPONSES, **ALWAYS_ON_RESPONSES})

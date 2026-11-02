@@ -9,6 +9,7 @@ import { expect, it, onTestFinished } from 'vitest';
 
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectUserText } from '../../test/expectUserText.ts';
 import { motion } from '../../test/reducedMotion.ts';
 import { ConnectorSection, type ConnectorSectionProps } from './ConnectorSection.tsx';
 
@@ -114,4 +115,20 @@ it('a_landed_row_is_at_its_end_state_under_reduced_motion', () => {
   expect(el.querySelector('.cd-cross-fade')).toBeNull();
   expect(el.querySelector('.cd-connector-section__tool-summary')?.textContent).toBe('Anyone · No discounts · Weekdays, all day');
   expect(document.getAnimations().filter((a) => el.contains((a.effect as KeyframeEffect | null)?.target ?? null))).toEqual([]);
+});
+
+it('a_tools_name_is_user_text_and_its_link_still_names_it_first', () => {
+  const title = 'Approved by your accountant';
+  const draw = mount();
+  const tool = quotes.tools[0];
+  if (!tool) throw new Error('Quotes has a tool');
+  // With a link to its page, and without one.
+  for (const href of ['connectors/quotes/native.quote', undefined]) {
+    const el = draw({ ...quotes, tools: [{ ...tool, name: title, ...(href === undefined ? { href: undefined } : { href }) }] });
+    expect(expectUserText(el, title)).toBe(1);
+    const link = el.querySelector('.cd-connector-section__tool-link');
+    if (href === undefined) expect(link).toBeNull();
+    // Its accessible name still leads with the title as a part of its own, before the app's words.
+    else expect(link?.getAttribute('aria-label')?.startsWith(`${title}: ${tool.summary}, `)).toBe(true);
+  }
 });
