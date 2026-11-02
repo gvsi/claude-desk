@@ -46,7 +46,6 @@ A wrong or incomplete frame is one high-level P1/P2 `abstraction gap`; don't lis
 ## Review focus
 
 - **Safety invariants.** For each of the six in `AGENTS.md` the plan touches: does it preserve the invariant, and does a task carry a test that would fail if it broke? A plan that weakens one, leaves a path around one, or plans to loosen a test, threshold or oracle to pass is P1 with type `safety invariant`.
-- **Constitution.** If `.local/constitution.md` exists, read it and score the target against its rubric after the safety pass. Report shortfalls as findings of type `constitution`, naming the rubric item, with the severities it sets. Quote nothing from that file in your output beyond the item name.
 - **Kernel/API trust boundary.** The API process holds only the Anthropic API key, passes session IDs and never identities to the kernel, and can't write policies, facts, approvals, sessions or the ledger. Flag any task that moves a business credential, a kernel-table write or an identity decision to the API side.
 - **Fail closed.** Each error path the plan introduces (errors, timeouts, missing reviewer scores, parse failures, unknown or drifted tools, a lost kernel) must specify refuse, hold or block. An unspecified error path in a decision, execution or reply path is a gap.
 - **Evals gate.** Plans that change the kernel, prompts or policies must say how the attack and legitimate-task suites are run and kept at their bars, and add eval cases for new attack surface. The master plan's Review Focus scenarios must each be covered by a test in the plan that owns them.
@@ -58,7 +57,7 @@ You are one of the panel's seats feeding an orchestrator that consolidates, vali
 - **Evidence:** plan section refs (`plan.md §3.2`), quoted plan text, codebase `file:line` refs that contradict or are missing from the plan, doc links.
 - **Reasoning:** the steps from "the plan says X" to "this is a problem".
 - **Root cause:** the underlying gap, not the symptom.
-- **Type:** `local defect`, `abstraction gap`, `safety invariant`, `constitution`, `product decision` or `test coverage gap`.
+- **Type:** `local defect`, `abstraction gap`, `safety invariant`, `product decision` or `test coverage gap`.
 - **Impact:** plain-language impact on visitors, the owner, money, data or the schedule.
 - **Proposed fix:** a concrete edit the orchestrator can apply to the plan.
 - **Verification hint:** 1–2 commands, greps or doc lookups that independently confirm the gap (e.g. `grep -rn "def check_reply" backend/desk/` for a function the plan assumes exists).
@@ -89,7 +88,7 @@ Then each finding in exactly this format:
 ```
 [#] P1 — Short title
 Location:         plan.md §3.2   (or: plan.md "Task 4")
-Type:             local defect | abstraction gap | safety invariant | constitution | product decision | test coverage gap
+Type:             local defect | abstraction gap | safety invariant | product decision | test coverage gap
 Impact:           <plain-language impact>
 Root cause:       <one sentence>
 Evidence:         <quoted plan text, file:line refs, doc links>
