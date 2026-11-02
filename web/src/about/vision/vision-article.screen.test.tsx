@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
+import { factsInProse } from '../../ds/boards/factInProse.ts';
 import { contrastRatio } from '../../ds/contrast.ts';
 import { FONT_SHEET_URL, loadWebFonts } from '../../ds/test/fonts.ts';
 import { writeLocal } from '../../lib/storage.ts';
@@ -17,7 +18,7 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.
 const PATH = '/about/vision';
 const HEADLINE = 'A front desk that never closes';
 const DEK =
-  'Today a Desk answers for one plumber in Oakland. The same idea fits a city permit office, a team in the field, a customer who’s already signed in and an owner who’s never at a desk. Here’s what that could look like, and the rules that wouldn’t change.';
+  'Today a Desk answers for one plumber in Oakland. The same idea fits a city permit office, a Desk for every person at work, a customer who’s already signed in and an owner who’s never at a desk. Here’s what that could look like, and the rules that wouldn’t change.';
 const NOTE = 'Vision, not the prototype. Nothing on this page is live.';
 const END_NOTE = 'Vision, not in the prototype. Nothing on this page is live; the businesses and people are fictional.';
 const FIRST_WORDS = /^Most of the questions a business gets are the same questions/;
@@ -36,9 +37,9 @@ const FIGURES = [
     ai: 'You’re chatting with Claude, an AI answering for the Permit Center.',
   },
   {
-    label: 'A plumber’s phone: the team Desk shows his job card with the gate code and declines to share a colleague’s pay.',
-    lead: 'Luis, between jobs.',
-    ai: 'Claude, an AI, answers the team under Mike’s rules.',
+    label: 'A colleague’s phone: Sam Patel’s Desk holds half an hour on Sam’s calendar in a card and asks Sam before sharing the hiring plan.',
+    lead: 'Jordan, looking for Sam.',
+    ai: 'Claude, an AI, answers colleagues under Sam’s rules.',
   },
   {
     label: 'A returning customer’s phone: she confirms it’s her with her Claude account, for this visit only, and her invoice opens.',
@@ -57,10 +58,35 @@ const CARDS_HEADING = 'See each one up close';
 const CARDS_LEAD = 'Each idea has its own page, drawn as it would work.';
 const CARDS = [
   { name: 'A city office that answers after hours', line: 'Meridian Bay Permits, after five', href: '/vision/city-office' },
-  { name: 'A Desk for the team', line: 'Turner Plumbing’s plumbers, from the van', href: '/vision/team-desk' },
+  { name: 'A Desk for everyone at work', line: 'Lumen Labs colleagues, asking Sam’s Desk', href: '/vision/team-desk' },
   { name: 'Recognized, with your permission', line: 'Dana, signed in with her Claude account', href: '/vision/claude-account' },
   { name: 'In your pocket', line: 'Mike’s requests on his phone', href: '/vision/phone' },
 ] as const;
+
+/**
+ * The section on a Desk for everyone at work, word for word as the signed board writes it: its heading, its two
+ * paragraphs, its caption, the screen's header (initial, name, line, and the line saying Claude, an AI, answers)
+ * and the chat, each part with its kind, its tone and its words. Claude's first reply leaves out the board's "this
+ * week", which the kernel's reply check reads as a date; the slot's day and time are on the calendar card.
+ */
+const WORK = {
+  heading: 'A Desk for everyone at work',
+  passages: [
+    'At Lumen Labs every employee has a Desk of their own, and colleagues chat with it before they interrupt the person: is Sam free this week, where’s the checklist, who owns this. Each Desk answers from its owner’s calendar, docs and notes, under rules its owner set.',
+    'Jordan gets half an hour on Thursday because Sam lets colleagues hold time. The hiring plan is Sam’s to share, so his Desk asks him and shares nothing until he says yes.',
+  ],
+  caption: 'Jordan, looking for Sam. Time on Sam’s calendar is open to colleagues. The hiring plan waits for Sam.',
+  head: ['S', 'Sam Patel’s Desk', 'Lumen Labs · Jordan Lee is asking', 'Claude, an AI, answers colleagues under Sam’s rules.'],
+  parts: [
+    ['visitor', '', 'Can I grab 30 minutes with Sam this week?'],
+    ['claude', '', 'Sam has a slot open. I’ve held it for you.'],
+    ['card', '', 'Calendar hold / Thursday, November 5, 2:00 pm / 30 minutes with Sam Patel: launch review'],
+    ['receipt', 'done', 'Open to colleagues: Sam lets them hold 30 minutes.'],
+    ['visitor', '', 'Can you send me the Q4 hiring plan?'],
+    ['claude', '', 'That one is Sam’s to share. I’ve asked him for you.'],
+    ['receipt', 'held', 'Held for Sam. Nothing was shared.'],
+  ],
+} as const;
 
 /**
  * The words a reader reads in `root`: its text, but what is hidden from everyone (`aria-hidden`) and the
@@ -189,7 +215,8 @@ describe('The Vision article', () => {
       }
       for (const words of picture?.querySelectorAll('[data-part="claude"]') ?? []) expect(flat(words)).not.toMatch(FACT);
     }
-    expect(facts, 'the cards hold the facts the test looks for').toBeGreaterThanOrEqual(6);
+    // The permit's fee and number, Sam's calendar hold, Dana's invoice date and the held discount: five in all.
+    expect(facts, 'the cards hold the facts the test looks for').toBeGreaterThanOrEqual(5);
 
     // Statuses too: the permit's status is the card's to state, and Claude's words in the city screen only point to it.
     const city = pictures[0];
@@ -204,12 +231,61 @@ describe('The Vision article', () => {
     const heldOrDeclined = outcomes.filter((receipt) => ['held', 'declined'].includes(receipt.getAttribute('data-tone') ?? ''));
     expect(heldOrDeclined.map(flat)).toEqual([
       'Held for a person: waivers are decided by staff.',
-      'Declined by team access. No pay was shared.',
+      'Held for Sam. Nothing was shared.',
     ]);
     for (const receipt of heldOrDeclined) {
       const message = receipt.previousElementSibling;
       expect(message?.getAttribute('data-part'), flat(receipt)).toBe('claude');
       expect(receipt.getBoundingClientRect().top).toBeGreaterThanOrEqual(message?.getBoundingClientRect().bottom ?? Infinity);
+    }
+  });
+
+  it('a_desk_at_work_holds_time_in_a_card_and_holds_the_hiring_plan_for_sam', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      // The section as the signed board writes it: its heading, its two paragraphs, then Sam's Desk and its caption.
+      await expect.element(screen.getByRole('heading', { level: 2, name: WORK.heading, exact: true }), { message: viewport }).toBeVisible();
+      for (const passage of WORK.passages) await expect.element(screen.getByText(passage, { exact: true }), { message: viewport }).toBeVisible();
+      const figure = screen.getByRole('figure', { name: WORK.caption, exact: true });
+      await expect.element(figure, { message: viewport }).toBeVisible();
+      const picture = figure.getByRole('img', { name: FIGURES[1].label, exact: true }).element();
+
+      // Sam Patel's own Desk, with Jordan Lee asking, under the line that says Claude, an AI, answers.
+      const head = picture.querySelector('[data-screen-head]');
+      expect([...(head?.querySelectorAll('.ph-mono, .ph-name, .ph-sub, .ph-ai') ?? [])].map(flat), viewport).toEqual(WORK.head);
+      expect(flat(picture.querySelector('.ph-compose')), viewport).toBe('Ask Sam’s Desk');
+      const parts = [...picture.querySelectorAll('[data-part]')].map((part) => [
+        part.getAttribute('data-part'),
+        part.getAttribute('data-tone') ?? '',
+        part.getAttribute('data-part') === 'card' ? [...part.children].map(flat).join(' / ') : flat(part),
+      ]);
+      expect(parts, viewport).toEqual(WORK.parts);
+
+      // The slot's day and time are on the calendar card alone, and the hold reads in full on the page.
+      const card = picture.querySelector('[data-part="card"]');
+      const when = card?.querySelector('.ph-card__head');
+      expect(flat(when), viewport).toBe('Thursday, November 5, 2:00 pm');
+      expect(flat(when)).toContain('Thursday, November 5');
+      expect(flat(when)).toContain('2:00 pm');
+      await expect.element(figure.getByText('Thursday, November 5, 2:00 pm', { exact: true }), { message: viewport }).toBeVisible();
+      // Claude's words state no day, time or other fact the kernel's reply check would block, "this week" included.
+      for (const words of picture.querySelectorAll('[data-part="claude"]')) expect(factsInProse(flat(words)), flat(words)).toEqual([]);
+
+      // The hiring plan is held for Sam: a held receipt right under Claude's message, as the app draws it.
+      const held = [...picture.querySelectorAll('[data-part="receipt"][data-tone="held"]')];
+      expect(held.map(flat), viewport).toEqual(['Held for Sam. Nothing was shared.']);
+      const asked = held[0]?.previousElementSibling;
+      expect(flat(asked), viewport).toBe('That one is Sam’s to share. I’ve asked him for you.');
+      expect(held[0]?.querySelector('.ph-dot--held'), viewport).not.toBeNull();
+      expect(held[0]?.getBoundingClientRect().top ?? -Infinity, viewport).toBeGreaterThanOrEqual(asked?.getBoundingClientRect().bottom ?? Infinity);
+      await expect.element(figure.getByText('Held for Sam. Nothing was shared.', { exact: true }), { message: viewport }).toBeVisible();
+
+      // The cover band and the picture card draw this same screen, from the same words.
+      const cover = document.querySelectorAll('[data-cover] .va-phone');
+      expect(flat(cover[1]), viewport).toBe(flat(picture));
+      const cardTop = screen.getByRole('link', { name: `${CARDS[1].name} ${CARDS[1].line}`, exact: true }).element().querySelector('.va-phone');
+      expect(flat(cardTop), viewport).toBe(flat(picture));
+      expect(flat(document.querySelector('.vision-article')), viewport).not.toMatch(/Turner Plumbing team|Luis/);
     }
   });
 
