@@ -26,11 +26,22 @@ export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
 export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 
 // The reads, which go out whenever they are asked for (a read ahead, a `fetchQuery`); only the hooks wait out `FRESH_MS`.
-export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
+// Leaving setup can cancel its read, so the next page may send it again.
+export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: ({ signal }) => request('desks', { signal }) });
+
+/** A server read to confirm an uncertain save; a cancelled read's cached value confirms nothing. */
+export async function confirmDesks(queryClient: QueryClient): Promise<BusinessOut[] | null> {
+  // Cancellation rolls back to this invalidated state, so the next reader still asks the server.
+  await queryClient.invalidateQueries({ queryKey: DESKS_KEY, refetchType: 'none' });
+  const before = queryClient.getQueryState(DESKS_KEY)?.dataUpdatedAt;
+  const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+  return queryClient.getQueryState(DESKS_KEY)?.dataUpdatedAt !== before ? read : null;
+}
+
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
 export const needsYouQuery = (deskId: string) =>
-  queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
+  queryOptions({ queryKey: needsYouKey(deskId), queryFn: ({ signal }) => request('needsYou', { params: { desk_id: deskId }, signal }) });
 export const ownerInboxQuery = () => queryOptions({ queryKey: OWNER_INBOX_KEY, queryFn: () => request('ownerInbox') });
 
 /** How long a page waits for a Desk's Today to be read ahead before it opens Today anyway, still loading. */

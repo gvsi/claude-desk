@@ -24,6 +24,7 @@ import type {
   VisitorSession,
 } from '../api/views.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
+import { deskJobTools } from './businessTools.ts';
 import { idempotencyKeyOf } from './keys.ts';
 import { OWNER_LANGUAGE, loweredReason } from './moneyCap.ts';
 import {
@@ -63,7 +64,6 @@ import { PRESETS, presetCards, seedWorld, type MockSeed } from './seed.ts';
 import {
   SETUP_ROUTES,
   setupPublicDesk,
-  setupTaskSet,
   stopSetupRuns,
   withSetupBusinesses,
   withSetupBusinessName,
@@ -280,6 +280,15 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
+/**
+ * The visitor's or visiting agent's latest line when nothing answered it after, as the API's hand-back
+ * looks for one: mode markers, whispers and annotations aren't answers.
+ */
+function waitingLine(session: SessionRecord): string | null {
+  const latest = session.items.findLast((item) => ['visitor_text', 'agent_text', 'delivered'].includes(item.kind));
+  return latest?.kind === 'visitor_text' || latest?.kind === 'agent_text' ? latest.text : null;
+}
+
 /** The owner-chat streams a test can plan: Ask Claude's answer, or a setup turn. */
 export type OwnerStreamKind = 'ruleChat' | 'setup';
 
@@ -407,6 +416,11 @@ export class Server {
       typeof steps === 'function' ? [{ pick: steps, language, text, generation }] : steps.map((step) => ({ step, language, text, generation }));
     turn.queue.push(...queued, { step: turnEnd, language, text, generation });
     if (turn.timer === null) this.tick(sessionId);
+  }
+
+  /** The scripted turn answering a visitor's line: one just sent, or one still waiting at the hand-back. */
+  runVisitorTurn(session: SessionRecord, text: string): void {
+    this.runTurn(session, () => scriptedTurn(text, hasAllTools(this.world, session), this.world.ownerOf(session), session.person), session.language, text);
   }
 
   private tick(sessionId: string): void {
@@ -615,7 +629,12 @@ const SERVED: ServedRoutes = {
     const session = ownerSession(sv, req);
     if (isFailure(session)) return session;
     if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
-    return ok(sv.world.handBack(session));
+    const state = sv.world.handBack(session);
+    // A line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and an
+    // agent's on its next request, the only time an agent's turn runs.
+    const waiting = waitingLine(session);
+    if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
+    return ok(state);
   },
   resume(sv, req) {
     const session = ownerSession(sv, req);
@@ -720,9 +739,12 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const preset = isRecord(req.body) ? req.body.preset : undefined;
     if (req.malformed || !isPreset(preset)) return INVALID;
-    // The preset's cards for the Desk's hours in place of every owner card, personal ones included:
-    // its diff lists each one it removes.
-    return ok(sv.world.draftCards(desk, presetCards(preset, desk.summary.hours)));
+    // Keep eligible non-money job cards unchanged; preset IDs always belong to the preset.
+    const jobs = deskJobTools(rulesView(desk).tools);
+    const cards = presetCards(preset, desk.summary.hours);
+    const presetIds = new Set(cards.map((card) => card.card_id));
+    const kept = desk.policy.cards.filter((card) => !card.is_default && jobs.has(card.applies_to) && !presetIds.has(card.card_id));
+    return ok(sv.world.draftCards(desk, [...cards, ...kept]));
   },
   draftMoneyCap(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -833,7 +855,7 @@ const SERVED: ServedRoutes = {
     const { session } = visitor;
     sv.world.visitorText(session, text);
     // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
-    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session), session.person), session.language, text);
+    if (session.state.mode === 'ai') sv.runVisitorTurn(session, text);
     // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
     else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
@@ -885,16 +907,15 @@ const SERVED: ServedRoutes = {
     return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
   },
   agentTasks(sv, req) {
-    // The Desk's set, read with this browser's chat as the API reads it: its setup business type,
-    // Turner's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
+    // The Desk's set, read with this browser's chat: its summary's business type, the one key the API reads for
+    // the agent and the owner's list (`agents.demo_task_sets`). That is its setup business type, Turner's on the
+    // copy's first Desk, and `other` on any other Desk setup didn't make.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
-    const deskId = visitor.desk.summary.desk_id;
-    const own = sv.world.desks[0]?.summary.desk_id === deskId;
     const payments = visitor.desk.tools.some((row) => row.status === 'enabled'
       && (row.tool === 'native.payment_link' || row.tool === 'native.charge_mandate'));
     return ok({
-      task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other'),
+      task_set: visitor.desk.summary.business_type,
       tasks: payments ? ['book_visit', 'ask_question', 'quote_and_deposit', 'push_the_limit'] : ['book_visit', 'ask_question'],
     } satisfies AgentTasks);
   },

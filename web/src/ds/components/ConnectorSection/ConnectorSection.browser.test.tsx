@@ -9,6 +9,7 @@ import { expect, it, onTestFinished } from 'vitest';
 
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectUserText } from '../../test/expectUserText.ts';
 import { motion } from '../../test/reducedMotion.ts';
 import { ConnectorSection, type ConnectorSectionProps } from './ConnectorSection.tsx';
 
@@ -38,6 +39,32 @@ function withTool(section: ConnectorSectionProps, name: string, changes: Partial
 
 /** The selected fill, as the browser computes `--bg-selected`. */
 const SELECTED = 'rgb(60, 57, 47)';
+
+it.each([680, 688].flatMap((width) => [undefined, '/x'].map((href) => ({ width, href }))))('payment_link_keeps_a_readable_text_column_in_a_$width_px_section_with_href_$href', ({ width, href }) => {
+  const payments = rivera.connectors.sections.find((section) => section.connector.id === 'payments');
+  const paymentLink = payments?.tools.find((tool) => tool.key === 'native.payment_link');
+  if (!payments || !paymentLink) throw new Error('Payments has a payment link');
+  const draw = mount();
+  const el = draw({
+    ...payments,
+    tools: [{ ...paymentLink, href, summary: 'Anyone · Up to $300 · Checked by the reviewer' }],
+  });
+  el.style.width = `${width}px`;
+  const row = el.querySelector<HTMLElement>('.cd-connector-section__tool')!;
+  const head = row.querySelector<HTMLElement>('.cd-connector-section__tool-head')!;
+  const description = row.querySelector<HTMLElement>('.cd-connector-section__tool-description')!;
+  const summary = row.querySelector<HTMLElement>('.cd-connector-section__tool-summary')!;
+  const outcome = row.querySelector<HTMLElement>('.cd-connector-section__tool-outcome')!;
+  expect(head.getBoundingClientRect().width).toBeGreaterThanOrEqual(240);
+  expect(description.getBoundingClientRect().width).toBeGreaterThanOrEqual(240);
+  expect(description.getBoundingClientRect().height).toBeLessThanOrEqual(4 * parseFloat(getComputedStyle(description).lineHeight));
+  expect(summary.getBoundingClientRect().right).toBeLessThanOrEqual(outcome.getBoundingClientRect().left);
+  const style = getComputedStyle(row);
+  const contentRight = row.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
+  for (const part of row.children) {
+    expect(part.getBoundingClientRect().right).toBeLessThanOrEqual(contentRight);
+  }
+});
 
 it('a_landed_row_lights_up_holds_and_lets_go', async () => {
   await motion();
@@ -114,4 +141,20 @@ it('a_landed_row_is_at_its_end_state_under_reduced_motion', () => {
   expect(el.querySelector('.cd-cross-fade')).toBeNull();
   expect(el.querySelector('.cd-connector-section__tool-summary')?.textContent).toBe('Anyone · No discounts · Weekdays, all day');
   expect(document.getAnimations().filter((a) => el.contains((a.effect as KeyframeEffect | null)?.target ?? null))).toEqual([]);
+});
+
+it('a_tools_name_is_user_text_and_its_link_still_names_it_first', () => {
+  const title = 'Approved by your accountant';
+  const draw = mount();
+  const tool = quotes.tools[0];
+  if (!tool) throw new Error('Quotes has a tool');
+  // With a link to its page, and without one.
+  for (const href of ['connectors/quotes/native.quote', undefined]) {
+    const el = draw({ ...quotes, tools: [{ ...tool, name: title, ...(href === undefined ? { href: undefined } : { href }) }] });
+    expect(expectUserText(el, title)).toBe(1);
+    const link = el.querySelector('.cd-connector-section__tool-link');
+    if (href === undefined) expect(link).toBeNull();
+    // Its accessible name still leads with the title as a part of its own, before the app's words.
+    else expect(link?.getAttribute('aria-label')?.startsWith(`${title}: ${tool.summary}, `)).toBe(true);
+  }
 });

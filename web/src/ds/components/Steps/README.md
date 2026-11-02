@@ -11,6 +11,7 @@
 ## What it shows
 
 - An ordered list in a row, named by `label`, in `.cd-type-meta`, its steps joined by 28 px hairlines (`line-hairline`).
+- While `current` is null, no step is marked and the phone line keeps its place without naming a step.
 - Each step is a 22 px circle and its name, 8 px apart. The circle is drawn only (`aria-hidden`), since the list already numbers the steps.
   - Before `current`: a 14 px `check` on `fill-secondary`, and the name in `text-secondary`, read "{name}, done".
   - `current`: the primary button's fill (`button-primary`) with its number in `button-primary-text`, the name in `text-primary`, and `aria-current="step"` on the item.
@@ -24,6 +25,6 @@
 | --- | --- | --- |
 | `label` | `string` | Required. What the steps are of: "Connect Google Calendar", "Set up your Desk". |
 | `steps` | `readonly string[]` | Required. Each step's name, in order. |
-| `current` | `number` | Required. The step the person is on, counted from 0, kept within the steps: the list and the phone's line name the same step. With no steps there is no line. |
+| `current` | `number \| null` | Required. The step the person is on, counted from 0, kept within the steps: the list and the phone's line name the same step. Null until known. With no steps there is no line. |
 | `finished` | `boolean` | Optional, false by default. The flow is done: the current step shows a check and reads done as well. |
 | `drawCheck` | `boolean` | Optional, false by default. With `finished`, the current step's check draws once. Static under reduced motion. |

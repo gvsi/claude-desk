@@ -11,6 +11,7 @@ const HINT = 'Up to a few paragraphs. Only you can see it until you make it publ
 const FILES_LINE = 'Text or Markdown files, up to 100 KB.';
 const ADDED_LINE = 'Added. Only you can see it until you make it public.';
 const TOO_BIG = 'That file is too big. Add files up to 100 KB.';
+const EMPTY_NOTE = 'Write the note first, then add it.';
 
 const PRIMARY = 'rgba(250, 249, 245, 0.92)';
 const SECONDARY = 'rgba(250, 249, 245, 0.64)';
@@ -18,7 +19,7 @@ const SECONDARY = 'rgba(250, 249, 245, 0.64)';
 const meta = {
   title: 'Settings/KnowledgeAdd',
   component: KnowledgeAdd,
-  args: { note: NOTE, onNoteChange: fn(), onAddNote: fn(), onAddFile: fn() },
+  args: { websitePlaceholder: 'turner-plumbing.example/blog', note: NOTE, onNoteChange: fn(), onAddNote: fn(), onAddFile: fn() },
   render: (args) => (
     <div style={{ maxWidth: 720 }}>
       <KnowledgeAdd {...args} />
@@ -252,5 +253,24 @@ export const Phone: Story = {
     const card = canvas.getByRole('region', { name: 'Added' });
     await expect(Math.round(card.getBoundingClientRect().right - toggle.getBoundingClientRect().right)).toBe(21);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const NoteError: Story = {
+  name: 'Note error',
+  args: { note: '', noteError: EMPTY_NOTE },
+  parameters: { canvas: 'none', canvasNote: 'N-Run2-Settings-Knowledge’s form with the screen’s note validation under the note. The board draws no error.' },
+  play: async ({ canvas }) => {
+    const note = canvas.getByRole('textbox', { name: 'A note' });
+    const error = canvas.getByText(EMPTY_NOTE, { exact: true });
+    const website = canvas.getByRole('textbox', { name: 'A website' });
+    await expect(note).toHaveAttribute('aria-invalid', 'true');
+    await expect(note).toHaveAccessibleDescription(`${EMPTY_NOTE} ${HINT}`);
+    await expect(error.closest('.cd-text-field')).toBe(note.closest('.cd-text-field'));
+    await expect(error.closest('[aria-live="polite"]')).not.toBeNull();
+    await expect(error.getBoundingClientRect().top).toBeGreaterThan(note.getBoundingClientRect().bottom);
+    await expect(error.getBoundingClientRect().bottom).toBeLessThan(website.getBoundingClientRect().top);
+    await expect(website).not.toHaveAttribute('aria-invalid');
+    await expect(canvas.queryByRole('alert')).toBeNull();
   },
 };

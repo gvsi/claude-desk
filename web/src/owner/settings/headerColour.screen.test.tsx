@@ -226,6 +226,47 @@ it('draws the public header in every picked palette, including No colour', async
 });
 
 
+it('previews the header in paper ink on an owner colour, and in the theme ink on the panel', async () => {
+  const root = document.documentElement;
+  onTestFinished(() => {
+    delete root.dataset.theme;
+  });
+  const { screen } = await renderRoute(GENERAL);
+  const card = screen.getByRole('region', { name: 'Header colour', exact: true });
+  const group = card.getByRole('radiogroup');
+  await expect.element(group.getByRole('radio', { name: 'Teal', exact: true })).toHaveAttribute('aria-checked', 'true');
+  const preview = card.getByRole('group', { name: 'Header preview' }).element();
+  /** The preview's ground, its names' ink, its second line's and the monogram's edge. */
+  const inks = () => {
+    const [name, line] = [...preview.querySelectorAll('.cd-header-colour__names p')];
+    return {
+      field: getComputedStyle(preview).backgroundColor,
+      name: getComputedStyle(name as Element).color,
+      line: getComputedStyle(line as Element).color,
+      monogram: getComputedStyle(one(preview, '.cd-header-colour__monogram')).borderTopColor,
+    };
+  };
+  // The owner's colour is dark in either theme, so its words are paper ink in both.
+  const onTeal = { field: 'rgb(31, 78, 74)', name: 'rgba(250, 249, 245, 0.92)', line: 'rgba(250, 249, 245, 0.64)', monogram: 'rgba(250, 249, 245, 0.64)' };
+  expect(inks()).toEqual(onTeal);
+  root.dataset.theme = 'light';
+  expect(inks()).toEqual(onTeal);
+
+  // No colour lays the theme's panel under it, and the theme's own inks: paper ink in dark, dark ink in light.
+  await group.getByRole('radio', { name: 'No colour', exact: true }).click();
+  await expect.element(group.getByRole('radio', { name: 'No colour', exact: true })).toHaveAttribute('aria-checked', 'true');
+  expect(inks()).toEqual({ field: 'rgb(239, 236, 228)', name: 'rgba(28, 27, 25, 0.92)', line: 'rgba(28, 27, 25, 0.68)', monogram: 'rgba(28, 27, 25, 0.68)' });
+  root.dataset.theme = 'dark';
+  expect(inks()).toEqual({ field: 'rgb(34, 34, 32)', name: 'rgba(250, 249, 245, 0.92)', line: 'rgba(250, 249, 245, 0.64)', monogram: 'rgba(250, 249, 245, 0.64)' });
+});
+
+/** The one element under `parent` that matches `selector`. */
+function one(parent: Element, selector: string): Element {
+  const found = parent.querySelectorAll(selector);
+  expect(found, selector).toHaveLength(1);
+  return found[0] as Element;
+}
+
 it('turns the swatch edge warm on keyboard focus without changing the selected ring', async () => {
   const { screen } = await renderRoute(GENERAL);
   const teal = screen.getByRole('radio', { name: 'Teal', exact: true });

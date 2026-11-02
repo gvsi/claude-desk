@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
-import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
+import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../api/http.ts';
 import type { Choice, SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
 import { Button, ClaudeMessage, Composer, ConceptFooter, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
+import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
 import { GrowingReply } from '../lib/GrowingReply.tsx';
 import { useTopFade } from '../lib/useTopFade.ts';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
@@ -12,6 +13,7 @@ import { isCard, liveChoices } from './conversation.ts';
 import { SetupChoices } from './SetupChoices.tsx';
 import './SetupConversation.css';
 import { hasWords, useSetupStream } from './setupStream.ts';
+import { useChangeSomething } from './shared.ts';
 import { useSetupWork } from './useSetupWork.ts';
 
 /** Plan 02's limit on an answer. */
@@ -29,6 +31,12 @@ export interface QuestionsStepProps {
   onState: (state: SetupState) => void;
   /** Reads the interview again after a write whose answer was lost; null when it can't be read. */
   reread: () => Promise<SetupState | null>;
+  /**
+   * "Change something": the chat over a step after the questions, its message box focused. What the
+   * owner sends goes to the API's reopen (`setupReopen`), which takes the interview back to its
+   * questions; `onContinue` goes back to the step without sending.
+   */
+  changing?: boolean;
 }
 
 /** The owner hasn't answered whether Claude may read their memory and website. */
@@ -38,12 +46,15 @@ function awaitsConsent(state: SetupState): boolean {
 
 /**
  * An answer as sent: the question it answers, the words, and how many messages the interview held
- * when it was sent, so a read can tell what came after.
+ * when it was sent, so a read can tell what came after. A change sent from a later step ("Change
+ * something") answers no question: it carries its idempotency key (`reopen`) instead, sent again
+ * as it is by "Try again".
  */
 type Answer = SetupAnswerBody & {
   seen: number;
   /** The API refused it (a 409 to its first send): final, whatever a later read holds. */
   refused?: true;
+  reopen?: string;
 }
 
 /**
@@ -57,6 +68,8 @@ function outcomeOf(now: SetupState, answer: Answer): 'taken' | 'refused' | 'unkn
   const since = now.messages.slice(answer.seen);
   const words = answer.text.trim();
   if (since.some((message) => message.role === 'owner' && message.text.trim() === words)) return 'taken';
+  // A change reopens a later step: back at the questions without these words, something else took it.
+  if (answer.reopen !== undefined) return since.length > 0 || now.step === 'questions' ? 'refused' : 'unknown';
   const movedPast = now.step !== 'questions' || now.question !== answer.question || (answer.question === null && now.pending_card !== answer.card);
   return since.length > 0 || movedPast ? 'refused' : 'unknown';
 }
@@ -75,7 +88,7 @@ function Line({ message }: { message: SetupMessage }) {
  * the message box, and words typed there are "No, I'll type it"; then each answer goes to the API,
  * which asks the next question. An answer that didn't go through stays in the composer.
  */
-export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsStepProps) {
+export function QuestionsStep({ state, onState, reread, onContinue, changing: changingHere = false }: QuestionsStepProps) {
   const step = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   // Messages fade where they scroll under the bar, once the conversation is scrolled from its top.
@@ -104,7 +117,11 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const [dismissed, setDismissed] = useState<ReadonlySet<number>>(() => new Set());
   const id = state.interview_id;
   const asking = awaitsConsent(state);
-  const closing = state.step !== 'questions';
+  // "Change something" over a later step: the message box, until the API has the questions again.
+  const changing = changingHere && state.step !== 'questions';
+  // The questions are done: under the plan, "Change something" and "Continue".
+  const closing = state.step !== 'questions' && !changing;
+  const changeSomething = useChangeSomething(id);
   const live = liveChoices(state);
   const busy = state.busy === true;
   const consentBusy = busy && !asking && state.question === null && !state.pending_card && state.messages.filter(({ role }) => role === 'claude').length === 1;
@@ -213,7 +230,9 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     setAmountRequired(null);
     setSuggestionsError(null);
     try {
-      const next = await request('setupAnswer', { params: { id }, body: answer.question === null ? { question: null, card: answer.card, text: answer.text } : { question: answer.question, text: answer.text } });
+      const next = answer.reopen !== undefined
+        ? await request('setupReopen', { params: { id }, body: { text: answer.text, idempotency_key: answer.reopen } })
+        : await request('setupAnswer', { params: { id }, body: answer.question === null ? { question: null, card: answer.card, text: answer.text } : { question: answer.question, text: answer.text } });
       onState(next);
       if (next.busy === true && outcomeOf(next, answer) !== 'taken') setRefill({ text: answer.text });
       setSending(null);
@@ -272,6 +291,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
 
   const suggestions = async () => {
     if (suggesting || busy || sending !== null || deciding !== null) return;
+    returnFocus.current = true;
+    returnToTextarea.current = false;
     setSuggesting(true);
     setSuggestionsError(null);
     try {
@@ -282,6 +303,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
         const now = await reread();
         if (now !== null && (now.step !== 'questions' || now.busy === true)) return;
       }
+      returnFocus.current = false;
       setSuggestionsError(ownerErrorCopy(err));
     } finally {
       setSuggesting(false);
@@ -323,6 +345,11 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
   const send = (text: string) => {
     // While an answer is unsettled the composer shows it with "Try again", which reads first; nothing posts blind.
     if (failed !== null || retrying) return;
+    if (changing) {
+      // A change from a later step: the API takes the interview back to its questions with these words.
+      void submit({ question: null, card: '', text, seen: state.messages.length, reopen: newIdempotencyKey() });
+      return;
+    }
     if (asking) {
       // Typing is "No, I'll type it": nothing is read, and the words wait for the question they answer.
       setRefill({ text });
@@ -379,7 +406,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     const target = failed ? composer.current?.querySelector<HTMLElement>('button:not(:disabled)')
       : decisionFailed ? step.current?.querySelector<HTMLElement>('.cd-setup-c3__failed button:not(:disabled)')
       : panel || consentPanel !== null ? step.current?.querySelector<HTMLElement>(ACTIVE_CHOICE)
-      : closing ? step.current?.querySelector<HTMLElement>('.cd-setup-dock button')
+      : closing ? step.current?.querySelector<HTMLElement>('.cd-setup-dock .cd-button--primary')
       : returnToTextarea.current ? field
       : cardTarget ?? (window.matchMedia('(pointer: fine)').matches ? field : null);
     target?.focus({ preventScroll: true });
@@ -481,7 +508,12 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       {consentPanel === null ? null : <SetupChoices key="consent" kind="consent" question={state.messages[consentPanel]!.text} choices={CONSENT_CHOICES}
         maxLength={ANSWER_MAX} disabled={blocked} onDismiss={toComposer}
         onChoose={(text) => { returnFocus.current = true; returnToTextarea.current = false; void consent(text === copy.allow); }} />}
-      {closing ? <div className="cd-setup-step__actions"><Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button></div> : (
+      {closing ? (
+        <div className="cd-setup-step__actions">
+          <Button variant="secondary" size="main" onClick={changeSomething}>{SETUP_COPY.changeSomething}</Button>
+          <Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button>
+        </div>
+      ) : (
         <div ref={composer}>
           <Composer
             variant="owner"
@@ -496,8 +528,13 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
           />
         </div>
       )}
+      {changing ? <FocusOnArrival composer={composer} /> : null}
+      {/* "Change something" goes back to the step without sending; not once a change is on its way. */}
+      {changing && !replying ? <div className="cd-setup-suggestions">
+        <Button variant="ghost" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button>
+      </div> : null}
       {/* Not while the memory question's turn runs, from the press until Claude's opening is saved. */}
-      {!closing && !asking && consenting === null && !consentBusy ? <div className="cd-setup-suggestions">
+      {!closing && !changing && !asking && consenting === null && !consentBusy ? <div className="cd-setup-suggestions">
         <Button variant="ghost" busy={suggesting} waiting={!suggesting && (blocked || failed !== null)} onClick={() => void suggestions()}>{copy.suggestions}</Button>
         <p className="cd-setup-suggestions__line cd-type-meta">{copy.suggestionsLine}</p>
       </div> : null}
@@ -506,4 +543,10 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       </div></div>
     </div>
   );
+}
+
+/** The message box takes focus when "Change something" opens it, as setup's text boxes do on arrival. */
+function FocusOnArrival({ composer }: { composer: RefObject<HTMLDivElement | null> }) {
+  useFocusOnArrival(composer, 'textarea');
+  return null;
 }

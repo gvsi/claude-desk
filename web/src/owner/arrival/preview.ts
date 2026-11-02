@@ -6,9 +6,9 @@
  * minutes before) with the reply the check stopped (on Safety, so in no read here), Dana's chat
  * (live, booked, with Mike's whisper), the briefing and the last 7 days they make, and the hold's
  * alert in the Demo inbox. The held request and the names come from the design system's Turner
- * fixtures. Each part of the seed is dated back from `now` as the seed dates it, and counted on its
- * own day on the business's clock, so just after midnight what happened before it is yesterday's.
- * Nothing here is read from the API: no copy exists yet.
+ * fixtures. Each part of the seed is dated back from when the copy opened as the seed dates it, and
+ * counted on its own day on the business's clock as Today reads it, so just after midnight what
+ * happened before it is yesterday's. Nothing here is read from the API: no copy exists yet.
  */
 import type { QueryKey } from '@tanstack/react-query';
 
@@ -45,6 +45,23 @@ const SEEDED = {
  */
 export const READ_AFTER_OPENING_MS = 1_000;
 
+/** When the preview takes its copy to have opened, and when it reads it and draws its labels. */
+export interface PreviewClock {
+  opened: Date;
+  readAt: Date;
+}
+
+/**
+ * The preview's clock, for a page drawn at `drawnAt` (a `Date.now()` time): once the copy has
+ * answered, `openedAt`, this page's closest reading of when it opened, so the picture the dialog
+ * leaves onto is dated as the copy is; until then, a copy that opened as the page was drawn. Either
+ * way it is read `READ_AFTER_OPENING_MS` after it opened, as Today reads it.
+ */
+export function previewClock(drawnAt: number, openedAt: number | null): PreviewClock {
+  const opened = openedAt ?? drawnAt - READ_AFTER_OPENING_MS;
+  return { opened: new Date(opened), readAt: new Date(opened + READ_AFTER_OPENING_MS) };
+}
+
 /** The booking Dana made in her chat, in the kernel's words for the owner. */
 const DANA_BOOKED = 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.';
 
@@ -73,13 +90,12 @@ function addDays(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }
 
-/** Turner's Today, Needs you and Demo inbox as Today reads them at `now`, a moment after a new copy opened. */
-export function stillToday(now: Date): StillToday {
-  const at = now.getTime();
-  // The seed is dated back from when the copy opened, a moment before Today reads it at `now`.
-  const opened = at - READ_AFTER_OPENING_MS;
-  const iso = (msAgo: number) => new Date(opened - msAgo).toISOString();
-  const dateOf = (msAgo: number) => localDate(opened - msAgo);
+/** Turner's Today, Needs you and Demo inbox as Today reads them at `readAt`, for a new copy that opened at `opened`. */
+export function stillToday(opened: Date, readAt: Date): StillToday {
+  // The seed is dated back from when the copy opened; the business's today is the one Today reads it on.
+  const from = opened.getTime();
+  const iso = (msAgo: number) => new Date(from - msAgo).toISOString();
+  const dateOf = (msAgo: number) => localDate(from - msAgo);
   const held = rivera.decisions.held;
   const heldAt = iso(SEEDED.held);
   const visitorTurn = rivera.conversations.visitor.turns.find((t) => t.kind === 'visitor');
@@ -87,7 +103,7 @@ export function stillToday(now: Date): StillToday {
   // What Dana wrote last, which Live now quotes: her chat's newest message, as the seed replays it.
   const danaSaid = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : [])).at(-1) ?? null;
   const agent = rivera.conversations.alexAgent;
-  const today = localDate(at);
+  const today = localDate(readAt.getTime());
 
   const desk: DeskSummary = {
     desk_id: DESK_ID,
@@ -97,6 +113,7 @@ export function stillToday(now: Date): StillToday {
     hours: [],
     answering: true,
     setup: null,
+    business_type: 'rivera',
   };
   const business: BusinessOut = {
     business_id: 'preview-business',

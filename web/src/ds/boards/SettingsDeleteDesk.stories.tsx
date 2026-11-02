@@ -15,7 +15,7 @@ function SettingsDeleteDesk() {
         <GeneralSettings answering={ANSWERING_LINE} />
       </SettingsPage>
       <Dialog
-        title={`Delete ${rivera.business.deskName}?`}
+        title={`Delete ${rivera.business.deskName} for ${rivera.business.name}?`}
         body={DELETE_DESK_LINE}
         confirmLabel="Delete Desk"
         cancelLabel="Keep it"
@@ -36,7 +36,8 @@ const meta = {
     canvas: 'N-Run2-Settings-DeleteDesk',
     canvasNote: [
       'Signed on 2026-10-30.',
-      'The general Dialog over Settings › General: “Delete Main line?”, the body, and “Keep it” focused beside “Delete Desk”, fitted to this board (24 px padding, the body 12 px under the title, the answers at a screen’s main size).',
+      'The board\'s title is “Delete Main line?”; the title names the Desk and then its business, “Delete Main line for Turner Plumbing?” (owner decision, 2026-11-02).',
+      "The general Dialog over Settings › General: “Delete Main line for Turner Plumbing?”, the body, and “Keep it” focused beside “Delete Desk”, fitted to this board (24 px padding, the body 12 px under the title, the answers at a screen’s main size).",
       'The board draws a refused dot beside the title and both delete buttons red; deleting a Desk is a neutral button over the general Dialog, not a danger dialog (owner decision, 2026-10-30), so there is no dot and the buttons are neutral.',
       'The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
       'The page behind is Boards/Settings, general.',
@@ -52,7 +53,7 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
     await expectSettingsPage(canvasElement, 'General');
-    const dialog = canvas.getByRole('dialog', { name: 'Delete Main line?' });
+    const dialog = canvas.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" });
     await expect(dialog).toHaveAccessibleDescription(DELETE_DESK_LINE);
     // Where the board draws it: 440 by 182 px, centered on the window.
     const box = dialog.getBoundingClientRect();

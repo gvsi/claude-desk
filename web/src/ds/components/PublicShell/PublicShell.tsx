@@ -30,6 +30,8 @@ export interface PublicBrand {
   ink: string;
   /** The tagline's color over the field; it keeps 4.5:1 too. */
   inkSecondary: string;
+  /** The open-status dot's green over the field; the closed ring takes `inkSecondary`. */
+  statusHandled: string;
   /** Decorative only: the 2 px rule under the header. */
   accent: string;
 }
@@ -68,6 +70,8 @@ export interface PublicShellProps {
    * until it has, as the composer's Send does. `false` by default.
    */
   askWaits?: boolean;
+  /** The chat can't be written in: Ask is disabled like the composer and Send. */
+  askDisabled?: boolean;
   /**
    * The owner is in the chat (a take-over). While it is set, the chat's head says so on the
    * disclosure's line, "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it
@@ -409,9 +413,10 @@ function watchAbout(shell: HTMLElement, observer: ResizeObserver | null, watched
  *
  * When the shell or a pinned part changes size, it lays out again at once, before the browser paints
  * and before the page's own observers measure the conversation. If the about column moves with
- * focus in it, focus goes to the same place in the moved column. If the shell turns short or tall,
- * what the visitor was reading stays where it was under the chat's head (`readingPlace`), and the
- * shell sends `PUBLIC_SHELL_SCROLLER_EVENT` with the element that now scrolls the conversation.
+ * focus in it, focus goes to the same place in the moved column. If the shell's width changes or it
+ * turns short or tall, what the visitor was reading stays where it was under the chat's head
+ * (`readingPlace`). If it turns short or tall, the shell also sends `PUBLIC_SHELL_SCROLLER_EVENT`
+ * with the element that now scrolls the conversation.
  */
 export function useShellLayout(shell: RefObject<HTMLElement | null>, keepComposerRoom = false): boolean {
   const [aboutBeside, setAboutBeside] = useState(false);
@@ -477,13 +482,15 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>, keepCompose
     let beside = fitsBeside();
     setAboutBeside(beside);
     // Where the visitor is reading, as they last saw it at the width the shell was laid out at
-    // (`laidOutWidth`): read after each scroll of the conversation, and each time the shell has laid
-    // itself out. The observer below hears of a new size only once the browser has laid the page out
-    // at it. At the same width nothing under the chat's head has moved by then, and the place is read
-    // there; at a new width, as when a phone turns, the about column, the messages and the chat's
-    // head have wrapped onto other lines, and the place put back is this one. A scroll at a new width
-    // the observer hasn't heard of yet isn't read: it may be the browser's, keeping some other element
-    // still. The trade-off: a visitor's own scroll in that very frame is taken for the browser's.
+    // (`laidOutWidth`): read after each scroll of the conversation, each time it changes size at that
+    // width, and each time the shell has laid itself out. The observer below hears of a new size only
+    // once the browser has laid the page out at it. At the same width nothing under the chat's head
+    // has moved by then, and the place is read there; at a new width, as when a phone turns or a
+    // window widens, the about column, the messages and the chat's head have wrapped onto other
+    // lines, and the place put back is this one, whether or not the shell switches. A scroll at a new
+    // width the observer hasn't heard of yet isn't read: it may be the browser's, keeping some other
+    // element still. The trade-off: a visitor's own scroll in that very frame is taken for the
+    // browser's.
     let laidOutWidth = el.offsetWidth;
     let place = readingPlace(el);
     // The column's line steps aside near the head rather than the chat landing past it: the page lands a chat wherever its end falls.
@@ -504,7 +511,8 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>, keepCompose
       const wasShort = short.current;
       const wasBeside = beside;
       const restoreFocus = focusInAbout(el);
-      const restorePlace = el.offsetWidth === laidOutWidth ? readingPlace(el) : place;
+      const widthChanged = el.offsetWidth !== laidOutWidth;
+      const restorePlace = widthChanged ? place : readingPlace(el);
       // First the about column, by width, at once; then short or tall, with the column in place.
       beside = fitsBeside();
       if (beside !== wasBeside) {
@@ -514,7 +522,9 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>, keepCompose
       fit();
       restoreFocus?.();
       const switched = short.current !== wasShort;
-      if (switched || beside !== wasBeside) restorePlace?.();
+      // At a new width everything under the chat's head has wrapped, whether or not the shell
+      // switched (the about column moves only at a new width), so the place goes back then too.
+      if (switched || widthChanged) restorePlace?.();
       const scroller = scrollerOf(el);
       if (switched && scroller) {
         el.dispatchEvent(
@@ -532,12 +542,22 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>, keepCompose
     const { banner, header, head, composer } = partsOf(el);
     for (const part of [el, banner, header, head, composer]) if (part) observer.observe(part);
     observerRef.current = observer;
+    // Where the browser doesn't anchor scrolling, a message above the place changing height moves
+    // the place with no scroll, so the place is read again whenever the conversation changes size at
+    // the width the shell was laid out at. Made after the shell's own observer, it hears of a new
+    // width only once the shell has put the place back.
+    const conversationObserver = new ResizeObserver(() => {
+      if (el.offsetWidth === laidOutWidth) place = readingPlace(el);
+    });
+    const conversation = el.querySelector('.cd-public-shell__conversation');
+    if (conversation) conversationObserver.observe(conversation);
     watchAbout(el, observer, watchedAbout);
     // The composer taking focus at the top of a short chat comes out from under the chat's head.
     const onFocusIn = () => uncoverComposer(el);
     composer?.addEventListener('focusin', onFocusIn);
     return () => {
       observer.disconnect();
+      conversationObserver.disconnect();
       observerRef.current = null;
       relayoutRef.current = null;
       watchedAbout.current = null;
@@ -621,6 +641,7 @@ export function PublicShell({
   openStatus,
   onAskForOwner,
   askWaits = false,
+  askDisabled = false,
   ownerInChat = false,
   inertAsk = false,
   about,
@@ -654,7 +675,7 @@ export function PublicShell({
   // The owner joining takes "Ask for {owner}" out of the chat's head. Its ref callback notes, as React
   // lets go of it and while it is still on the page, whether it had focus. After the swap, focus goes
   // on (`focusAfterAsk`) only if it had, so it doesn't drop to the page; focus anywhere else, or
-  // nowhere, stays where it is.
+  // nowhere, stays where it is. A focused Ask becoming disabled follows the same path.
   const ask = useRef<HTMLButtonElement | null>(null);
   const askLeftWithFocus = useRef(false);
   const askRef = useCallback((element: HTMLButtonElement | null) => {
@@ -662,10 +683,11 @@ export function PublicShell({
     ask.current = element;
   }, []);
   useLayoutEffect(() => {
-    const follow = ownerInChat && askLeftWithFocus.current;
+    const follow = (ownerInChat && askLeftWithFocus.current)
+      || (askDisabled && ask.current !== null && ask.current === ask.current.ownerDocument.activeElement);
     askLeftWithFocus.current = false;
     if (follow && shellRef.current) focusAfterAsk(shellRef.current);
-  }, [ownerInChat]);
+  }, [ownerInChat, askDisabled]);
   const name = <Name>{brand.name}</Name>;
   const owner = ownerName === null ? null : <Name>{ownerName}</Name>;
 
@@ -753,7 +775,7 @@ export function PublicShell({
             {/* A vision page's Ask goes nowhere, and says so once, in the pinned head under its row.
                 While the owner is in the chat there is no Ask: the owner is already here. */}
             {ownerInChat ? null : (
-              <Button variant="secondary" buttonRef={askRef} waiting={askWaits} onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
+              <Button variant="secondary" buttonRef={askRef} disabled={askDisabled} waiting={askWaits} onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
                 {copy.askFor(owner)}
               </Button>
             )}

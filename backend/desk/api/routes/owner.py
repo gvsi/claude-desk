@@ -24,9 +24,10 @@ from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api import owner_reads
+from desk.api.agents import demo_task_sets
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
-from desk.api.prompts import NOTES
+from desk.api.prompts import NOTES, DemoTaskSet
 from desk.api.ratelimit import RateLimitLedger
 from desk.api.ro import KernelRO
 from desk.api.schemas import (
@@ -55,7 +56,8 @@ from desk.api.schemas import (
     operation_ids,
 )
 from desk.api.sse import RUN_EVENTS, append_control, emit
-from desk.api.store import MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending, transcript
+from desk.api.store import (MESSAGES, Ids, Replayed, append_message, blocks_text, clear_hand_back_wake, has_pending,
+                            has_unanswered_message, transcript)
 from desk.contracts import (CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState,
                             effective_brand)
 from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
@@ -88,27 +90,29 @@ class CopyRequest(BaseModel):
     passcode: Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
 
-async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup]]:
+async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup], dict[str, DemoTaskSet]]:
     """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
-    unfinished setup interviews by Desk ID, from the API's own rows."""
+    unfinished setup interviews and business types by Desk ID, from the API's own rows."""
     # Deleted Desks still consume pending setup claims; whoami lists only the active Desks to show.
     all_desks = await ctx.ro.desks()
     desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks)
+    types = await demo_task_sets(ctx.ro.conn, ctx.ro, [desk["desk_id"] for desk in desks], all_desks=all_desks)
+    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks), types
 
 
-def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup]) -> DeskSummary:
+def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup], types: dict[str, DemoTaskSet]) -> DeskSummary:
     return DeskSummary(desk_id=desk["desk_id"], slug=desk["slug"], name=desk["name"], business_name=business["name"],
-                       hours=desk["hours"], answering=desk["answering"], setup=setups.get(desk["desk_id"]))
+                       hours=desk["hours"], answering=desk["answering"], setup=setups.get(desk["desk_id"]),
+                       business_type=types[desk["desk_id"]])
 
 
 async def copy_out(ctx: OwnerCtx) -> CopyOut:
     """The copy's Desks, from its kernel_ro rows, in the order they were made, each with its unfinished setup."""
-    desks, businesses, setups = await _desks(ctx)
+    desks, businesses, setups, types = await _desks(ctx)
     return CopyOut(copy_id=ctx.copy_id,
-                   desks=[_summary(desk, businesses[desk["business_id"]], setups) for desk in desks])
+                   desks=[_summary(desk, businesses[desk["business_id"]], setups, types) for desk in desks])
 
 
 # A replayed visitor's words, by the kind of session they were said in; and the record each event kind carries
@@ -275,7 +279,7 @@ async def me(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> CopyOut:
 async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOut]:
     """The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk
     names its setup interview while that isn't finished."""
-    found, businesses, setups = await _desks(ctx)
+    found, businesses, setups, types = await _desks(ctx)
     listed: dict[str, BusinessOut] = {}
     for desk in found:
         business = businesses[desk["business_id"]]
@@ -284,7 +288,7 @@ async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOu
                 business_id=business["business_id"], name=business["name"],
                 owner_display_name=business["owner_display_name"], timezone=business["timezone"],
                 brand=effective_brand(business["brand"] or {}), desks=[])
-        listed[business["business_id"]].desks.append(_summary(desk, business, setups))
+        listed[business["business_id"]].desks.append(_summary(desk, business, setups, types))
     return list(listed.values())
 
 
@@ -699,16 +703,19 @@ async def _change_mode(ctx: OwnerCtx, session_id: str, mode: Literal["ai", "owne
 
 async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionState, name: str) -> None:
     """The visitor's event (`name` is the owner's, as the kernel has it) and Claude's note for a mode change; after
-    one back to Claude, a `run_resumable` row when work is waiting for it. A take-over or a hand-back also stays in
-    the transcript (`_transcribed`); a resume after a breaker pause has no event and leaves no item."""
+    one back to Claude, a `run_resumable` row when work is waiting for it. A take-over stops the wake of a hand-back
+    note no turn has read (`clear_hand_back_wake`). A take-over or a hand-back also stays in the transcript
+    (`_transcribed`); a resume after a breaker pause has no event and leaves no item."""
     if now.mode == "owner":
         await _transcribed(conn, ids, EvOwnerJoined(type="owner_joined", name=name))
         await append_message(conn, ids, "note", text=NOTES["taken_over"], wake=False)
+        await clear_hand_back_wake(conn, ids.session_id)   # the owner answers what an earlier hand-back woke for
         return
     if before == "owner":
         await _transcribed(conn, ids, EvOwnerLeft(type="owner_left"))
+    waiting = before == "owner" and await has_unanswered_message(conn, ids.session_id)
     await append_message(conn, ids, "note", text=NOTES["handed_back" if before == "owner" else "resumed"],
-                         wake=False)
+                         wake=waiting)
     if await has_pending(conn, ids.session_id):
         await append_control(conn, ids, "run_resumable", {"generation": now.generation})
 

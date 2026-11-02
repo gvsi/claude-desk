@@ -287,7 +287,6 @@ describe('customers', () => {
     expect(again.screen.getByRole('link', { name: 'Includes recorded history' }).query()).toBeNull();
   });
 
-  // Tab stops in the page: each person's row, then the recorded-history link, and no lead.
   it('leads_newest_first', async () => {
     // The list comes oldest first, as the mock keeps them; the page puts the newest first.
     addLead({ name: 'Ana Reyes', note: JORDAN.note, minutesAgo: 60 * 24 * 4 });
@@ -520,6 +519,30 @@ describe('customers', () => {
 });
 
 describe('a person outside the list', () => {
+  it('person_page_does_not_reuse_a_read_started_before_leaving', async () => {
+    const stale = { people: [{ person_id: bob.personId, display_name: bob.name, masked_contact: bob.maskedContact }], leads: [] };
+    mockStore.inject({ route: 'people', status: 200, body: stale });
+    const { screen, router } = await renderRoute(PEOPLE);
+    await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+
+    const old = held();
+    const before = mockStore.requests.filter((r) => r.key === 'people').length;
+    mockStore.inject({ route: 'people', status: 200, body: stale, until: old.until });
+    await expect.poll(() => mockStore.requests.filter((r) => r.key === 'people').length).toBeGreaterThan(before);
+    await router.navigate(`${DESK}/share`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Share', exact: true })).toBeVisible();
+
+    const now = held();
+    const answer = await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } });
+    mockStore.inject({ route: 'people', status: 200, until: now.until, body: (answer as { body: unknown }).body });
+    await router.navigate(`${PEOPLE}/${dana.personId}`);
+    await expect.element(screen.getByRole('status').filter({ hasText: /^Loading this customer$/ })).toBeVisible();
+    old.release();
+    now.release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
+    expect(screen.getByText("This page doesn't exist").query()).toBeNull();
+  });
+
   it('person_page_reads_the_list_again_before_not_found', async () => {
     // Customers read the list before Dana was on it.
     mockStore.inject({ route: 'people', status: 200, body: { people: [{ person_id: bob.personId, display_name: bob.name, masked_contact: bob.maskedContact }], leads: [] } });
@@ -856,6 +879,12 @@ describe('share', () => {
       const box = card.getBoundingClientRect();
       expect(Math.round(box.width)).toBe(300);
       expect(Math.round(box.left)).toBe(Math.round((document.documentElement.clientWidth - 300) / 2));
+      // On paper the kit stops being a size container, so it can't hold the fixed card's place.
+      expect(getComputedStyle(card.closest('.cd-share-kit') as HTMLElement).containerType).toBe('normal');
+      // At the top of the page, and nothing over it: the card is what its centre hits.
+      expect(Math.round(box.top)).toBe(0);
+      const centre = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      expect(centre !== null && card.contains(centre)).toBe(true);
       expect(getComputedStyle(card).visibility).toBe('visible');
       expect(getComputedStyle(card).backgroundColor).toBe('rgb(250, 249, 245)');
       expect(getComputedStyle(card).printColorAdjust).toBe('exact');

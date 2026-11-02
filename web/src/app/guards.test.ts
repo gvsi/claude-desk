@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { withoutComments, withoutCssComments } from '../test/withoutComments.ts';
+
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 interface Source {
@@ -83,9 +85,8 @@ function withoutHeaderPalette(source: Source): Source {
   for (const [start, end] of ranges.reverse()) text = text.slice(0, start) + ' '.repeat(end - start) + text.slice(end);
   return { ...source, text };
 }
-// A CSS comment; a palette's root rule, its class alone as the selector (read with comments blanked); and a
-// custom property's name, which is a declaration's whole name.
-const CSS_COMMENT = /\/\*[\s\S]*?(?:\*\/|$)/g;
+// A palette's root rule, its class alone as the selector (read with comments blanked); and a custom property's
+// name, which is a declaration's whole name.
 const rootRule = (root: string) => new RegExp(String.raw`(?<=^|[{};])\s*\.${root}\s*\{([^{}]*)\}`, 'g');
 const CUSTOM_PROPERTY_NAME = /^--[\w-]+$/;
 
@@ -121,7 +122,7 @@ function declarationRanges(body: string, offset: number): [number, number][] {
  * only to find the rule and read its declarations' names, so a name in a comment or a string never passes for one.
  */
 function withoutThePalette(text: string, root: string): string {
-  const code = text.replace(CSS_COMMENT, (comment) => ' '.repeat(comment.length));
+  const code = withoutCssComments(text);
   const read = text.split('');
   for (const rule of code.matchAll(rootRule(root))) {
     const bodyStart = rule.index + rule[0].indexOf('{') + 1;
@@ -232,9 +233,10 @@ const DOCUMENT_LINK = /\/api\/d\//i;
 
 // An API operation's name, "GET /api/d/{token}", in capitals as the API's document writes it, names
 // the route for a check, never a link. It is passed over only in the two files that list operations
-// for the route checks: the generated operation list and the compile-time checks.
+// for the route checks: the generated operation list and the routes' compile-time checks.
 const OPERATION_NAME = /\b(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) \/api\/d\//g;
-const listsOperations = (file: string) => file === 'api/openapi.gen.ts' || file.endsWith('.typecheck.ts');
+const OPERATION_LISTS: ReadonlySet<string> = new Set(['api/openapi.gen.ts', 'api/routes.typecheck.ts']);
+const listsOperations = (file: string) => OPERATION_LISTS.has(file);
 
 /** Every document link in `scanned`, but an operation's name in a file that lists operations. */
 function documentLinks(scanned: Source[]): string[] {
@@ -260,7 +262,8 @@ function everyFileButThisOne(): string[] {
 // text file under `src/`, the design system included, but the token sources and the tables and tests
 // that list every token or prove the design system's own guards.
 const MARK_PARTS = /(?<![\w-])--mark-[a-z-]*[a-z]|\bcd-mark__[a-z-]*|#d97757\b|217\s*,\s*119\s*,\s*87/i;
-const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/i;
+// Clay's token, and its dark and light themes' colors as hex and as RGB.
+const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104|#c4673f\b|196\s*,\s*103\s*,\s*63/i;
 const MARK_FOLDER = 'ds/components/Mark/';
 // Clay is the intro illustration's field and the field of the About pages' app icon, which counts as
 // part of the mark (owner, 2026-10-30), plus Claude's writing dots and their story's computed color check.
@@ -413,11 +416,6 @@ function bindingsNotFromTheHook(scanned: Source[]): string[] {
     if (OTHER_DECLARATION.test(text)) bad.push(`${file}: openStatus is declared or assigned elsewhere`);
     return bad;
   });
-}
-
-/** `text` without its comments, so a comment that names something isn't taken for code. */
-function codeOf(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
 }
 
 /** The index just past the brace, bracket or parenthesis that closes the one at `open` in `code`. */
@@ -953,6 +951,8 @@ describe('app source guards', () => {
     expect(named('api/openapi.gen.ts', '"get /api/d/{token}": { 200: null },')).toHaveLength(1);
     expect(named('api/routes.typecheck.ts', "const link = `${origin}/api/d/${token}`;")).toHaveLength(1);
     expect(named('owner/share/ShareKit.tsx', "const route = 'GET /api/d/{token}';")).toHaveLength(1);
+    // Only those two files: any other compile-time check is scanned as code is.
+    expect(named('api/contracts.typecheck.ts', "export const NEVER_CALLED = ['GET /api/d/{token}'];")).toHaveLength(1);
 
     // The app's code and its page: no hint that fetches a link ahead, and no document link written out.
     expect(INDEX_HTML.text).toContain('<div id="root"></div>');
@@ -1173,8 +1173,12 @@ describe('app source guards', () => {
       'sample.tsx: chat is declared or assigned elsewhere',
     ]);
     expect(ownerInChatNotFromTheChat(visitor)).toEqual([]);
+    // The binding check below and the method check further down read code without its comments. A comment
+    // marker inside a string is text, so the code after it on the same line still counts.
+    expect(withoutComments("const a = '//'; const b = <X ownerInChat />;")).toContain('ownerInChat');
+    expect(methodBody(withoutComments("class C { private a(): string { return '//'; } private followMode(): void {} }"), 'followMode')).not.toBeNull();
     // It is passed where it is meant to be, so the check can't pass by finding nothing.
-    expect(visitor.filter(({ text }) => /\bownerInChat=\{chat\.ownerInChat\}/.test(codeOf(text))).map(({ file }) => file)).toEqual(['public/PublicChat.tsx']);
+    expect(visitor.filter(({ file, text }) => /\bownerInChat=\{chat\.ownerInChat\}/.test(withoutComments(text, file))).map(({ file }) => file)).toEqual(['public/PublicChat.tsx']);
 
     // In the visitor chat, the value is `ownerInChatNow`'s, which reads the session's mode and only
     // ANDs on what keeps it false.
@@ -1230,7 +1234,7 @@ describe('app source guards', () => {
     expect(ownerInChatSources(chat?.text ?? '', reducer?.text ?? '')).toEqual([]);
     expect(sessionModeWrites(chat?.text ?? '')).toEqual([]);
     // The rules read the methods they name, so they can't pass by finding nothing.
-    for (const method of ['openedSession', 'followMode', 'laterSession', 'laterRead']) expect(methodBody(codeOf(chat?.text ?? ''), method), method).not.toBeNull();
+    for (const method of ['openedSession', 'followMode', 'laterSession', 'laterRead']) expect(methodBody(withoutComments(chat?.text ?? '', VISITOR_CHAT_FILE), method), method).not.toBeNull();
     expect(ownerInChatNodes(chat?.text ?? '').some((node) => ts.isPropertyAssignment(node) && ts.isCallExpression(node.initializer) && sameExpression(node.initializer.expression, 'ownerInChatNow')), 'the chat sets it from ownerInChatNow').toBe(true);
   });
 
@@ -1322,6 +1326,8 @@ describe('app source guards', () => {
     expect(hits(MARK_PARTS, sample('.cd-mark { display: block } --bookmark-tile: 1; --marked: 1'))).toEqual([]);
     expect(hits(CLAY_PARTS, sample('background: var(--clay-soft); color: #E08968; rgb(224, 137, 104)'))).toHaveLength(3);
     expect(hits(CLAY_PARTS, sample('--clayton: 1; --mark-clay: 1'))).toEqual([]);
+    // The light theme's clay is clay too, as hex and as RGB.
+    expect(hits(CLAY_PARTS, sample('color: #C4673F; fill: rgb(196, 103, 63)'))).toHaveLength(2);
 
     // Every text file under src/, the design system's stories, boards and docs included.
     const everything = everyTextFile().map(withoutHeaderPalette);
@@ -1336,8 +1342,12 @@ describe('app source guards', () => {
     expect(mayUseClay('ds/components/WritingIndicator/Other.css')).toBe(false);
     expect(mayUseClay('ds/components/MarkBanner/MarkBanner.css')).toBe(false);
     expect(mayUseClay('about/reader.css')).toBe(false);
-    const plantedClay: Source[] = [{ file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' }];
-    expect(hits(CLAY_PARTS, plantedClay.filter(({ file }) => !mayUseClay(file)))).toEqual(['about/reader.css: --clay']);
+    const plantedClay: Source[] = [
+      { file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' },
+      { file: 'owner/settings/Settings.css', text: '.cd-settings__accent { color: #c4673f; }' },
+      { file: 'ds/components/IntroDialog/IntroDialog.css', text: '.cd-intro__field { background: #c4673f; }' },
+    ];
+    expect(hits(CLAY_PARTS, plantedClay.filter(({ file }) => !mayUseClay(file)))).toEqual(['about/reader.css: --clay', 'owner/settings/Settings.css: #c4673f']);
     // The matchers find the real uses in their own folders, and nothing anywhere else.
     expect(hits(MARK_PARTS, everything.filter(({ file }) => file.startsWith(MARK_FOLDER))).length).toBeGreaterThan(0);
     for (const folder of CLAY_FOLDERS) {

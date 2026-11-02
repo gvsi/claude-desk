@@ -1,8 +1,17 @@
 /** Chen & Co. CPA's own tools, as the kernel lists them for setup and the owner's rules. */
 import type { JobProposal, ToolRow } from '../api/views.ts';
+import { MONEY_EFFECTS } from '../api/contracts.ts';
 import { placeholderHex } from '../ds/fixtures/index.ts';
 import { isBusinessDef } from '../owner/connectors/businessWords.ts';
+import { isBusinessToolName, toolState } from '../owner/connectors/catalog.ts';
 import type { DeskRecord, ToolRecord } from './world.ts';
+
+/** Non-money jobs whose cards a preset keeps: enabled or awaiting review of a changed pin. */
+export function deskJobTools(rows: readonly ToolRow[]): ReadonlySet<string> {
+  return new Set(rows.filter((row) => row.source === 'business' && isBusinessToolName(row.tool)
+    && !row.effects.some((effect) => MONEY_EFFECTS.has(effect))
+    && (toolState(row) === 'on' || toolState(row) === 'changed')).map((row) => row.tool));
+}
 
 // Claude-facing, third-person drafts of the kernel's fixed block sentences (adapters/blocks.py),
 // and the blocks' capabilities. The owner sees BUSINESS_OWNER_LINES instead.
@@ -96,8 +105,21 @@ export function seedBusinessTools(desk: DeskRecord, rows: readonly ToolRow[] = c
   desk.tools = [...desk.tools.filter((row) => !names.has(row.tool)), ...seeded];
 }
 
-/** Append accepted setup jobs without replacing any tools already on the Desk. */
-export function appendBusinessTools(desk: DeskRecord | undefined, jobs: readonly JobProposal[]): void {
+/** Reconcile accepted jobs as the kernel does, preserving unchanged rows and disabling omissions. */
+export function replaceBusinessTools(desk: DeskRecord | undefined, jobs: readonly JobProposal[]): void {
   if (!desk) throw new Error('the setup Desk must exist');
-  seedBusinessTools(desk, businessToolRows(jobs, desk.tools.map(({ tool }) => tool)));
+  const remaining = new Map(desk.tools.filter(({ source }) => source === 'business').map((row) => [row.tool, row]));
+  const rows = businessToolRows(jobs, desk.tools.filter(({ source }) => source !== 'business').map(({ tool }) => tool));
+  const changed: ToolRow[] = [];
+  for (const row of rows) {
+    const before = remaining.get(row.tool);
+    remaining.delete(row.tool);
+    if (before && before.status !== 'disabled' && before.definition_sha256 === row.definition_sha256) continue;
+    changed.push({ ...row, review_reason: before && before.status !== 'disabled' ? 'changed' : 'new' });
+  }
+  for (const row of remaining.values()) {
+    row.status = 'disabled';
+    row.review_reason = null;
+  }
+  seedBusinessTools(desk, changed);
 }

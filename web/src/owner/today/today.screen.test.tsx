@@ -15,7 +15,7 @@ import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { newIdempotencyKey, observeRequests, OWNER_ERROR_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, RefusalCause, SetupState, ThisWeek, Today } from '../../api/views.ts';
-import { pollMs } from '../../app/poll.ts';
+import { ANSWER_REREAD_MS, answerRereadMs, pollMs } from '../../app/poll.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
@@ -229,6 +229,62 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
+/** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
+function failReads(path: string): { count: () => number; stop: () => void } {
+  let failing = true;
+  let count = 0;
+  worker.use(
+    http.get(path, () => {
+      if (!failing) return undefined;
+      count += 1;
+      return HttpResponse.json({ error: 'kernel', code: 'kernel_unavailable' }, { status: 503 });
+    }),
+  );
+  return {
+    count: () => count,
+    stop: () => {
+      failing = false;
+    },
+  };
+}
+
+/** The main Desk's Today, as the app reads it. */
+const todayReadPath = ROUTES.today.path.replace('{desk_id}', RIVERA.deskId);
+
+/** What "Last 7 days" says of a figure at zero, which it says only of a week its latest read gave. */
+const WEEK_ZERO_LINES = [
+  'No bookings in the last 7 days.',
+  'No conversations in the last 7 days.',
+  "You haven't stepped in.",
+  'Nothing turned down in the last 7 days.',
+  'Claude handled 0',
+  '$0 booked',
+] as const;
+
+/** The zero lines "Last 7 days" shows now. */
+function weekZeroLines(screen: RenderResult): string[] {
+  const text = region(screen, 'Last 7 days').element().textContent;
+  return WEEK_ZERO_LINES.filter((line) => text.includes(line));
+}
+
+/**
+ * Every zero line "Last 7 days" draws while it also says its read failed, even for a moment, from
+ * now until the test ends.
+ */
+function watchZeroLinesOverAFailure(screen: RenderResult): () => string[] {
+  const seen = new Set<string>();
+  const look = () => {
+    const block = screen.container.querySelector('.cd-week');
+    if (block === null || !block.textContent.includes(UNAVAILABLE)) return;
+    for (const line of WEEK_ZERO_LINES) if (block.textContent.includes(line)) seen.add(line);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => watch.disconnect());
+  return () => [...seen];
+}
+
 /** The full-page shapes, with the real heading and no exposed navigation or Today yet. */
 function expectLoadingPage(): void {
   const layer = document.querySelector('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
@@ -399,6 +455,32 @@ describe('Today', () => {
     (document.activeElement as HTMLElement | null)?.blur();
     await things.getByRole('button', { name: 'Open the request' }).click();
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+  });
+
+  it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
+    // The greeting says the owner's first name after the time of day. An owner who gave no name has
+    // setup's fallback, "Owner", in its place, and a blank name is none either: the greeting then
+    // names no one, rather than greeting them as "Owner" or ending on a comma.
+    const greeting = (screen: RenderResult) => screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening)/ });
+    const seen = [];
+
+    const { screen: named } = await renderRoute(TODAY);
+    await expect.element(greeting(named)).toBeVisible();
+    seen.push(greeting(named).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+    await cleanup();
+
+    const { deskId } = await liveSetupDeskIds('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const { screen: fallback } = await renderRoute(`/app/${deskId}/today`);
+    await expect.element(greeting(fallback)).toBeVisible();
+    seen.push(greeting(fallback).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+    await cleanup();
+
+    await injectToday((today) => ({ ...today, greeting_name: '  ' }));
+    const { screen: empty } = await renderRoute(TODAY);
+    await expect.element(greeting(empty)).toBeVisible();
+    seen.push(greeting(empty).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+
+    expect(seen).toEqual(['Good …, Mike', 'Good …', 'Good …']);
   });
 
   it('reload_opens_today_drawn', async () => {
@@ -1289,6 +1371,125 @@ describe('Today', () => {
     expect(turnedDown.element().textContent).not.toContain(refusals()[0]?.reason_plain);
   });
 
+  it('this_week_holds_back_its_zero_lines_while_its_read_fails', { timeout: 15_000 }, async () => {
+    // A quiet week is read, then Today's refreshes fail. "Last 7 days" says so over what it read,
+    // with "Try again", and says none of its zero lines while it can't check them, nor while "Try
+    // again" reads. Once a read works, the line goes and the zero lines are back.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet', retryScale: 0 });
+    const block = region(screen, 'Last 7 days');
+    await expect.element(block.getByText('No bookings in the last 7 days.', { exact: true })).toBeVisible();
+    const quiet = ['No bookings in the last 7 days.', 'No conversations in the last 7 days.', 'Nothing turned down in the last 7 days.'];
+    expect(weekZeroLines(screen)).toEqual(quiet);
+    expect(block.getByRole('alert').elements()).toHaveLength(0);
+
+    const drawn = watchZeroLinesOverAFailure(screen);
+    const failing = failReads(todayReadPath);
+    const line = block.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    const retry = block.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual([]);
+    // Each part keeps its title, and Turned down its way to Safety. The flat bars go too: all they
+    // say is that no day had a booking.
+    const titles = ['Bookings', 'Handled by Claude, or by you', 'Turned down'];
+    for (const title of titles) await expect.element(block.getByRole('heading', { level: 3, name: title, exact: true })).toBeVisible();
+    expect(block.getByRole('list', { name: 'Bookings per day' }).elements()).toHaveLength(0);
+    await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+    // The line sits above the three parts, inside the card.
+    const notice = block.getByRole('alert').element();
+    expect(notice.closest('.cd-week')).not.toBeNull();
+    const bookings = block.getByRole('heading', { level: 3, name: 'Bookings', exact: true }).element();
+    expect(notice.compareDocumentPosition(bookings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // It stays while the polls read again and fail.
+    const failed = failing.count();
+    await vi.waitFor(() => expect(failing.count()).toBeGreaterThanOrEqual(failed + 2), { timeout: 4_000 });
+    expect(line.elements()).toHaveLength(1);
+    expect(weekZeroLines(screen)).toEqual([]);
+
+    // "Try again" reads again: busy while that read is out, and still no zero line.
+    const read = holdReads(todayReadPath);
+    await retry.click();
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    expect(line.elements()).toHaveLength(1);
+    expect(weekZeroLines(screen)).toEqual([]);
+
+    // A read that works takes the line away and brings the zero lines and the bars back.
+    failing.stop();
+    read.release();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.element(block.getByText('No bookings in the last 7 days.', { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(quiet);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    expect(block.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(drawn()).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'a_week_with_bookings_and_no_step_in',
+      figures: week({
+        bookings: 2,
+        booked_cents: 37_800,
+        conversations: 3,
+        handled: 3,
+        stepped_in: 0,
+        stopped: 2,
+        days: ZERO_DAYS.map((d, i) => ({ ...d, bookings: i === 4 || i === 6 ? 1 : 0 })),
+      }),
+      kept: ['$378 booked', '2 bookings, 1 so far today', 'Claude handled 3', '2 requests'],
+      held: ["You haven't stepped in."],
+      bars: 7,
+    },
+    {
+      name: 'a_week_the_owner_stepped_into_every_chat_of',
+      figures: week({ conversations: 2, handled: 0, stepped_in: 2, stopped: 1 }),
+      kept: ['You stepped in 2 times', '1 request'],
+      held: ['No bookings in the last 7 days.', 'Claude handled 0'],
+      bars: 0,
+    },
+    {
+      // A booking with no amount taken, as the API sends one: the count and its bar stay, the $0 doesn't.
+      name: 'a_week_with_a_booking_and_nothing_booked',
+      figures: week({
+        bookings: 1,
+        booked_cents: 0,
+        conversations: 1,
+        handled: 1,
+        days: ZERO_DAYS.map((d, i) => ({ ...d, bookings: i === 6 ? 1 : 0 })),
+      }),
+      kept: ['1 booking, 1 so far today', 'Claude handled 1'],
+      held: ["You haven't stepped in.", 'Nothing turned down in the last 7 days.', '$0 booked'],
+      bars: 7,
+    },
+  ])('this_week_keeps_its_figures_while_its_read_fails_$name', { timeout: 15_000 }, async ({ figures, kept, held, bars }) => {
+    // A week with figures is read, then Today's refreshes fail. Its figures above zero stay, with
+    // the line that says the read failed; only that week's zero lines are held back, until a read works.
+    await injectToday((t) => ({ ...t, this_week: figures }));
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const block = region(screen, 'Last 7 days');
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(held);
+
+    const drawn = watchZeroLinesOverAFailure(screen);
+    const failing = failReads(todayReadPath);
+    const line = block.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    await expect.element(block.getByRole('button', { name: 'Try again' })).toBeVisible();
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual([]);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(bars);
+    await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+
+    failing.stop();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(held);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    expect(drawn()).toEqual([]);
+  });
+
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
     // The signed Today boards draw each day's bar 24 px wide, centered over its initial in one of
     // seven equal columns 6 px apart, at every width: a busy day is a taller bar, never a wider one.
@@ -1667,6 +1868,238 @@ describe('Today', () => {
     expect(card.getByRole('alert').elements()).toHaveLength(0);
   });
 
+  describe('an answer still under way', () => {
+    const ALLOWED = 'You allowed this.';
+    const DONE = "You allowed this. It's done.";
+    /** The owner's read of a decision, as the app sends it. */
+    const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
+    /** The whole re-read schedule at the test's pace: every read an answer can make has been made by then. */
+    const wholeSchedule = () => answerRereadMs().reduce((total, ms) => total + ms, 0);
+
+    it('a_repeat_answer_that_finds_it_allowed_reads_on_until_it_is_done', async () => {
+      // The first answer goes through, but the reply to it is lost on the way back. Asked again, the
+      // API says it was allowed and its action is still running: the card reads the request again
+      // until it's done.
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      mockStore.inject({ route: 'answer', status: 'network', afterCommit: true });
+      const card = heldCard(screen, SEEDED_REASON);
+      const allow = card.getByRole('button', { name: 'Allow this time' });
+      await allow.click();
+      await expect.element(card.getByText(UNCERTAIN, { exact: true })).toBeVisible();
+
+      const allowed = { ...held, state: 'approved', answers: [] };
+      let finish = () => {};
+      const running = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: allowed } });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed });
+      mockStore.inject({ route: 'decision', status: 200, body: { ...held, state: 'executed', answers: [] }, until: running });
+      await allow.click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+      // Read once, still allowed and running; read again, and the card waits on that read.
+      await expect.poll(() => requests('decision').length, { timeout: 5_000 }).toBe(2);
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+
+      finish();
+      await expect.element(card.getByText(DONE, { exact: true })).toBeVisible();
+      expect(card.getByText(ALLOWED, { exact: true }).elements()).toHaveLength(0);
+      expect(card.getByText(UNCERTAIN, { exact: true }).elements()).toHaveLength(0);
+      expect(card.getByRole('alert').elements()).toHaveLength(0);
+      expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id), decisionPath(held.decision_id)]);
+      expect(requests('answer')).toHaveLength(2);
+    });
+
+    it('an_answer_allowed_and_not_yet_run_ends_on_how_the_run_ended', async () => {
+      // The answer comes back allowed and not yet run. The run is then refused, and the card says why
+      // in the kernel's words; that read is final, so it's the last.
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      const refused = 'Not shared: their session ended before your answer';
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: { ...held, state: 'approved', answers: [] }, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: { ...held, state: 'refused_at_execution', answers: [], owner_plain: refused } });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+
+      await expect.element(card.getByText(refused, { exact: true })).toBeVisible();
+      expect(card.getByText(ALLOWED, { exact: true }).elements()).toHaveLength(0);
+      await pause(wholeSchedule());
+      expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
+      await expect.element(card.getByText(refused, { exact: true })).toBeVisible();
+      expect(card.getByRole('alert').elements()).toHaveLength(0);
+    });
+
+    it('an_answer_that_stays_allowed_is_read_only_so_often', async () => {
+      // The run never reports back. Its first read fails on the API's side and the next is lost on the
+      // way: each is one of the tries, and neither shows an error, since the answer went through. The
+      // card reads the request a fixed number of times, then stops on the last line it read.
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      const allowed = { ...held, state: 'approved', answers: [] };
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: allowed, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 503 });
+      mockStore.inject({ route: 'decision', status: 'network' });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, times: 100 });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+
+      await expect.poll(() => requests('decision').length, { timeout: 10_000 }).toBe(ANSWER_REREAD_MS.length);
+      await pause(2 * Math.max(...answerRereadMs()));
+      expect(requests('decision')).toHaveLength(ANSWER_REREAD_MS.length);
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+      expect(card.getByRole('alert').elements()).toHaveLength(0);
+      expect(region(screen, 'Needs you').getByRole('alert').elements()).toHaveLength(0);
+      expect(card.getByText(UNCERTAIN, { exact: true }).elements()).toHaveLength(0);
+    });
+
+    it('only_an_answer_still_under_way_is_read_again', async () => {
+      // Two requests answered: one allowed with its run not yet confirmed, the other denied, final as
+      // its answer says. Only the first is read again, until it's done.
+      mockStore.world.addHeldRefund();
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      const card = heldCard(screen, SEEDED_REASON);
+      const refund = heldCard(screen, REFUND_REASON);
+      await expect.element(refund.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: { ...held, state: 'unknown', answers: [] }, execution_state: 'unknown', card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: { ...held, state: 'executed', answers: [] } });
+
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await refund.getByRole('button', { name: 'Deny', exact: true }).click();
+      await screen.getByRole('menuitem', { name: 'This time' }).click();
+      await expect.element(refund.getByText('You denied this.', { exact: true })).toBeVisible();
+      await expect.element(card.getByText(DONE, { exact: true })).toBeVisible();
+
+      await pause(wholeSchedule());
+      expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
+      await expect.element(refund.getByText('You denied this.', { exact: true })).toBeVisible();
+    });
+
+    it.each(['dismissed', 'left'] as const)('an_answer_still_under_way_is_read_no_more_once_%s', async (how) => {
+      // The run never reports back, and the owner dismisses its card, or leaves Today: no read follows.
+      const { screen, router } = await renderRoute(TODAY);
+      const held = seededHold();
+      const allowed = { ...held, state: 'approved', answers: [] };
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: allowed, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, times: 100 });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+      await expect.poll(() => requests('decision').length, { timeout: 5_000 }).toBeGreaterThanOrEqual(1);
+
+      if (how === 'dismissed') {
+        await region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).click();
+        await expect.element(card).not.toBeInTheDocument();
+      } else {
+        await router.navigate(CONVERSATIONS);
+        await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+      }
+      const reads = requests('decision').length;
+      await pause(wholeSchedule());
+      expect(requests('decision')).toHaveLength(reads);
+      expect(reads).toBeLessThan(ANSWER_REREAD_MS.length);
+    });
+
+    it.each(['dismissed', 'left'] as const)('a_read_still_out_when_the_answer_is_%s_ends_the_reads_at_once', async (how) => {
+      // A read is still out when the owner dismisses the card, or leaves Today: it's dropped, and
+      // nothing waits to read again. At this pace no other timer on the page runs as long as the wait
+      // after that read, so a timer of that length means the reads went on.
+      const { screen, router } = await renderRoute(TODAY, { pollScale: 0.0533 });
+      const held = seededHold();
+      const allowed = { ...held, state: 'approved', answers: [] };
+      let answerRead = () => {};
+      const out = new Promise<void>((resolve) => {
+        answerRead = resolve;
+      });
+      onTestFinished(() => answerRead());
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: allowed, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, until: out });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, times: 100 });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+      await expect.poll(() => requests('decision').length, { timeout: 5_000 }).toBe(2);
+
+      const nextWait = answerRereadMs()[2];
+      const timers = vi.spyOn(window, 'setTimeout');
+      if (how === 'dismissed') {
+        await region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).click();
+        await expect.element(card).not.toBeInTheDocument();
+      } else {
+        await router.navigate(CONVERSATIONS);
+        await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+      }
+      answerRead();
+      await pause(wholeSchedule());
+      expect(requests('decision')).toHaveLength(2);
+      expect(timers.mock.calls.filter(([, ms]) => ms === nextWait)).toEqual([]);
+    });
+
+    it('a_read_from_before_the_answer_never_brings_the_answers_back', async () => {
+      // The answer comes back allowed and not yet run, and the first read is from before it, still
+      // held with its answers: the card keeps its line and offers nothing, then ends done.
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      expect(held.answers?.length).toBeGreaterThan(0);
+      let finish = () => {};
+      const running = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      onTestFinished(() => finish());
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: { ...held, state: 'approved', answers: [] }, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: held });
+      mockStore.inject({ route: 'decision', status: 200, body: { ...held, state: 'executed', answers: [] }, until: running });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+
+      // The held read has landed, since the next one is out.
+      await expect.poll(() => requests('decision').length, { timeout: 5_000 }).toBe(2);
+      await nextFrames();
+      expect(card.getByRole('button', { name: /Allow|Deny/ }).elements()).toHaveLength(0);
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+
+      finish();
+      await expect.element(card.getByText(DONE, { exact: true })).toBeVisible();
+      expect(card.getByRole('button', { name: /Allow|Deny/ }).elements()).toHaveLength(0);
+    });
+
+    it('an_answer_that_lands_after_today_has_gone_is_never_read_again', async () => {
+      // The owner allows, and leaves Today before the answer comes back allowed and not yet run:
+      // nothing is left on screen to show a read, so none is made.
+      const { screen, router } = await renderRoute(TODAY);
+      const held = seededHold();
+      const allowed = { ...held, state: 'approved', answers: [] };
+      let land = () => {};
+      const landing = new Promise<void>((resolve) => {
+        land = resolve;
+      });
+      onTestFinished(() => land());
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, until: landing, body: { decision: allowed, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, times: 100 });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.poll(() => requests('answer').length, { timeout: 5_000 }).toBe(1);
+
+      await router.navigate(CONVERSATIONS);
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+      const answered = new Promise<void>((resolve) => {
+        onTestFinished(
+          observeRequests((outcome) => {
+            if (outcome.key === 'answer') resolve();
+          }),
+        );
+      });
+      land();
+      await answered;
+      await pause(wholeSchedule());
+      expect(requests('decision')).toEqual([]);
+    });
+  });
+
   it('answer_lands_in_its_slot', async () => {
     // Things to try hidden, as the board draws it, so only the card is in play.
     writeLocal('thingsToTryHidden', 'true');
@@ -1763,9 +2196,10 @@ describe('Today', () => {
     await userEvent.keyboard('{Enter}');
     await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
     expect(document.activeElement).toBe(live.element());
-    // The Today line above loses "held 1 for you" and may take a row less on a phone, which the
-    // browser's scroll anchoring takes off the column's scroll; the focus scrolls nothing itself.
+    // Callbacks aren't counted in the Today line, so marking one done leaves its height and the
+    // column's scroll unchanged; the focus scrolls nothing itself.
     const shrunk = lineBefore - todayLine();
+    expect(shrunk).toBe(0);
     expect(column.scrollTop).toBe(before.column - shrunk);
     expect(window.scrollY).toBe(before.window);
   });
@@ -2726,16 +3160,42 @@ describe("Today's How your Desk works", () => {
     expectNoHorizontalScroll();
   });
 
-  it('how_your_desk_works_counts_today_from_the_briefing', async () => {
-    // Handled is the night's answers and bookings; held, what needs the owner; turned down, the
-    // requests refused. All from the one Today read, each a link to where they are.
+  it('how_your_desk_works_counts_only_held_requests_like_safety', async () => {
+    openCallback();
+    openCallback('ses-visitor-web');
+    const items = await needsYouRead();
+    const seeded = items.find((item) => item.decision != null);
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const newer: NeedsYouItem = {
+      ...seeded,
+      decision: { ...seeded.decision, decision_id: 'dec-newer', reason_plain: 'A visitor asked to book Sunday at 10:00 pm.' },
+      held_at: new Date().toISOString(),
+    };
+    // Two held requests and two callbacks: the aggregate remains four Needs you cards.
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [newer, ...items] });
+    await injectToday((t) => ({ ...t, needs_you_count: 4 }));
+    const { screen, router } = await renderRoute(TODAY);
+    const how = region(screen, 'How your Desk works');
+    const held = how.getByRole('link', { name: 'held 2 for you', exact: true });
+    await expect.element(held).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
+    await expect.element(held).toHaveAttribute('href', `${TODAY}#request-${seeded.decision.decision_id}`);
+    await held.click();
+    await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
+    await router.navigate(`${DESK}/safety`);
+    await expect.element(screen.getByRole('link', { name: '2 held for you', exact: true })).toBeVisible();
+  });
+
+  it('how_your_desk_works_counts_handled_and_refused_from_the_briefing', async () => {
+    // Handled is the night's answers and bookings; turned down, the requests refused. Held comes
+    // from Needs you's requests, even when Today's aggregate differs. Each links to where it is.
     await injectToday((t) => ({ ...t, needs_you_count: 4, briefing: { ...t.briefing, answers: 3, bookings: 2, turned_down: 1 } }));
     const { screen } = await renderRoute(TODAY);
     const how = region(screen, 'How your Desk works');
     const line = () => how.element().querySelector<HTMLElement>('.cd-how__today');
     await vi.waitFor(() => expect(line()).not.toBeNull());
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    expect(line()!.textContent).toBe('Today, Claude handled 5 on its own held 4 for you turned down 1 request');
+    expect(line()!.textContent).toBe('Today, Claude handled 5 on its own held 1 for you turned down 1 request');
     const outcomes = [...line()!.querySelectorAll('.cd-how__outcome')];
     expect(outcomes.map((o) => o.querySelector('.cd-status-dot')?.className)).toEqual([
       'cd-status-dot cd-status-dot--handled',
@@ -2743,7 +3203,7 @@ describe("Today's How your Desk works", () => {
       'cd-status-dot cd-status-dot--refused',
     ]);
     const links = outcomes.map((o) => o.querySelector('a'));
-    expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 4 for you', 'turned down 1 request']);
+    expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 1 for you', 'turned down 1 request']);
     expect(links.map((a) => a?.getAttribute('href'))).toEqual([
       `/app/${RIVERA.deskId}/conversations`,
       `/app/${RIVERA.deskId}/today#request-${seededHold().decision_id}`,
@@ -2761,28 +3221,41 @@ describe("Today's How your Desk works", () => {
     expectComputed(count, { fontWeight: '600', fontVariantNumeric: 'tabular-nums' });
     expect(getComputedStyle(count).color).not.toBe(getComputedStyle(line()!).color);
 
-    // "held 4 for you" brings the oldest held request into focus in Needs you.
-    await how.getByRole('link', { name: 'held 4 for you', exact: true }).click();
+    // "held 1 for you" brings the oldest held request into focus in Needs you.
+    await how.getByRole('link', { name: 'held 1 for you', exact: true }).click();
     await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
   });
 
-  it('how_your_desk_works_links_to_needs_you_when_only_a_callback_waits', async () => {
+  it('how_your_desk_works_omits_held_when_only_callbacks_wait', async () => {
+    openCallback();
+    openCallback('ses-visitor-web');
+    const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
+    await injectToday((t) => ({ ...t, needs_you_count: 2 }));
+    const { screen, router } = await renderRoute(TODAY);
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    expect(how.element().querySelector('.cd-how__today')?.textContent).toBe('Today, Claude handled 2 on its own');
+    expect(how.element().querySelector('.cd-how__outcome .cd-status-dot--held')).toBeNull();
+    expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
+    await router.navigate(`${DESK}/safety`);
+    await expect.element(screen.getByRole('heading', { name: 'Safety', exact: true })).toBeVisible();
+    expect(screen.getByRole('link', { name: /held for you/ }).elements()).toHaveLength(0);
+  });
+
+  it('how_your_desk_works_draws_no_quiet_line_when_a_callback_waits', async () => {
     openCallback();
     const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
     mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
-    await injectToday((t) => ({ ...t, needs_you_count: 1 }));
-    const { screen, router } = await renderRoute(TODAY);
-    const how = region(screen, 'How your Desk works');
-    const link = how.getByRole('link', { name: 'held 1 for you', exact: true });
-    await expect.element(link).toBeVisible();
-    await expect.element(link).toHaveAttribute('href', `${TODAY}#needs-you`);
-    await link.click();
-    await vi.waitFor(() => expect(document.activeElement).toBe(region(screen, 'Needs you').element()));
-    expect(router.state.location.hash).toBe('#needs-you');
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
+    expect(region(screen, 'How your Desk works').element().querySelector('.cd-how__today')).toBeNull();
   });
 
   it('how_your_desk_works_says_a_quiet_day_and_waits_for_the_answers', async () => {
     // A quiet day: one quiet line in place of the outcomes, with no dots or links.
+    mockStore.reset('rivera_quiet');
     await injectToday((t) => ({ ...t, needs_you_count: 0, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
     const quiet = await renderRoute(TODAY);
     const how = region(quiet.screen, 'How your Desk works');
@@ -2812,6 +3285,56 @@ describe("Today's How your Desk works", () => {
     const how = region(screen, 'How your Desk works');
     expect(how.getByRole('listitem').elements()).toHaveLength(3);
     expect(how.element().querySelector('.cd-how__today')).toBeNull();
+  });
+
+  it('how_your_desk_works_keeps_counts_hidden_until_the_reconnected_read_succeeds', async () => {
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    const read = holdReads(needsYouPath);
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
+
+    mockStore.world.decisions.clear();
+    onlineManager.setOnline(true);
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.fetchStatus).toBe('fetching'));
+    await nextFrames();
+    expect(how.element().querySelector('.cd-how__today')).toBeNull();
+    read.release();
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0);
+
+    // An ordinary refresh keeps the current line while its response is pending.
+    const poll = holdReads(needsYouPath);
+    const refresh = queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(poll.held()).toBeGreaterThan(0));
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    poll.release();
+    await refresh;
+  });
+
+  it('how_your_desk_works_hides_and_recovers_counts_after_a_needs_you_refresh_fails', async () => {
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
+
+    mockStore.reset('rivera');
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
+    await allowTheSeededRequest(screen);
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0));
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
   });
 
   it('how_your_desk_works_hides_kept_counts_when_a_refresh_fails', async () => {
@@ -3243,6 +3766,39 @@ describe("Today's unfinished setup", () => {
     await expectScreenBasics(phone.screen.container, { owner: true });
   });
 
+  it('back_to_an_unfinished_today_returns_to_its_place_once_drawn', async () => {
+    // Back to the Today of a Desk whose setup isn't finished, once Needs you has left the app's
+    // memory: Today opens on its own skeleton, with the "Not live yet" card's shape in it, and
+    // restores the owner's place once drawn, and keeps it.
+    const state = await deskAtRules();
+    const today = `/app/${state.desk_id}/today`;
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen, router } = await renderRoute(today, { viewport: { width: 1440, height: 600 } });
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio')).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    const column = document.querySelector('main')!;
+    column.scrollTop = 300;
+    await vi.waitFor(() => expect(column.scrollTop).toBe(300));
+    // Time for the place to be kept, as the owner's own scrolling is.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await mainNav(screen).getByRole('link', { name: /^Conversations/ }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+
+    queryClient.removeQueries({ queryKey: needsYouKey(state.desk_id) });
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', state.desk_id));
+    onTestFinished(needsYou.release);
+    await router.navigate(-1);
+    await vi.waitFor(expectTodayOpening);
+    expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer .cd-today__band > .cd-continue-setup')).not.toBeNull();
+    needsYou.release();
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio')).toBeVisible();
+    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector('main')!.scrollTop).toBe(300));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(document.querySelector('main')!.scrollTop).toBe(300);
+  });
+
   it('a_live_desk_has_no_setup_card', async () => {
     // The seeded copy's Desk is live and was made without setup: Today has no card, and Things to try stays.
     const { screen } = await renderRoute(TODAY);
@@ -3334,25 +3890,6 @@ describe("Today's Demo inbox", () => {
 
   /** The owner's read of one decision, as the app sends it. */
   const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
-
-  /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
-  function failReads(path: string): { count: () => number; stop: () => void } {
-    let failing = true;
-    let count = 0;
-    worker.use(
-      http.get(path, () => {
-        if (!failing) return undefined;
-        count += 1;
-        return HttpResponse.json({ error: 'kernel', code: 'kernel_unavailable' }, { status: 503 });
-      }),
-    );
-    return {
-      count: () => count,
-      stop: () => {
-        failing = false;
-      },
-    };
-  }
 
   /** The top of `el` is inside the window, where the owner can see it. */
   function expectInView(el: Element): void {

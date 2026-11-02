@@ -42,6 +42,7 @@ type SetupMessage = {
   text: string;                    // "" on a card message
   choices: Choice[];               // [] unless this Claude message asks a question with choices
   card: ProposalCard | null;       // set only on a card message (role "claude", text "")
+  owner_decided: boolean;          // read-only: true only on a card the owner decided
 };
 type Choice = { text: string; recommended: boolean };   // 2..4 choices, each text ≤ 80, at most one recommended, listed first
 ```

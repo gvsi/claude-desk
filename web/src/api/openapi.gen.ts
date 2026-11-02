@@ -260,7 +260,9 @@ export interface BusinessOut {
  * One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back
  * into it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.
  * `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
- * setup.
+ * setup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set
+ * (`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the
+ * Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's.
  */
 export interface DeskSummary {
   desk_id: string;
@@ -270,6 +272,7 @@ export interface DeskSummary {
   hours: HoursWindow[];
   answering: boolean;
   setup: DeskSetup | null;
+  business_type: "rivera" | "trade" | "office" | "landlord" | "other";
 }
 /**
  * A Desk's setup interview that hasn't gone live: its ID (`GET /api/owner/setup/{id}`) and the step it is at.
@@ -627,12 +630,16 @@ export interface MoneyCapIn {
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
  * applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
  * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
- * wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
- * characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
- * AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
- * shown as "Claude's note on what the Desk stopped: {summary}" and never quoted as the visitor's), else None. A held
- * request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
- * AI-written text: a visitor could steer a summary to sway an approval.
+ * wrote (`from_the_visitor`: at most two messages; a held request quotes only the visitor's lines since Claude's
+ * last reply before its held status (a request whose status isn't in the chat quotes the chat's latest).
+ * If that window is empty, it quotes the newest visitor line before the status. A handoff quotes the chat's
+ * latest. Each is
+ * a one-line glimpse of at most 200 characters, joined with " · "; their own untrusted words); and, on a handoff
+ * only, the conversation's newest AI-written triage summary (`claude_summary`: what the person asked for and what
+ * the Desk did, for the owner alone, shown as "Claude's note on what the Desk stopped: {summary}" and never quoted
+ * as the visitor's), else None. A held request asks the owner for a decision, so neither it nor a handoff in a
+ * session with one awaiting the owner carries AI-written text: a visitor could steer a summary to sway an
+ * approval.
  */
 export interface NeedsYouItem {
   decision: Decision | null;
@@ -871,6 +878,7 @@ export interface ToolRow {
   pending_sha256: string | null;
   cards: CoveringCard[];
   business?: BusinessToolDef | null;
+  review_reason?: ("new" | "changed" | "delisted") | null;
 }
 /**
  * `POST /api/owner/policy/setup/{id}/safety_check`: what a bad actor would try against the drafted rules,
@@ -927,13 +935,16 @@ export interface SetupConsentIn {
 /**
  * One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
  * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
- * only to a card message, with role `claude` and empty text.
+ * only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+ * themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
+ * false. Read-only: it only says what happened.
  */
 export interface SetupMessage {
   role: "claude" | "owner" | "tool_label";
   text: string;
   choices?: Choice[];
   card?: ProposalCard | null;
+  owner_decided?: boolean;
 }
 /**
  * The owner's decision on a setup proposal, with optional changes when accepting it.
@@ -990,6 +1001,15 @@ export interface SetupPublicLinesConfirmIn {
    */
   keys: [string, ...string[]];
   revision: string;
+}
+/**
+ * `POST /api/owner/setup/{id}/reopen`: "Change something", the owner's message to Claude from a step after the
+ * questions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),
+ * makes a repeat answer the interview as the first left it instead of sending the message twice.
+ */
+export interface SetupReopenIn {
+  text: string;
+  idempotency_key: string;
 }
 /**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
@@ -1290,6 +1310,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/proposals/{proposal_id}": { 200: "SetupState", 202: "SetupState" },
+  "POST /api/owner/setup/{id}/reopen": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/suggestions": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },

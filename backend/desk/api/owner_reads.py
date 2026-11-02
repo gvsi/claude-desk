@@ -30,15 +30,16 @@ offer no take-over on them.
 import asyncio
 import logging
 from collections import Counter, OrderedDict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import DateTime, cast, func, literal, null, select, type_coerce, union_all
+from sqlalchemy import DateTime, and_, cast, func, literal, null, or_, select, tuple_, type_coerce, union_all
 from sqlalchemy.dialects.postgresql import JSONB, JSONPATH
 
+from desk.always_on import specificity
 from desk.api.deps import OwnerCtx
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.ro import decision_replayed, replayed, ro_view, set_copy
@@ -64,7 +65,7 @@ from desk.api.schemas import (
 from desk.api.setup import INTERVIEWS
 from desk.api.sse import RUN_EVENTS
 from desk.api.store import AUDIENCE_KINDS, MESSAGES, WITH_EVENTS, newest_triage, triaged
-from desk.contracts import Decision, DecisionState, is_business_tool
+from desk.contracts import Decision, DecisionState, RuleCard, is_business_tool
 
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
@@ -184,6 +185,55 @@ async def recent_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str], 
     return found
 
 
+async def texts_before_held(ctx: OwnerCtx, desk_id: str, decisions: Iterable[Decision], count: int = 2,
+                            kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, list[str | None]]:
+    """What each held request's visitor (or visiting agent) wrote in the turn that made it, by decision ID: the
+    newest `count` rows of `kinds` after Claude's newest `delivered` row before the request's held status in its chat
+    (its session's first `status` row naming the decision, written when the turn's call was held), oldest first,
+    read for every decision in one query. Without a prior Claude reply, the turn starts at the chat's beginning.
+    If the window is empty (a prior turn's reply can arrive after the visitor's next line), quote the newest line before the
+    status. A request with no such line maps to `[None]`; one whose status isn't
+    in the chat (held before the API showed it) is left out. If the API restarts after the kernel holds a request
+    but before the chat shows it, the next request recovers the turn (`loop._drain` through `tools.recover_call`
+    and `_settle`) and writes the held status after that request's own message, so that message can be quoted too."""
+    wanted = sorted({(decision.decision_id, decision.session_id) for decision in decisions})
+    if not wanted:
+        return {}
+    shown = (select(MESSAGES.c.ref_id, MESSAGES.c.session_id, func.min(MESSAGES.c.n).label("at"))
+             .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "status",
+                    tuple_(MESSAGES.c.ref_id, MESSAGES.c.session_id).in_(wanted))
+             .group_by(MESSAGES.c.ref_id, MESSAGES.c.session_id)
+             .subquery())
+    delivered = MESSAGES.alias("last_delivery")
+    answered = (select(func.coalesce(func.max(delivered.c.n), 0))
+                .where(delivered.c.copy_id == ctx.copy_id, delivered.c.desk_id == desk_id,
+                       delivered.c.session_id == shown.c.session_id, delivered.c.kind == "delivered",
+                       delivered.c.author == "claude", delivered.c.n < shown.c.at)
+                .correlate(shown).scalar_subquery())
+    preceding = MESSAGES.alias("last_visitor_line")
+    latest = (select(func.max(preceding.c.n))
+              .where(preceding.c.copy_id == ctx.copy_id, preceding.c.desk_id == desk_id,
+                     preceding.c.session_id == shown.c.session_id, preceding.c.kind.in_(kinds),
+                     preceding.c.n < shown.c.at)
+              .correlate(shown).scalar_subquery())
+    # With a nonempty window its newest line is already included; otherwise this adds only the fallback.
+    said = and_(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
+                MESSAGES.c.session_id == shown.c.session_id,
+                or_(MESSAGES.c.n > answered, MESSAGES.c.n == latest),
+                MESSAGES.c.n < shown.c.at, MESSAGES.c.kind.in_(kinds))
+    ranked = (select(shown.c.ref_id, MESSAGES.c.text, MESSAGES.c.n,
+                     func.row_number().over(partition_by=shown.c.ref_id,
+                                            order_by=MESSAGES.c.n.desc()).label("newest"))
+              .select_from(shown.outerjoin(MESSAGES, said))
+              .subquery())
+    rows = await ctx.ro.conn.execute(select(ranked.c.ref_id, ranked.c.text)
+                                     .where(ranked.c.newest <= count).order_by(ranked.c.ref_id, ranked.c.n))
+    found: dict[str, list[str | None]] = {}
+    for decision_id, text in rows:
+        found.setdefault(decision_id, []).append(text)
+    return found
+
+
 def visitor_lines(texts: Iterable[str | None]) -> str | None:
     """Several of a visitor's messages as one owner-facing line: each a glimpse (`visitor_line`), oldest first, joined
     with " · ", the separator a call-back note uses. None when nothing is left."""
@@ -234,25 +284,42 @@ async def refusal_reason(ctx: OwnerCtx, decision_id: str, session_id: str, state
     return decision.owner_plain
 
 
+def holding_card(cards: Mapping[str, RuleCard], card_ids: Iterable[str]) -> RuleCard | None:
+    """The rule card that held a request, the first its `reason_plain` quotes, picked as the kernel's
+    `decide.hold_decider` picks the cards that decided a hold. A held decision's `card_ids` are every card behind its
+    matching hold permits, sorted by ID, so the compiler's default ask for anyone can come first. Of those found in
+    `cards` (the version's, by ID): the most specific (`desk.always_on.specificity`, which ranks a default ask below
+    every card), the ask cards among them when there are any (an ask card wins a tie with an auto card's hold twin),
+    then the first by `card_id`. A hold only the default ask decided names the default ask. None when no card is
+    found."""
+    known = [cards[card_id] for card_id in card_ids if card_id in cards]
+    if not known:
+        return None
+    top = max(specificity(card) for card in known)
+    deciding = [card for card in known if specificity(card) == top]
+    return min([card for card in deciding if card.mode == "ask"] or deciding, key=lambda card: card.card_id)
+
+
 async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> dict[str, str | None]:
-    """The reason of the rule card that held each decision: its first `card_ids` entry, in the policy version it was
-    decided under (default cards included), by decision ID."""
+    """The reason of the rule card that held each decision (`holding_card`), in the policy version it was decided
+    under (default cards included), by decision ID."""
     versions = sorted({decision.policy_version for decision in decisions})
     if not versions:
         return {}
-    cards: dict[tuple[int, str], str] = {}
+    cards: dict[int, dict[str, RuleCard]] = {}
     for row in await ctx.ro.rows("policy_versions", desk_id=desk_id, version=versions):
-        for card in row["cards"] or []:
-            cards[(row["version"], card["card_id"])] = card["reason"]
-    return {decision.decision_id: cards.get((decision.policy_version, decision.card_ids[0]))
-            if decision.card_ids else None for decision in decisions}
+        cards[row["version"]] = {card["card_id"]: RuleCard.model_validate(card) for card in row["cards"] or []}
+    held = {decision.decision_id: holding_card(cards.get(decision.policy_version, {}), decision.card_ids)
+            for decision in decisions}
+    return {decision_id: card.reason if card is not None else None for decision_id, card in held.items()}
 
 
 async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     """The Desk's held requests, each read from the kernel with the owner's credential (which applies expiry, so a
     request that expired meanwhile drops out), oldest first, then its open handoffs, call-back requests and the handoff
     card's, each with its kind. A card's handoff has no action: its kernel row's `action_id`, which no view shows,
-    names the handoff itself."""
+    names the handoff itself. Each quotes at most two visitor lines: a held request's only from the turn that
+    made it, a handoff's the chat's latest."""
     who = await people(ctx, desk_id)
     held_rows = [row for row in await ctx.ro.rows("decisions", desk_id=desk_id, state="held",
                                                   order_by=("created_at", "decision_id"))
@@ -263,7 +330,12 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
             if decision.state == "held" and decision.decision_id == row["decision_id"]]
     handoffs = [row for row in await ctx.ro.rows("handoffs", desk_id=desk_id, status="open", order_by=("handoff_id",))
                 if row["session_id"] in who.sessions]
-    asked = [decision.session_id for _, decision in held] + [row["session_id"] for row in handoffs]
+    # A held request quotes the words that made it (`texts_before_held`); a handoff, and a request whose held status
+    # isn't in its chat, the chat's latest.
+    requested = {decision_id: visitor_lines(said) for decision_id, said
+                 in (await texts_before_held(ctx, desk_id, [decision for _, decision in held])).items()}
+    asked = ([decision.session_id for _, decision in held if decision.decision_id not in requested]
+             + [row["session_id"] for row in handoffs])
     texts = {session_id: visitor_lines(said) for session_id, said in (await recent_texts(ctx, desk_id, asked)).items()}
     # AI-written triage never sits beside an approval it could sway: only a handoff gets one, which asks the owner
     # for no decision, and not while the same session has a held request awaiting them.
@@ -275,9 +347,11 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     items = []
     for row, decision in held:
         if (session := who.brief(decision.session_id)) is not None:
+            said = (requested[decision.decision_id] if decision.decision_id in requested
+                    else texts.get(decision.session_id))
             items.append(NeedsYouItem(decision=decision, held_by=held_by[decision.decision_id],
                                       held_at=utc(row["created_at"]), handoff=None, session=session,
-                                      from_the_visitor=texts.get(decision.session_id), claude_summary=None))
+                                      from_the_visitor=said, claude_summary=None))
     for row in handoffs:
         if (session := who.brief(row["session_id"])) is not None:
             handoff = Handoff(handoff_id=row["handoff_id"], session_id=row["session_id"], reason=row["reason"],

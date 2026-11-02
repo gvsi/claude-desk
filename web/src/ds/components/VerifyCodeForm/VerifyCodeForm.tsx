@@ -33,6 +33,12 @@ function digitsOf(text: string): string {
 /** What an input method's composition puts in the field: it can't be cancelled before it lands. */
 const COMPOSING: ReadonlySet<string> = new Set(['insertCompositionText', 'insertFromComposition']);
 
+/**
+ * What Enter asks of the field. A one-line field never takes the line break, and the browser sends
+ * the form instead, as Confirm does; cancelling it would cancel that too.
+ */
+const LINE_BREAK: ReadonlySet<string> = new Set(['insertLineBreak', 'insertParagraph']);
+
 /** `idle` waiting for a code, `checking` while one is checked, `failed` after one didn't work. */
 export type VerifyCodeState = 'idle' | 'checking' | 'failed';
 
@@ -100,12 +106,13 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = fals
   // - Anything else put into a whole code with nothing selected, typed, pasted or dropped, is
   //   refused, so the six digits and the caret stay as they were, as a length limit would keep
   //   them. Typing or pasting over a selection replaces it as usual.
+  // Enter's line break is neither: it goes through, so the form is sent (`submit`).
   useEffect(() => {
     const field = fieldRef.current;
     if (!field) return undefined;
     const beforeInput = (event: InputEvent) => {
       selectionBefore.current = { start: field.selectionStart ?? 0, end: field.selectionEnd ?? 0 };
-      if (!event.cancelable || !event.inputType.startsWith('insert')) return;
+      if (!event.cancelable || !event.inputType.startsWith('insert') || LINE_BREAK.has(event.inputType)) return;
       const inserted = digitsOf(event.data ?? event.dataTransfer?.getData('text/plain') ?? '');
       if (inserted.length === CODE_LENGTH) {
         event.preventDefault();
@@ -153,6 +160,9 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = fals
             aria-invalid={failed || undefined}
             aria-describedby={failed ? failedId : undefined}
             onChange={change}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && event.repeat) event.preventDefault();
+            }}
           />
           {/* Busy keeps the words and the focus: the button stays focusable but inert. */}
           <Button variant="primary" size="main" type="submit" disabled={!whole && !checking} busy={checking}>

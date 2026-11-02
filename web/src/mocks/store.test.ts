@@ -449,6 +449,73 @@ describe('the scripted Desk', () => {
     expect(answersFor({ ...DECISIONS.heldRefund, amountCents: 50_000 })).toContain('allow_person');
   });
 
+  it('a_held_request_quotes_the_words_that_made_it', async () => {
+    // The held request quotes only its own turn after Claude answered the price question,
+    // as the API's Needs you does, while the same chat's callback quotes its latest.
+    const { session } = await openChat();
+    await send('How much to clear a drain?');
+    await drain();
+    await send('Can I get 15% off?');
+    await drain();
+    await send('Can you come Tuesday?');
+    await drain();
+    await send('Please call me back');
+    await drain();
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const chat = needsYou.filter((item) => item.session.session_id === session.session_id);
+    expect(chat.map((item) => [item.decision ? 'held' : 'handoff', item.from_the_visitor])).toEqual([
+      ['held', 'Can I get 15% off?'],
+      ['handoff', 'Can you come Tuesday? · Please call me back'],
+    ]);
+  });
+
+  it.each(['desk', 'owner'] as const)('a_%s_delivery_keeps_the_held_requests_visitor_words', async (author) => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    world.visitorText(session, 'It is the downstairs drain.');
+    world.visitorText(session, 'Can I get 15% off?');
+    world.emit(session, { ...ctx.reply([proseBlock('Your payment link was cancelled.')]), author });
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('It is the downstairs drain. · Can I get 15% off?');
+  });
+
+  it.each(['visitor', 'agent'] as const)('a_late_reply_keeps_one_line_from_the_%s_before_the_hold', async (kind) => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!, kind === 'agent' ? { agent: "Alex Kim's assistant" } : {});
+    const say = (text: string) => kind === 'agent' ? world.agentText(session, text) : world.visitorText(session, text);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    say('How much to clear a drain?');
+    say('Can I get 15% off?');
+    world.emit(session, ctx.reply([proseBlock('Here is the drain clearing quote.')]));
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+    say('A later request must not be quoted.');
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('Can I get 15% off?');
+  });
+
+  it('a_first_turn_hold_quotes_both_visitor_lines', async () => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    world.visitorText(session, 'It is the downstairs drain.');
+    world.visitorText(session, 'Can I get 15% off?');
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('It is the downstairs drain. · Can I get 15% off?');
+  });
+
   it('owner_alert_names_the_held_request', async () => {
     // Mike's Demo inbox alert for a hold names that held request; the code sent to a visitor names none.
     const before = mockStore.world.inbox.length;
@@ -1283,12 +1350,16 @@ describe('the scripted Desk', () => {
   });
 
   it('held_request_quotes_two_lines_each_cut_to_its_glimpse', async () => {
-    // A held request quotes the same two lines as a handoff (the API's `visitor_lines`): each with
+    // The last two visitor lines in the request's own turn (the API's `visitor_lines`): each with
     // whitespace collapsed, and past 200 characters cut to 199, trimmed, and "…".
     const { session } = await openChat();
     const long = `${'x'.repeat(198)}   ${'y'.repeat(10)}`;
-    await send(long);
+    await send('How much to clear a drain?');
     await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the visitor has a session');
+    mockStore.world.visitorText(record, 'One more question about the drain.');
+    mockStore.world.visitorText(record, long);
     await send('Can I get 50%   off if I pay cash?');
     await drain();
     const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
@@ -1326,6 +1397,143 @@ describe('the scripted Desk', () => {
     expect(asked?.handoff?.kind).toBe('card');
     expect(asked?.claude_summary).toBeNull();
   });
+
+  it('held_by_names_the_rule_the_decision_quotes', async () => {
+    // As the API reads it (`holding_card`): a hold's card_ids are every card behind its matching hold
+    // permits, sorted by ID, so the kernel's default ask for anyone can come first. "Held by your rule"
+    // names the card the decision's reason quotes: the most specific, an ask card at a tie, then the
+    // first by ID.
+    const refund = mockStore.world.addHeldRefund();
+    const record = mockStore.world.decisions.get(refund.decision_id);
+    const main = mockStore.world.desk(deskId);
+    if (!record || !main) throw new Error('Dana has a refund held on the main Desk');
+    const defaultAsk: RuleCard = {
+      card_id: 'default:payments.create_refund',
+      applies_to: 'payments.create_refund',
+      mode: 'ask',
+      who: 'anyone',
+      is_default: true,
+      reason: 'Not covered by a rule yet, so it asks you.',
+    };
+    main.policy.cards = [...main.policy.cards, defaultAsk];
+    const read = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+        (item) => item.decision?.decision_id === refund.decision_id,
+      );
+
+    // The refund card held it, and the default ask matched too, listed first.
+    record.decision.card_ids = [defaultAsk.card_id, 'rv-refund'];
+    expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
+
+    // Held by the default ask alone, it names the default ask.
+    record.decision.card_ids = [defaultAsk.card_id];
+    expect((await read())?.held_by).toBe(defaultAsk.reason);
+  });
+
+  it.each([
+    ['seed', 'changed'], ['seed', 'removed'], ['confirmed', 'changed'], ['confirmed', 'removed'],
+  ] as const)('held_by_keeps_the_%s_version_when_the_rule_is_%s', async (start, change) => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    const competing: RuleCard = {
+      card_id: 'a-refund-effect', applies_to: 'effect:pay_out', mode: 'ask', who: 'anyone',
+      reason: 'Payouts ask first.',
+    };
+    if (start === 'confirmed') {
+      const initial = world.draft(main, [competing]);
+      expect(world.confirmDraft(main, initial.version)).toMatchObject({ version: initial.version });
+    } else {
+      world.addActiveRules(main, [competing]);
+      expect(main.versions.size).toBe(0);
+    }
+    const heldVersion = main.policy.version;
+    const refundRule = main.policy.cards.find((card) => card.card_id === 'rv-refund')!;
+    const refund = world.addHeldRefund();
+    // All matching hold cards are stored; the tool card outranks the effect card.
+    refund.card_ids = [competing.card_id, refundRule.card_id];
+    expect(refund.policy_version).toBe(heldVersion);
+    const read = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+        (item) => item.decision?.decision_id === refund.decision_id,
+      );
+    expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
+
+    const next = world.draftCards(main, main.policy.cards.flatMap((card) =>
+      card.card_id !== refundRule.card_id ? [card] : change === 'removed' ? [] : [{ ...card, reason: 'New refund rule.' }],
+    ));
+    expect(world.confirmDraft(main, next.version)).toMatchObject({ version: heldVersion + 1 });
+
+    expect((await read())?.decision?.state).toBe('held');
+    expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
+    expect(main.versions.has(main.policy.version)).toBe(false);
+  });
+
+  it('keeps_no_archived_versions_after_100_confirms_without_held_decisions', () => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    world.decisions.clear();
+    for (let i = 0; i < 100; i += 1) {
+      const draft = world.draft(main, []);
+      expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+    }
+    expect(main.versions.size).toBe(0);
+  });
+
+  it('held_by_names_no_rule_when_the_deciding_version_is_missing', async () => {
+    const refund = mockStore.world.addHeldRefund();
+    refund.policy_version = 999;
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+      .find((item) => item.decision?.decision_id === refund.decision_id);
+    expect(held?.held_by).toBeNull();
+  });
+
+  it('held_by_reads_an_in_place_edit_of_the_active_cards', async () => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    const draft = world.draft(main, []);
+    expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+    const refund = world.addHeldRefund();
+    expect(refund.policy_version).toBe(main.policy.version);
+    const card = main.policy.cards.find((card) => card.card_id === 'rv-refund')!;
+    card.reason = 'The current refund rule asks for your answer.';
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+      .find((item) => item.decision?.decision_id === refund.decision_id);
+    expect(held?.held_by).toBe(card.reason);
+    expect(main.versions.has(main.policy.version)).toBe(false);
+  });
+
+  it.each(['allow', 'deny', 'cancel', 'refuse', 'closed_allow', 'closed_deny'] as const)(
+    'drops_archived_cards_after_the_last_hold_resolves_%s', (resolution) => {
+      const world = mockStore.world;
+      const main = world.desk(deskId)!;
+      world.decisions.clear();
+      const first = world.addHeldRefund();
+      const last = world.addHeldRefund();
+      const version = first.policy_version;
+      const draft = world.draft(main, []);
+      expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+      expect([...main.versions.keys()]).toEqual([version]);
+
+      world.cancel(world.decisions.get(first.decision_id)!);
+      expect([...main.versions.keys()]).toEqual([version]);
+      const record = world.decisions.get(last.decision_id)!;
+      let state: DecisionState;
+      if (resolution === 'cancel') state = world.cancel(record).state;
+      else if (resolution === 'closed_allow' || resolution === 'closed_deny') {
+        world.deleteDesk(main);
+        state = world.answerClosed(record, resolution === 'closed_allow' ? 'allow_once' : 'deny_once').state;
+      } else {
+        if (resolution === 'refuse') {
+          main.policy.cards = main.policy.cards.map((card) => card.card_id === 'rv-refund' ? { ...card, mode: 'never' } : card);
+        }
+        state = world.answer(record, resolution === 'deny' ? 'deny_once' : 'allow_once').state;
+      }
+      expect(state).toBe(resolution === 'cancel' ? 'cancelled'
+        : resolution === 'refuse' || resolution === 'closed_allow' ? 'refused_at_execution'
+        : resolution === 'deny' || resolution === 'closed_deny' ? 'denied' : 'executed');
+      expect(main.versions.size).toBe(0);
+    },
+  );
 
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
     // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
@@ -1677,6 +1885,52 @@ describe('taking over', () => {
   const kindsFor = (sessionId: string) =>
     (mockStore.world.desks[0]?.ledger ?? []).filter((e) => e.event.session_id === sessionId).map((e) => e.event.kind);
 
+  it('hand_back_answers_the_waiting_visitor_once', async () => {
+    const { session, events } = await openChat();
+    const params = { session_id: session.session_id };
+    expect((await call('takeover', { params, body: { generation: session.generation } })).status).toBe(200);
+    await send('Do you work in Alameda?');
+    await drain();
+    expect(typesOf(events)).toEqual(['owner_joined']);
+
+    expect((await call('handback', { params, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events)).toEqual(['owner_joined', 'owner_left', 'writing', 'message', 'turn_end']);
+    expect(events[3]?.[1]).toMatchObject({ type: 'message', author: 'claude', generation: session.generation + 2 });
+    await drain();
+    expect(typesOf(events).filter((kind) => kind === 'message')).toHaveLength(1);
+  });
+
+  it('hand_back_leaves_a_waiting_agent_line_for_its_next_request', async () => {
+    // As on the API, an agent's line waits too, but its turn runs only on the agent's own next request.
+    const world = mockStore.world;
+    const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+    const params = { session_id: agent.state.session_id };
+    expect((await call('takeover', { params, body: { generation: agent.state.generation } })).status).toBe(200);
+    world.agentText(agent, 'Can someone come on Thursday?');
+    expect((await call('handback', { params, body: { generation: agent.state.generation } })).status).toBe(200);
+    await drain();
+    expect(agent.events.map(({ ev }) => ev.type)).toEqual(['owner_joined', 'owner_left']);
+  });
+
+  it.each(['empty', 'owner_answered', 'owner', 'claude'] as const)('hand_back_starts_nothing_after_%s', async (latest) => {
+    const { session, events } = await openChat();
+    const params = { session_id: session.session_id };
+    if (latest === 'claude') {
+      await send('Do you work in Alameda?');
+      await drain();
+    }
+    expect((await call('takeover', { params, body: { generation: session.generation } })).status).toBe(200);
+    if (latest === 'owner_answered') await send('Do you work in Alameda?');
+    if (latest === 'owner_answered' || latest === 'owner') {
+      expect((await call('ownerMessage', { params, body: { kind: 'say', text: 'Yes, we do.' } })).status).toBe(200);
+    }
+    const before = events.length;
+    expect((await call('handback', { params, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events.slice(before))).toEqual(['owner_left']);
+  });
+
   it('takeover_fences_the_turn_in_flight', async () => {
     const { session, events } = await openChat();
     // The visitor picks a time, and Mike takes the chat over before Claude's turn has done anything.
@@ -1929,6 +2183,102 @@ describe('rules and tools', () => {
     expect((await confirm(8)).status).toBe(401);
   });
 
+  it.each(['ask_first', 'auto'] as const)('preset_%s_keeps_person_card_on_non_money_job', async (preset) => {
+    const desk = mockStore.world.desks[0]!;
+    const person: RuleCard = { ...desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!, card_id: 'person-dana-callback', who: 'person', person_id: rivera.people.dana.personId };
+    desk.policy.cards.push(person);
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    expect(draft.cards).toContainEqual(person);
+    expect(draft.diff?.removed).not.toContainEqual(person);
+    expect(draft.diff?.changed?.some(([old]) => old.card_id === person.card_id)).toBe(false);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe(preset);
+  });
+
+  it.each([
+    ['needs_review', 'new', false], ['needs_review', 'changed', true],
+    ['needs_review', 'delisted', false], ['disabled', null, false],
+  ] as const)('preset_handles_job_state_%s_%s', async (status, reviewReason, kept) => {
+    for (const preset of ['ask_first', 'auto'] as const) {
+      mockStore.reset('rivera');
+      const desk = mockStore.world.desks[0]!;
+      const job = desk.tools.find((row) => row.tool === 'desk.emergency-callback')!;
+      job.status = status;
+      job.review_reason = reviewReason;
+      const urgent = desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!;
+      const before = await rules();
+      expect(before.tools.find((row) => row.tool === job.tool)?.review_reason).toBe(reviewReason);
+      const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+      expect(response.status).toBe(200);
+      const draft = response.body as RulesDraft;
+      expect(draft.cards.some((card) => card.card_id === urgent.card_id)).toBe(kept);
+      expect(draft.diff?.removed?.some((card) => card.card_id === urgent.card_id)).toBe(!kept);
+      expect((await confirm(draft.version)).status).toBe(200);
+      expect((await rules()).preset).toBe(preset);
+    }
+  });
+
+  it.each(['ask_first', 'auto'] as const)('preset_%s_card_wins_job_card_id_collision', async (preset) => {
+    const desk = mockStore.world.desks[0]!;
+    const presetCard = presetCards(preset, RIVERA_HOURS)[0]!;
+    const collision: RuleCard = { ...desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!, card_id: presetCard.card_id, mode: 'never' };
+    desk.policy.cards = [...desk.policy.cards.filter((card) => card.card_id !== collision.card_id), collision];
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    expect(draft.cards).toContainEqual(presetCard);
+    expect(draft.cards).not.toContainEqual(collision);
+    expect(draft.diff?.changed).toContainEqual([collision, presetCard]);
+    expect(new Set(draft.cards.map((card) => card.card_id)).size).toBe(draft.cards.length);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe(preset);
+  });
+
+  it.each(['ask_first', 'auto'] as const)('preset_%s_removes_automatic_money_job_cards', async (preset) => {
+    const desk = mockStore.world.desks[0]!;
+    const urgent = desk.tools.find((row) => row.tool === 'desk.emergency-callback')!;
+    const payment: RuleCard = { ...desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!, card_id: 'deposit', applies_to: 'desk.deposit', max_amount_cents: 5000 };
+    const payout: RuleCard = { ...payment, card_id: 'payout', applies_to: 'desk.payout' };
+    desk.tools.push({ ...urgent, tool: 'desk.deposit', effects: ['change', 'charge'] },
+      { ...urgent, tool: 'desk.payout', effects: ['change', 'pay_out'] });
+    desk.policy.cards.push(payment, payout);
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    for (const card of [payment, payout]) {
+      expect(draft.cards).not.toContainEqual(card);
+      expect(draft.diff?.removed).toContainEqual(card);
+    }
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe(preset);
+    desk.policy.cards.push(payment);
+    expect((await rules()).preset).toBeNull();
+  });
+
+  it.each(['ask_first', 'auto'] as const)('preset_%s_keeps_the_desks_job_cards', async (preset) => {
+    const before = await rules();
+    const urgent = before.active.cards.find((card) => card.card_id === 'rv-urgent');
+    expect(urgent).toMatchObject({ applies_to: 'desk.emergency-callback', mode: 'auto', reason: 'Anyone can ask for an urgent callback, which alerts you at once.' });
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    expect(draft.cards).toEqual([...presetCards(preset, RIVERA_HOURS), urgent]);
+    expect(new Set(draft.cards.map((card) => card.card_id)).size).toBe(draft.cards.length);
+    expect(draft.diff?.removed).not.toContainEqual(urgent);
+    const was = new Map(before.active.cards.map((card) => [card.card_id, card]));
+    const now = new Map(draft.cards.map((card) => [card.card_id, card]));
+    for (const card of draft.diff?.added ?? []) expect(was.has(card.card_id)).toBe(false);
+    for (const card of draft.diff?.removed ?? []) expect(now.has(card.card_id)).toBe(false);
+    for (const [old, next] of draft.diff?.changed ?? []) expect(old).not.toEqual(next);
+    expect((await rules()).active).toEqual(before.active);
+    expect((await confirm(draft.version)).status).toBe(200);
+    const after = await rules();
+    expect(after.preset).toBe(preset);
+    expect(after.tools.find((row) => row.tool === 'desk.emergency-callback')).toEqual(before.tools.find((row) => row.tool === 'desk.emergency-callback'));
+  });
+
   it('preset_drafts_recommended_rules_in_the_desks_own_hours', async () => {
     // Turner's Desk keeps 8:00 to 18:00 on weekdays and 9:00 to 13:00 on Saturdays: its "Recommended
     // rules" book weekdays 8 to 6, as the API drafts them, and Saturday bookings ask first.
@@ -1940,7 +2290,8 @@ describe('rules and tools', () => {
     // Its weekday card is Turner's own weekday rule, words included, in all but its id.
     const reason = 'Weekday bookings in opening hours, checked by the reviewer.';
     expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' }, reason }]);
-    expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)));
+    const urgent = (await rules()).active.cards.find((card) => card.card_id === 'rv-urgent');
+    expect(draft.cards).toEqual([...PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)), urgent]);
     expect(bookings(draft.cards)).toEqual([{ ...rivera.ruleCards['rv-book-wk'], card_id: 'preset-book-weekday' }]);
     expect((await confirm(draft.version)).status).toBe(200);
     expect((await rules()).preset).toBe('auto');
@@ -1952,7 +2303,7 @@ describe('rules and tools', () => {
     desk.summary.hours = [];
     expect((await rules()).preset).toBeNull();
     const fallback = await preset();
-    expect(fallback.cards).toEqual(PRESETS.auto);
+    expect(fallback.cards).toEqual([...PRESETS.auto, urgent]);
     expect((await confirm(fallback.version)).status).toBe(200);
     expect((await rules()).preset).toBe('auto');
   });

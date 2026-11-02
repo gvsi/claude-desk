@@ -3252,6 +3252,127 @@
         }
       }
     },
+    "/api/owner/setup/{id}/reopen": {
+      "post": {
+        "summary": "Setup Reopen",
+        "description": "\"Change something\": take setup back to its chat from a step after the questions (`tools`, `rules`,\n`situations`, `safety_check` or `preview`), with the owner's message as the next owner turn. The interview\nreturns to `questions`, and what was drafted from the answers is dropped: the rules draft, the situations and the\nsafety check are drafted again on the way forward, and the rules can't be confirmed until the safety check has run\nagain. Answered as `/answer` is: 200 with the landed state, or 202 `SetupState` with `busy: true` past the wait.\n\nEach send carries an `idempotency_key`. A repeat with the same key and text answers the interview as it stands and\nruns nothing; the same key with other text is 409 `conflict`. 409 `conflict` while a turn runs, at the questions\nstep, and once the Desk is live (changes are then made in the owner app). A turn that fails or is abandoned\nleaves the interview at the step it was at, so the same send can be tried again. 503 `model_unavailable` when\nClaude couldn't answer.",
+        "operationId": "owner_setup_reopen",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupReopenIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/owner/setup/{id}/suggestions": {
       "post": {
         "summary": "Setup Suggestions",
@@ -3376,7 +3497,7 @@
     "/api/owner/setup/{id}/tools": {
       "get": {
         "summary": "Setup Tools",
-        "description": "The new Desk's tools, and the mock payments server while it isn't connected.",
+        "description": "The new Desk's tools, and the mock payments server while it isn't connected. The payment tools of a Stripe\nconnection \"Change something\" took away are switched off first, when publishing the plan couldn't: 503 when the\nkernel can't do it now, so a retry tries again.",
         "operationId": "owner_setup_tools",
         "parameters": [
           {
@@ -7276,7 +7397,7 @@
     "/api/owner/policy/{desk_id}/preset": {
       "post": {
         "summary": "Draft Preset",
-        "description": "Draft a preset in place of the Desk's owner cards: \"Ask me first for everything\" (`ask_first`) or \"Recommended\nrules\" (`auto`). Every owner card goes, those for one person and \"never\" ones included, and the draft's diff lists\neach; nothing changes until `confirm`.",
+        "description": "Draft a preset in place of the Desk's owner cards: \"Ask me first for everything\" (`ask_first`) or \"Recommended\nrules\" (`auto`). The Desk's own job cards stay unchanged. Other owner cards go, those for one person and \"never\"\nones included, and the draft's diff lists each; nothing changes until `confirm`.",
         "operationId": "owner_draft_preset",
         "parameters": [
           {
@@ -9909,6 +10030,17 @@
                 "type": "null"
               }
             ]
+          },
+          "business_type": {
+            "type": "string",
+            "enum": [
+              "rivera",
+              "trade",
+              "office",
+              "landlord",
+              "other"
+            ],
+            "title": "Business Type"
           }
         },
         "type": "object",
@@ -9919,10 +10051,11 @@
           "business_name",
           "hours",
           "answering",
-          "setup"
+          "setup",
+          "business_type"
         ],
         "title": "DeskSummary",
-        "description": "One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back\ninto it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.\n`answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its\nsetup."
+        "description": "One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back\ninto it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.\n`answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its\nsetup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set\n(`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the\nTurner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's."
       },
       "DeskUpdated": {
         "properties": {
@@ -11212,7 +11345,7 @@
           "claude_summary"
         ],
         "title": "NeedsYouItem",
-        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200\ncharacters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff only, the conversation's newest\nAI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,\nshown as \"Claude's note on what the Desk stopped: {summary}\" and never quoted as the visitor's), else None. A held\nrequest asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries\nAI-written text: a visitor could steer a summary to sway an approval."
+        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote (`from_the_visitor`: at most two messages; a held request quotes only the visitor's lines since Claude's\nlast reply before its held status (a request whose status isn't in the chat quotes the chat's latest).\nIf that window is empty, it quotes the newest visitor line before the status. A handoff quotes the chat's\nlatest. Each is\na one-line glimpse of at most 200 characters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff\nonly, the conversation's newest AI-written triage summary (`claude_summary`: what the person asked for and what\nthe Desk did, for the owner alone, shown as \"Claude's note on what the Desk stopped: {summary}\" and never quoted\nas the visitor's), else None. A held request asks the owner for a decision, so neither it nor a handoff in a\nsession with one awaiting the owner carries AI-written text: a visitor could steer a summary to sway an\napproval."
       },
       "NeedsYouSession": {
         "properties": {
@@ -13456,6 +13589,11 @@
                 "type": "null"
               }
             ]
+          },
+          "owner_decided": {
+            "type": "boolean",
+            "title": "Owner Decided",
+            "default": false
           }
         },
         "type": "object",
@@ -13464,7 +13602,7 @@
           "text"
         ],
         "title": "SetupMessage",
-        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text."
+        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided\nthemselves, by a click or a typed answer; a card setup settled for them (as \"Use your suggestions\" does) stays\nfalse. Read-only: it only says what happened."
       },
       "SetupProposalIn": {
         "properties": {
@@ -13764,6 +13902,31 @@
           "items"
         ],
         "title": "SetupPublicPrices"
+      },
+      "SetupReopenIn": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "idempotency_key"
+        ],
+        "title": "SetupReopenIn",
+        "description": "`POST /api/owner/setup/{id}/reopen`: \"Change something\", the owner's message to Claude from a step after the\nquestions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),\nmakes a repeat answer the interview as the first left it instead of sending the message twice."
       },
       "SetupStartIn": {
         "properties": {
@@ -14663,6 +14826,22 @@
                 "type": "null"
               }
             ]
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new",
+                  "changed",
+                  "delisted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
           }
         },
         "type": "object",

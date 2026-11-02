@@ -15,7 +15,7 @@
   - The name and the tagline.
   - The open status, when the Desk has hours (see "Open status" below). The header holds no other line and no free text: everything a visitor reads is the kernel's or the shell's own copy.
   - The `accent` only as the 2 px rule under the header: never text, never a ground for text, never the only sign of a control.
-  - Colors are set as `--brand-field`, `--brand-ink`, `--brand-ink-secondary` and `--brand-accent`. Only a plain `#rrggbb` or a token (`var(--token)`) is used; anything else falls back to `bg-panel`, `text-primary`, `text-secondary` and `line-hairline` (`guards.ts`).
+  - Colors are set as `--brand-field`, `--brand-ink`, `--brand-ink-secondary`, `--brand-status-handled` and `--brand-accent`. Only a plain `#rrggbb` or a token (`var(--token)`) is used; anything else falls back to `bg-panel`, `text-primary`, `text-secondary`, `status-handled` and `line-hairline` (`guards.ts`). The open-status dot takes `--brand-status-handled`, and its closed ring `--brand-ink-secondary`.
 - **The chat** in a column at most 680 px wide:
   - "Chat with {name}" and, under it, the AI disclosure. It can't be turned off:
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
@@ -23,7 +23,7 @@
 
     When `{name}` already ends in '.', '!' or '?', the period after it is left out (`afterName`), so 'Chen & Co.' reads 'Chen & Co. Ask for …'.
 
-  - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
+  - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`. Ask is disabled while the chat can't be written in.
   - **When the owner gave no name** (`ownerName` is null), the disclosure and the button ask for a person instead, and name no one:
     - "You're chatting with Claude, an AI answering for {name}. Ask for a person anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con una persona cuando quieras."
@@ -72,7 +72,7 @@ The shell is the window's height (`100dvh`, or `100vh` in a browser without dyna
 - **The scroll region** (`.cd-public-shell__scroll`) between them is the only part that scrolls. It holds the conversation, runs the chat's full width (so the scrollbar is at the chat's edge and the wheel scrolls it anywhere over the chat), and is positioned, so a receipt's screen-reader label scrolls with it instead of stretching the document. It is a stop in the tab order after "Ask for {ownerName}", a group named by the chat's title, so a conversation with nothing to focus in it still scrolls from the keyboard.
 - **The disclosure must stay in view.** It is part of the always-on baseline: however long the chat, and wherever the visitor has scrolled to, the chat's head with the disclosure is on screen and nothing covers it. Nothing may be added to the page that scrolls it away or covers it, such as content under the composer or a page that scrolls as a whole.
 - **A long draft scrolls in the composer.** The composer's text box grows with what is typed up to a sixth of the shell's height (two lines at least, and never more than its own six), then scrolls inside, so a draft can't push the chat's head off the screen. The shell writes its measured height as `--cd-public-shell-height` for this.
-- **What the page does:** keeping the newest message above the composer as the chat goes on (the public chat leaves 24 px of room under it), and leaving a visitor who has scrolled back to read where they are, is the page's job (`PublicChat`), in whichever element scrolls the conversation (see "When the scroller changes"). The shell scrolls the conversation itself only to keep the visitor's place when it switches between tall and short, and to bring the composer out from under the chat's head on a short shell.
+- **What the page does:** keeping the newest message above the composer as the chat goes on (the public chat leaves 24 px of room under it), and leaving a visitor who has scrolled back to read where they are, is the page's job (`PublicChat`), in whichever element scrolls the conversation (see "When the scroller changes"). The shell scrolls the conversation itself only to keep the visitor's place when its width changes or it switches between tall and short (it sends `PUBLIC_SHELL_SCROLLER_EVENT` only for a switch), and to bring the composer out from under the chat's head on a short shell.
 - **On a phone,** `100dvh` follows the browser's toolbars as they show and hide, so the composer stays above them. Where the browser shrinks the page for the on-screen keyboard (Chrome on Android with the page's `interactive-widget=resizes-content`), the shell shrinks with it and the composer stays just above the keyboard.
 - **Safari on an iPhone** keeps the page's height for the keyboard and shrinks only the visual viewport. While the visual viewport is shorter than the window at a scale of 1 (a keyboard, not a zoom), the shell on a page of its own takes the visual viewport's height and moves down to where it shows (`visualViewport.offsetTop`), so it turns short and the chat's head stays at the top of what shows; it goes back when the keyboard closes. This is checked in Chromium with a faked visual viewport, and still needs a check on a real iPhone.
 
@@ -101,7 +101,7 @@ When the shell turns short or tall, the element that scrolls the conversation ch
 
 1. keeps the visitor's place on the new scroller, even when the width changes too, as when a phone turns. The place is what is first under the chat's head: the about column while it opens the scroll region and still reaches under the head (the chat's start on a narrow shell), and the first message otherwise. It stays where it was under the head; when part of it is above the head's edge, the same share of it stays above, however it has wrapped, so the same part of it is at the edge and it is still what is first under the head. If the about column was the place and has since moved beside the chat, nothing is put back.
 
-   The shell hears of a new size only once the browser has laid the page out at it. At the same width nothing under the chat's head has moved by then, and the shell reads the place there. At a new width the about column, the messages and the chat's head have already wrapped onto other lines, and the browser's scroll anchoring may have moved the conversation to keep some other element still, so the shell puts back the place it read after the last scroll of the conversation, or the last time it laid itself out, at the old width. A scroll at the new width before the shell hears of it isn't taken for the visitor's, so a visitor's own scroll in that very frame is lost with it;
+   The shell hears of a new size only once the browser has laid the page out at it. At the same width nothing under the chat's head has moved by then, and the shell reads the place there. At a new width the about column, the messages and the chat's head have already wrapped onto other lines, and the browser's scroll anchoring may have moved the conversation to keep some other element still, so the shell puts back the place it read at the old width: after the last scroll of the conversation, the last time the conversation changed size, or the last time the shell laid itself out. It puts the place back at every new width, not only when it switches, so a phone turned with the keyboard open (short both ways) or a window widened keeps the visitor's place too. Reading the place again as the conversation changes size matters where the browser doesn't anchor scrolling: there a message above the place changing height moves what shows under the chat's head without any scroll. A scroll at the new width before the shell hears of it isn't taken for the visitor's, so a visitor's own scroll in that very frame is lost with it;
 2. sends one event from its root, once per switch, after the place is kept:
 
 ```ts
@@ -146,8 +146,9 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 - `brand` from the kernel-served `PublicDesk`, through the screen's mapping:
   - `name` is `business_name`, `tagline` the Desk's name, `monogram` the first letter.
   - `field` and `accent` are the brand's colors.
-  - `ink` and `inkSecondary` are `var(--text-primary)` and `var(--text-secondary)`.
-  - The mapping keeps both inks at 4.5:1 over the field, falling back to `bg-panel` when they can't.
+  - `ink` and `inkSecondary`: on the owner's colour, the paper inks `var(--text-on-brand)` and `var(--text-on-brand-secondary)`, the same in both themes (setup's colours are all dark). On the `bg-panel` fallback, the theme's `var(--text-primary)` and `var(--text-secondary)`.
+  - The mapping keeps both paper inks at 4.5:1 over the field, falling back to `bg-panel` with the theme's inks when they can't.
+  - `statusHandled`, the open-status dot's green: on the owner's colour `var(--status-handled-on-brand)`, which keeps 3:1 on every setup colour in either theme; on the panel, the theme's `var(--status-handled)`. The closed ring takes `inkSecondary`.
 - `ownerName` (`owner_display_name`), or null when the owner gave no name, `language`, `onAskForOwner`. The kernel has no field that says no name was given: the public page's mapping (`brandFrom`) reads setup's fallback name, "Owner", as null, so the page never asks for "Owner". The charter's cards never name the owner, so a null name leaves them as they are.
 - `ownerInChat`, whether the owner is in the chat. Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens or reloads, kept current by the stream's `owner_joined` and `owner_left` (the events the page also draws as the joined and "Claude is helping again." lines). The line tells the visitor a person is in the chat, so it is never set from anything else. `PublicChat` passes `chat.ownerInChat` from `PublicChatProvider`, which derives it through `ownerInChatNow`. The flag is false while the stream is disconnected or catching up, or the session mode is not confirmed. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
@@ -160,12 +161,13 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `brand` | `PublicBrand` | Required. `{ name; tagline; monogram; field; ink; inkSecondary; accent }`. |
+| `brand` | `PublicBrand` | Required. `{ name; tagline; monogram; field; ink; inkSecondary; statusHandled; accent }`. |
 | `ownerName` | `string \| null` | Required. `owner_display_name`, or null when the owner gave no name: the head then asks for a person. |
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
 | `askWaits` | `boolean` | A reply is coming in: "Ask for {ownerName}" waits (`aria-disabled`, focus kept, presses do nothing), as the composer's Send does. `false` by default. |
+| `askDisabled` | `boolean` | The chat can't be written in: Ask is disabled like the composer and Send. If it had focus, focus moves to the available composer or the conversation's scroll region. `false` by default. |
 | `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. `PublicChat` passes `chat.ownerInChat`, derived by `PublicChatProvider` through `ownerInChatNow`; it is false while the stream is disconnected or catching up, or the mode is not confirmed. `false` by default. |
 | `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |

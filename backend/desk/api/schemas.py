@@ -108,7 +108,9 @@ class DeskSummary(BaseModel):
     """One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back
     into it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.
     `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
-    setup."""
+    setup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set
+    (`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the
+    Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's."""
 
     desk_id: str
     slug: str
@@ -117,6 +119,7 @@ class DeskSummary(BaseModel):
     hours: list[HoursWindow]
     answering: bool
     setup: DeskSetup | None
+    business_type: DemoTaskSet
 
 
 class CopyOut(BaseModel):
@@ -385,12 +388,16 @@ class NeedsYouItem(BaseModel):
     """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
     applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
     an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
-    wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
-    characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
-    AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
-    shown as "Claude's note on what the Desk stopped: {summary}" and never quoted as the visitor's), else None. A held
-    request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
-    AI-written text: a visitor could steer a summary to sway an approval."""
+    wrote (`from_the_visitor`: at most two messages; a held request quotes only the visitor's lines since Claude's
+    last reply before its held status (a request whose status isn't in the chat quotes the chat's latest).
+    If that window is empty, it quotes the newest visitor line before the status. A handoff quotes the chat's
+    latest. Each is
+    a one-line glimpse of at most 200 characters, joined with " · "; their own untrusted words); and, on a handoff
+    only, the conversation's newest AI-written triage summary (`claude_summary`: what the person asked for and what
+    the Desk did, for the owner alone, shown as "Claude's note on what the Desk stopped: {summary}" and never quoted
+    as the visitor's), else None. A held request asks the owner for a decision, so neither it nor a handoff in a
+    session with one awaiting the owner carries AI-written text: a visitor could steer a summary to sway an
+    approval."""
 
     decision: Decision | None
     held_by: str | None
@@ -636,8 +643,8 @@ class PaymentConflict(BaseModel):
 OWNER_NAME_CHARS = "A-Za-zÀ-ÿ' -"
 OWNER_NAME_PATTERN = rf"^[{OWNER_NAME_CHARS}]{{1,40}}$"
 # What setup can wait on: a topic (`QuestionKey`), then, once the plan is closed, whether to add the owner as a test
-# client (`setup.TEST_CLIENT_OFFER`). Code asks that one and reads its answer with no model turn, so it is no topic and
-# no structured output names it.
+# client (`setup.TEST_CLIENT_OFFER`). Code asks that one and reads a yes or a no with no model turn (anything else goes
+# to setup's consultant as the owner's answer), so it is no topic and no structured output names it.
 TestClientQuestion = Literal["test_client"]
 SetupQuestion = Literal[QuestionKey, TestClientQuestion]
 
@@ -721,6 +728,17 @@ class SetupProposalIn(BaseModel):
         return self
 
 
+class SetupReopenIn(BaseModel):
+    """`POST /api/owner/setup/{id}/reopen`: "Change something", the owner's message to Claude from a step after the
+    questions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),
+    makes a repeat answer the interview as the first left it instead of sending the message twice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    idempotency_key: IdempotencyKey
+
+
 class SetupSuggestionsIn(BaseModel):
     """Finish setup questions with the current suggestions; no additional answers are supplied."""
 
@@ -730,12 +748,15 @@ class SetupSuggestionsIn(BaseModel):
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
     owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
-    only to a card message, with role `claude` and empty text."""
+    only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+    themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
+    false. Read-only: it only says what happened."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
     choices: list[Choice] = []
     card: ProposalCard | None = None
+    owner_decided: bool = False
 
 
 class SetupPublicLine(BaseModel):
@@ -844,6 +865,7 @@ class ToolRow(BaseModel):
     pending_sha256: str | None
     cards: list[CoveringCard]
     business: BusinessToolDef | None = None
+    review_reason: Literal["new", "changed", "delisted"] | None = None
 
 
 class SetupTools(BaseModel):
