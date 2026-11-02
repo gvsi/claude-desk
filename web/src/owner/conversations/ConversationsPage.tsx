@@ -23,6 +23,7 @@ import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
 import { agentLine } from './copy.ts';
 import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
+import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
 import { conversationPath, conversationListStatus, whoLabel, type ConversationArrival } from './status.ts';
 
 import './Conversations.css';
@@ -73,7 +74,7 @@ export function ConversationsPage() {
   useLayoutEffect(() => {
     const previous = previousSession.current;
     previousSession.current = sessionId;
-    if (sessionId !== undefined || previous === undefined || !window.matchMedia('(max-width: 1023.98px)').matches) return;
+    if (sessionId !== undefined || previous === undefined || !window.matchMedia(CONVERSATIONS_SINGLE_COLUMN).matches) return;
     // The phone list kept its place while the chat had the page. Both ways back return to its row.
     const href = conversationPath(deskId, previous);
     const row = [...(listRef.current?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [])].find((link) => link.getAttribute('href') === href);

@@ -38,6 +38,7 @@ import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { TRANSCRIPT_NOTE } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { latestOf } from './latest.ts';
+import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
@@ -200,14 +201,16 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
   const opened = useRef(false);
   useLayoutEffect(() => {
-    if (loading || opened.current) return;
-    opened.current = true;
+    if (loading || chat.data === undefined || opened.current) return;
     // On a phone the focused list row steps aside. Announce the chat once it is read, unless
     // the owner has already moved on to another control while it was opening.
-    if (!window.matchMedia('(max-width: 1023.98px)').matches) return;
+    if (!window.matchMedia(CONVERSATIONS_SINGLE_COLUMN).matches) return;
     const active = document.activeElement;
-    if (active === null || active === document.body || active.closest('.cd-conversations__list')) nameRef.current?.focus();
-  }, [loading]);
+    if (active === null || active === document.body || active.closest('.cd-conversations__list')) {
+      nameRef.current?.focus();
+      opened.current = document.activeElement === nameRef.current;
+    }
+  }, [loading, chat.data]);
   const pane = (content: ReactNode) => (
     <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
       {content}

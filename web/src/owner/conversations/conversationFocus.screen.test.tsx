@@ -9,6 +9,20 @@ import { nextFrames } from '../../test/screen.ts';
 
 const LIST = `/app/${RIVERA.deskId}/conversations`;
 
+it('a_phone_chat_focuses_its_heading_after_retrying_its_first_failed_read', async () => {
+  await coarsePointer();
+  mockStore.world.sessions.get('ses-dana-web')!.displayName = 'Dana Whitfield';
+  mockStore.inject({ route: 'conversation', status: 500, times: 2 });
+  const { screen } = await renderRoute(LIST, { viewport: 'phone', pollScale: 100, retryScale: 0 });
+  const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Dana Whitfield/ });
+  await row.click();
+  const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+  await expect.element(retry).toBeVisible();
+  await retry.click();
+  await expect.element(screen.getByRole('heading', { level: 2, name: 'Dana Whitfield' })).toHaveFocus();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
+});
+
 it('desktop_chat_keeps_focus_on_the_list_row', async () => {
   mockStore.world.sessions.get('ses-dana-web')!.displayName = 'Dana Whitfield';
   const { screen, router } = await renderRoute(LIST);
