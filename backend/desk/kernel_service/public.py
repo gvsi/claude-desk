@@ -11,8 +11,10 @@ writes (`render.agent_card`): one block for each tool an agent session may be gi
 (its enabled tools with an adapter, of those an agent declares, kept to lead capture and callbacks
 while Answering is off), by plain label, none when there are none, and a block carrying a canary is
 left out. Each block carries its outcome for an agent with no standing of its own, `allowed`,
-`asks_first` or `never`, read from the active version's cards for anyone alone
-(`compiler.outcome_for`), and the kernel's fixed words for it: no card's ID, reason, limit,
+`asks_first` or `never`, read from the active version's cards for anyone (`compiler.outcome_for`),
+but for the abilities whose standing they assume: a verified customer's own documents and charges,
+read for that customer (`STANDING`), and a payment link and a charge within a signed limit, read for
+an agent holding one (`SIGNED_LIMIT`), and the kernel's fixed words for it: no card's ID, reason, limit,
 hours or discount reaches the page, and nothing of a card for a person or an agent key. With no
 active version, one `/decide` won't decide on (outdated or unloadable), or when reading it fails, the
 blocks claim no outcome. It names no one: the page
@@ -183,12 +185,20 @@ AGENT_OUTCOME: dict[str, AgentOutcome] = {"auto": "allowed", "ask": "asks_first"
 # no one; every other ability reads the cards for anyone alone (`compiler.ANYONE`).
 STANDING: dict[str, frozenset[str]] = {"native.release_document": compiler.VERIFIED_OWNER,
                                        "payments.list_charges": compiler.VERIFIED_OWNER}
+# The abilities an agent is given only while it holds a signed limit, a mandate (`decide.tools_given`; the baseline
+# refuses a charge from an agent with none): their outcome is read for an agent holding one. Mandates name no one, so
+# the cards they read stay those for anyone.
+SIGNED_LIMIT: frozenset[str] = frozenset({"native.payment_link", "native.charge_mandate"})
 
 
 async def _agent_outcomes(ctx: KernelCtx, desk_id: str, tools: Collection[str],
                           profiles: Sequence[ToolProfile]) -> dict[str, AgentOutcome]:
     """Each of `tools`' outcome for an agent with no standing of its own, by the Desk's active
-    version's cards for anyone (`compiler.outcome_for`), among the enabled `profiles`. Only
+    version's cards for anyone (`compiler.outcome_for`), among the enabled `profiles`, but for the
+    abilities that assume a standing: a verified customer's own documents and charges are read for
+    that customer (`STANDING`: cards for verified people and record owners count too), and a payment
+    link and a charge within a signed limit for an agent holding one (`SIGNED_LIMIT`: still the
+    cards for anyone, since a mandate names no one). Only
     the outcome's key leaves here: no card ID, reason, limit, or anything of a card for a person or
     an agent key. None, so the card claims no outcome rather than guess one, when `/decide` would
     refuse every request: with no active version, or one it won't decide on (outdated, or whose

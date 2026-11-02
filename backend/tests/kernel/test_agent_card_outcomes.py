@@ -13,6 +13,7 @@ them (Friday 10:04 in Oakland).
 import hashlib
 import json
 import logging
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -22,7 +23,7 @@ from sqlalchemy import select
 from desk.contracts import OWNER_NAME_FALLBACK, RuleCard
 from desk.db.models import Person
 from desk.kernel_api import PublicDesk
-from desk.kernel_service import activation, compiler, public, render
+from desk.kernel_service import activation, compiler, decide, public, render
 from desk.kernel_service.seed import RIVERA_CARDS, RIVERA_MONEY_CAP_CENTS
 
 from .helpers import activate_cards, kernel_ctx, rows_of
@@ -125,6 +126,22 @@ def test_only_the_abilities_whose_labels_name_a_verified_customer_read_their_sta
         module = render.en if lang == "en" else render.es
         assert {tool for tool, label in module.AGENT_TOOLS.items() if labels in label} == set(public.STANDING), lang
     assert set(public.STANDING.values()) == {compiler.VERIFIED_OWNER}
+
+
+def test_the_money_abilities_are_read_for_an_agent_holding_a_signed_limit():
+    """A payment link and a charge within a signed limit are given only to an agent holding a mandate
+    (`decide.tools_given`), and the baseline refuses a charge from an agent with none, so their outcome is read
+    for an agent holding a signed limit (`public.SIGNED_LIMIT`). Mandates name no one, so those two read the
+    cards for anyone, not a verified customer's."""
+    enabled = set(decide.declared_tools("agent"))
+    session, desk = SimpleNamespace(preview=False), SimpleNamespace(answering=True)
+
+    def given(mandate_id: str | None) -> set[str]:
+        agent = SimpleNamespace(kind="agent", assurance="none", person_id=None, mandate_id=mandate_id)
+        return decide.tools_given(agent, session, desk, enabled)
+
+    assert given("mandate-1") - given(None) == public.SIGNED_LIMIT == {"native.payment_link", "native.charge_mandate"}
+    assert public.SIGNED_LIMIT.isdisjoint(public.STANDING)
 
 
 # A visiting agent's key ID, as the kernel makes one: the first 16 hex of its public key's sha256 (a stand-in key).

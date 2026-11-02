@@ -385,7 +385,9 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
         return self
 
 # What happens when an agent with no standing of its own asks for an ability on the Agent Card, by the active version's
-# cards for anyone (`compiler.outcome_for`): an auto card allows it, a never card refuses it, else it asks first.
+# cards for anyone (`compiler.outcome_for`): an auto card allows it, a never card refuses it, else it asks first. Two
+# kinds of ability assume a standing (`public.STANDING`, `public.SIGNED_LIMIT`): a verified customer's own documents
+# and charges are read for that customer, and a payment link and a charge within a signed limit for an agent holding one.
 AgentOutcome = Literal["allowed", "asks_first", "never"]
 
 class AgentAbility(RenderedBlock):        # one Agent Card block: the kernel's prose for an ability, with its outcome
