@@ -166,47 +166,136 @@ function landedElement(selector: string): Element | null {
   return [...document.querySelectorAll(selector)].find((el) => el.closest('.cd-skeleton-screen__layer') === null) ?? null;
 }
 
-it('unfinished_setup_card_lands_once_after_the_skeleton', async () => {
-  // Decision 15: the skeleton draws a fresh copy's Today, which has no "Not live yet" card. For a
-  // Desk whose setup isn't finished, nothing of the card shows while Today's reads are out; once
-  // they settle, the card lands once with Today, first in its column, in the place the skeleton's
-  // first section under the greeting (How your Desk works) had, and Things to try lands under it and
-  // stays there.
+/**
+ * How Today opens on a Desk whose setup isn't finished: a reload, on the owner's loading page; a
+ * reload whose reads outlast its deadline, handing off to Today's own skeleton; or a move from
+ * another page, on Today's own skeleton.
+ */
+type SetupOpening = 'reload' | 'deadline' | 'navigation';
+
+const FRAME_LAYER = '.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer[data-state="shown"]';
+const TODAY_LAYER = '.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]';
+
+/** The "Not live yet" card's shape in a shown skeleton layer: first in the band, under the greeting. */
+function setupShapeIn(layer: string): Element | null {
+  return document.querySelector(`${layer} .cd-today__band > .cd-continue-setup`);
+}
+
+async function expectSetupCardLands(width: number, height: number, opening: SetupOpening) {
+  // For a Desk whose setup isn't finished, the skeleton draws the "Not live yet" card's shape, first
+  // in the band's column under the greeting, with no words in it; once Today's reads settle, the
+  // card lands once where its shape was, its parts where theirs were, and Things to try lands
+  // where the skeleton had it.
   const state = await deskLeftAtRules();
-  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', state.desk_id));
+  const today = `/app/${state.desk_id}/today`;
+  const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', state.desk_id);
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  let needsYou = opening === 'navigation' ? null : holdReads(needsYouPath);
+  const { screen, router } = await renderRoute(opening === 'navigation' ? `/app/${state.desk_id}/conversations` : today, {
+    pollScale: 100,
+    viewport: { width, height },
+  });
+  if (opening === 'navigation') {
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    needsYou = holdReads(needsYouPath);
+    queryClient.removeQueries({ queryKey: needsYouKey(state.desk_id) });
+  }
+  const held = needsYou!;
+  onTestFinished(held.release);
   const cardsAdded = new Set<Element>();
   const cards = new MutationObserver(() => {
-    document.querySelectorAll('.cd-continue-setup').forEach((card) => cardsAdded.add(card));
+    document.querySelectorAll('.cd-continue-setup').forEach((card) => {
+      if (card.closest('.cd-skeleton-screen__layer') === null) cardsAdded.add(card);
+    });
   });
   cards.observe(document.body, { childList: true, subtree: true });
   onTestFinished(() => cards.disconnect());
   const sawNotLive = watchFor('Not live yet');
-  const { screen } = await renderRoute(`/app/${state.desk_id}/today`, { pollScale: 100 });
-  await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-  const layer = document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')!;
+  if (opening === 'navigation') await router.navigate(today);
+
+  const layerSelector = opening === 'navigation' ? TODAY_LAYER : FRAME_LAYER;
+  await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(setupShapeIn(layerSelector)).not.toBeNull());
+  await document.fonts.ready;
+  await nextFrames();
+  if (opening === 'deadline') {
+    // Past the loading page's deadline, Today's own skeleton draws the card's shape where it was.
+    const before = setupShapeIn(FRAME_LAYER)!.getBoundingClientRect();
+    await vi.waitFor(() => expect(setupShapeIn(TODAY_LAYER)).not.toBeNull(), { timeout: 5_000 });
+    await nextFrames();
+    const after = setupShapeIn(TODAY_LAYER)!.getBoundingClientRect();
+    for (const edge of ['top', 'bottom', 'left', 'width'] as const) {
+      expect(Math.abs(before[edge] - after[edge]), `the card's shape ${edge} across the handoff`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    }
+  }
+  const layer = document.querySelector(opening === 'reload' ? FRAME_LAYER : TODAY_LAYER)!;
   expect(layer.querySelector('.cd-things'), "the skeleton draws Today's Things to try").not.toBeNull();
-  expect(document.querySelector('.cd-continue-setup'), 'no setup card while the reads are out').toBeNull();
+  const shape = layer.querySelector('.cd-today__band > .cd-continue-setup')!;
+  expect(shape.previousElementSibling?.classList.contains('cd-today__greeting'), 'the shape is first under the greeting').toBe(true);
+  expect(shape.nextElementSibling?.classList.contains('cd-how'), 'How your Desk works comes under it').toBe(true);
+  expect(shape.textContent, 'the shape draws no words').toBe('');
+  expect(landedElement('.cd-continue-setup'), 'no landed card while the reads are out').toBeNull();
   expect(sawNotLive()).toBe(false);
-  const shapeFirst = layer.querySelector('.cd-how')!.getBoundingClientRect();
+  const shapeTop = shape.getBoundingClientRect().top;
+  const parts = [
+    ['setup-card', '.cd-continue-setup > .cd-card'],
+    ['setup-status', '.cd-continue-setup__status'],
+    ['setup-title', '.cd-continue-setup__title'],
+    ['setup-action', '.cd-continue-setup__action > .cd-button'],
+  ] as const;
+  const shapes = parts.map(([anchor]) => layer.querySelector(`[data-skeleton-anchor="${anchor}"]`)!.getBoundingClientRect());
+  const thingsShapeTop = layer.querySelector('.cd-things')!.getBoundingClientRect().top;
   const thingsTops = watchTop(() => landedElement('.cd-things'));
 
-  needsYou.release();
+  held.release();
   const card = screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true });
   await expect.element(card).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   await nextFrames();
   const things = screen.getByRole('heading', { level: 2, name: 'Things to try' }).element();
   expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING, 'the card comes before Things to try').toBeTruthy();
-  expect(card.element().parentElement?.firstElementChild?.classList.contains('cd-today__greeting')).toBe(true);
   expect(card.element().previousElementSibling?.classList.contains('cd-today__greeting')).toBe(true);
-  expect(Math.abs(card.element().getBoundingClientRect().top - shapeFirst.top), "the card takes How your Desk works' place").toBeLessThanOrEqual(
-    SKELETON_TOLERANCE_PX,
-  );
-  expect(thingsTops(), 'Things to try lands once, under the card').toHaveLength(1);
-  expect(thingsTops()[0]!).toBeGreaterThan(card.element().getBoundingClientRect().bottom);
+  expect(Math.abs(card.element().getBoundingClientRect().top - shapeTop), "the card lands at its shape's top").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  for (const [i, [anchor, selector]] of parts.entries()) {
+    const real = landedElement(selector)!.getBoundingClientRect();
+    // The status's dot and words sit in its line box, where the shape's pill is centred.
+    const edges = anchor === 'setup-status' ? (['left'] as const) : (['top', 'bottom', 'left'] as const);
+    for (const edge of edges) {
+      expect(Math.abs(real[edge] - shapes[i]![edge]), `${anchor} ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    }
+  }
+  expect(thingsTops(), 'Things to try lands once').toHaveLength(1);
+  expect(Math.abs(thingsTops()[0]! - thingsShapeTop), "Things to try lands at the skeleton's place for it").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  expect(sawNotLive(), 'the words show only once the card lands').toBe(true);
   expect(cardsAdded.size, 'the card mounts once').toBe(1);
   expect(card.element().isConnected).toBe(true);
+}
+
+it.each([
+  [390, 844],
+  [620, 900],
+  [1024, 900],
+  [1440, 900],
+  [1512, 900],
+])('unfinished_setup_card_lands_once_after_the_skeleton at %i by %i', async (width, height) => {
+  await expectSetupCardLands(width, height, 'reload');
+});
+
+it.each([
+  [390, 844],
+  [1440, 900],
+])('unfinished_setup_card_stays_across_the_deadline_handoff at %i by %i', { timeout: 10_000 }, async (width, height) => {
+  await expectSetupCardLands(width, height, 'deadline');
+});
+
+it.each([
+  [390, 844],
+  [1440, 900],
+])('unfinished_setup_card_lands_from_todays_own_skeleton at %i by %i', async (width, height) => {
+  await expectSetupCardLands(width, height, 'navigation');
 });
 
 it('reload_opens_today_without_waiting_for_the_demo_inbox', async () => {
