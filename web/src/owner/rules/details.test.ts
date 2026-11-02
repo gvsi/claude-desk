@@ -8,7 +8,7 @@ import { ruleDetails, shortHash, toolDetails } from './details.tsx';
 
 const VERSION = { version: 7, cedar_sha256: `c41d${'0'.repeat(56)}09af`, auto_money_cap_cents: 50_000, proof: { ok: true, method: 'symcc' as const, checks: [] } };
 
-/** Rivera's payment link card, its fields in the order a store might send them. */
+/** Turner Plumbing's payment link card, its fields in the order a store might send them. */
 const LINK = {
   max_discount_bp: 0, review: true, is_default: false, reason: 'Payment links up to $300, checked by the reviewer.',
   person_id: null, agent_key_id: null, hours: null, max_amount_cents: 30_000,
