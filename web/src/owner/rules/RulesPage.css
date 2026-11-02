@@ -118,6 +118,9 @@
   flex: 1;
   min-width: 0;
 }
+.cd-rules-skeleton__summary {
+  max-width: min(280px, 100%);
+}
 .cd-rules__header .cd-preset-menu > .cd-rules-skeleton__control {
   flex: 1;
 }
