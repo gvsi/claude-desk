@@ -1329,9 +1329,8 @@ describe('Conversations', () => {
       .toBeVisible();
     await expect.element(box).toHaveValue('');
 
-    // The whisper wakes Claude, as on the API; Dana sees the checked reply, never the private note.
-    await expect.poll(() => chat.events.slice(streamed).map(({ ev }) => ev.type)).toEqual(['writing', 'message', 'turn_end']);
-    expect(JSON.stringify(chat.events.slice(streamed))).not.toContain(words);
+    // Nothing new reached Dana: no event on her stream, and no typing either.
+    expect(chat.events.length).toBe(streamed);
     expect(requests('ownerTyping')).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
   });

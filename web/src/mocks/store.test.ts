@@ -1693,42 +1693,6 @@ describe('taking over', () => {
     expect(typesOf(events).filter((kind) => kind === 'message')).toHaveLength(1);
   });
 
-  it('whispers_during_takeover_wait_for_one_hand_back_turn', async () => {
-    const { session, events } = await openChat();
-    const params = { session_id: session.session_id };
-    expect((await call('takeover', { params, body: { generation: session.generation } })).status).toBe(200);
-    for (const text of ['Keep it simple.', 'Be reassuring.']) {
-      expect((await call('ownerMessage', { params, body: { kind: 'whisper', text } })).status).toBe(200);
-    }
-    await drain();
-    expect(typesOf(events)).toEqual(['owner_joined']);
-    expect((await call('handback', { params, body: { generation: session.generation + 1 } })).status).toBe(200);
-    await drain();
-    expect(typesOf(events)).toEqual(['owner_joined', 'owner_left', 'writing', 'message', 'turn_end']);
-    expect(JSON.stringify(events)).not.toContain('Keep it simple.');
-    expect(JSON.stringify(events)).not.toContain('Be reassuring.');
-
-    // Those whispers were consumed: the next take-over and hand-back start nothing.
-    const before = events.length;
-    expect((await call('takeover', { params, body: { generation: session.generation + 2 } })).status).toBe(200);
-    expect((await call('handback', { params, body: { generation: session.generation + 3 } })).status).toBe(200);
-    await drain();
-    expect(typesOf(events.slice(before))).toEqual(['owner_joined', 'owner_left']);
-  });
-
-  it('whispers_while_paused_do_not_wake_on_resume', async () => {
-    const { session, events } = await openChat();
-    const record = mockStore.visitorSession(slug)!;
-    mockStore.world.pause(record);
-    const params = { session_id: session.session_id };
-    expect((await call('ownerMessage', { params, body: { kind: 'whisper', text: 'It is sorted.' } })).status).toBe(200);
-    await drain();
-    expect(events).toEqual([]);
-    expect((await call('resume', { params, body: { generation: session.generation } })).status).toBe(200);
-    await drain();
-    expect(events).toEqual([]);
-  });
-
   it.each(['empty', 'owner_answered', 'claude'] as const)('hand_back_starts_nothing_after_%s', async (latest) => {
     const { session, events } = await openChat();
     const params = { session_id: session.session_id };
@@ -1825,14 +1789,11 @@ describe('the owner in the chat', () => {
     expect(whispered.status).toBe(200);
     expect(whispered.body).toMatchObject({ verdict: null });
     await drain();
-    // Like the API in AI mode: Claude answers, but the whisper itself stays private.
-    expect(typesOf(events)).toEqual(['writing', 'message', 'turn_end']);
-    expect(await ownerKinds(sessionId)).toEqual(['whisper', 'delivered']);
+    expect(events).toEqual([]);
+    expect(await ownerKinds(sessionId)).toEqual(['whisper']);
     expect((await owner(sessionId)).items[0]?.text).toBe('offer Thursday too');
     const visitor = (await call('visitorSession', { params: { slug } })).body as VisitorTranscript;
-    expect(visitor.items.map((item) => item.kind)).toEqual(['delivered']);
-    expect(JSON.stringify(visitor)).not.toContain('offer Thursday too');
-    expect(JSON.stringify(events)).not.toContain('offer Thursday too');
+    expect(visitor.items).toEqual([]);
 
     // Words the API would refuse: none, too long, or no kind it knows.
     for (const body of [{ text: '', kind: 'say' }, { text: 'x'.repeat(2001), kind: 'whisper' }, { text: 'hi', kind: 'shout' }]) {

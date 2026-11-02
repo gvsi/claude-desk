@@ -627,10 +627,9 @@ const SERVED: ServedRoutes = {
     if (isFailure(session)) return session;
     if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
     const state = sv.world.handBack(session);
+    // A line the visitor sent while the owner had the chat, with no answer after it, gets Claude's.
     const waiting = waitingVisitorText(session);
-    const joined = session.items.findLastIndex((item) => item.kind === 'owner_joined');
-    const whispered = joined >= 0 && session.items.slice(joined + 1).some((item) => item.kind === 'whisper');
-    if (waiting !== null || whispered) sv.runVisitorTurn(session, waiting ?? '');
+    if (waiting !== null) sv.runVisitorTurn(session, waiting);
     return ok(state);
   },
   resume(sv, req) {
@@ -647,11 +646,7 @@ const SERVED: ServedRoutes = {
     const text = isRecord(req.body) ? req.body.text : undefined;
     const kind = isRecord(req.body) ? req.body.kind : undefined;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX || !OWNER_KINDS.has(kind)) return INVALID;
-    if (kind === 'whisper') {
-      const result = sv.world.whisper(session, text);
-      if (session.state.mode === 'ai') sv.runVisitorTurn(session, waitingVisitorText(session) ?? '');
-      return ok(result);
-    }
+    if (kind === 'whisper') return ok(sv.world.whisper(session, text));
     // Her own words reach the visitor only once she is in the chat.
     if (session.state.mode !== 'owner') return failWith(409, 'take_over_first');
     return ok(sv.world.say(session, text));
