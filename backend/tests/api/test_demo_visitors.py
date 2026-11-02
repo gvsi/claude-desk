@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import logging
 from collections.abc import AsyncIterator, Callable
 
 import httpx
@@ -21,8 +22,22 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text
 
-from desk.api.demo_visitors import NUDGE_AFTER_S, OWNER_SILENT_S, PAUSE_MAX_S, DemoVisitors, visitor_client
+from desk.api import demo_visitors as demo_visitors_module
+from desk.api.demo_visitors import (
+    MAX_MESSAGES,
+    MAX_MODEL_CALLS,
+    MAX_RUNS,
+    NUDGE_AFTER_S,
+    OWNER_SILENT_S,
+    PAUSE_MAX_S,
+    RUN_LIMIT,
+    DemoVisitors,
+    KeyReused,
+    TooManyStarts,
+    visitor_client,
+)
 from desk.api.main import create_app
+from desk.api.metrics import record_model_call
 from desk.api.model import ModelRequest, ModelResponse
 from desk.api.prompts import (
     DEMO_VISITOR_SYSTEM,
@@ -31,11 +46,14 @@ from desk.api.prompts import (
     demo_visitor_brief,
     wrap,
 )
-from desk.contracts import CopyCreated
-from desk.kernel_api import CreateCopyRequest
-from tests.api.fakes import JOB_ROUTES, ScriptedModel, gated, response
+from desk.api.setup import default_notifications
+from desk.contracts import BusinessSeed, CopyCreated, DeskSeed
+from desk.kernel_api import CreateCopyRequest, CreateDeskRequest
+from tests.api.fakes import JOB_ROUTES, ScriptedModel, gated, response, unavailable
 from tests.api.fakes import text as text_block
-from tests.api.test_public_chat import reply
+from tests.api.test_copies import usage_row
+from tests.api.test_demo_agent import owner_desk, setup_row, task_set_of
+from tests.api.test_public_chat import Stream, reply
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 LOOPBACK_PEER = ("127.0.0.1", 50002)
@@ -534,3 +552,336 @@ async def test_nudges_the_quiet_owner_once_then_ends_owner_silent(app, browser, 
                                                                       "Are you still there?"]
     assert len(visitor_model.requests) == 1 and desk_model.requests == []     # the nudge took no model call
     assert sleeps.timers == [NUDGE_AFTER_S, OWNER_SILENT_S - NUDGE_AFTER_S]
+
+
+# How a run ends ---------------------------------------------------------------------------------------------------
+
+
+async def test_stop_ends_it_with_no_further_model_call_and_closes_its_stream(app, fake, visitors, loopback,
+                                                                             visitor_model, desk_model, engine, copy):
+    release = asyncio.Event()
+    answering = gated(say("We can help with that."), release)
+    visitor_model.add(step("Hi, can you fix a leaking sink?"), step("never asked"))
+    desk_model.add(answering)
+
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(answering.entered.wait(), 5)           # it waits on Claude's turn
+    assert app.state.runtime.stream_slots.open_counts()[0] == {started.session_id: 1}
+    stopped = await visitors.stop(started.run_id, copy.copy_id)
+    assert (stopped.state, stopped.ended, stopped.messages_sent) == ("stopped", "stopped_by_owner", 1)
+    assert app.state.runtime.stream_slots.open_counts() == ({}, {})        # its stream closed
+    release.set()
+    await app.state.runtime.runner.drain()
+    await visitors.drain()
+
+    # No further model call, however the Desk's turn went on; a stopped run stays as it ended.
+    assert len(visitor_model.requests) == 1 and len(visitor_model.script) == 1
+    assert visitors.run(started.run_id, copy.copy_id) == stopped
+    assert await visitors.stop(started.run_id, copy.copy_id) == stopped
+    assert await visitors.stop(started.run_id, "copy-elsewhere") is None
+    assert await visitors.stop("visitor-unknown", copy.copy_id) is None
+
+
+async def test_ends_chat_ended_when_its_session_closes(app, fake, visitors, loopback, visitor_model, desk_model,
+                                                      engine, copy):
+    def closing(request: ModelRequest) -> ModelResponse:
+        session = fake.sessions[started.session_id]        # the kernel closes the chat while the visitor thinks
+        session.closed_at = fake.now
+        fake._put_session(session)
+        return step("And could you come on Saturday?")
+
+    visitor_model.add(step("Hi, can you fix a leaking sink?"), closing, step("never asked"))
+    desk_model.add(say("We can help with that."))
+    started = await start(visitors, fake, copy)
+    await visitors.drain()
+
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("stopped", "chat_ended", 1)
+    assert loopback.paths()[-1] == ("POST", f"/api/public/desks/{fake.desks[copy.desk_ids[0]].slug}/typing")
+    assert await rows(engine, started.session_id, "visitor_text") == ["Hi, can you fix a leaking sink?"]
+    assert len(visitor_model.requests) == 2
+
+
+async def test_ends_chat_ended_when_its_stream_closes(app, fake, visitors, loopback, visitor_model, desk_model, copy):
+    release = asyncio.Event()
+    answering = gated(say("We can help with that."), release)
+    visitor_model.add(step("Hi, can you fix a leaking sink?"), step("never asked"))
+    desk_model.add(answering)
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(answering.entered.wait(), 5)
+
+    # Three more streams for its session: the API closes the session's oldest, the demo visitor's.
+    cookie = ("cookie", loopback.sent[-1].headers["cookie"])
+    path = f"/api/public/desks/{fake.desks[copy.desk_ids[0]].slug}/events"
+    async with contextlib.AsyncExitStack() as stack:
+        for _ in range(3):
+            await stack.enter_async_context(Stream(app, path, headers=[cookie]))
+        await visitors.drain()
+        run = visitors.run(started.run_id, copy.copy_id)
+        assert (run.state, run.ended) == ("stopped", "chat_ended")
+        release.set()
+    await app.state.runtime.runner.drain()
+    assert len(visitor_model.requests) == 1
+
+
+async def test_ends_at_ten_messages(app, fake, visitors, visitor_model, desk_model, engine, copy):
+    visitor_model.add(*(step(f"Could you tell me more, part {n}?") for n in range(1, 12)))      # never done
+    desk_model.add(*(say("Happy to help with that.") for _ in range(10)))
+    started = await start(visitors, fake, copy)
+    await visitors.drain()
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "limit", MAX_MESSAGES)
+    assert len(await rows(engine, started.session_id, "visitor_text")) == MAX_MESSAGES == 10
+    assert len(visitor_model.requests) == 10 and len(visitor_model.script) == 1     # no eleventh call
+
+
+async def test_ends_at_twelve_model_calls(app, fake, visitors, visitor_model, desk_model, copy, monkeypatch):
+    # With room for more messages, the model-call cap holds on its own.
+    monkeypatch.setattr(demo_visitors_module, "MAX_MESSAGES", 20)
+    visitor_model.add(*(step(f"Could you tell me more, part {n}?") for n in range(1, 14)))
+    desk_model.add(*(say("Happy to help with that.") for _ in range(12)))
+    started = await start(visitors, fake, copy)
+    await visitors.drain()
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "limit", 12)
+    assert len(visitor_model.requests) == MAX_MODEL_CALLS == 12
+
+
+async def test_ends_after_fifteen_minutes(app, fake, visitors, visitor_model, desk_model, copy, sleeps):
+    release = asyncio.Event()
+    visitor_model.add(step("Hi, can you fix a leaking sink?"), step("never asked"))
+    desk_model.add(gated(say("We can help with that."), release))           # Claude takes its time
+    started = await start(visitors, fake, copy)
+    waited = await sleeps.elapse()                                          # the rest of its fifteen minutes
+    await visitors.drain()
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "limit", 1)
+    assert sum(sleeps.pauses) + waited == pytest.approx(RUN_LIMIT.total_seconds())
+    assert len(visitor_model.requests) == 1
+    release.set()
+    await app.state.runtime.runner.drain()
+
+
+async def test_ends_failed_when_its_model_or_the_desk_cant_answer(app, fake, visitors, visitor_model, engine, copy,
+                                                                 caplog):
+    caplog.set_level(logging.DEBUG)
+    owner = copy.owner_session.session_id
+    # Its model is unavailable: the run fails before it writes, and the failed call is recorded.
+    visitor_model.add(unavailable())
+    started = await start(visitors, fake, copy)
+    await visitors.drain()
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("failed", "failed", 0)
+    async with engine.connect() as conn:
+        recorded = (await conn.execute(text("SELECT route, session_id, stop_reason FROM app.model_calls"))).all()
+    assert [tuple(row) for row in recorded] == [("demo_visitor", owner, "error")]
+    assert "a demo visitor's run failed: the model was unavailable" in caplog.text
+
+    # The Desk won't open its session: the run fails, with no session and no model call.
+    fake.fail("POST /sessions", "422", times=1)
+    refused = await start(visitors, fake, copy)
+    assert (refused.state, refused.ended, refused.session_id) == ("failed", "failed", None)
+    assert len(visitor_model.requests) == 1
+    assert "a demo visitor's run failed: opening the session answered 422" in caplog.text
+
+
+async def test_close_ends_every_running_run_failed(app, fake, visitors, visitor_model, copy):
+    release = asyncio.Event()
+    thinking = gated(step("never sent"), release)
+    visitor_model.add(thinking)
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(thinking.entered.wait(), 5)
+    await visitors.close()
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("failed", "failed", 0)
+
+
+# Today's model budget -----------------------------------------------------------------------------------------------
+
+
+async def test_a_spent_budget_ends_it_with_no_model_call(app, fake, loopback, clock, sleeps, visitor_model, engine,
+                                                        copy):
+    visitors = demo_visitors(app, loopback, clock, sleeps, production=True)
+    async with engine.begin() as conn:                     # $150 spent today: the whole budget
+        await record_model_call(conn, "copy-budget", None, "setup", usage_row(7_500_000, clock()))
+    started = await start(visitors, fake, copy)
+    await visitors.drain()
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("failed", "budget", 0)
+    assert visitor_model.requests == [] and await rows(engine, started.session_id, "visitor_text") == []
+
+
+async def test_the_budget_is_checked_before_each_step(app, fake, loopback, clock, sleeps, visitor_model, desk_model,
+                                                     engine, copy):
+    visitors = demo_visitors(app, loopback, clock, sleeps, production=True)
+    async with engine.begin() as conn:                     # $149.98 spent today: just under the $150 budget
+        await record_model_call(conn, "copy-budget", None, "setup", usage_row(7_499_000, clock()))
+    visitor_model.add(step("Hi, can you fix a leaking sink?"), step("never asked"))
+    desk_model.add(say("We can help with that."))          # its first step and the Desk's turn pass the budget
+    started = await start(visitors, fake, copy)
+    await visitors.drain()
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("failed", "budget", 1)
+    assert len(visitor_model.requests) == 1 and len(visitor_model.script) == 1
+
+
+# The process's runs -------------------------------------------------------------------------------------------------
+
+
+async def visitor_sessions(fake) -> int:
+    """The visitor sessions the kernel holds (a new copy's seeded chat among them)."""
+    return len([session for session in fake.sessions.values() if session.kind == "visitor"])
+
+
+async def test_one_runs_at_a_time_in_a_copy_and_three_start_an_hour(app, fake, kernel_http, visitors, visitor_model,
+                                                                     desk_model, clock, copy):
+    seeded = await visitor_sessions(fake)
+    release = asyncio.Event()
+    thinking = gated(step("", done=True), release)
+    visitor_model.add(thinking)
+    first = await start(visitors, fake, copy)
+    await asyncio.wait_for(thinking.entered.wait(), 5)
+
+    # While it runs, starting another in the copy answers it, on any of the copy's Desks, and opens nothing.
+    again = await start(visitors, fake, copy)
+    assert (again.run_id, again.session_id) == (first.run_id, first.session_id)
+    assert await visitor_sessions(fake) == seeded + 1
+    release.set()
+    await visitors.drain()
+
+    # Two more start this hour; the fourth is refused until the first start's hour ends.
+    visitor_model.add(step("", done=True), step("", done=True))
+    second = await start(visitors, fake, copy)
+    await visitors.drain()
+    third = await start(visitors, fake, copy)
+    await visitors.drain()
+    assert len({first.run_id, second.run_id, third.run_id}) == 3
+    clock.advance(600)
+    with pytest.raises(TooManyStarts) as refused:
+        await start(visitors, fake, copy)
+    assert refused.value.retry_after == 3000 and visitors.start_wait(copy.copy_id) == 3000
+    assert await visitor_sessions(fake) == seeded + 3
+
+    # Another copy starts its own meanwhile.
+    other = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    visitor_model.add(step("", done=True))
+    assert (await start(visitors, fake, other)).run_id not in (first.run_id, second.run_id, third.run_id)
+    await visitors.drain()
+
+    clock.advance(3000)
+    visitor_model.add(step("", done=True))
+    fourth = await start(visitors, fake, copy)
+    assert fourth.run_id not in (first.run_id, second.run_id, third.run_id)
+    await visitors.drain()
+
+
+async def test_a_key_answers_the_run_it_started(app, fake, kernel_http, clock, visitors, visitor_model, copy):
+    seeded = await visitor_sessions(fake)
+    visitor_model.add(step("", done=True))
+    first = await start(visitors, fake, copy, key="click-1")
+    await visitors.drain()
+    # Its repeat answers the same run however it ended, counts no start and opens nothing.
+    repeat = await start(visitors, fake, copy, key="click-1")
+    assert (repeat.run_id, repeat.ended) == (first.run_id, "finished")
+    assert visitors.start_wait(copy.copy_id) is None and await visitor_sessions(fake) == seeded + 1
+    # The same key to another of the copy's Desks is a conflict; another copy's same key is its own.
+    made = await kernel_http.owner(copy.owner_token).call("POST /desks", CreateDeskRequest(
+        business=BusinessSeed(name="Turner Plumbing", owner_display_name="Mike Turner",
+                              timezone="America/Los_Angeles"),
+        desk=DeskSeed(name="Emergency line", charter=[], hours=[], price_items=[], calendar_slots=[], people=[],
+                      documents=[], notifications=default_notifications("trade"))))
+    with pytest.raises(KeyReused):
+        await visitors.start(copy.copy_id, copy.owner_session.session_id, made.desk_id, made.slug, "trade",
+                             key="click-1")
+    other = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    visitor_model.add(step("", done=True))
+    assert (await start(visitors, fake, other, key="click-1")).run_id != first.run_id
+    await visitors.drain()
+
+
+async def test_runs_are_read_by_their_copy_for_an_hour(app, fake, kernel_http, visitors, visitor_model, clock,
+                                                       copy):
+    visitor_model.add(step("", done=True))
+    started = await start(visitors, fake, copy)
+    await visitors.drain()
+    ended = visitors.run(started.run_id, copy.copy_id)
+    assert (ended.state, ended.ended) == ("done", "finished")
+    assert visitors.run(started.run_id, "copy-elsewhere") is None
+    assert visitors.newest(copy.copy_id, copy.desk_ids[0]).run_id == started.run_id
+    assert visitors.newest(copy.copy_id, "desk-elsewhere") is None and visitors.newest("copy-elsewhere",
+                                                                                       copy.desk_ids[0]) is None
+
+    # The process keeps the 50 newest that have ended, and every running one, each for an hour.
+    release = asyncio.Event()
+    thinking = gated(step("", done=True), release)
+    visitor_model.add(thinking)
+    other = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    running = await start(visitors, fake, other)
+    await asyncio.wait_for(thinking.entered.wait(), 5)
+    for n in range(MAX_RUNS):
+        filler = ended.model_copy(update={"run_id": f"visitor-filler-{n}"})
+        visitors._runs[filler.run_id] = demo_visitors_module._Held(run=filler, copy_id="copy-filler", key=None,
+                                                                   started_at=clock())
+    assert visitors.run(started.run_id, copy.copy_id) is None              # the oldest made room
+    assert visitors.run(running.run_id, other.copy_id).state == "running"   # older, but running
+    clock.advance(3600)
+    assert visitors.run("visitor-filler-0", "copy-filler") is None
+    assert visitors.run(running.run_id, other.copy_id).state == "running"
+    release.set()
+    await visitors.drain()
+    assert visitors.run(running.run_id, other.copy_id) is None              # ended, and started an hour ago
+
+
+# The persona -----------------------------------------------------------------------------------------------------
+
+
+async def test_plays_its_desks_persona_with_no_desk_text_in_it(app, fake, kernel_http, clock, engine, ro_schema,
+                                                               visitors, visitor_model, desk_model):
+    # A hair studio's Desk, made by setup as `other`, a marker in every name: the persona is the `other` line, chosen
+    # by the setup business type alone, and the Desk's words reach the visitor's model only inside its wrapper.
+    mark = "Quazzlewick"
+    copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    desk_id, slug = await owner_desk(kernel_http, fake, clock, copy.owner_token, f"{mark} Hair Studio",
+                                     owner=f"{mark} Shah", desk_name=f"{mark} line")
+    await setup_row(engine, copy.copy_id, desk_id, "other", answers={"business_name": f"{mark} Hair Studio"})
+    task_set = await task_set_of(engine, ro_schema, copy.copy_id, desk_id)
+    assert task_set == "other"
+    visitor_model.add(step("Hi, what do you offer?"), step("", done=True))
+    desk_model.add(say(f"Welcome to {mark} Hair Studio."))
+    started = await visitors.start(copy.copy_id, copy.owner_session.session_id, desk_id, slug, task_set)
+    await visitors.drain()
+
+    assert started.first_name == "Taylor"
+    first, second = visitor_model.requests
+    assert first.messages == [user(demo_visitor_brief("other"))]
+    assert mark.lower() not in json.dumps([first.system, first.messages]).lower()
+    outside, inside = json.dumps(second.messages[:-1]).lower(), last_input(second)
+    assert mark.lower() not in outside
+    assert inside == wrap(DESK_REPLY_TAG, f"Claude (the business's AI): Welcome to {mark} Hair Studio.")
+
+
+# Once its session is open --------------------------------------------------------------------------------------
+
+
+async def test_on_open_runs_with_the_sessions_ids_before_start_answers(app, fake, loopback, clock, sleeps,
+                                                                       visitor_model, copy):
+    seen: list[tuple] = []
+
+    async def on_open(ids, run) -> None:
+        seen.append((ids, run.session_id, run.state, len(loopback.sent)))
+
+    visitors = demo_visitors(app, loopback, clock, sleeps, on_open=on_open)
+    visitor_model.add(step("", done=True))
+    started = await start(visitors, fake, copy)
+    ((ids, session_id, state, sent),) = seen
+    assert (ids.copy_id, ids.desk_id, ids.session_id) == (copy.copy_id, copy.desk_ids[0], started.session_id)
+    assert (session_id, state, sent) == (started.session_id, "running", 1)    # only its session opened so far
+    await visitors.drain()
+
+    async def broken(ids, run) -> None:
+        raise RuntimeError("the marker couldn't be written")
+
+    visitors = demo_visitors(app, loopback, clock, sleeps, on_open=broken)
+    failed = await start(visitors, fake, copy)
+    await visitors.drain()
+    assert (visitors.run(failed.run_id, copy.copy_id).state, len(visitor_model.requests)) == ("failed", 1)

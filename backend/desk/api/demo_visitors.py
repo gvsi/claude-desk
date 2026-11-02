@@ -674,9 +674,12 @@ class DemoVisitors:
                 del self._starts[copy_id]
 
     async def drain(self) -> None:
-        """Wait until no run is going in this process."""
-        while self._tasks:
-            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+        """Wait until no run is going in this process. A task that has just ended can still be listed until its done
+        callback runs, and gathering only ended tasks completes without yielding, so only the running ones are waited
+        on, and the loop is then let run once for those callbacks."""
+        while running := [task for task in self._tasks if not task.done()]:
+            await asyncio.gather(*running, return_exceptions=True)
+        await asyncio.sleep(0)
 
     async def close(self) -> None:
         """Stop every run still going (the process is stopping); each ends `failed`."""
