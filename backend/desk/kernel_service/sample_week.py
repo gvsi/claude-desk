@@ -11,20 +11,26 @@ written conversations instead of a recording:
   model and no outbound HTTP. It uses the kernel's pure helpers alone: the quote adapter's `price` and
   `discounted` for amounts, `decide`'s own text functions (`_reason_plain`, `status_line`) and `sign_decision`,
   `render.render_clause` and `reply_check.sign_verdict`, `reply_check.scan_prose` (each reply's prose must pass),
-  and `desks.next_open_window` and `desks.mask_contact`. Since no model ran, a sample booking, whose cards send it to
-  the reviewer, carries a fixed reviewer result (`SAMPLE_REVIEW`) and no `review` ledger entry, which a live
-  decision gets only for a reviewer call it made.
+  and `desks.next_open_window` and `desks.mask_contact`. Since no model ran, sample bookings and payment links,
+  whose cards send them to the reviewer, carry a fixed reviewer result (`SAMPLE_REVIEW`) and no `review` ledger
+  entry, which a live decision gets only for a reviewer call it made. An unverified document request mirrors
+  the live path's early `not_given` refusal, with no action or deciding policy.
 - **Terminal states only.** Sessions are closed at generation 0. Decisions are `executed`, `refused` or `denied`
   (the denied hold's approval row answered `deny_once` and used up). Quotes and their facts are `expired`, the
   callback's handoff is `done` with its fact expired, and bookings are `confirmed` on past slots: a slot ID in
   the seed's form for a time before the copy was made, which is no `calendar_slots` row, so no live call can book
-  it, and no owner calendar write is held up by it. No execution, link, challenge, mandate or Demo inbox entry is
-  written.
-- **No person.** Each session has no person, is unverified with assurance `none`, and its token is discarded at
-  once. Facts are labelled `["owner", "session:<id>"]` only, never `person:`. A visitor's first name and a
-  callback's reserved example number (`(510) 555-0163`, masked in the owner's handoff) are the only personal
-  details, and neither names a seeded person.
-- **Marked history.** Every kernel event (session, decide, execute, approval, reply, and the callback's handling)
+  it, and no owner calendar write is held up by it. The deposit link is expired unpaid, has no completion marker,
+  reservation or real provider checkout, and cannot be paid or reconciled at the provider. Its historical card
+  links to the terminal checkout view. No execution, mandate or Demo inbox entry is written, including for the
+  urgent callback, whose unscheduled handoff mirrors `request_callback.open_callback` and is done after 15 minutes.
+- **One archived sample person.** The invoice conversation alone is verified with assurance `demo_code` as a
+  sample-only person from `seed.SAMPLE_CUSTOMER`. Its consumed, long-expired challenge has an empty hash, which
+  cannot match a live six-digit code, and no failed attempts. Its verification entries are historical, with no
+  delivery. The person is already removed from the live record, so verification's contact lookup cannot send
+  them a fresh code. The invoice and released link facts are expired, labelled only for owner and that person;
+  the document link is voided and expired. Other sessions are unverified, with owner/session-only facts. All
+  session tokens are discarded. No sample names a seeded person; every word is in `seed.py`.
+- **Marked history.** Every kernel event (including verification, link issuance/expiry and callback handling)
   is one normal `ledger.append`, in sample-time order, hashed, chained and signed as usual, its summary carrying
   `replayed: {"at": <the sample moment>, "recording": <recording ID>}`. Each decision's `ledger_seq` is the entry
   that recorded its final state. A head checkpoint the appends call for is a real event, written unmarked by the
@@ -33,8 +39,11 @@ written conversations instead of a recording:
 Every moment falls on a local day 1 to 6 days before `now` in the business's time zone, at the conversation's own
 wall time, which the clock change neither skips nor repeats, and at least an hour before `now`; otherwise, or when
 anything else can't be written, `SampleWeekRefused` (or any error) leaves the caller to roll the week back whole.
+Only the first three seed conversations fall in yesterday's 18:00-to-now briefing window: two answered alone
+and one refused. The live seeded hold remains the only Needs-you item.
 """
 
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
@@ -59,12 +68,14 @@ from desk.contracts import (
     ToolCall,
 )
 from desk.db.models import Action as ActionRow
-from desk.db.models import Approval, Booking, Business, Desk, Handoff, Lead, Quote
+from desk.db.models import (Approval, Booking, Business, Desk, Document, DocumentLink, Handoff, Lead, PaymentLink,
+                            Person, Quote, VerificationChallenge)
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import DecideRequest
 from desk.kernel_service import activation, adapters, auth, decide, desks, labels, ledger, render, reply_check, seed
 from desk.kernel_service.adapters import quote as quotes
+from desk.kernel_service.adapters import blocks, payment_link, release_document
 from desk.kernel_service.adapters.capture_lead import lead_note
 from desk.kernel_service.adapters.request_callback import window_claims
 from desk.kernel_service.auth import SessionRow
@@ -77,11 +88,12 @@ LANGUAGE = "en"
 RUN_S = 2                                 # an allowed call runs this many seconds after it is decided
 CLOSE_AFTER = timedelta(minutes=2)        # a sample session closes this long after its last event
 QUIET_BEFORE_NOW = timedelta(hours=1)     # nothing sample happens in the hour before the copy is made
-# What the reviewer said of a sample booking, which its cards send to the reviewer.
+# What the reviewer said of sample bookings and payment links, whose cards require review.
 SAMPLE_REVIEW = Review(within_charter_bp=9_600, manipulation_bp=150, recommendation="allow")
 # The card that allows each sample tool, by tool; a booking's is its slot's day's (`_booking_card`).
 ALLOWING_CARDS = {"native.quote": "rv-quote", "native.capture_lead": "preset-capture-lead",
-                  "native.request_callback": "preset-request-callback"}
+                  "native.request_callback": "preset-request-callback", "native.release_document": "rv-docs",
+                  "native.payment_link": "rv-link", "desk.emergency-callback": "rv-urgent"}
 HOLDING_CARDS = {"native.quote": "rv-quote"}
 
 
@@ -262,17 +274,22 @@ async def _call(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session
                 n: int, call: seed.SampleCall, written: _Written, facts: dict[str, Fact]) -> datetime:
     """One call's action, decision, side effects and entries; returns the moment it reached its final state."""
     at = start + timedelta(seconds=call.at_s)
-    adapter = adapters.ADAPTERS[call.tool]
+    profile = desk.tools.get(call.tool)
+    if profile is None:
+        raise SampleWeekRefused("tool_not_enabled")
+    adapter = (blocks.adapter_for(profile.profile.business, call.tool) if call.tool.startswith("desk.")
+               else adapters.ADAPTERS[call.tool])
     raw, starts_at = _args(desk, sample, call)
+    if call.tool == "native.payment_link" and call.outcome == "executed":
+        raw["quote_id"] = facts["quote"].fact_id.removeprefix("quote:")
+    if sample.verified_customer:
+        raw["document_id"] = _verified_customer(ctx, desk, session, start, written)
     args = adapter.Args.model_validate(raw)
     tool_call = ToolCall(call_id=f"sample-{n}", tool=call.tool, args=args.model_dump(mode="json", exclude_none=True))
     request = DecideRequest(session_id=session.session_id, generation=0, call=tool_call)
     principal = principal_for(session)
-    profile = desk.tools.get(call.tool)
-    if profile is None:
-        raise SampleWeekRefused("tool_not_enabled")
     action = (None if call.outcome == "refused"
-              else await _action(ctx, desk, session, call, args, profile, at, starts_at))
+              else await _action(ctx, desk, session, call, args, profile, at, starts_at, written))
     sample_call = decide._Call(principal=principal, session_row=session, req=request,
                                call_sha256=decide.call_sha256(request), desk_row=desk.desk_row,
                                business=desk.business, subject=await decide._subject(ctx, principal),
@@ -281,7 +298,7 @@ async def _call(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session
     outcome = {"executed": "allow", "denied": "hold", "refused": "refuse"}[call.outcome]
     state = {"executed": "executed", "denied": "denied", "refused": "refused"}[call.outcome]
     evaluation = None if action is None else _evaluation(desk, outcome, call.tool, action)
-    reason = "adapter_refused" if action is None else None
+    reason = ("not_given" if call.check == "not_given" else "adapter_refused") if action is None else None
     final_at = {"executed": at + timedelta(seconds=RUN_S), "refused": at,
                 "denied": start + timedelta(seconds=call.answered_s or 0)}[call.outcome]
     if final_at < at:
@@ -297,7 +314,7 @@ async def _call(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session
         review=evaluation.review if evaluation else None,
         reason_plain=decide._reason_plain(sample_call, outcome, reason, evaluation),
         visitor_plain=decide.status_line(state, tool=call.tool, session=session,
-                                         owner=desk.business.owner_display_name),
+                                         owner=desk.business.owner_display_name, business=profile.profile.business),
         owner_plain=None, expires_at=at + decide.LIFETIME[outcome], ledger_seq=0, created_at=at, updated_at=final_at,
         action_id=action.action_id if action else None)
     written.rows.append(row)
@@ -310,7 +327,8 @@ async def _call(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session
     if action is None:
         written.entry(at, "decide", session.session_id, row.decision_id,
                       {"outcome": "refuse", "tool": ledger.safe_ref(call.tool), "reason": reason,
-                       "check": ledger.safe_ref(call.check or "")}, recorded)
+                       "policy_version": row.policy_version, "auto_money_cap_cents": desk.cap,
+                       **({"check": ledger.safe_ref(call.check or "")} if reason == "adapter_refused" else {})}, recorded)
         return final_at
     written.entry(at, "decide", session.session_id, row.decision_id, {
         "decision_id": row.decision_id, "action_id": action.action_id, "tool": action.tool, "outcome": outcome,
@@ -344,7 +362,7 @@ def _args(desk: _Desk, sample: seed.SampleSession, call: seed.SampleCall) -> tup
 
 
 async def _action(ctx: KernelCtx, desk: _Desk, session: SessionRow, call: seed.SampleCall, args: BaseModel,
-                  profile: Any, at: datetime, slot_starts_at: datetime | None) -> NormalizedAction:
+                  profile: Any, at: datetime, slot_starts_at: datetime | None, written: _Written) -> NormalizedAction:
     """The call's action as its adapter would resolve it, from the seed's own rows: a quote priced from the price
     list (`quotes.price`, `quotes.discounted`), a booking on its past slot, anything else on the Desk."""
     resource = ResourceRef(kind="desk", id=desk.desk_id, owner_person_id=None)
@@ -357,15 +375,59 @@ async def _action(ctx: KernelCtx, desk: _Desk, session: SessionRow, call: seed.S
     elif call.tool == "native.book":
         starts_at = slot_starts_at
         resource = ResourceRef(kind="slot", id=args.slot_id, owner_person_id=None)
+    elif call.tool == "native.release_document":
+        resource = ResourceRef(kind="document", id=args.document_id, owner_person_id=session.person_id)
+    elif call.tool == "native.payment_link":
+        quote = next(row for row in written.rows if isinstance(row, Quote) and row.quote_id == args.quote_id)
+        amount_cents = quote.amount_cents
+        resource = ResourceRef(kind="quote", id=quote.quote_id, owner_person_id=None)
     args_json = args.model_dump(mode="json", exclude_none=True)
     action = NormalizedAction(
         action_id=new_id("act"), copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
         generation=0, tool=call.tool, effects=profile.profile.effects, args_sha256=decide.args_sha256(args_json),
         profile_sha256=profile.profile_sha256, resource=resource, list_cents=list_cents, discount_bp=discount_bp,
-        amount_cents=amount_cents, recipient=None, starts_at=starts_at)
+        amount_cents=amount_cents, recipient="verified_contact" if call.tool == "native.release_document" else None,
+        starts_at=starts_at)
     ctx.db.add(ActionRow(**action.model_dump(exclude={"resource"}), resource=action.resource,
                          resource_kind=action.resource.kind, args_json=args_json, created_at=at))
     return action
+
+
+def _verified_customer(ctx: KernelCtx, desk: _Desk, session: SessionRow, start: datetime,
+                       written: _Written) -> str:
+    """Historical verification only: no usable code, no delivery, and no person still on record.
+
+    Removal is the existing live verification barrier, rather than a new exception to verification.
+    The document and release facts remain private and expired; the link is voided on removal.
+    """
+    if session.person_id is not None:
+        raise SampleWeekRefused("duplicate_sample_verification")
+    person_id, document_id, challenge_id = new_id("person"), new_id("document"), new_id("challenge")
+    started, verified_at, archived = (start + timedelta(seconds=n) for n in (5, 45, 180))
+    customer, invoice = seed.SAMPLE_CUSTOMER, seed.SAMPLE_INVOICE
+    person = Person(person_id=person_id, copy_id=desk.copy_id, desk_id=desk.desk_id,
+                    display_name=customer["name"], contact=customer["contact"], ref=customer["ref"],
+                    contact_norm=desks.normalize_contact(customer["contact"]),
+                    masked_contact=desks.mask_contact(customer["contact"]), created_at=start, removed_at=archived)
+    document = Document(document_id=document_id, copy_id=desk.copy_id, desk_id=desk.desk_id,
+                        title=invoice["title"], body=invoice["body"], ref=invoice["ref"],
+                        record_owner_person_id=person_id, canary=new_id("canary"), created_at=start)
+    fact = Fact(fact_id=f"document:{document_id}", kind="document", status="expired", source="kernel",
+                claims=[Claim(key="title", kind="text", value=invoice["title"]),
+                        Claim(key="ref", kind="ref", value=document_id)],
+                label=Label(readers=["owner", f"person:{person_id}"], record_owner=person_id), expires_at=archived)
+    ctx.db.add_all([person, document, labels.fact_row(desk.copy_id, desk.desk_id, fact, start)])
+    written.rows.append(VerificationChallenge(
+        challenge_id=challenge_id, copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
+        person_id=person_id, code_hash="", status="consumed", failed_at=[], created_at=started,
+        expires_at=started + timedelta(minutes=10)))
+    session.person_id, session.verified, session.assurance = person_id, True, "demo_code"
+    written.entry(start, "desk_data", session.session_id, None, {"part": "people", "refs": [person_id]})
+    written.entry(started, "verify", session.session_id, None, {"outcome": "started", "challenge_id": challenge_id})
+    written.entry(verified_at, "verify", session.session_id, None,
+                  {"outcome": "verified", "challenge_id": challenge_id})
+    written.entry(archived, "desk_data", session.session_id, None, {"part": "people", "refs": [person_id]})
+    return document_id
 
 
 def _evaluation(desk: _Desk, outcome: str, tool: str, action: NormalizedAction) -> decide.Evaluation:
@@ -425,21 +487,60 @@ async def _effects(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, sess
         written.rows.append(Lead(lead_id=new_id("lead"), copy_id=desk.copy_id, desk_id=desk.desk_id,
                                  session_id=session.session_id, display_name=args.name, note=lead_note(args),
                                  created_at=at))
-    elif call.tool == "native.request_callback":
-        window = desks.next_open_window(desk.desk_row.hours, desk.tz, at)
-        if window is None or sample.handled_s is None:
+    elif call.tool == "native.release_document":
+        link_id, token = new_id("doclink"), secrets.token_urlsafe(32)
+        archived = start + timedelta(seconds=180)
+        expires = at + release_document.LINK_TTL
+        written.rows.append(DocumentLink(
+            link_id=link_id, copy_id=desk.copy_id, desk_id=desk.desk_id, document_id=action.resource.id,
+            session_id=session.session_id, person_id=session.person_id, token=token,
+            token_sha256=auth.hash_token(token), created_at=at, expires_at=expires, voided_at=archived))
+        private = Label(readers=["owner", f"person:{session.person_id}"], record_owner=session.person_id)
+        keep("document_link", Fact(
+            fact_id=f"document_link:{link_id}", kind="document", status="available", source="kernel",
+            claims=[Claim(key="title", kind="text", value=seed.SAMPLE_INVOICE["title"]),
+                    Claim(key="ref", kind="ref", value=link_id)], label=private, expires_at=expires), "expired", archived)
+        written.entry(at, "document_link", session.session_id, link_id,
+                      {"link_id": link_id, "document_id": action.resource.id, "issued": True})
+        written.entry(archived, "document_link", session.session_id, link_id, {"link_id": link_id, "voided": True})
+    elif call.tool == "native.payment_link":
+        quote = next(row for row in written.rows if isinstance(row, Quote) and row.quote_id == action.resource.id)
+        link_id, token = new_id("paylink"), secrets.token_urlsafe(32)
+        expires = at + payment_link.LINK_TTL
+        title = quotes.items_text(quote.items)
+        written.rows.append(PaymentLink(
+            link_id=link_id, copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
+            quote_id=quote.quote_id, action_id=action.action_id, title=title, amount_cents=action.amount_cents,
+            state="expired", token=token, token_sha256=auth.hash_token(token),
+            provider_checkout_id=new_id("samplecheckout"), customer_id=f"session:{session.session_id}",
+            expires_at=expires, created_at=at, updated_at=expires))
+        keep("payment_link", Fact(
+            fact_id=f"payment_link:{link_id}", kind="payment_link", status="available", source="kernel",
+            claims=[Claim(key="title", kind="text", value=title),
+                    Claim(key="total", kind="money", value=action.amount_cents),
+                    Claim(key="ref", kind="ref", value=link_id)], label=label, expires_at=expires), "expired", expires)
+        written.entry(at, "payment", session.session_id, link_id,
+                      {"link_id": link_id, "state": "issued", "version": desk.version_row.version})
+        written.entry(expires, "payment", session.session_id, link_id, {"link_id": link_id, "state": "expired"})
+    elif call.tool in {"native.request_callback", "desk.emergency-callback"}:
+        urgent = call.tool == "desk.emergency-callback"
+        window = None if urgent else desks.next_open_window(desk.desk_row.hours, desk.tz, at)
+        if (window is None and not urgent) or sample.handled_s is None:
             raise SampleWeekRefused("callback_unhandled")
-        window_start, window_end = window
-        handled_at = max(start + timedelta(seconds=sample.handled_s), window_start + timedelta(minutes=10))
+        window_start, window_end = window or (None, None)
+        handled_at = start + timedelta(seconds=sample.handled_s)
+        if window_start is not None:
+            handled_at = max(handled_at, window_start + timedelta(minutes=10))
         handoff_id = new_id("handoff")
         written.rows.append(Handoff(
             handoff_id=handoff_id, copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
-            reason=f"{args.name} · {desks.mask_contact(args.contact)} · {args.reason}",
-            callback_window=f"{window_start.isoformat()}/{window_end.isoformat()}", status="done", kind="callback",
+            reason=f"{args.name} · {args.contact} · {args.reason}",
+            callback_window=f"{window_start.isoformat()}/{window_end.isoformat()}" if window else None,
+            status="done", kind="callback",
             action_id=action.action_id, window_start=window_start, window_end=window_end, created_at=at))
         keep("callback_confirmed", Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed",
                                         source="kernel", claims=window_claims(window), label=label,
-                                        expires_at=window_end), "expired", window_end)
+                                        expires_at=window_end), "expired", handled_at)
         written.entry(handled_at, "desk_data", session.session_id, None, {"part": "handoffs", "refs": [handoff_id]})
     else:
         raise SampleWeekRefused("no_sample_effect")
@@ -454,8 +555,18 @@ def _reply(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session: Ses
         raise SampleWeekRefused("prose_fails_the_scan")
     if any(template not in facts for template in sample.cards):
         raise SampleWeekRefused("card_without_fact")
+
+    def href(template: str) -> str | None:
+        # This is the signed snapshot when issued, not a fresh citation of a now-expired link.
+        if template not in {"document_link", "payment_link"}:
+            return None
+        link_id = next(claim.value for claim in facts[template].claims if claim.key == "ref")
+        model = DocumentLink if template == "document_link" else PaymentLink
+        link = next(row for row in written.rows if isinstance(row, model) and row.link_id == link_id)
+        return f"/api/d/{link.token}" if template == "document_link" else f"/pay/{link.token}"
+
     cards = [render.render_clause(Clause(template=template, fact_id=facts[template].fact_id), facts[template],
-                                  LANGUAGE, desk.info) for template in sample.cards]
+                                  LANGUAGE, desk.info, href=href(template)) for template in sample.cards]
     blocks = [RenderedBlock(kind="prose", text=sample.prose), *cards]
     fact_ids = [card.fact_id for card in cards]
     message_id = new_id("msg")
