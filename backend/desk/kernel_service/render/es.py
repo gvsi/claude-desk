@@ -33,9 +33,9 @@ STATUS: dict[str, str] = {
     "owner_say_blocked": "No se envió: incluía texto de un documento privado",
 }
 
-# Owner-only (`en.OWNER_STATUS`): why an action was refused at execution, a decision's `owner_plain`,
-# kept out of `STATUS`, since a decision's status line reaches the visitor, who mustn't read why their
-# session ended.
+# Owner-only (`en.OWNER_STATUS`): why an action was refused at execution, or that the visitor's booking
+# closed a held request, a decision's `owner_plain`, kept out of `STATUS`, since a decision's status line
+# reaches the visitor, who mustn't read why their session ended.
 OWNER_STATUS: dict[str, str] = {
     "refused_contact_changed": "No se compartió: su sesión terminó cuando cambió su contacto",
     "refused_person_removed": "No se compartió: se quitó a esta persona de tus registros",
@@ -43,6 +43,7 @@ OWNER_STATUS: dict[str, str] = {
     "refused_rules_changed": "Tus reglas cambiaron antes de que se hiciera, así que no se hizo.",
     "refused_desk_deleted": "Este Desk se eliminó antes de que se hiciera, así que no se hizo.",
     "refused_fallback": "No se pudo hacer, así que no se hizo.",
+    "cancelled_by_booking": "El visitante reservó antes de que respondieras, así que esta solicitud se cerró.",
 }
 
 EXECUTED: dict[str, str] = {
@@ -71,6 +72,7 @@ MESSAGES: dict[str, str] = {
     "inbox_code_body": ("Tu código de {business} es {code}. Vence en diez minutos. "
                         "Si no lo pediste, ignora este mensaje."),
     "offer_callback": "¿Quiere que solicite una llamada?",
+    "check_status": "Consulte el estado de la solicitud en este chat.",
 }
 
 WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")

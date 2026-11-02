@@ -15,6 +15,15 @@
   color: var(--text-primary);
 }
 
+/* Keyboard focus shows in the words, as a TextLink's: they and a 2 px underline turn the primary ink. */
+.cd-recorded-history-link:focus-visible {
+  box-shadow: none;
+  color: var(--text-primary);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--text-primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cd-recorded-history-link {
     transition: none;

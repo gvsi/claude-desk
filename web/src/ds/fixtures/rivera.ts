@@ -836,6 +836,16 @@ const decisions = {
 } satisfies Record<DecisionState, Decision>;
 
 /**
+ * The held quote once the visitor booked a time at list price before Mike answered: the kernel
+ * closed the stale discount request (`cancelled`), and the owner's read says why in `owner_plain`.
+ * The line isn't signed, so the visitor's read is `decisions.cancelled`, word for word, without it.
+ */
+const cancelledByBooking = {
+  ...decisions.cancelled,
+  owner_plain: 'The visitor booked before you answered, so this request closed.',
+} satisfies Decision;
+
+/**
  * Verified Dana asks for a Saturday afternoon visit, after the Saturday card's morning hours. Both
  * booking cards' hold twins match, since a hold twin drops its card's hours; the Saturday card, the
  * one the reason names, comes first. Hours hold it, not the tool, so Deny always isn't offered;
@@ -2043,6 +2053,7 @@ export const rivera = {
   conversations,
   events,
   decisions,
+  cancelledByBooking,
   heldVerified,
   heldRefund,
   ruleCards,

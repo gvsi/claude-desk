@@ -191,6 +191,9 @@ REFUSED = {"outcome": "refused"}
 DELIVERED_HANDOFF = {"outcome": "delivered_handoff"}
 # The kernel's call-back offer, shown as prose in place of a draft blocked only for its prose with no card to keep.
 CALL_BACK_OFFERS = frozenset(STATUS_LINES["offer_callback"].values())
+# The prose the kernel writes in place of a draft blocked only for its prose: the call-back offer, or, while a held
+# request awaits the owner, the status line after any kept cards.
+KERNEL_LINES = CALL_BACK_OFFERS | frozenset(STATUS_LINES["check_status"].values())
 
 
 @dataclass(frozen=True)
@@ -645,19 +648,20 @@ def _drafted_prose(tool_input: Any) -> str | None:
 
 def prose_unshown(tool_input: Any, blocks: Iterable[RenderedBlock]) -> bool:
     """Whether Claude drafted prose (`tool_input`, its `send_reply` input, a nonempty string `prose`) that none of the
-    shown `blocks` holds: the check failed and showed the kept cards, a handoff or the kernel's call-back offer in its
-    place. The offer is the one prose block the kernel writes, in the signed words (`CALL_BACK_OFFERS`), so a prose
-    block holding them is Claude's only when Claude drafted those words."""
+    shown `blocks` holds: the check failed and showed the kept cards, a handoff, or the kernel's call-back offer or
+    status line in its place. Those are the only prose blocks the kernel writes, in the signed words
+    (`KERNEL_LINES`), so a prose block holding them is Claude's only when Claude drafted those words."""
     prose = _drafted_prose(tool_input)
     return prose is not None and not any(
-        block.kind == "prose" and (block.text not in CALL_BACK_OFFERS or block.text == prose) for block in blocks)
+        block.kind == "prose" and (block.text not in KERNEL_LINES or block.text == prose) for block in blocks)
 
 
 def offer_shown_instead(tool_input: Any, blocks: Iterable[RenderedBlock]) -> str | None:
-    """The kernel's call-back offer when it was shown in place of Claude's own prose (`tool_input`, its `send_reply`
-    input): the offer's words, so Claude reads the question the visitor's next message answers; else None."""
+    """The kernel's call-back offer or status line when it was shown in place of Claude's own prose (`tool_input`, its
+    `send_reply` input): its words, so Claude reads what the visitor saw, such as the question the visitor's next
+    message answers; else None."""
     prose = _drafted_prose(tool_input)
-    return next((block.text for block in blocks if block.kind == "prose" and block.text in CALL_BACK_OFFERS
+    return next((block.text for block in blocks if block.kind == "prose" and block.text in KERNEL_LINES
                  and block.text != prose), None)
 
 

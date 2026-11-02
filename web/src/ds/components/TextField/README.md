@@ -19,7 +19,7 @@
 
 ## Held fields
 
-A read-only field, single or multiline, uses a `line-control` outline on `fill-secondary`, with a default cursor. Its words stay at full `text-primary` contrast, selectable and in the tab order. It has no caret, so with focus, by click or keyboard, it shows the warm `ring-focus` ring like any other control; only a field that can be typed in shows its caret and a stronger edge instead. The muted fill says the words are held while a request settles; they can still be read and copied, so the field does not look disabled (owner, 2026-10-31, option B, “muted fill”; N-Explore-ReadOnly-B).
+A read-only field, single or multiline, uses a `line-control` outline on `fill-secondary`, with a default cursor. Its words stay at full `text-primary` contrast, selectable and in the tab order. It has no caret, so with focus, by click or keyboard, it shows the warm focus edge, 1 px of `line-focus` just inside it, like any other borderless control, and its border doesn't change; only a field that can be typed in shows its caret and a stronger edge instead. The muted fill says the words are held while a request settles; they can still be read and copied, so the field does not look disabled (owner, 2026-10-31, option B, “muted fill”; N-Explore-ReadOnly-B).
 
 ## Accessibility
 

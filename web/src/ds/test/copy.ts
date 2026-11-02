@@ -31,6 +31,7 @@ export const COPY_ACRONYMS: ReadonlySet<string> = new Set([
   'AI',
   'IA',
   'PDF',
+  'DOCX',
   'QR',
   'CPA',
   'ZIP',

@@ -18,7 +18,7 @@
   color: var(--text-primary);
 }
 
-/* The first keyboard stop sits over the banner and sidebar with the shared focus ring. */
+/* The first keyboard stop sits over the banner and sidebar with the shared focus edge. */
 .cd-app-shell__skip {
   position: absolute;
   top: var(--space-8);
@@ -48,9 +48,10 @@
   clip-path: inset(50%);
 }
 
-/* The main region takes programmatic focus; it is not a control. */
+/* The main region takes programmatic focus; it is not a control, so it draws nothing. */
 .cd-app-shell__main:focus {
   outline: none;
+  box-shadow: none;
 }
 
 /* Positioned, so a panel that is leaving can sit at its right edge, out of the row (below). It is

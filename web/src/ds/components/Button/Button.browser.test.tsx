@@ -9,10 +9,11 @@ import { composeStory } from '@storybook/react-vite';
 import { act, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
+import { userEvent } from 'vitest/browser';
 
 import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
 import { Card } from '../Card/Card.tsx';
-import { Button } from './Button.tsx';
+import { Button, type ButtonVariant } from './Button.tsx';
 import meta, { BusyReducedMotion } from './Button.stories.tsx';
 
 declare global {
@@ -184,6 +185,51 @@ it('touch_hit_areas_past_card_edges_stay_apart', async () => {
       expect(hitArea(button).height, 'the full 44 px target is available across the card edge').toBe(44);
       expectHitAreaLands(button);
       expectUnseen(button);
+    }
+  } finally {
+    unmount();
+  }
+});
+
+it('keyboard_focus_draws_an_edge_inside_every_variant', async () => {
+  // No ring outside a button (owner, 2026-11-01): keyboard focus draws an edge inside its own box, so
+  // nothing moves. The fills and ghosts show 1 px of line-focus; the primary's cream fill shows 2 px of
+  // the page's own dark instead, since the warm line hardly shows on it. A click draws nothing.
+  const probe = document.createElement('span');
+  document.body.append(probe);
+  const color = (token: string) => {
+    probe.style.color = `var(${token})`;
+    return getComputedStyle(probe).color;
+  };
+  const edges: [ButtonVariant, string][] = [
+    ['primary', `${color('--bg-app')} 0px 0px 0px 2px inset`],
+    ['secondary', `${color('--line-focus')} 0px 0px 0px 1px inset`],
+    ['ghost', `${color('--line-focus')} 0px 0px 0px 1px inset`],
+    ['danger', `${color('--line-focus')} 0px 0px 0px 1px inset`],
+    ['danger-ghost', `${color('--line-focus')} 0px 0px 0px 1px inset`],
+  ];
+  probe.remove();
+  const { host, unmount } = mount(
+    <div style={{ display: 'flex', gap: 16, padding: 40 }}>
+      {edges.map(([variant]) => (
+        <Button key={variant} variant={variant}>
+          {variant}
+        </Button>
+      ))}
+    </div>,
+  );
+  try {
+    for (const [i, button] of [...host.querySelectorAll<HTMLElement>('.cd-button')].entries()) {
+      const [variant, edge] = edges[i]!;
+      const box = button.getBoundingClientRect().toJSON();
+      await userEvent.click(button);
+      expect([variant, getComputedStyle(button).outlineStyle, getComputedStyle(button).boxShadow]).toEqual([variant, 'none', 'none']);
+      button.blur();
+      await userEvent.keyboard('{Shift}');
+      button.focus();
+      expect(button.matches(':focus-visible'), variant).toBe(true);
+      expect([variant, getComputedStyle(button).outlineStyle, getComputedStyle(button).boxShadow]).toEqual([variant, 'none', edge]);
+      expect(button.getBoundingClientRect().toJSON(), variant).toEqual(box);
     }
   } finally {
     unmount();

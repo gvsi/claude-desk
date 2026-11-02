@@ -548,7 +548,8 @@ describe('setup', () => {
   it('the_lockup_leads_to_the_start_page_before_there_is_a_desk', async () => {
     // Before there is a Desk, the bar's lockup leads where "Save and exit" does: the app's start
     // page. It is a link named by the product's name and what it does, keeps the lockup's look with
-    // a pointer, and takes the warm focus ring from the keyboard, 4 px off so it clears the badge.
+    // a pointer, and from the keyboard takes the base focus edge: 1 px of line-focus just inside it, at
+    // the control radius, and no ring outside it.
     const firstVisit = holdFirstVisit();
     const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
     const bar = screen.getByRole('banner');
@@ -559,20 +560,17 @@ describe('setup', () => {
     expect(look.textDecorationLine).toBe('none');
     expect(look.color).toBe(getComputedStyle(bar.element()).color);
     expect(look.cursor).toBe('pointer');
-    expect(look.outlineStyle, 'no ring before the keyboard').toBe('none');
+    expect([look.outlineStyle, look.boxShadow], 'nothing drawn before the keyboard').toEqual(['none', 'none']);
+    // Its box stands 6 px off the bell and the wordmark, so the focus edge clears the bell and the Preview badge,
+    // while the bell sits where the bar's 40 px padding puts it.
+    const [own, bell, words] = [lockup.element(), lockup.element().firstElementChild, lockup.element().lastElementChild].map((el) => el!.getBoundingClientRect());
+    expect([bell!.left - bar.element().getBoundingClientRect().left, bell!.left - own!.left, own!.right - words!.right]).toEqual([40, 6, 6]);
+    expect(Math.round(Math.min(bell!.top, words!.top) - own!.top)).toBe(6);
     await userEvent.keyboard('{Tab}');
     (lockup.element() as HTMLElement).focus();
     expect(lockup.element().matches(':focus-visible')).toBe(true);
-    const probe = document.createElement('span');
-    probe.style.color = 'var(--ring-focus)';
-    document.body.append(probe);
-    try {
-      expect(getComputedStyle(lockup.element()).outlineColor).toBe(getComputedStyle(probe).color);
-      expect(getComputedStyle(lockup.element()).outlineOffset).toBe('4px');
-      expect(getComputedStyle(lockup.element()).outlineWidth).toBe('2px');
-    } finally {
-      probe.remove();
-    }
+    const edge = getComputedStyle(lockup.element());
+    expect([edge.outlineStyle, edge.boxShadow, edge.borderTopLeftRadius]).toEqual(['none', `${tokenColor('--line-focus')} 0px 0px 0px 1px inset`, '8px']);
     await lockup.click();
     await expect.poll(() => router.state.location.pathname).toBe('/');
     firstVisit.draw();
@@ -1210,18 +1208,45 @@ describe('setup', () => {
     const box = screen.getByRole('textbox', { name: 'Your answer' });
     await box.click();
     await userEvent.keyboard('Leaks and drains.{Enter}');
-    await expect.element(box).toBeDisabled();
+    // The box takes typing while the reply is held, and Send waits.
+    await expect.element(box).toBeEnabled();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
     // Leave for another control while the reply is held, then click the page's text. Even though
-    // focus ends up on the body again, it now belongs to the owner, not the disabled textarea.
+    // focus ends up on the body again, it now belongs to the owner, not the message box.
     const exit = screen.getByRole('link', { name: 'Save and exit' });
     (exit.element() as HTMLElement).focus();
     await expect.element(exit).toHaveFocus();
     await screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true }).click();
     expect(document.activeElement).toBe(document.body);
     release();
-    await expect.element(box).toBeEnabled();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
     await expect.element(box).toHaveValue(outcome === 'refused' ? 'Leaks and drains.' : '');
     expect(document.activeElement).toBe(document.body);
+  });
+
+  it('a_refused_answer_comes_back_ahead_of_words_typed_meanwhile_and_focus_stays', async () => {
+    const { interview_id: id } = await startInterview();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    worker.use(http.post(`/api/owner/setup/${id}/answer`, async () => {
+      await gate;
+      return undefined;
+    }, { once: true }));
+    mockStore.inject({ route: 'setupAnswer', status: 409 });
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('Leaks and drains.{Enter}');
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    // The owner goes on typing while the answer is out.
+    await userEvent.keyboard('Around Oakland.');
+    await expect.element(box).toHaveValue('Around Oakland.');
+    // Refused: the answer comes back first, the words typed since after it on a new line, with focus.
+    release();
+    await expect.element(box).toHaveValue('Leaks and drains.\nAround Oakland.');
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
+    await expect.element(box).toHaveFocus();
   });
 
   it.each([1440, 390])('at %i px, the setup chat reads at 16/24, Claude and the owner alike, and the dock keeps its own type', async (width) => {
@@ -1426,7 +1451,7 @@ describe('setup', () => {
       await expect.element(writing).toBeVisible();
       expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
       await expect.element(wait).toBeVisible();
-      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
       await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
       expect(writing.element().nextElementSibling).toBe(wait.element());
       const log = screen.getByRole('log', { name: 'Setup questions' }).element();
@@ -1449,7 +1474,7 @@ describe('setup', () => {
       await screen.getByRole('button', { name: 'Send' }).click();
       await expect.element(writing).toBeVisible();
       expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
-      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
       await expect.element(wait).not.toBeInTheDocument();
       release();
       await expect.element(writing).not.toBeInTheDocument();
@@ -1469,7 +1494,7 @@ describe('setup', () => {
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await expect.element(box).toBeDisabled();
+    await expect.element(box).toBeEnabled();
     await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
     expectNoHorizontalScroll();
     const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
@@ -1561,7 +1586,7 @@ describe('setup', () => {
       expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);
     });
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await expect.element(box).toBeDisabled();
+    await expect.element(box).toBeEnabled();
     finish('landed');
     await screen.getByRole('button', { name: 'Try again' }).click();
     await until(() => {
@@ -1588,7 +1613,7 @@ describe('setup', () => {
     await expect.element(writing).toBeVisible();
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     finish('landed');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
@@ -1609,7 +1634,7 @@ describe('setup', () => {
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.poll(() => requests('setup', mark)).toHaveLength(1);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     finish('landed');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
@@ -1628,6 +1653,7 @@ describe('setup', () => {
     (exit.element() as HTMLElement).focus();
     const mark = requests('setup').length;
     finish('landed');
+    await expect.element(writing).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     expect(requests('setup').length).toBeGreaterThan(mark);
     await expect.element(exit).toHaveFocus();
@@ -4317,7 +4343,7 @@ describe('consultant setup', () => {
     if (action === 'answer') { await box.fill('Yes, please'); await screen.getByRole('button', { name: 'Send', exact: true }).click(); }
     else await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
     await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
-    await expect.element(box).toBeDisabled();
+    await expect.element(box).toBeEnabled();
     const setup = screen.getByRole('article', { name: 'Ask new clients three questions' }).getByRole('button', { name: 'Set it up', exact: true });
     await expect.element(setup).toHaveAttribute('aria-disabled', 'true');
     await expect.element(setup).not.toHaveAttribute('disabled');
@@ -4477,7 +4503,7 @@ describe('consultant setup', () => {
     else await card.getByRole('button', { name: 'Set it up', exact: true }).click();
     await expect.poll(() => requests(key).length).toBe(sent + 1);
     await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
-    await expect.element(box).toBeDisabled();
+    await expect.element(box).toBeEnabled();
     release();
     await expect.element(box).toBeEnabled();
     if (action === 'answer') await expect.element(box).toHaveValue('Keep these words for my next answer.');
@@ -4517,13 +4543,16 @@ describe('consultant setup', () => {
     await expect.element(accept).toHaveFocus();
     await expect.element(decline).toHaveAttribute('aria-disabled', 'true');
     await expect.element(decline).not.toHaveAttribute('disabled');
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     await expect.element(suggestions).toHaveAttribute('aria-disabled', 'true');
     await expect.element(suggestions).not.toHaveAttribute('disabled');
     if (kind !== 'schedule') {
       await userEvent.keyboard('{Tab}');
       await expect.element(decline).toHaveFocus();
       await userEvent.keyboard('{Enter} ');
+      // The message box takes typing while the turn runs, so Tab stops there; Send waits, and is skipped.
+      await userEvent.keyboard('{Tab}');
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
       await userEvent.keyboard('{Tab}');
       await expect.element(suggestions).toHaveFocus();
       await userEvent.keyboard('{Enter} ');
@@ -4565,7 +4594,7 @@ describe('consultant setup', () => {
     expect(requests('setupAnswer')).toHaveLength(answers + 1);
     expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'money_limit', text: 'Ask me before every payment' });
     await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Continue', exact: true }).elements()).toHaveLength(0);
     const reads = requests('setup').length;
     release();

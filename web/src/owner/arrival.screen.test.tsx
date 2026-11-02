@@ -462,15 +462,18 @@ describe('Arrival', () => {
     await dialog.click({ position: { x: 8, y: 8 } });
     expect(el.open).toBe(true);
 
-    // Tab and Shift+Tab go round the dialog's own controls.
+    // Tab and Shift+Tab go round the dialog's own controls and its footer's author link.
     await field.click();
     const button = dialog.getByRole('button', { name: 'Start the demo' });
+    const author = dialog.getByRole('link', { name: 'Giovanni Alcantara' });
     await userEvent.keyboard('{Tab}');
     await expect.element(button).toHaveFocus();
+    await userEvent.keyboard('{Tab}');
+    await expect.element(author).toHaveFocus();
     await userEvent.keyboard('{Tab}');
     await expect.element(field).toHaveFocus();
     await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
-    await expect.element(button).toHaveFocus();
+    await expect.element(author).toHaveFocus();
     expect(el.contains(document.activeElement)).toBe(true);
 
     // Enter in the field submits.
@@ -902,14 +905,16 @@ describe('OwnerLayout', () => {
       'Today',
       'Conversations',
       'Customers',
+      'Knowledge',
       'Rules',
       'Safety',
+      'Profile',
       'Share',
       'Settings',
     ]);
     const base = `/app/${RIVERA.deskId}`;
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'].map((page) => `${base}/${page}`),
+      ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'profile', 'share', 'settings'].map((page) => `${base}/${page}`),
     );
     await expect.element(nav.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
 
@@ -955,9 +960,11 @@ describe('OwnerLayout', () => {
       ['today/briefing', 'Since last night', 'Since last night'],
       ['conversations', 'Conversations', 'Conversations'],
       ['people', 'Customers', 'Customers'],
+      ['knowledge', 'Knowledge', 'Knowledge'],
       ['rules', 'Rules', 'Rules'],
       ['rules/all', 'All rules', 'All rules'],
       ['safety', 'Safety', 'Safety'],
+      ['profile', 'Profile', 'Profile'],
       ['share', 'Share', 'Share'],
       ['settings/general', 'Settings', 'Settings'],
       ['settings/notifications', 'Settings', 'Settings'],
@@ -992,6 +999,7 @@ describe('OwnerLayout', () => {
       ['Capability prediction', '/about/prediction'],
       ['Product proposal', '/about/proposal'],
       ['Vision', '/about/vision'],
+      ['GitHub', 'https://github.com/gvsi/claude-desk'],
     ];
     const rows = (nav: Element) => [...nav.querySelectorAll('a')].map((a) => [a.textContent.trim(), a.getAttribute('href')]);
 
@@ -1757,6 +1765,27 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
     expect(requests('ledger').length).toBeGreaterThan(reads.ledger);
     expectNoHorizontalScroll();
+  });
+
+  it.each([
+    ['a_booking', 'The visitor booked before you answered, so this request closed.', 'The visitor booked before you answered, so this request closed.'],
+    ['the_visitor', null, 'The visitor cancelled before you answered. Nothing was done.'],
+  ] as const)('a_late_answer_to_a_request_%s_closed_says_why_on_the_card', async (_, owner_plain, cardLine) => {
+    // The answer comes back 409, cancelled. The kernel's owner line says when the visitor's booking
+    // closed it; without one, the visitor cancelled it, and the card's own line says so.
+    const { screen } = await renderRoute(TODAY);
+    const card = heldCard(screen);
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    const held = seededHoldNow();
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...held, state: 'cancelled', answers: [], owner_plain } } });
+    await card.getByRole('button', { name: 'Allow this time' }).click();
+
+    await expect.element(card.getByText(cardLine, { exact: true })).toBeVisible();
+    const lines = ['The visitor booked before you answered, so this request closed.', 'The visitor cancelled before you answered. Nothing was done.'];
+    for (const other of lines.filter((words) => words !== cardLine)) {
+      expect(card.getByText(other, { exact: true }).elements()).toHaveLength(0);
+    }
+    expect(card.getByRole('button').elements()).toHaveLength(0);
   });
 
   it.each([

@@ -23,6 +23,16 @@
   text-underline-offset: 3px;
 }
 
+/* Keyboard focus shows in the words, as a TextLink's: they and a 2 px underline turn the primary ink. */
+.cd-person-rules__change:focus-visible {
+  box-shadow: none;
+  color: var(--text-primary);
+  text-decoration-line: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--text-primary);
+}
+
 .cd-person-rules__rows {
   margin: 0;
   padding: 0;

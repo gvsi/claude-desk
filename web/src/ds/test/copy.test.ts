@@ -167,6 +167,8 @@ describe('assertCleanCopy', () => {
     expect(check(`<p data-ds="concept-footer">${exact}.</p>`)).toThrow(/concept footer reads/);
     expect(check(`<p data-ds="concept-footer" aria-hidden="true">${exact}</p>`)).toThrow(/concept footer reads ""/);
     expect(check('<p data-ds="concept-footer">Concept prototype by <b>Giovanni</b> Alcantara<span>,</span> not an Anthropic product</p>')).not.toThrow();
+    // The author's name as a link reads the same.
+    expect(check('<p data-ds="concept-footer">Concept prototype by <a href="https://example.test/">Giovanni Alcantara</a>, not an Anthropic product</p>')).not.toThrow();
   });
 
   it('lists_every_problem_in_one_error', () => {

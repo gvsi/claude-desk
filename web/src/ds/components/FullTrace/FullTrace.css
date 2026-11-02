@@ -9,6 +9,12 @@
   color: var(--text-primary);
 }
 
+/* A screen can move focus to it: with focus from the keyboard, its own border turns line-focus. */
+.cd-full-trace:focus-visible {
+  border-color: var(--line-focus);
+  box-shadow: none;
+}
+
 /* Zero specificity, so each part's own margin below wins. */
 :where(.cd-full-trace) :where(p, dl, dd, pre) {
   margin: 0;

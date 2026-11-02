@@ -35,8 +35,10 @@ const hrefs = {
   today: '/app/desk-rivera-main/today',
   conversations: '/app/desk-rivera-main/conversations',
   people: '/app/desk-rivera-main/people',
+  knowledge: '/app/desk-rivera-main/knowledge',
   rules: '/app/desk-rivera-main/rules',
   safety: '/app/desk-rivera-main/safety',
+  profile: '/app/desk-rivera-main/profile',
   share: '/app/desk-rivera-main/share',
   settings: '/app/desk-rivera-main/settings',
 } satisfies SidebarHrefs;
@@ -74,12 +76,11 @@ const sidebar = (
   />
 );
 
-/** The eight pages, in the sidebar's fixed order. */
-/** The seven pages Today's board draws, before Connectors. */
-const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Share', 'Settings'];
+/** The nine pages, including Knowledge, without Connectors. */
+const PAGES = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings'];
 
-/** The eight pages N-Docs-Sidebar draws, Connectors after Rules. */
-const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings'];
+/** The ten pages with Knowledge after Customers and Connectors after Rules. */
+const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Settings'];
 
 /** The words of each page row in a nav, in order (a row's count is read separately). */
 function pageNames(nav: HTMLElement): string[] {
@@ -149,7 +150,7 @@ export const OwnerToday: Story = {
     await expect(column.getBoundingClientRect().top).toBe(banner.getBoundingClientRect().bottom);
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expect(nav).toBeVisible();
-    // nav_order_is_fixed: the board's seven pages, each to its own route (no Connectors page here).
+    // nav_order_is_fixed: the nine pages, each to its own route (no Connectors page here).
     await expect(pageNames(nav)).toEqual(PAGES);
     await expect(within(nav).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(Object.values(hrefs));
     // It runs to the bottom of the window, so the Claude acts for you switch sits at the foot.
@@ -176,14 +177,15 @@ export const SkipToContent: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      'No board draws Skip to content: the first Tab stop on every owner page, out of sight until the keyboard reaches it, then at the top left over the reviewer bar and the sidebar, on the raised surface with the standard focus ring.',
+      'No board draws Skip to content: the first Tab stop on every owner page, out of sight until the keyboard reaches it, then at the top left over the reviewer bar and the sidebar, on the raised surface with the standard focus edge, 1 px of line-focus inside it.',
   },
   play: async ({ canvas, userEvent }) => {
     // skip_link_first_and_out_of_sight: nothing shows until the keyboard reaches it.
     const skip = canvas.getByRole('link', { name: 'Skip to content' });
     await expect(skip.getBoundingClientRect().width).toBeLessThanOrEqual(1);
 
-    // The first Tab, before Start over: at the top left, over the reviewer bar, with the ring.
+    // The first Tab, before Start over: at the top left, over the reviewer bar, with the focus edge
+    // inside it and no ring outside it.
     await userEvent.tab();
     await expect(skip).toHaveFocus();
     expectComputed(skip, {
@@ -192,9 +194,8 @@ export const SkipToContent: Story = {
       borderTopLeftRadius: '8px',
       backgroundColor: 'rgb(42, 41, 39)',
       color: 'rgba(250, 249, 245, 0.92)',
-      outlineStyle: 'solid',
-      outlineWidth: '2px',
-      outlineColor: 'rgba(250, 249, 245, 0.64)',
+      outlineStyle: 'none',
+      boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset',
     });
     const box = skip.getBoundingClientRect();
     await expect([box.left, box.top]).toEqual([8, 8]);
@@ -436,7 +437,7 @@ export const ShortWindow: Story = {
   parameters: {
     canvas: 'N-Docs-Sidebar',
     canvasNote:
-      'The board draws the sidebar at 982 px; in a window 657 px tall, under the reviewer bar and with two Desks, the nav’s eight pages and the about group scroll between the pinned top and the pinned foot.',
+      'The board draws the sidebar at 982 px; in a window 657 px tall, under the reviewer bar and with two Desks, the nav’s nine pages and the about group scroll between the pinned top and the pinned foot.',
   },
   play: async ({ canvas, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1366, 657]);
@@ -444,7 +445,7 @@ export const ShortWindow: Story = {
     const sidebar = column.querySelector('.cd-sidebar') as HTMLElement;
     const foot = sidebar.querySelector('.cd-sidebar__footer') as HTMLElement;
     const middle = sidebar.querySelector('.cd-sidebar__middle') as HTMLElement | null;
-    // All eight pages, Connectors included, and the foot still wholly in the window.
+    // All nine pages, Connectors included, and the foot still wholly in the window.
     await expect(pageNames(within(column).getByRole('navigation', { name: 'Main' }))).toEqual(PAGES_WITH_CONNECTORS);
 
     // sidebar_foot_stays_in_view: the column itself never scrolls; the foot sits 12 px over its
@@ -503,7 +504,7 @@ export const Skeleton: Story = {
         />
       </div>
       <div data-shaped-frame aria-hidden="true" ref={(element) => element?.setAttribute('inert', '')}>
-        <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={7} about={ABOUT.links.length} />}>
+        <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={9} about={ABOUT.links.length} />}>
           <div />
         </AppShell>
       </div>

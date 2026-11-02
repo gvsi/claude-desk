@@ -15,6 +15,7 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, isLive, needsYouKey, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ContinueSetup } from './ContinueSetup.tsx';
+import { HowItWorks } from './HowItWorks.tsx';
 import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
@@ -51,7 +52,8 @@ export const COPIED_FOR_MS = 1_600;
 /**
  * `/app/:deskId/today`: a band across the page with the greeting, who is here now, the Desk's public
  * link to copy and "Chat as a customer" (the public page a new tab away), then "Not live yet" while
- * the Desk's setup hasn't gone live, and "Things to try"; under it two columns: in this order "Needs
+ * the Desk's setup hasn't gone live, "How your Desk works" with what Claude did today under it, and
+ * "Things to try"; under it two columns: in this order "Needs
  * you" and "Live now" when they have something, and "Since last night" always; at the right the last
  * 7 days. Today opens no visitor chat itself, and
  * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
@@ -132,6 +134,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const needsYouSection = useRef<HTMLElement>(null);
   const liveNow = useRef<HTMLElement>(null);
   const sinceLastNight = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!opening && location.hash === '#needs-you') needsYouSection.current?.focus();
+  }, [opening, location.key, location.hash]);
   const pendingFocus = useRef<PendingFocus | null>(null);
   const dismissAnswer = (id: string, next: string | undefined) => {
     pendingFocus.current = { kind: 'dismiss', next };
@@ -260,6 +265,12 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             {setup !== null ? (
               <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} answering={desk.answering} />
             ) : null}
+            <HowItWorks
+              deskId={deskId}
+              business={desk.business_name}
+              today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
+              firstHeldId={firstHeld?.decision.decision_id ?? null}
+            />
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
           </div>
           <div className="cd-today__main">

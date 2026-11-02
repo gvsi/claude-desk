@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 
-import { COMING_LATER_CHANNELS, SETUP_COPY } from './copy.ts';
+import { COMING_LATER_CHANNELS } from '../lib/channels.ts';
+import { SETUP_COPY } from './copy.ts';
 import { aroundBusiness, changeSomethingPath, opensSetupChat, setupPath } from './shared.ts';
 
 it('avoids a second sentence stop after a business name while preserving the name and other copy', () => {

@@ -37,6 +37,12 @@
   background: var(--button-primary-hover);
 }
 
+/* Keyboard focus: the ghost takes the base edge, 1 px of line-focus just inside it; the primary's
+   cream fill hides the warm line, so its edge is 2 px of the page's own dark, as a primary Button's. */
+.cd-icon-button--primary:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--bg-app);
+}
+
 .cd-icon-button:active {
   transform: scale(0.98);
 }
