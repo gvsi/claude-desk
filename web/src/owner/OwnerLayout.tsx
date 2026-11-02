@@ -49,7 +49,7 @@ import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { useLandingVisit } from './rules/landing.ts';
 import {
   DESKS_KEY,
-  desksQuery,
+  confirmDesks,
   dropTheOldInbox,
   findDesk,
   FRESH_MS,
@@ -188,6 +188,7 @@ export function OwnerLayout() {
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
+  const retried = useRef(false);
   // The demo bar's Demo inbox is read with the Desks, so the bar draws it with the frame: nothing
   // waits for it, and the bar's own read finds it read, or on its way.
   const queryClient = useQueryClient();
@@ -210,7 +211,10 @@ function DeskGate({ deskId }: { deskId: string }) {
   const next = shown ? (
     <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />
   ) : failed ? (
-    <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />
+    <OwnerState error={desks.error} focusRetry={retried.current} onRetry={() => {
+      retried.current = true;
+      void desks.refetch();
+    }} />
   ) : (
     <NotFound />
   );
@@ -360,7 +364,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
         return;
       }
       // The change may have been applied with its answer lost: the switch shows what the Desk reads now.
-      const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+      const read = await confirmDesks(queryClient);
       if (read === null) {
         // Nor could the Desk be read: the switch stays where it was put, and the next read settles it.
         setNotice(answeringSaveUnconfirmed(on));
@@ -588,8 +592,15 @@ function BesideTheBusinessRow({ container, children }: { container: RefObject<HT
 }
 
 /** When the copy's Desks cannot be read: the product's name, an error and a next step. */
-function OwnerState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+function OwnerState({ error, onRetry, focusRetry = false }: { error: unknown; onRetry?: () => void; focusRetry?: boolean }) {
   const titleId = useId();
+  const retryButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    // Focus that went with the retry's replaced control moves back; focus moved elsewhere stays.
+    if (focusRetry && (document.activeElement === null || document.activeElement === document.body)) {
+      retryButton.current?.focus();
+    }
+  }, [focusRetry]);
   return (
     <div className="cd-owner-state">
       <header className="cd-owner-state__brand">
@@ -603,7 +614,7 @@ function OwnerState({ error, onRetry }: { error: unknown; onRetry?: () => void }
         <Notice
           tone="error"
           action={
-            <Button variant="secondary" onClick={onRetry}>
+            <Button variant="secondary" onClick={onRetry} buttonRef={retryButton}>
               Try again
             </Button>
           }

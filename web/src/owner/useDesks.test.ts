@@ -84,6 +84,37 @@ it('cancelling_a_desks_read_aborts_its_http_request_without_a_query_error', asyn
   await reading;
 });
 
+it('unsubscribing_the_last_desks_observer_aborts_and_rolls_back_without_an_error', async () => {
+  let received: Request | undefined;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const server = setupServer(http.get(`http://localhost${ROUTES.desks.path}`, async ({ request }) => {
+    received = request;
+    await held;
+    return HttpResponse.json([]);
+  }));
+  server.listen();
+  const send = globalThis.fetch;
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => send(
+    typeof input === 'string' ? new URL(input, 'http://localhost') : input, init,
+  ));
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  stops.push(() => { release(); queryClient.clear(); vi.unstubAllGlobals(); server.close(); });
+  queryClient.setQueryData(DESKS_KEY, [], { updatedAt: 123 });
+  const observer = new QueryObserver(queryClient, desksQuery());
+  const unsubscribe = observer.subscribe(() => undefined);
+  stops.push(unsubscribe);
+  await vi.waitFor(() => expect(received).toBeDefined());
+  expect(received!.signal.aborted).toBe(false);
+
+  unsubscribe();
+
+  expect(received!.signal.aborted).toBe(true);
+  expect(queryClient.getQueryState(DESKS_KEY)).toMatchObject({
+    status: 'success', fetchStatus: 'idle', error: null, data: [], dataUpdatedAt: 123,
+  });
+});
+
 it('the_sample_business_name_matches_the_backend_seed_and_fixture', () => {
   const seedPy = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'kernel_service', 'seed.py'), 'utf8');
   const riveraSeed = /^def rivera_seed\b[^\n]*\n((?:[ \t].*\n|\n)*)/m.exec(seedPy)?.[1] ?? '';

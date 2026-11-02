@@ -1063,7 +1063,7 @@ it('desk_gate_hides_the_old_error_while_retrying_a_missing_desk', async () => {
   const main = mockStore.world.desk(RIVERA.deskId)!;
   mockStore.world.addDesk({ desk_id: 'desk-rivera-new', slug: 'rivera-new', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
   // The cached list holds the first Desk but lacks the new one. Its failed re-read keeps that data.
-  mockStore.inject({ route: 'desks', status: 'network', times: 2 });
+  mockStore.inject({ route: 'desks', status: 'network', times: 4 });
   await router.navigate('/app/desk-rivera-new/today');
   const error = screen.getByRole('alert').getByText("We couldn't reach Claude Desk. Check your connection, then try again.", { exact: true });
   await expect.element(error).toBeVisible();
@@ -1081,6 +1081,15 @@ it('desk_gate_hides_the_old_error_while_retrying_a_missing_desk', async () => {
   await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Desk' })).toBeVisible();
 
   desks.release();
+  await expect.element(error).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Try again' })).toHaveFocus();
+
+  const retriedDesks = holdReads(ROUTES.desks.path);
+  await screen.getByRole('button', { name: 'Try again' }).click();
+  await vi.waitFor(() => expect(retriedDesks.held()).toBe(1));
+  await expect.element(error).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Desk' })).toBeVisible();
+  retriedDesks.release();
   await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
   await expect.element(error).not.toBeInTheDocument();
 });
