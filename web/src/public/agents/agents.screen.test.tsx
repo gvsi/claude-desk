@@ -343,7 +343,7 @@ describe('agents page', () => {
       await expect.element(panel.getByRole('button', { name: plain[0] })).toBeVisible();
       for (const name of plain) await expect.element(panel.getByRole('button', { name })).toBeVisible();
       await expect.element(screen.getByRole('region', { name: 'What agents can do here' })).toBeVisible();
-      await panel.getByRole('button', { name: plain[2] }).click();
+      await panel.getByRole('button', { name: 'Try to pay more than its limit' }).click();
       await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
       expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'push_the_limit' });
     }
