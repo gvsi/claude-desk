@@ -880,6 +880,7 @@ export interface EvOwnerJoined {
 }
 export interface EvOwnerLeft {
   type: "owner_left";
+  resuming?: boolean;
 }
 export interface EvOwnerTyping {
   type: "owner_typing";

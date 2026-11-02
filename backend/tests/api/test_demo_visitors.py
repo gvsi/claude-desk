@@ -524,6 +524,36 @@ async def test_carries_on_with_claude_after_a_handback(app, browser, fake, visit
         desk_model.requests[1].messages)
 
 
+async def test_handback_waits_for_a_pending_whispers_delayed_claude_reply(
+        app, browser, fake, visitors, visitor_model, desk_model, copy, sleeps):
+    owner = owner_of(app, browser, copy)
+    release_step, release_reply = asyncio.Event(), asyncio.Event()
+    asking = gated(step("Is a visit this week possible?"), release_step)
+    answering = gated(say("I can check the available times for you."), release_reply)
+    visitor_model.add(step("Can you fix a leaking sink?"), asking, step("", done=True))
+    desk_model.add(say("Yes, we can help."), answering)
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(asking.entered.wait(), 5)
+    await change_mode(owner, fake, started.session_id, "takeover")
+    release_step.set()
+    assert await sleeps.waiting(NUDGE_AFTER_S) == NUDGE_AFTER_S
+    await owner_writes(owner, started.session_id, "Check the available times for Riley.", kind="whisper")
+    try:
+        await change_mode(owner, fake, started.session_id, "handback")
+        await asyncio.wait_for(answering.entered.wait(), 5)
+        # A resumed turn is still in flight. Hand-back alone must not trigger a visitor model call.
+        await asyncio.sleep(0.1)
+        assert len(visitor_model.requests) == 2, "Hand-back triggered a visitor step before Claude answered"
+        assert visitors.run(started.run_id, copy.copy_id).state == "running"
+    finally:
+        release_reply.set()
+    await asyncio.wait_for(visitors.drain(), 5)
+    assert visitors.run(started.run_id, copy.copy_id).ended == "finished"
+    assert "Claude (the business's AI): I can check the available times for you." in last_input(
+        visitor_model.requests[2])
+    assert "Check the available times for Riley." not in last_input(visitor_model.requests[2])
+
+
 async def turn_ends(engine, session_id: str) -> int:
     async with engine.connect() as conn:
         return (await conn.execute(text("SELECT count(*) FROM app.run_events WHERE session_id = :s AND kind = 'sse'"

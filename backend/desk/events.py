@@ -66,6 +66,8 @@ class EvOwnerTyping(BaseModel):           # presence after a take-over; carries 
 
 class EvOwnerLeft(BaseModel):
     type: Literal["owner_left"]
+    # Only presence, never the pending work's text. Omitted when idle for existing stream readers.
+    resuming: bool = Field(default=False, exclude_if=lambda value: not value)
 
 class EvDemoInbox(BaseModel):             # code-free; the panel fetches entry bodies through the kernel
     type: Literal["demo_inbox"]

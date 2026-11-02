@@ -10103,6 +10103,11 @@
             "type": "string",
             "const": "owner_left",
             "title": "Type"
+          },
+          "resuming": {
+            "type": "boolean",
+            "title": "Resuming",
+            "default": false
           }
         },
         "type": "object",

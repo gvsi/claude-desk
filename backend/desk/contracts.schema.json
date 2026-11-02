@@ -1616,6 +1616,11 @@
           "const": "owner_left",
           "title": "Type",
           "type": "string"
+        },
+        "resuming": {
+          "default": false,
+          "title": "Resuming",
+          "type": "boolean"
         }
       },
       "required": [

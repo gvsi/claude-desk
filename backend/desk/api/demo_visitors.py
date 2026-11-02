@@ -15,7 +15,7 @@ It keeps the session's event stream (`GET .../events`) open for the whole run, s
 wakes Claude only while the visitor's credential is present. Each step:
 
 1. Wait for the Desk: until Claude's turn ends (`turn_end`), or, once the owner has taken the chat over, until the
-   owner says something or hands it back. While the owner has the chat and stays quiet, it sends its one fixed nudge
+   owner says something or hands it back (waiting for Claude when work resumes). While the owner stays quiet, it sends its one fixed nudge
    (`DEMO_VISITOR_NUDGE`) after 90 seconds, with no model call, and ends `owner_silent` after four minutes.
 2. Its model reads what a visitor saw since its last step: each delivered message's plain text labelled by who said
    it (Claude, or the owner by the name the stream carries, as a person), each request's signed status, and where the
@@ -270,7 +270,8 @@ class _Answer:
 
 def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
     """Whether the events after `mark` (the feed's length when the message went) answer it: Claude's turn ending while
-    Claude has the chat, or the owner's words or leaving while the owner has it. The stream's `session` error is the
+    Claude has the chat, or the owner's words or an idle hand-back. A hand-back resuming work waits for Claude's
+    turn to end. The stream's `session` error is the
     chat ending."""
     mode, heard = "ai", None
     for index, seen in enumerate(events):
@@ -286,7 +287,7 @@ def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
             raise _Ended("chat_ended")
         if kind in ("owner_joined", "owner_typing"):
             heard = seen.at
-        elif kind == "owner_left" or (kind == "message" and event.author == "owner"):
+        elif (kind == "owner_left" and not event.resuming) or (kind == "message" and event.author == "owner"):
             return _Answer(True, mode, heard)
         elif kind == "turn_end" and mode != "owner":
             return _Answer(True, mode, heard)
