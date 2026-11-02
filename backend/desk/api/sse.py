@@ -208,7 +208,9 @@ class Listener:
 
     @contextlib.asynccontextmanager
     async def subscribe(self, session_id: str, wakeup: Wakeup | None = None) -> AsyncIterator[Wakeup]:
-        """Wake `wakeup` (a new one when None) on each notification for the session while the block runs."""
+        """Wake `wakeup` (a new one when None) on each notification for the session while the block runs. Only the
+        visitor's public chat stream subscribes (`event_stream`, from `routes/public.py`), so `streaming` means
+        the visitor is in the chat: another subscriber would change what the owner reads as `visitor_here`."""
         wakeup = wakeup or Wakeup()
         self._streams.setdefault(session_id, set()).add(wakeup)
         try:
