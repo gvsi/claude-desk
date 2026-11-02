@@ -40,6 +40,7 @@ import { ARROW_CHARACTERS } from '../ds/test/copy.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { retryAfterMs } from '../app/poll.ts';
 import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
+import { changeSomethingPath, useChangeSomething } from './shared.ts';
 import { ProposalCard } from './ProposalCard.tsx';
 import { assertNoJargon, expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 
@@ -542,6 +543,39 @@ describe('setup', () => {
     expect(sent).toHaveLength(3);
     expect(new Set(sent.map((body) => JSON.stringify(body))).size).toBe(1);
     expect(mockStore.world.desks.length).toBe(desks + 1);
+  });
+
+  it('the_lockup_leads_to_the_start_page_before_there_is_a_desk', async () => {
+    // Before there is a Desk, the bar's lockup leads where "Save and exit" does: the app's start
+    // page. It is a link named by the product's name and what it does, keeps the lockup's look with
+    // a pointer, and takes the warm focus ring from the keyboard, 4 px off so it clears the badge.
+    const firstVisit = holdFirstVisit();
+    const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
+    const bar = screen.getByRole('banner');
+    const lockup = bar.getByRole('link', { name: 'Claude Desk, save and exit', exact: true });
+    await expect.element(lockup).toHaveAttribute('href', '/');
+    expect(lockup.element().getAttribute('href')).toBe(bar.getByRole('link', { name: 'Save and exit' }).element().getAttribute('href'));
+    const look = getComputedStyle(lockup.element());
+    expect(look.textDecorationLine).toBe('none');
+    expect(look.color).toBe(getComputedStyle(bar.element()).color);
+    expect(look.cursor).toBe('pointer');
+    expect(look.outlineStyle, 'no ring before the keyboard').toBe('none');
+    await userEvent.keyboard('{Tab}');
+    (lockup.element() as HTMLElement).focus();
+    expect(lockup.element().matches(':focus-visible')).toBe(true);
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--ring-focus)';
+    document.body.append(probe);
+    try {
+      expect(getComputedStyle(lockup.element()).outlineColor).toBe(getComputedStyle(probe).color);
+      expect(getComputedStyle(lockup.element()).outlineOffset).toBe('4px');
+      expect(getComputedStyle(lockup.element()).outlineWidth).toBe('2px');
+    } finally {
+      probe.remove();
+    }
+    await lockup.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    firstVisit.draw();
   });
 
   it('start_left_while_under_way_stays_left', async () => {
@@ -1217,6 +1251,22 @@ describe('setup', () => {
     await expect.element(box).toHaveFocus();
   });
 
+  it.each([1440, 390])('at %i px, the setup chat reads at 16/24, Claude and the owner alike, and the dock keeps its own type', async (width) => {
+    const { interview_id: id } = await startInterview();
+    await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: SETUP_QUESTIONS[0]?.key, text: 'Leaks, drains and water heaters.' } });
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
+    const log = screen.getByRole('log', { name: 'Setup questions' });
+    await expect.element(log.getByText('Leaks, drains and water heaters.', { exact: true })).toBeVisible();
+    const bubble = log.element().querySelector('.cd-visitor-message__bubble');
+    const prose = log.element().querySelector('.cd-type-reply');
+    if (!bubble || !prose) throw new Error('the chat has the owner\'s words and Claude\'s');
+    for (const el of [bubble, prose]) expect([getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]).toEqual(['16px', '24px']);
+    for (const el of document.querySelectorAll('.cd-setup-q3__question, .cd-setup-q3__question .cd-type-reply')) {
+      expect([getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]).toEqual(['17px', '25px']);
+    }
+    expectNoHorizontalScroll();
+  });
+
   it('answer_failure_keeps_the_answer', async () => {
     const { interview_id: id } = await startInterview();
     const { screen } = await renderRoute(`/app/setup/${id}`);
@@ -1799,7 +1849,32 @@ describe('setup', () => {
     await expect.element(connectorRow(screen, 'Verification').getByText('Always on', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Connect Stripe' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
+
+    // One screen for the app. Its tools exist only once it is connected, so before that its card
+    // holds one row that says so, and nothing is connected until the owner connects it here.
+    await expect.element(screen.getByText('Connect it first, so Claude Desk can read what Stripe lets Claude do. Nothing runs until you turn it on.', { exact: true })).toBeVisible();
+    const waiting = screen.getByRole('region', { name: 'Tools' });
+    await expect.element(waiting.getByText('Stripe’s tools', { exact: true })).toBeVisible();
+    await expect.element(waiting.getByText('They show here once Stripe is connected, each with the rule it starts at.', { exact: true })).toBeVisible();
+    await expect.element(waiting.getByText('Not connected', { exact: true })).toBeVisible();
+    expect(waiting.element().querySelector('.cd-status-label .cd-status-dot--held')).not.toBeNull();
+    expect(waiting.getByRole('listitem').elements()).toHaveLength(1);
+    // The row sits straight in the card, as the board draws it: no padding of its own over the
+    // card's 16 px, so the card is the row, its padding and its border.
+    const placeholder = waiting.getByRole('listitem').element();
+    expect([getComputedStyle(placeholder).paddingTop, getComputedStyle(placeholder).paddingBottom]).toEqual(['0px', '0px']);
+    const cardBox = waiting.element().getBoundingClientRect().height;
+    expect(Math.abs(cardBox - (placeholder.getBoundingClientRect().height + 2 * 16 + 2))).toBeLessThanOrEqual(1);
+    await expect.element(screen.getByText("You review its tools here once it's connected.", { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Turn it on' }).elements()).toHaveLength(0);
+    expect(requests('setupConnect', mark)).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(screen.getByText("Connected to Stripe's test account. Nothing runs until you turn it on.", { exact: true })).toBeVisible();
     expect(requests('setupConnect', mark).map((r) => r.body)).toEqual([{ server: 'mock_payments' }]);
+    expect(screen.getByText('Not connected', { exact: true }).elements()).toHaveLength(0);
     const tools = ['payments.list_charges', 'payments.create_refund'];
     expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
     const review = screen.getByRole('region', { name: 'Tools' });
@@ -1837,6 +1912,16 @@ describe('setup', () => {
     await expect.element(connectorRow(screen, 'Stripe').getByText('On', { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: /^(Connect|Review) Stripe$/ }).elements()).toHaveLength(0);
     expect(requests('confirmTool', mark)).toHaveLength(1);
+
+    // The same calls in the same order as before the screens were merged: connect, the tools read
+    // again, one confirm at the pinned hashes, the rules read again, then the owner's confirm.
+    const order = ['setupConnect', 'setupTools', 'confirmTool', 'rules', 'confirmRules'];
+    const keys = mockStore.requests.slice(mark).map((r) => r.key);
+    let at = -1;
+    for (const key of order) {
+      at = keys.indexOf(key as RouteKey, at + 1);
+      expect(at, `${key} after the one before`).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it('built_in_connector_turns_on_only_after_its_change_is_confirmed', async () => {
@@ -1876,6 +1961,30 @@ describe('setup', () => {
     expect(requests('confirmRules', mark)).toHaveLength(1);
     expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
     await expect.element(connectorRow(screen, 'Payments').getByText('On', { exact: true })).toBeVisible();
+  });
+
+  it('change_something_opens_the_chat_again_and_its_continue_goes_back_to_the_step', async () => {
+    // "Change something"'s handler, as Real situations will place it: the interview's chat again,
+    // over the rules the API has it at. The chat's "Continue" goes back to the step; the API's step
+    // stays where it was, and nothing is sent to the chat.
+    const { state } = await interviewAtRules();
+    function ChangeSomething() {
+      const change = useChangeSomething(state.interview_id);
+      return <button type="button" onClick={change}>Change something</button>;
+    }
+    const { screen, router } = await renderRoute('/probe', { routes: [{ path: '/probe', element: <ChangeSomething /> }, ...routes] });
+    const mark = mockStore.requests.length;
+    await screen.getByRole('button', { name: 'Change something' }).click();
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(changeSomethingPath(state.interview_id));
+    await expect.element(screen.getByRole('log', { name: 'Setup questions' })).toBeVisible();
+    expect(screen.getByRole('list', { name: 'Set up your Desk' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
+    const read = await mockStore.dispatch('setup', { params: { id: state.interview_id } });
+    expect('network' in read ? null : (read.body as SetupState).step).toBe('rules');
+
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    expect(requests('setupAnswer', mark)).toHaveLength(0);
   });
 
   it('tools_start_at_the_outcome_rules_shows', async () => {
@@ -1931,9 +2040,33 @@ describe('setup', () => {
     expect(reviewOutcomes(screen)).toEqual(asRules(['Share a document']));
   });
 
+  it('a_failed_connect_then_a_retry_that_works_leaves_no_failure_notice', async () => {
+    const state = await interviewAtTools();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(screen.getByText('Not connected', { exact: true })).toBeVisible();
+    const mark = mockStore.requests.length;
+
+    // The connect fails: the screen says so, still not connected, and "Connect Stripe" works again.
+    mockStore.inject({ route: 'setupConnect', status: 503 });
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    const review = () => screen.container.querySelector('.cd-connector-review') as HTMLElement;
+    await expect.poll(() => review().querySelector('.cd-notice')).not.toBeNull();
+    await expect.element(screen.getByText('Not connected', { exact: true })).toBeVisible();
+
+    // The retry connects it: its tools show for review, with no notice left from the failure.
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(screen.getByText("Connected to Stripe's test account. Nothing runs until you turn it on.", { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Turn it on' })).toBeVisible();
+    expect(review().querySelector('.cd-notice')).toBeNull();
+    expect(requests('setupConnect', mark)).toHaveLength(2);
+  });
+
   it('tool_confirm_conflicts_fail_closed', async () => {
     const state = await interviewAtTools();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
+    await expect.element(screen.getByText('Not connected', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Connect Stripe' }).click();
     await expect.element(screen.getByRole('button', { name: 'Turn it on' })).toBeVisible();
     const mark = mockStore.requests.length;
@@ -2039,7 +2172,7 @@ describe('setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Check real situations' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Real situations' })).toBeVisible();
-    await expect.element(screen.getByText('How your draft rules handle things that really happen at Turner Plumbing. Nothing here is real.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('How your rules will handle things that really happen at Turner Plumbing. Nothing here is real.', { exact: true })).toBeVisible();
 
     const rows = screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem');
     await expect.element(rows.first()).toBeVisible();
@@ -2543,6 +2676,32 @@ describe('setup', () => {
     await expect.element(screen.getByRole('switch', { name: /Claude acts for you/ })).toHaveAttribute('aria-checked', 'true');
     // And the Desk is live, so Today no longer leads back into setup.
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+  });
+
+  it.each([1440, 390])('at %i px, live lists more channels, coming later, in a card after Share it', async (width) => {
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turner Plumbing is live' })).toBeVisible();
+    const share = screen.getByRole('region', { name: 'Share it' }).element();
+    const card = screen.getByRole('region', { name: 'More channels' });
+    await expect.element(card.getByRole('heading', { level: 2, name: 'More channels' })).toBeVisible();
+    expect(card.element().classList).toContain('cd-card');
+    expect(share.nextElementSibling).toBe(card.element());
+    const list = card.getByRole('list');
+    expect(getComputedStyle(list.element()).marginTop).toBe('10px');
+    const rows = list.getByRole('listitem').elements();
+    const channels = [
+      ['WhatsApp', 'Customers message your Desk from WhatsApp.'],
+      ['iMessage', 'The same chat in Messages on iPhone.'],
+      ['Phone calls', 'Your Desk answers your business line by voice.'],
+    ];
+    expect(rows.map((row) => [row.querySelector('.cd-setup-live__embed-title')?.textContent, row.querySelector('.cd-setup-live__embed-line')?.textContent, row.querySelector('.cd-pill')?.textContent])).toEqual(
+      channels.map(([name, line]) => [name, line, 'Coming later']),
+    );
+    const pads = rows.map((row) => [getComputedStyle(row).paddingTop, getComputedStyle(row).paddingBottom, getComputedStyle(row).borderTopWidth]);
+    expect(pads).toEqual([['0px', '12px', '0px'], ['12px', '12px', '1px'], ['12px', '0px', '1px']]);
+    expectNoHorizontalScroll();
   });
 
   it('live_step_shows_the_signed_share_card', async () => {

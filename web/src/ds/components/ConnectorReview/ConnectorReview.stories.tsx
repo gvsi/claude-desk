@@ -274,3 +274,83 @@ export const BusinessJobPhone: Story = {
     await expect(context.canvas.getByText('Ask me first', { exact: true }).getBoundingClientRect().top).toBeGreaterThanOrEqual(text.getBoundingClientRect().bottom);
   },
 };
+
+const intakeQuestions: [string, string, string] = ['Which tax year is this for?', 'Is it for a business?', 'Who did your books last year?'];
+const intakeDef = { title: 'Before an intro call', description: 'Asks questions.', config: { block: 'intake' as const, questions: intakeQuestions } };
+
+/** An intake job: its questions in the Asks row, one numbered line each, in asking order. */
+export const IntakeJob: Story = {
+  ...BusinessJob,
+  args: {
+    connector: undefined,
+    job: { title: intakeDef.title, glyph: businessGlyph(intakeDef.config)!, rows: businessRows(intakeDef, 'ask') },
+    tools: [reviewTool({ ...introCall, tool: 'desk.intake_1', business: intakeDef }, [])], onChangeOutcome: undefined,
+  },
+  parameters: { canvas: 'none', canvasNote: 'The intake questions board (canvas v279), not yet in the reference registry.' },
+  play: async ({ canvas }) => {
+    const setup = canvas.getByRole('region', { name: 'How it’s set up' });
+    const list = setup.querySelector('dd > ol');
+    await expect(list).not.toBeNull();
+    await expect([...list!.querySelectorAll('li')].map((item) => item.textContent)).toEqual(intakeQuestions);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const IntakeJobPhone: Story = {
+  ...IntakeJob,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+};
+
+const stripeView = rivera.connectors.views.stripe;
+const stripeTools = [
+  { key: 'payments.list_charges', name: 'See charges', description: "Your customers' charges. Reads only.", mode: 'ask' as const, coveredBy: [] },
+  { key: 'payments.create_refund', name: 'Refund', description: 'Refunds a charge. Test mode, no money moves.', mode: 'ask' as const, coveredBy: [] },
+];
+
+/**
+ * Setup's Stripe before it is connected: its tools can't be known yet, so one row says so, with
+ * "Not connected" where an outcome sits, and the main button connects it on this same screen.
+ */
+export const AppNotConnected: Story = {
+  args: { connector: stripeView, connection: 'not_connected', onConnect: fn(), tools: [], onChangeOutcome: undefined },
+  parameters: { canvas: 'none', canvasNote: 'The Tools step board for an app not connected yet (canvas v279), not yet in the reference registry.' },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await expect(canvas.getByText('Connect it first, so Claude Desk can read what Stripe lets Claude do. Nothing runs until you turn it on.')).toBeVisible();
+    const tools = canvas.getByRole('region', { name: 'Tools' });
+    await expect(within(tools).getAllByRole('listitem')).toHaveLength(1);
+    await expect(within(tools).getByText('Stripe’s tools', { exact: true })).toBeVisible();
+    await expect(within(tools).getByText('They show here once Stripe is connected, each with the rule it starts at.')).toBeVisible();
+    await expect(within(tools).getByText('Not connected', { exact: true })).toBeVisible();
+    await expect(canvasElement.querySelector('.cd-connector-review__status .cd-status-dot--held')).not.toBeNull();
+    await expect(canvas.getByText("You review its tools here once it's connected.", { exact: true })).toBeVisible();
+    await expect(canvas.queryByRole('button', { name: 'Turn it on' })).toBeNull();
+    await userEvent.click(canvas.getByRole('button', { name: 'Connect Stripe' }));
+    await userEvent.click(canvas.getByRole('button', { name: 'Connect Stripe' }));
+    await expect(args.onConnect).toHaveBeenCalledTimes(1);
+    await expect(args.onTurnOn).not.toHaveBeenCalled();
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const AppNotConnectedPhone: Story = {
+  ...AppNotConnected,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+};
+
+/** Setup's Stripe once connected here: its tools for review, as ever, under the connected lead. */
+export const AppConnected: Story = {
+  args: { connector: stripeView, connection: 'connected', tools: stripeTools, onChangeOutcome: undefined },
+  parameters: { canvas: 'none', canvasNote: 'The Tools step board for an app once connected (canvas v279), not yet in the reference registry.' },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByText("Connected to Stripe's test account. Nothing runs until you turn it on.")).toBeVisible();
+    await expect(within(canvas.getByRole('region', { name: 'Tools' })).getAllByRole('listitem')).toHaveLength(2);
+    await expect(canvas.queryByText('Not connected')).toBeNull();
+    await expect(canvas.getByRole('button', { name: 'Turn it on' })).toBeVisible();
+    await expect(canvas.getByText(HINT)).toBeVisible();
+  },
+};
+
+export const AppConnectedPhone: Story = {
+  ...AppConnected,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+};

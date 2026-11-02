@@ -1,3 +1,11 @@
+/* The setup chat reads at 16/24: Claude's prose and the owner's own words alike. Only on setup's chat
+   (the shell's chat page), so the public chat, the owner's preview of it and Conversations keep the
+   design system's 15 px. The dock's question, Markdown and all, keeps its own type, below. */
+.cd-setup--chat :is(.cd-type-reply, .cd-visitor-message__bubble):not(.cd-setup-q3__question, .cd-setup-q3__question *) {
+  font-size: 16px;
+  line-height: 24px;
+}
+
 .cd-setup-kbd {
   display: inline-flex;
   align-items: center;

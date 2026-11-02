@@ -28,6 +28,7 @@ import {
   causeLabel,
   entryCopy,
   entryFor,
+  rowLabel,
   turnedDownHeadline,
 } from './copy.ts';
 
@@ -258,6 +259,20 @@ describe('Safety copy', () => {
     expect(causeLabel({ kind: 'reply_blocked', cause: null })).toBeNull();
     expect(causeLabel({ kind: 'reply_blocked', cause: 'owner_rule' })).toBeNull();
     expect(causeLabel({ kind: 'held', cause: 'owner_rule' })).toBeNull();
+  });
+
+  it('row_label_says_why_a_request_was_turned_down_or_that_a_reply_was_stopped', () => {
+    const triage = { category: 'wording', summary: 'The visitor asked for a discount.' } as Attempt['triage'];
+    // A refused request: its cause, exactly as `causeLabel` words it, or none.
+    expect(rowLabel({ kind: 'refused', cause: 'owner_rule', triage })).toBe('Your rule says no');
+    expect(rowLabel({ kind: 'refused', cause: null, triage: null })).toBeNull();
+    // A stopped reply Claude has summarised says it's one; an unsummarised one reads the API's reason
+    // as its title, which already says so.
+    expect(rowLabel({ kind: 'reply_blocked', cause: null, triage })).toBe('A reply was stopped before it was shown');
+    expect(rowLabel({ kind: 'reply_blocked', cause: null, triage: null })).toBeNull();
+    // A held request, or a kind this build doesn't know yet: no label.
+    expect(rowLabel({ kind: 'held', cause: 'owner_rule', triage })).toBeNull();
+    expect(rowLabel({ kind: 'a_newer_kind' as Attempt['kind'], cause: null, triage })).toBeNull();
   });
 
   it('headline_says_how_many_requests_were_turned_down', () => {
