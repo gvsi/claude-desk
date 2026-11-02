@@ -873,6 +873,15 @@ describe('Conversations', () => {
     }
   });
 
+  it('the_head_names_the_action_a_reply_came_after', async () => {
+    // Dana asks a price after her visit is booked: the quote that ran is what happened last, in the
+    // kernel's own line for it, where the head said the reply was checked.
+    priceTurn(named(DANA_LIVE, DANA), 'How much is drain clearing?');
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(screen.getByText("Latest: Quoted from Mike Turner's price list", { exact: true })).toBeVisible();
+    await expect.element(log(screen).getByRole('article', { name: 'Quote' }).last()).toBeVisible();
+  });
+
   it('a_reply_in_markdown_shows_bold_and_a_list', async () => {
     // A reply of Claude's in Markdown, in Dana's chat: the owner reads it as she did.
     const items = ['Is the water heater leaking from the top or the bottom?', 'Is the pilot light still on?'];
