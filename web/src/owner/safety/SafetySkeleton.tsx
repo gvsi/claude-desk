@@ -146,11 +146,26 @@ function Detail() {
  * in as many lines as its words take at the column's width in this browser's fonts.
  */
 export function SafetySkeleton({ withHeader }: { withHeader: boolean }) {
-  const page = useRef<HTMLDivElement>(null);
-  const subtitleLines = useTextLines(page, { parts: [SAFETY_SUBTITLE], className: 'cd-page-header__subtitle cd-type-body' }, 1);
   return (
-    <div ref={page} className="cd-safety">
-      {withHeader ? <PageHeaderSkeleton subtitleLines={subtitleLines} actions /> : null}
+    <div className="cd-safety">
+      {withHeader ? (
+        <PageHeaderSkeleton
+          subtitle={SAFETY_SUBTITLE}
+          actions={
+            <Skeleton
+              shape="block"
+              height="var(--size-control)"
+              anchor="page-actions"
+              measure={{
+                label: '1 held for you',
+                className: 'cd-button cd-button--secondary cd-button--inline cd-type-control',
+                contentClassName: 'cd-status-label',
+                suffix: { className: 'cd-status-dot', width: 'var(--size-dot)' },
+              }}
+            />
+          }
+        />
+      ) : null}
       <Lines words={turnedDownHeadline(0)} className="cd-safety__headline cd-type-summary" text="summary" anchor="safety-headline" />
       <Bar />
       <div className="cd-safety__split">
