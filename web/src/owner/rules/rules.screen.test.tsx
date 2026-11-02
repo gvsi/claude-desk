@@ -734,8 +734,9 @@ describe('rules page', () => {
 
     // Its rule confirmed, the suggestion that opened the review is done with, so focus goes to the
     // rule the change landed on, under Refund: to its first control, its Details.
+    // Rules shows its reading state until its read has the new version, so the tool may not be drawn yet.
     const dana = () =>
-      [...screen.getByRole('region', { name: 'Refund' }).element().querySelectorAll<HTMLElement>('.cd-house-rules__rule')].find(
+      [...(screen.getByRole('region', { name: 'Refund' }).elements()[0]?.querySelectorAll<HTMLElement>('.cd-house-rules__rule') ?? [])].find(
         (row) => row.querySelector('.cd-house-rules__rule-line')?.textContent?.startsWith('Dana Whitfield'),
       );
     await expect.poll(() => dana()?.querySelector('.cd-pill')?.textContent).toBe('Updated');
