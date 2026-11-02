@@ -187,10 +187,11 @@ async def recent_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str], 
 
 async def texts_before_held(ctx: OwnerCtx, desk_id: str, decisions: Iterable[Decision], count: int = 2,
                             kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, list[str | None]]:
-    """What each held request's visitor (or visiting agent) wrote up to the turn that made it, by decision ID: the
-    newest `count` rows of `kinds` before the request's held status in its chat (its session's first `status` row
-    naming the decision, written when the turn's call was held), oldest first, read for every decision in one query.
-    A request whose chat has its status but nothing of `kinds` before it maps to `[None]`; one whose status isn't
+    """What each held request's visitor (or visiting agent) wrote in the turn that made it, by decision ID: the
+    newest `count` rows of `kinds` after the newest `delivered` row before the request's held status in its chat
+    (its session's first `status` row naming the decision, written when the turn's call was held), oldest first,
+    read for every decision in one query. Without a prior delivery, the turn starts at the chat's beginning.
+    A request whose chat has its status but nothing of `kinds` in that turn maps to `[None]`; one whose status isn't
     in the chat (held before the API showed it) is left out. If the API restarts after the kernel holds a request
     but before the chat shows it, the next request recovers the turn (`loop._drain` through `tools.recover_call`
     and `_settle`) and writes the held status after that request's own message, so that message can be quoted too."""
@@ -202,8 +203,15 @@ async def texts_before_held(ctx: OwnerCtx, desk_id: str, decisions: Iterable[Dec
                     tuple_(MESSAGES.c.ref_id, MESSAGES.c.session_id).in_(wanted))
              .group_by(MESSAGES.c.ref_id, MESSAGES.c.session_id)
              .subquery())
+    delivered = MESSAGES.alias("last_delivery")
+    answered = (select(func.coalesce(func.max(delivered.c.n), 0))
+                .where(delivered.c.copy_id == ctx.copy_id, delivered.c.desk_id == desk_id,
+                       delivered.c.session_id == shown.c.session_id, delivered.c.kind == "delivered",
+                       delivered.c.n < shown.c.at)
+                .correlate(shown).scalar_subquery())
     said = and_(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
-                MESSAGES.c.session_id == shown.c.session_id, MESSAGES.c.n < shown.c.at, MESSAGES.c.kind.in_(kinds))
+                MESSAGES.c.session_id == shown.c.session_id, MESSAGES.c.n > answered,
+                MESSAGES.c.n < shown.c.at, MESSAGES.c.kind.in_(kinds))
     ranked = (select(shown.c.ref_id, MESSAGES.c.text, MESSAGES.c.n,
                      func.row_number().over(partition_by=shown.c.ref_id,
                                             order_by=MESSAGES.c.n.desc()).label("newest"))
@@ -301,7 +309,7 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     """The Desk's held requests, each read from the kernel with the owner's credential (which applies expiry, so a
     request that expired meanwhile drops out), oldest first, then its open handoffs, call-back requests and the handoff
     card's, each with its kind. A card's handoff has no action: its kernel row's `action_id`, which no view shows,
-    names the handoff itself. Each quotes its visitor's previous and last lines: a held request's up to the turn that
+    names the handoff itself. Each quotes at most two visitor lines: a held request's only from the turn that
     made it, a handoff's the chat's latest."""
     who = await people(ctx, desk_id)
     held_rows = [row for row in await ctx.ro.rows("decisions", desk_id=desk_id, state="held",

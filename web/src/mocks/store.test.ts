@@ -450,8 +450,8 @@ describe('the scripted Desk', () => {
   });
 
   it('a_held_request_quotes_the_words_that_made_it', async () => {
-    // The visitor keeps chatting after asking for a discount: the held request quotes their lines up
-    // to it, as the API's Needs you does, while the same chat's callback quotes its latest.
+    // The held request quotes only its own turn after Claude answered the price question,
+    // as the API's Needs you does, while the same chat's callback quotes its latest.
     const { session } = await openChat();
     await send('How much to clear a drain?');
     await drain();
@@ -465,7 +465,7 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     const chat = needsYou.filter((item) => item.session.session_id === session.session_id);
     expect(chat.map((item) => [item.decision ? 'held' : 'handoff', item.from_the_visitor])).toEqual([
-      ['held', 'How much to clear a drain? · Can I get 15% off?'],
+      ['held', 'Can I get 15% off?'],
       ['handoff', 'Can you come Tuesday? · Please call me back'],
     ]);
   });
@@ -1304,12 +1304,16 @@ describe('the scripted Desk', () => {
   });
 
   it('held_request_quotes_two_lines_each_cut_to_its_glimpse', async () => {
-    // A held request quotes the same two lines as a handoff (the API's `visitor_lines`): each with
+    // The last two visitor lines in the request's own turn (the API's `visitor_lines`): each with
     // whitespace collapsed, and past 200 characters cut to 199, trimmed, and "…".
     const { session } = await openChat();
     const long = `${'x'.repeat(198)}   ${'y'.repeat(10)}`;
-    await send(long);
+    await send('How much to clear a drain?');
     await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the visitor has a session');
+    mockStore.world.visitorText(record, 'One more question about the drain.');
+    mockStore.world.visitorText(record, long);
     await send('Can I get 50%   off if I pay cash?');
     await drain();
     const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(

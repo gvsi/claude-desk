@@ -113,7 +113,7 @@ const SAID: ReadonlySet<TranscriptKind> = new Set(['visitor_text', 'agent_text']
  * What Needs you quotes from a chat, as the API's `recent_texts`, `texts_before_held` and
  * `visitor_lines` read it: the visitor's (or visiting agent's) previous and last messages, oldest
  * first, each as its glimpse (`visitorLine`), joined with " · ". For a held request (`decisionId`),
- * those before its held status in the chat, the words that made it; for a handoff, and a request
+ * only those since the last Desk delivery before its held status, the words that made it; for a handoff, and a request
  * whose status isn't in the chat, the chat's latest. Just the last when there's one, and null when
  * nothing is left.
  */
@@ -121,7 +121,9 @@ function fromTheVisitor(session: SessionRecord | undefined, decisionId?: string)
   const items = session?.items ?? [];
   const held = decisionId === undefined ? -1 : items.findIndex((item) =>
     item.kind === 'status' && item.event !== null && 'decision_id' in item.event && item.event.decision_id === decisionId);
-  const said = (held === -1 ? items : items.slice(0, held)).filter((item) => SAID.has(item.kind)).slice(-2);
+  const before = held === -1 ? items : items.slice(0, held);
+  const answered = held === -1 ? -1 : before.findLastIndex((item) => item.kind === 'delivered');
+  const said = before.slice(answered + 1).filter((item) => SAID.has(item.kind)).slice(-2);
   const lines = said.map((item) => visitorLine(item.text)).filter((line) => line !== null);
   return lines.length > 0 ? lines.join(' · ') : null;
 }

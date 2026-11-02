@@ -242,8 +242,9 @@ export interface NeedsYouSession {
 interface NeedsYouBase {
   session: NeedsYouSession;
   /**
-   * What the visitor (or visiting agent) wrote, labelled: their previous and last messages, a held
-   * request's up to the turn that made it, oldest first, each with whitespace collapsed and, past 200
+   * What the visitor (or visiting agent) wrote, labelled: at most two messages, a held request's only
+   * since the last Desk delivery before its held status, a handoff's the chat's latest; oldest first,
+   * each with whitespace collapsed and, past 200
    * characters, cut to 199 and "…", joined with " · "; just the last when there's one. Untrusted.
    */
   from_the_visitor: string | null;

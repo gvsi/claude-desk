@@ -728,8 +728,8 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
 
 async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser, fake, kernel_http, engine, db,
                                                                    ro_schema):
-    """A held request quotes what the visitor wrote up to the turn that made it, its previous and last lines before
-    its held status in the chat, not what they wrote after, so the owner answers it with their words for it. Each
+    """A held request quotes at most two visitor lines since Claude last answered before its held status,
+    not earlier exchanges or what they wrote after, so the owner answers it with their words for it. Each
     hold in a chat quotes its own, and one made before the visitor wrote anything quotes nothing. A handoff in the
     same chat quotes the chat's latest lines, and a hold whose status isn't in the chat (one held before the API
     showed it) falls back to them too."""
@@ -743,6 +743,8 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
 
     await write(engine, db, asker.ids, "visitor_text", text="Hi there")
     await write(engine, db, asker.ids, "visitor_text", text="How much to clear a clogged drain?")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="Here is the drain clearing quote.",
+                blocks=[{"kind": "prose", "text": "Here is the drain clearing quote."}])
     await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off if I pay cash?")
     discount = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
     elsewhere = await guest(kernel_http, fake, owner)
@@ -750,10 +752,12 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
     await write(engine, db, elsewhere.ids, "status", ref_id=discount.decision_id)
     await write(engine, db, asker.ids, "triage", text=json.dumps({"summary": "Asked for a discount.", "category": "prices"}))
     await write(engine, db, asker.ids, "whisper", text="Offer a callback instead.")
+    await show(asker, discount)
     await write(engine, db, asker.ids, "delivered", author="claude", text="I can ask about that.",
                 blocks=[{"kind": "prose", "text": "I can ask about that."}])
-    await show(asker, discount)
     await write(engine, db, asker.ids, "visitor_text", text="How much to clear a drain?")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="Here is the drain clearing quote again.",
+                blocks=[{"kind": "prose", "text": "Here is the drain clearing quote again."}])
     await write(engine, db, asker.ids, "visitor_text", text="What about 20% off then?")
     bigger = await asker.decide("native.quote", discounted_quote(fake, owner, 2000))
     await show(asker, bigger)
@@ -767,6 +771,9 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
     await write(engine, db, unshown.ids, "visitor_text", text="Do you work in Alameda?")
     await write(engine, db, unshown.ids, "visitor_text", text="Thanks, and what about Berkeley?")
     quiet = await guest(kernel_http, fake, owner)
+    await write(engine, db, quiet.ids, "visitor_text", text="An earlier exchange")
+    await write(engine, db, quiet.ids, "delivered", author="claude", text="That is answered.",
+                blocks=[{"kind": "prose", "text": "That is answered."}])
     unasked = await quiet.decide("native.quote", discounted_quote(fake, owner))
     await show(quiet, unasked)
     await write(engine, db, quiet.ids, "visitor_text", text="Thanks")
@@ -774,6 +781,9 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
     fake.flush()
     agent = Guest(Ids(copy_id=owner.copy_id, desk_id=owner.desk_id, session_id=agent_session.session_id),
                   kernel_http.session(agent_token), fake)
+    await write(engine, db, agent.ids, "agent_text", text="An earlier agent exchange")
+    await write(engine, db, agent.ids, "delivered", author="claude", text="That is answered too.",
+                blocks=[{"kind": "prose", "text": "That is answered too."}])
     await write(engine, db, agent.ids, "agent_text", text="I'm asking for Alex Kim.")
     await write(engine, db, agent.ids, "agent_text", text="Can Alex get 10% off?")
     agent_hold = await agent.decide("native.quote", discounted_quote(fake, owner))
@@ -787,12 +797,34 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
     handed = {item["handoff"]["handoff_id"]: item["from_the_visitor"] for item in listed.json() if item["handoff"]}
     assert held == {
         seeded_hold(fake, owner): None,
-        discount.decision_id: "How much to clear a clogged drain? · Can I get 15% off if I pay cash?",
-        bigger.decision_id: "How much to clear a drain? · What about 20% off then?",
+        discount.decision_id: "Can I get 15% off if I pay cash?",
+        bigger.decision_id: "What about 20% off then?",
         older.decision_id: "Do you work in Alameda? · Thanks, and what about Berkeley?",
         unasked.decision_id: None,
         agent_hold.decision_id: "I'm asking for Alex Kim. · Can Alex get 10% off?"}
     assert list(handed.values()) == ["Can you come Tuesday? · Please call me back"]
+
+
+async def test_needs_you_quotes_two_visitor_lines_in_the_requests_turn(app, browser, fake, kernel_http, engine, db,
+                                                                    ro_schema):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, "visitor_text", text="How much to clear a drain?")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="Here is the quote.",
+                blocks=[{"kind": "prose", "text": "Here is the quote."}])
+    await write(engine, db, asker.ids, "visitor_text", text="It is the downstairs drain.")
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off?")
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "It is the downstairs drain. · Can I get 15% off?"
 
 
 async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
