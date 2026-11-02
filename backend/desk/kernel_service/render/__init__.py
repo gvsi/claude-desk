@@ -28,11 +28,12 @@ once (`register_template`) with the fact kinds it renders, the fact ID (or ID pr
 fact statuses that count as current, and a renderer per language that returns the card's headline
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line; the soft checks read it after
-its kind's fixed label (`CHECK_LABELS`, `check_text`). A template that names no fact
-kinds (handoff, verify_prompt) renders without one. `Template.current` says
-whether a fact may still be shown (a status the template renders, not expired), and a fact with
-nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an empty
-card.
+its kind's fixed label (`CHECK_LABELS`, `check_text`), and a session's request receipts, each a
+decision's status line, after a label of their own (`RECEIPT_LABEL`, `receipt_check_text`). A
+template that names no fact kinds (handoff, verify_prompt) renders without one. `Template.current`
+says whether a fact may still be shown (a status the template renders, not expired), and a fact
+with nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an
+empty card.
 
 A card that links somewhere (a document or payment link) registers `href_for`, which the reply
 check awaits once the cited fact has passed its checks, and passes to `render_clause` as the card's
@@ -270,3 +271,16 @@ def check_text(card: RenderedBlock) -> str:
     """A card as the soft checks (Sonnet's and Jev's) read it: its kind's label, then its text
     ("Payment link card: Service call deposit, $20.00")."""
     return f"{CHECK_LABELS[card.template]} card: {card.text}"
+
+
+# The label of the session's request receipts the soft checks read beside a reply's cards, though the reply
+# doesn't show them again (`reply_check.request_receipts`): a decision's status line, its `visitor_plain`,
+# which the chat already shows as its own event, one label whether the request is held or resolved, since
+# the line itself says which. Not a template's, so kept apart from `CHECK_LABELS`; English, as those are.
+RECEIPT_LABEL = "Request receipt"
+
+
+def receipt_check_text(visitor_plain: str) -> str:
+    """A request receipt as the soft checks read it: its label, then the decision's status line
+    ("Request receipt card: Waiting for Maria Rivera to approve")."""
+    return f"{RECEIPT_LABEL} card: {visitor_plain}"

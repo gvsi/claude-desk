@@ -21,10 +21,10 @@ from desk.kernel_service.decisions import (SOFT_PROMISE_SCHEMA, SOFT_PROMISE_SYS
 
 from .fakes import FakeAnthropicClient, FakeDecisions, model_message
 from .helpers import connections_of, ledger_rows, until_waiting
-from .test_adapters import visitor_of
+from .test_adapters import quote_args, visitor_of
 from .test_decide import decided, open_visitor
 from .test_execute import executed
-from .test_handoff_card import CLEAN, HANDOFF_CARD, hand_over, handoffs_of
+from .test_handoff_card import CLEAN, HANDOFF_CARD, hand_over, handoffs_of, held_quote
 from .test_lead_tools import CALLBACK, callback, handoff_done
 from .test_reply_check import (assert_handed_off, assert_offered, checked, clause, own_booking, own_quote,
                                reply_entries, without_call_backs)
@@ -852,3 +852,156 @@ async def test_soft_check_makes_one_try_and_ledgers_it(app, client, reviewer, st
     [entry] = await reply_entries(app, copy)
     deciding = "ok" if status in ("pass", "flag") else status
     assert entry.event.summary["soft_promise"] == {**reviewer.SOFT_USAGE, "status": deciding}
+
+
+# ---- The session's request receipts back a later reply -----------------------------------------------
+
+# a held request's receipt as the check reads it: its label, then the decision's status line
+HELD_SEEN = "Request receipt card: Waiting for Mike Turner to approve"
+
+
+async def test_the_soft_check_reads_a_held_requests_receipt(app, client, reviewer):
+    """While the session has a held request awaiting the owner, the check is shown that request's
+    receipt (its decision's status line, which the chat already shows as its own event) after the
+    reply's own cards, though the reply doesn't show it again and cites no fact for it: "your
+    request is with Mike Turner" is backed, and nothing more than the line says."""
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    await held_quote(client, visitor)
+    verdict = await checked(client, visitor, CLEAN)
+    assert reviewer.soft_inputs[-1].cards == [HELD_SEEN]
+    assert verdict.ok and [(block.kind, block.text) for block in verdict.blocks] == [("prose", CLEAN)]
+
+    verdict = await checked(client, visitor, "Here is your quote.", [clause("quote", quote.fact_id)])
+    assert reviewer.soft_inputs[-1].cards == [f"Quote card: {QUOTE_CARD}", HELD_SEEN]   # the reply's cards first
+    assert [(block.kind, block.template) for block in verdict.blocks] == [("prose", None), ("card", "quote")]
+    entries = await reply_entries(app, copy)
+    assert [entry.event.summary["fact_ids"] for entry in entries] == [[], [quote.fact_id]]   # the receipt cites none
+
+
+async def test_the_soft_check_reads_the_update_of_a_request_a_booking_closed(app, client, reviewer, frozen_clock):
+    """A held discount quote the visitor's own booking closed (`decide.supersede_if_booked`, settled by
+    the next read of it) is no longer a held request: the check is shown its update's receipt ("Cancelled")
+    beside the booking's card, so "your earlier request was closed" is backed, until Claude's next reply
+    that passes has told the visitor."""
+    from .test_approvals import read_id
+
+    copy, visitor = await visitor_of(app, client)
+    held = await held_quote(client, visitor)
+    frozen_clock.advance(60)                                     # the booking is decided after the discount
+    booking = await own_booking(client, reviewer, visitor)
+    assert (await read_id(client, visitor.headers, held.decision_id)).state == "cancelled"
+    prose = "Since you went ahead with the booking, your earlier request was closed. Your booking is below."
+    verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
+    card = verdict.blocks[-1]
+    assert reviewer.soft_inputs[-1].cards == [f"Booking confirmed card: {card.text}", "Request receipt card: Cancelled"]
+    assert verdict.ok and [(block.kind, block.template) for block in verdict.blocks] == [
+        ("prose", None), ("card", "booking_confirmed")]
+
+    assert (await checked(client, visitor, CLEAN)).ok            # the reply that passed told the visitor
+    assert reviewer.soft_inputs[-1].cards == []
+
+
+@pytest.mark.parametrize("session", ["no hold", "hold past its day", "update told"])
+async def test_the_soft_check_reads_no_receipt_without_a_held_or_just_resolved_request(app, client, reviewer,
+                                                                                       frozen_clock, session):
+    """No receipt backs a reply in a session with no held request and none resolved since Claude's last
+    reply that passed: none asked for (an allowed quote is no request), a hold past its day that no read
+    has expired yet (the owner can no longer answer it), or an update a reply that passed has told. A
+    reply the check blocked tells the visitor nothing, so the update still backs the next one."""
+    from .test_approvals import answered
+    from .test_reply_check import keep_alive_until
+
+    copy, visitor = await visitor_of(app, client)
+    if session == "no hold":
+        await own_quote(client, visitor)
+    elif session == "hold past its day":
+        await held_quote(client, visitor)
+        await keep_alive_until(client, frozen_clock, visitor, 24)
+    else:
+        held = await held_quote(client, visitor)
+        await answered(client, copy.owner, held.decision_id, "deny_once")
+        update = "Request receipt card: Mike Turner decided not to go ahead"
+        reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=True, denies_being_ai=False)
+        assert not (await checked(client, visitor, CLEAN)).ok
+        assert reviewer.soft_inputs[-1].cards == [update]
+        reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
+        assert (await checked(client, visitor, CLEAN)).ok          # still backed after the blocked reply
+        assert reviewer.soft_inputs[-1].cards == [update]
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == []
+
+
+async def test_the_soft_check_never_reads_another_sessions_receipts(app, client, reviewer, frozen_clock):
+    """Another session's held request, or its request just resolved, backs nothing in this one: each
+    session is shown its own receipts alone, oldest request first."""
+    from .test_approvals import answered
+
+    copy, visitor = await visitor_of(app, client)
+    other = await open_visitor(client, copy)
+    await held_quote(client, other)
+    frozen_clock.advance(60)
+    answered_one = await decided(client, other, "native.quote", quote_args(("drain", 1), discount_bp=2000),
+                                 call_id="call-held-2")
+    await answered(client, copy.owner, answered_one.decision_id, "deny_once")
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == []
+
+    await held_quote(client, visitor)                             # its own, alone
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == [HELD_SEEN]
+    assert (await checked(client, other, CLEAN)).ok               # and the other session reads its own
+    assert reviewer.soft_inputs[-1].cards == [HELD_SEEN, "Request receipt card: Mike Turner decided not to go ahead"]
+
+
+async def test_a_receipt_read_that_fails_adds_nothing(app, client, reviewer, monkeypatch, caplog):
+    """The receipts only widen what backs a reply, so a read of them that fails adds none, the stricter
+    way, in a savepoint of its own: the check goes on with the reply's own cards, and its verdict is
+    recorded in the same transaction."""
+    from sqlalchemy import text
+
+    from desk.kernel_service import reply_check
+
+    copy, visitor = await visitor_of(app, client)
+    await held_quote(client, visitor)
+
+    async def failing(ctx, session_row):
+        await ctx.db.execute(text("SELECT 1 / 0"))               # a statement the database refuses
+
+    monkeypatch.setattr(reply_check, "_request_receipts", failing)
+    caplog.set_level(logging.ERROR, logger="desk.kernel_service.reply_check")
+    verdict = await checked(client, visitor, CLEAN)
+    assert reviewer.soft_inputs[-1].cards == []
+    assert verdict.ok and [(block.kind, block.text) for block in verdict.blocks] == [("prose", CLEAN)]
+    [entry] = await reply_entries(app, copy)
+    assert entry.seq == verdict.ledger_seq
+    assert "request_receipts_unread" in caplog.text
+
+
+@pytest.mark.parametrize(("prose", "language", "receipt"), [
+    ("Your request is with Mike Turner now. Please check the request status in this chat.", "en", HELD_SEEN),
+    ("Su solicitud está con Mike Turner. Consulte el estado de la solicitud en este chat.", "es",
+     "Request receipt card: Esperando la aprobación de Mike Turner"),
+])
+async def test_an_honest_acknowledgement_of_a_hold_passes_on_its_receipt(app, client, reviewer, prose, language,
+                                                                         receipt):
+    """The live failure this backing fixes: Claude telling the visitor their request waits for the owner
+    read as a step under way that no card showed, and was stopped. With a check that passes the words only
+    beside the held request's receipt, they're blocked in a session with no hold and shown once the
+    session's quote is held. The receipt reads as the visitor's chat shows it, in the session's language
+    when the request was held, after the label the checks read in English."""
+    async def backed_by_the_receipt(data):
+        reviewer.soft_inputs.append(data)
+        backed = receipt in data.cards
+        return (SoftPromiseVerdict(promises_beyond_cards=not backed, denies_being_ai=False),
+                CallUsage(status="ok", **reviewer.SOFT_USAGE))
+
+    reviewer.soft_promise = backed_by_the_receipt
+    copy, visitor = await visitor_of(app, client)
+    blocked = await checked(client, visitor, prose)
+    assert [(v.kind, v.rule_id) for v in blocked.violations] == [("soft_promise", "soft.promise")]
+
+    await held_quote(client, visitor)
+    verdict = await checked(client, visitor, prose)
+    assert (verdict.ok, verdict.language) == (True, language)
+    assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", prose)]

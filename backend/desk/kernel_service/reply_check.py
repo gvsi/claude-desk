@@ -68,8 +68,19 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reply here, and once its window has passed nothing promises a call. That handoff is read
    without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
    each check one pooled connection, across the try. A reply that passes with the handoff's
-   card is checked again in step 7. When configured, TypeSafe Jev evaluates the same prose, labelled
-   cards and fixed next steps concurrently, within three seconds of Sonnet's eight-second window.
+   card is checked again in step 7. The session's request receipts are cards of it too, after the
+   reply's own, though the reply doesn't show them again and cites no fact for them
+   (`request_receipts`, never another session's), each as "Request receipt card: " and its
+   decision's status line: each held request awaiting the owner ("Waiting for Mike Turner to
+   approve"), and each request that has left `held` since Claude's latest reply in the session that
+   passed, in ledger order ("Cancelled", when the visitor's booking closed a held discount). A
+   receipt backs what its line says and nothing more: never an outcome, a time or an approval it
+   doesn't state. They are read without a lock, in a savepoint, and a read that fails adds none. A
+   receipt only restates a status the chat already shows and updates, so unlike the handoff's card
+   it isn't checked again in step 7: a change while the model reads leaves the reply true to what
+   the chat showed moments before, an accepted race. When configured,
+   TypeSafe Jev evaluates the same prose, labelled cards and fixed next steps concurrently, within
+   three seconds of Sonnet's eight-second window.
    Its top score at or above 0.95 adds `soft.jev`; its failure leaves Sonnet's verdict standing.
    No key means no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not
    ledger floats.
@@ -136,6 +147,7 @@ from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessag
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
+from desk.db.models import LedgerEntry as LedgerRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
@@ -1274,7 +1286,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                                                                                              cards_only=True):
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
-        found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing)
+        found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing,
+                                                        receipts=await request_receipts(ctx, session_row))
         violations += found
     if violations:
         blocks = blocked_blocks(cards, violations, language, desk, call_back=await call_back_offered(
@@ -1289,10 +1302,12 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
-                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None, dict]:
+                        cards: Sequence[RenderedBlock], *,
+                        receipts: Sequence[str] = ()) -> tuple[list[Violation], CallUsage | None, dict]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card), each shown to Sonnet and Jev alike as its kind's
-    label and its text (`render.check_text`), with the session's fixed next steps from its
+    label and its text (`render.check_text`), then the session's request receipts as they read
+    them (`receipts`, from `request_receipts`), with the session's fixed next steps from its
     resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
     no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
     (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
@@ -1302,7 +1317,8 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
     tools = await session_tools(ctx, session_row)
-    data = SoftPromiseInput(language=language, prose=prose, cards=[render.check_text(card) for card in cards],
+    data = SoftPromiseInput(language=language, prose=prose,
+                            cards=[*(render.check_text(card) for card in cards), *receipts],
                             next_steps=next_steps(tools))
     if ctx.settings.typesafe_api_key:
         # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
@@ -1525,6 +1541,49 @@ async def awaits_the_owner(ctx: KernelCtx, session_row: SessionRow) -> bool:
     except SQLAlchemyError as error:
         log_error(logger, error, "held_decisions_unread")
         return False
+
+
+async def _last_passed_reply(ctx: KernelCtx, session_row: SessionRow, *, after: int) -> int | None:
+    """The ledger sequence of Claude's latest reply in the session that passed the check (its `reply`
+    entry: author `claude`, `ok`), when one came after `after`, else None. Read without a lock, from the
+    Desk's newest entry back to `after` at most."""
+    event = LedgerRow.event
+    return (await ctx.db.execute(ctx.repo.scoped(select(LedgerRow.seq).where(
+        LedgerRow.desk_id == session_row.desk_id, LedgerRow.seq > after, event["kind"].astext == "reply",
+        event["session_id"].astext == session_row.session_id, event["summary"]["author"].astext == "claude",
+        event["summary"]["ok"].astext == "true").order_by(LedgerRow.seq.desc()).limit(1)))).scalar_one_or_none()
+
+
+async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[str]:
+    """The status lines (`visitor_plain`) of the session's request receipts, oldest request first,
+    read without a lock: each held request awaiting the owner, as `_awaiting_holds` reads them (held
+    and not expired), and each request that has left `held` (answered, cancelled, timed out, run or
+    settled) after Claude's latest reply in the session that passed the check, by ledger order (its
+    decision's `ledger_seq`, `_last_passed_reply`). A hold past its expiry that no read has expired
+    yet is neither."""
+    rows = (await ctx.db.execute(ctx.repo.scoped(select(
+        DecisionRow.state, DecisionRow.visitor_plain, DecisionRow.expires_at, DecisionRow.ledger_seq).where(
+        DecisionRow.session_id == session_row.session_id, DecisionRow.outcome == "hold")
+        .order_by(DecisionRow.created_at, DecisionRow.decision_id)))).all()
+    left = [row.ledger_seq for row in rows if row.state != "held"]
+    passed = await _last_passed_reply(ctx, session_row, after=min(left)) if left else None
+    now = ctx.clock.now()
+    return [row.visitor_plain for row in rows
+            if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
+
+
+async def request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[str]:
+    """The session's request receipts as the soft checks read them (`render.receipt_check_text`), never
+    another session's: backing the reply doesn't show again and cites no fact for, as an open handoff's
+    card is. A read that fails adds none, in a savepoint of its own, so the transaction goes on: the
+    receipts only widen what backs a reply, so not knowing fails toward the stricter check."""
+    try:
+        async with ctx.db.begin_nested():
+            found = await _request_receipts(ctx, session_row)
+    except SQLAlchemyError as error:
+        log_error(logger, error, "request_receipts_unread")
+        return []
+    return [render.receipt_check_text(line) for line in found]
 
 
 async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:

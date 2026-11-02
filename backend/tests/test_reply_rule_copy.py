@@ -30,6 +30,36 @@ def test_every_card_template_has_a_label_for_the_soft_checks():
     assert all(label.strip() == label and label for label in render.CHECK_LABELS.values())
 
 
+def test_a_request_receipt_reaches_the_soft_checks_with_a_label_no_card_has():
+    """The session's request receipts aren't templates: held or resolved, they share one label of their own,
+    which no card's label shares, so the checks can tell a request's status line from a card's text."""
+    assert render.RECEIPT_LABEL == "Request receipt"
+    assert render.RECEIPT_LABEL not in render.CHECK_LABELS.values()
+    assert render.receipt_check_text("Waiting for Maria Rivera to approve") == (
+        "Request receipt card: Waiting for Maria Rivera to approve")
+    assert render.receipt_check_text("Cancelado") == "Request receipt card: Cancelado"
+
+
+async def test_both_soft_checkers_read_the_receipts_after_the_cards(monkeypatch):
+    """Sonnet and Jev are shown one list: the reply's cards, each with its kind, then the receipts as given."""
+    soft_promise = AsyncMock(return_value=(SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False),
+                                           None))
+    evaluate = AsyncMock(return_value=jev.Result(status="ok", scores=dict.fromkeys(jev.STATEMENTS, 0.0),
+                                                 blocked=False))
+    monkeypatch.setattr(reply_check.context, "resolved_tools", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reply_check, "principal_for", lambda session: None)
+    monkeypatch.setattr(jev, "evaluate", evaluate)
+    prose = "Your request is with Maria Rivera now."
+    receipts = ["Request receipt card: Waiting for Maria Rivera to approve", "Request receipt card: Cancelled"]
+
+    await reply_check.soft_promises(stub_ctx(soft_promise), SimpleNamespace(desk_id="desk"), "en", prose,
+                                    DEPOSIT_CARDS[:1], receipts=receipts)
+
+    seen = ["Quote card: $20.00\nService call deposit\nGood until Monday, November 2, 9:04 am", *receipts]
+    soft_promise.assert_awaited_once_with(SoftPromiseInput(language="en", prose=prose, cards=seen))
+    evaluate.assert_awaited_once_with(prose, seen, [], api_key="fake-key")
+
+
 # A live deposit reply's cards: the quote, its payment link and a policy, as the kernel renders them.
 DEPOSIT_CARDS = [
     RenderedBlock(kind="card", template="quote",
