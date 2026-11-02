@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <script>
       // The theme chosen in this browser (src/lib/theme.ts), set before anything paints, with the page's scheme
-      // following it so the blank page before the styles load is in its colors; dark, the default, sets nothing.
+      // narrowed to it so the blank page before the styles load is in its colors; the system's sets nothing.
       try {
         const theme = localStorage.getItem('claude-desk.theme');
-        if (theme === 'light' || theme === 'system') {
+        if (theme === 'light' || theme === 'dark') {
           document.documentElement.dataset.theme = theme;
           const scheme = document.querySelector('meta[name="color-scheme"]');
-          if (scheme) scheme.content = theme === 'light' ? 'light' : 'dark light';
+          if (scheme) scheme.content = theme;
         }
       } catch {}
     </script>

@@ -84,7 +84,9 @@ it('a_removed_shared_rule_says_so_after_its_connector', () => {
   if (row.before === null) throw new Error('The shared row has no Before');
   const removed: ChangeRowView = { ...row, change: 'removed', before: { ...row.before, appliesTo: 'Every tool that charges money' }, after: null, changed: [] };
   act(() => root.render(<TurnOnPayments rows={[removed]} />));
-  expect(rowMeta()).toBe("Payments · Shared rule · Every tool that charges money · Alex Kim's assistant · Up to $20");
+  expect(rowMeta()).toBe("Payments · Shared rule · Alex Kim's assistant · Up to $20");
+  // What it applied to, which isn't its title, is said once: on its side, as a changed row says it.
+  expect(container.querySelector('.cd-change-review__target')?.textContent).toBe('Every tool that charges money');
 });
 
 it('a_shared_rule_on_tools_of_several_connectors_leads_with_shared_rule', () => {
@@ -104,7 +106,10 @@ it('a_shared_rule_on_tools_of_several_connectors_leads_with_shared_rule', () => 
     changed: [],
   };
   act(() => root.render(<TurnOnPayments rows={[added]} />));
-  expect(rowMeta()).toBe("Shared rule · Every tool that touches private data · The record's owner, verified");
+  // Its title is what it applies to, so the meta line and its side don't say it again.
+  expect(rowMeta()).toBe("Shared rule · The record's owner, verified");
+  expect(container.querySelector('.cd-change-review__target')).toBeNull();
+  expect(container.textContent?.split('Every tool that touches private data')).toHaveLength(2);
 });
 
 /** A tool title that reads like the app's own sentence, as a business could name a job in setup. */
@@ -123,20 +128,33 @@ it('tool_titles_in_a_rows_title_and_its_targets_are_user_text', () => {
       after: { ...side, appliesTo: { titles: ['Quote', TITLE] } },
       changed: ['applies_to'],
     },
-    // An added rule, with its target on the meta line, and a tool turned on.
+    // An added rule and a tool turned on: each names its tools once, in its title.
     { key: 'added', change: 'added', title: { titles: [TITLE] }, before: null, after: { ...side, appliesTo: { titles: [TITLE] } }, changed: [] },
     { key: 'on', change: 'turned_on', title: { titles: [TITLE] }, before: null, after: side, changed: [] },
+    // A removed rule whose tools aren't its title's: its side still names them, once.
+    { key: 'other', change: 'removed', title: { titles: ['Quote', 'Refund'] }, before: { ...side, appliesTo: { titles: ['Refund'] } }, after: null, changed: [] },
     // A group's words are the app's own, so they stay plain.
     { key: 'group', change: 'added', title: 'Every tool that charges money', shared: true, before: null, after: { ...side, appliesTo: 'Every tool that charges money' }, changed: [] },
   ];
   act(() => root.render(<TurnOnPayments rows={rows} />));
-  expect(expectUserText(container, TITLE)).toBe(6);
+  expect(expectUserText(container, TITLE)).toBe(4);
   expectUserText(container, 'Quote');
   const titles = [...container.querySelectorAll('.cd-change-review__title')].map((el) => el.textContent);
-  expect(titles).toEqual([`Quote and ${TITLE}`, TITLE, TITLE, 'Every tool that charges money']);
+  expect(titles).toEqual([`Quote and ${TITLE}`, TITLE, TITLE, 'Quote and Refund', 'Every tool that charges money']);
   const targets = [...container.querySelectorAll('.cd-change-review__target')].map((el) => el.textContent);
-  expect(targets).toEqual(['Quote', `Quote and ${TITLE} Changed`, TITLE, 'Every tool that charges money']);
+  expect(targets).toEqual(['Quote', `Quote and ${TITLE} Changed`, 'Refund']);
   const metas = [...container.querySelectorAll('.cd-change-review__row > .cd-change-review__body > .cd-change-review__meta')].map((el) => el.textContent);
-  expect(metas).toEqual(['Shared rule', `${TITLE} · Anyone`, 'Anyone', 'Shared rule · Every tool that charges money · Anyone']);
+  expect(metas).toEqual(['Shared rule', 'Anyone', 'Anyone', 'Anyone', 'Shared rule · Anyone']);
+  // Each title starts its line set off as user text, its own isolated run: never mid-line.
+  const setOff = [...container.querySelectorAll('[data-copy="user"]')];
+  expect(setOff.length).toBeGreaterThan(0);
+  for (const title of setOff) {
+    expect(title.classList.contains('cd-user-name'), title.textContent ?? '').toBe(true);
+    expect(getComputedStyle(title).unicodeBidi).toBe('isolate');
+  }
+  // Every line that names tools starts with its first title.
+  for (const line of new Set(setOff.map((title) => title.closest('p')))) {
+    expect(line?.textContent?.startsWith(line.querySelector('[data-copy="user"]')?.textContent ?? '-'), line?.textContent ?? '').toBe(true);
+  }
   expect(container.querySelector('.cd-change-review__row:last-child [data-copy="user"]')).toBeNull();
 });

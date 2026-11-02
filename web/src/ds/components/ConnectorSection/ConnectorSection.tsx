@@ -130,7 +130,7 @@ export function ConnectorSection({ connector, href, tools, addedNote, aboveTools
                   {landed ? <LandedGlow key={`glow-${tool.landed}`} /> : null}
                   <span className="cd-connector-section__tool-head">
                     {tool.href === undefined ? (
-                      <span className="cd-connector-section__tool-name cd-type-body" data-copy="user">
+                      <span className="cd-connector-section__tool-name cd-type-body cd-user-name" data-copy="user">
                         {tool.name}
                       </span>
                     ) : (
@@ -141,7 +141,7 @@ export function ConnectorSection({ connector, href, tools, addedNote, aboveTools
                         aria-describedby={descriptionId}
                       >
                         {/* The tool's own title, so it is user text; the link's name above stays the app's words around it. */}
-                        <span data-copy="user">{tool.name}</span>
+                        <span className="cd-user-name" data-copy="user">{tool.name}</span>
                       </Link>
                     )}
                     {landed ? <UpdatedPill /> : null}
