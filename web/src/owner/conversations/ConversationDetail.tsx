@@ -3,7 +3,9 @@
  * its bar as REV-720 C draws it): a bar pinned to the top of the pane with who it is with, what
  * happened last and Take over; every message with the checks under it, the requests held for the
  * owner answered in place, the visitor's typing, and the owner's controls at the foot: hand back
- * or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
+ * or resume, whisper to Claude, or write to the visitor in their own words. Polled while open. A
+ * demo visitor's chat (REV-DEMO) adds its pill to the bar after the level pill, and its note to the
+ * top of the transcript, over the opening lines.
  */
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
@@ -36,7 +38,7 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
-import { TRANSCRIPT_NOTE } from './copy.ts';
+import { DEMO_VISITOR_PILL, TRANSCRIPT_NOTE } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { DemoVisitorNote, useDemoVisitorRun } from './DemoVisitorNote.tsx';
 import { latestOf } from './latest.ts';
@@ -147,7 +149,15 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   const nameRef = useRef<HTMLHeadingElement>(null);
   const transcriptRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement | null>(null);
+  // Whether focus was in the owner's controls at the foot as they went: the demo visitor ended while she
+  // was in the whisper box, or Hand back (or Resume Claude) left an ended demo chat with nobody there.
+  const controlsHadFocus = useRef(false);
+  const holdControls = useCallback((controls: HTMLDivElement | null) => {
+    const leaving = controlsRef.current;
+    if (controls === null && leaving !== null && leaving.contains(leaving.ownerDocument.activeElement)) controlsHadFocus.current = true;
+    controlsRef.current = controls;
+  }, []);
   const [unsent, setUnsent] = useState<{ kind: 'say' | 'whisper'; text: string } | null>(null);
 
   const chat = useQuery({
@@ -216,6 +226,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   // When Take over goes from the bar with focus on it (she took the chat over, or it changed hands
   // elsewhere while she was on it), focus moves to the first line of the owner's controls, as
   // TakeOverBar moves it for its own buttons, so a keyboard user isn't dropped to the top of the page.
+  // A demo visitor's chat that ended while Claude has it has no controls: focus goes to its name, as it
+  // does when those controls go with focus in them.
   const takeOverButton = useRef<HTMLButtonElement | null>(null);
   const takeOverHadFocus = useRef(false);
   const holdTakeOver = useCallback((button: HTMLButtonElement | null) => {
@@ -224,10 +236,14 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
     takeOverButton.current = button;
   }, []);
   useLayoutEffect(() => {
-    if (!takeOverHadFocus.current) return;
+    if (!takeOverHadFocus.current && !controlsHadFocus.current) return;
     takeOverHadFocus.current = false;
+    controlsHadFocus.current = false;
     const active = document.activeElement;
-    if (active === null || active === document.body) controlsRef.current?.querySelector<HTMLElement>('.cd-take-over__first')?.focus();
+    if (active !== null && active !== document.body) return;
+    const first = controlsRef.current?.querySelector<HTMLElement>('.cd-take-over__first');
+    if (first) first.focus();
+    else nameRef.current?.focus({ preventScroll: true });
   });
   useLayoutEffect(() => {
     if (!takeOverSent || controls.changing) return;
@@ -282,9 +298,10 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   const started = startedLine(read, desk.slug, who, business.timezone);
   const now = new Date();
   // Take over is offered in the bar while Claude answers (and in a mode this build doesn't know), as
-  // TakeOverBar would offer it: no one is on the other side of a recorded chat, and a paused chat
-  // keeps it beside Resume Claude at the foot.
-  const takeOverHere = read.replayed !== true && state.mode !== 'owner' && state.mode !== 'paused';
+  // TakeOverBar would offer it: no one is on the other side of a recorded chat, nor of a demo
+  // visitor's that has ended while Claude has it, and a paused chat keeps it under Resume Claude at
+  // the foot, until a demo visitor's has ended: then only Resume Claude.
+  const takeOverHere = !nobodyThere && state.mode !== 'owner' && state.mode !== 'paused';
 
   // The requests held in this chat: as Needs you lists them, those answered or being answered here, oldest first.
   const held = heldOldestFirst(needsYou.data ?? []).filter((item) => item.decision.session_id === sessionId);
@@ -363,13 +380,15 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
 
   return pane(
     <section className="cd-conversation" aria-labelledby={titleId}>
-      {/* The bar, pinned to the top of the pane across its width: who, their level, what happened last and Take over. */}
+      {/* The bar, pinned to the top of the pane across its width: who, their level (and a demo visitor's pill), what
+          happened last and Take over. */}
       <header className="cd-conversation__bar">
         <div className="cd-conversation__who">
           <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
             {who}
           </h2>
           {level !== who ? <Pill>{level}</Pill> : null}
+          {demo ? <Pill>{DEMO_VISITOR_PILL}</Pill> : null}
           {state.kind === 'agent' ? (
             <Pill>
               <StatusDot tone="handled" />
@@ -399,7 +418,6 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
           <RecordedNote />
         </div>
       ) : null}
-      {demo ? <DemoVisitorNote deskId={deskId} phase={demoRun} onStopped={() => nameRef.current?.focus({ preventScroll: true })} /> : null}
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
@@ -412,6 +430,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
             ))}
           </div>
         ) : null}
+        {/* A demo visitor's note opens the transcript, over its opening lines, and scrolls away with them. */}
+        {demo ? <DemoVisitorNote deskId={deskId} phase={demoRun} onStopped={() => nameRef.current?.focus({ preventScroll: true })} /> : null}
         <Transcript label={`Conversation with ${who}`} logRef={transcriptRef}>
           <TranscriptHeader left={started ?? 'No messages yet.'} right={TRANSCRIPT_NOTE} />
           <OwnerTranscript
@@ -435,15 +455,17 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
       </div>
       {/* No one is on the other side of a recorded chat, nor of a demo visitor's once it has ended (its visitor
           session is gone, or idle for good) and Claude has it again: nothing to take over, whisper or write. An ended
-          demo chat the owner still has keeps Hand back (or Resume), with no composer. */}
+          demo chat the owner still has keeps Hand back, and one the breaker paused keeps only Resume Claude, with no
+          Take over and no composer. */}
       {nobodyThere ? null : (
-        <div ref={controlsRef} className="cd-conversation__controls">
+        <div ref={holdControls} className="cd-conversation__controls">
           <TakeOverBar
             mode={state.mode}
             visitorName={who}
             ownerName={business.owner_display_name}
             agent={state.kind === 'agent'}
             takeOverAbove
+            offerTakeOver={!demoEnded}
             onTakeOver={controls.takeOver}
             onHandBack={controls.handBack}
             onResume={controls.resume}

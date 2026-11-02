@@ -284,6 +284,12 @@ function ConversationBoard({ stage, phone = false }: { stage: Stage; phone?: boo
 // ---------------------------------------------------------------------------------------------
 
 const IN_REVIEW = 'Built against the board in review; sign-off pending.';
+/**
+ * What the web app draws differently from the REV-DEMO conversation boards, which predate the pinned bar (REV-720 C).
+ * The stories draw the boards as they are.
+ */
+const SINCE_THE_BAR =
+  'The board predates the bar pinned to the top of the open conversation (REV-720 C). The web app draws "Demo visitor" in that bar, right after the level pill, and the note at the top of the transcript, 16 px under the bar and over its opening lines, so it scrolls away with them.';
 
 const meta = {
   title: 'Boards/Demo visitor',
@@ -386,7 +392,7 @@ export const RunningLaptop: Story = {
   render: () => <ConversationBoard stage="chat" />,
   parameters: {
     canvas: 'N-Live-REV-DEMO-chat-1512',
-    canvasNote: `${IN_REVIEW} REV-DEMO while it chats (#artboard-4ae3b66fd4f0): Riley typing, the signed typing bubble.`,
+    canvasNote: `${IN_REVIEW} REV-DEMO while it chats (#artboard-4ae3b66fd4f0): Riley typing, the signed typing bubble. ${SINCE_THE_BAR} Take over sits in the bar too, at its right.`,
   },
   play: async ({ canvasElement, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
@@ -410,7 +416,7 @@ export const RunningPhone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: {
     canvas: 'N-Live-REV-DEMO-chat-390',
-    canvasNote: `${IN_REVIEW} REV-DEMO while it chats, on a phone (#artboard-b6a3eaf4a777): the conversation has the page, the list a step back, as the web app draws it under 1024 px.`,
+    canvasNote: `${IN_REVIEW} REV-DEMO while it chats, on a phone (#artboard-b6a3eaf4a777): the conversation has the page, the list a step back, as the web app draws it under 1024 px. ${SINCE_THE_BAR} On a phone the bar's first line holds the name, both pills and Take over, and Latest takes its second.`,
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([390, 844]);
@@ -423,7 +429,7 @@ export const AfterAWhisper: Story = {
   render: () => <ConversationBoard stage="whisper" />,
   parameters: {
     canvas: 'N-Live-REV-DEMO-whisper-1512',
-    canvasNote: `${IN_REVIEW} REV-DEMO after you whisper (#artboard-b5079e9ac81c): the whisper, then Claude's open times; Riley never sees it.`,
+    canvasNote: `${IN_REVIEW} REV-DEMO after you whisper (#artboard-b5079e9ac81c): the whisper, then Claude's open times; Riley never sees it. ${SINCE_THE_BAR}`,
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
@@ -438,7 +444,7 @@ export const AfterATakeOver: Story = {
   render: () => <ConversationBoard stage="takeover" />,
   parameters: {
     canvas: 'N-Live-REV-DEMO-takeover-1512',
-    canvasNote: `${IN_REVIEW} REV-DEMO after you take over (#artboard-894cee1ec120): Mike joined, Riley answers him, and Hand back with his composer.`,
+    canvasNote: `${IN_REVIEW} REV-DEMO after you take over (#artboard-894cee1ec120): Mike joined, Riley answers him, and Hand back with his composer. ${SINCE_THE_BAR}`,
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
@@ -454,7 +460,7 @@ export const Ended: Story = {
   render: () => <ConversationBoard stage="ended" />,
   parameters: {
     canvas: 'N-Live-REV-DEMO-ended-1512',
-    canvasNote: `${IN_REVIEW} REV-DEMO when it ends (#artboard-2e93bf1904b9): the note says it finished, with no button; the row keeps its pill. Stopped by the owner, it says "${DEMO_VISITOR_NOTE.stopped}" Stopped by a failure or the day's budget, "${DEMO_VISITOR_NOTE.stoppedEarly}" The board still draws Take over and the whisper box under it; since UX QA on 2026-11-02 an ended demo visitor's chat offers neither, as nobody is left to answer.`,
+    canvasNote: `${IN_REVIEW} REV-DEMO when it ends (#artboard-2e93bf1904b9): the note says it finished, with no button; the row keeps its pill. Stopped by the owner, it says "${DEMO_VISITOR_NOTE.stopped}" Stopped by a failure or the day's budget, "${DEMO_VISITOR_NOTE.stoppedEarly}" The board still draws Take over and the whisper box under it; since UX QA on 2026-11-02 an ended demo visitor's chat offers neither, as nobody is left to answer: while Claude has it, there are no controls; while the owner holds it, only Hand back stays at its foot; if the breaker paused it, only Resume Claude stays. ${SINCE_THE_BAR}`,
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);

@@ -1,8 +1,8 @@
 /**
  * The demo visitor in a real browser against the mock API: Today's "Watch a demo visitor" card that
  * starts one and opens its conversation, its start error, the five cards' layout, the "Demo
- * visitor" pill on its row, its conversation's head and wherever Needs you names it, the note over
- * its conversation with Stop, and how the note says it ended.
+ * visitor" pill on its row, its conversation's bar and wherever Needs you names it, the note at the
+ * top of its transcript with Stop, and how the note says it ended.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent, type Locator } from 'vitest/browser';
@@ -208,7 +208,7 @@ describe('Demo visitor', () => {
     expect(document.querySelectorAll('.cd-conversation-item .cd-pill')).toHaveLength(1);
     expectNoHorizontalScroll();
 
-    // Its conversation's head: the name, "Public", then "Demo visitor".
+    // Its conversation's bar: the name, "Public", then "Demo visitor".
     await router.navigate(`${LIST}/${sessionId}`);
     const head = screen.getByRole('heading', { level: 2, name: 'Riley' });
     await expect.element(head).toBeVisible();
@@ -225,9 +225,10 @@ describe('Demo visitor', () => {
     await expect.poll(() => router.state.location.pathname).toContain('/conversations/');
     const note = demoNote(screen);
     await expect.element(note).toMatchTextContent(NOTE);
-    // 8 px under the head, over the transcript.
+    // At the top of the transcript, right over the log and its opening lines, not in the bar.
     const head = screen.getByRole('heading', { level: 2, name: 'Riley' }).element().closest('header')!;
-    expect(note.element().getBoundingClientRect().top - head.getBoundingClientRect().bottom).toBeCloseTo(8, 0);
+    expect(head.contains(note.element())).toBe(false);
+    expect(note.element().closest('.cd-conversation__demo')?.nextElementSibling).toBe(screen.getByRole('log').element());
     expect(note.element().querySelector('.cd-status-dot--info'), 'its hollow dot').not.toBeNull();
     const stop = note.getByRole('button', { name: STOP, exact: true });
     await expect.element(stop).toBeVisible();
@@ -353,6 +354,8 @@ describe('Demo visitor', () => {
     await expect.element(screen.getByRole('button', { name: 'Hand back to Claude', exact: true })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: 'Take over', exact: true })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).not.toBeInTheDocument();
+    // Hand back had focus as the controls went: focus goes to the conversation's name rather than falling to the page.
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Riley' })).toHaveFocus();
     await router.navigate(LIST);
     const row = screen.getByRole('link', { name: /^Riley Demo visitor/ });
     await expect.element(row).toBeVisible();
@@ -469,23 +472,27 @@ describe('Demo visitor', () => {
     expectNoHorizontalScroll();
   });
 
-  it('the_card_and_stop_take_the_keyboard_by_their_names', async () => {
-    const { screen, router } = await renderRoute(TODAY);
+  it.each(['desktop', 'phone'] as const)('the_card_and_stop_take_the_keyboard_by_their_names_on_%s', async (viewport: Viewport) => {
+    const { screen, router } = await renderRoute(TODAY, { viewport });
     const things = region(screen, 'Things to try');
-    const start = things.getByRole('button', { name: 'Start a demo visitor', exact: true });
+    const start = startControl(things, viewport);
     await expect.element(start).toBeVisible();
-    // The card's button is the stop after "Open your public page", and Enter starts it.
-    (things.getByRole('link', { name: 'Open your public page', exact: true }).element() as HTMLElement).focus();
+    // The card's button follows the public-page card's link at either width, and Enter starts it.
+    const publicPage = viewport === 'phone' ? 'Chat as a customer' : 'Open your public page';
+    (things.getByRole('link', { name: publicPage, exact: true }).element() as HTMLElement).focus();
     await userEvent.tab();
     await expect.element(start).toHaveFocus();
     await userEvent.keyboard('{Enter}');
     await expect.poll(() => router.state.location.pathname).toContain('/conversations/');
 
-    // In its conversation, Stop is the first stop after the conversation's name, named by its words.
+    // In its conversation, Stop is the first stop after the bar, whose Take over follows the
+    // conversation's name, named by its words.
     const name = screen.getByRole('heading', { level: 2, name: 'Riley' });
     const stop = screen.getByRole('button', { name: STOP, exact: true });
     await expect.element(stop).toBeVisible();
     (name.element() as HTMLElement).focus();
+    await userEvent.tab();
+    await expect.element(screen.getByRole('button', { name: 'Take over', exact: true })).toHaveFocus();
     await userEvent.tab();
     await expect.element(stop).toHaveFocus();
     await userEvent.keyboard('{Enter}');
