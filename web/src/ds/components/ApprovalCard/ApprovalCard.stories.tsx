@@ -574,6 +574,25 @@ export const TwoPlainButtons: Story = {
 };
 
 /** On a vision page, which makes no requests: the answers look and focus as ever, and do nothing. */
+/** A demo visitor's held request: its pill 8 px after where and when it was held, so it's never taken for a real customer's. */
+export const DemoVisitorRequest: Story = {
+  args: { demoVisitor: true, context: <>From the visitor: “<span data-copy="user">Could I get 10% off as a returning customer?</span>”</> },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'The REV-DEMO boards in review draw no held card; the pill is the conversation\'s and the row\'s "Demo visitor" pill (N-Live-REV-DEMO-chat-1512, #artboard-4ae3b66fd4f0), beside where the request came from.',
+  },
+  play: async ({ canvas }) => {
+    const waiting = canvas.getByText('Web chat, 2 min ago');
+    const pill = canvas.getByText('Demo visitor');
+    await expect(pill).toHaveClass('cd-pill');
+    await expect(waiting.contains(pill)).toBe(true);
+    await expect(pill.closest('.cd-approval-card__top')).not.toBeNull();
+    // Only in the card's own words: the outgoing layer holds none until an answer lands.
+    await expect(canvas.getAllByText('Demo visitor')).toHaveLength(1);
+  },
+};
+
 export const InertAnswers: Story = {
   args: { inertAnswers: true },
   parameters: {
