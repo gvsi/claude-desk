@@ -207,6 +207,9 @@ async def test_a_canary_split_after_a_new_desks_business_name_is_refused(app, cl
     canary split between the name and the next field is refused on a new Desk too."""
     # canaries ending in two letters, so an owner's display name (letters only) can hold the end of one
     monkeypatch.setattr(desks, "new_canary", lambda: f"cdk-{secrets.token_hex(7)}fd")
+    # and slug suffixes no canary goes on into: a random one starting with the canary's last two
+    # letters (1 in 1,296) would complete it in the slug alone, which is refused on business.name only
+    monkeypatch.setattr(desks, "new_slug", lambda name: f"{desks.slugify(name)}-zzzzzz")
     copy = await rivera(app, client)
     dana = (await documents(app, copy))["dana-invoice"]
     head, tail = dana.canary[:-2], dana.canary[-2:]
