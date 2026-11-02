@@ -12,24 +12,23 @@ import {
   TranscriptRow,
   VisitorMessage,
 } from '../ds/index.ts';
-import { LUIS_ACCESS, TEAM_CHAT, TEAM_EVERYONE, TEAM_HEADER, TEAM_OWNER, TEAM_TODAY, TEAM_TURNS, TEAMMATES, type TeamTurn } from './data.ts';
+import { JORDAN_ACCESS, TEAM_CHAT, TEAM_EVERYONE, TEAM_HEADER, TEAM_OWNER, TEAM_TODAY, TEAM_TURNS, TEAMMATES, type TeamTurn } from './data.ts';
 import { ClaudeWords, noop, VisionFrame, VisionOwnerShell } from './VisionFrame.tsx';
 
-/** "Luis Ortega" is "LO": the first letters of the first and last names. */
+/** "Jordan Lee" is "JL": the first letters of the first and last names. */
 function initials(name: string): string {
   const words = name.trim().split(/\s+/);
   return [words[0], words.length > 1 ? words[words.length - 1] : undefined].map((word) => Array.from(word ?? '')[0] ?? '').join('');
 }
 
 /**
- * `/vision/team-desk` (N-R2-Vision-TeamDesk): Turner Plumbing's team asking its own Desk, the
- * "Team" Desk in the sidebar's Desk picker. Conversations with Luis's open: what he asked from the
- * van, Claude's answers with their cards and receipts, and what his access lets him open beside it.
+ * `/vision/team-desk` (N-R2-Vision-TeamDesk): Sam Patel's Desk at Lumen Labs, with
+ * Jordan's conversation open and the calendar, docs and notes his access lets him open beside it.
  */
 export function TeamDeskPage() {
   const chatId = useId();
   return (
-    <VisionFrame title="Turner Plumbing team">
+    <VisionFrame title="Sam Patel’s Desk">
       {(bar) => (
         <VisionOwnerShell bar={bar} {...TEAM_OWNER}>
           <div className="cd-vision-page cd-vision-team">
@@ -93,7 +92,7 @@ export function TeamDeskPage() {
                 </Transcript>
               </section>
               <div className="cd-vision-team__access">
-                <AccessPanel name={LUIS_ACCESS.name} canOpen={LUIS_ACCESS.canOpen} cantOpen={LUIS_ACCESS.cantOpen} onEditAccess={noop} />
+                <AccessPanel name={JORDAN_ACCESS.name} canOpen={JORDAN_ACCESS.canOpen} cantOpen={JORDAN_ACCESS.cantOpen} onEditAccess={noop} />
               </div>
             </div>
             <div className="cd-vision-team__foot">
@@ -107,7 +106,7 @@ export function TeamDeskPage() {
   );
 }
 
-/** A teammate's message, then Claude's answer with its cards, and the receipts under it. */
+/** A colleague's message, then Claude's answer with its cards, and the receipts under it. */
 function Turn({ turn, ownerName }: { turn: TeamTurn; ownerName: string }) {
   return (
     <>

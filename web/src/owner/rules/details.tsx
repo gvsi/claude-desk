@@ -6,7 +6,6 @@ import {
   AdvancedDetails, ConnectorName, effectPhrases, StatusLabel, type ConnectorView, type DetailsCode, type DetailsField,
 } from '../../ds/index.ts';
 import { BUSINESS_WORDS } from '../connectors/businessWords.ts';
-import { toolState } from '../connectors/catalog.ts';
 import { capOf } from './drafts.ts';
 
 /** What one Details panel shows (REV-RULES-D, as it ships: no Parameters, no compiled Cedar). */
@@ -39,11 +38,38 @@ function cardAsSet(card: RuleCard): Record<string, unknown> {
   return Object.fromEntries(fields.sort(([a], [b]) => rank(a) - rank(b)));
 }
 
+/** How a tool's listed definition stands against its pin, read apart from whether the tool is on. */
+type PinState = 'matches' | 'changed' | 'delisted' | 'unknown';
+
+/**
+ * The pin's state from the row's own pin columns, whatever its status: the kernel records a drift
+ * on a disabled tool too (its pending entry), keeping it disabled (`mcp_pins.check_pin`).
+ * - `delisted`: its connector no longer lists it, so there is nothing to match;
+ * - `changed`: a different definition waits for review (`pending_sha256`), or the kernel says so;
+ * - `unknown`: no pin is recorded, so nothing is claimed about it;
+ * - `matches`: pinned, with no change waiting. Only this one says "Matches its pin".
+ */
+function pinState(row: Pick<ToolRow, 'definition_sha256' | 'pending_sha256' | 'review_reason'>): PinState {
+  if (row.review_reason === 'delisted') return 'delisted';
+  const pending = row.pending_sha256 ?? '';
+  if (row.review_reason === 'changed' || (pending !== '' && pending !== row.definition_sha256)) return 'changed';
+  if ((row.definition_sha256 ?? '') === '') return 'unknown';
+  return 'matches';
+}
+
+/** The Pinned row's words and dot for each state; an unknown pin has no row. */
+const PIN_WORDS = {
+  matches: <StatusLabel tone="handled">Matches its pin</StatusLabel>,
+  changed: <StatusLabel tone="held">Needs your review</StatusLabel>,
+  // The owner's alert for it says the same: "{tool} is no longer offered. Claude won't use it."
+  delisted: <StatusLabel tone="info">No longer offered</StatusLabel>,
+} as const satisfies Record<Exclude<PinState, 'unknown'>, ReactNode>;
+
 /**
  * A tool's details: what Claude Desk lists for it, from its `ToolRow`. Its input schema and a changed
  * definition waiting for review (`pending_definition_text`) are never shown: the list names the
- * tool, where it comes from, what Claude reads about it, its effects, whether it's on and whether
- * its definition still matches its pin; the block is the row's own fields.
+ * tool, where it comes from, what Claude reads about it, its effects, whether it's on and how its
+ * definition stands against its pin (`pinState`); the block is the row's own fields.
  */
 export function toolDetails(row: ToolRow, connector: ConnectorView | null): Details {
   const source = row.source === 'business' ? BUSINESS_WORDS.jobs
@@ -56,13 +82,9 @@ export function toolDetails(row: ToolRow, connector: ConnectorView | null): Deta
     ...(row.description_confirmed.trim() === '' ? [] : [{ label: 'Claude sees', value: <span data-copy="user">{row.description_confirmed}</span> }]),
     { label: 'Effects', value: effectPhrases(row.effects, row.reversible).join(' · ') },
     { label: 'Status', value: row.status === 'enabled' ? 'Turned on' : 'Turned off' },
-    {
-      label: 'Pinned',
-      value: toolState(row) === 'changed'
-        ? <StatusLabel tone="held">Needs your review</StatusLabel>
-        : <StatusLabel tone="handled">Matches its pin</StatusLabel>,
-    },
   ];
+  const pin = pinState(row);
+  if (pin !== 'unknown') fields.push({ label: 'Pinned', value: PIN_WORDS[pin] });
   const { tool, source: from, effects, reversible, status, description_confirmed, definition_sha256 } = row;
   return {
     fields,

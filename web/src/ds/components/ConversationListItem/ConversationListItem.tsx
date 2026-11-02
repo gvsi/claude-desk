@@ -1,3 +1,4 @@
+import { Pill } from '../Pill/Pill.tsx';
 import { RecordedTag } from '../RecordedTag/RecordedTag.tsx';
 import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
 
@@ -20,6 +21,11 @@ export interface ConversationListItemProps {
   /** Recorded history replayed into this copy: the Recorded tag at the end of the status line. */
   recorded?: boolean;
   /**
+   * A demo visitor's chat, an AI the owner started to play a customer: a "Demo visitor" pill right
+   * after the name on the first line, so the row is never taken for a real customer's.
+   */
+  demoVisitor?: boolean;
+  /**
    * What the person last wrote, in their own words (untrusted, shown as text): quoted on the second
    * line, above any status line or Recorded tag.
    */
@@ -34,12 +40,23 @@ export interface ConversationListItemProps {
 }
 
 /**
- * One conversation in a list: who it is with and when on the first line, its status as a dot and
- * words below its optional preview (a visitor's quote, or the app's line for an agent), with the
- * Recorded tag at the status line's end when the conversation was replayed. The whole row is one
- * link to the conversation. Put each in a list item.
+ * One conversation in a list: who it is with and when on the first line, with a demo visitor's pill
+ * right after the name, its status as a dot and words below its optional preview (a visitor's quote,
+ * or the app's line for an agent), with the Recorded tag at the status line's end when the
+ * conversation was replayed. The whole row is one link to the conversation. Put each in a list item.
  */
-export function ConversationListItem({ name, time, status, href, current = false, recorded = false, quote, line, quoteWithStatus = true }: ConversationListItemProps) {
+export function ConversationListItem({
+  name,
+  time,
+  status,
+  href,
+  current = false,
+  recorded = false,
+  demoVisitor = false,
+  quote,
+  line,
+  quoteWithStatus = true,
+}: ConversationListItemProps) {
   const statusLine = status !== undefined || recorded;
   const previewed = quoteWithStatus || !statusLine;
   const quoted = previewed && quote !== undefined && quote.trim() !== '';
@@ -47,9 +64,10 @@ export function ConversationListItem({ name, time, status, href, current = false
   return (
     <a href={href} className="cd-conversation-item" aria-current={current || undefined}>
       <span className="cd-conversation-item__top">
-        <span className="cd-conversation-item__name cd-type-control" data-copy="user">
+        <span className={demoVisitor ? 'cd-conversation-item__name cd-conversation-item__name--tagged cd-type-control' : 'cd-conversation-item__name cd-type-control'} data-copy="user">
           {name}
         </span>
+        {demoVisitor ? <Pill>Demo visitor</Pill> : null}
         <span className="cd-conversation-item__time cd-type-caption">{time}</span>
       </span>
       {quoted ? (

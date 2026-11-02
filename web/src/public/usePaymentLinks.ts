@@ -41,8 +41,11 @@ export function usePaymentLinks(
     }
   }, [cards, chatPath]);
   const cancellations = cards.filter((card) => card.template === 'link_cancelled');
+  // A card that may have closed a link: its payment, its cancellation, or a mandate charge, which
+  // may have paid the link's quote another way (the kernel then reads the link as cancelled).
   const refreshIds = messages.flatMap((ev) => ev.blocks.some(
-    (block) => block.template === 'payment_confirmed' || block.template === 'link_cancelled',
+    (block) => block.template === 'payment_confirmed' || block.template === 'charge_confirmed'
+      || block.template === 'link_cancelled',
   ) ? [ev.message_id] : []);
   const [, redraw] = useState(0);
   const closed = (card: RenderedBlock) => paymentLinkClosed(card, cancellations, undefined) || memory.closed.has(tokenOf(card) ?? '');

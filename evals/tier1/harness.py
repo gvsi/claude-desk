@@ -50,7 +50,7 @@ LANDS: dict[str, Path] = {
     "01c": _BACKEND / "mockpay" / "server.py",                # mock payments server: Plan 01c Task 1; the id in Task 10
     "01c-setup": _BACKEND / "kernel_service" / "fetch_guard.py",   # Plan 01c Task 8; the id in Task 10
     "02a": TIER1_DIR / "api_impl.py",                         # `make_api_target`: Plan 02a Task 9, with the id
-    "02": TIER1_DIR / "test_02_a2a.py",                       # Plan 02b's cases: its Task 12, with the id
+    "02": _BACKEND / "api" / "a2a.py",                        # A2A endpoint: Plan 02b Task 4; the id in Task 12
 }
 
 
