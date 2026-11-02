@@ -46,7 +46,7 @@ export function endedLine(ended: DemoVisitorRun['ended']): string {
  * visitor's), polled at the conversation's pace while it runs. `startedRun` is the run the page that
  * opened the chat started there, if it did.
  */
-export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boolean, startedRun: string | null) {
+export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boolean, startedRun: string | null): DemoVisitorPhase {
   const queryClient = useQueryClient();
   const [runId, setRunId] = useState<string | null>(() => startedRun ?? queryClient.getQueryData<string>(runIdKey(sessionId)) ?? null);
 
