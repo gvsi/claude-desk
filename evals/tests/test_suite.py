@@ -907,7 +907,7 @@ def test_recorded_rates_history_is_consistent(tmp_path: Path):
     rates = load_recorded_rates()
     assert rates.current == (rates.history[-1] if rates.history else None)
     for entry in rates.history:
-        assert set(entry.model_dump()) == set(RATE_FIELDS), entry.run_id
+        assert set(entry.model_dump()) == {*RATE_FIELDS, "lowered"}, entry.run_id   # `lowered` defaults to False
         assert entry.signed_off_by.strip() and entry.reason.strip(), entry.run_id
         assert entry.completion_lower_95 <= entry.completion_point, entry.run_id
         bound = wilson_lower_95(round(entry.completion_point * entry.trials), entry.trials)

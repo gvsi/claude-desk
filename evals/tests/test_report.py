@@ -1061,8 +1061,8 @@ DOC_SECTIONS = ("What the evals test", "Soft-check calibration, 2026-10-31", "Sc
 
 
 def test_evals_doc_has_every_section():
-    """docs/evals.md has its eight sections in order and one latest-results block, still holding its
-    placeholder until the first held-out report fills it. Its claims follow the code: it names every
+    """docs/evals.md has its eight sections in order and one latest-results block, holding its
+    placeholder until the first held-out report fills it and that report's pass after. Its claims follow the code: it names every
     built-in oracle and every attack category, and the spend limits it states are budget.toml's."""
     text = EVALS_DOC.read_text()
     assert headings(text) == list(DOC_SECTIONS)
@@ -1072,7 +1072,12 @@ def test_evals_doc_has_every_section():
     assert begin < end
     assert text.split(f"\n## {DOC_SECTIONS[-1]}\n", 1)[1].count(BEGIN_MARKER) == 1   # the block is in the last section
     block = "\n".join(lines[begin + 1:end])
-    assert PLACEHOLDER in block
+    latest = EVALS_DOC.parents[1] / "evals" / "reports" / "latest.json"
+    if latest.is_file():
+        pass_id = json.loads(latest.read_text())["pass_id"]
+        assert f"[report for pass `{pass_id}`]" in block and PLACEHOLDER not in block
+    else:
+        assert PLACEHOLDER in block
     outside = "\n".join(lines[:begin] + lines[end + 1:])
     assert "[measured:" not in outside                    # measured numbers appear only in the block
 
