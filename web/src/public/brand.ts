@@ -19,6 +19,10 @@ const INK_SECONDARY_ON_FIELD = 'var(--text-on-brand-secondary)';
 const INK = 'var(--text-primary)';
 const INK_SECONDARY = 'var(--text-secondary)';
 
+/** The open-status dot's green: one that keeps 3:1 on the owner's colour in either theme, else the theme's. */
+const HANDLED_ON_FIELD = 'var(--status-handled-on-brand)';
+const HANDLED = 'var(--status-handled)';
+
 /** Where a brand color can't be used: the panel for the field, the hairline for the accent rule. */
 const FIELD_FALLBACK = 'var(--bg-panel)';
 const ACCENT_FALLBACK = 'var(--line-hairline)';
@@ -70,6 +74,7 @@ export function brandFrom(desk: Pick<PublicDesk, 'business_name' | 'desk_name' |
       field: field ?? FIELD_FALLBACK,
       ink: field === null ? INK : INK_ON_FIELD,
       inkSecondary: field === null ? INK_SECONDARY : INK_SECONDARY_ON_FIELD,
+      statusHandled: field === null ? HANDLED : HANDLED_ON_FIELD,
       accent: plainHex(brand.accent) ?? ACCENT_FALLBACK,
     },
     ownerName: desk.owner_display_name === OWNER_NAME_FALLBACK ? null : desk.owner_display_name,

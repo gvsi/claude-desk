@@ -722,6 +722,7 @@ export function brandOf(publicDesk: PublicDesk): PublicBrand {
     field: publicDesk.brand.primary ?? '',
     ink: 'var(--text-on-brand)',
     inkSecondary: 'var(--text-on-brand-secondary)',
+    statusHandled: 'var(--status-handled-on-brand)',
     accent: publicDesk.brand.accent ?? '',
   };
 }

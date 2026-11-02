@@ -94,6 +94,7 @@ function brandOf(publicDesk: PublicDesk): PublicBrand {
     field: publicDesk.brand.primary ?? '',
     ink: 'var(--text-on-brand)',
     inkSecondary: 'var(--text-on-brand-secondary)',
+    statusHandled: 'var(--status-handled-on-brand)',
     accent: publicDesk.brand.accent ?? '',
   };
 }
@@ -408,33 +409,51 @@ function aboutDrawsItsLine(): boolean {
 const named = ([width, height]: Size) => `${width}x${height}`;
 
 it('the_header_keeps_paper_ink_on_the_owners_colour_in_either_theme', () => {
-  // On the owner's colour the header's name and tagline are paper ink, the same in both themes, as
-  // the page's mapping gives them. On the panel, where the colour can't be used, they take the
-  // theme's own ink: light on the dark ground, dark on light paper.
-  const onPanel: PublicBrand = { ...brandOf(desk), field: 'var(--bg-panel)', ink: 'var(--text-primary)', inkSecondary: 'var(--text-secondary)' };
+  // On the owner's colour the header's name and tagline are paper ink, its open dot the on-brand
+  // green and its closed ring paper ink too, the same in both themes, as the page's mapping gives
+  // them. On the panel, where the colour can't be used, they take the theme's own: light on the dark
+  // ground, dark on light paper.
+  const onPanel: PublicBrand = {
+    ...brandOf(desk),
+    field: 'var(--bg-panel)',
+    ink: 'var(--text-primary)',
+    inkSecondary: 'var(--text-secondary)',
+    statusHandled: 'var(--status-handled)',
+  };
+  const closed = { ...OPEN_EN, open: false, until: null, opens_at: '2026-10-30T08:00:00-07:00', text: 'Closed now, opens at 8:00 am' };
   const seen = [];
   for (const theme of ['dark', 'light'] as const) {
     chooseTheme(theme);
     for (const [ground, brand] of [['colour', brandOf(desk)], ['panel', onPanel]] as const) {
-      act(() => root.render(
-        <PublicShell brand={brand} ownerName="Mike Turner" language="en" onAskForOwner={() => {}} composer={null}>
-          {null}
-        </PublicShell>,
-      ));
-      seen.push({
-        theme,
-        ground,
-        name: getComputedStyle(one('.cd-public-shell__brand-name')).color,
-        tagline: getComputedStyle(one('.cd-public-shell__tagline')).color,
-      });
+      const look: Record<string, string> = {};
+      for (const status of [OPEN_EN, closed]) {
+        act(() => root.render(
+          <PublicShell brand={brand} ownerName="Mike Turner" language="en" openStatus={status} onAskForOwner={() => {}} composer={null}>
+            {null}
+          </PublicShell>,
+        ));
+        const dot = getComputedStyle(one('.cd-public-shell__open-status > .cd-status-dot'));
+        if (status.open) look.openDot = dot.backgroundColor;
+        else look.closedRing = dot.borderTopColor;
+        look.name = getComputedStyle(one('.cd-public-shell__brand-name')).color;
+        look.tagline = getComputedStyle(one('.cd-public-shell__tagline')).color;
+      }
+      seen.push({ theme, ground, ...look });
     }
   }
-  const paper = { name: 'rgba(250, 249, 245, 0.92)', tagline: 'rgba(250, 249, 245, 0.64)' };
+  const paper = { name: 'rgba(250, 249, 245, 0.92)', tagline: 'rgba(250, 249, 245, 0.64)', openDot: 'rgb(111, 168, 89)', closedRing: 'rgba(250, 249, 245, 0.64)' };
   expect(seen).toEqual([
     { theme: 'dark', ground: 'colour', ...paper },
     { theme: 'dark', ground: 'panel', ...paper },
     { theme: 'light', ground: 'colour', ...paper },
-    { theme: 'light', ground: 'panel', name: 'rgba(28, 27, 25, 0.92)', tagline: 'rgba(28, 27, 25, 0.68)' },
+    {
+      theme: 'light',
+      ground: 'panel',
+      name: 'rgba(28, 27, 25, 0.92)',
+      tagline: 'rgba(28, 27, 25, 0.68)',
+      openDot: 'rgb(63, 122, 46)',
+      closedRing: 'rgba(28, 27, 25, 0.68)',
+    },
   ]);
 });
 

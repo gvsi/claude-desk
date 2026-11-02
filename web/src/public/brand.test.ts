@@ -50,19 +50,30 @@ describe('brandFrom', () => {
       field: '#1F4E4A',
       ink: 'var(--text-on-brand)',
       inkSecondary: 'var(--text-on-brand-secondary)',
+      statusHandled: 'var(--status-handled-on-brand)',
       accent: '#B87333',
     });
   });
 
   it('the_owners_colour_keeps_paper_ink_in_either_theme', () => {
-    // On the owner's colour the header's text is paper ink, which no theme changes, and that is the
-    // ink the contrast check measures. Where the colour can't be used, the panel takes the theme's
+    // On the owner's colour the header's text is paper ink and its open dot the on-brand green, which
+    // no theme changes, and the paper ink is what the contrast check measures. Where the colour can't be used, the panel takes the theme's
     // own ink, dark on light paper and light on the dark ground.
-    expect(brandFrom(desk).brand).toMatchObject({ field: '#1F4E4A', ink: 'var(--text-on-brand)', inkSecondary: 'var(--text-on-brand-secondary)' });
+    expect(brandFrom(desk).brand).toMatchObject({
+      field: '#1F4E4A',
+      ink: 'var(--text-on-brand)',
+      inkSecondary: 'var(--text-on-brand-secondary)',
+      statusHandled: 'var(--status-handled-on-brand)',
+    });
     expect(new Set(contrast.inks)).toEqual(new Set(['var(--text-on-brand)', 'var(--text-on-brand-secondary)']));
     for (const primary of ['#f0f0f0', 'red', undefined]) {
       const { brand } = brandFrom(withBrand(primary === undefined ? {} : { primary, accent: '#B87333' }));
-      expect(brand, String(primary)).toMatchObject({ field: 'var(--bg-panel)', ink: 'var(--text-primary)', inkSecondary: 'var(--text-secondary)' });
+      expect(brand, String(primary)).toMatchObject({
+        field: 'var(--bg-panel)',
+        ink: 'var(--text-primary)',
+        inkSecondary: 'var(--text-secondary)',
+        statusHandled: 'var(--status-handled)',
+      });
     }
   });
 

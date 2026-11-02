@@ -14,6 +14,7 @@ const BRAND: PublicBrand = {
   field: rivera.publicDesk.en.brand.primary ?? '',
   ink: 'var(--text-on-brand)',
   inkSecondary: 'var(--text-on-brand-secondary)',
+  statusHandled: 'var(--status-handled-on-brand)',
   accent: rivera.publicDesk.en.brand.accent ?? '',
 };
 
