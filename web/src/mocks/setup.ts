@@ -380,11 +380,15 @@ function slugFor(world: MockWorld, business: string): string {
       .replace(/[^\x20-\x7e]/g, '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 30) || 'desk';
+      .replace(/^-+/, '')
+      .slice(0, 30)
+      .replace(/-+$/, '') || 'desk';
   const slug = (n: number) => world.scoped(`${base}-setup${n}`);
+  // A deleted Desk's address stays closed, so a later Desk never takes it over.
+  const taken = (s: string) =>
+    world.deskBySlug(s) !== undefined || [...world.deletedDesks.values()].some((desk) => desk.summary.slug === s);
   let n = 1;
-  while (world.deskBySlug(slug(n))) n += 1;
+  while (taken(slug(n))) n += 1;
   return slug(n);
 }
 

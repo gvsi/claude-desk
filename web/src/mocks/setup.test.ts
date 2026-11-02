@@ -953,8 +953,17 @@ describe('a Desk setup made, in each copy on the dev server', () => {
       const read = await store.dispatch('visitorSession', { cookies: { desk_visitor: cookieSet(preview, 'desk_visitor') }, params: { slug } });
       expect(read, browser).toMatchObject({ status: 200, body: { state: { session_id: (preview.body as VisitorSession).state.session_id } } });
       slugs.push(slug);
+      // A second setup of the same business in this copy takes the next number, still with the copy's tag.
+      const again = await store.dispatch('startSetup', {
+        cookies: owner,
+        body: { description, timezone: 'America/Los_Angeles', idempotency_key: `two-copies-${browser}-again` },
+      });
+      if ('network' in again || again.status !== 201) throw new Error(`the ${browser} copy starts setup again`);
+      const second = (again.body as SetupState).slug;
+      expect(second, `${browser} again`).toMatch(/^juniper-hair-studio-setup2-/);
+      slugs.push(second);
     }
-    expect(new Set(slugs).size).toBe(2);
+    expect(new Set(slugs).size).toBe(4);
   });
 });
 
