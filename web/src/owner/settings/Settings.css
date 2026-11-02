@@ -155,6 +155,17 @@
   overflow-wrap: anywhere;
 }
 
+/* The preview's secondary words and the monogram's edge take the secondary ink the public header's
+   mapping gives (`--cd-header-colour-ink-secondary`, set on the preview): paper ink on the owner's
+   colour in both themes, the theme's own on the panel. */
+.cd-header-colour__preview .cd-settings__quiet {
+  color: var(--cd-header-colour-ink-secondary);
+}
+
+.cd-header-colour__preview .cd-header-colour__monogram {
+  border-color: var(--cd-header-colour-ink-secondary);
+}
+
 /* Answering's card: the switch row pads itself 8 px, so 8 px more at the sides puts its words 16 px
    in, where the details' words start in the card above, and its track as far in on the right. */
 .cd-settings__answering {
@@ -173,18 +184,19 @@
   margin-top: var(--space-8);
 }
 
-/* Delete this Desk: its heading 28 px under Answering, then its line with the button at the right. */
-.cd-settings__delete {
+/* Appearance and Delete this Desk: each heading 28 px under what comes before it, then its line with
+   its control at the right. */
+.cd-settings__row-section {
   padding-top: var(--space-8);
 }
 
-.cd-settings__delete-row {
+.cd-settings__row {
   display: flex;
   align-items: center;
   gap: var(--space-16);
 }
 
-.cd-settings__delete-line {
+.cd-settings__row-line {
   flex: 1;
 }
 
@@ -208,11 +220,11 @@
     gap: var(--space-16);
   }
 
-  .cd-settings__delete {
+  .cd-settings__row-section {
     padding-top: 0;
   }
 
-  .cd-settings__delete-row {
+  .cd-settings__row {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-8);

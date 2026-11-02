@@ -30,6 +30,8 @@ export interface PublicBrand {
   ink: string;
   /** The tagline's color over the field; it keeps 4.5:1 too. */
   inkSecondary: string;
+  /** The open-status dot's green over the field; the closed ring takes `inkSecondary`. */
+  statusHandled: string;
   /** Decorative only: the 2 px rule under the header. */
   accent: string;
 }

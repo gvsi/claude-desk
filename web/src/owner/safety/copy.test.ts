@@ -22,12 +22,14 @@ import {
   HANDOFF_ENTRY_COPY,
   LEDGER_KIND_COPY,
   ORIGIN_COPY,
+  SAFETY_SUBTITLE,
   anythingStoppedIn,
   anythingTurnedDownIn,
   categoryLabel,
   causeLabel,
   entryCopy,
   entryFor,
+  originCopy,
   rowLabel,
   turnedDownHeadline,
 } from './copy.ts';
@@ -57,6 +59,23 @@ function causeEnum(): string[] {
   const values = (cause?.anyOf ?? (cause ? [cause] : [])).flatMap((option) => resolve(option)?.enum ?? []);
   if (values.length === 0) throw new Error('openapi.json has no enum at Attempt.cause');
   return values;
+}
+
+const PROMPTS_PATH = path.join(here, '..', '..', '..', '..', 'backend', 'desk', 'api', 'prompts.py');
+
+/**
+ * The words a triage summary gives as the reason a request was turned down, by cause, as prompts.py
+ * holds them in `TURNED_DOWN_BECAUSE`: one `"cause": "words",` line each, every line read.
+ */
+function turnedDownBecause(): Record<string, string> {
+  const block = /^TURNED_DOWN_BECAUSE\b[^=\n]*=\s*\{\n([\s\S]*?)^\}/m.exec(readFileSync(PROMPTS_PATH, 'utf8'))?.[1];
+  if (block === undefined) throw new Error('prompts.py has no TURNED_DOWN_BECAUSE');
+  const lines = block.split('\n').filter((line) => line.trim() !== '');
+  return Object.fromEntries(lines.map((line) => {
+    const entry = /^\s*"(\w+)": "([^"\\]*)",$/.exec(line);
+    if (!entry) throw new Error(`a TURNED_DOWN_BECAUSE line this test can't read: ${line}`);
+    return [entry[1], entry[2]];
+  }));
 }
 
 /** Why a request was turned down, each cause in the owner's signed words. */
@@ -142,6 +161,22 @@ describe('Safety copy', () => {
     for (const table of [LEDGER_KIND_COPY, ORIGIN_COPY, CATEGORY_COPY]) {
       for (const [key, words] of Object.entries(table)) expect(words.trim(), key).not.toBe('');
     }
+  });
+
+  it('origin_and_subtitle_name_no_part', () => {
+    // Where an entry came from says who recorded it, never which part wrote it. A kernel entry isn't
+    // called checked, since some are events ("Chat started"), and claims nothing about when, since
+    // the sample week's replayed entries are written when a copy is made.
+    expect(ORIGIN_COPY).toEqual({
+      kernel: 'Recorded by your Desk',
+      api: 'Reported by the chat, not verified by your Desk',
+    });
+    expect(originCopy('kernel')).toBe(ORIGIN_COPY.kernel);
+    // Anything but the kernel reads as reported, never as recorded by the Desk. The kernel checks a
+    // report's form, not whether it is true, so the line says it wasn't verified.
+    for (const origin of ['api', 'other', '']) expect(originCopy(origin), origin).toBe(ORIGIN_COPY.api);
+    expect(SAFETY_SUBTITLE).toBe('Requests your Desk turned down, replies it stopped before they were shown, and the signed record of every entry.');
+    for (const words of [...Object.values(ORIGIN_COPY), SAFETY_SUBTITLE]) expect(words, words).not.toMatch(/checkpoint|chat service|as it happened/);
   });
 
   it('handoff_entries_say_which_they_are', () => {
@@ -244,6 +279,12 @@ describe('Safety copy', () => {
   it('cause_copy_has_every_cause_in_the_signed_words', () => {
     expect(sorted(Object.keys(CAUSE_COPY))).toEqual(sorted(causeEnum()));
     expect(CAUSE_COPY).toEqual(SIGNED_CAUSES);
+  });
+
+  it('a_triage_summary_gives_the_cause_labels_words', () => {
+    // The AI-written summary under a turned-down entry names why in the label's words: the API
+    // sends Haiku its cause's words from prompts.py, so they're the label's, word for word.
+    expect(turnedDownBecause()).toEqual(CAUSE_COPY);
   });
 
   it('cause_label_is_only_for_a_refused_entry_with_a_cause', () => {

@@ -26,14 +26,15 @@ export const visitorCalledBack = (ownerFirstName: string): string => `${ownerFir
 /**
  * The note over a demo visitor's conversation (an AI the owner started to play a customer): while it
  * runs, what it is and what to try, with Stop; once it ends, how it ended. Stopped by the owner is
- * said so; every other ending (its goal met, the owner quiet, its limits, the chat closed, a failure
- * or the day's budget) is "finished", as the owner needs nothing more from it.
+ * said so; a failure or the day's model budget stopped it early; every other ending (its goal met,
+ * the owner quiet, its limits, the chat closed, or a run the API no longer keeps) is "finished".
  */
 export const DEMO_VISITOR_NOTE = {
   running: 'A demo visitor, played by an AI. Take over or whisper to see how Claude responds.',
   stop: 'Stop the demo visitor',
   finished: 'The demo visitor finished.',
   stopped: 'You stopped the demo visitor.',
+  stoppedEarly: 'The demo visitor stopped early.',
 } as const;
 
 /** The head's pill, and the row's, on a demo visitor's conversation. */

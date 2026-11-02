@@ -454,7 +454,7 @@ export const Ended: Story = {
   render: () => <ConversationBoard stage="ended" />,
   parameters: {
     canvas: 'N-Live-REV-DEMO-ended-1512',
-    canvasNote: `${IN_REVIEW} REV-DEMO when it ends (#artboard-2e93bf1904b9): the note says it finished, with no button; the row keeps its pill. Stopped by the owner, it says "${DEMO_VISITOR_NOTE.stopped}" The board still draws Take over and the whisper box under it; since UX QA on 2026-11-02 an ended demo visitor's chat offers neither, as nobody is left to answer.`,
+    canvasNote: `${IN_REVIEW} REV-DEMO when it ends (#artboard-2e93bf1904b9): the note says it finished, with no button; the row keeps its pill. Stopped by the owner, it says "${DEMO_VISITOR_NOTE.stopped}" Stopped by a failure or the day's budget, "${DEMO_VISITOR_NOTE.stoppedEarly}" The board still draws Take over and the whisper box under it; since UX QA on 2026-11-02 an ended demo visitor's chat offers neither, as nobody is left to answer.`,
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);

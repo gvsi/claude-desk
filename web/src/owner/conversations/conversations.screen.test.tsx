@@ -873,6 +873,15 @@ describe('Conversations', () => {
     }
   });
 
+  it('the_head_names_the_action_a_reply_came_after', async () => {
+    // Dana asks a price after her visit is booked: the quote that ran is what happened last, in the
+    // kernel's own line for it, where the head said the reply was checked.
+    priceTurn(named(DANA_LIVE, DANA), 'How much is drain clearing?');
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(screen.getByText("Latest: Quoted from Mike Turner's price list", { exact: true })).toBeVisible();
+    await expect.element(log(screen).getByRole('article', { name: 'Quote' }).last()).toBeVisible();
+  });
+
   it('a_reply_in_markdown_shows_bold_and_a_list', async () => {
     // A reply of Claude's in Markdown, in Dana's chat: the owner reads it as she did.
     const items = ['Is the water heater leaking from the top or the bottom?', 'Is the pilot light still on?'];
@@ -1968,6 +1977,12 @@ describe('Conversations', () => {
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
     await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
     const before = quotes().length;
+    const stale = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'conversation', status: 200, times: 1, until, body: stale });
+    await readsMore('conversation', 1);
 
     // The owner goes back to the list, and Dana asks and gets her answer meanwhile. Back on the
     // chat, the page shows the read it had first, then the reply where it belongs, drawn still: it
@@ -1976,6 +1991,8 @@ describe('Conversations', () => {
     await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
     priceTurn(chat, 'How much is drain clearing?');
     await router.navigate(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    release();
     await expect.poll(() => quotes().length).toBe(before + 1);
     await readsMore('conversation', 1);
     expect(landed.rows()).toEqual([]);

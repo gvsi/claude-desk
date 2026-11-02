@@ -22,6 +22,7 @@ STATUS: dict[str, str] = {
     "denied": "{owner} decidió no seguir adelante",
     "expired": "Esta solicitud venció",
     "cancelled": "Cancelado",
+    "closed_by_booking": "Cerrada: su reserva sustituyó esta solicitud",
     "executed": "Hecho",
     "failed": "No se pudo completar",
     "unknown": "Todavía lo estamos confirmando",

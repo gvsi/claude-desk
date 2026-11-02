@@ -29,9 +29,14 @@ export type DemoVisitorPhase =
   | { phase: 'running'; run: DemoVisitorRun }
   | { phase: 'ended'; ended: DemoVisitorRun['ended'] };
 
-/** The line once the demo visitor has ended: stopped by the owner, or finished however else it ended. */
+/**
+ * The line once the demo visitor has ended: stopped by the owner; stopped early by a failure or the
+ * day's model budget; or finished, however else it ended (unknown when the API no longer keeps it).
+ */
 export function endedLine(ended: DemoVisitorRun['ended']): string {
-  return ended === 'stopped_by_owner' ? DEMO_VISITOR_NOTE.stopped : DEMO_VISITOR_NOTE.finished;
+  if (ended === 'stopped_by_owner') return DEMO_VISITOR_NOTE.stopped;
+  if (ended === 'failed' || ended === 'budget') return DEMO_VISITOR_NOTE.stoppedEarly;
+  return DEMO_VISITOR_NOTE.finished;
 }
 
 /**

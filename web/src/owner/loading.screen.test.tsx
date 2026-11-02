@@ -19,11 +19,12 @@ import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
+import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
 import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { needsYouKey, todayKey } from './useDesks.ts';
+import { DESKS_KEY, needsYouKey, todayKey } from './useDesks.ts';
 import { publicLink } from './customerLink.ts';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
 import { settled } from '../ds/test/settled.ts';
@@ -1053,6 +1054,46 @@ it('desks_failure_ends_the_skeleton', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
+it('desk_gate_hides_the_old_error_while_retrying_a_missing_desk', async () => {
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { screen, router } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+  const client = mounted.mock.contexts.at(-1) as QueryClient;
+  await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
+  const main = mockStore.world.desk(RIVERA.deskId)!;
+  mockStore.world.addDesk({ desk_id: 'desk-rivera-new', slug: 'rivera-new', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
+  // The cached list holds the first Desk but lacks the new one. Its failed re-read keeps that data.
+  mockStore.inject({ route: 'desks', status: 'network', times: 4 });
+  await router.navigate('/app/desk-rivera-new/today');
+  const error = screen.getByRole('alert').getByText("We couldn't reach Claude Desk. Check your connection, then try again.", { exact: true });
+  await expect.element(error).toBeVisible();
+
+  const desks = holdReads(ROUTES.desks.path);
+  onlineManager.setOnline(false);
+  onTestFinished(() => onlineManager.setOnline(true));
+  await screen.getByRole('button', { name: 'Try again' }).click();
+  await vi.waitFor(() => expect(client.getQueryState(DESKS_KEY)?.fetchStatus).toBe('paused'));
+  await expect.element(error).toBeVisible();
+  expect(desks.held()).toBe(0);
+  onlineManager.setOnline(true);
+  await vi.waitFor(() => expect(desks.held()).toBe(1));
+  await expect.element(error).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Desk' })).toBeVisible();
+
+  desks.release();
+  await expect.element(error).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Try again' })).toHaveFocus();
+
+  const retriedDesks = holdReads(ROUTES.desks.path);
+  await screen.getByRole('button', { name: 'Try again' }).click();
+  await vi.waitFor(() => expect(retriedDesks.held()).toBe(1));
+  await expect.element(error).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Desk' })).toBeVisible();
+  retriedDesks.release();
+  await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
+  await expect.element(error).not.toBeInTheDocument();
+});
+
 it('failed_demo_inbox_read_says_so_in_its_sheet', async () => {
   // The first read fails, and so does its one retry: the bar draws the inbox's button with no count,
   // and its sheet holds the line with Try again, never an inbox that looks empty.
@@ -1258,6 +1299,67 @@ const LIST_REGION = '.cd-conversations__region';
 function firstListRow(): Element | null {
   return document.querySelector(`${LIST_REGION} [data-skeleton-anchor="conversation-row-0"]`) ?? landedElement('.cd-conversations__items .cd-conversation-item');
 }
+
+it.each([
+  ['desktop', false], ['phone', false], ['desktop', true], ['phone', true],
+] as const)('setup_desk_conversations_land_at_their_shapes at %s after deleting starting Desk: %s', async (viewport, deleteStarting) => {
+  const { deskId } = await liveSetupDeskIds('Maple Street Rentals. We rent apartments in Oakland.');
+  const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the conversations');
+  // Reuse the live rows on the new Desk: none is recorded history.
+  mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: answer.body });
+  if (deleteStarting) {
+    const deleted = await mockStore.dispatch('deleteDesk', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in deleted || deleted.status !== 204) throw new Error('the mock deletes the starting Desk');
+    expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
+  }
+  const read = holdReads(ROUTES.conversations.path.replace('{desk_id}', deskId));
+  await expectSkeletonLoad({
+    status: 'Reading your conversations',
+    anchors: LIST_ANCHORS.filter(({ name }) => name === 'conversations-day-0' || name === 'conversation-row-0'),
+    open: async () => {
+      await renderRoute(`/app/${deskId}/conversations`, { viewport, pollScale: 100 });
+      await vi.waitFor(() => expect(document.querySelector(`${LIST_REGION} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
+      expect(document.querySelector(`${LIST_REGION} [data-skeleton-anchor="conversations-caption"]`)).toBeNull();
+    },
+    release: read.release,
+  });
+  expect(document.querySelector('.cd-conversations__caption')).toBeNull();
+});
+
+it.each(['desktop', 'phone'] as const)('setup_desk_cold_reload_moves_only_when_desks_are_read at %s', async (viewport) => {
+  const { deskId } = await liveSetupDeskIds('Maple Street Rentals. We rent apartments in Oakland.');
+  const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the conversations');
+  mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: answer.body });
+  const desks = holdReads(ROUTES.desks.path);
+  const list = holdReads(ROUTES.conversations.path.replace('{desk_id}', deskId));
+  await renderRoute(`/app/${deskId}/conversations`, { viewport, pollScale: 100 });
+  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await nextFrames();
+  // A cold reload cannot identify the Desk before this read. Its caption shape leaves once at
+  // the hand-off; the page's own rows then land on their shapes without another move.
+  const caption = document.querySelector(`${FULL_LAYER} [data-skeleton-anchor="conversations-caption"]`)!.getBoundingClientRect();
+  const tops = watchTop(firstListRow);
+  await expectSkeletonLoad({
+    status: 'Reading your conversations',
+    continues: true,
+    anchors: LIST_ANCHORS.filter(({ name }) => name === 'conversations-day-0' || name === 'conversation-row-0'),
+    open: async () => {
+      desks.release();
+      await vi.waitFor(() => expect(document.querySelector(FULL_LAYER)).toBeNull());
+      await vi.waitFor(() => expect(document.querySelector(`${LIST_REGION} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
+      expect(document.querySelector('[data-skeleton-anchor="conversations-caption"]')).toBeNull();
+      expect(tops()).toHaveLength(2);
+      expect(tops()[0]! - tops()[1]!).toBe(Math.round(caption.height) + 4);
+    },
+    release: list.release,
+  });
+  for (let frame = 0; frame < 10; frame += 1) await nextFrames();
+  expect(tops(), 'only the cold hand-off moves the rows').toHaveLength(2);
+  expect(document.querySelector('.cd-conversations__caption')).toBeNull();
+});
 
 it('conversations_without_recorded_history_moves_once', async () => {
   // Decision 15: the skeleton draws a fresh copy's list, which replays recorded history and so says
@@ -1804,8 +1906,9 @@ it('rules_outcome_shapes_remeasure_when_fonts_become_ready', async () => {
   await vi.waitFor(() => expect(Number.parseFloat(shape.style.width)).toBeGreaterThan(before));
 });
 
-it.each(['desktop', 'phone'] as const)('rules_load_in_place at %s', async (viewport) => {
-  const { screen, router } = await openToday(viewport);
+it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async (viewport) => {
+  const { screen, router } = await openToday(viewport === 'phone' ? 'phone' : 'desktop');
+  if (typeof viewport === 'number') await page.viewport(viewport, 768);
   const read = holdReads(RULES_READ);
   const landing = watchPaneLanding(RULES_ANCHORS, '.cd-rules__region .cd-skeleton-screen__layer');
   const headings = watchTopHeadings();
@@ -1816,6 +1919,18 @@ it.each(['desktop', 'phone'] as const)('rules_load_in_place at %s', async (viewp
       await router.navigate(RULES);
       await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
       expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__suggestions')).toBeNull();
+      if (typeof viewport === 'number') {
+        await nextFrames();
+        const rows = document.querySelectorAll('.cd-rules__region .cd-skeleton-screen__layer .cd-connector-section__tool');
+        expect(rows.length).toBeGreaterThan(0);
+        for (const row of rows) {
+          const summary = row.querySelector('.cd-connector-section__tool-summary')!;
+          const outcome = row.querySelector('.cd-connector-section__tool-outcome')!;
+          expect(summary.getBoundingClientRect().right, row.getAttribute('data-skeleton-anchor')!).toBeLessThanOrEqual(outcome.getBoundingClientRect().left);
+        }
+        const paymentSummary = document.querySelector('[data-skeleton-anchor="rules-tool-5-0"] .cd-connector-section__tool-summary')!;
+        expect(paymentSummary.querySelectorAll('.cd-skeleton')).toHaveLength(2);
+      }
     }, release: read.release,
   });
   await landing.expectStill();
@@ -2291,7 +2406,7 @@ it('safety_entries_reload_keeps_its_existing_loader', async () => {
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   ledger.release();
-  await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('No entry has been changed since it was written', { exact: true })).toBeVisible();
   expect(headings()).toEqual([1]);
   await expectScreenBasics(document.body, { owner: true });
 });

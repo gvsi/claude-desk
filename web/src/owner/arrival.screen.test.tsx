@@ -37,6 +37,7 @@ const INTRO =
 const ENDED = 'Your demo session ended. Enter the passcode to start a fresh copy.';
 const THINGS = [
   ['Chat as a customer', 'Turner’s public page opens in a new tab.'],
+  ['Watch a demo visitor', 'An AI plays a customer on your Desk.'],
   ['Try to break it', 'Ask for a discount or someone else’s details.'],
   ['Answer a held request', 'One is waiting for you on Today.'],
   ['Create your own Desk', 'It gets a live link you can share.'],
@@ -160,6 +161,26 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(screen.getByText(/^You're Mike Turner today\. This is a concept prototype\.$/)).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Mike$/ })).toBeVisible();
+  });
+
+  it.each(['desktop', 'phone'] as const)('intro_dialog_lists_the_five_things_in_order_on_%s', async (viewport) => {
+    const { screen } = await renderRoute('/', { viewport, seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    await settled(dialog.element());
+    const items = dialog.getByRole('list').getByRole('listitem').elements();
+    // The five Today counts, in Today's order, the demo visitor second with the first sentence of its line.
+    expect(items.map((item) => item.querySelector('.cd-intro__thing-title')?.textContent)).toEqual(THINGS.map(([title]) => title));
+    expect(items.map((item) => item.textContent)).toEqual(THINGS.map(([title, detail]) => `${title}${detail}`));
+    expect(items[1]?.querySelector('svg path[d]')).not.toBeNull();
+    // Each detail stays on one line.
+    for (const detail of items.map((item) => item.querySelector('.cd-intro__thing-detail') as HTMLElement)) {
+      expect(detail.getClientRects()).toHaveLength(1);
+    }
+    // On a phone too, "Start the demo" and the footer are in view as the dialog opens.
+    await expect.element(dialog.getByRole('button', { name: 'Start the demo' })).toBeInViewport();
+    await expect.element(dialog.getByText(/^Concept prototype by/)).toBeInViewport();
+    expectNoHorizontalScroll();
   });
 
   it('the_illustration_plays_once_as_the_window_changes', async () => {
@@ -1428,6 +1449,34 @@ describe('OwnerLayout', () => {
     expect(saved()).toBe(false);
   });
 
+  it('answering_cancelled_confirmation_reads_again_after_switching_desks', async () => {
+    const main = mockStore.world.desk(RIVERA.deskId)!;
+    mockStore.world.addDesk({ desk_id: 'desk-rivera-weekends', slug: 'rivera-weekends', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+    const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
+    await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+
+    // The write never saved. Its confirming read stays out until leaving this Desk aborts it.
+    const desks = holdReads(ROUTES.desks.path);
+    mockStore.inject({ route: 'setAnswering', status: 'network' });
+    await answering.click();
+    await screen.getByRole('dialog').getByRole('button', { name: 'Take messages only', exact: true }).click();
+    await vi.waitFor(() => expect(desks.held()).toBe(1));
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+    expect(main.summary.answering).toBe(true);
+
+    const leftAt = performance.now();
+    await router.navigate('/app/desk-rivera-weekends/today');
+    await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
+    await router.navigate(TODAY);
+    await expect.element(screen.getByRole('button', { name: `Switch Desk, current: ${main.summary.name}` })).toBeVisible();
+    expect(performance.now() - leftAt).toBeLessThan(FRESH_MS);
+    // The cancelled read must not make the optimistic list count as a fresh server answer.
+    await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(1));
+    desks.release();
+    await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('start_over_confirms_first', async () => {
     const { screen, router } = await renderRoute(TODAY);
     const startOver = screen.getByRole('button', { name: 'Start over' });
@@ -2481,7 +2530,8 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
     await expect.element(thingsToTry(screen).getByText('2 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was refused and why.", { exact: true })).toBeVisible();
+    // Safety lists what was stopped, not every request Claude declines in its own words.
+    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was stopped and why.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
     // Its words don't say it's done, so the Done pill is read out.
@@ -2537,7 +2587,7 @@ describe('Things to try ticks off', () => {
     await router.navigate(`/app/${RIVERA.deskId}/settings/general`);
     const section = screen.getByRole('region', { name: 'Delete this Desk' });
     await section.getByRole('button', { name: 'Delete this Desk' }).click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     const animated = watchListAnimations();
     // The copy's Desks are read again without the main line: the Desk switcher goes.

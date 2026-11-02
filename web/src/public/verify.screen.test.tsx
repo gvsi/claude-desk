@@ -77,6 +77,22 @@ async function say(screen: RenderResult, text: string): Promise<void> {
   );
 }
 
+/**
+ * Pastes `text` into the code field as a visitor does: copied with the keyboard from elsewhere on
+ * the page, then pasted into the field with the keyboard.
+ */
+async function pasteInto(field: HTMLInputElement, text: string): Promise<void> {
+  const source = document.createElement('input');
+  source.value = text;
+  document.body.append(source);
+  source.focus();
+  source.select();
+  await userEvent.copy();
+  source.remove();
+  field.focus();
+  await userEvent.paste();
+}
+
 describe('verification', () => {
   it('verify_prompt_shows_the_code_form', async () => {
     const { screen } = await renderRoute(PAGE);
@@ -244,6 +260,110 @@ describe('verification', () => {
     const stored = reloaded.screen.getByRole('article', { name: 'Document, only for you' });
     await expect.element(stored).toBeVisible();
     expect(invoiceReceipts(stored.element())).toEqual(explained);
+  });
+
+  it('enter_in_the_field_sends_a_typed_code_once', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can you send my invoice?');
+    const field = screen.getByRole('textbox', { name: '6-digit code' });
+    const input = field.element() as HTMLInputElement;
+
+    // A wrong code typed in full, then Enter pressed in the field, not on Confirm: it goes once, and
+    // the form says what Confirm's press would, with the field ready for the next code.
+    await userEvent.type(field, '000000');
+    await expect.element(field).toHaveValue('000000');
+    await userEvent.keyboard('{Enter}');
+    await vi.waitFor(() => expect(requests('verifyCheck').map((r) => r.body)).toEqual([{ code: '000000' }]));
+    await expect.element(screen.getByRole('alert')).toHaveTextContent(FAILED);
+    await expect.element(field).toHaveAttribute('aria-invalid', 'true');
+    await expect.element(field).toHaveFocus();
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 6]);
+
+    // The right code typed over it, then Enter: it goes once, and the visitor is verified.
+    await userEvent.keyboard(DEMO_CODE);
+    await expect.element(field).toHaveValue(DEMO_CODE);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByText(VERIFIED)).toBeVisible();
+    expect(requests('verifyCheck').map((r) => r.body)).toEqual([{ code: '000000' }, { code: DEMO_CODE }]);
+  });
+
+  it('enter_in_the_field_sends_a_pasted_code_once', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can you send my invoice?');
+    const field = screen.getByRole('textbox', { name: '6-digit code' });
+
+    // Codes pasted as they come, plain, with a space or with a dash, each over the last one, then
+    // Enter in the field: each goes once, as its six digits, as Confirm would send it.
+    const pasted = ['615204', '123 456', '123-456', `${DEMO_CODE.slice(0, 3)} ${DEMO_CODE.slice(3)}`];
+    for (const [index, text] of pasted.entries()) {
+      await pasteInto(field.element() as HTMLInputElement, text);
+      const digits = text.replace(/\D/g, '');
+      await expect.element(field, { message: text }).toHaveValue(digits);
+      await userEvent.keyboard('{Enter}');
+      await vi.waitFor(() => expect(requests('verifyCheck'), text).toHaveLength(index + 1));
+      expect(requests('verifyCheck').at(-1)?.body, text).toEqual({ code: digits });
+      if (digits !== DEMO_CODE) await expect.element(screen.getByRole('alert'), { message: text }).toHaveTextContent(FAILED);
+    }
+    await expect.element(screen.getByText(VERIFIED)).toBeVisible();
+    expect(requests('verifyCheck')).toHaveLength(pasted.length);
+  });
+
+  it('enter_in_the_field_sends_nothing_short_of_six_digits', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can you send my invoice?');
+    const field = screen.getByRole('textbox', { name: '6-digit code' });
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+
+    // Five digits, then Enter: Confirm is disabled until the sixth, and Enter does as it would, nothing.
+    await userEvent.type(field, DEMO_CODE.slice(0, 5));
+    await userEvent.keyboard('{Enter}');
+    // Time for a request to go out, had Enter sent one.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(requests('verifyCheck')).toEqual([]);
+    expect(screen.getByRole('alert').elements()).toHaveLength(0);
+    await expect.element(confirm).toBeDisabled();
+    await expect.element(field).toHaveValue(DEMO_CODE.slice(0, 5));
+    await expect.element(field).toHaveFocus();
+
+    // The sixth digit, then Enter: the code goes, once.
+    await userEvent.keyboard(`${DEMO_CODE.slice(5)}{Enter}`);
+    await expect.element(screen.getByText(VERIFIED)).toBeVisible();
+    expect(requests('verifyCheck').map((r) => r.body)).toEqual([{ code: DEMO_CODE }]);
+  });
+
+  it('enter_while_a_code_is_checked_sends_nothing_more', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can you send my invoice?');
+    const field = screen.getByRole('textbox', { name: '6-digit code' });
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+    // The verify route holds its answer until the test lets it land.
+    let release = () => {};
+    const until = new Promise<void>((resolve) => (release = resolve));
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'verifyCheck', status: 422, body: { error: 'kernel', code: 'invalid' }, until });
+
+    await userEvent.type(field, '000000');
+    await userEvent.keyboard('{Enter}');
+    await vi.waitFor(() => expect(requests('verifyCheck')).toHaveLength(1));
+    await expect.element(confirm).toHaveAttribute('aria-busy', 'true');
+    // While it is checked, Enter twice more in the field, then Tab to Confirm and press it: nothing
+    // more goes. (A pointer click would wait for the busy button, `aria-disabled`, to be enabled.)
+    await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard('{Enter}');
+    await userEvent.tab();
+    await expect.element(confirm).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard(' ');
+    // Time for a request to go out, had any press sent one.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(requests('verifyCheck')).toHaveLength(1);
+    release();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent(FAILED);
+    expect(requests('verifyCheck').map((r) => r.body)).toEqual([{ code: '000000' }]);
   });
 
   it('wrong_code_copy_is_uniform', async () => {

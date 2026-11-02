@@ -24,6 +24,8 @@ STATUS: dict[str, str] = {
     "denied": "{owner} decided not to go ahead",
     "expired": "This request timed out",
     "cancelled": "Cancelled",
+    # cancelled's line when the visitor's own booking closed a held request (`decide.supersede_if_booked`)
+    "closed_by_booking": "Closed: your booking replaced this request",
     "executed": "Done",
     "failed": "That didn't go through",
     "unknown": "Still confirming this",

@@ -396,6 +396,8 @@ def owner_refusal_key(reason: str | None, check: str | None) -> str:
 
 # The key of the owner's line for a held request a booking closed (`supersede_if_booked`, `set_state`).
 BOOKING_CLOSED_KEY = "cancelled_by_booking"
+# The key of the visitor's line for it: their own booking replaced the request (`supersede_if_booked`).
+BOOKING_CLOSED_STATUS = "closed_by_booking"
 
 # Every line `owner_refusal_key` picks is an owner line, and so is a booking's, checked at import: a missing one
 # would raise in `set_state` and leave a refusal at execution without its line (in T2, an action settled `unknown`).
@@ -404,6 +406,8 @@ if not {owner_refusal_key(reason, check) for reason in ("session_ended", "rules_
     raise RuntimeError("every refusal at execution has an owner line")
 if BOOKING_CLOSED_KEY not in render.OWNER_STATUS_KEYS:
     raise RuntimeError("a held request a booking closed has an owner line")
+if BOOKING_CLOSED_STATUS not in render.DECISION_STATUS_KEYS:
+    raise RuntimeError("a held request a booking closed has a visitor line")
 
 
 async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str = "decide",
@@ -500,8 +504,9 @@ async def supersede_if_booked(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
     only ever closes a request, never runs one, and the booking's own transaction takes no decision
     row. Ledgered `decide` `{decision_id, action_id, state, cancelled_by: "booking", booking_id,
     policy_version, auto_money_cap_cents}`, the Desk's active version and its cap as `_answers_now`
-    reads them (both left out only when it has none), and re-signed; the visitor's line is the
-    state's own, and the owner's (`owner_plain`, unsigned, on the owner's reads alone) says the
+    reads them (both left out only when it has none), and re-signed; the visitor's line says their
+    booking replaced the request (`closed_by_booking`, where a visitor's own cancel keeps the state's
+    "Cancelled"), and the owner's (`owner_plain`, unsigned, on the owner's reads alone) says the
     visitor booked before the owner answered. The row is locked and checked again before it changes,
     so two readers cancel it once."""
     if await _superseding_booking(ctx, row) is None:
@@ -517,7 +522,7 @@ async def supersede_if_booked(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
     version_row = await activation.active_version(ctx, locked.desk_id)
     if version_row is not None:
         summary.update(policy_version=version_row.version, auto_money_cap_cents=activation.version_cap(version_row))
-    await set_state(ctx, locked, "cancelled", summary=summary)
+    await set_state(ctx, locked, "cancelled", summary=summary, status=BOOKING_CLOSED_STATUS)
     return locked
 
 

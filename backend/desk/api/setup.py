@@ -61,7 +61,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
-  after its retry gets the fixed transition line instead. When the owner typed their own contact on the contact
+  after its retry gets the fixed transition line instead. When the owner's description stated discounts or special
+  prices for some customers, code's note that they aren't set up follows (`offers_not_set_up`). When the owner typed their own contact on the contact
   question, setup first asks, with code's two choices, whether to add them as a test client (`TEST_CLIENT_OFFER`).
   Code reads a yes or a no with no model turn: only a yes puts them on record as a client with that contact
   (`PUT /desks/{id}/people`), and either moves on to step `tools`. Any other answer, such as a request for another
@@ -205,6 +206,7 @@ from desk.api.prompts import (
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
     SETUP_OFFER_ANSWER_LINE,
+    SETUP_REOPEN_LINE,
     SETUP_PLAN_NOT_CONNECTED,
     SETUP_PLAN_NO_AMOUNT,
     SETUP_PLAN_TAG,
@@ -408,6 +410,11 @@ WEBSITE_FAILED_LABEL = "Couldn't read {host}"
 WEB_SEARCH_LABEL = "Searched the web: {query}"
 WEB_SEARCH_FAILED_LABEL = "Couldn't search the web just now"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
+# After the closing plan (or `QUESTIONS_DONE`), the offers the owner's description stated, in their words
+# (`offers_not_set_up`).
+OFFERS_NOT_SET_UP = "Offers you mentioned aren't set up yet:"
+OFFERS_NOT_SET_UP_WHY = ("Your Desk won't offer them to customers, since a discount reaches customers only through "
+                         "your rules. You can add one in Rules.")
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
 AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
@@ -855,7 +862,8 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False,
                       consent=interview.consent, question=interview.question, busy=interview.busy,
                       pending_card=interview.pending_card,
                       held_policy_keys=interview.held_policy_keys,
-                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry))
+                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry),
+                                             owner_decided=entry.owner_decided)
                                 for entry in interview.transcript[1:]
                                 if (entry.text or entry.choices or entry.card is not None) and
                                 (cards or entry.card is None) and (entry.role != "owner" or bool(entry.text))])
@@ -1275,7 +1283,8 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
         business_type=described.business_type, step="questions", consent=None,
         answers=SetupAnswers(summary=described.summary, business_name=desk.business.name,
                              owner_display_name=(reduce_name(body.owner_display_name)
-                                                 or reduce_name(described.owner_display_name) or None)),
+                                                 or reduce_name(described.owner_display_name) or None),
+                             offers=described.offers),
         transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None,
                           connected_apps=described.connected_apps,
                           search_queries=described.search_queries or None),
@@ -1897,7 +1906,8 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     """The answer turn's one message: a fact's actual question is wrapped; a limit keeps its fixed head. A limit
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
-    even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
+    even the price list the quote question's prices merge into, whose titles may be website or memory text. No turn
+    reads the offers the owner stated (`offers_not_set_up`), so none rewords one into a customer line. Every
     turn includes earlier owner answers and Claude replies since this topic began, including its follow-up asks.
     With more than one ask, the exchange includes the first ask too. It never includes tool labels or their content.
     On a limit question these replies were made under the same isolation;
@@ -1905,7 +1915,7 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     entries never enter history: its current answer appears only in `owner_answer`."""
     transcript = _history(interview, run_id)
     limit_turn = key in LIMIT_QUESTIONS.values()
-    so_far = interview.answers.model_dump_json(exclude_defaults=True, exclude={"suggested_fields"})
+    so_far = interview.answers.model_dump_json(exclude_defaults=True, exclude={"suggested_fields", "offers"})
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
     asked = next((entry.text for entry in reversed(transcript) if entry.question == key), "")
@@ -1916,6 +1926,8 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
               wrap(QUESTION_ASKED_TAG, asked)])
     if not limit_turn and not interview.business_tools_enabled:
         parts.insert(1, SETUP_PAYMENT_UNAVAILABLE_LINE)
+    if not limit_turn and interview.reopening:
+        parts.insert(1, SETUP_REOPEN_LINE)                       # the change's own turn alone
     parts.append(wrap(ANSWERS_SO_FAR_TAG, so_far))
     reads = [] if limit_turn else transcript
     for entry in reads:
@@ -2345,7 +2357,7 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
                                covered=", ".join(key for key in QUESTION_KEYS if closing or key in interview.covered),
                                uncovered="" if closing else ", ".join(key for key in QUESTION_KEYS
                                                                     if key not in interview.covered)),
-        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json(exclude={"suggested_fields"})),
+        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json(exclude={"suggested_fields", "offers"})),
         wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)),
     ]
     if not interview.business_tools_enabled:
@@ -2821,10 +2833,14 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     _hold_unless_kept(interview, key)
     stored_lines = {name: line for name in TIME_FRAME_LINES
                     if isinstance(line := getattr(interview.answers, name, None), str)}
+    # A change ("Change something") names the time frames it removes, and the owner's next answers are often more of
+    # it, so only the setup questions' answers before any change are checked for keeping them.
+    problems = (None if interview.reopens else
+                lambda drafted: owner_time_frame_errors(text, drafted, stored_lines))
     turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
                             [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS,
-                            problems=lambda drafted: owner_time_frame_errors(text, drafted, stored_lines),
-                            timeout_s=lambda: _turn_time_left(interview), retry_min_s=UNDERSTAND_RETRY_MIN_S)
+                            problems=problems, timeout_s=lambda: _turn_time_left(interview),
+                            retry_min_s=UNDERSTAND_RETRY_MIN_S)
     patch = turn.patch()
     if key in LIMIT_CHOICES:
         choice = next((choice for choice in LIMIT_CHOICES[key](interview.business_type)
@@ -3028,8 +3044,9 @@ def settle_plan(interview: Interview) -> None:
 
 
 async def close_setup(owner, engine, model, interview: Interview, *, answered: bool = False) -> None:
-    """Settle cards, end with the closing plan (or a fixed line without one), then finish, and offer to add the owner as
-    a test client when they typed their own contact (`_offer_test_client`): setup then waits on that answer.
+    """Settle cards, end with the closing plan (or a fixed line without one) and code's note on the offers the owner
+    stated (`offers_not_set_up`), then finish, and offer to add the owner as a test client when they typed their own
+    contact (`_offer_test_client`): setup then waits on that answer.
 
     The closing call's own reply comes before the plan unless `answered`: a reply of this run already answered the
     owner (`_TurnReplies.answered`), so it would say the same again. A run shows only its first call's text, so a
@@ -3062,8 +3079,16 @@ async def close_setup(owner, engine, model, interview: Interview, *, answered: b
             _unshow(closing.reply)            # asked again for a plan: this reply isn't kept
     if not plan:
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
+    if interview.answers.offers:
+        interview.transcript.append(Entry(role="claude", text=offers_not_set_up(interview.answers.offers)))
     finish(interview)
     _offer_test_client(interview)
+
+
+def offers_not_set_up(offers: Iterable[str]) -> str:
+    """The offers the owner stated, each in their words, and why the Desk won't offer them: no customer line can state
+    a discount, and none of setup's rules gives one."""
+    return "\n".join([OFFERS_NOT_SET_UP, *(f"- {offer}" for offer in offers), "", OFFERS_NOT_SET_UP_WHY])
 
 
 def accepted_jobs(interview: Interview) -> list[JobProposal]:
@@ -4240,9 +4265,10 @@ def _card(index: int, draft: RuleCardDraft) -> RuleCard:
 
 
 def owner_rule_answers(answers: SetupAnswers) -> SetupAnswers:
-    """One projection for rule inputs: suggested facts are unanswered, and summaries confer no job authority."""
+    """One projection for rule inputs: suggested facts are unanswered, summaries confer no job authority, and an offer
+    the owner stated is only told back to them as not set up."""
     return SetupAnswers.model_validate({"summary": "", **answers.model_dump(
-        exclude={"suggested_fields", "how_we_help", *answers.suggested_fields})})
+        exclude={"suggested_fields", "how_we_help", "offers", *answers.suggested_fields})})
 
 
 async def draft_cards(model: ModelClient, record: Record, business_type: BusinessType, answers: SetupAnswers,

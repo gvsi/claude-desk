@@ -229,6 +229,62 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
+/** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
+function failReads(path: string): { count: () => number; stop: () => void } {
+  let failing = true;
+  let count = 0;
+  worker.use(
+    http.get(path, () => {
+      if (!failing) return undefined;
+      count += 1;
+      return HttpResponse.json({ error: 'kernel', code: 'kernel_unavailable' }, { status: 503 });
+    }),
+  );
+  return {
+    count: () => count,
+    stop: () => {
+      failing = false;
+    },
+  };
+}
+
+/** The main Desk's Today, as the app reads it. */
+const todayReadPath = ROUTES.today.path.replace('{desk_id}', RIVERA.deskId);
+
+/** What "Last 7 days" says of a figure at zero, which it says only of a week its latest read gave. */
+const WEEK_ZERO_LINES = [
+  'No bookings in the last 7 days.',
+  'No conversations in the last 7 days.',
+  "You haven't stepped in.",
+  'Nothing turned down in the last 7 days.',
+  'Claude handled 0',
+  '$0 booked',
+] as const;
+
+/** The zero lines "Last 7 days" shows now. */
+function weekZeroLines(screen: RenderResult): string[] {
+  const text = region(screen, 'Last 7 days').element().textContent;
+  return WEEK_ZERO_LINES.filter((line) => text.includes(line));
+}
+
+/**
+ * Every zero line "Last 7 days" draws while it also says its read failed, even for a moment, from
+ * now until the test ends.
+ */
+function watchZeroLinesOverAFailure(screen: RenderResult): () => string[] {
+  const seen = new Set<string>();
+  const look = () => {
+    const block = screen.container.querySelector('.cd-week');
+    if (block === null || !block.textContent.includes(UNAVAILABLE)) return;
+    for (const line of WEEK_ZERO_LINES) if (block.textContent.includes(line)) seen.add(line);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => watch.disconnect());
+  return () => [...seen];
+}
+
 /** The full-page shapes, with the real heading and no exposed navigation or Today yet. */
 function expectLoadingPage(): void {
   const layer = document.querySelector('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
@@ -1315,6 +1371,125 @@ describe('Today', () => {
     expect(turnedDown.element().textContent).not.toContain(refusals()[0]?.reason_plain);
   });
 
+  it('this_week_holds_back_its_zero_lines_while_its_read_fails', { timeout: 15_000 }, async () => {
+    // A quiet week is read, then Today's refreshes fail. "Last 7 days" says so over what it read,
+    // with "Try again", and says none of its zero lines while it can't check them, nor while "Try
+    // again" reads. Once a read works, the line goes and the zero lines are back.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet', retryScale: 0 });
+    const block = region(screen, 'Last 7 days');
+    await expect.element(block.getByText('No bookings in the last 7 days.', { exact: true })).toBeVisible();
+    const quiet = ['No bookings in the last 7 days.', 'No conversations in the last 7 days.', 'Nothing turned down in the last 7 days.'];
+    expect(weekZeroLines(screen)).toEqual(quiet);
+    expect(block.getByRole('alert').elements()).toHaveLength(0);
+
+    const drawn = watchZeroLinesOverAFailure(screen);
+    const failing = failReads(todayReadPath);
+    const line = block.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    const retry = block.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual([]);
+    // Each part keeps its title, and Turned down its way to Safety. The flat bars go too: all they
+    // say is that no day had a booking.
+    const titles = ['Bookings', 'Handled by Claude, or by you', 'Turned down'];
+    for (const title of titles) await expect.element(block.getByRole('heading', { level: 3, name: title, exact: true })).toBeVisible();
+    expect(block.getByRole('list', { name: 'Bookings per day' }).elements()).toHaveLength(0);
+    await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+    // The line sits above the three parts, inside the card.
+    const notice = block.getByRole('alert').element();
+    expect(notice.closest('.cd-week')).not.toBeNull();
+    const bookings = block.getByRole('heading', { level: 3, name: 'Bookings', exact: true }).element();
+    expect(notice.compareDocumentPosition(bookings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // It stays while the polls read again and fail.
+    const failed = failing.count();
+    await vi.waitFor(() => expect(failing.count()).toBeGreaterThanOrEqual(failed + 2), { timeout: 4_000 });
+    expect(line.elements()).toHaveLength(1);
+    expect(weekZeroLines(screen)).toEqual([]);
+
+    // "Try again" reads again: busy while that read is out, and still no zero line.
+    const read = holdReads(todayReadPath);
+    await retry.click();
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    expect(line.elements()).toHaveLength(1);
+    expect(weekZeroLines(screen)).toEqual([]);
+
+    // A read that works takes the line away and brings the zero lines and the bars back.
+    failing.stop();
+    read.release();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.element(block.getByText('No bookings in the last 7 days.', { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(quiet);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    expect(block.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(drawn()).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'a_week_with_bookings_and_no_step_in',
+      figures: week({
+        bookings: 2,
+        booked_cents: 37_800,
+        conversations: 3,
+        handled: 3,
+        stepped_in: 0,
+        stopped: 2,
+        days: ZERO_DAYS.map((d, i) => ({ ...d, bookings: i === 4 || i === 6 ? 1 : 0 })),
+      }),
+      kept: ['$378 booked', '2 bookings, 1 so far today', 'Claude handled 3', '2 requests'],
+      held: ["You haven't stepped in."],
+      bars: 7,
+    },
+    {
+      name: 'a_week_the_owner_stepped_into_every_chat_of',
+      figures: week({ conversations: 2, handled: 0, stepped_in: 2, stopped: 1 }),
+      kept: ['You stepped in 2 times', '1 request'],
+      held: ['No bookings in the last 7 days.', 'Claude handled 0'],
+      bars: 0,
+    },
+    {
+      // A booking with no amount taken, as the API sends one: the count and its bar stay, the $0 doesn't.
+      name: 'a_week_with_a_booking_and_nothing_booked',
+      figures: week({
+        bookings: 1,
+        booked_cents: 0,
+        conversations: 1,
+        handled: 1,
+        days: ZERO_DAYS.map((d, i) => ({ ...d, bookings: i === 6 ? 1 : 0 })),
+      }),
+      kept: ['1 booking, 1 so far today', 'Claude handled 1'],
+      held: ["You haven't stepped in.", 'Nothing turned down in the last 7 days.', '$0 booked'],
+      bars: 7,
+    },
+  ])('this_week_keeps_its_figures_while_its_read_fails_$name', { timeout: 15_000 }, async ({ figures, kept, held, bars }) => {
+    // A week with figures is read, then Today's refreshes fail. Its figures above zero stay, with
+    // the line that says the read failed; only that week's zero lines are held back, until a read works.
+    await injectToday((t) => ({ ...t, this_week: figures }));
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const block = region(screen, 'Last 7 days');
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(held);
+
+    const drawn = watchZeroLinesOverAFailure(screen);
+    const failing = failReads(todayReadPath);
+    const line = block.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    await expect.element(block.getByRole('button', { name: 'Try again' })).toBeVisible();
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual([]);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(bars);
+    await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+
+    failing.stop();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(held);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    expect(drawn()).toEqual([]);
+  });
+
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
     // The signed Today boards draw each day's bar 24 px wide, centered over its initial in one of
     // seven equal columns 6 px apart, at every width: a busy day is a taller bar, never a wider one.
@@ -2021,9 +2196,10 @@ describe('Today', () => {
     await userEvent.keyboard('{Enter}');
     await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
     expect(document.activeElement).toBe(live.element());
-    // The Today line above loses "held 1 for you" and may take a row less on a phone, which the
-    // browser's scroll anchoring takes off the column's scroll; the focus scrolls nothing itself.
+    // Callbacks aren't counted in the Today line, so marking one done leaves its height and the
+    // column's scroll unchanged; the focus scrolls nothing itself.
     const shrunk = lineBefore - todayLine();
+    expect(shrunk).toBe(0);
     expect(column.scrollTop).toBe(before.column - shrunk);
     expect(window.scrollY).toBe(before.window);
   });
@@ -2989,16 +3165,42 @@ describe("Today's How your Desk works", () => {
     expectNoHorizontalScroll();
   });
 
-  it('how_your_desk_works_counts_today_from_the_briefing', async () => {
-    // Handled is the night's answers and bookings; held, what needs the owner; turned down, the
-    // requests refused. All from the one Today read, each a link to where they are.
+  it('how_your_desk_works_counts_only_held_requests_like_safety', async () => {
+    openCallback();
+    openCallback('ses-visitor-web');
+    const items = await needsYouRead();
+    const seeded = items.find((item) => item.decision != null);
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const newer: NeedsYouItem = {
+      ...seeded,
+      decision: { ...seeded.decision, decision_id: 'dec-newer', reason_plain: 'A visitor asked to book Sunday at 10:00 pm.' },
+      held_at: new Date().toISOString(),
+    };
+    // Two held requests and two callbacks: the aggregate remains four Needs you cards.
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [newer, ...items] });
+    await injectToday((t) => ({ ...t, needs_you_count: 4 }));
+    const { screen, router } = await renderRoute(TODAY);
+    const how = region(screen, 'How your Desk works');
+    const held = how.getByRole('link', { name: 'held 2 for you', exact: true });
+    await expect.element(held).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
+    await expect.element(held).toHaveAttribute('href', `${TODAY}#request-${seeded.decision.decision_id}`);
+    await held.click();
+    await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
+    await router.navigate(`${DESK}/safety`);
+    await expect.element(screen.getByRole('link', { name: '2 held for you', exact: true })).toBeVisible();
+  });
+
+  it('how_your_desk_works_counts_handled_and_refused_from_the_briefing', async () => {
+    // Handled is the night's answers and bookings; turned down, the requests refused. Held comes
+    // from Needs you's requests, even when Today's aggregate differs. Each links to where it is.
     await injectToday((t) => ({ ...t, needs_you_count: 4, briefing: { ...t.briefing, answers: 3, bookings: 2, turned_down: 1 } }));
     const { screen } = await renderRoute(TODAY);
     const how = region(screen, 'How your Desk works');
     const line = () => how.element().querySelector<HTMLElement>('.cd-how__today');
     await vi.waitFor(() => expect(line()).not.toBeNull());
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    expect(line()!.textContent).toBe('Today, Claude handled 5 on its own held 4 for you turned down 1 request');
+    expect(line()!.textContent).toBe('Today, Claude handled 5 on its own held 1 for you turned down 1 request');
     const outcomes = [...line()!.querySelectorAll('.cd-how__outcome')];
     expect(outcomes.map((o) => o.querySelector('.cd-status-dot')?.className)).toEqual([
       'cd-status-dot cd-status-dot--handled',
@@ -3006,7 +3208,7 @@ describe("Today's How your Desk works", () => {
       'cd-status-dot cd-status-dot--refused',
     ]);
     const links = outcomes.map((o) => o.querySelector('a'));
-    expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 4 for you', 'turned down 1 request']);
+    expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 1 for you', 'turned down 1 request']);
     expect(links.map((a) => a?.getAttribute('href'))).toEqual([
       `/app/${RIVERA.deskId}/conversations`,
       `/app/${RIVERA.deskId}/today#request-${seededHold().decision_id}`,
@@ -3024,28 +3226,41 @@ describe("Today's How your Desk works", () => {
     expectComputed(count, { fontWeight: '600', fontVariantNumeric: 'tabular-nums' });
     expect(getComputedStyle(count).color).not.toBe(getComputedStyle(line()!).color);
 
-    // "held 4 for you" brings the oldest held request into focus in Needs you.
-    await how.getByRole('link', { name: 'held 4 for you', exact: true }).click();
+    // "held 1 for you" brings the oldest held request into focus in Needs you.
+    await how.getByRole('link', { name: 'held 1 for you', exact: true }).click();
     await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
   });
 
-  it('how_your_desk_works_links_to_needs_you_when_only_a_callback_waits', async () => {
+  it('how_your_desk_works_omits_held_when_only_callbacks_wait', async () => {
+    openCallback();
+    openCallback('ses-visitor-web');
+    const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
+    await injectToday((t) => ({ ...t, needs_you_count: 2 }));
+    const { screen, router } = await renderRoute(TODAY);
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    expect(how.element().querySelector('.cd-how__today')?.textContent).toBe('Today, Claude handled 2 on its own');
+    expect(how.element().querySelector('.cd-how__outcome .cd-status-dot--held')).toBeNull();
+    expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
+    await router.navigate(`${DESK}/safety`);
+    await expect.element(screen.getByRole('heading', { name: 'Safety', exact: true })).toBeVisible();
+    expect(screen.getByRole('link', { name: /held for you/ }).elements()).toHaveLength(0);
+  });
+
+  it('how_your_desk_works_draws_no_quiet_line_when_a_callback_waits', async () => {
     openCallback();
     const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
     mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
-    await injectToday((t) => ({ ...t, needs_you_count: 1 }));
-    const { screen, router } = await renderRoute(TODAY);
-    const how = region(screen, 'How your Desk works');
-    const link = how.getByRole('link', { name: 'held 1 for you', exact: true });
-    await expect.element(link).toBeVisible();
-    await expect.element(link).toHaveAttribute('href', `${TODAY}#needs-you`);
-    await link.click();
-    await vi.waitFor(() => expect(document.activeElement).toBe(region(screen, 'Needs you').element()));
-    expect(router.state.location.hash).toBe('#needs-you');
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
+    expect(region(screen, 'How your Desk works').element().querySelector('.cd-how__today')).toBeNull();
   });
 
   it('how_your_desk_works_says_a_quiet_day_and_waits_for_the_answers', async () => {
     // A quiet day: one quiet line in place of the outcomes, with no dots or links.
+    mockStore.reset('rivera_quiet');
     await injectToday((t) => ({ ...t, needs_you_count: 0, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
     const quiet = await renderRoute(TODAY);
     const how = region(quiet.screen, 'How your Desk works');
@@ -3075,6 +3290,56 @@ describe("Today's How your Desk works", () => {
     const how = region(screen, 'How your Desk works');
     expect(how.getByRole('listitem').elements()).toHaveLength(3);
     expect(how.element().querySelector('.cd-how__today')).toBeNull();
+  });
+
+  it('how_your_desk_works_keeps_counts_hidden_until_the_reconnected_read_succeeds', async () => {
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    const read = holdReads(needsYouPath);
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
+
+    mockStore.world.decisions.clear();
+    onlineManager.setOnline(true);
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.fetchStatus).toBe('fetching'));
+    await nextFrames();
+    expect(how.element().querySelector('.cd-how__today')).toBeNull();
+    read.release();
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0);
+
+    // An ordinary refresh keeps the current line while its response is pending.
+    const poll = holdReads(needsYouPath);
+    const refresh = queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(poll.held()).toBeGreaterThan(0));
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    poll.release();
+    await refresh;
+  });
+
+  it('how_your_desk_works_hides_and_recovers_counts_after_a_needs_you_refresh_fails', async () => {
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
+
+    mockStore.reset('rivera');
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
+    await allowTheSeededRequest(screen);
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0));
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
   });
 
   it('how_your_desk_works_hides_kept_counts_when_a_refresh_fails', async () => {
@@ -3630,25 +3895,6 @@ describe("Today's Demo inbox", () => {
 
   /** The owner's read of one decision, as the app sends it. */
   const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
-
-  /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
-  function failReads(path: string): { count: () => number; stop: () => void } {
-    let failing = true;
-    let count = 0;
-    worker.use(
-      http.get(path, () => {
-        if (!failing) return undefined;
-        count += 1;
-        return HttpResponse.json({ error: 'kernel', code: 'kernel_unavailable' }, { status: 503 });
-      }),
-    );
-    return {
-      count: () => count,
-      stop: () => {
-        failing = false;
-      },
-    };
-  }
 
   /** The top of `el` is inside the window, where the owner can see it. */
   function expectInView(el: Element): void {

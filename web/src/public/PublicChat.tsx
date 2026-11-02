@@ -802,6 +802,20 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const newChatRef = useRef<HTMLButtonElement>(null);
+  const verifyRef = useRef<HTMLDivElement | null>(null);
+  const verifyLeftWithFocus = useRef(false);
+  const verifyPlace = useCallback((node: HTMLDivElement | null) => {
+    if (node === null && verifyRef.current?.contains(document.activeElement)) verifyLeftWithFocus.current = true;
+    verifyRef.current = node;
+  }, []);
+  // The entire verify form leaves when its session ends, so its own focus hand-off cannot run.
+  useLayoutEffect(() => {
+    const left = verifyLeftWithFocus.current;
+    verifyLeftWithFocus.current = false;
+    if (left && chat.state.error === 'session' && document.activeElement === document.body) {
+      newChatRef.current?.focus({ preventScroll: true });
+    }
+  });
   // The chat's own path, without the owner's `?preview=`: the visitor cookie the preview's chat
   // runs on is the one `/d/<slug>` resumes. Setup's preview sits inside an owner screen, so its
   // links note no chat to go back to.
@@ -1007,16 +1021,17 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const verifyUnder = (row: ChatRow): ReactNode[] =>
     verifyRow !== null && rowKey(row) === verifyRow && (verified || (ready && !(ownerHere && verifyClosed === verifyRow)))
       ? [
-          <VerifyInline
-            key="verify"
-            status={chat.verifyStatus}
-            verified={verified}
-            assurance={chat.session?.assurance ?? 'none'}
-            language={language}
-            onSubmit={chat.verify}
-            onAskForOwner={chat.ownerInChat ? closeVerify : askForOwner}
-            askWaits={!chat.ownerInChat && sendHeld}
-          />,
+          <div key="verify" ref={verifyPlace}>
+            <VerifyInline
+              status={chat.verifyStatus}
+              verified={verified}
+              assurance={chat.session?.assurance ?? 'none'}
+              language={language}
+              onSubmit={chat.verify}
+              onAskForOwner={chat.ownerInChat ? closeVerify : askForOwner}
+              askWaits={!chat.ownerInChat && sendHeld}
+            />
+          </div>,
         ]
       : [];
 

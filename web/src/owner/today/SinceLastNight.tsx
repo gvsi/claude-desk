@@ -1,9 +1,10 @@
 import { useId, type ReactNode, type Ref } from 'react';
 
 import type { BriefingItem, Today } from '../../api/views.ts';
-import { Button, Card, EmptyState, Notice, SectionHeader, TextLink } from '../../ds/index.ts';
+import { Card, EmptyState, SectionHeader, TextLink } from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { ReadFailed } from '../ReadFailed.tsx';
 import { useToday } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { BriefingRow, isShown } from './BriefingRow.tsx';
@@ -97,16 +98,7 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   let body;
   if (briefing === undefined) {
     body = failure !== null ? (
-      <Notice
-        tone="error"
-        action={
-          <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-            Try again
-          </Button>
-        }
-      >
-        {failure.line}
-      </Notice>
+      <ReadFailed failure={failure} />
     ) : (
       <p className="cd-today__loading cd-type-meta" role="status">
         Reading what happened since last night

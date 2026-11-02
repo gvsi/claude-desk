@@ -18,10 +18,11 @@ import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { NO_BUSINESS_TOOLS, businessTools, type BusinessTools } from '../connectors/catalog.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
+import { ReadFailed } from '../ReadFailed.tsx';
 import { rulesQuery } from '../rules/RuleDraftReview.tsx';
 import { ruleWords, targetWords } from '../rules/ruleWords.ts';
 import { useReadFailure } from '../useReadFailure.ts';
-import { PEOPLE_LABEL, ReadFailed, peoplePath, usePeople } from './PeoplePage.tsx';
+import { PEOPLE_LABEL, peoplePath, usePeople } from './PeoplePage.tsx';
 
 import './People.css';
 
