@@ -140,23 +140,20 @@ function Target({ target }: { target: RuleTarget }) {
 const SHARED_RULE = 'Shared rule';
 
 /**
- * The connector's name, then "Shared rule" for a shared rule, then a group's words the rule applies
- * to, then the side's words, joined by " · ". A rule that applies to tools by title names them on a
- * line of their own under it, set off as user text, so no title sits mid-line. A built-in connector is
- * named alone; an external one keeps its Mock badge (`ConnectorName`), so a mock is never named
- * without saying so.
+ * The connector's name, then "Shared rule" for a shared rule, then the side's words, joined by " · ".
+ * What the rule applies to isn't said here: the row's title names it, and a side names it when it
+ * isn't the title. A built-in connector is named alone; an external one keeps its Mock badge
+ * (`ConnectorName`), so a mock is never named without saying so.
  */
 function MetaLine({
   connector,
   shared = false,
-  appliesTo,
   words,
   tag,
   strong,
 }: {
   connector?: ConnectorView;
   shared?: boolean;
-  appliesTo?: RuleTarget;
   words: readonly RuleWord[];
   tag?: boolean;
   /** The line's value changed: in weight 520. */
@@ -167,29 +164,18 @@ function MetaLine({
   // The review's rows name the connector without "Built in"; an app keeps its Mock badge.
   if (connector) parts.push(<ConnectorName key="connector" connector={connector} size="inline" hideBuiltIn />);
   if (shared) parts.push(<span key="shared">{SHARED_RULE}</span>);
-  if (says(appliesTo) && typeof appliesTo === 'string') parts.push(<span key="target">{appliesTo.trim()}</span>);
   if (text !== '') parts.push(<span key="words">{text}</span>);
-  // The tools line is the rule's target, not its words, so it takes neither the words' weight nor their tag.
-  const titles =
-    says(appliesTo) && typeof appliesTo !== 'string' ? (
-      <p className="cd-change-review__meta cd-type-meta">
-        <ToolTitleList titles={appliesTo.titles} />
-      </p>
-    ) : null;
-  if (parts.length === 0) return titles;
+  if (parts.length === 0) return null;
   return (
-    <>
-      <p className={`cd-change-review__meta cd-type-meta${strong ? ' cd-change-review__strong' : ''}`}>
-        {parts.flatMap((part, index) => (index === 0 ? [part] : [<span key={`sep-${index}`}> · </span>, part]))}
-        {tag ? (
-          <>
-            {' '}
-            <ChangedTag />
-          </>
-        ) : null}
-      </p>
-      {titles}
-    </>
+    <p className={`cd-change-review__meta cd-type-meta${strong ? ' cd-change-review__strong' : ''}`}>
+      {parts.flatMap((part, index) => (index === 0 ? [part] : [<span key={`sep-${index}`}> · </span>, part]))}
+      {tag ? (
+        <>
+          {' '}
+          <ChangedTag />
+        </>
+      ) : null}
+    </p>
   );
 }
 
@@ -242,8 +228,22 @@ function hasTarget(side: ChangeSide | null): boolean {
   return says(side?.appliesTo);
 }
 
+/** Whether two targets name the same tools, or are the same group's words. */
+function sameTarget(a: RuleTarget, b: RuleTarget): boolean {
+  if (typeof a === 'string' || typeof b === 'string') return typeof a === typeof b && String(a).trim() === String(b).trim();
+  return a.titles.length === b.titles.length && a.titles.every((title, index) => title === b.titles[index]);
+}
+
+/** The side without what it applies to. */
+function withoutTarget({ appliesTo: _target, ...side }: ChangeSide): ChangeSide {
+  return side;
+}
+
 function Row({ row }: { row: ChangeRowView }) {
-  const single = row.after ?? row.before;
+  const shown = row.after ?? row.before;
+  // A row with one side names its target once, in its title, as a changed row does: a target that is
+  // the title isn't said again on the meta line or the side.
+  const single = shown && shown.appliesTo !== undefined && sameTarget(shown.appliesTo, row.title) ? withoutTarget(shown) : shown;
   const showsBoth = row.change === 'changed' && row.before !== null && row.after !== null;
   // A changed target is tagged on the after side's target line; without the screen's words for
   // it, the title carries the tag, so the change is never unmarked.
@@ -271,7 +271,7 @@ function Row({ row }: { row: ChangeRowView }) {
           </>
         ) : single ? (
           <>
-            <MetaLine connector={row.connector} shared={row.shared} appliesTo={single.appliesTo} words={single.words} />
+            <MetaLine connector={row.connector} shared={row.shared} words={single.words} />
             <div className="cd-change-review__sides">
               {/* A removed rule is what goes; an added rule, or a tool turned on, is what applies. */}
               <Side label={row.after ? 'After' : 'Before'} side={single} changed={null} />
