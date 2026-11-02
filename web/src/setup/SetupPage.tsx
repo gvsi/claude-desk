@@ -378,7 +378,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
   };
   switch (shownStep) {
     case 'questions':
-      body = <QuestionsStep state={state} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
+      body = <QuestionsStep state={state} hours={desk?.hours[0]} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
       break;
     case 'tools':
       body = <ToolsStep state={state} business={name} onContinue={() => moveTo('rules')} />;

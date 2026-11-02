@@ -20,10 +20,12 @@ import {
   type RuleMode,
   type StatusTone,
 } from '../ds/index.ts';
+import { businessTools } from '../owner/connectors/catalog.ts';
 import { checkStatus, type CheckStatus } from '../owner/rules/checkStatus.ts';
 import { capOf } from '../owner/rules/drafts.ts';
 import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
+import { situationSentence } from './situationSentence.ts';
 import { SETUP_COPY } from './copy.ts';
 import { useLanding } from './landing.ts';
 import { aroundBusiness, setupRulesQuery, useChangeSomething, useOpensAtTop } from './shared.ts';
@@ -103,6 +105,8 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
   // Real situations and What customers will read each open at their top, as setup's steps do.
   useOpensAtTop(view);
   const draft = useQuery(setupRulesQuery(id));
+  // A situation's rule is read against the Desk's tools, as Rules reads them.
+  const tools = useQuery({ queryKey: ['setupTools', id] as const, queryFn: () => request('setupTools', { params: { id } }), refetchOnWindowFocus: false });
   const people = useQuery({ ...peopleQuery(state.desk_id), refetchOnWindowFocus: false });
   const situations = useQuery({
     queryKey: ['setupSituations', id] as const,
@@ -171,6 +175,7 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
                       outcome={result.outcome}
                       dependsOnReview={result.depends_on_review}
                       reason={result.reason_plain}
+                      sentence={situationSentence({ situation, result, matches }, draft.data, { business: businessTools(tools.data?.tools ?? []), people: people.data, tools: tools.data?.tools, cards: draft.data.cards })}
                       matches={matches}
                       index={index}
                       live={landing.live}

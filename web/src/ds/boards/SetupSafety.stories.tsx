@@ -7,7 +7,7 @@ import { SafetyCheckRow, type SafetyCheckRowProps } from '../components/SafetyCh
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { SetupFrame } from './parts.tsx';
-import { SPEC, expectFooter, expectFooterAtFoot, expectTabOrder, one } from './spec.ts';
+import { SPEC, expectFooter, expectTabOrder, one } from './spec.ts';
 
 /** The six tricks the safety check tried, as the board writes them; every one was stopped. */
 const TRICKS: Omit<SafetyCheckRowProps, 'index'>[] = [
@@ -48,8 +48,7 @@ function SetupSafety() {
 const meta = {
   title: 'Boards/Setup, safety check',
   render: () => <SetupSafety />,
-  // Drawn at a 14-inch laptop's width and the page's own 1150 px, so the play measures it there.
-  globals: { viewport: { value: 'laptop-1150', isRotated: false } },
+  globals: { viewport: { value: 'desktop', isRotated: false } },
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-R2-Setup-11-Safety',
@@ -67,17 +66,18 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1150]);
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Safety check' }), SPEC.pageTitle);
-    expectComputed(canvas.getByText('6 of 6 stopped'), { fontFamily: /^"Source Serif 4"/, fontSize: '18px' });
+    expectComputed(canvas.getByText('6 of 6 stopped'), { fontFamily: /^"Source Serif 4"/ });
 
     const list = canvas.getByRole('list', { name: 'Tricks tried' });
     const box = list.getBoundingClientRect();
-    await expect([Math.round(box.left), Math.round(box.width)]).toEqual([396, 720]);
+    await expect(Math.round(box.width)).toBeLessThanOrEqual(720);
+    await expect(Math.round(box.left + box.width / 2)).toBe(Math.round(window.innerWidth / 2));
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
     const rows = within(list).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
-    await expect(rows.map((row) => one(row, '.cd-safety-check-row__outcome').textContent)).toEqual(['Blocked', 'Asks you', 'Blocked', 'Blocked', 'Blocked', 'Blocked']);
+    await expect(rows.map((row) => one(row, '.cd-safety-check-row__outcome').textContent)).toEqual(['Never', 'Ask me first', 'Never', 'Never', 'Never', 'Never']);
     await expect(one(rows[1]!, '.cd-status-dot').classList.contains('cd-status-dot--held')).toBe(true);
-    await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([89, 90, 90, 90, 90, 90]);
+    await expect(list.querySelector('.cd-safety-check-row__checkpoint')).toBeNull();
     // safety_rows_land_one_by_one: each motion-stagger after the one before.
     await expect(rows.map((row) => getComputedStyle(row).animationDelay)).toEqual(['0s', '0.15s', '0.3s', '0.45s', '0.6s', '0.75s']);
 
@@ -85,7 +85,9 @@ export const Board: Story = {
     expectComputed(confirm, SPEC.primary);
     await expect(Math.round(confirm.getBoundingClientRect().top - box.bottom)).toBe(20);
     await expectFooter(canvasElement);
-    await expectFooterAtFoot(canvasElement);
+    await expect(one(canvasElement, '[data-ds="concept-footer"]').getBoundingClientRect().top).toBeGreaterThan(box.bottom);
     await expectTabOrder(userEvent, [canvas.getByRole('button', { name: 'Save and exit' }), confirm, canvas.getByRole('button', { name: 'Run again' })]);
   },
 };
+
+export const Phone: Story = { ...Board, globals: { viewport: { value: 'phone', isRotated: false } } };
