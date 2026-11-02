@@ -134,6 +134,8 @@ export interface DeskRecord {
   summary: Omit<DeskSummary, 'setup'>;
   /** The active rules version, with its money cap. */
   policy: PolicyVersionOut;
+  /** Retired versions' cards, retained only while a held decision on this Desk needs them. */
+  versions: Map<number, RuleCard[]>;
   ledger: LedgerEntry[];
   /** The kernel's open status for the Desk's public page, by language; null when it makes no claim. */
   openStatus: Record<Language, OpenStatus> | null;
@@ -373,6 +375,7 @@ export class MockWorld {
       brand: { ...BUSINESS.brand },
       summary: { ...summary, business_name: BUSINESS.name, answering: true },
       policy,
+      versions: new Map(),
       ledger: [],
       openStatus,
       drafts: new Map(),
@@ -626,7 +629,7 @@ export class MockWorld {
         discount_bp: spec.discountBp ?? null,
         amount_cents: spec.amountCents ?? null,
         recipient: null,
-        starts_at: null,
+        starts_at: spec.startsAt ?? null,
       },
       outcome: spec.outcome,
       state,
@@ -793,6 +796,7 @@ export class MockWorld {
       ledger_seq: ledgerSeq,
       signature: sign(`${decisionId}:${state}`),
     };
+    this.pruneVersions(desk);
     return record.decision;
   }
 
@@ -806,6 +810,7 @@ export class MockWorld {
     record.decision = { ...decision, state: 'refused_at_execution', owner_plain: ownerPlain,
       visitor_plain: statusLine(this.sessions.get(decision.session_id)?.language ?? 'en', 'refused_at_execution', decision.action?.tool ?? null, deskOwner(desk)),
       inbox: [], ledger_seq: entry.seq, signature: sign(`${decision.decision_id}:refused_at_execution`) };
+    this.pruneVersions(desk);
     return record.decision;
   }
 
@@ -833,6 +838,7 @@ export class MockWorld {
       ledger_seq: entry.seq,
       signature: sign(`${record.decision.decision_id}:${state}`),
     };
+    this.pruneVersions(desk);
     return record.decision;
   }
 
@@ -857,6 +863,7 @@ export class MockWorld {
       ledger_seq: cancelled.seq,
       signature: sign(`${decisionId}:cancelled`),
     };
+    this.pruneVersions(desk);
     this.emit(session, statusEvent('resolved', record.decision));
     return record.decision;
   }
@@ -1245,6 +1252,16 @@ export class MockWorld {
     desk.policy = { ...desk.policy, cards: [...desk.policy.cards, ...cards.map((card) => ({ ...card }))] };
   }
 
+  /** Drops retired rule cards once no held request on this Desk needs their version. */
+  private pruneVersions(desk: DeskRecord): void {
+    const held = new Set([...this.decisions.values()]
+      .filter((record) => record.deskId === desk.summary.desk_id && record.decision.state === 'held')
+      .map((record) => record.decision.policy_version));
+    for (const version of desk.versions.keys()) {
+      if (version === desk.policy.version || !held.has(version)) desk.versions.delete(version);
+    }
+  }
+
   /**
    * A draft of the Desk's rules with `add` merged in by `card_id`, as the kernel drafts an
    * approval's card diff: the next version, checked, and stored until the owner confirms it.
@@ -1338,7 +1355,12 @@ export class MockWorld {
       return tool === undefined || entry.definition_sha256 !== listedHash(tool);
     });
     if (drifted) return 'conflict';
+    // The seed's version can retire before ever being confirmed, with requests still held under it.
+    const needed = [...this.decisions.values()].some((record) => record.deskId === desk.summary.desk_id
+      && record.decision.state === 'held' && record.decision.policy_version === desk.policy.version);
+    if (needed) desk.versions.set(desk.policy.version, structuredClone(desk.policy.cards));
     desk.policy = this.versionOf(desk, record, 'active');
+    this.pruneVersions(desk);
     desk.drafts.delete(version);
     for (const entry of record.enables) {
       desk.tools = desk.tools.map((tool) =>

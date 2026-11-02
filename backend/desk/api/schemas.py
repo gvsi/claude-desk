@@ -411,6 +411,14 @@ class NeedsYouItem(BaseModel):
         return self
 
 
+RefusalCause = Literal[
+    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
+    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
+    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
+    "agent_limit", "other_copy", "no_rule",
+]
+
+
 class ConversationSummary(BaseModel):
     """A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
     anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
@@ -425,7 +433,14 @@ class ConversationSummary(BaseModel):
     entries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release
     (`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the
     owner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later
-    request still held, expired or cancelled, or a handoff card opening, clears it to null."""
+    request still held, expired or cancelled, or a handoff card opening, clears it to null.
+
+    An agent's outcome carries the facts behind it, read from the kernel's rows, never from anyone's words:
+    `latest_outcome_starts_at`, the booking's start (`visit_booked`, from the booking decision's action);
+    `latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored
+    payment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide
+    (`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its
+    outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview."""
 
     session_id: str
     kind: ActorKind
@@ -439,6 +454,9 @@ class ConversationSummary(BaseModel):
     latest_outcome: Literal["visit_booked", "deposit_paid", "turned_down", "quoted", "lead_captured",
                             "owner_declined", "called_back", "document_sent"] | None
     replayed: bool = False                  # recorded history written into the copy (`owner_reads.history_sessions`)
+    latest_outcome_starts_at: AwareDatetime | None = None
+    latest_outcome_cents: int | None = None
+    latest_outcome_cause: RefusalCause | None = None
 
 
 class OwnerTranscript(BaseModel):
@@ -473,14 +491,6 @@ class OwnerMessageIn(BaseModel):
 
     text: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
     kind: Literal["say", "whisper"]
-
-
-RefusalCause = Literal[
-    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
-    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
-    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
-    "agent_limit", "other_copy", "no_rule",
-]
 
 
 class BriefingItem(BaseModel):
@@ -626,8 +636,8 @@ class PaymentConflict(BaseModel):
 OWNER_NAME_CHARS = "A-Za-zÀ-ÿ' -"
 OWNER_NAME_PATTERN = rf"^[{OWNER_NAME_CHARS}]{{1,40}}$"
 # What setup can wait on: a topic (`QuestionKey`), then, once the plan is closed, whether to add the owner as a test
-# client (`setup.TEST_CLIENT_OFFER`). Code asks that one and reads its answer with no model turn, so it is no topic and
-# no structured output names it.
+# client (`setup.TEST_CLIENT_OFFER`). Code asks that one and reads a yes or a no with no model turn (anything else goes
+# to setup's consultant as the owner's answer), so it is no topic and no structured output names it.
 TestClientQuestion = Literal["test_client"]
 SetupQuestion = Literal[QuestionKey, TestClientQuestion]
 
@@ -711,6 +721,17 @@ class SetupProposalIn(BaseModel):
         return self
 
 
+class SetupReopenIn(BaseModel):
+    """`POST /api/owner/setup/{id}/reopen`: "Change something", the owner's message to Claude from a step after the
+    questions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),
+    makes a repeat answer the interview as the first left it instead of sending the message twice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    idempotency_key: IdempotencyKey
+
+
 class SetupSuggestionsIn(BaseModel):
     """Finish setup questions with the current suggestions; no additional answers are supplied."""
 
@@ -720,12 +741,15 @@ class SetupSuggestionsIn(BaseModel):
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
     owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
-    only to a card message, with role `claude` and empty text."""
+    only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+    themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
+    false. Read-only: it only says what happened."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
     choices: list[Choice] = []
     card: ProposalCard | None = None
+    owner_decided: bool = False
 
 
 class SetupPublicLine(BaseModel):

@@ -62,7 +62,12 @@ function renameBusiness(name: string): void {
 function reviewRows(screen: { container: HTMLElement }): { title: string; before: string | null; after: string | null }[] {
   const words = (el: Element | null) => (el === null ? null : (el.textContent?.replace(/\s+/g, ' ').trim() ?? ''));
   return [...screen.container.querySelectorAll('.cd-change-review__row')].map((row) => ({
-    title: row.querySelector('.cd-change-review__title')?.firstChild?.textContent?.trim() ?? '',
+    // The title's words without its "Changed" tag: each tool's title, joined as the review joins them.
+    title: [...(row.querySelector('.cd-change-review__title')?.childNodes ?? [])]
+      .filter((node) => !(node instanceof Element && node.classList.contains('cd-change-review__changed')))
+      .map((node) => node.textContent ?? '')
+      .join('')
+      .trim(),
     before: words(row.querySelector('[role="group"][aria-label="Before"]')),
     after: words(row.querySelector('[role="group"][aria-label="After"]')),
   }));

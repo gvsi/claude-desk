@@ -6,7 +6,7 @@
  * second call unmounts the first.
  */
 import { StrictMode } from 'react';
-import { createMemoryRouter, type DataRouter, type RouteObject } from 'react-router';
+import { createMemoryRouter, type DataRouter, type Location, type RouteObject } from 'react-router';
 import { page } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
@@ -30,6 +30,8 @@ export interface SeedOption extends ResetOptions {
 }
 
 export interface RenderRouteOptions {
+  /** Existing history entries, for a reload that keeps history but starts a fresh router. */
+  initialEntries?: (string | Partial<Location>)[];
   /** The desktop or phone viewport by name, or a window of its own size, such as a phone on its side. */
   viewport?: Viewport | { width: number; height: number };
   /** The browser's first language, as `navigator.languages[0]` reports it ("es-MX"). */
@@ -94,7 +96,7 @@ export async function renderRoute(path: string, opts: RenderRouteOptions = {}): 
     mockStore.nextEpoch();
     mockStore.reset(name, { signedIn });
   }
-  const router = createMemoryRouter(opts.routes ?? routes, { initialEntries: [path] });
+  const router = createMemoryRouter(opts.routes ?? routes, { initialEntries: opts.initialEntries ?? [path] });
   opts.beforeRender?.(router);
   const app = <App router={router} />;
   const screen = await render(opts.strict === true ? <StrictMode>{app}</StrictMode> : app);

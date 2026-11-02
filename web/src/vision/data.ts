@@ -25,7 +25,7 @@ export { VISION_PATHS } from './paths.ts';
  * Where every vision page's "Back to Vision" goes: the Vision article under About this prototype,
  * which tells the story the four pages draw and links each of them.
  */
-export const VISION_BACK_HREF = VISION_ARTICLE.route;
+export const VISION_BACK_HREF = `${VISION_ARTICLE.route}#vision-pages`;
 
 /** The receipts' sources, by what each reports: a checked reply, or an action in its state. */
 const CHECKED: ReceiptSource = { kind: 'reply', handoff: false };

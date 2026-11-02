@@ -8,6 +8,8 @@
 .cd-knowledge__known,
 .cd-knowledge__add { min-width: 0; }
 
+.cd-knowledge__known:empty { display: none; }
+
 .cd-knowledge__previews {
   display: flex;
   flex-direction: column;
@@ -27,4 +29,8 @@
   .cd-knowledge__known { grid-column: 1; grid-row: 1; }
   .cd-knowledge__add { grid-column: 2; grid-row: 1 / span 2; }
   .cd-knowledge__previews { grid-column: 1; grid-row: 2; }
+  .cd-knowledge:has(> .cd-knowledge__known:empty) {
+    > .cd-knowledge__add,
+    > .cd-knowledge__previews { grid-row: 1; }
+  }
 }

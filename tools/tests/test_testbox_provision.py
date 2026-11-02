@@ -556,6 +556,15 @@ def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessio
     script = (Path(__file__).parents[1] / 'testbox/bootstrap.sh').read_text()
     block = script[script.index('# Every lane on a laptop shares one SSH connection'):script.index('# This server holds only disposable test data')]
     assert 256 <= int(re.search(r'MaxSessions (\d+)', block).group(1)) <= 450   # each session holds ~2 of 1024 files
+    # A laptop's connection can die while Session Manager keeps sshd's local socket open, and sshd then keeps that
+    # connection's processes, and the lane locks they hold, until something kills them. sshd now closes a connection
+    # whose client stops answering keepalives, within 15 minutes, but never inside the ten minutes a live connection's
+    # reply may spend queued behind slow uploads.
+    interval = int(re.search(r'ClientAliveInterval (\d+)', block).group(1))
+    count = int(re.search(r'ClientAliveCountMax (\d+)', block).group(1))
+    assert 600 <= interval * count <= 900
+    assert f"grep -qx 'clientaliveinterval {interval}'" in block                # the check confirms the ones in effect
+    assert f"grep -qx 'clientalivecountmax {count}'" in block
     # On a fresh machine no connection has started ssh.service yet, so the check's runtime directory may be missing.
     assert block.index('install -d -o root -g root -m 0755 /run/sshd') < block.index('sshd -t')
     (tmp_path / 'bin').mkdir()
@@ -574,7 +583,7 @@ def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessio
     run = lambda: subprocess.run(['bash', '-e', '-c', commands], env=env, capture_output=True)
     reload = ['sshd -t', 'sshd -T', 'systemctl try-reload-or-restart ssh.service']
 
-    effective.write_text('maxsessions 256\n')
+    effective.write_text(f'maxsessions 256\nclientaliveinterval {interval}\nclientalivecountmax {count}\n')
     assert run().returncode == 0 and run().returncode == 0
     assert log.read_text().splitlines() == reload                       # installed once, then left alone
     (config / '90-testbox.conf').write_text('old configuration')
@@ -586,4 +595,10 @@ def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessio
     effective.write_text('maxsessions 10\n')                           # another drop-in read first wins
     assert run().returncode != 0
     assert not (config / '90-testbox.conf').exists()                    # so a retry checks again
+    assert 'systemctl try-reload-or-restart ssh.service' not in log.read_text()
+
+    log.write_text('')
+    effective.write_text(f'maxsessions 256\nclientaliveinterval {interval}\nclientalivecountmax 0\n')  # 0 never closes one
+    assert run().returncode != 0
+    assert not (config / '90-testbox.conf').exists()
     assert 'systemctl try-reload-or-restart ssh.service' not in log.read_text()

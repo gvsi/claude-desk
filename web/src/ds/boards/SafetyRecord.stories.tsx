@@ -9,6 +9,8 @@ import { SafetyPage } from './parts.tsx';
 import { SPEC, expectOwnerFrame, expectTabOrder } from './spec.ts';
 
 const page = rivera.ledger.verified;
+/** Where an entry came from, as the screen words it: the kernel's own entries, and the chat's reports. */
+const ORIGIN = { kernel: 'Recorded by your Desk', api: 'Reported by the chat, not verified by your Desk' } as const;
 /** The entry opened beside the list: the decision that held the discounted quote. */
 const OPEN_SEQ = 2;
 
@@ -47,7 +49,7 @@ function SafetyRecord() {
                 What
               </th>
               <th scope="col" className="cd-type-caption">
-                Recorded by
+                From
               </th>
               <th scope="col" className="cd-type-caption">
                 Time
@@ -63,7 +65,7 @@ function SafetyRecord() {
                     {rowOf(entry).what}
                   </a>
                 </td>
-                <td className="board-ledger__by cd-type-caption">{entry.event.origin === 'kernel' ? 'Recorded by the checkpoint' : 'Reported by the chat service, not checked by the checkpoint'}</td>
+                <td className="board-ledger__by cd-type-caption">{entry.event.origin === 'kernel' ? ORIGIN.kernel : ORIGIN.api}</td>
                 <td className="board-ledger__entry cd-type-meta">{rowOf(entry).time}</td>
               </tr>
             ))}
@@ -84,7 +86,7 @@ const meta = {
     canvasNote: [
       'Every entry: the ledger as a table, newest first, and one entry’s full trace beside it.',
       'The ledger is the Turner fixture’s three entries, with the held quote’s decision open, where the board lists entries 48 to 39 and opens the refused refund; the times are the screen’s strings.',
-      'The table is page layout the web app (plan 04) owns, composed on the tokens; every entry is “Recorded by the checkpoint”, signed at sign-off, as is FullTrace’s own line.',
+      'The table is page layout the web app (plan 04) owns, composed on the tokens; every entry is “Recorded by your Desk” under the column head “From”, where the board says “Recorded by the checkpoint” under “Recorded by”, so the owner’s row names no part and the head doesn’t repeat it; FullTrace’s own line keeps “Recorded by the checkpoint.”, as signed at sign-off.',
       'The board’s open questions are canvas notes.',
     ].join(' '),
   },
@@ -100,11 +102,13 @@ export const Board: Story = {
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Safety' }), SPEC.pageTitle);
     await expect(canvas.getByRole('radio', { name: 'Every entry' })).toHaveAttribute('aria-checked', 'true');
 
-    // The ledger, newest first, each recorded by the checkpoint; the open one marked.
+    // The ledger, newest first, each recorded by the Desk; the open one marked.
     const table = canvas.getByRole('table', { name: 'Every entry' });
+    // The column heads, where the board's "Recorded by" became "From", so the head doesn't repeat its cells.
+    await expect(within(table).getAllByRole('columnheader').map((head) => head.textContent)).toEqual(['Entry', 'What', 'From', 'Time']);
     const rows = within(table).getAllByRole('row').slice(1);
     await expect(rows.map((row) => row.firstElementChild?.textContent)).toEqual(['3', '2', '1']);
-    for (const row of rows) await expect(row).toHaveTextContent('Recorded by the checkpoint');
+    for (const row of rows) await expect(row).toHaveTextContent(ORIGIN.kernel);
     await expect(rows[1]).toHaveAttribute('aria-current', 'true');
     expectComputed(rows[1] as HTMLElement, { backgroundColor: 'rgb(60, 57, 47)' });
 

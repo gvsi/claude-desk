@@ -208,6 +208,9 @@ async def test_a_canary_split_after_a_new_desks_business_name_is_refused(app, cl
     # canaries ending in two letters, so an owner's display name (letters only) can hold the end of one
     monkeypatch.setattr(desks, "new_canary", lambda: f"cdk-{secrets.token_hex(7)}fd")
     copy = await rivera(app, client)
+    # new slugs' suffixes no canary goes on into: a random one starting with the canary's last two
+    # letters (1 in 1,296) would complete it in the slug alone, which is refused on business.name only
+    monkeypatch.setattr(desks, "SLUG_ALPHABET", "z")
     dana = (await documents(app, copy))["dana-invoice"]
     head, tail = dana.canary[:-2], dana.canary[-2:]
     [rivera_business] = await rows_of(app, copy.copy_id, select(Business))
@@ -233,6 +236,23 @@ async def test_a_canary_split_after_a_new_desks_business_name_is_refused(app, cl
     assert [row.name for row in await rows_of(app, copy.copy_id, select(Business))] == [f"Turner Plumbing {head}"]
     await assert_no_canary_on_record(app, copy, dana.canary, head)
 
+
+
+async def test_a_canary_a_new_slugs_suffix_completes_is_refused(app, client, monkeypatch):
+    """The slug is checked suffix and all: a business name ending in the start of a canary, whose
+    new slug's random suffix happens to go on with the rest of it, would put the canary in the Desk's
+    public address, so it is refused on the business's name alone."""
+    copy = await rivera(app, client)
+    dana = (await documents(app, copy))["dana-invoice"]
+    head, tail = dana.canary[:-2], dana.canary[-2:]
+    monkeypatch.setattr(desks, "new_slug", lambda name: f"{desks.slugify(name)}-{tail}zzzz")
+    before = len(await entries_of(app, copy))
+    response = await post_desk(client, copy, new_desk(name=f"Lopez Electric {head}"))
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    assert [entry.event.summary for entry in (await entries_of(app, copy))[before:]] == [
+        {"part": "desk", "refused": "canary", "fields": ["business.name"], "fact_ids": [f"document:{dana.document_id}"]}]
+    assert set(await desks_of(app, copy)) == {copy.desk_id}
+    await assert_no_canary_on_record(app, copy, dana.canary, head)
 
 RIVERA_CONTACT = {"key": "contact", "kind": "text", "value": "(510) 555-0142"}
 

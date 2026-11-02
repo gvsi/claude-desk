@@ -40,6 +40,7 @@ import {
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
+import { skeletonSetupOf } from './today/TodaySkeleton.tsx';
 import { ANSWERING_CONFIRM_COPY, answeringSaveFailed, answeringSaveUnconfirmed } from './answeringCopy.ts';
 import { InboxOpenContext } from './inbox/inboxOpen.ts';
 import { OwnerInbox } from './inbox/OwnerInbox.tsx';
@@ -200,6 +201,9 @@ function DeskGate({ deskId }: { deskId: string }) {
   const shown = found ?? held;
   const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
 
+  // Once the copy's Desks say this Desk's setup isn't finished, Today's shapes draw its card.
+  const setupShape = shown === null ? undefined : skeletonSetupOf(shown.desk);
+
   const titleId = useId();
   const loading = shown ? readingAhead : !desks.isError && !(desks.data && !desks.isFetching);
   const next = shown ? (
@@ -220,7 +224,7 @@ function DeskGate({ deskId }: { deskId: string }) {
         loading={loading}
         status="Opening your Desk"
         className="cd-owner-opening"
-        skeleton={<OwnerFrameSkeleton pathname={location.pathname} />}
+        skeleton={<OwnerFrameSkeleton pathname={location.pathname} setup={setupShape} />}
       >
         {loading ? null : next}
       </SkeletonScreen>
