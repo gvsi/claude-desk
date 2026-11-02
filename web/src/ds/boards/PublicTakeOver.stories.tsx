@@ -56,8 +56,13 @@ const meta = {
     layout: 'fullscreen',
     canvasNote: [
       'Take-over option A, signed on 2026-10-30: while Mike is in the chat, the chat head says so and that Claude, an AI, is paused until he hands it back, on the disclosure’s line, and Ask for Mike isn’t shown.',
-      'Built from the signed option; its render and the by-eye comparison are tracked in issue #230.',
-      'The conversation is the Turner fixture’s: Dana asks for Mike, the kernel’s handoff card with its receipt, then the take-over’s events (Mike joins, and his words under his name), with its end kept above the composer as the page keeps it; the about column shows the charter’s cards, and the header the kernel’s open status.',
+      'Checked against both renders on 2026-11-02 (issue #230): the story matches them to the pixel, apart from the names, the content and the decisions signed after the boards, below.',
+      'The boards keep the names they were drawn with, Rivera Plumbing and Maria Rivera, as history; the story has the fixture’s, Turner Plumbing and Mike Turner, so on a phone the head’s line breaks at another word.',
+      'The conversation is the Turner fixture’s: Dana asks for Mike, the kernel’s handoff card with its receipt, then the take-over’s events (Mike joins, and his words under his name), with its end kept above the composer as the page keeps it, its last row 24 px over the composer area.',
+      'The board opens with an earlier exchange about the water heater, which isn’t in the fixture, so the story starts at Dana asking for Mike; Mike’s words are the fixture’s, without the board’s greeting.',
+      'The about column shows the charter’s cards, and the header the kernel’s open status; on a phone the about column opens the chat’s scroll region, above the conversation, where the phone board has none.',
+      'The author’s name in the footer is a text link, signed after the boards (#697), where they draw it as plain text.',
+      'Where the chat scrolls under its head, the page fades it out over 24 px (#670); the story doesn’t draw that fade and cuts the chat at the head’s edge.',
     ].join(' '),
   },
 } satisfies Meta;
