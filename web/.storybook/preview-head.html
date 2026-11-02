@@ -1,3 +1,9 @@
+<script>
+  // The theme a story draws in, set before the preview first paints, as the decorator sets it once a
+  // story renders: dark unless the address asks for light (`&globals=theme:light`). An unmarked root
+  // follows the device, so without this a light-preferring device would flash paper first.
+  document.documentElement.dataset.theme = /(?:^|[?&;])globals=[^&]*\btheme:light\b/.test(location.search) ? 'light' : 'dark';
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link
