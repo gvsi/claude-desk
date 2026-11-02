@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, LedgerEvent, NormalizedAction, Principal, ResourceRef, Review
 from desk.db.models import DemoInboxEntry, LedgerHead
-from desk.kernel_service import adapters, compiler, decide, demo_inbox, desks, labels, ledger, repo
+from desk.kernel_service import adapters, compiler, decide, demo_inbox, desks, labels, ledger, render, repo
 from desk.kernel_service.adapters.base import Adapter
 from desk.kernel_service.repo import new_id
 
@@ -282,6 +282,35 @@ def test_only_an_alert_to_the_owner_is_titled_and_only_for_the_owner():
     assert demo_inbox.owner_entry(alert).title == "Urgent callback requested"
     assert [demo_inbox.owner_entry(other).title for other in others] == [None] * 3
     assert [demo_inbox.session_entry(entry).title for entry in [alert, *others]] == [None] * 4
+
+
+def test_an_owner_alert_is_titled_only_with_a_fixed_preview_line():
+    """A title is one of the owner's fixed preview lines, word for word, and nothing else: an alert to the owner whose
+    stored preview isn't one reads back untitled, and the owner's panel shows its kind instead."""
+    def alert(preview: str) -> DemoInboxEntry:
+        return DemoInboxEntry(entry_id=new_id("inbox"), copy_id="copy-1", desk_id="desk-1", to="owner", person_id=None,
+                              kind="alert", body="Dana asked for a callback at (510) 555-0100.", preview=preview,
+                              created_at=datetime(2026, 11, 1, 9, tzinfo=UTC))
+
+    for preview in ("Call Dana back at (510) 555-0100", "Your code is 482913", "urgent callback requested",
+                    "Urgent callback requested ", ""):
+        assert demo_inbox.owner_entry(alert(preview)).title is None, preview
+    assert demo_inbox.owner_entry(alert("Urgent callback requested")).title == "Urgent callback requested"
+
+
+async def test_every_owner_preview_line_reads_back_as_its_alerts_title(app):
+    # each kind's preview line, written as an alert to the owner, is the title the owner reads it under
+    rows = await make_copy_rows(app)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        notices = {kind: await demo_inbox.deliver(ctx, copy_id=rows.copy_id, desk_id=rows.desk_id, to="owner",
+                                                  person_id=None, kind="alert", body="...",
+                                                  preview=render.owner_preview(kind))
+                   for kind in render.en.OWNER_PREVIEWS}
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        titles = {entry.entry_id: entry.title for entry in await demo_inbox.owner_entries(ctx)}
+    assert {kind: titles[notice.entry_id] for kind, notice in notices.items()} == render.en.OWNER_PREVIEWS
 
 
 def test_one_check_says_what_text_the_database_holds():

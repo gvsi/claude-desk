@@ -13,7 +13,8 @@ the code sent to it, and never a code another session asked for, which may have 
 the owner has since changed. A session never reads an owner alert or a head checkpoint, nor the
 codes of agents another session or the owner minted, and no entry it reads names a decision
 (`session_entry`). The owner reads every entry of the copy, a held request's alert with the
-decision it is about and each alert to them under its preview line (`owner_entry`).
+decision it is about and each alert to them under its fixed preview line, when its stored preview
+is one (`owner_entry`).
 """
 
 from typing import get_args
@@ -23,9 +24,12 @@ from sqlalchemy import insert, select
 from desk.contracts import DemoInboxEntry, InboxNotice
 from desk.db.models import ActorSession, NotificationPref, VerificationChallenge
 from desk.db.models import DemoInboxEntry as DemoInboxRow
+from desk.kernel_service import render
 from desk.kernel_service.repo import KernelCtx, new_id
 
 KINDS = frozenset(get_args(DemoInboxEntry.model_fields["kind"].annotation))
+# The lines an alert to the owner may be titled with: its fixed preview lines (`render.owner_preview`), and no other.
+OWNER_TITLES = frozenset(render.en.OWNER_PREVIEWS.values())
 
 
 async def deliver(ctx: KernelCtx, *, copy_id: str, desk_id: str, to: str, person_id: str | None, kind: str,
@@ -74,12 +78,14 @@ async def alert_owner(ctx: KernelCtx, desk_id: str, event_kind: str, preview: st
 
 def owner_entry(row: DemoInboxRow) -> DemoInboxEntry:
     """An entry as the owner reads it: a held request's alert names its decision, and an alert to the
-    owner is titled with its fixed preview line (`render.owner_preview`; a preview never holds a code),
-    never with anything from its body. Every other entry has no title: a code, a checkpoint, an alert
-    to a contact."""
-    owner_alert = row.kind == "alert" and row.to == "owner"
+    owner is titled with its preview when that is one of the fixed owner preview lines
+    (`OWNER_TITLES`, from `render.owner_preview`; a preview never holds a code), never with anything
+    from its body. The read checks it, so no write fails over it: an alert whose stored preview is
+    any other text has no title, and the owner's panel shows its kind. Every other entry has no title
+    either: a code, a checkpoint, an alert to a contact."""
+    titled = row.kind == "alert" and row.to == "owner" and row.preview in OWNER_TITLES
     return DemoInboxEntry(entry_id=row.entry_id, to=row.to, kind=row.kind, body=row.body, created_at=row.created_at,
-                          decision_id=row.decision_id, title=row.preview if owner_alert else None)
+                          decision_id=row.decision_id, title=row.preview if titled else None)
 
 
 def session_entry(row: DemoInboxRow) -> DemoInboxEntry:
