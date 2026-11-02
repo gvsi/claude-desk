@@ -1,0 +1,133 @@
+/* AdvancedDetails: REV-RULES-D's quiet Details button, and the panel it opens under its row. */
+
+/* The button: control type in the secondary ink, no fill until hovered or open. 2 px by 6 px, so one
+   line is 24 px tall, the smallest target WCAG 2.2 allows. */
+.cd-advanced-details__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-6);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--motion-instant) var(--motion-ease);
+}
+
+/* Open, it keeps the hover fill, so the panel under the row reads as its own. */
+.cd-advanced-details__toggle:hover,
+.cd-advanced-details__toggle[aria-expanded='true'] {
+  background: var(--fill-hover);
+}
+
+.cd-advanced-details__chevron {
+  flex: none;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+/* Closed, the chevron points at the words; open, it turns down to the panel. */
+.cd-advanced-details__toggle[aria-expanded='true'] .cd-advanced-details__chevron {
+  transform: rotate(90deg);
+}
+
+/* Under reduced motion the fill and the chevron change at once. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-advanced-details__toggle,
+  .cd-advanced-details__chevron {
+    transition: none;
+  }
+}
+
+/* The panel: the raised surface inside the card's line, at the control radius. */
+.cd-advanced-details__panel {
+  min-width: 0;
+  margin: var(--space-8) 0 var(--space-4);
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+}
+
+.cd-advanced-details__fields {
+  margin: 0;
+}
+
+.cd-advanced-details__field {
+  display: flex;
+  gap: var(--space-12);
+  padding: var(--space-4) 0;
+}
+
+/* The board's 104 px label column, at every width. */
+.cd-advanced-details__label {
+  flex: 0 0 104px;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-advanced-details__value {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-advanced-details__code {
+  min-width: 0;
+  margin: var(--space-8) 0 0;
+}
+
+/* The label at the left; "Copied." and the ghost Copy button at the right. */
+.cd-advanced-details__code-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0 0 var(--space-4);
+}
+
+.cd-advanced-details__code-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-advanced-details__copied {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* The JSON as written: every line kept, a long one scrolling inside the block, never the page.
+   No ligatures, so `!=` or `->` in a value reads as typed. */
+.cd-advanced-details__json {
+  margin: 0;
+  padding: var(--space-12);
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+  color: var(--text-primary);
+  white-space: pre;
+  overflow-x: auto;
+  font-variant-ligatures: none;
+}
+
+/* The tint: keys in the accent blue, strings in the primary ink, other values in the secondary,
+   punctuation in the tertiary. No status color: nothing here is a verdict. */
+.cd-advanced-details__json-key {
+  color: var(--accent-blue);
+}
+
+.cd-advanced-details__json-string {
+  color: var(--text-primary);
+}
+
+.cd-advanced-details__json-value {
+  color: var(--text-secondary);
+}
+
+.cd-advanced-details__json-punct {
+  color: var(--text-tertiary);
+}
