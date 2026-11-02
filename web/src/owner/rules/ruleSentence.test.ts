@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
-import { NO_BUSINESS_TOOLS } from '../connectors/catalog.ts';
+import { NO_BUSINESS_TOOLS, businessTools } from '../connectors/catalog.ts';
 import {
   ALWAYS_ON_SENTENCES,
   canJoin,
@@ -185,6 +185,27 @@ describe('any tool', () => {
       expect(sentence).not.toContain('Claude can');
       expect(sentence).not.toContain(applies_to);
       expect(line(ruleMeta(unknown, words))).toBe('A connected tool · Anyone');
+    }
+  });
+
+  it('a_business_tool_on_the_desk_without_a_title_keeps_its_outcome_but_an_unknown_target_does_not', () => {
+    // The Desk lists this business tool, so its rule still reads as what Claude does, in the app's words for it.
+    const rows = [
+      { tool: 'desk.untitled', source: 'business', business: null, effects: [] },
+      // A tool this version's catalog doesn't know, even when the Desk lists it, stays a stored rule.
+      { tool: 'native.teleport', source: 'native', business: null, effects: [] },
+    ] as unknown as Pick<ToolRow, 'tool' | 'source' | 'business' | 'effects'>[];
+    const onDesk = { business: businessTools(rows), tools: rows };
+    const untitled = card({ card_id: 'u', applies_to: 'desk.untitled', mode: 'auto', who: 'anyone' });
+    expect(read(ruleSentence(untitled, onDesk))).toBe('Claude can use a connected tool');
+    expect(read(ruleSentence({ ...untitled, mode: 'ask' }, onDesk))).toBe('Claude asks you before using a connected tool');
+    expect(read(ruleSentence({ ...untitled, mode: 'never' }, onDesk))).toBe('Claude never uses a connected tool');
+    expect(line(ruleMeta(untitled, onDesk))).toBe('A connected tool · Anyone');
+    for (const applies_to of ['desk.not-listed', 'native.teleport']) {
+      for (const mode of ['auto', 'ask', 'never'] as const) {
+        const unknown = card({ card_id: 'x', applies_to, mode, who: 'anyone' });
+        expect(read(ruleSentence(unknown, onDesk))).toBe("A rule for a tool this version can't name");
+      }
     }
   });
 
