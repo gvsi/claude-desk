@@ -1,5 +1,5 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from 'react';
 import { useNavigate, useParams, useSearchParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
 import { ApiError, observeRequests, ownerErrorCopy, request } from '../api/http.ts';
@@ -25,6 +25,12 @@ import './SetupPage.css';
 export function setupQuery(id: string) {
   return queryOptions({ queryKey: ['setup', id], queryFn: () => request('setup', { params: { id } }) });
 }
+
+/**
+ * The later steps' reads of what setup drafted from the answers (each keyed `[read, id]`): read
+ * again once "Change something" takes the interview back to its questions.
+ */
+const DRAFTED_READS = ['setupTools', 'setupRules', 'setupSituations', 'setupPublicLines', 'setupSafetyCheck'] as const;
 
 /** Where "Save and exit" goes: the new Desk's Today once there is one, else the start. */
 const todayPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/today`;
@@ -66,6 +72,7 @@ interface SetupShellProps {
    * the copy's Desks, so the page it opens is drawn from it.
    */
   beforeLeave?: () => Promise<void>;
+  contentRef?: Ref<HTMLDivElement>;
   children: ReactNode;
 }
 
@@ -75,7 +82,7 @@ interface SetupShellProps {
  * that leaves as "Save and exit" does; the business once known, the five steps and "Save and exit";
  * one column; the concept footer at the window's foot.
  */
-function SetupShell({ business, step, live, exitTo, wide = false, chat = false, beforeLeave, children }: SetupShellProps) {
+function SetupShell({ business, step, live, exitTo, wide = false, chat = false, beforeLeave, contentRef, children }: SetupShellProps) {
   const navigate = useNavigate();
   // An in-app link goes once `beforeLeave` is done, whether or not it worked.
   const leave: NavigateFunction = (to: To | number, options?: NavigateOptions) => {
@@ -113,7 +120,7 @@ function SetupShell({ business, step, live, exitTo, wide = false, chat = false, 
         </span>
       </header>
       <main className={`cd-setup__main${wide ? ' cd-setup__main--wide' : ''}`}>
-        <div className="cd-setup__column">{children}</div>
+        <div ref={contentRef} className="cd-setup__column">{children}</div>
         {chat ? null : <ConceptFooter />}
       </main>
     </div>
@@ -265,8 +272,64 @@ function SetupInterview({ setupId }: { setupId: string }) {
   // While Questions closes, the tools the API has moved on to wait for its "Continue".
   const closingQuestions = state !== undefined && closing.current && !continued && state.step === 'tools';
   // "Change something" (`changeSomethingPath`): the chat again, over a step past it; its "Continue"
-  // goes back to the step the API has the interview at. The API's step stays where it is.
-  const changing = state !== undefined && state.step !== 'questions' && opensSetupChat(search);
+  // goes back to the step the API has the interview at. The API's step stays where it is until the
+  // owner sends a change, which the API's reopen takes back to the questions. Until then the change
+  // runs busy at the step it was sent from (no other turn runs past the questions), so a page opened
+  // or come back to while one runs follows it in the chat too, whatever its address says. A live
+  // Desk is changed in the owner app, never here: the page shows it live, whatever the address.
+  const chatOpen = opensSetupChat(search);
+  const changeRuns = state !== undefined && state.busy === true && state.step !== 'questions';
+  const changing = state !== undefined && state.step !== 'questions' && state.step !== 'live' && (chatOpen || changeRuns);
+  const content = useRef<HTMLDivElement>(null);
+  const returnToStep = useRef(false);
+  useEffect(() => {
+    if (changing || !returnToStep.current) return;
+    returnToStep.current = false;
+    if (document.activeElement !== document.body) return;
+    // Preview's own arrival waits for its chat to load. Leave focus free until it is ready;
+    // touch-first screens keep the heading instead, without opening the keyboard.
+    if (state?.step === 'preview' && !window.matchMedia('(pointer: coarse)').matches) return;
+    // Cancelling the change chat announces the restored view, or returns to the closing plan's Continue.
+    const target = content.current?.querySelector<HTMLElement>(closingQuestions ? '.cd-setup-dock .cd-button--primary' : 'h1');
+    if (!target) return;
+    if (target.tagName === 'H1' && !target.hasAttribute('tabindex')) {
+      target.setAttribute('tabindex', '-1');
+      target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
+    }
+    target.focus({ preventScroll: true });
+  }, [changing, closingQuestions, state?.step]);
+  // A change may close the questions in one turn and return tools directly. Remember where this
+  // chat opened, or where a running change was found, so both that response and a read of the landed
+  // turn clear the old drafts and show the new plan.
+  const changeStartedAt = useRef<number | null>(null);
+  if (state !== undefined && changeStartedAt.current === null && changing) changeStartedAt.current = state.messages.length;
+  // The API's interview is back at its questions after a later step (a change landed, here or
+  // anywhere), or a change followed here landed past them: what was drafted from the answers before
+  // is read again on the way forward.
+  const reopened = state !== undefined && !state.busy
+    && ((state.step === 'questions' && confirmed.current !== null && confirmed.current !== 'questions')
+      || (changeStartedAt.current !== null && (state.step === 'questions' || state.messages.length > changeStartedAt.current)));
+  if (!chatOpen && !changeRuns && !reopened) changeStartedAt.current = null;
+  const reopenedStep = state?.step;
+  useEffect(() => {
+    if (!reopened || reopenedStep === undefined) return;
+    confirmed.current = reopenedStep;
+    closing.current = reopenedStep === 'tools';
+    changeStartedAt.current = null;
+    setContinued(false);
+    setOpenedAt('questions');
+    for (const read of DRAFTED_READS) queryClient.removeQueries({ queryKey: [read, setupId] });
+    void carry();
+    if (chatOpen) void navigate(setupPath(setupId), { replace: true });
+  }, [reopened, reopenedStep, chatOpen, carry, navigate, queryClient, setupId]);
+  // Setup come back to while a turn it last saw was running (a change sent before "Save and exit",
+  // say): the interview the cache holds is read again at once, rather than drawn as it was.
+  const resumedBusy = useRef(setup.data?.busy === true);
+  useEffect(() => {
+    if (!resumedBusy.current) return;
+    resumedBusy.current = false;
+    void reread();
+  }, [reread]);
   // Each step opens at its top, by the bar's step: Your rules' views open at their tops on their own
   // (RulesStep), and the preview going live stays the same screen.
   useOpensAtTop(state === undefined ? null : STEP_INDEX[closingQuestions || changing ? 'questions' : state.step]);
@@ -301,10 +364,16 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const answering = desk?.answering === true;
   let body: ReactNode;
   const shownStep = closingQuestions || changing ? 'questions' : state.step;
-  const backToStep = () => void navigate(setupPath(setupId));
+  const backToStep = () => {
+    returnToStep.current = true;
+    // The situations request may have advanced the API while the page still held its rules step.
+    // Restore that confirmed step so cancelling the chat reopens the same view of the rules.
+    update((now) => now === undefined ? now : asConfirmed(now));
+    void navigate(setupPath(setupId));
+  };
   switch (shownStep) {
     case 'questions':
-      body = <QuestionsStep state={state} onState={onState} reread={reread} onContinue={changing ? backToStep : () => setContinued(true)} />;
+      body = <QuestionsStep state={state} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
       break;
     case 'tools':
       body = <ToolsStep state={state} business={name} onContinue={() => moveTo('rules')} />;
@@ -332,12 +401,15 @@ function SetupInterview({ setupId }: { setupId: string }) {
   return (
     <SetupShell
       business={business}
-      step={STEP_INDEX[shownStep]}
+      // The closing plan still belongs to Questions, including while its change chat is open.
+      // Over later steps, the bar keeps the steps done until a change lands.
+      step={STEP_INDEX[closingQuestions ? 'questions' : changing ? state.step : shownStep]}
       live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
       exitTo={todayPath(state.desk_id)}
       wide={state.step === 'preview' && !changing}
       chat={shownStep === 'questions'}
       beforeLeave={beforeLeave}
+      contentRef={content}
     >
       {/* The same region as while the interview was read, so its shapes hand off to the step's. */}
       <SetupOpening loading={false}>{body}</SetupOpening>

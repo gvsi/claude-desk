@@ -3,6 +3,7 @@ import { page } from 'vitest/browser';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import type { ToolRow } from '../../api/views.ts';
+import { expectUserText } from '../../ds/test/expectUserText.ts';
 import { chenBusinessTools, seedBusinessTools } from '../../mocks/businessTools.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -175,5 +176,35 @@ it('keeps active jobs and their rules with safe fallback names and descriptions 
       expect(job.getByRole('link').elements()).toHaveLength(0);
     }
     expect(screen.container.querySelector('.cd-app-error')).toBeNull();
+  }
+});
+
+/** The tools a rule on every tool that changes something covers on the jobs' Desk, in the order Rules lists them. */
+const CHANGE_TOOL_TITLES = ['Quote', 'Book a visit', 'Save a lead', 'Request a callback', 'New client intake', 'Approved by your accountant'];
+const CHANGE_TOOLS = 'Quote, Book a visit, Save a lead, Request a callback, New client intake and Approved by your accountant';
+
+it('shows a job title that reads like the app’s own words only as user text on Rules and All rules', async () => {
+  // A business can name a job anything in setup, so its title is untrusted text, never the app's sentence.
+  const title = 'Approved by your accountant';
+  const desk = seedJobs();
+  const intro = chenBusinessTools[0];
+  if (!intro?.business) throw new Error('The fixture has an intro call definition');
+  seedBusinessTools(desk, [{ ...intro, status: 'enabled', review_reason: null, business: { ...intro.business, title } }]);
+  // A shared rule on every tool that changes something, which names the job among the tools it covers.
+  mockStore.world.addActiveRules(desk, [{ ...INTAKE_RULE, card_id: 'changes-ask', applies_to: 'effect:change', mode: 'ask', reason: 'Changes ask you first.' }]);
+  for (const path of ['rules', 'rules/all']) {
+    const { screen } = await renderRoute(`${DESK}/${path}`);
+    const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+    await expect.element(jobs.getByRole('region', { name: title })).toBeVisible();
+    // On the job's card and in every shared rule's line, the title is its own user-text element.
+    expectUserText(screen.container, title);
+    const shared = [...screen.container.querySelectorAll('.cd-rule-row__shared')];
+    expect(shared.length).toBeGreaterThan(0);
+    // The line reads word for word as it did: the app's words, then the tools it covers, one period.
+    for (const line of shared) {
+      expect(line.textContent).toBe(`Shared rule. Applies to every tool that changes something: ${CHANGE_TOOLS}.`);
+      expect([...line.querySelectorAll('[data-copy="user"]')].map((el) => el.textContent)).toEqual(CHANGE_TOOL_TITLES);
+    }
+    await expectScreenBasics(screen.container, { owner: true });
   }
 });

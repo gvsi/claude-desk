@@ -3,8 +3,12 @@ import { expect, it } from 'vitest';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { chenBusinessTools } from '../../mocks/businessTools.ts';
-import { changeRows } from './changeRows.ts';
+import { rowWords } from '../../test/changeRowWords.ts';
+import { changeRows as changeRowViews } from './changeRows.ts';
 import type { RuleDraft } from './drafts.ts';
+
+/** The review's rows as they read: titles and targets in words (`rowWords`). */
+const changeRows = (...args: Parameters<typeof changeRowViews>) => changeRowViews(...args).map(rowWords);
 
 /** A plain automatic rule, with no scope or limits beyond its target. */
 function card(card_id: string, applies_to: string, mode: RuleCard['mode'] = 'auto'): RuleCard {
@@ -62,4 +66,24 @@ it('an added rule follows the changed rows of its own tool', () => {
     ['book-nine-to-five', 'added', 'Book a visit'],
     ['link', 'changed', 'Payment link'],
   ]);
+});
+
+it('names tools by their titles, each apart, and a group of tools in the app’s own words', () => {
+  // A tool's title is its own words (a business's from setup), so the review shows each one as user
+  // text: the rows keep the titles apart rather than joined into one string.
+  const before = card('shared', 'effect:change');
+  const [row] = changeRowViews(draft([before], [{ ...before, mode: 'ask' }]), null, chenBusinessTools);
+  expect(row).toMatchObject({
+    title: { titles: ['Book a free intro call', 'New client intake'] },
+    before: { appliesTo: { titles: ['Book a free intro call'] } },
+    after: { appliesTo: { titles: ['Book a free intro call', 'New client intake'] } },
+  });
+  // A rule moved to a group of tools names the group in the app's words.
+  const link = card('link', 'native.payment_link');
+  const [moved] = changeRowViews(draft([link], [{ ...link, applies_to: 'effect:charge' }]), null);
+  expect(moved).toMatchObject({ title: { titles: ['Payment link'] }, before: { appliesTo: { titles: ['Payment link'] } }, after: { appliesTo: 'Every tool that charges money' } });
+  // A tool turned on is named by its title too.
+  const intro = chenBusinessTools[0];
+  if (!intro) throw new Error('Chen has an intro call tool');
+  expect(changeRowViews(draft([], [], [intro]), null).at(-1)).toMatchObject({ change: 'turned_on', title: { titles: ['Book a free intro call'] } });
 });
