@@ -133,7 +133,7 @@ describe('setup consultant run and decisions', () => {
   it('does_not_assume_agreement_in_the_cpa_opening', async () => {
     let state = await startState();
     state = await setupState('setupConsent', state.interview_id, { allow: true });
-    expect(state.messages.find(({ text }) => text.startsWith('Here’s what I’d have your Desk do:'))?.text).toBe('Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.');
+    expect(state.messages.find(({ text }) => text.startsWith('Here’s what I’d have your Desk do:'))?.text).toBe('Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link when an engagement starts. Questions like “where’s my return?” can come to you for now.');
   });
 
   it('reconciles_accepted_setup_jobs_after_closing_the_questions_three_times', async () => {
@@ -863,6 +863,8 @@ describe('the owner and the line about the business, from the description', () =
       ['Acme Bakery. My name is Lee. Sourdough and cakes to order.', 'Sourdough and cakes to order.'],
       ["Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks.", 'We fix leaks.'],
       ["Hi! I'm Ana. Ana's Bakery.", null],
+      // Spanish: the introduction and the naming sentence go too.
+      ['Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland. Abrimos de martes a sábado.', 'Abrimos de martes a sábado.'],
     ];
     for (const [description, about] of cases) expect((await started(description)).about, description).toBe(about);
   });

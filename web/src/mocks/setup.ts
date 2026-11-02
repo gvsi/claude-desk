@@ -832,7 +832,7 @@ function consultantProposals(): ProposalCard[] {
 export const CPA_COPY = {
   opening: [
     'Thanks, Linda. Here’s how I understand Chen & Co.: you and one colleague do tax returns and bookkeeping in San Jose. New clients book a free 20-minute consult, a personal return is $350, and each engagement starts with a $500 retainer by secure link. A client’s AI assistant can also book and pay for them, within a limit the client signs.',
-    'Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.',
+    'Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link when an engagement starts. Questions like “where’s my return?” can come to you for now.',
     'One thing first, so I describe Chen & Co. the right way.',
   ],
   first: 'Who do you work with most?',
