@@ -71,3 +71,63 @@ export const TODAY_COPY = {
 
 export const handledCount = (count: number) => `Claude handled ${count}`;
 export const steppedInCount = (count: number) => `You stepped in ${count} ${count === 1 ? 'time' : 'times'}`;
+
+/**
+ * "How your Desk works" on Today, as the signed board writes it: three numbered steps, each its
+ * title and one line, the second naming the business as the Desk has it.
+ */
+export const HOW_IT_WORKS_TITLE = 'How your Desk works';
+
+/** "Step 1" over each step's title. */
+export const stepLabel = (n: number) => `Step ${n}`;
+
+/** The three steps, in order. */
+export function howItWorksSteps(business: string): readonly { title: string; line: string }[] {
+  return [
+    { title: 'Someone asks', line: 'A customer on your page, or their AI agent' },
+    { title: 'Claude answers', line: `As ${business}, and says it's an AI` },
+    { title: 'Your rules decide', line: 'Bookings, quotes, payments and documents are checked first' },
+  ];
+}
+
+/** Today's counts under the steps, over the briefing's window (since last night). */
+export interface TodayCounts {
+  /** What Claude did on its own: the answers and the bookings. */
+  handled: number;
+  /** What waits for the owner now. */
+  held: number;
+  /** The requests the kernel refused. */
+  turnedDown: number;
+}
+
+export type TodayOutcomeKind = keyof TodayCounts;
+
+/** One outcome on the Today line: its count, and the words before and after it. */
+export interface TodayOutcome {
+  kind: TodayOutcomeKind;
+  count: number;
+  before: string;
+  after: string;
+}
+
+/** The Today line: its lead and the outcomes that have a count, or one quiet line when none has. */
+export type TodayOutcomesLine = { quiet: true; line: string } | { quiet: false; lead: string; parts: readonly TodayOutcome[] };
+
+/**
+ * The Today line's words, in one place: "Today, Claude", then "handled 2 on its own", "held 1 for
+ * you" and "turned down 1 request" (or "3 requests"), in that order, each left out at 0; when all
+ * three are 0, "Today, Claude hasn't been asked anything yet." alone.
+ */
+export function todayOutcomes({ handled, held, turnedDown }: TodayCounts): TodayOutcomesLine {
+  const parts: TodayOutcome[] = [
+    { kind: 'handled', count: handled, before: 'handled ', after: ' on its own' },
+    { kind: 'held', count: held, before: 'held ', after: ' for you' },
+    { kind: 'turnedDown', count: turnedDown, before: 'turned down ', after: turnedDown === 1 ? ' request' : ' requests' },
+  ];
+  const counted = parts.filter((part) => part.count > 0);
+  if (counted.length === 0) return { quiet: true, line: "Today, Claude hasn't been asked anything yet." };
+  return { quiet: false, lead: 'Today, Claude', parts: counted };
+}
+
+/** An outcome's words as one string: "handled 2 on its own". */
+export const outcomeWords = ({ before, count, after }: TodayOutcome) => `${before}${count}${after}`;
