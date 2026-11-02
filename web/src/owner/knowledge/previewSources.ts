@@ -1,7 +1,11 @@
 import type { KnowledgeRowView } from '../../ds/index.ts';
 import { BUSINESS_WORDS, type BusinessWords } from '../businessWords.ts';
 
-/** Display samples shared by the live app and mock API screens. They never enter the knowledge API. */
+/**
+ * Display samples shared by the live app and mock API screens. They never enter the knowledge API.
+ * They carry no pill: the page's one "Mock", beside its title, says what they are, and their line
+ * already says who can see each.
+ */
 export const MOCK_SOURCES: readonly KnowledgeRowView[] = [
   {
     id: 'mock-maintenance',
@@ -10,7 +14,7 @@ export const MOCK_SOURCES: readonly KnowledgeRowView[] = [
     title: 'Maintenance plan.pdf',
     detail: 'PDF · 2 pages · Added Oct 28 · Customers can see this',
     readers: ['public'],
-    pill: 'Mock',
+    pill: null,
   },
   {
     id: 'mock-warranty',
@@ -19,7 +23,7 @@ export const MOCK_SOURCES: readonly KnowledgeRowView[] = [
     title: 'Warranty terms.docx',
     detail: 'Word document · 3 pages · Added Oct 28 · Only you',
     readers: ['owner'],
-    pill: 'Mock',
+    pill: null,
   },
   {
     id: 'mock-map',
@@ -28,7 +32,7 @@ export const MOCK_SOURCES: readonly KnowledgeRowView[] = [
     title: 'Service area map.pdf',
     detail: 'PDF · 1 page · Added Oct 30 · Customers can see this',
     readers: ['public'],
-    pill: 'Mock',
+    pill: null,
   },
   {
     id: 'mock-faq',
@@ -36,7 +40,7 @@ export const MOCK_SOURCES: readonly KnowledgeRowView[] = [
     title: 'turner-plumbing.example/faq',
     detail: 'Website page · Read again every week · Customers can see this',
     readers: ['public'],
-    pill: 'Mock',
+    pill: null,
   },
 ];
 
