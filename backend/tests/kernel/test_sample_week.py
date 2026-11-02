@@ -138,7 +138,7 @@ async def reports_of(app, created: CopyCreated, now: datetime):
         await engine.dispose()
 
 
-@pytest.mark.parametrize("hour,minute", [(0, 30), (9, 0), (17, 59), (23, 30)])
+@pytest.mark.parametrize("hour,minute", [(0, 30), (3, 30), (9, 0), (17, 59), (23, 30)])
 async def test_since_last_night_has_two_answers_and_one_refusal(week_on, app, client, frozen_clock, hour, minute):
     now = datetime(2026, 11, 1, hour, minute, tzinfo=TZ)
     frozen_clock.travel(now)
@@ -154,6 +154,11 @@ async def test_since_last_night_has_two_answers_and_one_refusal(week_on, app, cl
                 and since <= datetime.fromisoformat(event.shown_at) < now]
     assert {event.text for event in visitors} == {sample.said for sample in seed.RIVERA_SAMPLE_WEEK[:3]}
     assert len(visitors) == 3
+    expected_date = (now.date() - timedelta(days=1)) if hour < 3 else now.date()
+    assert {datetime.fromisoformat(event.shown_at).astimezone(TZ).date() for event in visitors} == {expected_date}
+    if hour >= 3:
+        for event, minutes in zip(sorted(visitors, key=lambda event: event.shown_at), (180, 135, 90), strict=True):
+            assert datetime.fromisoformat(event.shown_at) == now.astimezone(UTC) - timedelta(minutes=minutes)
 
 
 async def test_elena_cannot_be_verified_or_read_by_a_fresh_visitor(week_on, app, client, frozen_clock):
@@ -227,15 +232,24 @@ async def test_sample_payment_is_terminal_and_never_calls_the_provider(week_on, 
                                                                       monkeypatch):
     created = await create_copy(client, replay_night=True)
     [link] = await rows_of(app, created.copy_id, select(PaymentLink))
-    assert (link.state, link.amount_cents, link.completion_started_at, link.mandate_id) == (
-        "expired", 2_000, None, None)
-    assert link.created_at < link.expires_at == link.updated_at < frozen_clock.now()
+    assert (link.state, link.amount_cents, link.mandate_id) == ("paid", 2_000, None)
+    assert link.created_at < link.completion_started_at < link.updated_at
+    assert link.created_at < link.updated_at < link.expires_at < frozen_clock.now()
     [decision] = await rows_of(app, created.copy_id, select(DecisionRow).where(
         DecisionRow.action_id == link.action_id))
     assert (decision.state, decision.card_ids, decision.policy_ids) == ("executed", ["rv-link"], ["A.auto.rv-link"])
     assert decision.review == sample_week.SAMPLE_REVIEW
     [quote] = await rows_of(app, created.copy_id, select(Quote).where(Quote.quote_id == link.quote_id))
-    assert quote.status == "expired" and quote.amount_cents == link.amount_cents
+    assert quote.status == "paid" and quote.amount_cents == link.amount_cents
+    [paid] = [entry for entry in (await ledger_page(client, created)).entries
+              if entry.event.kind == "payment" and entry.event.summary.get("state") == "paid"]
+    summary = {key: value for key, value in paid.event.summary.items() if key != "replayed"}
+    assert set(summary) == {"link_id", "state", "charge_id", "policy_version", "auto_money_cap_cents"}
+    assert summary["link_id"] == link.link_id and summary["auto_money_cap_cents"] == seed.RIVERA_MONEY_CAP_CENTS
+    [charge] = await rows_of(app, created.copy_id, select(Fact).where(
+        Fact.fact_id == f"charge:{summary['charge_id']}"))
+    assert charge.created_at == link.updated_at
+    assert (paid.event.session_id, paid.event.ref_id) == (link.session_id, link.link_id)
     card = next(block for event in created.replayed_messages if event.verdict for block in event.verdict.blocks
                 if block.template == "payment_link")
     assert card.href is not None and card.href.endswith(link.token)
@@ -245,17 +259,95 @@ async def test_sample_payment_is_terminal_and_never_calls_the_provider(week_on, 
 
     monkeypatch.setattr(payments, "provider", no_provider)
     response = await client.get(f"/payment_links/{link.token}")
-    assert response.status_code == 200 and response.json()["state"] == "expired"
+    assert response.status_code == 200 and response.json()["state"] == "paid"
     for operation in ("complete", "cancel"):
         response = await client.post(f"/payment_links/{link.token}/{operation}", json={})
         assert response.status_code == 409
     async with kernel_ctx(app) as ctx:
         ctx.bind(created.copy_id)
         assert await payments.reconcile_link(ctx, link.link_id) is False
-        assert await payments.quote_unpayable(ctx, quote) is None
+        await payments.settle_link(ctx, link.link_id)
+        assert await payments.quote_unpayable(ctx, quote) == "quote_paid"
         assert await payments.open_link_fact(ctx, quote) is None
+        version = await activation.active_version(ctx, link.desk_id)
+        assert await payments.cancel_disallowed_links(ctx, link.desk_id, version) == []
+        assert await payments._desk_links(ctx, link.desk_id) == []
+        assert await payments.cancelled_links(ctx, link.desk_id, version.version) == []
+    assert await payments.reconcile_links_at_startup(app.state.kernel) == []
+    from .test_payment_links import checkouts
+    assert checkouts(created) == []
+    [desk] = await rows_of(app, created.copy_id, select(Desk))
+    [dana] = await rows_of(app, created.copy_id, select(Person).where(Person.ref == "dana"))
+    opened = (await client.post("/sessions", json={"desk_slug": desk.slug, "kind": "visitor"})).json()
+    await verify_session(app, created.copy_id, opened["state"]["session_id"], dana.person_id)
+    response = await client.post("/decide", headers={auth.SESSION_HEADER: opened["session_token"]}, json={
+        "session_id": opened["state"]["session_id"], "generation": 0,
+        "call": {"call_id": "sample-refund", "tool": "payments.create_refund",
+                 "args": {"charge_id": summary["charge_id"]}}})
+    assert response.status_code == 200 and response.json()["state"] == "refused"
     await today_of(app, created, frozen_clock.now())
-    assert (await reports_of(app, created, frozen_clock.now())).paid_cents == 0
+    assert (await reports_of(app, created, frozen_clock.now())).paid_cents == 2_000
+
+
+async def test_each_sample_session_ends_with_its_conversations_outcome(week_on, app, client):
+    created = await create_copy(client, replay_night=True)
+    page = await ledger_page(client, created)
+    entries = {entry.seq: entry.model_dump(mode="json") for entry in page.entries}
+    decisions = await rows_of(app, created.copy_id, select(DecisionRow))
+    links = {row.link_id: row for row in await rows_of(app, created.copy_id, select(PaymentLink))}
+    handoffs = {row.handoff_id: row for row in await rows_of(app, created.copy_id, select(Handoff))}
+    expected = ("quote", None, "refused", "booking", "document released", "deposit paid",
+                "callback handled", "owner declined", "lead", "refused")
+    tools = {"native.quote": "quote", "native.book": "booking", "native.release_document": "document released",
+             "native.capture_lead": "lead"}
+    for sample, outcome in zip(seed.RIVERA_SAMPLE_WEEK, expected, strict=True):
+        [visitor] = [event for event in created.replayed_messages
+                     if event.kind == "visitor_message" and event.text == sample.said]
+        candidates = []
+        for decision in decisions:
+            if decision.session_id != visitor.session_id:
+                continue
+            entry = entries[decision.ledger_seq]
+            assert entry["event"]["ref_id"] == decision.decision_id
+            assert entry["event"]["kind"] == {"executed": "execute", "denied": "approval", "refused": "decide"}[
+                decision.state]
+            value = ("refused" if decision.state == "refused" else "owner declined"
+                     if decision.state == "denied" else tools.get(decision.tool)
+                     if decision.state == "executed" else None)
+            candidates.append((owner_reads.entry_time(entry), entry["seq"], value))
+        for entry in entries.values():
+            event, summary = entry["event"], entry["event"]["summary"]
+            link = links.get(summary.get("link_id"))
+            if (event["kind"] == "payment" and link is not None and link.session_id == visitor.session_id
+                    and link.state == summary.get("state") == "paid" and not summary.get("refused")):
+                candidates.append((owner_reads.entry_time(entry), entry["seq"], "deposit paid"))
+            if event["kind"] == "desk_data" and summary.get("part") == "handoffs":
+                for ref in summary.get("refs", []):
+                    handoff = handoffs.get(ref)
+                    if handoff is not None and handoff.session_id == visitor.session_id:
+                        assert event["session_id"] is None and event["ref_id"] is None
+                        assert {key: value for key, value in summary.items() if key != "replayed"} == {
+                            "part": "handoffs", "refs": [handoff.handoff_id]}
+                        candidates.append((owner_reads.entry_time(entry), entry["seq"],
+                                           "callback handled" if handoff.status == "done" else None))
+        assert (max(candidates)[2] if candidates else None) == outcome, sample.said
+
+
+@pytest.mark.parametrize("now", NOWS)
+async def test_booking_bars_use_the_two_conversations_dates(week_on, app, client, frozen_clock, now):
+    frozen_clock.travel(now)
+    created = await create_copy(client, replay_night=True)
+    _, today, _, _, _ = await today_of(app, created, now)
+    expected = {now.astimezone(TZ).date() - timedelta(days=back): 1 for back in (6, 5)}
+    assert {day.date: day.bookings for day in today.this_week.days if day.bookings} == expected
+    assert today.this_week.bookings == 2
+    assert next(day.bookings for day in today.this_week.days if day.date == now.astimezone(TZ).date()) == 0
+    sessions = {row.session_id: row for row in await sample_sessions(app, created)}
+    entries = {entry.seq: entry.model_dump(mode="json") for entry in (await ledger_page(client, created)).entries}
+    bookings = await rows_of(app, created.copy_id, select(DecisionRow).where(DecisionRow.tool == "native.book"))
+    for booking in bookings:
+        assert owner_reads.entry_time(entries[booking.ledger_seq]).astimezone(TZ).date() == (
+            sessions[booking.session_id].created_at.astimezone(TZ).date())
 
 
 @pytest.mark.parametrize("now", NOWS, ids=lambda now: now.strftime("%a-%m-%d-%H%M"))
@@ -271,8 +363,8 @@ async def test_a_hosted_copy_opens_on_a_sample_week(week_on, app, client, frozen
     stored, today, conversations, needs_you, attempts = await today_of(app, created, now)
     assert stored == len(created.replayed_messages)
     week = today.this_week
-    assert len({day.date for day in week.days if day.bookings}) == 1
-    assert week.bookings == 1 and week.booked_cents > 0
+    assert len({day.date for day in week.days if day.bookings}) == 2
+    assert week.bookings == 2 and week.booked_cents > 0
     assert week.handled > 1 and week.stopped >= 2
     assert today.recorded_history.this_week is True and today.recorded_history.needs_you is False
     # "Needs you" holds the seeded hold alone, live; nothing sample asks the owner for anything
@@ -288,7 +380,7 @@ async def test_a_hosted_copy_opens_on_a_sample_week(week_on, app, client, frozen
     local_today = now.astimezone(TZ).date()
     for event in created.replayed_messages:
         shown = datetime.fromisoformat(event.shown_at)
-        assert local_today - timedelta(days=6) <= shown.astimezone(TZ).date() < local_today
+        assert local_today - timedelta(days=6) <= shown.astimezone(TZ).date() <= local_today
         assert shown <= now - timedelta(hours=1)
 
 
@@ -416,12 +508,16 @@ async def test_signed_verdicts_and_cards_are_the_kernels(week_on, app, client):
         digest = hashlib.sha256(desk_kernel.canonical_json(json.dumps(body)).encode()).digest()
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key)).verify(
             bytes.fromhex(verdict.signature), b"desk-verdict-v1\0" + digest)
+        templates |= {block.template for block in verdict.blocks if block.kind == "card"}
         prose = [block for block in verdict.blocks if block.kind == "prose"]
+        if any(block.template == "payment_confirmed" for block in verdict.blocks):
+            assert prose == []
+            continue
         assert len(prose) == 1 and reply_check.scan_prose(
             prose[0].text, booking_card=any(block.template == "booking_confirmed" for block in verdict.blocks),
             callback_card=any(block.template == "callback_confirmed" for block in verdict.blocks)) == []
-        templates |= {block.template for block in verdict.blocks if block.kind == "card"}
-    assert templates == {"quote", "booking_confirmed", "callback_confirmed", "document_link", "payment_link"}
+    assert templates == {"quote", "booking_confirmed", "callback_confirmed", "document_link", "payment_link",
+                         "payment_confirmed"}
     # each card's numbers are the copy's own: a quote's total is its quote row's, a booking's date its booking's
     quotes = {f"quote:{row.quote_id}": row for row in await rows_of(app, created.copy_id, select(Quote))}
     bookings = {f"booking:{row.booking_id}": row for row in await rows_of(app, created.copy_id, select(Booking))}
@@ -445,7 +541,7 @@ async def test_every_sample_row_is_finished(week_on, app, client):
         assert row.closed_at < created_at(created)
     decisions = await rows_of(app, created.copy_id, select(DecisionRow).where(DecisionRow.session_id.in_(ids)))
     assert {row.state for row in decisions} == {"executed", "refused", "denied"}
-    assert {row.status for row in await rows_of(app, created.copy_id, select(Quote))} == {"expired"}
+    assert {row.status for row in await rows_of(app, created.copy_id, select(Quote))} == {"expired", "paid"}
     assert {row.status for row in await rows_of(app, created.copy_id, select(Handoff))} == {"done"}
     [approval] = await rows_of(app, created.copy_id, select(Approval))
     assert (approval.answer, approval.nonce, approval.binding_sha256) == ("deny_once", None, None)
@@ -453,7 +549,7 @@ async def test_every_sample_row_is_finished(week_on, app, client):
     facts = await rows_of(app, created.copy_id, select(Fact).where(Fact.session_id.in_(ids)))
     assert {(row.kind, row.status) for row in facts} == {("quote", "expired"), ("booking", "committed"),
                                                          ("handoff", "expired"), ("document", "expired"),
-                                                         ("payment_link", "expired")}
+                                                         ("payment_link", "expired"), ("charge", "committed")}
     # Nothing that runs, waits or pays: one consumed challenge, no execution or Demo inbox entry of the week.
     assert await rows_of(app, created.copy_id, select(Execution)) == []
     assert {row.status for row in await rows_of(app, created.copy_id, select(VerificationChallenge))} == {"consumed"}
@@ -585,7 +681,7 @@ async def test_a_visitor_verified_as_dana_reads_none_of_it(week_on, app, client)
     facts = await rows_of(app, created.copy_id, select(Fact).where(
         Fact.session_id.in_({row.session_id for row in await sample_sessions(app, created)})))
     template = {"quote": "quote", "booking": "booking_confirmed", "handoff": "callback_confirmed",
-                "document": "document_link", "payment_link": "payment_link"}
+                "document": "document_link", "payment_link": "payment_link", "charge": "charges"}
     for fact in facts:
         response = await client.post("/check_reply", headers={auth.SESSION_HEADER: opened["session_token"]}, json={
             "draft": {"session_id": session_id, "generation": 0, "prose": "Here it is.",
@@ -698,7 +794,7 @@ async def test_live_payment_limits_and_quote_reads_are_unchanged(either, app, cl
     held = await decided(client, visitor, "native.payment_link", {"quote_id": large_quote}, call_id="large-link")
     assert held.outcome == "hold" and "allow_person" not in held.answers
     await today_of(app, created, frozen_clock.now())
-    assert (await reports_of(app, created, frozen_clock.now())).paid_cents == 2_000
+    assert (await reports_of(app, created, frozen_clock.now())).paid_cents == 2_000 * (2 if either else 1)
 
 
 async def test_live_urgent_alerts_are_unchanged(either, app, client):
@@ -759,7 +855,7 @@ async def test_the_week_takes_no_open_time(either, app, client, frozen_clock):
         Booking.status == "confirmed"))}
     open_future = sorted(row.slot_id for row in slots if row.starts_at > now and row.slot_id not in booked)
     assert open_future == sorted(slot.slot_id for slot in seed.calendar_slots(now))
-    assert len(booked) == (1 if either else 0)
+    assert len(booked) == (2 if either else 0)
     for row in await rows_of(app, created.copy_id, select(Booking)):
         assert row.starts_at < now
 

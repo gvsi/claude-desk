@@ -16,13 +16,17 @@ written conversations instead of a recording:
   entry, which a live decision gets only for a reviewer call it made. An unverified document request mirrors
   the live path's early `not_given` refusal, with no action or deciding policy.
 - **Terminal states only.** Sessions are closed at generation 0. Decisions are `executed`, `refused` or `denied`
-  (the denied hold's approval row answered `deny_once` and used up). Quotes and their facts are `expired`, the
+  (the denied hold's approval row answered `deny_once` and used up). Quotes are `expired` or `paid`, their facts
+  expired, the
   callback's handoff is `done` with its fact expired, and bookings are `confirmed` on past slots: a slot ID in
   the seed's form for a time before the copy was made, which is no `calendar_slots` row, so no live call can book
-  it, and no owner calendar write is held up by it. The deposit link is expired unpaid, has no completion marker,
-  reservation or real provider checkout, and cannot be paid or reconciled at the provider. Its historical card
-  links to the terminal checkout view. No execution, mandate or Demo inbox entry is written, including for the
-  urgent callback, whose unscheduled handoff mirrors `request_callback.open_callback` and is done after 15 minutes.
+  it, and no owner calendar write is held up by it. Each booking decision is timed on its conversation's local
+  date, so Today has no booking bar. The deposit conversation also books; its link and quote are paid, with a
+  session-only charge fact, the live completion's paid ledger shape and a signed payment confirmation. The old
+  completion marker cannot make a paid link actionable. No provider checkout, execution, reservation, mandate
+  or Demo inbox entry is written. The paid sample contributes its marked amount to Reports. Refund normalization
+  refuses a known charge with no verified record owner before provider access. The urgent callback's unscheduled
+  handoff mirrors `request_callback.open_callback` and is done after 15 minutes, without an alert.
 - **One archived sample person.** The invoice conversation alone is verified with assurance `demo_code` as a
   sample-only person from `seed.SAMPLE_CUSTOMER`. Its consumed, long-expired challenge has an empty hash, which
   cannot match a live six-digit code, and no failed attempts. Its verification entries are historical, with no
@@ -30,15 +34,16 @@ written conversations instead of a recording:
   them a fresh code. The invoice and released link facts are expired, labelled only for owner and that person;
   the document link is voided and expired. Other sessions are unverified, with owner/session-only facts. All
   session tokens are discarded. No sample names a seeded person; every word is in `seed.py`.
-- **Marked history.** Every kernel event (including verification, link issuance/expiry and callback handling)
+- **Marked history.** Every kernel event (including verification, link issuance/payment and callback handling)
   is one normal `ledger.append`, in sample-time order, hashed, chained and signed as usual, its summary carrying
   `replayed: {"at": <the sample moment>, "recording": <recording ID>}`. Each decision's `ledger_seq` is the entry
   that recorded its final state. A head checkpoint the appends call for is a real event, written unmarked by the
   ledger as always. Every time on a row is its sample moment.
 
-Every moment falls on a local day 1 to 6 days before `now` in the business's time zone, at the conversation's own
-wall time, which the clock change neither skips nor repeats, and at least an hour before `now`; otherwise, or when
-anything else can't be written, `SampleWeekRefused` (or any error) leaves the caller to roll the week back whole.
+Fixed conversations fall on local days 1 to 6 before `now`, at unambiguous wall times. The first three instead
+start 180, 135 and 90 minutes before the copy's UTC instant, including across a clock change. If any relative
+start crosses today's local midnight, all three use yesterday's fixed times. Every event stays at least an hour
+before `now`; otherwise, or when anything can't be written, the caller rolls the week back whole.
 Only the first three seed conversations fall in yesterday's 18:00-to-now briefing window: two answered alone
 and one refused. The live seeded hold remains the only Needs-you item.
 """
@@ -114,6 +119,7 @@ class _Desk:
     now: datetime
     recording: str
     taken: set[str] = field(default_factory=set)       # the sample bookings' slots so far
+    relative_today: bool = False
 
     @property
     def desk_id(self) -> str:
@@ -135,7 +141,7 @@ class _Entry:
     at: datetime
     order: int
     kind: str
-    session_id: str
+    session_id: str | None
     ref_id: str | None
     summary: dict[str, Any]
     done: Callable[[int], None] = lambda seq: None
@@ -152,7 +158,7 @@ class _Written:
     replies: list[tuple[datetime, str, Callable[[], ReplyVerdict]]] = field(default_factory=list)
     said: list[tuple[datetime, str, str]] = field(default_factory=list)
 
-    def entry(self, at: datetime, kind: str, session_id: str, ref_id: str | None, summary: dict[str, Any],
+    def entry(self, at: datetime, kind: str, session_id: str | None, ref_id: str | None, summary: dict[str, Any],
               done: Callable[[int], None] = lambda seq: None) -> None:
         self.entries.append(_Entry(at, len(self.entries), kind, session_id, ref_id, summary, done))
 
@@ -206,6 +212,7 @@ async def write(ctx: KernelCtx, copy_id: str, desk_id: str, now: datetime, sessi
                 recording: str) -> list[ReplayedEvent]:
     """Write `sessions` into the copy's Desk as finished history (module docstring) in the caller's transaction,
     and return the events the API stores as their transcripts, in shown order."""
+    now = now.astimezone(UTC)
     ctx.bind(copy_id)
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id)))).one()
     business = (await ctx.db.scalars(ctx.repo.scoped(
@@ -217,6 +224,10 @@ async def write(ctx: KernelCtx, copy_id: str, desk_id: str, now: datetime, sessi
                  tools=await decide.enabled_tools(ctx, desk_id), tz=ZoneInfo(business.timezone), now=now,
                  recording=recording)
     names = [desk_row.name, business.name]
+    today = now.astimezone(desk.tz).date()
+    desk.relative_today = all(
+        (now - timedelta(minutes=sample.before_now_minutes)).astimezone(desk.tz).date() == today
+        for sample in sessions if sample.before_now_minutes is not None)
     written = _Written()
     for sample in sessions:
         await _conversation(ctx, desk, sample, written, names)
@@ -249,7 +260,10 @@ async def _conversation(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession,
     today = desk.now.astimezone(desk.tz).date()
     if not 1 <= sample.days_back <= 6:
         raise SampleWeekRefused("outside_the_week")
-    start = moment(today, sample.days_back, sample.start, desk.tz)
+    # Subtract from the UTC instant: a DST fold is then one known instant, not an ambiguous wall input.
+    start = (desk.now - timedelta(minutes=sample.before_now_minutes)
+             if sample.before_now_minutes is not None and desk.relative_today
+             else moment(today, sample.days_back, sample.start, desk.tz))
     replied_at = start + timedelta(seconds=sample.reply_s)
     session = SessionRow(session_id=auth.new_session_id(), copy_id=desk.copy_id, desk_id=desk.desk_id, kind="visitor",
                          secret_hash=auth.hash_token(auth.new_token()), verified=False, assurance="none",
@@ -452,10 +466,11 @@ async def _effects(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, sess
     in its terminal state; the fact as the visitor saw it is kept for the reply's card."""
     label = Label(readers=["owner", f"session:{session.session_id}"])
 
-    def keep(template: str, fact: Fact, stored_status: str, expires_at: datetime | None) -> None:
+    def keep(template: str, fact: Fact, stored_status: str, expires_at: datetime | None,
+             created_at: datetime | None = None) -> None:
         facts[template] = fact
         written.rows.append(labels.fact_row(desk.copy_id, desk.desk_id, fact.model_copy(
-            update={"status": stored_status, "expires_at": expires_at}), at, session_id=session.session_id,
+            update={"status": stored_status, "expires_at": expires_at}), created_at or at, session_id=session.session_id,
             action_id=action.action_id))
 
     if call.tool == "native.quote":
@@ -507,21 +522,38 @@ async def _effects(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, sess
         quote = next(row for row in written.rows if isinstance(row, Quote) and row.quote_id == action.resource.id)
         link_id, token = new_id("paylink"), secrets.token_urlsafe(32)
         expires = at + payment_link.LINK_TTL
+        if sample.paid_s is None:
+            raise SampleWeekRefused("payment_unfinished")
+        paid_at = start + timedelta(seconds=sample.paid_s)
+        if paid_at <= max(at, start + timedelta(seconds=sample.reply_s)):
+            raise SampleWeekRefused("payment_before_link")
+        charge_id = new_id("samplecharge")
+        quote.status = "paid"
         title = quotes.items_text(quote.items)
         written.rows.append(PaymentLink(
             link_id=link_id, copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
             quote_id=quote.quote_id, action_id=action.action_id, title=title, amount_cents=action.amount_cents,
-            state="expired", token=token, token_sha256=auth.hash_token(token),
+            state="paid", token=token, token_sha256=auth.hash_token(token),
             provider_checkout_id=new_id("samplecheckout"), customer_id=f"session:{session.session_id}",
-            expires_at=expires, created_at=at, updated_at=expires))
+            completion_started_at=paid_at - timedelta(seconds=1),
+            expires_at=expires, created_at=at, updated_at=paid_at))
         keep("payment_link", Fact(
             fact_id=f"payment_link:{link_id}", kind="payment_link", status="available", source="kernel",
             claims=[Claim(key="title", kind="text", value=title),
                     Claim(key="total", kind="money", value=action.amount_cents),
                     Claim(key="ref", kind="ref", value=link_id)], label=label, expires_at=expires), "expired", expires)
+        keep("payment_confirmed", Fact(
+            fact_id=f"charge:{charge_id}", kind="charge", status="committed", source="kernel",
+            claims=[Claim(key="title", kind="text", value=title),
+                    Claim(key="total", kind="money", value=action.amount_cents),
+                    Claim(key="ref", kind="ref", value=link_id)], label=label), "committed", None, created_at=paid_at)
         written.entry(at, "payment", session.session_id, link_id,
                       {"link_id": link_id, "state": "issued", "version": desk.version_row.version})
-        written.entry(expires, "payment", session.session_id, link_id, {"link_id": link_id, "state": "expired"})
+        written.entry(paid_at, "payment", session.session_id, link_id, {
+            "link_id": link_id, "state": "paid", "charge_id": charge_id,
+            "policy_version": desk.version_row.version, "auto_money_cap_cents": desk.cap})
+        _reply(ctx, desk, sample, session, paid_at + timedelta(seconds=1), facts, written,
+               [desk.desk_row.name, desk.business.name], prose="", templates=("payment_confirmed",), author="desk")
     elif call.tool in {"native.request_callback", "desk.emergency-callback"}:
         urgent = call.tool == "desk.emergency-callback"
         window = None if urgent else desks.next_open_window(desk.desk_row.hours, desk.tz, at)
@@ -541,19 +573,22 @@ async def _effects(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, sess
         keep("callback_confirmed", Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed",
                                         source="kernel", claims=window_claims(window), label=label,
                                         expires_at=window_end), "expired", handled_at)
-        written.entry(handled_at, "desk_data", session.session_id, None, {"part": "handoffs", "refs": [handoff_id]})
+        written.entry(handled_at, "desk_data", None, None, {"part": "handoffs", "refs": [handoff_id]})
     else:
         raise SampleWeekRefused("no_sample_effect")
 
 
 def _reply(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session: SessionRow, at: datetime,
-           facts: dict[str, Fact], written: _Written, names: list[str]) -> None:
+           facts: dict[str, Fact], written: _Written, names: list[str], *, prose: str | None = None,
+           templates: tuple[str, ...] | None = None, author: str = "claude") -> None:
     """Claude's reply: its prose, which must pass the reply check's prose scan, then a card per template the sample
     names, rendered from the fact this conversation wrote; ledgered `reply` and signed at that entry."""
-    if reply_check.scan_prose(sample.prose, names=names, booking_card="booking_confirmed" in sample.cards,
-                              callback_card="callback_confirmed" in sample.cards):
+    prose = sample.prose if prose is None else prose
+    templates = sample.cards if templates is None else templates
+    if reply_check.scan_prose(prose, names=names, booking_card="booking_confirmed" in templates,
+                              callback_card="callback_confirmed" in templates):
         raise SampleWeekRefused("prose_fails_the_scan")
-    if any(template not in facts for template in sample.cards):
+    if any(template not in facts for template in templates):
         raise SampleWeekRefused("card_without_fact")
 
     def href(template: str) -> str | None:
@@ -566,8 +601,8 @@ def _reply(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session: Ses
         return f"/api/d/{link.token}" if template == "document_link" else f"/pay/{link.token}"
 
     cards = [render.render_clause(Clause(template=template, fact_id=facts[template].fact_id), facts[template],
-                                  LANGUAGE, desk.info, href=href(template)) for template in sample.cards]
-    blocks = [RenderedBlock(kind="prose", text=sample.prose), *cards]
+                                  LANGUAGE, desk.info, href=href(template)) for template in templates]
+    blocks = [*([RenderedBlock(kind="prose", text=prose)] if prose else []), *cards]
     fact_ids = [card.fact_id for card in cards]
     message_id = new_id("msg")
     visitor_plain = render.status("reply_checked", LANGUAGE, owner=desk.business.owner_display_name)
@@ -585,7 +620,7 @@ def _reply(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session: Ses
                                                                visitor_plain=visitor_plain, ledger_seq=seq))
 
     written.entry(at, "reply", session.session_id, message_id, {
-        "message_id": message_id, "author": "claude", "ok": True, "language": LANGUAGE, "violations": [],
+        "message_id": message_id, "author": author, "ok": True, "language": LANGUAGE, "violations": [],
         "rule_ids": [], "fact_ids": [ledger.safe_ref(fact_id) for fact_id in fact_ids], "soft_promise": None,
         "soft_checks": None, "dropped": [], "final": True}, recorded)
     written.replies.append((at, session.session_id, verdict))

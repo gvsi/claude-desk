@@ -186,7 +186,9 @@ class SampleSession(NamedTuple):
     `start` in the business's time, the calls Claude made, and Claude's reply `reply_s` seconds later (its prose,
     then a card per template in `cards`, each citing the fact this conversation's call wrote). A callback the owner
     handled `handled_s` seconds after the message. `verified_customer` writes the archived sample customer's
-    historical verification before their document release."""
+    historical verification before their document release. `before_now_minutes` places the briefing's three
+    conversations today when the whole group fits after midnight, otherwise using their fixed times yesterday.
+    `paid_s` records the sample link's completed payment after the first reply."""
 
     days_back: int
     start: time
@@ -197,6 +199,8 @@ class SampleSession(NamedTuple):
     cards: tuple[str, ...] = ()
     handled_s: int | None = None
     verified_customer: bool = False
+    before_now_minutes: int | None = None
+    paid_s: int | None = None
 
 
 def _quote_call(at_s: int, item_id: str, outcome: Literal["executed", "refused", "denied"] = "executed", *,
@@ -215,29 +219,32 @@ RIVERA_SAMPLE_WEEK: list[SampleSession] = [
                   "How much is a leak repair? There's a slow drip under our bathroom sink.",
                   (_quote_call(20, "leak"),), 35,
                   "Here's the price for a leak repair from the price list. I can book a visit if you'd like.",
-                  ("quote",)),
+                  ("quote",), before_now_minutes=180),
     SampleSession(1, time(20, 10), "Do you come out to Alameda?", (), 20,
-                  "Yes, Alameda is in the service area."),
+                  "Yes, Alameda is in the service area.", before_now_minutes=135),
     SampleSession(1, time(21, 30),
                   "Can you send me the invoice for the job at my landlord's place? He asked me to pay it.",
                   (SampleCall(20, "native.release_document", {"document_id": SAMPLE_INVOICE["ref"]},
                               "refused", check="not_given"),), 35,
                   "I can only send an invoice to the customer it belongs to, after they confirm it's them. "
-                  "Your landlord can ask here."),
+                  "Your landlord can ask here.", before_now_minutes=90),
     SampleSession(6, time(9, 10),
                   "Hi, our kitchen sink has been draining slowly for days. What does drain clearing cost, and could "
                   "someone come out on the next morning you have free?",
                   (_quote_call(20, "drain"), _book_call(55, time(10))), 70,
                   "Here's the price for drain clearing from the price list, and your visit is booked.",
                   ("quote", "booking_confirmed")),
-    SampleSession(5, time(10, 30), "Could you resend the invoice from my leak repair? This is Elena Park.",
+    SampleSession(4, time(10, 30), "Could you resend the invoice from my leak repair? This is Elena Park.",
                   (SampleCall(60, "native.release_document", {"document_id": SAMPLE_INVOICE["ref"]}, "executed"),),
                   75, "Thanks for confirming. Here's the invoice from your leak repair.",
                   ("document_link",), verified_customer=True),
-    SampleSession(4, time(13, 15), "Can I pay the service call deposit online before the visit?",
+    SampleSession(5, time(9, 40),
+                  "Can I pay the service call deposit online? And please book the first morning visit you have.",
                   (_quote_call(20, "deposit"),
-                   SampleCall(45, "native.payment_link", {"quote_id": "sample-quote"}, "executed")), 60,
-                  "Here's the deposit from the price list, and a link to pay it.", ("quote", "payment_link")),
+                   _book_call(45, time(10)),
+                   SampleCall(70, "native.payment_link", {"quote_id": "sample-quote"}, "executed")), 90,
+                  "Here's the deposit from the price list, your visit is booked, and here's a link to pay the deposit.",
+                  ("quote", "booking_confirmed", "payment_link"), paid_s=120),
     SampleSession(2, time(7, 20),
                   "Water is pouring from under our kitchen sink and I can't find the shut-off! Please call me now. "
                   "Sam, (510) 555-0178.",
