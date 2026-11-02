@@ -91,8 +91,8 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
         setOpen(true);
         setFocusComposer(true);
       } else if (options?.fromSuggestion) {
-        // A page suggestion is disabled as this answer starts. Hand its focus on as a typed
-        // question does; touch uses Close so it doesn't summon the phone keyboard.
+        // A page suggestion is disabled as this answer starts. Continue in the panel;
+        // touch uses Close so it doesn't summon the phone keyboard.
         panelRoot.current?.querySelector<HTMLElement>(pressedByTouch() ? '.cd-ask-claude__header button' : 'textarea')?.focus();
       }
       const at = conversation.current;

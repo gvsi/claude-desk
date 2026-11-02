@@ -9,6 +9,38 @@ import { nextFrames } from '../../test/screen.ts';
 
 const LIST = `/app/${RIVERA.deskId}/conversations`;
 
+it('the_phone_menu_conversations_link_returns_focus_to_menu', async () => {
+  await coarsePointer();
+  mockStore.world.sessions.get('ses-dana-web')!.displayName = 'Dana Whitfield';
+  const { screen } = await renderRoute(LIST, { viewport: 'phone' });
+  const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Dana Whitfield/ });
+  await row.click();
+  await expect.element(screen.getByRole('heading', { level: 2, name: 'Dana Whitfield' })).toHaveFocus();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
+  const menu = screen.getByRole('button', { name: 'Menu', exact: true });
+  await menu.click();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
+  await screen.getByRole('navigation', { name: 'Main', exact: true }).getByRole('link', { name: /^Conversations/ }).click();
+  await expect.element(row).toBeVisible();
+  await expect.element(menu).toHaveFocus();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
+});
+
+it('the_single_column_sidebar_link_keeps_focus_when_returning_to_the_list', async () => {
+  mockStore.world.sessions.get('ses-dana-web')!.displayName = 'Dana Whitfield';
+  const { screen } = await renderRoute(LIST, { viewport: { width: 900, height: 900 } });
+  const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Dana Whitfield/ });
+  await expect.element(row).toBeVisible();
+  row.element().focus();
+  await userEvent.keyboard('{Enter}');
+  await expect.element(screen.getByRole('heading', { level: 2, name: 'Dana Whitfield' })).toHaveFocus();
+  const link = screen.getByRole('navigation', { name: 'Main', exact: true }).getByRole('link', { name: /^Conversations/ });
+  link.element().focus();
+  await userEvent.keyboard('{Enter}');
+  await expect.element(row).toBeVisible();
+  await expect.element(link).toHaveFocus();
+});
+
 it('a_phone_chat_focuses_its_heading_after_retrying_its_first_failed_read', async () => {
   await coarsePointer();
   mockStore.world.sessions.get('ses-dana-web')!.displayName = 'Dana Whitfield';
@@ -40,12 +72,24 @@ it('desktop_chat_keeps_focus_on_the_list_row', async () => {
 it('touch_opens_the_phone_chat_at_its_heading_without_focusing_a_text_box', async () => {
   await coarsePointer();
   mockStore.world.sessions.get('ses-dana-web')!.displayName = 'Dana Whitfield';
-  const { screen } = await renderRoute(LIST, { viewport: 'phone' });
+  const { screen, router } = await renderRoute(LIST, { viewport: 'phone' });
   const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Dana Whitfield/ });
   await row.click();
-  await expect.element(screen.getByRole('heading', { level: 2, name: 'Dana Whitfield' })).toHaveFocus();
+  const heading = screen.getByRole('heading', { level: 2, name: 'Dana Whitfield' });
+  await expect.element(heading).toHaveFocus();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
   await screen.getByRole('link', { name: 'All conversations', exact: true }).click();
   await expect.element(row).toHaveFocus();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
+  await row.click();
+  await expect.element(heading).toHaveFocus();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
+  await router.navigate(-1);
+  await expect.element(row).toHaveFocus();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
+  await router.navigate(1);
+  await expect.element(heading).toHaveFocus();
+  expect(document.activeElement?.matches(':focus-visible')).toBe(false);
 });
 
 it.each(['All conversations', 'browser Back'] as const)('phone_chat_hands_focus_to_its_heading_and_back_to_its_row_through_%s', async (back) => {
@@ -76,4 +120,8 @@ it.each(['All conversations', 'browser Back'] as const)('phone_chat_hands_focus_
   expect(list.element().scrollTop).toBe(top);
   await userEvent.tab();
   expect(list.element().contains(document.activeElement)).toBe(true);
+  if (back === 'browser Back') {
+    await router.navigate(1);
+    await expect.element(heading).toHaveFocus();
+  }
 });

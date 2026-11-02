@@ -6,7 +6,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { useId, useLayoutEffect, useRef } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router';
 
 import { request } from '../../api/http.ts';
 import type { ConversationSummary } from '../../api/views.ts';
@@ -15,7 +15,7 @@ import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, Record
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
-import { followInAppLinks } from '../inAppLinks.ts';
+import { followInAppLinks, returnThroughHistory } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
 import { firstName, useNeedsYou } from '../useDesks.ts';
@@ -68,6 +68,7 @@ export function ConversationsPage() {
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const titleId = useId();
   const listRef = useRef<HTMLElement>(null);
   const previousSession = useRef(sessionId);
@@ -75,11 +76,12 @@ export function ConversationsPage() {
     const previous = previousSession.current;
     previousSession.current = sessionId;
     if (sessionId !== undefined || previous === undefined || !window.matchMedia(CONVERSATIONS_SINGLE_COLUMN).matches) return;
-    // The phone list kept its place while the chat had the page. Both ways back return to its row.
+    if (navigationType !== 'POP' && location.state?.fromChat !== true) return;
+    // Back and All conversations return to the row; the shell owns focus for its navigation.
     const href = conversationPath(deskId, previous);
     const row = [...(listRef.current?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [])].find((link) => link.getAttribute('href') === href);
     row?.focus();
-  }, [sessionId, deskId]);
+  }, [sessionId, deskId, navigationType, location.state]);
   // The list's title names the tab, with a conversation open beside it or on its own too.
   useDocumentTitle(inApp(TITLE));
 
@@ -186,7 +188,10 @@ export function ConversationsPage() {
             {/* Under 1024 px the list, and its title, step aside for the conversation: the page keeps
                 its one top heading here, out of sight, while the conversation opens and once it has. */}
             <h1 className="cd-sr-only cd-conversations__open-title">{TITLE}</h1>
-            <p className="cd-conversations__back cd-type-meta">
+            <p
+              className="cd-conversations__back cd-type-meta"
+              onClick={returnThroughHistory(navigate, conversationsPath(deskId), false, { state: { fromChat: true } })}
+            >
               <TextLink href={conversationsPath(deskId)}>All conversations</TextLink>
             </p>
             <ConversationDetail key={sessionId} sessionId={sessionId} summary={open} listRead={listRead} notice={arrivalNotice(location.state)} />
