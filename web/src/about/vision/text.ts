@@ -82,7 +82,7 @@ export const CITY: ChatScreen = {
 /** Sam Patel's own Desk at Lumen Labs, a colleague asking under Sam's rules: half an hour on his calendar, then a request held for him. */
 export const WORK: ChatScreen = {
   kind: 'chat',
-  label: 'A colleague’s phone: Sam Patel’s Desk holds half an hour on Sam’s calendar in a card and asks Sam before sharing the hiring plan.',
+  label: 'A colleague’s phone: Sam Patel’s Desk holds half an hour on Sam’s calendar in a card and asks Sam before sharing the Q4 budget.',
   field: 'rivera',
   monogram: 'S',
   name: 'Sam Patel’s Desk',
@@ -98,7 +98,7 @@ export const WORK: ChatScreen = {
       lines: ['30 minutes with Sam Patel: launch review'],
     },
     { kind: 'receipt', tone: 'done', text: 'Open to colleagues: Sam lets them hold 30 minutes.' },
-    { kind: 'visitor', text: 'Can you send me the Q4 hiring plan?' },
+    { kind: 'visitor', text: 'Can you send me the Q4 budget?' },
     { kind: 'claude', text: 'That one is Sam’s to share. I’ve asked him for you.' },
     { kind: 'receipt', tone: 'held', text: 'Held for Sam. Nothing was shared.' },
   ],
@@ -186,13 +186,13 @@ export const SECTIONS: Section[] = [
     heading: 'A Desk for everyone at work',
     passages: [
       'At Lumen Labs every employee has a Desk of their own, and colleagues chat with it before they interrupt the person: is Sam free this week, where’s the checklist, who owns this. Each Desk answers from its owner’s calendar, docs and notes, under rules its owner set.',
-      'Jordan gets half an hour on Thursday because Sam lets colleagues hold time. The hiring plan is Sam’s to share, so his Desk asks him and shares nothing until he says yes.',
+      'Jordan gets half an hour on Thursday because Sam lets colleagues hold time. The Q4 budget is Sam’s to share, so his Desk asks him and shares nothing until he says yes.',
     ],
     figure: {
       screen: WORK,
       side: 'right',
       lead: 'Jordan, looking for Sam.',
-      caption: 'Time on Sam’s calendar is open to colleagues. The hiring plan waits for Sam.',
+      caption: 'Time on Sam’s calendar is open to colleagues. The Q4 budget waits for Sam.',
     },
   },
   {

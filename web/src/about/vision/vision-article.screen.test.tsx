@@ -37,7 +37,7 @@ const FIGURES = [
     ai: 'You’re chatting with Claude, an AI answering for the Permit Center.',
   },
   {
-    label: 'A colleague’s phone: Sam Patel’s Desk holds half an hour on Sam’s calendar in a card and asks Sam before sharing the hiring plan.',
+    label: 'A colleague’s phone: Sam Patel’s Desk holds half an hour on Sam’s calendar in a card and asks Sam before sharing the Q4 budget.',
     lead: 'Jordan, looking for Sam.',
     ai: 'Claude, an AI, answers colleagues under Sam’s rules.',
   },
@@ -73,16 +73,16 @@ const WORK = {
   heading: 'A Desk for everyone at work',
   passages: [
     'At Lumen Labs every employee has a Desk of their own, and colleagues chat with it before they interrupt the person: is Sam free this week, where’s the checklist, who owns this. Each Desk answers from its owner’s calendar, docs and notes, under rules its owner set.',
-    'Jordan gets half an hour on Thursday because Sam lets colleagues hold time. The hiring plan is Sam’s to share, so his Desk asks him and shares nothing until he says yes.',
+    'Jordan gets half an hour on Thursday because Sam lets colleagues hold time. The Q4 budget is Sam’s to share, so his Desk asks him and shares nothing until he says yes.',
   ],
-  caption: 'Jordan, looking for Sam. Time on Sam’s calendar is open to colleagues. The hiring plan waits for Sam.',
+  caption: 'Jordan, looking for Sam. Time on Sam’s calendar is open to colleagues. The Q4 budget waits for Sam.',
   head: ['S', 'Sam Patel’s Desk', 'Lumen Labs · Jordan Lee is asking', 'Claude, an AI, answers colleagues under Sam’s rules.'],
   parts: [
     ['visitor', '', 'Can I grab 30 minutes with Sam this week?'],
     ['claude', '', 'Sam has a slot open. I’ve held it for you.'],
     ['card', '', 'Calendar hold / Thursday, November 5, 2:00 pm / 30 minutes with Sam Patel: launch review'],
     ['receipt', 'done', 'Open to colleagues: Sam lets them hold 30 minutes.'],
-    ['visitor', '', 'Can you send me the Q4 hiring plan?'],
+    ['visitor', '', 'Can you send me the Q4 budget?'],
     ['claude', '', 'That one is Sam’s to share. I’ve asked him for you.'],
     ['receipt', 'held', 'Held for Sam. Nothing was shared.'],
   ],
@@ -240,7 +240,7 @@ describe('The Vision article', () => {
     }
   });
 
-  it('a_desk_at_work_holds_time_in_a_card_and_holds_the_hiring_plan_for_sam', async () => {
+  it('a_desk_at_work_holds_time_in_a_card_and_holds_the_q4_budget_for_sam', async () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(PATH, { viewport });
       // The section as the signed board writes it: its heading, its two paragraphs, then Sam's Desk and its caption.
@@ -271,7 +271,7 @@ describe('The Vision article', () => {
       // Claude's words state no day, time or other fact the kernel's reply check would block, "this week" included.
       for (const words of picture.querySelectorAll('[data-part="claude"]')) expect(factsInProse(flat(words)), flat(words)).toEqual([]);
 
-      // The hiring plan is held for Sam: a held receipt right under Claude's message, as the app draws it.
+      // The Q4 budget is held for Sam: a held receipt right under Claude's message, as the app draws it.
       const held = [...picture.querySelectorAll('[data-part="receipt"][data-tone="held"]')];
       expect(held.map(flat), viewport).toEqual(['Held for Sam. Nothing was shared.']);
       const asked = held[0]?.previousElementSibling;
