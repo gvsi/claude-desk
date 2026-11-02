@@ -34,6 +34,11 @@ export interface ReviewToolView {
   mode: RuleMode;
   /** The rules that already cover it, most specific first. */
   coveredBy: readonly ReviewCoverage[];
+  /**
+   * The screen's own line for a tool no rule covers, in place of "No rule of yours covers this
+   * yet…": why it starts where it does. A rule that covers the tool still shows instead.
+   */
+  uncoveredLine?: string;
 }
 
 interface ReviewControls {
@@ -69,9 +74,10 @@ export type ConnectorReviewProps = ReviewControls & (
   | { job: ReviewJobView; connector?: never; intro?: never; connection?: never; onConnect?: never }
 );
 
-/** A line for each rule that covers a tool, or the line that none does. */
+/** A line for each rule that covers a tool, or the line that none does: the screen's own, else ours. */
 function coverageLines(tool: ReviewToolView): string[] {
   if (tool.coveredBy.length === 0) {
+    if (tool.uncoveredLine?.trim()) return [tool.uncoveredLine];
     return [tool.mode === 'ask' ? 'No rule of yours covers this yet, so it starts at Ask me first.' : 'No rule of yours covers this yet.'];
   }
   return tool.coveredBy.map((rule) => {

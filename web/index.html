@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
     <meta name="color-scheme" content="dark" />
+    <script>
+      // The theme chosen in this browser (src/lib/theme.ts), set before anything paints, with the page's scheme
+      // following it so the blank page before the styles load is in its colors; dark, the default, sets nothing.
+      try {
+        const theme = localStorage.getItem('claude-desk.theme');
+        if (theme === 'light' || theme === 'system') {
+          document.documentElement.dataset.theme = theme;
+          const scheme = document.querySelector('meta[name="color-scheme"]');
+          if (scheme) scheme.content = theme === 'light' ? 'light' : 'dark light';
+        }
+      } catch {}
+    </script>
     <title>Claude Desk</title>
     <link rel="icon" type="image/svg+xml" href="/src/ds/components/Mark/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />

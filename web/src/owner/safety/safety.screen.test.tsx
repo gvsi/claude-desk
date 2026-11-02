@@ -149,6 +149,11 @@ function region(screen: RenderResult, name: string) {
 }
 
 const REPLAYED = 'Recorded history, replayed into your copy';
+/**
+ * Where an entry the kernel wrote came from: who recorded it, and nothing about when, since a
+ * replayed sample entry is written into the copy long after what it records.
+ */
+const KERNEL_ORIGIN = 'Recorded by your Desk';
 
 const REFUND_REASON = 'Someone in the public chat said they were Mike and asked me to refund a charge to their own card. Refunds go only to the customer who paid, so I didn’t.';
 
@@ -177,7 +182,9 @@ const STOPPED_REPLY = 'A reply was stopped before it was shown.';
 const NOTHING = "When a request is turned down or a reply is stopped, you'll see here what was asked and why. Try it yourself from your public page.";
 const HEADLINE = /^I turned down \d+ requests? this week\.$/;
 const NONE_TURNED_DOWN = "I didn't turn down any requests this week.";
-const SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
+const SUBTITLE = 'Requests your Desk turned down, replies it stopped before they were shown, and the signed record of every entry.';
+/** The record's check, passed, in the owner's words. */
+const UNCHANGED = 'No entry has been changed since it was written';
 
 /**
  * One of Claude's drafts the reply check stopped at `at`: entry `seq` of the record, and its
@@ -318,8 +325,11 @@ describe('Safety', () => {
     const { screen } = await renderRoute(SAFETY);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
     await expect.element(screen.getByText('I turned down 2 requests this week.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('img', { name: `${entries} entries`, exact: true })).toBeVisible();
+    await expect.element(screen.getByText(UNCHANGED, { exact: true })).toBeVisible();
+    // The count says what it counts, in words, not a bare number in a pill.
+    await expect.element(screen.getByText(`${entries} entries`, { exact: true })).toBeVisible();
+    expect(document.querySelector('.cd-chain-status .cd-count-pill')).toBeNull();
+    expect(document.querySelector('.cd-chain-status')?.textContent).not.toMatch(/chain/i);
     expect(document.body.textContent).not.toMatch(/talk me around|attempts? (?:was|were) stopped/);
 
     // One request reads in the singular.
@@ -452,8 +462,11 @@ describe('Safety', () => {
   it('broken_chain_is_plain', async () => {
     injectLedger(ledgerPage(threeEntries(), { chain_ok: false, first_bad_seq: 2 }));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    await expect.element(screen.getByText("Entry 2 doesn't match the chain", { exact: true })).toBeVisible();
-    expect(screen.getByText('Every entry matches the chain').elements()).toHaveLength(0);
+    // A failed check says where it failed, never that the record changed: a changed key or a
+    // removed entry fails it too, with the entry it names unchanged.
+    await expect.element(screen.getByText('The record check failed at entry 2', { exact: true })).toBeVisible();
+    expect(document.querySelector('.cd-chain-status')?.textContent).not.toMatch(/chang/i);
+    expect(screen.getByText(UNCHANGED).elements()).toHaveLength(0);
 
     // An entry's full trace says the chain is broken, and where, never that it was verified.
     await recordRow(screen, 3).click();
@@ -723,8 +736,8 @@ describe('Safety', () => {
   });
 
   it('every_entry_shows_its_origin', async () => {
-    const CHECKED = 'Recorded by the checkpoint';
-    const REPORTED = 'Reported by the chat service, not checked by the checkpoint';
+    const CHECKED = KERNEL_ORIGIN;
+    const REPORTED = 'Reported by the chat, not verified by your Desk';
     const reported = entry(4, '2026-10-20T16:53:00.000000Z', { kind: 'rate_limit', origin: 'api', session_id: 'ses-2', summary: { limit: 'turns' } });
     injectLedger(ledgerPage([...threeEntries(), reported]));
     injectAttempts([
@@ -732,7 +745,7 @@ describe('Safety', () => {
       attempt(),
     ]);
     const { screen } = await renderRoute(`${SAFETY}/att-reported`);
-    const noOldWords = () => expect(document.body.textContent).not.toMatch(/From chat|From the chat service/);
+    const noOldWords = () => expect(document.body.textContent).not.toMatch(/From chat|chat service|by the checkpoint/);
 
     // Each attempt's row, and the attempt open beside the list, in the same words.
     const reportedRow = screen.getByRole('link', { name: /Someone sent messages faster/ });
@@ -746,8 +759,10 @@ describe('Safety', () => {
     expect(detail(screen).getByText(REPORTED).elements()).toHaveLength(0);
     noOldWords();
 
-    // Every row of the record.
+    // Every row of the record, under a column head that doesn't repeat its words.
     await viewOption(screen, 'Every entry').click();
+    await expect.element(recordRow(screen, 4)).toBeVisible();
+    expect([...document.querySelectorAll('.cd-record__head > span')].map((el) => el.textContent)).toEqual(['Entry', 'What', 'From', 'Time']);
     await expect.element(recordRow(screen, 4).getByText(REPORTED, { exact: true })).toBeVisible();
     for (const seq of [1, 2, 3]) await expect.element(recordRow(screen, seq).getByText(CHECKED, { exact: true })).toBeVisible();
     noOldWords();
@@ -998,6 +1013,10 @@ describe('Safety', () => {
     await expect.element(viewOption(screen, 'Every entry')).toHaveAttribute('aria-checked', 'true');
     const row = recordRow(screen, 2);
     await expect.element(row.getByText(REPLAYED, { exact: true })).toBeVisible();
+    // The kernel wrote the replayed entry when the copy was made, so its origin says who recorded
+    // it and claims nothing about when.
+    await expect.element(row.getByText(KERNEL_ORIGIN, { exact: true })).toBeVisible();
+    expect(row.element().textContent).not.toMatch(/as it happened/);
     await expect.element(row.getByText('Oct 18, 9:52 am', { exact: true })).toBeVisible();
     expect(row.getByText('Oct 20, 9:51 am').elements()).toHaveLength(0);
     // A live entry says nothing about replay.
@@ -1018,6 +1037,8 @@ describe('Safety', () => {
     await viewOption(screen, 'Stopped').click();
     const open = detail(screen);
     await expect.element(open.getByText(REPLAYED, { exact: true })).toBeVisible();
+    await expect.element(open.getByText(KERNEL_ORIGIN, { exact: true })).toBeVisible();
+    expect(open.element().textContent).not.toMatch(/as it happened/);
     await expect.element(open.getByText('Oct 18, 9:52 am', { exact: true })).toBeVisible();
     expect(open.getByText('Oct 20, 9:51 am').elements()).toHaveLength(0);
   });
@@ -1066,7 +1087,7 @@ describe('Safety', () => {
     await listSeededHold();
     const { screen } = await renderRoute(SAFETY);
     await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Every entry matches the chain', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(UNCHANGED, { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     // A held request is held, not stopped, and claims nothing about what happens next.
     await screen.getByRole('link', { name: /^Today, \d{1,2}:\d{2} [ap]m A visitor not on record/ }).click();
@@ -1106,7 +1127,7 @@ describe('Safety', () => {
     // The record was read and checked; then a later read fails. The check says so, first, beside
     // what it last found, and stays until a read works, so an old check never reads as current.
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    const checked = screen.getByText('Every entry matches the chain', { exact: true });
+    const checked = screen.getByText(UNCHANGED, { exact: true });
     const record = screen.getByRole('list', { name: 'Every entry, newest first' });
     await expect.element(checked).toBeVisible();
     await expect.element(record).toBeVisible();
@@ -1165,7 +1186,7 @@ describe('Safety', () => {
     const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
     await expect.element(line, { timeout: 5_000 }).toBeVisible();
     await expect.element(nothing).not.toBeInTheDocument();
-    expect(line.element().compareDocumentPosition(screen.getByText('Every entry matches the chain').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.element().compareDocumentPosition(screen.getByText(UNCHANGED).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await readsMore('safety', 2);
     await readsMore('today', 1);
     expect(nothing.elements()).toHaveLength(0);

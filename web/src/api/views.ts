@@ -590,6 +590,11 @@ export interface SetupMessage {
   text: string;
   choices: Choice[];
   card: ProposalCard | null;
+  /**
+   * A card the owner decided themselves, by a click or a typed answer; false for one setup settled
+   * for them, as "Use your suggestions" does. Older responses omit it (false).
+   */
+  owner_decided?: boolean;
 }
 
 export interface SetupState {

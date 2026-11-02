@@ -430,7 +430,7 @@ async def test_carries_on_with_claude_after_a_handback(app, browser, fake, visit
     asking = gated(step("Is a visit this week possible?"), release)
     visitor_model.add(step("Hi, can you fix a leaking sink?"), asking, step("Okay, can I book the earliest visit?"),
                       step("", done=True))
-    desk_model.add(say("We can help with that."), say("Here are the open times."))
+    desk_model.add(say("We can help with that."), say("Yes, we have times this week."), say("Here are the open times."))
 
     started = await start(visitors, fake, copy)
     session_id = started.session_id
@@ -443,14 +443,18 @@ async def test_carries_on_with_claude_after_a_handback(app, browser, fake, visit
 
     run = visitors.run(started.run_id, copy.copy_id)
     assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 3)
-    # The owner left: it read that Claude answers again, wrote to Claude, and Claude answered it.
-    assert len(desk_model.requests) == 2
+    # The owner left without answering its line, so the hand-back woke Claude to answer it: the visitor waited for
+    # that resumed turn, read it with the owner's coming and going, then wrote to Claude, and Claude answered it.
+    assert len(desk_model.requests) == 3
+    assert "<visitor_message>Is a visit this week possible?</visitor_message>" in json.dumps(
+        desk_model.requests[1].messages)
     third, fourth = visitor_model.requests[2:]
     assert last_input(third) == wrap(DESK_REPLY_TAG, "Mike Turner (the owner, a person) joined the chat.\n"
-                                     "The owner left the chat, and Claude (the business's AI) answers again.")
+                                     "The owner left the chat, and Claude (the business's AI) answers again.\n"
+                                     "Claude (the business's AI): Yes, we have times this week.")
     assert last_input(fourth) == wrap(DESK_REPLY_TAG, "Claude (the business's AI): Here are the open times.")
     assert "<visitor_message>Okay, can I book the earliest visit?</visitor_message>" in json.dumps(
-        desk_model.requests[1].messages)
+        desk_model.requests[2].messages)
 
 
 async def test_handback_waits_for_a_pending_whispers_delayed_claude_reply(

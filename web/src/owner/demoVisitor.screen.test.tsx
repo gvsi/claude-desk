@@ -23,6 +23,7 @@ const NOTE = 'A demo visitor, played by an AI. Take over or whisper to see how C
 const STOP = 'Stop the demo visitor';
 const FINISHED = 'The demo visitor finished.';
 const STOPPED = 'You stopped the demo visitor.';
+const STOPPED_EARLY = 'The demo visitor stopped early.';
 const LIST = `/app/${RIVERA.deskId}/conversations`;
 
 /** The requests a route got, by key. */
@@ -250,13 +251,20 @@ describe('Demo visitor', () => {
     expectNoHorizontalScroll();
   });
 
-  it.each(['finished', 'owner_silent', 'limit', 'chat_ended', 'failed', 'budget'] as const)('the_note_says_the_demo_visitor_finished_when_it_ended_%s', async (ended) => {
+  it.each([
+    ['finished', FINISHED],
+    ['owner_silent', FINISHED],
+    ['limit', FINISHED],
+    ['chat_ended', FINISHED],
+    ['failed', STOPPED_EARLY],
+    ['budget', STOPPED_EARLY],
+  ] as const)('the_note_says_how_the_demo_visitor_ended_when_it_ended_%s', async (ended, line) => {
     const { session_id: sessionId, run_id: runId } = await startOne(`ended-${ended}`);
     const opened = await renderRoute(`${LIST}/${sessionId}`);
     await expect.element(demoNote(opened.screen)).toMatchTextContent(NOTE);
-    // It ended on its own, or for any reason but Stop: the same line, with no button.
+    // It ended on its own: finished, or stopped early by a failure or the day's budget; no button either way.
     mockStore.demoVisitors.endRun(runId, ended);
-    await expect.element(demoNote(opened.screen)).toHaveTextContent(FINISHED);
+    await expect.element(demoNote(opened.screen)).toHaveTextContent(line);
     expect(demoNote(opened.screen).getByRole('button').elements()).toHaveLength(0);
     // The row keeps its tag.
     await expect.element(opened.screen.getByRole('link', { name: /^Riley Demo visitor/ })).toBeVisible();

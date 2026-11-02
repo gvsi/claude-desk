@@ -4,6 +4,7 @@
  * shared contracts.
  */
 import { effectiveBrand } from './brand.ts';
+import { deskJobTools } from './businessTools.ts';
 import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, SseEvent, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
@@ -918,12 +919,11 @@ export const HEALTH: HealthOut = {
 
 /**
  * The preset the owner cards came from: the one whose cards they are, exactly, as a Desk with these
- * opening hours drafts it (`presetCards`), else null. It is provenance only, and Turner's own rules
- * match neither.
+ * opening hours drafts it (`presetCards`), apart from the Desk's own job cards, else null.
  */
-function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[]): RulesPreset | null {
+function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[], jobs: ReadonlySet<string>): RulesPreset | null {
   const set = (list: readonly RuleCard[]) => list.filter((card) => card.is_default !== true).map(canonicalCard).sort().join('\n');
-  const owned = set(cards);
+  const owned = set(cards.filter((card) => !jobs.has(card.applies_to)));
   const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(presetCards(preset, hours)) === owned);
   return match ?? null;
 }
@@ -954,7 +954,7 @@ export function rulesView(desk: DeskRecord): RulesView {
         .map((card) => ({ card_id: card.card_id, mode: card.mode, reason: card.reason, shared: card.applies_to.startsWith('effect:') })),
     };
   });
-  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards, desk.summary.hours) };
+  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards, desk.summary.hours, deskJobTools(tools)) };
 }
 
 /**

@@ -7729,7 +7729,7 @@
     "/api/owner/policy/{desk_id}/preset": {
       "post": {
         "summary": "Draft Preset",
-        "description": "Draft a preset in place of the Desk's owner cards: \"Ask me first for everything\" (`ask_first`) or \"Recommended\nrules\" (`auto`). Every owner card goes, those for one person and \"never\" ones included, and the draft's diff lists\neach; nothing changes until `confirm`.",
+        "description": "Draft a preset in place of the Desk's owner cards: \"Ask me first for everything\" (`ask_first`) or \"Recommended\nrules\" (`auto`). The Desk's own job cards stay unchanged. Other owner cards go, those for one person and \"never\"\nones included, and the draft's diff lists each; nothing changes until `confirm`.",
         "operationId": "owner_draft_preset",
         "parameters": [
           {
@@ -14100,6 +14100,11 @@
                 "type": "null"
               }
             ]
+          },
+          "owner_decided": {
+            "type": "boolean",
+            "title": "Owner Decided",
+            "default": false
           }
         },
         "type": "object",
@@ -14108,7 +14113,7 @@
           "text"
         ],
         "title": "SetupMessage",
-        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text."
+        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided\nthemselves, by a click or a typed answer; a card setup settled for them (as \"Use your suggestions\" does) stays\nfalse. Read-only: it only says what happened."
       },
       "SetupProposalIn": {
         "properties": {
@@ -15332,6 +15337,22 @@
                 "type": "null"
               }
             ]
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new",
+                  "changed",
+                  "delisted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
           }
         },
         "type": "object",

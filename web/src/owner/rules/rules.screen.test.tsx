@@ -405,6 +405,31 @@ describe('rules page', () => {
     expect([...nav.element().querySelectorAll('[aria-current="page"]')].map((row) => row.textContent)).toEqual(['Connectors']);
   });
 
+  it.each(['Ask me first', 'Recommended rules'])('preset_review_%s_keeps_emergency_callbacks_automatic', async (label) => {
+    await page.viewport(1440, 900);
+    const urgent = desk().policy.cards.find((card) => card.card_id === 'rv-urgent');
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+    await expect.element(jobs.getByText('Emergency callback', { exact: true })).toBeVisible();
+    await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: label }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: label })).toBeVisible();
+    const rows = reviewRows(screen);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.map((row) => row.title)).not.toContain('Emergency callback');
+    for (const row of rows) {
+      const words = (value: string | null) => value?.replace(/^(Before|After)/, '').replace(/\bChanged\b/g, '').replace(/\s+/g, ' ').trim();
+      expect(words(row.after), row.title).not.toBe(words(row.before));
+    }
+    await expect.element(screen.getByText('Open times, leads, callbacks and identity checks still run on their own.', { exact: true })).toBeVisible();
+    expect(desk().drafts.get(desk().lastVersion)?.draft.cards).toContainEqual(urgent);
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    expect(desk().policy.cards).toContainEqual(urgent);
+    await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+  });
+
   it('preset_menu_drafts_a_preset', async () => {
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
@@ -441,7 +466,7 @@ describe('rules page', () => {
   it('preset_review_lists_every_removed_rule', async () => {
     // Dana Whitfield's own booking rule, from an earlier "Allow only for Dana" answer.
     mockStore.world.addActiveRules(desk(), [EXTRA_RULES.danaBooking]);
-    const owned = desk().policy.cards.filter((card) => !card.card_id.startsWith('preset-'));
+    const owned = desk().policy.cards.filter((card) => !card.card_id.startsWith('preset-') && card.applies_to !== 'desk.emergency-callback');
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();

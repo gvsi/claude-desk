@@ -777,6 +777,15 @@ function say(interview: Interview, role: SetupMessage['role'], text: string, cho
   interview.state.messages.push({ role, text, choices, card: null });
 }
 
+/**
+ * The owner decided this card themselves, by a click or a typed answer: its message says so, as the
+ * API's does (`owner_decided`). A card setup settles for them, as "Use your suggestions" does, stays unmarked.
+ */
+function markDecided(interview: Interview, proposalId: string): void {
+  const message = interview.state.messages.findLast(({ card }) => card?.proposal_id === proposalId);
+  if (message) message.owner_decided = true;
+}
+
 /** The CPA fixture's proposals, made once so their ids remain stable throughout the interview. */
 const proposalId = () => `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
 function consultantProposals(): ProposalCard[] {
@@ -1201,7 +1210,10 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
       interview.state.messages.push({ role: 'claude', text: '', choices: [], card: updated });
     } else if (!/[?]/.test(words) && /^(?:yes\b|accept\b|set it up\b|connect\b|no\b|not now\b|skip\b|decline\b)/i.test(words)) {
       const unpriced = payment !== null && (payment.amount_cents === null || payment.amount_cents <= 0);
-      card.state = unpriced || /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words) ? 'declined' : 'accepted';
+      const no = /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words);
+      card.state = unpriced || no ? 'declined' : 'accepted';
+      // As the API's typed decision: a yes can't accept a payment with no amount, so its decline is setup's, not the owner's.
+      if (no || !unpriced) markDecided(interview, card.proposal_id);
       connectAcceptedProposal(world, interview, card);
       nextConsultant(interview);
     } else {
@@ -1717,6 +1729,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     }
     const apply = () => {
       proposal.state = body.accept ? 'accepted' : 'declined';
+      markDecided(interview, proposal.proposal_id);
       if (proposal.job && (body.autonomy === 'auto' || body.autonomy === 'ask')) proposal.job.autonomy = body.autonomy;
       if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
       if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;

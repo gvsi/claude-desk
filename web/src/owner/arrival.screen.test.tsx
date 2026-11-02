@@ -37,6 +37,7 @@ const INTRO =
 const ENDED = 'Your demo session ended. Enter the passcode to start a fresh copy.';
 const THINGS = [
   ['Chat as a customer', 'Turner’s public page opens in a new tab.'],
+  ['Watch a demo visitor', 'An AI plays a customer on your Desk.'],
   ['Try to break it', 'Ask for a discount or someone else’s details.'],
   ['Answer a held request', 'One is waiting for you on Today.'],
   ['Create your own Desk', 'It gets a live link you can share.'],
@@ -160,6 +161,26 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(screen.getByText(/^You're Mike Turner today\. This is a concept prototype\.$/)).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Mike$/ })).toBeVisible();
+  });
+
+  it.each(['desktop', 'phone'] as const)('intro_dialog_lists_the_five_things_in_order_on_%s', async (viewport) => {
+    const { screen } = await renderRoute('/', { viewport, seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    await settled(dialog.element());
+    const items = dialog.getByRole('list').getByRole('listitem').elements();
+    // The five Today counts, in Today's order, the demo visitor second with the first sentence of its line.
+    expect(items.map((item) => item.querySelector('.cd-intro__thing-title')?.textContent)).toEqual(THINGS.map(([title]) => title));
+    expect(items.map((item) => item.textContent)).toEqual(THINGS.map(([title, detail]) => `${title}${detail}`));
+    expect(items[1]?.querySelector('svg path[d]')).not.toBeNull();
+    // Each detail stays on one line.
+    for (const detail of items.map((item) => item.querySelector('.cd-intro__thing-detail') as HTMLElement)) {
+      expect(detail.getClientRects()).toHaveLength(1);
+    }
+    // On a phone too, "Start the demo" and the footer are in view as the dialog opens.
+    await expect.element(dialog.getByRole('button', { name: 'Start the demo' })).toBeInViewport();
+    await expect.element(dialog.getByText(/^Concept prototype by/)).toBeInViewport();
+    expectNoHorizontalScroll();
   });
 
   it('the_illustration_plays_once_as_the_window_changes', async () => {
@@ -2481,7 +2502,8 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
     await expect.element(thingsToTry(screen).getByText('2 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was refused and why.", { exact: true })).toBeVisible();
+    // Safety lists what was stopped, not every request Claude declines in its own words.
+    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was stopped and why.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
     // Its words don't say it's done, so the Done pill is read out.

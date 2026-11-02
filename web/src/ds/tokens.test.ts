@@ -4,8 +4,18 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, test } from 'vitest';
 
-import { buildTokensCss, type DesignTokens, type TypeStyle } from '../../scripts/build-tokens.mjs';
-import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast, tokenHex } from './contrast';
+import { buildTokensCss, type DesignTokens, type ThemedValues, type TypeStyle } from '../../scripts/build-tokens.mjs';
+import {
+  CONTRAST_PAIRS,
+  DECORATIVE_COLORS,
+  LIGHT_THEME_EXEMPTIONS,
+  ON_BRAND_COLORS,
+  THEMES,
+  contrastRatio,
+  pairContrast,
+  tokenHex,
+  type Theme,
+} from './contrast';
 import tokens from './tokens.json' with { type: 'json' };
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
@@ -26,25 +36,28 @@ function label(pair: { fg: string; ground: string; over?: string; under?: string
   return `${pair.fg} on ${pair.ground}${over}${under}${faded}`;
 }
 
+/** A token's value: a color's or a shadow's dark value, or a plain one. */
 function tokenValue(name: string): string | undefined {
-  const color = tokens.color.tokens.find((t) => t.name === name);
-  if (color) return color.value.dark;
+  const themed = [...tokens.color.tokens, ...tokens.shadow.tokens].find((t) => t.name === name);
+  if (themed) return themed.value.dark;
   for (const family of LIST_FAMILIES) {
-    if (family === 'color') continue;
+    if (family === 'color' || family === 'shadow') continue;
     const entry = tokens[family].tokens.find((t) => t.name === name);
     if (entry) return entry.value;
   }
   return undefined;
 }
 
-/** Color tokens that alias a `mark-*` color or clay, as "name: value". */
-function aliasesOfTheMarkOrClay(colors: readonly { name: string; value: { dark: string } }[]): string[] {
-  return colors
-    .filter((token) => {
-      const target = ALIAS.exec(token.value.dark)?.[1];
-      return target !== undefined && (target.startsWith('mark-') || target === 'clay' || target.startsWith('clay-'));
-    })
-    .map((token) => `${token.name}: ${token.value.dark}`);
+/** Color tokens that alias a `mark-*` color or clay in any theme, as "name: value". */
+function aliasesOfTheMarkOrClay(colors: readonly { name: string; value: ThemedValues }[]): string[] {
+  return colors.flatMap((token) =>
+    Object.values(token.value)
+      .filter((value): value is string => {
+        const target = value === undefined ? undefined : ALIAS.exec(value)?.[1];
+        return target !== undefined && (target.startsWith('mark-') || target === 'clay' || target.startsWith('clay-'));
+      })
+      .map((value) => `${token.name}: ${value}`),
+  );
 }
 
 /** The tokens with one more interface type style, for the builder's checks. */
@@ -58,6 +71,80 @@ describe('design tokens', () => {
   test('tokens_css_is_generated_from_tokens_json', () => {
     const committed = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'tokens.css'), 'utf8');
     expect(buildTokensCss(tokens)).toBe(committed);
+  });
+
+  test('a_light_theme_overrides_only_the_tokens_it_has_values_for', () => {
+    // Dark is the base and the default: every token, on :root and on anything marked dark. Light is
+    // chosen in this browser (data-theme="light" on the root), or by the system when System is chosen
+    // (data-theme="system") and it prefers light, and sets only
+    // the tokens with a light value, with the browser's own scheme. An alias without one (line-focus)
+    // resolves against the light values on the same root, and a fixed color (the mark's) stays.
+    const usage = 'A test token.';
+    const themed: DesignTokens = structuredClone(tokens);
+    themed.color = {
+      themes: [
+        { id: 'dark', name: 'Dark' },
+        { id: 'light', name: 'Light' },
+      ],
+      tokens: [
+        { name: 'bg-app', value: { dark: '#1c1b19', light: '#f6f4ee' }, usage },
+        { name: 'text-primary', value: { dark: 'rgba(250,249,245,0.92)', light: 'rgba(28,27,25,0.92)' }, usage },
+        { name: 'line-focus', value: { dark: '{text-primary}' }, usage },
+        { name: 'mark-ink', value: { dark: '#141413' }, usage },
+      ],
+    };
+    themed.shadow = {
+      tokens: [{ name: 'shadow-composer', value: { dark: '0 4px 20px rgba(0,0,0,0.25)', light: '0 4px 20px rgba(28,27,25,0.08)' }, usage }],
+    };
+    const css = buildTokensCss(themed);
+    const dark = [
+      ':root,',
+      '[data-theme="dark"] {',
+      '  --bg-app: #1c1b19;',
+      '  --text-primary: rgba(250,249,245,0.92);',
+      '  --line-focus: var(--text-primary);',
+      '  --mark-ink: #141413;',
+      '  --shadow-composer: 0 4px 20px rgba(0,0,0,0.25);',
+      '}',
+    ].join('\n');
+    const light = [
+      '  color-scheme: light;',
+      '  --bg-app: #f6f4ee;',
+      '  --text-primary: rgba(28,27,25,0.92);',
+      '  --shadow-composer: 0 4px 20px rgba(28,27,25,0.08);',
+    ];
+    const chosen = [':root[data-theme="light"] {', ...light, '}'].join('\n');
+    const system = [
+      '@media (prefers-color-scheme: light) {',
+      '  :root[data-theme="system"] {',
+      ...light.map((line) => `  ${line}`),
+      '  }',
+      '}',
+    ].join('\n');
+    expect(css).toContain(`\n${dark}\n\n${chosen}\n\n${system}\n`);
+    // A token without a light value is set once, in the dark block.
+    for (const name of ['--line-focus', '--mark-ink']) expect(css.split(`${name}:`), name).toHaveLength(2);
+
+    // Without a light theme, only the dark block, as before.
+    const darkOnly: DesignTokens = structuredClone(themed);
+    darkOnly.color.themes = [{ id: 'dark', name: 'Dark' }];
+    for (const token of [...darkOnly.color.tokens, ...darkOnly.shadow.tokens]) delete token.value.light;
+    expect(buildTokensCss(darkOnly)).not.toMatch(/data-theme="light"|prefers-color-scheme|color-scheme/);
+
+    // Every value is checked as the dark one is, and only the two themes are known.
+    const broken = (change: (copy: DesignTokens) => void) => {
+      const copy: DesignTokens = structuredClone(themed);
+      change(copy);
+      return () => buildTokensCss(copy);
+    };
+    expect(broken((copy) => (copy.color.tokens[2]!.value.light = '{no-such-color}'))).toThrow(/line-focus/);
+    expect(broken((copy) => (copy.color.tokens[3]!.value.light = 'red'))).toThrow(/mark-ink/);
+    expect(broken((copy) => (copy.shadow.tokens[0]!.value.light = '0 0 0 red; color: red'))).toThrow(/shadow-composer/);
+    // As tokens.json may hold them: a misspelt theme, or a shadow with no dark value.
+    const loose = (values: ThemedValues) => values as unknown as Record<string, string | undefined>;
+    expect(broken((copy) => (loose(copy.color.tokens[0]!.value).dim = '#000000'))).toThrow(/bg-app/);
+    expect(broken((copy) => delete loose(copy.shadow.tokens[0]!.value).dark)).toThrow(/shadow-composer/);
+    expect(broken((copy) => (copy.color.themes = [{ id: 'dark', name: 'Dark' }, { id: 'dim', name: 'Dim' }]))).toThrow(/theme/);
   });
 
   test('core_values_match_design_system_v2', () => {
@@ -156,8 +243,14 @@ describe('design tokens', () => {
       { name: 'odd-field', value: { dark: '{clay}' } },
       { name: 'odd-soft', value: { dark: '{clay-soft}' } },
       { name: 'fine', value: { dark: '{bg-app}' } },
+      { name: 'odd-light', value: { dark: '#1c1b19', light: '{mark-ink}' } },
     ];
-    expect(aliasesOfTheMarkOrClay(sample)).toEqual(['odd-tile: {mark-tile}', 'odd-field: {clay}', 'odd-soft: {clay-soft}']);
+    expect(aliasesOfTheMarkOrClay(sample)).toEqual([
+      'odd-tile: {mark-tile}',
+      'odd-field: {clay}',
+      'odd-soft: {clay-soft}',
+      'odd-light: {mark-ink}',
+    ]);
     expect(aliasesOfTheMarkOrClay(tokens.color.tokens)).toEqual([]);
   });
 
@@ -281,14 +374,79 @@ describe('design tokens', () => {
     }
   });
 
-  test('one_dark_theme_only', () => {
-    expect(tokens.color.themes).toEqual([{ id: 'dark', name: 'Dark' }]);
-    for (const token of tokens.color.tokens) {
-      expect(Object.keys(token.value), token.name).toEqual(['dark']);
+  test('light_blocks_hold_exactly_the_listed_tokens', () => {
+    // The light theme's values, as the design system set them: warm paper, the dark theme's ink at its
+    // alpha steps, an ink primary button, darker steps of the status hues, a darker clay, a lighter
+    // scrim and shadows, and Stripe's mark in Stripe's own purple, since its white would vanish on
+    // paper. The aliases (line-field-focus, line-focus, button-primary-text, status-info) follow the
+    // light values by themselves; the mark, Google Calendar's blue, the illustration's other inks, the
+    // QR tile and its hairline, and the inks on an owner's colour are the same in both themes. The
+    // illustration's ink and the QR code's, which alias bg-app in dark, stay dark ink on paper.
+    const expected = {
+      'bg-app': '#f6f4ee',
+      'bg-panel': '#efece4',
+      'bg-surface': '#fbfaf6',
+      'bg-muted': '#e9e5da',
+      'bg-selected': '#e3ddcf',
+      'text-primary': 'rgba(28,27,25,0.92)',
+      'text-secondary': 'rgba(28,27,25,0.68)',
+      'text-tertiary': 'rgba(28,27,25,0.64)',
+      'line-hairline': 'rgba(28,27,25,0.10)',
+      'line-card': 'rgba(28,27,25,0.13)',
+      'line-control': 'rgba(28,27,25,0.22)',
+      'line-control-hover': 'rgba(28,27,25,0.32)',
+      'line-field': 'rgba(28,27,25,0.56)',
+      'fill-card': 'rgba(255,255,255,0.55)',
+      'fill-count': 'rgba(28,27,25,0.05)',
+      'fill-hover': 'rgba(28,27,25,0.05)',
+      'fill-bubble': 'rgba(28,27,25,0.06)',
+      'fill-secondary': 'rgba(28,27,25,0.07)',
+      'fill-secondary-hover': 'rgba(28,27,25,0.11)',
+      'button-primary': '#1f1e1b',
+      'button-primary-hover': '#3a3833',
+      'button-danger-fill': 'rgba(176,58,74,0.10)',
+      'button-danger-fill-hover': 'rgba(176,58,74,0.16)',
+      'button-danger-text': '#9e3343',
+      'accent-blue': '#285e92',
+      'status-handled': '#3f7a2e',
+      'status-held': '#8c6d08',
+      'status-refused': '#b2475a',
+      clay: '#c4673f',
+      scrim: 'rgba(28,27,25,0.32)',
+      'illustration-card': '#fdfcf9',
+      'illustration-ink': '#1c1b19',
+      'illustration-arc': 'rgba(28,27,25,0.08)',
+      'qr-ink': '#1c1b19',
+      'connector-stripe': '#635bff',
+      'shadow-composer': '0 4px 20px rgba(28,27,25,0.08)',
+      'shadow-dialog': '0 4px 8px rgba(28,27,25,0.05), 0 12px 28px -2px rgba(28,27,25,0.14)',
+      'shadow-illustration-card': '0 1px 2px rgba(28,27,25,0.12)',
+    };
+    const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'tokens.css'), 'utf8');
+    /** The declarations in the block that opens with `opening`, as a property-to-value map. */
+    const declarations = (opening: string) => {
+      const start = css.indexOf(`${opening} {\n`);
+      expect(start, opening).toBeGreaterThanOrEqual(0);
+      const body = css.slice(start + opening.length + 2, css.indexOf('}', start));
+      return Object.fromEntries(body.split(';').map((d) => d.trim()).filter(Boolean).map((d) => [d.slice(0, d.indexOf(':')), d.slice(d.indexOf(':') + 1).trim()]));
+    };
+    const want = { 'color-scheme': 'light', ...Object.fromEntries(Object.entries(expected).map(([name, value]) => [`--${name}`, value])) };
+    expect(declarations(':root[data-theme="light"]')).toEqual(want);
+    expect(declarations('@media (prefers-color-scheme: light) {\n  :root[data-theme="system"]')).toEqual(want);
+    // Each theme block once: dark on the root, light chosen, light by the system when it's chosen.
+    // A root marked neither stays dark whatever the system prefers.
+    const count = (opening: string) => css.split(opening).length - 1;
+    expect([':root,\n[data-theme="dark"] {', ':root[data-theme="light"] {', ':root[data-theme="system"] {'].map(count)).toEqual([1, 1, 1]);
+    expect(css).not.toContain(':not([data-theme');
+  });
+
+  test('every_color_and_shadow_has_a_dark_value', () => {
+    // Dark is the base theme: every color and shadow has a dark value, and light is the only other theme.
+    const themes = tokens.color.themes.map((theme) => theme.id);
+    expect(themes).toEqual(['dark', 'light']);
+    for (const token of [...tokens.color.tokens, ...tokens.shadow.tokens]) {
       expect(typeof token.value.dark, token.name).toBe('string');
-    }
-    for (const token of tokens.shadow.tokens) {
-      expect(typeof token.value, `${token.name} has no per-theme values`).toBe('string');
+      expect(Object.keys(token.value).filter((theme) => !themes.includes(theme)), token.name).toEqual([]);
     }
   });
 
@@ -320,7 +478,7 @@ describe('design tokens', () => {
     }
   });
 
-  test('every_used_pair_meets_contrast', () => {
+  test('every_used_pair_meets_contrast_in_both_themes', () => {
     // The ratio itself, against known WCAG values, so a broken formula can't pass the pairs.
     expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 5);
     expect(contrastRatio('#777777', '#ffffff')).toBeCloseTo(4.48, 2);
@@ -329,10 +487,24 @@ describe('design tokens', () => {
     expect(() => contrastRatio('text-primary', 'fill-card')).toThrow();
     expect(() => contrastRatio('not-a-color', 'bg-app')).toThrow();
 
-    type Required = { fg: string; ground: string; over?: string; under?: string; opacity?: number; min: 4.5 | 3 };
+    // Each theme reads its own values: light where a token has one, and its dark one where it hasn't,
+    // an alias resolving against the light values, as the CSS inherits them.
+    expect(pairContrast({ fg: 'text-primary', ground: 'bg-app' }, 'light')).toBeCloseTo(contrastRatio('rgba(28,27,25,0.92)', '#f6f4ee'), 6);
+    expect(pairContrast({ fg: 'line-focus', ground: 'bg-app' }, 'light')).toBeCloseTo(contrastRatio('rgba(28,27,25,0.68)', '#f6f4ee'), 6);
+    expect(pairContrast({ fg: 'mark-ink', ground: 'mark-tile' }, 'light')).toBeCloseTo(pairContrast({ fg: 'mark-ink', ground: 'mark-tile' }), 6);
+    expect(pairContrast({ fg: 'text-primary', ground: 'bg-app' })).toBeCloseTo(pairContrast({ fg: 'text-primary', ground: 'bg-app' }, 'dark'), 6);
+
+    type Required = { fg: string; ground: string; over?: string; under?: string; opacity?: number; min: 4.5 | 3; themes: readonly Theme[] };
     const required: Required[] = [];
+    let drawnIn: readonly Theme[] = THEMES;
     const add = (fgs: string[], grounds: string[], min: 4.5 | 3, over?: string, under?: string, opacity?: number) => {
-      for (const fg of fgs) for (const ground of grounds) required.push({ fg, ground, over, under, opacity, min });
+      for (const fg of fgs) for (const ground of grounds) required.push({ fg, ground, over, under, opacity, min, themes: drawnIn });
+    };
+    /** Requires the pairs `require` adds in `themes` only. */
+    const only = (themes: readonly Theme[], require: () => void) => {
+      drawnIn = themes;
+      require();
+      drawnIn = THEMES;
     };
     const text = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'];
     add(text, ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted', 'bg-selected'], 4.5);
@@ -355,12 +527,14 @@ describe('design tokens', () => {
     add(['line-focus'], ['fill-secondary', 'fill-secondary-hover'], 3, 'bg-surface');
     add(['bg-app'], ['button-primary', 'button-primary-hover'], 3);
     // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
-    // top bar, and the intro dialog's surface; its dark ink on the intro illustration's light card.
-    add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3);
+    // top bar, and the intro dialog's surface, in the dark theme; its dark ink on the same grounds in
+    // the light theme, and on the intro illustration's light card in both.
+    only(['dark'], () => add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3));
+    only(['light'], () => add(['mark-ink'], ['bg-app', 'bg-panel', 'bg-surface'], 3));
     add(['mark-ink'], ['illustration-card'], 3);
     // The mark with its tile: the tile on the app, as the design system's stories show it, and its
     // drawing on the tile, the ink where it crosses the clay dome included.
-    add(['mark-tile'], ['bg-app'], 3);
+    only(['dark'], () => add(['mark-tile'], ['bg-app'], 3));
     add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
     add(['mark-ink'], ['mark-clay'], 3);
     // Claude's writing dots carry the waiting status on the page and in the Ask Claude panel;
@@ -422,7 +596,8 @@ describe('design tokens', () => {
     add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'fill-card', 'bg-app');
     add(['button-danger-text'], ['fill-hover'], 3, 'bg-surface');
 
-    // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
+    // Every required pair is listed, at no lower a minimum and in every theme it is required in, so
+    // dropping one can't pass.
     for (const want of required) {
       const listed = CONTRAST_PAIRS.find(
         (p) =>
@@ -430,11 +605,38 @@ describe('design tokens', () => {
       );
       expect(listed, label(want)).toBeDefined();
       expect(listed?.min).toBeGreaterThanOrEqual(want.min);
+      expect(listed?.themes ?? THEMES, `${label(want)} is checked in ${want.themes.join(' and ')}`).toEqual(expect.arrayContaining([...want.themes]));
     }
 
+    // Every listed pair meets its minimum in each theme it is drawn in: both, unless it says.
     for (const pair of CONTRAST_PAIRS) {
       expect(pair.use.trim().length, `${label(pair)} says where it is used`).toBeGreaterThan(0);
-      expect(pairContrast(pair), label(pair)).toBeGreaterThanOrEqual(pair.min);
+      for (const theme of pair.themes ?? THEMES) {
+        expect(pairContrast(pair, theme), `${label(pair)} in ${theme}`).toBeGreaterThanOrEqual(pair.min);
+      }
+    }
+
+    // Only the mark's pairs are drawn in one theme: on the app's grounds its ink is light in the dark
+    // theme and dark in the light one. The clay dome and the lone tile there are dark-only pairs, and
+    // the light theme draws them as the logo they are, exempt from contrast, each named with why.
+    const oneTheme = CONTRAST_PAIRS.filter((p) => p.themes !== undefined).map((p) => `${label(p)} in ${p.themes?.join(' and ')}`);
+    expect(oneTheme.sort()).toEqual(
+      [
+        ...['bg-app', 'bg-panel', 'bg-surface'].flatMap((ground) => [
+          `mark-ink-light on ${ground} in dark`,
+          `mark-clay on ${ground} in dark`,
+          `mark-ink on ${ground} in light`,
+        ]),
+        'mark-tile on bg-app in dark',
+      ].sort(),
+    );
+    expect(LIGHT_THEME_EXEMPTIONS.map(label)).toEqual(['mark-clay on bg-app', 'mark-clay on bg-panel', 'mark-clay on bg-surface', 'mark-tile on bg-app']);
+    for (const exempt of LIGHT_THEME_EXEMPTIONS) {
+      expect(exempt.reason.trim().length, `${label(exempt)} says why it is exempt`).toBeGreaterThan(0);
+      // A real exemption: it falls under the minimum its dark pair keeps, so a stale one shows.
+      const dark = CONTRAST_PAIRS.find((p) => p.fg === exempt.fg && p.ground === exempt.ground && p.themes?.join() === 'dark');
+      expect(dark, `${label(exempt)} is listed for the dark theme`).toBeDefined();
+      expect(pairContrast(exempt, 'light'), label(exempt)).toBeLessThan(dark?.min ?? 0);
     }
   });
 
@@ -484,6 +686,10 @@ describe('design tokens', () => {
     };
     const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
     expect(actual).toEqual(expected);
+    // On the light theme's paper, Stripe's white mark would vanish: it takes Stripe's own purple there,
+    // with no outline and no tile. Google Calendar's blue stays.
+    const light = (name: string) => tokens.color.tokens.find((t) => t.name === name)?.value as { light?: string } | undefined;
+    expect([light('connector-stripe')?.light, light('connector-google-blue')?.light]).toEqual(['#635bff', undefined]);
 
     const connectorColors = colorNames.filter((name) => name.startsWith('connector-'));
     expect(connectorColors.sort()).toEqual(['connector-google-blue', 'connector-stripe']);
@@ -545,6 +751,31 @@ describe('design tokens', () => {
     expect(tokens.motion.tokens.map((t) => t.name).filter((name) => name.includes('skeleton'))).toEqual([]);
   });
 
+  test('colours_on_brand_are_the_same_in_both_themes', () => {
+    // On an owner's chosen colour, the public header and Profile's header-colour preview: the dark
+    // theme's paper inks for its words, and the dark theme's handled green for the open-status dot,
+    // in both themes, since every colour an owner can pick is dark.
+    const expected = {
+      'text-on-brand': 'rgba(250,249,245,0.92)',
+      'text-on-brand-secondary': 'rgba(250,249,245,0.64)',
+      'status-handled-on-brand': '#6fa859',
+    };
+    const names = Object.keys(expected);
+    expect(Object.fromEntries(names.map((name) => [name, tokenValue(name)]))).toEqual(expected);
+    for (const name of names) {
+      const token = tokens.color.tokens.find((t) => t.name === name);
+      expect(Object.keys(token?.value ?? {}), `${name} has one value for both themes`).toEqual(['dark']);
+    }
+    // The colour under them isn't a token: it is checked where it is chosen, so they are classified
+    // as colours on the owner's colour rather than listed against a token, the words at 4.5:1 and the
+    // dot, a status mark, at 3:1.
+    expect(Object.fromEntries(Object.entries(ON_BRAND_COLORS).map(([name, { min }]) => [name, min]))).toEqual({
+      'text-on-brand': 4.5,
+      'text-on-brand-secondary': 4.5,
+      'status-handled-on-brand': 3,
+    });
+  });
+
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
       'clay',
@@ -565,8 +796,13 @@ describe('design tokens', () => {
       expect(reason.trim().length, `${name} says why no contrast applies`).toBeGreaterThan(0);
     }
 
+    for (const [name, { use }] of Object.entries(ON_BRAND_COLORS)) {
+      expect(colorNames, `${name} is a color token`).toContain(name);
+      expect(use.trim().length, `${name} says where it is used and checked`).toBeGreaterThan(0);
+    }
+
     const paired = new Set(CONTRAST_PAIRS.flatMap((p) => [p.fg, p.ground]));
-    const unclassified = colorNames.filter((name) => !paired.has(name) && !(name in DECORATIVE_COLORS));
+    const unclassified = colorNames.filter((name) => !paired.has(name) && !(name in DECORATIVE_COLORS) && !(name in ON_BRAND_COLORS));
     expect(unclassified).toEqual([]);
   });
 
