@@ -1084,7 +1084,7 @@ describe('rules page', () => {
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(menu.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     expect(top(menu) - top(title)).toBe(4);
-    await expect.element(screen.getByText('Claude shows you the change and example situations before anything applies.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Claude shows you the change before anything applies.', { exact: true })).toBeVisible();
   });
 
   it('rules_have_no_jargon', async () => {

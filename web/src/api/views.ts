@@ -729,10 +729,8 @@ export interface AgentRunStarted {
  */
 export type DemoTaskSet = import('./openapi.gen.ts').AgentTasks['task_set'];
 
-/** `GET /api/public/desks/{slug}/agent_tasks`: the Desk's set, read with the visitor's chat. */
-export interface AgentTasks {
-  task_set: DemoTaskSet;
-}
+/** The Desk's set and fitting tasks in page order, read with the visitor's chat. */
+export type { AgentTasks } from './openapi.gen.ts';
 
 /**
  * One turn of a demo agent run: the agent's request, with the words it sent (`text`), or the Desk's
