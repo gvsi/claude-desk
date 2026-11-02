@@ -370,7 +370,8 @@ describe('knowledge', () => {
     const text = '🔧'.repeat(MAX_FILE_BYTES / 4 + 1);
     await main(screen).getByRole('textbox', { name: 'A note' }).fill(text);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
-    await expect.element(main(screen).getByRole('alert')).toHaveTextContent("That didn't go through. Check it and try again.");
+    await expect.element(main(screen).getByText("That didn't go through. Check it and try again.", { exact: true })).toBeVisible();
+    await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveAttribute('aria-invalid', 'true');
     expect(posts()).toEqual([]);
     await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue(text);
   });

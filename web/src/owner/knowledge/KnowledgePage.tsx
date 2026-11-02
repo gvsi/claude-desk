@@ -183,6 +183,7 @@ export function KnowledgePage() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<Busy | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [noteError, setNoteError] = useState<string | undefined>(undefined);
   // The item as the kernel last returned it: what the "Added" card and its switch show.
   const [added, setAdded] = useState<KnowledgeItem | null>(null);
   const [switchLine, setSwitchLine] = useState<string | undefined>(undefined);
@@ -230,7 +231,6 @@ export function KnowledgePage() {
     const ownerOnly = { ...fields, label: { readers: ['owner'] } };
     const item: KnowledgeItem = { item_id: posted !== null && sameItem(posted, ownerOnly) ? posted.item_id : newId(kind), ...ownerOnly };
     setPosted(item);
-    setError(undefined);
     try {
       const stored = await post(item);
       setPosted(null);
@@ -259,19 +259,23 @@ export function KnowledgePage() {
   };
 
   const addNote = () => {
+    setError(undefined);
+    setNoteError(undefined);
     const text = note.trim();
     if (text === '') {
-      setError(KNOWLEDGE_COPY.emptyNote);
+      setNoteError(KNOWLEDGE_COPY.emptyNote);
       return;
     }
     if (new TextEncoder().encode(text).length > MAX_FILE_BYTES) {
-      setError(errorCopy('invalid'));
+      setNoteError(errorCopy('invalid'));
       return;
     }
     void exclusive('note', () => add('note', { source: 'setup', title: titleOf(text), text }));
   };
 
   const addFile = (file: File) => {
+    setError(undefined);
+    setNoteError(undefined);
     if (!TEXT_FILE.test(file.name)) {
       setError(KNOWLEDGE_COPY.notText);
       return;
@@ -354,12 +358,13 @@ export function KnowledgePage() {
           note={note}
           onNoteChange={(text) => {
             setNote(text);
-            if (text.trim() !== '' && error === KNOWLEDGE_COPY.emptyNote) setError(undefined);
+            if (text.trim() !== '') setNoteError(undefined);
           }}
           onAddNote={addNote}
           onAddFile={addFile}
           {...(busy === undefined ? {} : { busy })}
-          {...(error === undefined ? {} : error === KNOWLEDGE_COPY.emptyNote ? { noteError: error } : { error })}
+          {...(noteError === undefined ? {} : { noteError })}
+          {...(error === undefined ? {} : { error })}
           {...(added === null
             ? {}
             : {
