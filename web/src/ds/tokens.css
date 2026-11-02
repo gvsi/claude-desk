@@ -11,12 +11,13 @@
   --text-primary: rgba(250,249,245,0.92);
   --text-secondary: rgba(250,249,245,0.64);
   --text-tertiary: rgba(250,249,245,0.60);
+  --text-on-brand: rgba(250,249,245,0.92);
+  --text-on-brand-secondary: rgba(250,249,245,0.64);
   --line-hairline: rgba(250,249,245,0.12);
   --line-card: rgba(250,249,245,0.14);
   --line-control: rgba(250,249,245,0.22);
   --line-control-hover: rgba(250,249,245,0.30);
   --line-field: rgba(250,249,245,0.36);
-  --line-field-focus: var(--text-tertiary);
   --line-focus: var(--text-secondary);
   --fill-card: rgba(250,249,245,0.03);
   --fill-count: rgba(250,249,245,0.05);
@@ -35,6 +36,7 @@
   --status-held: #dabe4a;
   --status-refused: #dc8290;
   --status-info: var(--text-secondary);
+  --status-handled-on-brand: #6fa859;
   --mark-tile: #ffffff;
   --mark-clay: #d97757;
   --mark-ink: #141413;
@@ -57,6 +59,92 @@
   --shadow-composer: 0 4px 20px rgba(0,0,0,0.25);
   --shadow-dialog: 0 4px 8px rgba(11,11,11,0.08), 0 12px 28px -2px rgba(0,0,0,0.24);
   --shadow-illustration-card: 0 1px 2px rgba(28,27,25,0.16);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #f6f4ee;
+  --bg-panel: #efece4;
+  --bg-surface: #fbfaf6;
+  --bg-muted: #e9e5da;
+  --bg-selected: #e3ddcf;
+  --text-primary: rgba(28,27,25,0.92);
+  --text-secondary: rgba(28,27,25,0.68);
+  --text-tertiary: rgba(28,27,25,0.64);
+  --line-hairline: rgba(28,27,25,0.10);
+  --line-card: rgba(28,27,25,0.13);
+  --line-control: rgba(28,27,25,0.22);
+  --line-control-hover: rgba(28,27,25,0.32);
+  --line-field: rgba(28,27,25,0.56);
+  --fill-card: rgba(255,255,255,0.55);
+  --fill-count: rgba(28,27,25,0.05);
+  --fill-hover: rgba(28,27,25,0.05);
+  --fill-bubble: rgba(28,27,25,0.06);
+  --fill-secondary: rgba(28,27,25,0.07);
+  --fill-secondary-hover: rgba(28,27,25,0.11);
+  --button-primary: #1f1e1b;
+  --button-primary-hover: #3a3833;
+  --button-danger-fill: rgba(176,58,74,0.10);
+  --button-danger-fill-hover: rgba(176,58,74,0.16);
+  --button-danger-text: #9e3343;
+  --accent-blue: #285e92;
+  --status-handled: #3f7a2e;
+  --status-held: #8c6d08;
+  --status-refused: #b2475a;
+  --clay: #c4673f;
+  --scrim: rgba(28,27,25,0.32);
+  --illustration-card: #fdfcf9;
+  --illustration-ink: #1c1b19;
+  --illustration-arc: rgba(28,27,25,0.08);
+  --qr-ink: #1c1b19;
+  --connector-stripe: #635bff;
+  --shadow-composer: 0 4px 20px rgba(28,27,25,0.08);
+  --shadow-dialog: 0 4px 8px rgba(28,27,25,0.05), 0 12px 28px -2px rgba(28,27,25,0.14);
+  --shadow-illustration-card: 0 1px 2px rgba(28,27,25,0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg-app: #f6f4ee;
+    --bg-panel: #efece4;
+    --bg-surface: #fbfaf6;
+    --bg-muted: #e9e5da;
+    --bg-selected: #e3ddcf;
+    --text-primary: rgba(28,27,25,0.92);
+    --text-secondary: rgba(28,27,25,0.68);
+    --text-tertiary: rgba(28,27,25,0.64);
+    --line-hairline: rgba(28,27,25,0.10);
+    --line-card: rgba(28,27,25,0.13);
+    --line-control: rgba(28,27,25,0.22);
+    --line-control-hover: rgba(28,27,25,0.32);
+    --line-field: rgba(28,27,25,0.56);
+    --fill-card: rgba(255,255,255,0.55);
+    --fill-count: rgba(28,27,25,0.05);
+    --fill-hover: rgba(28,27,25,0.05);
+    --fill-bubble: rgba(28,27,25,0.06);
+    --fill-secondary: rgba(28,27,25,0.07);
+    --fill-secondary-hover: rgba(28,27,25,0.11);
+    --button-primary: #1f1e1b;
+    --button-primary-hover: #3a3833;
+    --button-danger-fill: rgba(176,58,74,0.10);
+    --button-danger-fill-hover: rgba(176,58,74,0.16);
+    --button-danger-text: #9e3343;
+    --accent-blue: #285e92;
+    --status-handled: #3f7a2e;
+    --status-held: #8c6d08;
+    --status-refused: #b2475a;
+    --clay: #c4673f;
+    --scrim: rgba(28,27,25,0.32);
+    --illustration-card: #fdfcf9;
+    --illustration-ink: #1c1b19;
+    --illustration-arc: rgba(28,27,25,0.08);
+    --qr-ink: #1c1b19;
+    --connector-stripe: #635bff;
+    --shadow-composer: 0 4px 20px rgba(28,27,25,0.08);
+    --shadow-dialog: 0 4px 8px rgba(28,27,25,0.05), 0 12px 28px -2px rgba(28,27,25,0.14);
+    --shadow-illustration-card: 0 1px 2px rgba(28,27,25,0.12);
+  }
 }
 
 :root {

@@ -41,15 +41,15 @@ import {
 import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
 import { skeletonSetupOf } from './today/TodaySkeleton.tsx';
+import { rememberedSetup, rememberSetups } from './today/todaySetupMemory.ts';
 import { ANSWERING_CONFIRM_COPY, answeringSaveFailed, answeringSaveUnconfirmed } from './answeringCopy.ts';
-import { InboxOpenContext } from './inbox/inboxOpen.ts';
-import { OwnerInbox } from './inbox/OwnerInbox.tsx';
 import { connectorPageHref } from './connectors/pages.ts';
+import { useUnreadNotifications } from './notifications/useNotifications.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { useLandingVisit } from './rules/landing.ts';
 import {
   DESKS_KEY,
-  desksQuery,
+  confirmDesks,
   dropTheOldInbox,
   findDesk,
   FRESH_MS,
@@ -112,7 +112,7 @@ export function useOwnerDesk(): OwnerDeskContext {
   return value;
 }
 
-const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'profile', 'share', 'settings'];
+const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'notifications', 'profile', 'share', 'settings'];
 
 /**
  * The pages that lay out their own columns across the main area (`AppShell` `fill`), each with the
@@ -166,8 +166,7 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
 }
 
 /**
- * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with the Demo
- * inbox and Start over,
+ * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Reset demo,
  * the sidebar (the business, which opens the business switcher; the Desk picker; the pages; the
  * About this prototype links; the Answering switch; the owner), the page, and one concept footer
  * under it. A Desk outside the copy is not found.
@@ -188,8 +187,9 @@ export function OwnerLayout() {
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
-  // The demo bar's Demo inbox is read with the Desks, so the bar draws it with the frame: nothing
-  // waits for it, and the bar's own read finds it read, or on its way.
+  const retried = useRef(false);
+  // The owner's notifications are read with the Desks, so the sidebar counts the unread ones with
+  // the frame: nothing waits for them, and the frame's own read finds them read, or on their way.
   const queryClient = useQueryClient();
   if (desks.data !== undefined) startingDeskFor(queryClient, desks.data);
   useEffect(() => {
@@ -201,15 +201,27 @@ function DeskGate({ deskId }: { deskId: string }) {
   const shown = found ?? held;
   const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
 
-  // Once the copy's Desks say this Desk's setup isn't finished, Today's shapes draw its card.
-  const setupShape = shown === null ? undefined : skeletonSetupOf(shown.desk);
+  // Once the copy's Desks say this Desk's setup isn't finished, Today's shapes draw its card. Until they
+  // are read (a reload), the shape this browser last saw for the Desk stands in, so the loading page
+  // draws the card from its first frame instead of dropping everything under it when the Desks arrive.
+  const [remembered] = useState(() => rememberedSetup(deskId));
+  const setupShape = shown === null ? (desks.data === undefined ? remembered : undefined) : skeletonSetupOf(shown.desk);
+  // Each settled read of the Desks rewrites the record: their unfinished Desks only.
+  const settledDesks = desks.data !== undefined && !desks.isFetching ? desks.data : null;
+  useEffect(() => {
+    if (settledDesks !== null) rememberSetups(settledDesks);
+  }, [settledDesks]);
 
   const titleId = useId();
-  const loading = shown ? readingAhead : !desks.isError && !(desks.data && !desks.isFetching);
+  const failed = desks.isError && !desks.isFetching;
+  const loading = shown ? readingAhead : !failed && !(desks.data && !desks.isFetching);
   const next = shown ? (
     <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />
-  ) : desks.isError ? (
-    <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />
+  ) : failed ? (
+    <OwnerState error={desks.error} focusRetry={retried.current} onRetry={() => {
+      retried.current = true;
+      void desks.refetch();
+    }} />
   ) : (
     <NotFound />
   );
@@ -327,8 +339,6 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [answeringChange, setAnsweringChange] = useState<boolean | null>(null);
-  // Whether the bar's Demo inbox sheet is open, as it says each time it opens or closes.
-  const [inboxOpen, setInboxOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // The Desk the owner is on is the one to come back to.
@@ -343,7 +353,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       await queryClient.cancelQueries({ queryKey: DESKS_KEY });
       queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (current) => withAnswering(current, deskId, on));
     },
-    // This can run after the frame has gone (Start over opened a new copy while the change was out),
+    // This can run after the frame has gone (Reset demo opened a new copy while the change was out),
     // so it only ever puts back this Desk's switch, in the Desks as they are now, and leaves a list
     // without this Desk alone.
     onError: async (err, on) => {
@@ -359,14 +369,14 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
         return;
       }
       // The change may have been applied with its answer lost: the switch shows what the Desk reads now.
-      const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+      const read = await confirmDesks(queryClient);
       if (read === null) {
         // Nor could the Desk be read: the switch stays where it was put, and the next read settles it.
         setNotice(answeringSaveUnconfirmed(on));
         void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
         return;
       }
-      // A copy without this Desk (a new one, from Start over) has nothing of this change to show.
+      // A copy without this Desk (a new one, from Reset demo) has nothing of this change to show.
       const now = findDesk(read, deskId)?.desk.answering;
       if (now !== undefined && now !== on) setNotice(answeringSaveFailed(now));
     },
@@ -412,6 +422,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   };
 
   const live = today.data?.live.length ?? 0;
+  const unread = useUnreadNotifications();
   const current = currentNav(location.pathname);
   // Conversations lays out its own columns from the sidebar's edge, as its boards draw it; Settings
   // centers its own, with the footer at the window's foot.
@@ -435,6 +446,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       desk={desk}
       current={current}
       liveCount={live}
+      unreadCount={unread}
       switching={switching}
       onToggleSwitcher={() => setSwitching((open) => !open)}
       onCloseSwitcher={() => setSwitching(false)}
@@ -449,11 +461,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
     <AppShell
       business={business.name}
       banner={
-        <ReviewerBar
-          ownerName={business.owner_display_name}
-          onStartOver={() => setConfirming(true)}
-          actions={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />}
-        />
+        <ReviewerBar ownerName={business.owner_display_name} onStartOver={() => setConfirming(true)} />
       }
       sidebar={sidebar}
       fill={fill}
@@ -467,9 +475,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
         ) : null}
         <AskClaudeProvider value={askClaude.value}>
           <OwnerDeskProvider value={deskContext}>
-            <InboxOpenContext.Provider value={inboxOpen}>
-              <Outlet />
-            </InboxOpenContext.Provider>
+            <Outlet />
           </OwnerDeskProvider>
         </AskClaudeProvider>
         {fill ? null : (
@@ -490,9 +496,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       ) : null}
       {confirming ? (
         <Dialog
-          title="Start over with a fresh copy?"
+          title="Reset demo?"
           body="You'll get a new copy of Turner Plumbing. This copy, its chats and its rules are left behind."
-          confirmLabel="Start over"
+          confirmLabel="Reset demo"
           cancelLabel="Keep this copy"
           pending={startOver.isPending}
           onConfirm={() => startOver.mutate()}
@@ -509,6 +515,8 @@ export interface OwnerSidebarProps {
   desk: DeskSummary;
   current: NavKey;
   liveCount: number;
+  /** How many of the owner's notifications they haven't seen. */
+  unreadCount: number;
   switching: boolean;
   onToggleSwitcher: () => void;
   onCloseSwitcher: () => void;
@@ -523,7 +531,7 @@ export interface OwnerSidebarProps {
  * preview of Today draws it too, so the frame it shows is the one Today opens in.
  */
 export function OwnerSidebar(props: OwnerSidebarProps) {
-  const { businesses, business, desk, liveCount } = props;
+  const { businesses, business, desk, liveCount, unreadCount } = props;
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div ref={ref} className="cd-owner-layout__sidebar">
@@ -536,11 +544,12 @@ export function OwnerSidebar(props: OwnerSidebarProps) {
         current={props.current}
         hrefs={hrefsFor(desk.desk_id)}
         peopleLabel="Customers"
-        counts={
-          liveCount > 0
+        counts={{
+          ...(liveCount > 0
             ? { conversations: { n: liveCount, label: `${liveCount} live ${liveCount === 1 ? 'conversation' : 'conversations'}` } }
-            : undefined
-        }
+            : {}),
+          ...(unreadCount > 0 ? { notifications: { n: unreadCount, label: `${unreadCount} unread` } } : {}),
+        }}
         answering={desk.answering}
         onAnsweringChange={props.onAnsweringChange}
         owner={{ name: business.owner_display_name, status: 'Available for chats' }}
@@ -587,8 +596,15 @@ function BesideTheBusinessRow({ container, children }: { container: RefObject<HT
 }
 
 /** When the copy's Desks cannot be read: the product's name, an error and a next step. */
-function OwnerState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+function OwnerState({ error, onRetry, focusRetry = false }: { error: unknown; onRetry?: () => void; focusRetry?: boolean }) {
   const titleId = useId();
+  const retryButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    // Focus that went with the retry's replaced control moves back; focus moved elsewhere stays.
+    if (focusRetry && (document.activeElement === null || document.activeElement === document.body)) {
+      retryButton.current?.focus();
+    }
+  }, [focusRetry]);
   return (
     <div className="cd-owner-state">
       <header className="cd-owner-state__brand">
@@ -602,7 +618,7 @@ function OwnerState({ error, onRetry }: { error: unknown; onRetry?: () => void }
         <Notice
           tone="error"
           action={
-            <Button variant="secondary" onClick={onRetry}>
+            <Button variant="secondary" onClick={onRetry} buttonRef={retryButton}>
               Try again
             </Button>
           }

@@ -25,7 +25,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,7 +103,7 @@ class Proving:
         return entry
 
     async def stream(self, key: Key, work: Callable[[], Awaitable[Any]], *,
-                     admit: Callable[[], Awaitable[None]]) -> AsyncIterator[dict]:
+                     admit: Callable[[], Awaitable[None]]) -> AsyncGenerator[dict, None]:
         """Admit before HTTP starts; subscribe to the same work a JSON re-post joins."""
         entry = await self._start(key, work, admit=admit, display=True)
         assert entry.display is not None

@@ -43,6 +43,31 @@ function sample(text: string): Source[] {
   return [{ file: 'sample.tsx', text }];
 }
 
+/**
+ * The selectors of every rule inside a `prefers-color-scheme: light` media block, each one alone:
+ * the text before each rule's opening brace, split at its commas.
+ */
+function systemLightSelectors(css: string): string[] {
+  const found: string[] = [];
+  for (const match of css.matchAll(/@media[^{]*prefers-color-scheme\s*:\s*light[^{]*\{/g)) {
+    let depth = 1;
+    let start = match.index + match[0].length;
+    for (let i = start; i < css.length && depth > 0; i++) {
+      if (css[i] === '{') {
+        if (depth === 1) found.push(...css.slice(start, i).split(',').map((selector) => selector.trim()).filter(Boolean));
+        depth++;
+      } else if (css[i] === '}') {
+        depth--;
+        if (depth === 1) start = i + 1;
+      }
+    }
+  }
+  return found;
+}
+
+/** A selector that starts at a root not marked dark, so a system's light preference never overrides a chosen Dark. */
+const NOT_DARK_ROOT = /^:root:not\(\[data-theme=(["'])dark\1\]\)/;
+
 // HTML written from a string: React's escape hatch and the DOM's.
 const RAW_HTML = /dangerouslySetInnerHTML|\.(?:inner|outer)HTML\b|insertAdjacentHTML|document\.write/;
 
@@ -262,7 +287,8 @@ function everyFileButThisOne(): string[] {
 // text file under `src/`, the design system included, but the token sources and the tables and tests
 // that list every token or prove the design system's own guards.
 const MARK_PARTS = /(?<![\w-])--mark-[a-z-]*[a-z]|\bcd-mark__[a-z-]*|#d97757\b|217\s*,\s*119\s*,\s*87/i;
-const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/i;
+// Clay's token, and its dark and light themes' colors as hex and as RGB.
+const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104|#c4673f\b|196\s*,\s*103\s*,\s*63/i;
 const MARK_FOLDER = 'ds/components/Mark/';
 // Clay is the intro illustration's field and the field of the About pages' app icon, which counts as
 // part of the mark (owner, 2026-10-30), plus Claude's writing dots and their story's computed color check.
@@ -1318,6 +1344,34 @@ describe('app source guards', () => {
     expect(hits(CAPS_BADGE_NAMES, outsideTheDs)).toEqual([]);
   });
 
+  it('a_systems_preference_never_overrides_a_chosen_theme', () => {
+    // The app follows the device until a person chooses, and a chosen Dark marks the root: a
+    // stylesheet turns light for a system that prefers it only on a root not marked dark. Every
+    // stylesheet in src/, the design system's included.
+    const unscoped = ({ file, text }: Source) =>
+      systemLightSelectors(withoutCssComments(text)).filter((selector) => !NOT_DARK_ROOT.test(selector)).map((selector) => `${file}: ${selector}`);
+    // The matcher, on known samples first.
+    const scoped = `@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .a, :root:not([data-theme='dark']) { color: red } }`;
+    expect(sample(scoped).flatMap(unscoped)).toEqual([]);
+    const loose = `@media (prefers-color-scheme: light) { :root { color: red } .b { color: blue } }`;
+    expect(sample(loose).flatMap(unscoped)).toEqual(['sample.tsx: :root', 'sample.tsx: .b']);
+    const stylesheets: Source[] = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
+      .map((file) => file.split(path.sep).join('/'))
+      .filter((file) => file.endsWith('.css'))
+      .map((file) => ({ file, text: readFileSync(path.join(SRC, file), 'utf8') }));
+    // The two that have such a block today: the tokens and the mark.
+    expect(stylesheets.filter(({ text }) => systemLightSelectors(text).length > 0).map(({ file }) => file).sort()).toEqual([
+      'ds/components/Mark/Mark.css',
+      'ds/tokens.css',
+    ]);
+    expect(stylesheets.flatMap(unscoped)).toEqual([]);
+    // Dark is the base the tokens are written in, so no stylesheet follows a system that prefers
+    // dark: such a rule would override a chosen Light on a dark device.
+    const darkPreference = /@media[^{]*prefers-color-scheme\s*:\s*dark/;
+    expect(sample('@media (prefers-color-scheme: dark) { .x { color: red } }').filter(({ text }) => darkPreference.test(text))).toHaveLength(1);
+    expect(stylesheets.filter(({ text }) => darkPreference.test(withoutCssComments(text))).map(({ file }) => file)).toEqual([]);
+  });
+
   it('mark_and_clay_colors_stay_in_their_components', () => {
     // The matchers, on known samples first: the mark's tokens, its parts' classes and its clay;
     // clay's token and color. The mark's own class and longer names aren't matched.
@@ -1325,6 +1379,8 @@ describe('app source guards', () => {
     expect(hits(MARK_PARTS, sample('.cd-mark { display: block } --bookmark-tile: 1; --marked: 1'))).toEqual([]);
     expect(hits(CLAY_PARTS, sample('background: var(--clay-soft); color: #E08968; rgb(224, 137, 104)'))).toHaveLength(3);
     expect(hits(CLAY_PARTS, sample('--clayton: 1; --mark-clay: 1'))).toEqual([]);
+    // The light theme's clay is clay too, as hex and as RGB.
+    expect(hits(CLAY_PARTS, sample('color: #C4673F; fill: rgb(196, 103, 63)'))).toHaveLength(2);
 
     // Every text file under src/, the design system's stories, boards and docs included.
     const everything = everyTextFile().map(withoutHeaderPalette);
@@ -1339,8 +1395,12 @@ describe('app source guards', () => {
     expect(mayUseClay('ds/components/WritingIndicator/Other.css')).toBe(false);
     expect(mayUseClay('ds/components/MarkBanner/MarkBanner.css')).toBe(false);
     expect(mayUseClay('about/reader.css')).toBe(false);
-    const plantedClay: Source[] = [{ file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' }];
-    expect(hits(CLAY_PARTS, plantedClay.filter(({ file }) => !mayUseClay(file)))).toEqual(['about/reader.css: --clay']);
+    const plantedClay: Source[] = [
+      { file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' },
+      { file: 'owner/settings/Settings.css', text: '.cd-settings__accent { color: #c4673f; }' },
+      { file: 'ds/components/IntroDialog/IntroDialog.css', text: '.cd-intro__field { background: #c4673f; }' },
+    ];
+    expect(hits(CLAY_PARTS, plantedClay.filter(({ file }) => !mayUseClay(file)))).toEqual(['about/reader.css: --clay', 'owner/settings/Settings.css: #c4673f']);
     // The matchers find the real uses in their own folders, and nothing anywhere else.
     expect(hits(MARK_PARTS, everything.filter(({ file }) => file.startsWith(MARK_FOLDER))).length).toBeGreaterThan(0);
     for (const folder of CLAY_FOLDERS) {

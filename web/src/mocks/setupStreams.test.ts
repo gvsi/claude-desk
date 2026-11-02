@@ -8,10 +8,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RouteKey } from '../api/routes.ts';
 import type { SetupState } from '../api/views.ts';
+import { START_EXAMPLES } from '../setup/copy.ts';
 import { CPA_COPY, holdNextAnswer, MEMORY_LABEL } from './setup.ts';
 import { mockStore } from './store.ts';
 
-const CPA = "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.";
+const CPA = START_EXAMPLES.en.examples[3]!.description;
 
 let starts = 0;
 

@@ -36,7 +36,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import DateTime, cast, func, literal, null, select, type_coerce, union_all
+from sqlalchemy import DateTime, and_, cast, func, literal, null, or_, select, tuple_, type_coerce, union_all
 from sqlalchemy.dialects.postgresql import JSONB, JSONPATH
 
 from desk.always_on import specificity
@@ -134,6 +134,14 @@ class People:
             return None
         return self._verified.get(session_id) or self._leads.get(session_id)
 
+    def person(self, session_id: str) -> str | None:
+        """The person on record a visitor's session was verified as, else None: never an agent's or the owner's own
+        preview, even one verified as someone on record."""
+        row = self.sessions.get(session_id)
+        if row is None or row["kind"] != "visitor" or row["preview"] or not row["verified"]:
+            return None
+        return row["person_id"]
+
     def brief(self, session_id: str) -> NeedsYouSession | None:
         row = self.sessions.get(session_id)
         if row is None:
@@ -182,6 +190,56 @@ async def recent_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str], 
     found: dict[str, list[str]] = {}
     for session_id, text in rows:
         found.setdefault(session_id, []).append(text)
+    return found
+
+
+async def texts_before_status(ctx: OwnerCtx, desk_id: str, requests: Iterable[tuple[str, str]], count: int = 2,
+                              kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, list[str | None]]:
+    """What each request's visitor (or visiting agent) wrote in the turn that made it, by decision ID, for
+    `(decision_id, session_id)` pairs: the newest `count` rows of `kinds` after Claude's newest `delivered` row before
+    the request's status in its chat (its session's first `status` row naming the decision, written when the turn's
+    call was held, or for a refusal its receipt), oldest first, read for every decision in one query. Without a prior
+    Claude reply, the turn starts at the chat's beginning.
+    If the window is empty (a prior turn's reply can arrive after the visitor's next line), quote the newest line before the
+    status. A request with no such line maps to `[None]`; one whose status isn't
+    in the chat (decided before the API showed it) is left out. If the API restarts after the kernel decides a request
+    but before the chat shows it, the next request recovers the turn (`loop._drain` through `tools.recover_call`
+    and `_settle`) and writes the status after that request's own message, so that message can be quoted too."""
+    wanted = sorted(set(requests))
+    if not wanted:
+        return {}
+    shown = (select(MESSAGES.c.ref_id, MESSAGES.c.session_id, func.min(MESSAGES.c.n).label("at"))
+             .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "status",
+                    tuple_(MESSAGES.c.ref_id, MESSAGES.c.session_id).in_(wanted))
+             .group_by(MESSAGES.c.ref_id, MESSAGES.c.session_id)
+             .subquery())
+    delivered = MESSAGES.alias("last_delivery")
+    answered = (select(func.coalesce(func.max(delivered.c.n), 0))
+                .where(delivered.c.copy_id == ctx.copy_id, delivered.c.desk_id == desk_id,
+                       delivered.c.session_id == shown.c.session_id, delivered.c.kind == "delivered",
+                       delivered.c.author == "claude", delivered.c.n < shown.c.at)
+                .correlate(shown).scalar_subquery())
+    preceding = MESSAGES.alias("last_visitor_line")
+    latest = (select(func.max(preceding.c.n))
+              .where(preceding.c.copy_id == ctx.copy_id, preceding.c.desk_id == desk_id,
+                     preceding.c.session_id == shown.c.session_id, preceding.c.kind.in_(kinds),
+                     preceding.c.n < shown.c.at)
+              .correlate(shown).scalar_subquery())
+    # With a nonempty window its newest line is already included; otherwise this adds only the fallback.
+    said = and_(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
+                MESSAGES.c.session_id == shown.c.session_id,
+                or_(MESSAGES.c.n > answered, MESSAGES.c.n == latest),
+                MESSAGES.c.n < shown.c.at, MESSAGES.c.kind.in_(kinds))
+    ranked = (select(shown.c.ref_id, MESSAGES.c.text, MESSAGES.c.n,
+                     func.row_number().over(partition_by=shown.c.ref_id,
+                                            order_by=MESSAGES.c.n.desc()).label("newest"))
+              .select_from(shown.outerjoin(MESSAGES, said))
+              .subquery())
+    rows = await ctx.ro.conn.execute(select(ranked.c.ref_id, ranked.c.text)
+                                     .where(ranked.c.newest <= count).order_by(ranked.c.ref_id, ranked.c.n))
+    found: dict[str, list[str | None]] = {}
+    for decision_id, text in rows:
+        found.setdefault(decision_id, []).append(text)
     return found
 
 
@@ -251,9 +309,17 @@ def holding_card(cards: Mapping[str, RuleCard], card_ids: Iterable[str]) -> Rule
     return min([card for card in deciding if card.mode == "ask"] or deciding, key=lambda card: card.card_id)
 
 
+def held_reason(card: RuleCard | None) -> str | None:
+    """The rule Needs you names for a hold whose deciding card is `card` (`holding_card`): an owner's ask card's
+    reason, as the kernel's headline names it ("Your rule asks you first: …"). A hold past an automatic card's limit
+    names none, since its headline already quotes that card, and neither does one only the default ask decided,
+    since no rule of the owner's did (the kernel's `DEFAULT_ASK_PLAIN`)."""
+    return card.reason if card is not None and card.mode == "ask" and not card.is_default else None
+
+
 async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> dict[str, str | None]:
-    """The reason of the rule card that held each decision (`holding_card`), in the policy version it was decided
-    under (default cards included), by decision ID."""
+    """The rule Needs you names for each decision (`held_reason` of its `holding_card`), in the policy version it
+    was decided under (default cards included), by decision ID."""
     versions = sorted({decision.policy_version for decision in decisions})
     if not versions:
         return {}
@@ -262,14 +328,15 @@ async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> di
         cards[row["version"]] = {card["card_id"]: RuleCard.model_validate(card) for card in row["cards"] or []}
     held = {decision.decision_id: holding_card(cards.get(decision.policy_version, {}), decision.card_ids)
             for decision in decisions}
-    return {decision_id: card.reason if card is not None else None for decision_id, card in held.items()}
+    return {decision_id: held_reason(card) for decision_id, card in held.items()}
 
 
 async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     """The Desk's held requests, each read from the kernel with the owner's credential (which applies expiry, so a
     request that expired meanwhile drops out), oldest first, then its open handoffs, call-back requests and the handoff
     card's, each with its kind. A card's handoff has no action: its kernel row's `action_id`, which no view shows,
-    names the handoff itself."""
+    names the handoff itself. Each quotes at most two visitor lines: a held request's only from the turn that
+    made it, a handoff's the chat's latest."""
     who = await people(ctx, desk_id)
     held_rows = [row for row in await ctx.ro.rows("decisions", desk_id=desk_id, state="held",
                                                   order_by=("created_at", "decision_id"))
@@ -280,7 +347,12 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
             if decision.state == "held" and decision.decision_id == row["decision_id"]]
     handoffs = [row for row in await ctx.ro.rows("handoffs", desk_id=desk_id, status="open", order_by=("handoff_id",))
                 if row["session_id"] in who.sessions]
-    asked = [decision.session_id for _, decision in held] + [row["session_id"] for row in handoffs]
+    # A held request quotes the words that made it (`texts_before_status`); a handoff, and a request whose held status
+    # isn't in its chat, the chat's latest.
+    requested = {decision_id: visitor_lines(said) for decision_id, said in (await texts_before_status(
+        ctx, desk_id, [(decision.decision_id, decision.session_id) for _, decision in held])).items()}
+    asked = ([decision.session_id for _, decision in held if decision.decision_id not in requested]
+             + [row["session_id"] for row in handoffs])
     texts = {session_id: visitor_lines(said) for session_id, said in (await recent_texts(ctx, desk_id, asked)).items()}
     # AI-written triage never sits beside an approval it could sway: only a handoff gets one, which asks the owner
     # for no decision, and not while the same session has a held request awaiting them.
@@ -292,9 +364,11 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     items = []
     for row, decision in held:
         if (session := who.brief(decision.session_id)) is not None:
+            said = (requested[decision.decision_id] if decision.decision_id in requested
+                    else texts.get(decision.session_id))
             items.append(NeedsYouItem(decision=decision, held_by=held_by[decision.decision_id],
                                       held_at=utc(row["created_at"]), handoff=None, session=session,
-                                      from_the_visitor=texts.get(decision.session_id), claude_summary=None))
+                                      from_the_visitor=said, claude_summary=None))
     for row in handoffs:
         if (session := who.brief(row["session_id"])) is not None:
             handoff = Handoff(handoff_id=row["handoff_id"], session_id=row["session_id"], reason=row["reason"],
@@ -1247,7 +1321,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
         outcome = outcomes.get(session_id, Outcome())
         found.append(ConversationSummary(
             session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
-            mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
+            person_id=who.person(session_id), mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
             latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcome.outcome,
             latest_outcome_starts_at=outcome.starts_at, latest_outcome_cents=outcome.cents,
@@ -1278,9 +1352,12 @@ async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
     """The Desk's refused requests and Claude's stopped drafts, newest first, each with its AI-written triage once
     written (Plan 02b, Task 10), else None. Only refusals count in Today; their nullable `cause` maps the decision's
     `policy_ids`, its already-read ledger decide summary's `reason`/`check` and the session's verified state
-    through `refusal_cause`.
-    Sessions, decisions and ledger entries share one snapshot so a newly verified session's refusal cannot be
-    labelled with an older verification state. No kernel call runs while the snapshot is open."""
+    through `refusal_cause`. A refused request quotes what its visitor wrote in the turn that made it, read from its
+    receipt in the chat as Needs you reads a held request's (`texts_before_status`), and nothing when the chat never
+    showed the receipt: no fallback to the chat's latest lines, which an old entry would misquote. A stopped draft
+    quotes nothing.
+    Sessions, decisions, ledger entries and the chat's rows share one snapshot so a newly verified session's refusal
+    cannot be labelled with an older verification state. No kernel call runs while the snapshot is open."""
     conn = ctx.ro.conn
     await conn.commit()
     await conn.execution_options(isolation_level="REPEATABLE READ")   # reset when the connection is pooled again
@@ -1288,13 +1365,16 @@ async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     triage = await triaged(ctx.ro.conn, ctx.copy_id, desk_id=desk_id)
-    await conn.commit()
     found = sorted(_stopped_attempts(decisions, ledger, sessions), key=lambda attempt: attempt.ref_id, reverse=True)
     found.sort(key=lambda attempt: attempt.at, reverse=True)
+    said = await texts_before_status(ctx, desk_id, [(attempt.ref_id, attempt.session_id) for attempt in found
+                                                    if attempt.kind == "refused" and attempt.session_id is not None])
+    await conn.commit()
     return [Attempt(ref_id=attempt.ref_id, kind=attempt.kind, reason_plain=attempt.reason_plain,
                     card_ids=list(attempt.card_ids), origin=attempt.origin, created_at=attempt.at,
-                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq,
-                    cause=attempt.cause) for attempt in found]
+                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq, cause=attempt.cause,
+                    from_the_visitor=visitor_lines(said.get(attempt.ref_id, ())) if attempt.kind == "refused" else None)
+            for attempt in found]
 
 
 # The Desk list (#233) -----------------------------------------------------------------------------------------

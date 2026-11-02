@@ -1,7 +1,7 @@
 /**
  * The first visit and the owner's frame in a real browser against the mock API: the intro dialog
  * over a still preview of Turner's Today, the passcode that opens a fresh copy, and the owner
- * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, start over),
+ * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, Reset demo),
  * with the public page always a new tab away and never opened on Today itself.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
@@ -15,7 +15,7 @@ import { routes } from '../app/routes.tsx';
 import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
-import type { SetupState } from '../api/views.ts';
+import type { NeedsYouItem, SetupState } from '../api/views.ts';
 import { breakItIdeas } from '../lib/breakItIdeas.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
@@ -206,10 +206,10 @@ describe('Arrival', () => {
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
     // Each of Today's reads had been answered, once and successfully, before it started to leave. The
-    // Demo inbox is the demo bar's, read once the frame draws, not ahead with Today.
+    // notifications are the sidebar's, read once the frame draws, not ahead with Today.
     expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 0 });
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    await expect.element(notificationsRow(screen, 1)).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(1);
   });
 
@@ -432,7 +432,7 @@ describe('Arrival', () => {
   });
 
   it('back_again_after_the_copy_was_made_away_opens_it_as_the_passcode_does', async () => {
-    // Mike Turner's demo session ended after he saw Today, whose Demo inbox held a note the next
+    // Mike Turner's demo session ended after he saw Today, whose notifications held a note the next
     // copy's doesn't. He starts the demo again, goes Back while the passcode is tried, and the copy
     // is made while he is away, before Turner Plumbing's public page has drawn: the page does
     // nothing with it meanwhile. Forward again, it opens the copy as the passcode does, the old
@@ -445,7 +445,7 @@ describe('Arrival', () => {
       sessionId: null,
     });
     const { screen, router } = await renderRoute(TODAY, { routes: publicPage.routes });
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 2 entries', exact: true })).toBeVisible();
+    await expect.element(notificationsRow(screen, 2)).toBeVisible();
     await router.navigate(PUBLIC_PAGE);
     await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
     // The session ends, and he opens the first visit's page again.
@@ -454,8 +454,8 @@ describe('Arrival', () => {
     const dialog = introDialog(screen);
     await expect.element(dialog).toBeVisible();
     const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
-    // Whether the old copy's inbox, its count on the Demo inbox button, ever shows from now on.
-    const oldInbox = '.cd-owner-inbox [aria-label="2 entries"]';
+    // Whether the old copy's inbox, its count beside Notifications, ever shows from now on.
+    const oldInbox = '.cd-sidebar [aria-label="2 unread"]';
     let sawTheOldInbox = false;
     const look = new MutationObserver(() => {
       if (document.querySelector(oldInbox) !== null) sawTheOldInbox = true;
@@ -481,7 +481,7 @@ describe('Arrival', () => {
     await router.navigate(1);
     await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    await expect.element(notificationsRow(screen, 1)).toBeVisible();
     expect(sawTheOldInbox, 'the old copy’s inbox, on the new copy’s Today').toBe(false);
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
     expect(requests('copies')).toHaveLength(1);
@@ -565,7 +565,7 @@ describe('Arrival', () => {
     const tryAgain = screen.getByRole('button', { name: 'Try again' });
 
     // The Desks reads since the demo last started. A count from the mock's reset would also hold
-    // Start over's own reads, which can reach the mock after it.
+    // Reset demo's own reads, which can reach the mock after it.
     let desksBefore = 0;
     const desksReadSinceStart = () => requests('desks').length - desksBefore;
     /** Starts the demo with the copy's Desks lost on the network `lost` times, and watches the way to Today. */
@@ -577,10 +577,10 @@ describe('Arrival', () => {
       await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
       return pages;
     };
-    /** Start over, then the session ends: the app holds copy 2's Desks, and the passcode opens copy 1, which they don't list. */
+    /** Reset demo, then the session ends: the app holds copy 2's Desks, and the passcode opens copy 1, which they don't list. */
     const startOverThenEnd = async () => {
-      await screen.getByRole('button', { name: 'Start over' }).click();
-      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('button', { name: 'Reset demo' }).click();
+      await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
       await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
       // The new copy's own Today drawn (the greeting alone could be the old Today's), and its Desks
       // reads over: a read still on its way would otherwise land after the reset, in the next
@@ -821,16 +821,16 @@ describe('Arrival', () => {
   });
 
   it('session_end_returns_to_the_intro', async () => {
-    // Today opens drawn, on what it first shows read before it opens, the Demo inbox among them;
+    // Today opens drawn, on what it first shows read before it opens, the notifications among them;
     // Things to try's reads go out as it opens. The inbox read answers slowly here, as on a slow
     // machine, and is in before the session ends, so the 401 that ends it is one of Today's own
     // reads, a poll or Things to try's, and not that read.
     delayNextRead(ROUTES.ownerInbox.path, 60);
     const { screen, router } = await renderRoute(TODAY);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
-    // In on this page, which counts its entries on the button. Not `nextAnswerTo`: the last test's
+    // In on this page, which counts them beside Notifications. Not `nextAnswerTo`: the last test's
     // page can still have an inbox read out, and its late answer would pass for this one.
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
 
     // The demo session ends: the browser's owner cookie no longer opens a copy, so Today's next poll is a 401.
     mockStore.reset('rivera', { signedIn: false });
@@ -863,7 +863,7 @@ describe('Arrival', () => {
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY);
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
-    // Today opens without it; the demo bar draws the inbox once its read is in.
+    // Today opens without it; the sidebar counts the notifications once their read is in.
     await expectTodayOpensWithoutItsInbox();
     mockStore.reset('rivera', { signedIn: false });
     await expect.poll(() => router.state.location.pathname).toBe('/');
@@ -882,8 +882,8 @@ describe('Arrival', () => {
 
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
-    // Time for another read to go out, had anything sent one: the new copy's bar read its inbox once.
+    await expect.element(notificationsRow(screen, 1)).toBeVisible();
+    // Time for another read to go out, had anything sent one: the new copy's frame read its inbox once.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(1);
   });
@@ -1086,7 +1086,10 @@ describe('The preview behind the intro dialog', () => {
       await startTheDemo(screen);
       await expect.poll(() => router.state.location.pathname).toBe(TODAY);
       await expect.element(heldCard(screen)).toBeVisible();
-      await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+      // The notifications read too: on a laptop the sidebar counts them, as the preview did.
+      await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(1));
+      if (viewport === 'desktop') await vi.waitFor(() => expect(notificationsCount()).toBe('1 unread'));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const after = layoutOf(document.body);
 
       expect(Object.keys(before)).toEqual(Object.keys(after));
@@ -1203,6 +1206,7 @@ describe('OwnerLayout', () => {
       'Customers',
       'Rules',
       'Safety',
+      'Notifications',
       'Profile',
       'Share',
       'Knowledge',
@@ -1210,7 +1214,7 @@ describe('OwnerLayout', () => {
     ]);
     const base = `/app/${RIVERA.deskId}`;
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['today', 'conversations', 'people', 'rules', 'safety', 'profile', 'share', 'knowledge', 'settings'].map((page) => `${base}/${page}`),
+      ['today', 'conversations', 'people', 'rules', 'safety', 'notifications', 'profile', 'share', 'knowledge', 'settings'].map((page) => `${base}/${page}`),
     );
     await expect.element(nav.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
 
@@ -1260,10 +1264,11 @@ describe('OwnerLayout', () => {
       ['rules', 'Rules', 'Rules'],
       ['rules/all', 'All rules', 'All rules'],
       ['safety', 'Safety', 'Safety'],
+      ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],
       ['share', 'Share', 'Share'],
       ['settings/general', 'Settings', 'Settings'],
-      ['settings/notifications', 'Settings', 'Settings'],
+      ['settings/alerts', 'Settings', 'Settings'],
       ['settings/billing', 'Settings', 'Settings'],
     ];
     for (const [path, heading, title] of pages) {
@@ -1428,11 +1433,39 @@ describe('OwnerLayout', () => {
     expect(saved()).toBe(false);
   });
 
+  it('answering_cancelled_confirmation_reads_again_after_switching_desks', async () => {
+    const main = mockStore.world.desk(RIVERA.deskId)!;
+    mockStore.world.addDesk({ desk_id: 'desk-rivera-weekends', slug: 'rivera-weekends', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+    const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
+    await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+
+    // The write never saved. Its confirming read stays out until leaving this Desk aborts it.
+    const desks = holdReads(ROUTES.desks.path);
+    mockStore.inject({ route: 'setAnswering', status: 'network' });
+    await answering.click();
+    await screen.getByRole('dialog').getByRole('button', { name: 'Take messages only', exact: true }).click();
+    await vi.waitFor(() => expect(desks.held()).toBe(1));
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+    expect(main.summary.answering).toBe(true);
+
+    const leftAt = performance.now();
+    await router.navigate('/app/desk-rivera-weekends/today');
+    await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
+    await router.navigate(TODAY);
+    await expect.element(screen.getByRole('button', { name: `Switch Desk, current: ${main.summary.name}` })).toBeVisible();
+    expect(performance.now() - leftAt).toBeLessThan(FRESH_MS);
+    // The cancelled read must not make the optimistic list count as a fresh server answer.
+    await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(1));
+    desks.release();
+    await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('start_over_confirms_first', async () => {
     const { screen, router } = await renderRoute(TODAY);
-    const startOver = screen.getByRole('button', { name: 'Start over' });
+    const startOver = screen.getByRole('button', { name: 'Reset demo' });
     await startOver.click();
-    const dialog = screen.getByRole('dialog', { name: 'Start over with a fresh copy?' });
+    const dialog = screen.getByRole('dialog', { name: 'Reset demo?' });
     await expect.element(dialog).toBeVisible();
     await expect
       .element(dialog.getByText("You'll get a new copy of Turner Plumbing. This copy, its chats and its rules are left behind.", { exact: true }))
@@ -1441,7 +1474,7 @@ describe('OwnerLayout', () => {
 
     // Escape keeps this copy.
     await userEvent.keyboard('{Escape}');
-    await expect.element(screen.getByRole('dialog', { name: 'Start over with a fresh copy?' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('dialog', { name: 'Reset demo?' })).not.toBeInTheDocument();
     await expect.element(startOver).toHaveFocus();
     expect(requests('startOver')).toEqual([]);
 
@@ -1453,7 +1486,7 @@ describe('OwnerLayout', () => {
     // Confirmed: one start over, and the new copy's first Today, with no "not found" on the way.
     const sawNotFound = watchFor("This page doesn't exist");
     await startOver.click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     const fresh = mockStore.world.ids.deskId;
     expect(fresh).not.toBe(RIVERA.deskId);
@@ -1471,15 +1504,15 @@ describe('OwnerLayout', () => {
   it('start_over_reads_the_new_copys_inbox', async () => {
     // Polls far apart, so only the reads that open a page land.
     const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(1);
 
     // Straight away, while this copy's inbox was just read: the new copy's Today reads its own.
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${mockStore.world.ids.deskId}/today`);
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
     // Time for a read on mount to go out, had Today sent one: the new copy's inbox is read once.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(2);
@@ -1497,14 +1530,14 @@ describe('OwnerLayout', () => {
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
-    // Today opens without it; the demo bar draws the inbox once its read is in.
+    // Today opens without it; the sidebar counts the notifications once their read is in.
     await expectTodayOpensWithoutItsInbox();
 
-    // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
+    // Reset demo while this copy's first inbox read is out, and hold the new copy's Desks.
     const newInbox = holdReads(ROUTES.ownerInbox.path);
     const newDesks = holdReads(ROUTES.desks.path);
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     const fresh = `/app/${mockStore.world.ids.deskId}/today`;
     expect(router.state.location.pathname).toBe(fresh);
@@ -1512,7 +1545,6 @@ describe('OwnerLayout', () => {
     // Navigation and the held read can precede React's commit, leaving the old Today's skeleton
     // mounted briefly. Wait for the new copy's loading page before either held answer is released.
     await vi.waitFor(() => expect(pageNow()).toBe('loading'));
-    const sawItOpening = watchFor('Opening your Demo inbox');
 
     // The old copy's inbox answers late, before the new copy's Desks do.
     const late = nextAnswerTo('ownerInbox');
@@ -1521,24 +1553,22 @@ describe('OwnerLayout', () => {
     newInbox.release();
     newDesks.release();
 
-    // The new copy's bar reads its own inbox, and draws it with its one entry counted, never with the
-    // inbox still opening.
+    // The new copy's frame reads its own inbox, and counts its one entry beside Notifications.
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
-    expect(sawItOpening()).toBe(false);
+    await expect.element(notificationsRow(screen, 1)).toBeVisible();
     // Time for another read to go out, had anything sent one: the old copy's read and the new one's.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(2);
 
-    // With the sheet's own read held, it shows what Today read: the new copy's alert, linking to the
-    // new copy's held request, and nothing of the old copy.
+    // With the page's own read held, Notifications shows what Today read: the new copy's alert,
+    // linking to the new copy's held request, and nothing of the old copy.
     const newHold = mockStore.world.inbox.find((record) => record.entry.decision_id != null)?.entry.decision_id;
     if (newHold == null) throw new Error("the new copy's hold alerted the owner, naming it");
     holdReads(ROUTES.ownerInbox.path);
-    await screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true }).click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toHaveAttribute('href', `${fresh}#request-${encodeURIComponent(newHold)}`);
-    expect(sheet.getByText(leftBehind).elements()).toHaveLength(0);
+    await notificationsRow(screen, 1).click();
+    const page = screen.getByRole('main');
+    await expect.element(page.getByRole('link', { name: /Open the request/ })).toHaveAttribute('href', `${fresh}#request-${encodeURIComponent(newHold)}`);
+    expect(page.getByText(leftBehind).elements()).toHaveLength(0);
   });
 
   it('late_answering_failure_keeps_the_fresh_copy', async () => {
@@ -1547,7 +1577,7 @@ describe('OwnerLayout', () => {
     const heading = screen.getByRole('heading', { level: 1, name: /, Mike$/ });
     const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
 
-    // An Answering change is still out when Start over opens a fresh copy, and fails after it:
+    // An Answering change is still out when Reset demo opens a fresh copy, and fails after it:
     // refused (the old copy's Desk is gone), then with its answer lost.
     for (const status of [404, 'network'] as const) {
       await expect.element(heading).toBeVisible();
@@ -1559,8 +1589,8 @@ describe('OwnerLayout', () => {
       await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
       await expect.element(answering).toHaveAttribute('aria-checked', 'false');
 
-      await screen.getByRole('button', { name: 'Start over' }).click();
-      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('button', { name: 'Reset demo' }).click();
+      await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
       await expect.poll(() => router.state.location.pathname).not.toBe(before);
       const fresh = `/app/${mockStore.world.ids.deskId}/today`;
       expect(router.state.location.pathname).toBe(fresh);
@@ -1599,7 +1629,6 @@ describe('OwnerLayout', () => {
         settled: async (screen: RenderResult) => {
           await expect.element(heldCard(screen)).toBeVisible();
           await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
-          await expect.element(screen.getByText('Opening your Demo inbox', { exact: true })).not.toBeInTheDocument();
         },
         controls: (screen: RenderResult) => [
           screen.getByRole('button', { name: 'Copy your Desk link' }),
@@ -1668,7 +1697,7 @@ describe('Today', () => {
     ]);
     const held = things.getByRole('listitem').nth(2);
     await expect
-      .element(held.getByText('A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.', { exact: true }))
+      .element(held.getByText('A request is waiting for your answer.', { exact: true }))
       .toBeVisible();
     await expect.element(held.getByRole('button', { name: 'Open the request' })).toBeVisible();
     expect(held.element().querySelector('.cd-status-dot--held')).not.toBeNull();
@@ -1833,7 +1862,9 @@ describe('Things to try ticks off', () => {
     draw.finish();
   });
 
-  it.each(['desktop', 'phone'] as const)('the_section_under_the_list_holds_then_glides_up_at_%s', async (viewport) => {
+  it.each(['desktop', 'phone', 'phone_under_a_long_rule'] as const)('the_section_under_the_list_holds_then_glides_up_at_%s', async (at) => {
+    const viewport = at === 'desktop' ? 'desktop' : 'phone';
+    if (at === 'phone_under_a_long_rule') holdUnderALongRule();
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -1845,8 +1876,9 @@ describe('Things to try ticks off', () => {
     await allow.click();
     const frames = await watching;
 
-    // Needs you holds while the check draws, then glides up once to where the done row's own height puts it.
-    expectHeldThenGlided(frames, row.element() as HTMLElement);
+    // The phone row reserves its end line's room, so Needs you stays still through every frame;
+    // under a rule whose line runs past that room, it glides up once the check has drawn.
+    expectHeldThenGlided(frames, row.element() as HTMLElement, at === 'phone');
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
   });
@@ -1999,8 +2031,8 @@ describe('Things to try ticks off', () => {
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
     await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     // The new copy's list has nothing done, and its held request waits.
     await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
@@ -2027,10 +2059,14 @@ describe('Things to try ticks off', () => {
   it.each([
     ['expired', 'desktop', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
     ['expired', 'phone', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
+    ['expired', 'phone_under_a_long_rule', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
     ['cancelled', 'desktop', 'The visitor cancelled before you answered. Nothing was done.', 'Cancelled before you answered. Nothing was done.'],
-  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s_at_%s', async (state, viewport, cardLine, rowLine) => {
+  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s_at_%s', async (state, at, cardLine, rowLine) => {
     // The answer comes back 409: the request had already ended. That isn't an answer, so nothing
-    // ticks; the row stays in its slot and says how it ended.
+    // ticks; the row stays in its slot and says how it ended. Under a long rule, its row on a phone
+    // is taller than the line it settles with, so what follows glides up.
+    const viewport = at === 'desktop' ? 'desktop' : 'phone';
+    if (at === 'phone_under_a_long_rule') holdUnderALongRule();
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -2045,7 +2081,7 @@ describe('Things to try ticks off', () => {
     const frames = await watching;
 
     await expect.element(card.getByText(cardLine, { exact: true })).toBeVisible();
-    expectSettledInItsSlot(frames, item);
+    expectSettledInItsSlot(frames, item, at === 'phone');
     expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
     await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
     // No check, no pill and no button, nor an empty place for one: the card right below has the request.
@@ -2473,8 +2509,8 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
     await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    // Safety lists what was stopped, not every request Claude declines in its own words.
-    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was stopped and why.", { exact: true })).toBeVisible();
+    // The detail points at each reply's receipt; Safety lists only what was stopped.
+    await expect.element(row.getByText("Ask for a discount or someone else's details. Each reply's receipt shows the checks.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
     // Its words don't say it's done, so the Done pill is read out.
@@ -2527,7 +2563,7 @@ describe('Things to try ticks off', () => {
     await router.navigate(`/app/${RIVERA.deskId}/settings/general`);
     const section = screen.getByRole('region', { name: 'Delete this Desk' });
     await section.getByRole('button', { name: 'Delete this Desk' }).click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete “Main line” for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     const animated = watchListAnimations();
     // The copy's Desks are read again without the main line: the Desk switcher goes.
@@ -2569,14 +2605,26 @@ function mainLinePath(key: 'conversations' | 'ledger'): string {
  * The animations that ran in Things to try, by name, from now until the test ends, read every frame
  * (a reload included: it watches the document, not one list).
  */
-/**
- * Today's frame is up (after the read ahead's deadline) with Today still on its own skeleton, its
- * sections waiting for the copy's Demo inbox.
- */
-/** Today opens with the copy's Demo inbox read still out: the demo bar draws no inbox button meanwhile. */
+/** Today opens with the copy's notifications read still out: the sidebar counts none meanwhile. */
 async function expectTodayOpensWithoutItsInbox(): Promise<void> {
   await vi.waitFor(() => expect(document.querySelector('.cd-needs-you')).not.toBeNull(), { timeout: READ_AHEAD_MS + 2_000 });
-  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
+  expect(notificationsCount()).toBeNull();
+}
+
+/** The count beside the sidebar's Notifications row, as it reads ("1 unread"), or null with none. */
+function notificationsCount(): string | null {
+  const row = [...document.querySelectorAll('.cd-sidebar__row')].find((link) => link.querySelector('.cd-sidebar__label')?.textContent === 'Notifications');
+  return row?.querySelector('.cd-count-pill')?.getAttribute('aria-label') ?? null;
+}
+
+/**
+ * The sidebar's Notifications row, named with its count of unread entries ("Notifications 1
+ * unread"), or with any count when `unread` is left out.
+ */
+function notificationsRow(screen: RenderResult, unread?: number) {
+  return screen
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: unread === undefined ? /^Notifications \d+ unread$/ : `Notifications ${unread} unread`, exact: true });
 }
 
 function watchListAnimations(): () => string[] {
@@ -2719,6 +2767,28 @@ interface ListFrame {
   below: number;
 }
 
+/**
+ * A rule long enough that "Answer a held request" takes three lines on a phone, more than the room
+ * the row keeps for the longest line it can end on.
+ */
+const LONG_RULE = 'Quotes from your price list, at list price, with no discount unless you agree to it first.';
+
+/**
+ * Needs you names `LONG_RULE` for each held request, as it would for an owner's "Ask me first" rule
+ * worded that long. Every read is the mock's own, so an answered request leaves it as before.
+ */
+function holdUnderALongRule(): void {
+  worker.use(
+    http.get(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId), async () => {
+      const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+      if ('network' in answer) return HttpResponse.error();
+      if (answer.status !== 200) return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+      const items = (answer.body as NeedsYouItem[]).map((item) => (item.decision ? { ...item, held_by: LONG_RULE } : item));
+      return HttpResponse.json(items as JsonBodyType, { status: 200 });
+    }),
+  );
+}
+
 /** A move this small (in px) can't show whether it eased: it fits in a frame or two whatever the curve. */
 const TOO_SMALL_TO_EASE = 4;
 
@@ -2727,11 +2797,11 @@ const TOO_SMALL_TO_EASE = 4;
  * way of places between (when it moved more than a few px), to where the row's own height puts it:
  * the row keeps no least height at the end.
  */
-function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): void {
+function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement, keepsHeight = false): void {
   const from = frames[0]?.below ?? 0;
   const to = frames.at(-1)?.below ?? 0;
-  // A card whose row keeps its height (its open ideas didn't make it the tallest) moves nothing.
-  if (cardsShareTheirRow() && Math.abs(to - from) < 0.5) {
+  // A phone row with its end line's room reserved, or cards sharing their height, move nothing.
+  if (keepsHeight || (cardsShareTheirRow() && Math.abs(to - from) < 0.5)) {
     expect(frames.some((frame) => frame.checkDrawing), 'the check drew').toBe(true);
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
@@ -2760,7 +2830,7 @@ function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): v
  * its place as the line came in, then moved up one way only, by way of places between, to where the
  * row's own height puts it.
  */
-function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement): void {
+function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, keepsHeight = false): void {
   expect(frames.every((frame) => frame.drawn), 'the row stayed in the list').toBe(true);
   const top = frames[0]?.rowTop ?? 0;
   expect(frames.every((frame) => Math.abs(frame.rowTop - top) < 0.5), 'the row kept its slot').toBe(true);
@@ -2770,7 +2840,7 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement):
   expect(first).toBeGreaterThan(-1);
   expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
-  if (cardsShareTheirRow()) {
+  if (keepsHeight || cardsShareTheirRow()) {
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
     return;
@@ -2843,7 +2913,7 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
-/** Today's first reads: the copy's Desks, Today and Needs you, and the copy's Demo inbox. */
+/** Today's first reads: the copy's Desks, Today and Needs you, and the copy's notifications. */
 type TodaysReads = Record<'desks' | 'today' | 'needsYou' | 'ownerInbox', number>;
 
 /**

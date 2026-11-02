@@ -333,8 +333,9 @@ function MariaTakesOver({ language }: { language: 'en' | 'es' }) {
         tagline: rivera.publicDesk.en.desk_name,
         monogram: Array.from(rivera.publicDesk.en.business_name)[0] ?? '',
         field: rivera.publicDesk.en.brand.primary ?? '',
-        ink: 'var(--text-primary)',
-        inkSecondary: 'var(--text-secondary)',
+        ink: 'var(--text-on-brand)',
+        inkSecondary: 'var(--text-on-brand-secondary)',
+        statusHandled: 'var(--status-handled-on-brand)',
         accent: rivera.publicDesk.en.brand.accent ?? '',
       }}
       ownerName={OWNER}

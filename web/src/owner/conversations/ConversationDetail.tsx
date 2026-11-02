@@ -1,11 +1,12 @@
 /**
- * One conversation as the owner watches it (N-Conv-Run1, N-Conv-Agent-Run1, N-Conv-TakeOver): who
- * it is with and what happened last, every message with the checks under it, the requests held
- * for the owner answered in place, the visitor's typing, and the owner's controls: take over, hand
- * back or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
+ * One conversation as the owner watches it (N-Conv-Run1, N-Conv-Agent-Run1, N-Conv-TakeOver, and
+ * its bar as REV-720 C draws it): a bar pinned to the top of the pane with who it is with, what
+ * happened last and Take over; every message with the checks under it, the requests held for the
+ * owner answered in place, the visitor's typing, and the owner's controls at the foot: hand back
+ * or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 
 import type { SessionState } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -35,7 +36,7 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
-import { TRANSCRIPT_NOTE } from './copy.ts';
+import { TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { latestOf } from './latest.ts';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
@@ -56,6 +57,8 @@ export interface ConversationDetailProps {
   listRead: boolean;
   /** A line the page that opened it left, such as why joining the chat didn't go through. */
   notice: string | null;
+  /** The chat is on the copy's starting sample Desk, the plumbing demo, whose whisper example is its own. */
+  sampleDesk: boolean;
 }
 
 /** Who the chat is with when the list hasn't named them yet: what the session says they are. */
@@ -136,18 +139,19 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
 }
 
-export function ConversationDetail({ sessionId, summary, listRead, notice }: ConversationDetailProps) {
+export function ConversationDetail({ sessionId, summary, listRead, notice, sampleDesk }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const titleId = useId();
   const nameRef = useRef<HTMLHeadingElement>(null);
   const transcriptRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
   const [unsent, setUnsent] = useState<{ kind: 'say' | 'whisper'; text: string } | null>(null);
 
   const chat = useQuery({
     queryKey: conversationKey(sessionId),
-    queryFn: () => request('conversation', { params: { session_id: sessionId } }),
+    queryFn: ({ signal }) => request('conversation', { params: { session_id: sessionId }, signal }),
     refetchInterval: pollMs('conversation'),
   });
   // A read taken since the chat opened has come in, not only one kept from an earlier visit.
@@ -195,6 +199,39 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
     if (ended && (active === null || active === document.body)) composerRef.current?.querySelector('textarea')?.focus();
   }, [controls.sending]);
 
+  // Take over sits in the bar. While the change it sent is out it spins, and only then: a change sent
+  // from the owner's controls at the foot leaves it waiting, as TakeOverBar's own buttons do.
+  const [takeOverSent, setTakeOverSent] = useState(false);
+  const takeOver = () => {
+    setTakeOverSent(true);
+    controls.takeOver();
+  };
+  // When Take over goes from the bar with focus on it (she took the chat over, or it changed hands
+  // elsewhere while she was on it), focus moves to the first line of the owner's controls, as
+  // TakeOverBar moves it for its own buttons, so a keyboard user isn't dropped to the top of the page.
+  const takeOverButton = useRef<HTMLButtonElement | null>(null);
+  const takeOverHadFocus = useRef(false);
+  const holdTakeOver = useCallback((button: HTMLButtonElement | null) => {
+    const leaving = takeOverButton.current;
+    if (button === null && leaving !== null && leaving.ownerDocument.activeElement === leaving) takeOverHadFocus.current = true;
+    takeOverButton.current = button;
+  }, []);
+  useLayoutEffect(() => {
+    if (!takeOverHadFocus.current) return;
+    takeOverHadFocus.current = false;
+    const active = document.activeElement;
+    if (active === null || active === document.body) controlsRef.current?.querySelector<HTMLElement>('.cd-take-over__first')?.focus();
+  });
+  useLayoutEffect(() => {
+    if (!takeOverSent || controls.changing) return;
+    setTakeOverSent(false);
+    const foot = controlsRef.current;
+    // Reveal the outcome of this bar's press: its error, or the owner's controls whole, Hand back and
+    // the box they now write in included, whether or not the press had focus (a click needn't, Safari).
+    if (controls.modeError !== null) foot?.querySelector('.cd-take-over [role="alert"]')?.scrollIntoView({ block: 'nearest' });
+    else if (mode === 'owner') foot?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  }, [takeOverSent, controls.changing, controls.modeError, mode]);
+
   // The pane's first view draws from the chat, from Needs you (the requests held in it) and from the
   // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
   // way the pane ends up draws inside the one region, so it stays mounted as they change.
@@ -237,6 +274,10 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   const latest = latestOf(read.items);
   const started = startedLine(read, desk.slug, who, business.timezone);
   const now = new Date();
+  // Take over is offered in the bar while Claude answers (and in a mode this build doesn't know), as
+  // TakeOverBar would offer it: no one is on the other side of a recorded chat, and a paused chat
+  // keeps it beside Resume Claude at the foot.
+  const takeOverHere = read.replayed !== true && state.mode !== 'owner' && state.mode !== 'paused';
 
   // The requests held in this chat: as Needs you lists them, those answered or being answered here, oldest first.
   const held = heldOldestFirst(needsYou.data ?? []).filter((item) => item.decision.session_id === sessionId);
@@ -289,7 +330,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
           key="say"
           variant="owner"
           label="Write to them"
-          placeholder="They see your words exactly as you write them."
+          placeholder={takeOverPlaceholder(business.owner_display_name, business.name)}
+          helper={TAKE_OVER_HELPER}
           maxLength={MESSAGE_MAX_LENGTH}
           disabled={controls.sending}
           onSend={say}
@@ -303,7 +345,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
           key="whisper"
           variant="whisper"
           label="Whisper to Claude"
-          placeholder="Whisper to Claude. They won't see it."
+          placeholder={sampleDesk ? WHISPER_PLACEHOLDER_SAMPLE : WHISPER_PLACEHOLDER}
           maxLength={MESSAGE_MAX_LENGTH}
           disabled={controls.sending}
           onSend={whisper}
@@ -314,19 +356,36 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
 
   return pane(
     <section className="cd-conversation" aria-labelledby={titleId}>
-      <header className="cd-conversation__head">
-        <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
-          {who}
-        </h2>
-        {level !== who ? <Pill>{level}</Pill> : null}
-        {state.kind === 'agent' ? (
-          <Pill>
-            <StatusDot tone="handled" />
-            Signed
-          </Pill>
+      {/* The bar, pinned to the top of the pane across its width: who, their level, what happened last and Take over. */}
+      <header className="cd-conversation__bar">
+        <div className="cd-conversation__who">
+          <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
+            {who}
+          </h2>
+          {level !== who ? <Pill>{level}</Pill> : null}
+          {state.kind === 'agent' ? (
+            <Pill>
+              <StatusDot tone="handled" />
+              Signed
+            </Pill>
+          ) : null}
+        </div>
+        <div className="cd-conversation__context">
+          {state.assurance === 'demo_code' ? <span className="cd-conversation__quiet cd-type-caption">Simulated verification</span> : null}
+          {latest !== null ? (
+            <>
+              <span className="cd-conversation__dot cd-type-meta" aria-hidden="true">
+                ·
+              </span>
+              <p className="cd-conversation__latest cd-type-meta">Latest: {latest}</p>
+            </>
+          ) : null}
+        </div>
+        {takeOverHere ? (
+          <Button variant="secondary" buttonRef={holdTakeOver} busy={takeOverSent} waiting={controls.changing && !takeOverSent} onClick={takeOver}>
+            Take over
+          </Button>
         ) : null}
-        {state.assurance === 'demo_code' ? <span className="cd-conversation__quiet cd-type-caption">Simulated verification</span> : null}
-        {latest !== null ? <p className="cd-conversation__latest cd-type-meta">Latest: {latest}</p> : null}
       </header>
       {read.replayed === true ? (
         <div className="cd-conversation__recorded">
@@ -336,7 +395,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
-      {/* The transcript and its handoff cards scroll between the head and the owner's controls, or in a short window with them, as one. */}
+      {/* The transcript and its handoff cards scroll between the bar and the owner's controls, or in a short window under the bar, with them, as one. */}
       <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
         {callbacks.length > 0 ? (
           <div ref={setHandoffCards} className="cd-conversation__handoffs">
@@ -368,12 +427,13 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
       </div>
       {/* No one is on the other side of a recorded chat: nothing to take over, whisper or write. */}
       {read.replayed === true ? null : (
-        <div className="cd-conversation__controls">
+        <div ref={controlsRef} className="cd-conversation__controls">
           <TakeOverBar
             mode={state.mode}
             visitorName={who}
             ownerName={business.owner_display_name}
             agent={state.kind === 'agent'}
+            takeOverAbove
             onTakeOver={controls.takeOver}
             onHandBack={controls.handBack}
             onResume={controls.resume}

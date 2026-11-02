@@ -5,7 +5,7 @@
 ## When to use
 
 - On the public page below 1280 px, with `viewer="visitor"`, where the inbox can't be a column beside the chat. The sheet rises from the bottom and opens itself when the first code arrives.
-- On Today, with `viewer="owner"`, for the owner's codes and alerts. The sheet is a 400 px column at the right, and the owner opens it.
+- With `viewer="owner"`, the owner's codes and alerts, as N-R2-Inbox-Sheet-Owner draws it: a 400 px column at the right, which the owner opens. The owner app no longer uses it: its notifications have their own page (REV-NOTIF). The owner's sheet stays for that board.
 - Not at 1280 px and wider on the public page, where `DemoInboxPanel` sits beside the chat on its own.
 
 ## What the consumer provides

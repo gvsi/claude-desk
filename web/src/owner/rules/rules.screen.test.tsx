@@ -405,6 +405,31 @@ describe('rules page', () => {
     expect([...nav.element().querySelectorAll('[aria-current="page"]')].map((row) => row.textContent)).toEqual(['Connectors']);
   });
 
+  it.each(['Ask me first', 'Recommended rules'])('preset_review_%s_keeps_emergency_callbacks_automatic', async (label) => {
+    await page.viewport(1440, 900);
+    const urgent = desk().policy.cards.find((card) => card.card_id === 'rv-urgent');
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+    await expect.element(jobs.getByText('Emergency callback', { exact: true })).toBeVisible();
+    await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    await screen.getByRole('menuitem', { name: label }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: label })).toBeVisible();
+    const rows = reviewRows(screen);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.map((row) => row.title)).not.toContain('Emergency callback');
+    for (const row of rows) {
+      const words = (value: string | null) => value?.replace(/^(Before|After)/, '').replace(/\bChanged\b/g, '').replace(/\s+/g, ' ').trim();
+      expect(words(row.after), row.title).not.toBe(words(row.before));
+    }
+    await expect.element(screen.getByText('Open times, leads, callbacks and identity checks still run on their own.', { exact: true })).toBeVisible();
+    expect(desk().drafts.get(desk().lastVersion)?.draft.cards).toContainEqual(urgent);
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    expect(desk().policy.cards).toContainEqual(urgent);
+    await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+  });
+
   it('preset_menu_drafts_a_preset', async () => {
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
@@ -441,7 +466,7 @@ describe('rules page', () => {
   it('preset_review_lists_every_removed_rule', async () => {
     // Dana Whitfield's own booking rule, from an earlier "Allow only for Dana" answer.
     mockStore.world.addActiveRules(desk(), [EXTRA_RULES.danaBooking]);
-    const owned = desk().policy.cards.filter((card) => !card.card_id.startsWith('preset-'));
+    const owned = desk().policy.cards.filter((card) => !card.card_id.startsWith('preset-') && card.applies_to !== 'desk.emergency-callback');
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
@@ -1511,6 +1536,69 @@ describe("Ask Claude's question about a hold", () => {
     reads.release();
     await expect.element(again.getByRole('button', { name: 'Why was this refund held?' })).toBeVisible();
     expect(chipWords(again)).toEqual([...FIXED_CHIPS, 'Why was this refund held?']);
+  });
+
+  it('hold_question_does_not_reuse_a_read_started_before_leaving', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'needsYou', status: 200, body: (answer as { body: unknown }).body, until });
+    const before = requests('needsYou').length;
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(before);
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
+    if (!held) throw new Error('the seed holds a quote');
+    mockStore.world.answer(held, 'deny_once');
+
+    const current = holdNeedsYou();
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
+    release();
+    await expect.poll(() => current.held()).toBeGreaterThan(0);
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+    current.release();
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(before + 1);
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+
+  it('hold_question_does_not_use_a_read_sent_on_today', async () => {
+    // A poll on Today is still out as the owner moves to Rules. Meanwhile the quote is answered and
+    // Dana's refund held. When the poll comes back, its answer, from before Rules opened, asks
+    // nothing about the quote; Rules' own read, once it comes back, asks about the refund.
+    const { screen, router } = await renderRoute(`${DESK}/today`);
+    await expect.element(screen.getByRole('region', { name: 'Needs you' })).toBeVisible();
+    const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'needsYou', status: 200, body: (answer as { body: unknown }).body, until });
+    const before = requests('needsYou').length;
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(before);
+    const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
+    if (!held) throw new Error('the seed holds a quote');
+    mockStore.world.answer(held, 'deny_once');
+    mockStore.world.addHeldRefund();
+
+    const current = holdNeedsYou();
+    let answered = 0;
+    onTestFinished(observeRequests(({ key, ok }) => { if (key === 'needsYou' && ok) answered += 1; }));
+    await router.navigate(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
+    release();
+    await expect.poll(() => answered).toBe(1);
+    // Time for the poll's answer to be drawn, had Rules taken it as its own.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+
+    current.release();
+    await expect.element(group.getByRole('button', { name: 'Why was this refund held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this refund held?']);
   });
 
   it('hold_question_goes_while_needs_you_cannot_be_read', async () => {

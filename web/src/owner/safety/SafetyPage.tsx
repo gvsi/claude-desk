@@ -5,12 +5,13 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import type { LedgerPage } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
-import { AttemptRow, Button, ChainStatus, Chip, EmptyState, Notice, PageHeader, SegmentedControl, SkeletonScreen, StatusLabel } from '../../ds/index.ts';
+import { AttemptRow, Button, ChainStatus, Chip, EmptyState, PageHeader, SegmentedControl, SkeletonScreen, StatusLabel } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { ReadFailed } from '../ReadFailed.tsx';
 import { heldOldestFirst, todayPath, useNeedsYou, useToday } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { AttemptDetail } from './AttemptDetail.tsx';
@@ -64,23 +65,6 @@ function useAttempts(deskId: string) {
 /** An attempt's page under the Desk, which opens it beside the list. */
 export function attemptPath(deskId: string, refId: string): string {
   return `/app/${encodeURIComponent(deskId)}/safety/${encodeURIComponent(refId)}`;
-}
-
-/** The latest read failed: what went wrong and the way to read it again, said over what was read before. */
-function ReadFailed({ failure }: { failure: ReadFailure | null }) {
-  if (failure === null) return null;
-  return (
-    <Notice
-      tone="error"
-      action={
-        <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-          Try again
-        </Button>
-      }
-    >
-      {failure.line}
-    </Notice>
-  );
 }
 
 /**

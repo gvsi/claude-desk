@@ -40,7 +40,7 @@ export function rulesQuery(deskId: string) {
 
 /** The business's people and leads, which name a person's rule. */
 export function peopleQuery(deskId: string) {
-  return queryOptions({ queryKey: ['people', deskId], queryFn: () => request('people', { params: { desk_id: deskId } }) });
+  return queryOptions({ queryKey: ['people', deskId], queryFn: ({ signal }) => request('people', { params: { desk_id: deskId }, signal }) });
 }
 
 /** A read the review makes once and keeps while it is open: a later read would change nothing it shows. */

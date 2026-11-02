@@ -20,6 +20,7 @@ import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { KNOWLEDGE_COPY, MAX_FILE_BYTES } from './KnowledgePage.tsx';
+import { MOCK_SOURCES } from './previewSources.ts';
 
 const KNOWLEDGE = `/app/${RIVERA.deskId}/knowledge`;
 
@@ -62,6 +63,11 @@ const posts = (): KnowledgeItem[] => mockStore.requests.filter((r) => r.key === 
 const TOO_MANY = "That's a lot of requests at once. Wait a moment, then try again.";
 
 const main = (screen: RenderResult) => screen.getByRole('main');
+
+/** The sample rows the starting Desk's list ends with, by their titles: they carry no pill of their own. */
+const SAMPLE_TITLES = new Set(MOCK_SOURCES.map((source) => source.title));
+/** Whether a row of "What Claude knows" is one the Desk really knows, not a sample. */
+const isKnownRow = (row: Element): boolean => !SAMPLE_TITLES.has(row.querySelector('.cd-knowledge-list__title')?.textContent ?? null);
 const switchOf = (screen: RenderResult) => main(screen).getByRole('switch', { name: 'Customers can see this' });
 
 /** Opens Knowledge, types `note` and adds it. */
@@ -104,9 +110,9 @@ describe('knowledge', () => {
     if (viewport === 'phone') await screen.getByRole('button', { name: 'Menu', exact: true }).click();
     const nav = screen.getByRole('navigation', { name: 'Main' });
     await expect.element(nav).toBeVisible();
-    expect(nav.element().querySelectorAll('.cd-sidebar__label').length).toBe(9);
+    expect(nav.element().querySelectorAll('.cd-sidebar__label').length).toBe(10);
     expect([...nav.element().querySelectorAll('.cd-sidebar__label')].map((row) => row.textContent)).toEqual([
-      'Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings',
+      'Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Notifications', 'Profile', 'Share', 'Knowledge', 'Settings',
     ]);
     const link = nav.getByRole('link', { name: 'Knowledge', exact: true });
     await expect.element(link).toHaveAttribute('href', path);
@@ -141,7 +147,7 @@ describe('knowledge', () => {
     const list = main(screen).getByRole('list', { name: 'What Claude knows' });
     await expect.element(list).toBeVisible();
     // Oldest first: the kernel stores the website read, then the price list.
-    expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').map((row) => row.textContent)).toEqual([
+    expect(list.getByRole('listitem').elements().filter(isKnownRow).map((row) => row.textContent)).toEqual([
       'turner-plumbing.exampleWebsite · Read during setup · Added Oct 30Customers can see this',
       'Price listFrom your answers in setup · Added Oct 30Customers can see this',
     ]);
@@ -221,11 +227,11 @@ describe('knowledge', () => {
     // Once added, the field clears; pressing Add again asks for words without posting a duplicate.
     await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue('');
     const list = main(screen).getByRole('list', { name: 'What Claude knows' });
-    await expect.poll(() => list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').length).toBe(3);
+    await expect.poll(() => list.getByRole('listitem').elements().filter(isKnownRow).length).toBe(3);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
     await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveAccessibleDescription(expect.stringContaining(KNOWLEDGE_COPY.emptyNote));
     expect(posts()).toHaveLength(1);
-    expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock')).toHaveLength(3);
+    expect(list.getByRole('listitem').elements().filter(isKnownRow)).toHaveLength(3);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Customers can see it: the same item posted again, public; the line no longer says only you can.
@@ -265,7 +271,7 @@ describe('knowledge', () => {
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
     expect(posts()[2]?.item_id).not.toBe(first.item_id);
     expect(mockStore.world.knowledge.get(`${RIVERA.deskId}:${first.item_id}`)?.item.label.readers).toEqual(['public']);
-    await expect.poll(() => main(screen).getByRole('list', { name: 'What Claude knows' }).getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').length).toBe(4);
+    await expect.poll(() => main(screen).getByRole('list', { name: 'What Claude knows' }).getByRole('listitem').elements().filter(isKnownRow).length).toBe(4);
   });
 
   it.each([429, 422])('knowledge_refused_switch_preserves_readers_%s', async (status) => {
@@ -618,13 +624,13 @@ describe('knowledge', () => {
       const { screen } = await renderRoute(KNOWLEDGE, { viewport, pollScale: 100 });
       const list = main(screen).getByRole('list', { name: 'What Claude knows' });
       await expect.element(list).toBeVisible();
-      expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').map((row) => row.textContent)).toEqual([
+      expect(list.getByRole('listitem').elements().filter(isKnownRow).map((row) => row.textContent)).toEqual([
         'An older noteNoteOnly you',
         'A recent noteNote · Added Oct 30Customers can see this',
         'A note only you can seeNoteOnly you',
         'An earlier noteNote · Added Oct 26Customers can see this',
       ]);
-      expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').map((row) => row.querySelector('.cd-knowledge-list__detail')?.textContent ?? null)).toEqual([
+      expect(list.getByRole('listitem').elements().filter(isKnownRow).map((row) => row.querySelector('.cd-knowledge-list__detail')?.textContent ?? null)).toEqual([
         'Note',
         'Note · Added Oct 30',
         'Note',
@@ -648,7 +654,7 @@ describe('knowledge', () => {
     const known = main(screen).getByRole('region', { name: 'What Claude knows' });
     const list = known.getByRole('list', { name: 'What Claude knows' });
     await expect.element(list).toBeVisible();
-    const rows = list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock');
+    const rows = list.getByRole('listitem').elements().filter(isKnownRow);
     expect(rows.map((row) => row.textContent)).toEqual([
       'Your websiteWebsite · Read during setup · Added Oct 26Customers can see this',
       'Parking is on the street.Note · Added Oct 27Only you',
@@ -666,11 +672,11 @@ describe('knowledge', () => {
     // A note just added joins the list, read again, with today's date and "Only you".
     await main(screen).getByRole('textbox', { name: 'A note' }).fill(NOTE);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
-    await expect.poll(() => list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').length).toBe(4);
-    expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock')[3]?.textContent).toBe(`${NOTE_TITLE}Note · Added Oct 30Only you`);
+    await expect.poll(() => list.getByRole('listitem').elements().filter(isKnownRow).length).toBe(4);
+    expect(list.getByRole('listitem').elements().filter(isKnownRow)[3]?.textContent).toBe(`${NOTE_TITLE}Note · Added Oct 30Only you`);
     // Made public with its switch, its row says so.
     await switchOf(screen).click();
-    await expect.poll(() => list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock')[3]?.textContent).toBe(`${NOTE_TITLE}Note · Added Oct 30Customers can see this`);
+    await expect.poll(() => list.getByRole('listitem').elements().filter(isKnownRow)[3]?.textContent).toBe(`${NOTE_TITLE}Note · Added Oct 30Customers can see this`);
   });
 
   it('knowledge_list_loads_fails_and_is_left_out_when_empty', async () => {

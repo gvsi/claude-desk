@@ -12,6 +12,12 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 /** The About pages' tests that run with motion, in `about-motion` rather than `about`. */
 const ABOUT_MOTION_TESTS = 'src/about/**/*.motion.browser.test.tsx';
 
+/**
+ * Every browser test sees the dark theme, the base the signed boards draw: a test browser prefers
+ * light by default, which would turn on the light theme. A test of the light theme asks for it itself.
+ */
+const DARK = { colorScheme: 'dark' } as const;
+
 export default defineConfig(async (env) =>
   mergeConfig(
     await viteConfig(env),
@@ -42,7 +48,7 @@ export default defineConfig(async (env) =>
               browser: {
                 enabled: true,
                 headless: true,
-                provider: playwright(),
+                provider: playwright({ contextOptions: DARK }),
                 viewport: { width: 1280, height: 820 },
                 instances: [{ browser: 'chromium' }],
               },
@@ -59,7 +65,7 @@ export default defineConfig(async (env) =>
               browser: {
                 enabled: true,
                 headless: true,
-                provider: playwright({ contextOptions: { reducedMotion: 'reduce' } }),
+                provider: playwright({ contextOptions: { ...DARK, reducedMotion: 'reduce' } }),
                 viewport: { width: 1280, height: 820 },
                 instances: [{ browser: 'chromium' }],
               },
@@ -77,7 +83,7 @@ export default defineConfig(async (env) =>
               browser: {
                 enabled: true,
                 headless: true,
-                provider: playwright({ contextOptions: { reducedMotion: 'no-preference' } }),
+                provider: playwright({ contextOptions: { ...DARK, reducedMotion: 'no-preference' } }),
                 viewport: { width: 1280, height: 820 },
                 instances: [{ browser: 'webkit' }],
               },
@@ -96,7 +102,7 @@ export default defineConfig(async (env) =>
               browser: {
                 enabled: true,
                 headless: true,
-                provider: playwright({ contextOptions: { reducedMotion: 'reduce' } }),
+                provider: playwright({ contextOptions: { ...DARK, reducedMotion: 'reduce' } }),
                 viewport: { width: 1440, height: 900 },
                 instances: [{ browser: 'chromium' }],
               },
@@ -114,7 +120,7 @@ export default defineConfig(async (env) =>
               browser: {
                 enabled: true,
                 headless: true,
-                provider: playwright({ contextOptions: { reducedMotion: 'no-preference' } }),
+                provider: playwright({ contextOptions: { ...DARK, reducedMotion: 'no-preference' } }),
                 viewport: { width: 1440, height: 900 },
                 instances: [{ browser: 'chromium' }],
               },
@@ -131,7 +137,7 @@ export default defineConfig(async (env) =>
               browser: {
                 enabled: true,
                 headless: true,
-                provider: playwright(),
+                provider: playwright({ contextOptions: DARK }),
                 viewport: { width: 1440, height: 900 },
                 instances: [{ browser: 'chromium' }],
               },

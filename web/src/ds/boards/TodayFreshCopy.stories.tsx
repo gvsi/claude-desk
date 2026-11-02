@@ -80,7 +80,7 @@ export const Board: Story = {
     // focus_order_is_logical.
     const nav = within(sidebar).getByRole('navigation', { name: 'Main' });
     await expectTabOrder(userEvent, [
-      canvas.getByRole('button', { name: 'Start over' }),
+      canvas.getByRole('button', { name: 'Reset demo' }),
       within(sidebar).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(nav).getAllByRole('link'),
       within(sidebar).getByRole('switch', { name: 'Claude acts for you' }),
