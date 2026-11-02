@@ -21,6 +21,7 @@ import { entriesPath } from '../today/SinceLastNight.tsx';
 import { firstName, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
+import { agentLine } from './copy.ts';
 import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
 import { conversationPath, conversationListStatus, whoLabel, type ConversationArrival } from './status.ts';
 
@@ -118,6 +119,7 @@ export function ConversationsPage() {
                 current={s.session_id === sessionId}
                 recorded={s.replayed === true}
                 quote={s.kind === 'visitor' && !s.owner_preview ? s.latest_visitor_text ?? undefined : undefined}
+                line={s.kind === 'agent' ? agentLine(s, business.timezone) ?? undefined : undefined}
               />
             </li>
           ))}

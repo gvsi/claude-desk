@@ -7,7 +7,7 @@
  *
  * Reused by setup's preview (`embedded`), which sits inside an owner screen.
  */
-import { Component, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Component, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import type { RenderedBlock, SessionState } from '../api/contracts.ts';
 import {
@@ -126,7 +126,8 @@ interface RowProps {
   /** `owner_display_name` as served, for the owner's own messages and a card's "{owner} said". */
   ownerName: string;
   language: CopyLanguage;
-  onResend: (id: string) => void;
+  onResend: (id: string) => Promise<void>;
+  composer: RefObject<HTMLDivElement | null>;
   /** A reply is on its way: "Try again" waits, as Send does. */
   resendHeld?: boolean;
   /** What goes under the row's receipts: "Cancel this request" for each open hold it holds. */
@@ -134,8 +135,21 @@ interface RowProps {
 }
 
 /** One row: the message and its visible receipts, exactly as the kernel wrote them. */
-function ChatRowView({ row, ownerPreview, ownerName, language, onResend, resendHeld = false, paymentBlock, after = [] }: RowProps) {
+function ChatRowView({ row, ownerPreview, ownerName, language, onResend, composer, resendHeld = false, paymentBlock, after = [] }: RowProps) {
+  const retryButton = useRef<HTMLButtonElement>(null);
+  const [restoreRetryFocus, setRestoreRetryFocus] = useState<{ posted: boolean; composer: boolean } | null>(null);
   const { item } = row;
+  const retryStatus = item.kind === 'visitor' ? item.status : null;
+  // A lost answer can outlive post(): wait for its row to settle, then restore the place
+  // unless the visitor moved elsewhere. A touch retry never raises the phone keyboard.
+  useLayoutEffect(() => {
+    if (restoreRetryFocus === null || !restoreRetryFocus.posted || retryStatus === 'checking') return;
+    setRestoreRetryFocus(null);
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    const target = retryStatus === 'failed' ? retryButton.current
+      : retryStatus === 'sent' && restoreRetryFocus.composer ? composer.current?.querySelector('textarea') : null;
+    target?.focus({ preventScroll: true });
+  }, [restoreRetryFocus, retryStatus, composer]);
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
   const receipts = [
@@ -156,7 +170,15 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, resendH
     const failed = item.status === 'failed' && item.failure !== 'session';
     const retry =
       item.failure === 'too_long' ? undefined : (
-        <Button variant="ghost" waiting={resendHeld} onClick={() => onResend(item.id)}>
+        <Button variant="ghost" buttonRef={retryButton} waiting={resendHeld} onClick={(event) => {
+          if (document.activeElement === event.currentTarget) {
+            setRestoreRetryFocus({
+              posted: false,
+              composer: event.currentTarget.matches(':focus-visible') || !window.matchMedia('(pointer: coarse)').matches,
+            });
+          }
+          void onResend(item.id).then(() => setRestoreRetryFocus((pending) => pending === null ? null : { ...pending, posted: true }));
+        }}>
           {copy.tryAgain}
         </Button>
       );
@@ -739,7 +761,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // The chat's own path, without the owner's `?preview=`: the visitor cookie the preview's chat
   // runs on is the one `/d/<slug>` resumes. Setup's preview sits inside an owner screen, so its
   // links note no chat to go back to.
-  const paymentBlock = usePaymentLinks(chat.state.rows, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
+  const messages = useMemo(() => chat.state.rows.flatMap(({ item }) => (item.kind === 'message' ? [item.ev] : [])), [chat.state.rows]);
+  const paymentBlock = usePaymentLinks(messages, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // After useNewestInView, so it looks once the newest message is in its place.
   const waiting = useWaitingRequests(endRef, composerRef, !opening && desk !== null);
@@ -1003,11 +1026,11 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   };
   // Sent again, a message waits for a reply on its way and holds Send until its own starts, as a
   // new one does.
-  const resend = (id: string) => {
+  const resend = async (id: string) => {
     if (sendHeld) return;
     newest.follow();
     if (!chat.ownerInChat) setPending({ marks: state.turnMarks, id });
-    chat.resend(id);
+    await chat.resend(id);
   };
 
   // Above the composer, a line for each held request whose receipt is out of view, oldest first,
@@ -1098,6 +1121,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               ownerName={desk.owner_display_name}
               language={language}
               onResend={resend}
+              composer={composerRef}
               resendHeld={sendHeld}
               after={[...cancelsUnder(shownReceipts(row, ownerPreview)), ...verifyUnder(row)]}
             />

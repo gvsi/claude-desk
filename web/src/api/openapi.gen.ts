@@ -346,6 +346,13 @@ export interface ConnectorProposal {
  * (`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the
  * owner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later
  * request still held, expired or cancelled, or a handoff card opening, clears it to null.
+ *
+ * An agent's outcome carries the facts behind it, read from the kernel's rows, never from anyone's words:
+ * `latest_outcome_starts_at`, the booking's start (`visit_booked`, from the booking decision's action);
+ * `latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored
+ * payment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide
+ * (`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its
+ * outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -372,6 +379,33 @@ export interface ConversationSummary {
       )
     | null;
   replayed?: boolean;
+  latest_outcome_starts_at?: string | null;
+  latest_outcome_cents?: number | null;
+  latest_outcome_cause?:
+    | (
+        | "owner_rule"
+        | "not_verified"
+        | "not_their_record"
+        | "recipient"
+        | "no_such_slot"
+        | "unknown_item"
+        | "over_quote_ceiling"
+        | "quote_unpayable"
+        | "no_such_charge"
+        | "not_refundable"
+        | "no_such_document"
+        | "no_amount"
+        | "tool_not_available"
+        | "incomplete_request"
+        | "paused"
+        | "no_rules"
+        | "rules_unchecked"
+        | "agent_pay_out"
+        | "agent_limit"
+        | "other_copy"
+        | "no_rule"
+      )
+    | null;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.

@@ -93,6 +93,15 @@ export interface ConversationSummary {
    * without it draws the row as before.
    */
   latest_visitor_text?: string | null;
+  /**
+   * The facts behind an agent's newest outcome, read from the kernel's rows, never anyone's words:
+   * the booking's start for `visit_booked`, the amount paid for `deposit_paid`, and the refusal's
+   * cause for `turned_down`. Null when the outcome isn't that one or the fact can't be read, and
+   * for a visitor's chat or the owner's preview; absent is null.
+   */
+  latest_outcome_starts_at?: string | null;
+  latest_outcome_cents?: number | null;
+  latest_outcome_cause?: RefusalCause | null;
 }
 
 export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';

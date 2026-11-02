@@ -30,6 +30,7 @@ import { CARD_REASON } from '../../mocks/world.ts';
 import { START_EXAMPLES } from '../../setup/copy.ts';
 import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { holdReads } from '../../test/holdReads.ts';
+import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import {
   aPollPasses,
@@ -1291,7 +1292,15 @@ describe('Today', () => {
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
     // The signed Today boards draw each day's bar 24 px wide, centered over its initial in one of
     // seven equal columns 6 px apart, at every width: a busy day is a taller bar, never a wider one.
-    const { screen } = await renderRoute(TODAY, { viewport });
+    // The seed's booking comes under a minute before the copy opens, so a fresh copy opens at a fixed
+    // afternoon on the Desk's clock: in the first minute after midnight, it would fall on yesterday's bar.
+    // Only Date is faked: the page's timers and polling stay real.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const { screen } = await renderRoute(TODAY, { viewport, seed: 'rivera' });
     const list = region(screen, 'Last 7 days').getByRole('list', { name: 'Bookings per day' });
     await expect.element(list).toBeVisible();
     const box = list.element().getBoundingClientRect();
@@ -1746,7 +1755,9 @@ describe('Today', () => {
     const live = region(screen, 'Live now');
     const column = await focusMarkDoneAtTheFoot(screen, live.element());
     const before = { column: column.scrollTop, window: window.scrollY };
-    const todayLine = () => document.querySelector('.cd-how__today')!.getBoundingClientRect().height;
+    // The page's own line: Today's loading shapes, while they fade out, draw one of their own.
+    const howToday = region(screen, 'How your Desk works').element();
+    const todayLine = () => howToday.querySelector('.cd-how__today')!.getBoundingClientRect().height;
     const lineBefore = todayLine();
 
     await userEvent.keyboard('{Enter}');
@@ -2404,6 +2415,15 @@ describe('Today', () => {
 /** The box of an element on the page. */
 const box = (el: Element) => el.getBoundingClientRect();
 
+/**
+ * Waits until Today's loading shapes have left the page. They fade out over the page once it has
+ * drawn, with a band and a greeting of their own, so a query for those finds the shapes until then.
+ */
+async function skeletonGone(): Promise<void> {
+  // The fade's own fallback takes the shapes away within a second, so allow that and more.
+  await expect.poll(() => document.querySelector('.cd-today--skeleton'), { timeout: 2_000 }).toBeNull();
+}
+
 /** The controls in `root` that a pointer or Tab can reach now (drawn, not hidden). */
 function drawnControls(root: Element): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>('a[href], button')].filter((el) => el.getClientRects().length > 0);
@@ -2421,6 +2441,7 @@ describe("Today's top band", () => {
     const things = region(screen, 'Things to try');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(things.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await skeletonGone();
     const band = document.querySelector('.cd-today__band');
     const main = document.querySelector('.cd-today__main');
     const aside = document.querySelector('.cd-today-aside');
@@ -2526,6 +2547,7 @@ describe("Today's top band", () => {
     const things = region(screen, 'Things to try');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(screen.getByText('One person is talking to your Desk right now.')).toBeVisible();
+    await skeletonGone();
 
     // Title, presence line, link pill, then "Chat as a customer", down the page from one left edge.
     const title = box(screen.getByRole('heading', { level: 1 }).element());
@@ -2636,6 +2658,7 @@ describe("Today's How your Desk works", () => {
     const { screen } = await renderRoute(TODAY);
     const how = region(screen, 'How your Desk works');
     await expect.element(how).toBeVisible();
+    await skeletonGone();
     await expect.element(how.getByRole('heading', { level: 2, name: 'How your Desk works', exact: true })).toBeVisible();
     // Three numbered steps, the second naming the business as the Desk knows it.
     expect(how.getByRole('list').elements()).toHaveLength(1);
@@ -2898,6 +2921,78 @@ describe("Today's unfinished setup", () => {
       )
       .toBeVisible();
     expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+  });
+
+  /** "Create your own Desk" in Today's Things to try. */
+  function createRow(screen: RenderResult): Locator {
+    return region(screen, 'Things to try')
+      .getByRole('listitem')
+      .filter({ has: page.getByRole('heading', { level: 3, name: 'Create your own Desk', exact: true }) });
+  }
+
+  /** Takes the Desk of `state`, left in setup, on through its last steps and live, as the owner would. */
+  async function goLive(state: SetupState): Promise<void> {
+    for (const key of ['setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm', 'goLive'] as const) {
+      const answered = await mockStore.dispatch(key, { params: { id: state.interview_id } });
+      if ('network' in answered || answered.status !== 200) throw new Error(`the mock answers ${key}`);
+    }
+  }
+
+  /** Opens setup at its tools and leaves with "Save and exit", before going live. Resolves on the Desk's Today. */
+  async function saveAndExitAtTools(state: SetupState): Promise<RenderResult> {
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio').getByText('Not live yet', { exact: true })).toBeVisible();
+    return screen;
+  }
+
+  it('save_and_exit_before_going_live_leaves_create_your_own_desk_open', async () => {
+    // Priya leaves her new Desk's setup with "Save and exit" before going live. Today says it isn't
+    // live yet, and "Create your own Desk" isn't done and says nothing about being live.
+    const state = await deskAtTools();
+    const screen = await saveAndExitAtTools(state);
+    const row = createRow(screen);
+    await expect.element(row.getByRole('link', { name: 'Start a Desk' })).toBeVisible();
+    // The list's reads come in a few times: still nothing ticks.
+    const reads = requests('ledger').length;
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBeGreaterThan(reads + 1);
+    expect(row.getByText('Done', { exact: true }).elements()).toHaveLength(0);
+    expect(row.element().textContent).not.toMatch(/live/i);
+    await expect.element(region(screen, 'Things to try').getByText('About 10 minutes. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    // Once it goes live, the row is done, in its own words.
+    await goLive(state);
+    const live = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(createRow(live.screen).getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+    expect(live.screen.getByText('Not live yet', { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('another_live_desk_never_has_a_desk_in_setup_say_it_is_live', async () => {
+    // Linda took Chen & Co. live earlier in this copy, so "Create your own Desk" is done. Then Priya
+    // starts Juniper Hair Studio and leaves its setup with "Save and exit" before going live. Its
+    // Today says it isn't live yet, and the row, done for the copy, says nothing about being live.
+    await liveSetupDeskIds("I'm Linda Chen. Chen & Co. keeps the books for small businesses in San Jose.");
+    const state = await deskAtTools();
+    // Answering on doesn't make a Desk still in setup live: only finishing setup does.
+    const answering = await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
+    if ('network' in answering || answering.status !== 200) throw new Error('the mock sets Answering');
+    const screen = await saveAndExitAtTools(state);
+    const row = createRow(screen);
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    await expect.element(region(screen, 'Things to try').getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Not live yet', { exact: true })).toBeVisible();
+    expect(row.element().textContent).not.toMatch(/live/i);
+    // It keeps its own words, so its Done pill is read out.
+    await expect.element(row.getByText('Describe a business in a few sentences. Claude drafts the rules, and you confirm them.', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-things__done')?.getAttribute('aria-hidden')).toBeNull();
+
+    // Once Juniper goes live too, its Today says so in the row's own words.
+    await goLive(state);
+    const live = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(createRow(live.screen).getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+    expect(live.screen.getByText('Not live yet', { exact: true }).elements()).toHaveLength(0);
   });
 
   /** The card's line at the rules, with Answering off. */
@@ -3405,14 +3500,20 @@ describe("Today's Demo inbox", () => {
     await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
     expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
 
+    const todayRead = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
     await link.click();
     await expect.element(sheet).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
-    // Main line's Today draws the card once its own reads land. Wait for the card with
-    // expect.element, whose retries are cheap: card.element() on a page without the card prints the
-    // whole page into its error, and a vi.waitFor around it does that every 50 ms, which keeps the
-    // browser too busy to draw the page it waits for.
+    // The inbox read Main line's Needs you, but not its Today. Hold that read so this always
+    // exercises the loading state after navigation, even when the mock answers quickly.
+    await expect.poll(todayRead.held).toBeGreaterThan(0);
+    expectTodayOpening();
+    expect(card.elements()).toHaveLength(0);
+    todayRead.release();
+    // Wait for Today's own reads to land before checking its card and focus. Looking up a
+    // missing card with element() on every retry serializes the page while it is still loading.
+    await expect.poll(() => document.querySelector('.cd-today-opening [aria-busy="true"]'), { timeout: 5_000 }).toBeNull();
     await expect.element(card).toBeInTheDocument();
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
     expectInView(card.element());
