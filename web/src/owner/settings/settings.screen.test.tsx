@@ -601,15 +601,15 @@ describe('Settings against its boards', () => {
     let content = await expectSettingsColumns(screen, 'General');
 
     // The details 8 px under their heading, as wide as the column, with no Change; Answering in its
-    // own card below Header colour, the card's look with its switch row 20 px in from its top and
-    // bottom (the row pads its own sides, so its words line up with the details'); Appearance's
+    // own card below Header colour, the card's look with its switch row 10 px in from its top and
+    // bottom (the row's own padding puts its words 16 px in on every side); Appearance's
     // heading 28 px under that, its choice at the column's right; Delete this Desk's heading 28 px
     // under Appearance, its neutral button at the column's right.
     const answeringCard = main(screen).getByRole('region', { name: 'Claude acts for you' }).element();
     expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
     const switchRow = answering.element();
-    expect(round(top(switchRow) - top(answeringCard))).toBe(21);
-    expect(round(bottom(answeringCard) - bottom(switchRow))).toBe(21);
+    expect(round(top(switchRow) - top(answeringCard))).toBe(11);
+    expect(round(bottom(answeringCard) - bottom(switchRow))).toBe(11);
     const appearance = main(screen).getByRole('region', { name: 'Appearance' }).element();
     const themes = one(appearance, '[role="radiogroup"]');
     expect(round(top(one(appearance, 'h2')) - bottom(answeringCard))).toBe(28);
@@ -700,6 +700,10 @@ describe('Settings against its boards', () => {
       const answering = main(screen).getByRole('region', { name: 'Claude acts for you' });
       await expect.element(answering).toBeVisible();
       const card = answering.element().getBoundingClientRect();
+      expect(card.height, `${viewport} Answering card height`).toBe(71);
+      const row = answering.getByRole('switch', { name: 'Claude acts for you' }).element().getBoundingClientRect();
+      expect(row.top - card.top).toBe(11);
+      expect(card.bottom - row.bottom).toBe(11);
       const label = answering.getByText('Claude acts for you', { exact: true }).element().getBoundingClientRect();
       const track = one(answering.element(), '.cd-switch__track').getBoundingClientRect();
       expect(Math.abs(label.left - card.left - (card.right - track.right))).toBeLessThanOrEqual(1);
