@@ -25,7 +25,6 @@ const HELD_CHAT = {
   handoff: { label: CARD_CHROME.handoff.en.label, headline: rivera.blocks.handoff.en.title ?? '', detail: rivera.blocks.handoff.en.lines?.[0] ?? '' },
   reason: rivera.decisions.held.reason_plain,
   context: `From the visitor: “${QUESTION}”`,
-  heldBy: `Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`,
 } as const;
 
 type LineText = 'caption' | 'meta' | 'section' | 'summary';
@@ -144,10 +143,6 @@ function HeldCardShape({ anchor }: { anchor?: string }) {
         </div>
         <MeasuredLines parts={[HELD_CHAT.reason]} className="cd-type-summary" text="summary" fallback={2} boxClassName="cd-approval-card__reason" />
         <MeasuredLines parts={[HELD_CHAT.context]} className="cd-type-meta" text="meta" boxClassName="cd-approval-card__context" />
-        <div className="cd-approval-card__held-by">
-          <Skeleton shape="block" width={16} height={16} />
-          <MeasuredLines parts={[HELD_CHAT.heldBy]} className="cd-type-meta" text="meta" boxClassName="cd-conversation-skeleton__rule" />
-        </div>
         <div className="cd-approval-card__answers">
           <div ref={answers} className="cd-approval-card__row">
             <Skeleton

@@ -1,7 +1,7 @@
 /**
  * The About this prototype pages keep their own paper in either theme: every color on each page,
  * its ground, top bar, figures, app icon and footer included, is the same in the dark theme, the
- * light theme chosen in this browser, and System chosen on a system that prefers light.
+ * light theme chosen in this browser, and a system that prefers light.
  */
 import type { ReactElement } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -67,19 +67,20 @@ describe('the About pages in either theme', () => {
           </MemoryRouter>,
         );
         const container = screen.container;
-        // Dark, the default, then the light theme chosen in this browser.
+        // Dark, as this project's system prefers it, then the light theme chosen in this browser.
         const dark = colors(container);
         expect(dark.length, name).toBeGreaterThan(0);
         chooseTheme('light');
         expect(colors(container), `${name} at ${size.width}, light chosen`).toEqual(dark);
         chooseTheme('dark');
         expect(colors(container), `${name} at ${size.width}, dark chosen`).toEqual(dark);
+        chooseTheme('system');
         await screen.unmount();
       }
     });
   }
 
-  it('the vision article keeps its paper when System is chosen and the system prefers light', async () => {
+  it('the vision article keeps its paper when the system prefers light', async () => {
     const screen = await render(
       <MemoryRouter initialEntries={['/about/vision']}>
         <VisionArticle />
@@ -87,7 +88,6 @@ describe('the About pages in either theme', () => {
     );
     const dark = colors(screen.container);
     await systemPrefersLight();
-    chooseTheme('system');
     expect(colors(screen.container)).toEqual(dark);
   });
 });
