@@ -103,7 +103,7 @@ export interface VisitorChatSnapshot {
 export interface VisitorChatActions {
   send: (text: string) => void;
   /** Sends a failed message again ("Try again"). */
-  resend: (id: string) => void;
+  resend: (id: string) => Promise<void>;
   /** Loads the Desk again, or reopens a stream the chat gave up on. */
   retry: () => void;
   /** Starts a new chat after this one ended. */
@@ -642,11 +642,11 @@ class VisitorChat {
     if (this.snapshot.state.rows.some((row) => row.live === true)) this.dispatch({ type: 'shown' });
   };
 
-  readonly resend = (id: string): void => {
+  readonly resend = async (id: string): Promise<void> => {
     const row = this.snapshot.state.rows.find((r) => r.item.kind === 'visitor' && r.item.id === id && r.item.status === 'failed');
     if (row?.item.kind !== 'visitor' || this.snapshot.state.error === 'session') return;
     this.dispatch({ type: 'resent', id });
-    void this.post(id, row.item.text);
+    await this.post(id, row.item.text);
   };
 
   private async post(id: string, text: string): Promise<void> {

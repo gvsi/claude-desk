@@ -28,7 +28,7 @@ Two kinds of item are owner-only, and only one loses its title:
 
 - The section's heading, "What Claude knows" (`SectionHeader`, an `h2` that names the section and the list), then 8 px under it a `Card` of rows with no padding of its own.
 - Each row padded 12 px 16 px, with a `line-hairline` above every row but the first: the title in `body` type at weight 520, `text-primary`, over the detail in `meta` type, `text-secondary`, 2 px apart. A title and a detail that each fit one line make a 64 px row, or 65 px with its separator. With `detail: null`, no detail element or empty line is drawn: the title sits 12 px from the top and bottom of a 44 px one-line row (45 px with a separator). Wrapped words make the row taller.
-- Who can see it, in a `Pill` at the row's right, centered on the row. The words wrap beside the pill, which keeps its line, so nothing scrolls sideways on a phone.
+- Who can see it, in a `Pill` at the row's right, centered on the row. The words wrap beside the pill, which keeps its line. Below 640 px, tiled rows move the pill under the text; untiled rows keep it at the right. Neither layout scrolls sideways on a phone.
 
 ## Accessibility
 
