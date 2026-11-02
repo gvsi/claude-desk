@@ -22,6 +22,27 @@ async function heldRequest(viewport: Viewport) {
 }
 
 describe.each(['desktop', 'phone'] as const)('request focus at %s size', (viewport) => {
+  it('returns keyboard focus to the composer after the visitor cancels', async () => {
+    if (viewport === 'phone') await coarsePointer();
+    const { box, cancel } = await heldRequest(viewport);
+    await userEvent.tab({ shift: true });
+    await expect.element(cancel).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(cancel).not.toBeInTheDocument();
+    await expect.element(box).toHaveFocus();
+  });
+
+  it('returns focus to the composer after an own cancel whose mouse click leaves focus on the body', async () => {
+    const { box, cancel } = await heldRequest(viewport);
+    (box.element() as HTMLElement).blur();
+    // Safari and Firefox mouse clicks do not focus a button.
+    cancel.element().addEventListener('mousedown', (event) => event.preventDefault(), { once: true });
+    cancel.element().addEventListener('click', () => expect(document.activeElement).toBe(document.body), { once: true });
+    await cancel.click();
+    await expect.element(cancel).not.toBeInTheDocument();
+    await expect.element(box).toHaveFocus();
+  });
+
   it.each(['allow_once', 'deny_once'] as const)('returns keyboard focus to the composer after %s', async (answer) => {
     if (viewport === 'phone') await coarsePointer();
     const { box, cancel, decisionId } = await heldRequest(viewport);
@@ -46,6 +67,14 @@ describe.each(['desktop', 'phone'] as const)('request focus at %s size', (viewpo
     await expect.element(ask).toHaveFocus();
     await expect.element(box).not.toHaveFocus();
   });
+});
+
+it('returns focus to the composer after the visitor cancels with a coarse pointer', async () => {
+  await coarsePointer();
+  const { box, cancel } = await heldRequest('phone');
+  await cancel.click();
+  await expect.element(cancel).not.toBeInTheDocument();
+  await expect.element(box).toHaveFocus();
 });
 
 it('focuses the outcome when the composer cannot be written in', async () => {

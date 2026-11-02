@@ -601,10 +601,10 @@ interface WaitingRequests {
  * composer. Showing a line makes the composer area taller and hiding one makes it shorter, which
  * only moves a receipt further the way it went, so a line never flickers in and out.
  */
-function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): WaitingRequests {
+function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean, state: ChatState): WaitingRequests {
   const places = useRef(new Map<string, CancelPlace>());
   const [away, setAway] = useState<ReadonlySet<string>>(NONE);
-  const leftWithFocus = useRef<{ button: HTMLElement; margin: HTMLElement; receipt: number; composer: boolean } | null>(null);
+  const leftWithFocus = useRef<{ id: string; button: HTMLElement; margin: HTMLElement; receipt: number; composer: boolean } | null>(null);
 
   // As with "View request", the ref notes focus before React removes the control. Only a
   // removed button hands its place on; ordinary ref updates and focus elsewhere leave it alone.
@@ -612,6 +612,8 @@ function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObj
     const left = leftWithFocus.current;
     leftWithFocus.current = null;
     if (!left || left.button.isConnected || document.activeElement !== document.body) return;
+    const source = state.latest.get(left.id)?.source;
+    if (source?.kind === 'decision' && source.state === 'cancelled') return;
     const box = left.composer ? composer.current?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled):not([readonly])') : null;
     if (box) box.focus({ preventScroll: true });
     else if (left.margin.isConnected) {
@@ -664,7 +666,7 @@ function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObj
         const margin = previous?.block.parentElement;
         if (button && margin && document.activeElement === button) {
           leftWithFocus.current = {
-            button, margin, receipt: previous.receipt,
+            id, button, margin, receipt: previous.receipt,
             composer: button.matches(':focus-visible') || !window.matchMedia('(pointer: coarse)').matches,
           };
         }
@@ -794,7 +796,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const paymentBlock = usePaymentLinks(messages, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // After useNewestInView, so it looks once the newest message is in its place.
-  const waiting = useWaitingRequests(endRef, composerRef, !opening && desk !== null);
+  const waiting = useWaitingRequests(endRef, composerRef, !opening && desk !== null, chat.state);
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);
   // The chat can be written in: it loaded, and its session hasn't ended.
@@ -812,6 +814,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // app's name comes back when the page closes. Inside an owner screen (setup's preview) the tab is
   // that screen's.
   useDocumentTitle(embedded ? null : (desk?.business_name ?? null));
+
+  // A cancel that went through takes its button away: the visitor's place moves to the composer,
+  // unless they have already moved on to something else.
+  const lastCancel = useRef<string | null>(null);
+  useEffect(() => {
+    const cancelled = lastCancel.current;
+    lastCancel.current = chat.cancelling;
+    if (cancelled === null || chat.cancelling !== null) return;
+    if (chat.state.openHolds.includes(cancelled) || chat.cancelFailed === cancelled) return;
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    composerRef.current?.querySelector('textarea')?.focus();
+  }, [chat.cancelling, chat.cancelFailed, chat.state.openHolds]);
 
   // A waiting line that goes with focus on its "View request" (the request was answered, or its
   // receipt came back into view) leaves the visitor's place in the composer, without scrolling.
