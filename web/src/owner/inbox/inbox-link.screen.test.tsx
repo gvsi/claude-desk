@@ -123,6 +123,27 @@ describe('Demo inbox request link', () => {
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   });
 
+  it('ledger_checkpoints_stay_out_of_the_owners_inbox', async () => {
+    // The kernel sends the owner a signed head checkpoint of the record now and then. It is the
+    // record's own engineering text, and Safety says how the record stands in plain words, so the
+    // owner's Demo inbox, its list and its count, leaves it out.
+    const held = seededHold();
+    const alert = alertFor(held.decision_id);
+    const checkpoint: DemoInboxEntry = {
+      entry_id: 'inbox-head', to: 'owner', kind: 'head_checkpoint',
+      body: '{"desk_id": "desk-turner", "head": "9f2c", "key_id": "k1", "seq": 50, "signature": "c2ln"}',
+      created_at: new Date().toISOString(), decision_id: null,
+    };
+    mockStore.inject({ route: 'ownerInbox', status: 200, times: 10_000, body: [alert, checkpoint] });
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry' })).toBeVisible();
+    await inboxButton(screen).click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByText(alert.body)).toBeVisible();
+    expect(sheet.getByText(checkpoint.body).elements()).toHaveLength(0);
+    expect(sheet.getByText('Ledger checkpoint').elements()).toHaveLength(0);
+  });
+
   it('answered_and_dismissed_request_has_no_link', async () => {
     // Denied and dismissed on Today, the request is no longer held: its alert stays in the inbox,
     // with no "Open the request" that would only close the sheet.
