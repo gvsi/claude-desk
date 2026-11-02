@@ -58,6 +58,9 @@
 
 .cd-setup__business {
   grid-area: business;
+  /* One line of its own type even before the name comes, so the bar's second row keeps its height
+     on a narrow screen while the Desks are read. */
+  min-height: 1lh;
   /* The business takes the room the wordmark leaves and never widens its column: a long name is cut. */
   flex: 1 1 0;
   contain: inline-size;

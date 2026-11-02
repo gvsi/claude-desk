@@ -27,7 +27,7 @@ const meta = {
       'Settings › General: SubNav at the left, the business’s details as a DetailList, Claude acts for you as a Switch in a Card, and Delete this Desk.',
       'The board draws a ghost Change at the right of each detail; the details are read-only, with no Change (owner decision, 2026-10-30).',
       'The switch says “Claude acts for you” with “Within your rules” while on, the same as on a phone (owner decision, 2026-11-01).',
-      'Delete this Desk is a neutral secondary button where the board draws it red (owner decision, 2026-10-30).',
+      'Delete this Desk uses the red danger variant, as the board draws it (owner decision, 2026-11-02, replacing the earlier neutral-delete rule).',
       'The board centers a 1000 px column; Settings keeps the app’s 960 px content width, like every other owner page (owner decision, 2026-10-30), so it sits 20 px right of the render.',
     ].join(' '),
   },
@@ -54,12 +54,12 @@ export const Board: Story = {
     await expect(Math.round(answeringCard.getBoundingClientRect().bottom - answering.getBoundingClientRect().bottom)).toBe(21);
     expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
 
-    // Delete this Desk: its heading 28 px under Claude acts for you, the line, and the neutral button at the column's right.
+    // Delete this Desk: its heading 28 px under Claude acts for you, the line, and the red button at the column's right.
     const remove = page.getByRole('region', { name: 'Delete this Desk' });
     await expect(Math.round(within(remove).getByRole('heading').getBoundingClientRect().top - answeringCard.getBoundingClientRect().bottom)).toBe(28);
     await expect(within(remove).getByText('Its public link stops working and its chats close. Its safety record is kept.')).toBeVisible();
     const button = within(remove).getByRole('button', { name: 'Delete this Desk' });
-    expectComputed(button, SPEC.secondaryMain);
+    expectComputed(button, SPEC.dangerMain);
     await expect(Math.round(button.getBoundingClientRect().right)).toBe(Math.round(content.getBoundingClientRect().right));
 
     await expectFooter(canvasElement);

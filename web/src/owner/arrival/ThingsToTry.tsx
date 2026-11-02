@@ -62,13 +62,13 @@ interface Pick {
   outcome: 'opened' | 'blocked';
 }
 
-/** "Held by your rule: {rule}." without doubling the rule's own full stop. */
+/** "A request is waiting for your answer: {rule}." without doubling the rule's own full stop. */
 function heldLine(rule: string | null | undefined): ReactNode {
   if (!rule) return TODAY_COPY.waiting;
   const ends = /[.!?]$/.test(rule.trim());
   return (
     <>
-      {TODAY_COPY.waiting} {TODAY_COPY.heldBy}<span data-copy="user">{rule.trim()}</span>
+      {TODAY_COPY.waitingFor}<span data-copy="user">{rule.trim()}</span>
       {ends ? '' : '.'}
     </>
   );
@@ -525,13 +525,7 @@ function BreakIt({ slug, deskId, ownerName, business, end }: { slug: string; des
     <Thing
       icon="safety"
       title={BREAK.title}
-      detail={
-        <>
-          {TODAY_COPY.breakBeforeOwner}
-          {ownerName === null ? TODAY_COPY.breakNoOwner : <span data-copy="user">{ownerName}</span>}
-          {TODAY_COPY.breakAfterOwner}
-        </>
-      }
+      detail={TODAY_COPY.breakDetail}
       below={below}
       end={end}
       step={{

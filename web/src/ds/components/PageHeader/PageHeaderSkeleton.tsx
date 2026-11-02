@@ -29,7 +29,9 @@ export function PageHeaderSkeleton({
   const subtitleWidth = useControlWidth(text, subtitle === undefined ? undefined : {
     label: subtitle, className: 'cd-page-header__subtitle cd-type-body', tagName: 'span',
   });
-  const lines = useTextLines(subtitleBox, { parts: [subtitle ?? ''], className: 'cd-page-header__subtitle cd-type-body' }, 1);
+  // Its lines are counted again once the column takes the subtitle's width, in that same commit, so the
+  // first frame already draws them as they stay.
+  const lines = useTextLines(subtitleBox, { parts: [subtitle ?? ''], className: 'cd-page-header__subtitle cd-type-body' }, 1, subtitleWidth);
   const wide = subtitle === undefined ? (typeof subtitleLines === 'number' ? subtitleLines : subtitleLines.wide) : lines;
   const phone = subtitle === undefined ? (typeof subtitleLines === 'number' ? subtitleLines : subtitleLines.phone) : lines;
   const modifiers = `${actionsBelowOnPhone ? ' cd-page-header--actions-below' : ''}${hideSubtitleOnPhone ? ' cd-page-header--no-phone-subtitle' : ''}`;

@@ -484,6 +484,24 @@ describe('Today', () => {
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
   });
 
+  it('held_row_quotes_its_rule_after_a_colon_with_one_full_stop', async () => {
+    // "Answer a held request" names the rule after a colon, as the owner's words, and adds a full
+    // stop only when the rule has none. A hold with no rule keeps the plain line.
+    const [seeded] = await heldItems();
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const heldBy = (rule: string | null) => () => mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [{ ...seeded, held_by: rule }] });
+
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera', beforeRender: heldBy('Quotes at list price') });
+    const line = region(screen, 'Things to try').getByText('A request is waiting for your answer: Quotes at list price.', { exact: true });
+    await expect.element(line).toBeVisible();
+    expect([...line.element().querySelectorAll('[data-copy="user"]')].map((span) => span.textContent)).toEqual(['Quotes at list price']);
+
+    const { screen: none } = await renderRoute(TODAY, { seed: 'rivera', beforeRender: heldBy(null) });
+    const plain = region(none, 'Things to try').getByText('A request is waiting for your answer.', { exact: true });
+    await expect.element(plain).toBeVisible();
+    expect(plain.element().querySelector('[data-copy="user"]')).toBeNull();
+  });
+
   it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
     // The greeting says the owner's first name after the time of day. An owner who gave no name has
     // setup's fallback, "Owner", in its place, and a blank name is none either: the greeting then
@@ -512,9 +530,9 @@ describe('Today', () => {
 
   it('an_owner_with_no_name_is_the_owner_and_their_business', async () => {
     // An owner who gave no name has setup's fallback, "Owner", in its place, and nothing says
-    // "Owner" (owner, 2026-11-02): the demo bar calls them "the owner", the break-it row asks for
-    // "the owner's home number", its idea speaks as the business, and the sidebar's owner row
-    // names the business, with its initials.
+    // "Owner" (owner, 2026-11-02): the demo bar calls them "the owner", the break-it row names no one,
+    // its idea speaks as the business, and the sidebar's owner row names the business, with its
+    // initials.
     const { deskId } = await liveSetupDeskIds('Fenster & Fenster. Bespoke windows and doors in Oakland.');
     const business = mockStore.world.desk(deskId)?.summary.business_name;
     if (business === undefined) throw new Error('the setup made a Desk');
@@ -528,9 +546,8 @@ describe('Today', () => {
     expect(owner?.querySelector('.cd-sidebar__avatar')?.textContent).toBe('FF');
 
     const things = region(screen, 'Things to try');
-    const line = things.getByText("Ask for a discount, another customer's address or the owner's home number. Safety shows what was stopped and why.", { exact: true });
+    const line = things.getByText("Ask for a discount or someone else's details. Each reply's receipt shows the checks.", { exact: true });
     await expect.element(line).toBeVisible();
-    // "the owner" is the app's words, not the owner's.
     expect(line.element().querySelector('[data-copy="user"]')).toBeNull();
     await things.getByRole('button', { name: 'Show me ideas' }).click();
     const ideas = things.getByRole('group', { name: 'Ideas to try' });
