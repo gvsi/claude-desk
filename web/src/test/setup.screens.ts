@@ -41,6 +41,8 @@ beforeEach(() => {
   writeLocal('hadOwnerCopy', null);
   // Whether a paid checkout links back to a chat depends on what chats this browser showed.
   writeLocal('payChats', null);
+  // Whether a reload's loading page draws a "Not live yet" card depends on the Desks this browser saw.
+  writeLocal('todaySetup', null);
 });
 
 afterEach(async () => {

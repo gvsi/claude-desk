@@ -5,7 +5,9 @@
  * session that ends is said to have ended after a reload too (`providers.tsx`), and the chat each
  * payment link the public chat showed came from, so the paid checkout can link back to it (one
  * record of token digests and paths, `payChats.ts`), and the theme chosen in this browser
- * (`theme.ts`; index.html's first script reads the same key). Nothing else is stored in the browser.
+ * (`theme.ts`; index.html's first script reads the same key), and, for each Desk whose setup isn't
+ * finished, what the loading page needs to draw its "Not live yet" card before the Desks are read
+ * again after a reload (`todaySetupMemory.ts`). Nothing else is stored in the browser.
  * Storage can be missing or blocked (a private window, blocked site data), so neither function
  * ever throws.
  */
@@ -16,6 +18,7 @@ const KEYS = {
   hadOwnerCopy: 'claude-desk.had-owner-copy',
   payChats: 'claude-desk.pay-chats',
   theme: 'claude-desk.theme',
+  todaySetup: 'claude-desk.today-setup',
 } as const;
 
 export type LocalKey = keyof typeof KEYS;
