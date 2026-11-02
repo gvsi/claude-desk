@@ -111,6 +111,7 @@ async def test_each_desk_names_the_business_type_setup_stored_for_it(api, browse
         assert created.status_code == 201, created.text
         made[kind] = created.json()["desk_id"]
     await setup_row(engine, owner.copy_id, made["office"], "office")
+    await setup_row(engine, owner.copy_id, made["office"], "landlord", created_at="2026-10-29 17:00:00+00")  # older
     await setup_row(engine, owner.copy_id, made["untyped"], None)
     listed = {desk["desk_id"]: desk["business_type"]
               for business in (await owner.browser.get("/api/owner/desks")).json() for desk in business["desks"]}

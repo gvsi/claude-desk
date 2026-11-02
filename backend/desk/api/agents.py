@@ -161,9 +161,12 @@ async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> De
     return (await demo_task_sets(conn, ro, [desk_id]))[desk_id]
 
 
-async def demo_task_sets(conn: AsyncConnection, ro: KernelRO, desk_ids: list[str]) -> dict[str, DemoTaskSet]:
+async def demo_task_sets(conn: AsyncConnection, ro: KernelRO, desk_ids: list[str], *,
+                         all_desks: list[dict] | None = None) -> dict[str, DemoTaskSet]:
     """`demo_task_set` for several of the copy's Desks at once, by Desk ID, with one read of its setup interviews. The
-    owner's Desk list names each Desk's set, so the owner's pages word their fixed examples by the same closed type."""
+    owner's Desk list names each Desk's set, so the owner's pages word their fixed examples by the same closed type.
+    `all_desks`: the copy's Desks as `ro.desks()` lists them, deleted ones included, when the caller already read
+    them."""
     if not desk_ids:
         return {}
     found = await conn.execute(select(INTERVIEWS.c.desk_id, INTERVIEWS.c.business_type).where(
@@ -172,7 +175,7 @@ async def demo_task_sets(conn: AsyncConnection, ro: KernelRO, desk_ids: list[str
     newest = {row.desk_id: row.business_type for row in found}          # the newest row of each Desk is read last
     oldest = None
     if any(desk_id not in newest for desk_id in desk_ids):
-        desks = await ro.desks()
+        desks = all_desks if all_desks is not None else await ro.desks()
         oldest = desks[0]["desk_id"] if desks else None
     return {desk_id: (newest[desk_id] if newest[desk_id] in BUSINESS_TYPES else "other") if desk_id in newest
             else "rivera" if desk_id == oldest else "other" for desk_id in desk_ids}

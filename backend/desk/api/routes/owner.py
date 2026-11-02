@@ -98,7 +98,7 @@ async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, 
     desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    types = await demo_task_sets(ctx.ro.conn, ctx.ro, [desk["desk_id"] for desk in desks])
+    types = await demo_task_sets(ctx.ro.conn, ctx.ro, [desk["desk_id"] for desk in desks], all_desks=all_desks)
     return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks), types
 
 
