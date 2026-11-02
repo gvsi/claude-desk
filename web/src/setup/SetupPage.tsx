@@ -1,5 +1,5 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from 'react';
 import { useNavigate, useParams, useSearchParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
 import { ApiError, observeRequests, ownerErrorCopy, request } from '../api/http.ts';
@@ -72,6 +72,7 @@ interface SetupShellProps {
    * the copy's Desks, so the page it opens is drawn from it.
    */
   beforeLeave?: () => Promise<void>;
+  contentRef?: Ref<HTMLDivElement>;
   children: ReactNode;
 }
 
@@ -81,7 +82,7 @@ interface SetupShellProps {
  * that leaves as "Save and exit" does; the business once known, the five steps and "Save and exit";
  * one column; the concept footer at the window's foot.
  */
-function SetupShell({ business, step, live, exitTo, wide = false, chat = false, beforeLeave, children }: SetupShellProps) {
+function SetupShell({ business, step, live, exitTo, wide = false, chat = false, beforeLeave, contentRef, children }: SetupShellProps) {
   const navigate = useNavigate();
   // An in-app link goes once `beforeLeave` is done, whether or not it worked.
   const leave: NavigateFunction = (to: To | number, options?: NavigateOptions) => {
@@ -119,7 +120,7 @@ function SetupShell({ business, step, live, exitTo, wide = false, chat = false, 
         </span>
       </header>
       <main className={`cd-setup__main${wide ? ' cd-setup__main--wide' : ''}`}>
-        <div className="cd-setup__column">{children}</div>
+        <div ref={contentRef} className="cd-setup__column">{children}</div>
         {chat ? null : <ConceptFooter />}
       </main>
     </div>
@@ -279,6 +280,17 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const chatOpen = opensSetupChat(search);
   const changeRuns = state !== undefined && state.busy === true && state.step !== 'questions';
   const changing = state !== undefined && state.step !== 'questions' && state.step !== 'live' && (chatOpen || changeRuns);
+  const content = useRef<HTMLDivElement>(null);
+  const returnToStep = useRef(false);
+  useLayoutEffect(() => {
+    if (changing || !returnToStep.current) return;
+    // Cancelling the change chat announces the restored view, or returns to the closing plan's Continue.
+    const target = content.current?.querySelector<HTMLElement>(closingQuestions ? '.cd-setup-dock .cd-button--primary' : 'h1');
+    if (!target) return;
+    returnToStep.current = false;
+    if (target.tagName === 'H1') target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }, [changing, closingQuestions]);
   // A change may close the questions in one turn and return tools directly. Remember where this
   // chat opened, or where a running change was found, so both that response and a read of the landed
   // turn clear the old drafts and show the new plan.
@@ -346,6 +358,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
   let body: ReactNode;
   const shownStep = closingQuestions || changing ? 'questions' : state.step;
   const backToStep = () => {
+    returnToStep.current = true;
     // The situations request may have advanced the API while the page still held its rules step.
     // Restore that confirmed step so cancelling the chat reopens the same view of the rules.
     update((now) => now === undefined ? now : asConfirmed(now));
@@ -389,6 +402,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       wide={state.step === 'preview' && !changing}
       chat={shownStep === 'questions'}
       beforeLeave={beforeLeave}
+      contentRef={content}
     >
       {/* The same region as while the interview was read, so its shapes hand off to the step's. */}
       <SetupOpening loading={false}>{body}</SetupOpening>

@@ -2080,6 +2080,28 @@ describe('setup', () => {
     expect(requests('setupReopen', mark)).toHaveLength(0);
   });
 
+  it.each(['desktop', 'phone'] as const)('change_chat_continue_returns_keyboard_focus_to_the_step_heading_%s', async (viewport) => {
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    const change = screen.getByRole('button', { name: 'Change something', exact: true });
+    await expect.element(change).toBeVisible();
+    for (let i = 0; i < 15 && document.activeElement !== change.element(); i += 1) await userEvent.keyboard('{Tab}');
+    await expect.element(change).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+    await userEvent.keyboard('{Tab}');
+    await expect.element(screen.getByRole('button', { name: 'Continue', exact: true })).toHaveFocus();
+    const mark = mockStore.requests.length;
+    await userEvent.keyboard('{Enter}');
+    const heading = screen.getByRole('heading', { name: 'Real situations', exact: true });
+    await expect.element(heading).toHaveFocus();
+    expect(heading.element().tabIndex).toBe(-1);
+    expect(getComputedStyle(heading.element()).boxShadow).toBe('none');
+    expect(requests('setupReopen', mark)).toHaveLength(0);
+    expectNoHorizontalScroll();
+  });
+
   it.each(['response', 'stream', 'lost response'] as const)('a_change_sent_from_real_situations_reopens_the_chat_and_setup_moves_forward_again_%s', async (delivery) => {
     // From Real situations on this page, so what the later steps read is still at hand.
     const { state } = await interviewAtRules();
@@ -4718,6 +4740,23 @@ describe('consultant setup', () => {
     await expect.element(box).toHaveFocus();
   });
 
+  it.each(['desktop', 'phone'] as const)('suggestions_return_keyboard_focus_to_continue_after_a_change_%s', async (viewport) => {
+    const state = await consultantAt('intake');
+    await mockStore.dispatch('setupSuggestions', { params: { id: state.interview_id }, query: { cards: '1' }, body: {} });
+    const { screen } = await renderRoute(changeSomethingPath(state.interview_id), { viewport });
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toHaveFocus();
+    await userEvent.keyboard('Closed Fridays.{Enter}');
+    const suggestions = screen.getByRole('button', { name: 'Use your suggestions', exact: true });
+    await expect.element(suggestions).toBeEnabled();
+    // From the composer, Tab past Send to suggestions and activate it with the keyboard.
+    for (let i = 0; i < 5 && document.activeElement !== suggestions.element(); i += 1) await userEvent.keyboard('{Tab}');
+    await expect.element(suggestions).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('button', { name: 'Continue', exact: true })).toHaveFocus();
+    expectNoHorizontalScroll();
+  });
+
   it.each(['desktop', 'phone'] as const)('change_something_sits_first_beside_continue_under_the_closing_plan_%s', async (viewport) => {
     const state = await consultantAt('intake');
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
@@ -4753,6 +4792,7 @@ describe('consultant setup', () => {
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('button', { name: 'Change something', exact: true })).toBeVisible();
+    await expect.element(next).toHaveFocus();
     expect(screen.getByRole('textbox', { name: 'Your answer' }).elements()).toHaveLength(0);
     expect(requests('setupReopen', mark)).toHaveLength(0);
     await expect.element(steps.nth(0)).toHaveAttribute('aria-current', 'step');
@@ -4760,6 +4800,31 @@ describe('consultant setup', () => {
     await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
     await expect.element(steps.nth(1)).toHaveAttribute('aria-current', 'step');
     if (viewport === 'phone') await expect.element(screen.getByText('Step 2 of 5: Tools', { exact: true })).toBeVisible();
+  });
+
+  it.each(['desktop', 'phone'] as const)('change_chat_focus_returns_without_a_touch_focus_edge_%s', async (viewport) => {
+    await coarsePointer();
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    const tap = async (element: Element) => {
+      element.scrollIntoView({ block: 'center' });
+      const rect = element.getBoundingClientRect();
+      await cdp().send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }] });
+      await cdp().send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeEnabled();
+    await tap(screen.getByRole('button', { name: 'Use your suggestions', exact: true }).element());
+    const next = screen.getByRole('button', { name: 'Continue', exact: true });
+    await expect.element(next).toHaveFocus();
+    expect(next.element().matches(':focus-visible')).toBe(false);
+    expect(getComputedStyle(next.element()).boxShadow).toBe('none');
+    await tap(screen.getByRole('button', { name: 'Change something', exact: true }).element());
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
+    await tap(next.element());
+    await expect.element(screen.getByRole('button', { name: 'Change something', exact: true })).toBeVisible();
+    await expect.element(next).toHaveFocus();
+    expect(next.element().matches(':focus-visible')).toBe(false);
+    expect(getComputedStyle(next.element()).boxShadow).toBe('none');
   });
 
   it('a_page_opened_at_tools_skips_the_closing', async () => {
