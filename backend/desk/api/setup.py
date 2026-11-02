@@ -408,6 +408,11 @@ WEBSITE_FAILED_LABEL = "Couldn't read {host}"
 WEB_SEARCH_LABEL = "Searched the web: {query}"
 WEB_SEARCH_FAILED_LABEL = "Couldn't search the web just now"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
+# After the closing plan (or `QUESTIONS_DONE`), the offers the owner's description stated, in their words
+# (`offers_not_set_up`).
+OFFERS_NOT_SET_UP = "Offers you mentioned aren't set up yet:"
+OFFERS_NOT_SET_UP_WHY = ("Your Desk won't offer them to customers, since a discount reaches customers only through "
+                         "your rules.")
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
 AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
@@ -1275,7 +1280,8 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
         business_type=described.business_type, step="questions", consent=None,
         answers=SetupAnswers(summary=described.summary, business_name=desk.business.name,
                              owner_display_name=(reduce_name(body.owner_display_name)
-                                                 or reduce_name(described.owner_display_name) or None)),
+                                                 or reduce_name(described.owner_display_name) or None),
+                             offers=described.offers),
         transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None,
                           connected_apps=described.connected_apps,
                           search_queries=described.search_queries or None),
@@ -3062,8 +3068,16 @@ async def close_setup(owner, engine, model, interview: Interview, *, answered: b
             _unshow(closing.reply)            # asked again for a plan: this reply isn't kept
     if not plan:
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
+    if interview.answers.offers:
+        interview.transcript.append(Entry(role="claude", text=offers_not_set_up(interview.answers.offers)))
     finish(interview)
     _offer_test_client(interview)
+
+
+def offers_not_set_up(offers: Iterable[str]) -> str:
+    """The offers the owner stated, each in their words, and why the Desk won't offer them: no customer line can state
+    a discount, and none of setup's rules gives one."""
+    return "\n".join([OFFERS_NOT_SET_UP, *(f"- {offer}" for offer in offers), "", OFFERS_NOT_SET_UP_WHY])
 
 
 def accepted_jobs(interview: Interview) -> list[JobProposal]:
@@ -4240,9 +4254,10 @@ def _card(index: int, draft: RuleCardDraft) -> RuleCard:
 
 
 def owner_rule_answers(answers: SetupAnswers) -> SetupAnswers:
-    """One projection for rule inputs: suggested facts are unanswered, and summaries confer no job authority."""
+    """One projection for rule inputs: suggested facts are unanswered, summaries confer no job authority, and an offer
+    the owner stated is only told back to them as not set up."""
     return SetupAnswers.model_validate({"summary": "", **answers.model_dump(
-        exclude={"suggested_fields", "how_we_help", *answers.suggested_fields})})
+        exclude={"suggested_fields", "how_we_help", "offers", *answers.suggested_fields})})
 
 
 async def draft_cards(model: ModelClient, record: Record, business_type: BusinessType, answers: SetupAnswers,

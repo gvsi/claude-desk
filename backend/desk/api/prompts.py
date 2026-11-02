@@ -60,7 +60,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.31"
+PROMPT_VERSION = "2026-10-31.32"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -811,6 +811,9 @@ plumbing".
 - business_type: trade, office, landlord or other.
 - summary: what the business does, in one or two plain sentences. {POLICY_FIELD_RULE} For example, say "a small CPA \
 firm", not "a two-person firm".
+- offers: each offer or discount the description states, such as "Students get 10% off with a student ID", in \
+the owner's own words, at most four; else empty. The summary can't carry them, so they go here: the owner hears at \
+the end that they aren't set up. Never one the description doesn't state.
 - website: the business's website address if the description gives one, else null. Never make one up.
 - memory: up to eight short notes the owner's Claude memory would plausibly hold about this business, written \
 as the owner's own notes. Cover its name, what it does, its customers, how it prices, its hours and area, how it \
@@ -986,13 +989,19 @@ most two jobs the owner's answers show are worth proposing, written like planned
 turn.
 - plan: the closing plan, only when next is done; else empty."""
 
-_PLAN = """\
+# The closing plan leaves the owner's stated offers to code, which lists them after it as not set up
+# (`setup.offers_not_set_up`): no rule or customer line carries one.
+PLAN_OFFERS_RULE = ("Leave out the offers in <answers_so_far>: code lists them after your plan as not set up, so "
+                    "never say the Desk gives one.")
+
+_PLAN = f"""\
 The closing plan (reference)
 At most 1,500 characters, laid out for a busy owner to scan: a few labelled groups, each a short list. Cover what \
 the Desk will do on its own, what it asks the owner first, anything they wanted that's coming later (only if there \
 is any), and two or three short examples from this business's own customers (their words in quotes, then what the \
-Desk does). Only things the Desk can do today, and limits in words, never amounts. End with what happens next: \
-they'll review the tools and rules, run a safety check, then try the Desk as a customer. Word the labels to fit \
+Desk does). Only things the Desk can do today, and limits in words, never amounts. {PLAN_OFFERS_RULE} \
+End with what happens next: they'll review the tools and rules, run a safety check, then try the Desk as a \
+customer. Word the labels to fit \
 the business. One illustrative layout, for a dog walker:
 
 On its own, the Desk will:
@@ -1362,6 +1371,9 @@ class SetupStart(BaseModel):
                                                     "or an accountant; landlord: renting homes or rooms; other.")
     summary: str = Field(min_length=1, max_length=1500, pattern=r"\S",
                          description=f"What the business does, in one or two plain sentences. {POLICY_FIELD_RULE}")
+    offers: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=4,
+        description="Each offer or discount the description states, in the owner's words; else empty.")
     website: str | None = Field(None, max_length=2048, description="The business's website address, else null.")
     memory: list[MemoryDraft] = Field(default_factory=list, max_length=8)
     connected_apps: list[ConnectorKey] = Field(default_factory=list, max_length=4)
@@ -1951,6 +1963,9 @@ class SetupAnswers(BaseModel):
     refunds: Refunds | None = None
     public_contact: str | None = Field(None, max_length=200)
     price_items: list[PriceAnswer] = Field([], max_length=PRICE_ITEMS_MAX)
+    # The offers the owner's description states (`SetupStart.offers`), in their words: no customer line or rule can
+    # carry one, so setup only tells the owner at the end that they aren't set up (`setup.offers_not_set_up`).
+    offers: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field([], max_length=4)
     # Written by code when setup fills from suggestions, never by a model turn or patch.
     suggested_fields: list[SetupPolicyField | SuggestedFactField] = Field(
         default_factory=list, max_length=len(SUGGESTED_FIELD_NAMES),
