@@ -50,7 +50,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-R2-Agents-03-Send',
     canvasNote: [
-      'Signed on 2026-10-30.',
+      "Signed on 2026-10-30; the four tasks in two rows by kind are built against the board's update in review, sign-off pending.",
       'Sending the built-in agent: its signed spending limit is SignedLimitPanel, with the page’s words for the seed’s mandate ($20 a charge, $100 in all, for one hour), on the card’s own fill as the board nests it; four tasks use two SuggestionChips rows, tasks without money first and payment tasks second, 8 px apart, each wrapping independently.',
       'The column, the cards and the demo key’s button are page layout the web app (plan 04) owns, composed as on the agents page’s other boards.',
       'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
