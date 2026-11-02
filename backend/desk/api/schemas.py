@@ -905,6 +905,7 @@ class ToolRow(BaseModel):
     pending_sha256: str | None
     cards: list[CoveringCard]
     business: BusinessToolDef | None = None
+    review_reason: Literal["new", "changed", "delisted"] | None = None
 
 
 class SetupTools(BaseModel):

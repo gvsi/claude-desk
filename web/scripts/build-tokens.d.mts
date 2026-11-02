@@ -6,11 +6,22 @@ export interface TokenEntry {
   usage: string;
 }
 
-export interface ColorToken {
+/**
+ * A color or shadow token: a value per theme. Dark is required; light, when the token has one,
+ * overrides it in the light theme.
+ */
+export interface ThemedValues {
+  dark: string;
+  light?: string | undefined;
+}
+
+export interface ThemedToken {
   name: string;
-  value: Record<string, string>;
+  value: ThemedValues;
   usage: string;
 }
+
+export type ColorToken = ThemedToken;
 
 export interface TypeStyle {
   name: string;
@@ -41,7 +52,7 @@ export interface DesignTokens {
   spacing: { tokens: TokenEntry[] };
   radius: { tokens: TokenEntry[] };
   size: { tokens: TokenEntry[] };
-  shadow: { tokens: TokenEntry[] };
+  shadow: { tokens: ThemedToken[] };
   motion: { note?: string; tokens: TokenEntry[] };
 }
 
