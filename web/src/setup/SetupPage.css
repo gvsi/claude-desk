@@ -479,6 +479,12 @@
   min-width: 0;
 }
 
+/* Each channel's line icon on a connector tile, 12 px before its words, as Share's More channels
+   draws it (board REV-CHAN A), centred on them. */
+.cd-setup-live__embed > .cd-connector-icon {
+  align-self: center;
+}
+
 .cd-setup-live__embed-text p {
   margin: 0;
 }

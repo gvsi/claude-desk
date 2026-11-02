@@ -6,6 +6,7 @@ import '../../owner/share/ShareKit.css';
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
+import { ConnectorIcon } from '../components/ConnectorIcon/ConnectorIcon.tsx';
 import { CopyList } from '../components/CopyList/CopyList.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
@@ -79,6 +80,7 @@ function Share() {
                 <ul role="list" className="cd-share-kit__channel-list">
                   {SHARE_CHANNELS.map((channel) => (
                     <li key={channel.key} className="cd-share-kit__later">
+                      <ConnectorIcon icon="quotes" glyph={channel.icon} size="section" />
                       <div className="cd-share-kit__later-text">
                         <p className="cd-share-kit__later-title cd-type-control">{channel.name}</p>
                         <p className="cd-share-kit__later-line cd-type-meta">{channel.line}</p>
@@ -106,7 +108,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Run2-Share',
     canvasNote: [
-      'More channels follows the signed Share boards from November 1.',
+      'More channels follows the signed Share boards from November 1, with each channel’s line icon on a connector tile as board REV-CHAN (option A) draws it.',
       'Share: the printable card is ShareCard, with the QR code in its slot (a placeholder here: the web app’s QrCode draws the real one), and the ready-made words are a CopyList.',
       'The link card, its Copy link (the web app’s CopyLink), More channels and the page’s columns are page layout the web app (plan 04) owns; the sidebar’s Connectors row belongs to another change.',
       'The board draws the link card 1 px taller, so everything under it sits 1 px higher here.',
@@ -148,6 +150,17 @@ export const Board: Story = {
     const rows = within(channels).getAllByRole('listitem');
     await expect(rows.map((row) => row.textContent)).toEqual(SHARE_CHANNELS.map(({ name, line }) => `${name}${line}Coming later`));
     rows.forEach((row, index) => expectComputed(row, { ...SPEC.shareChannelRow, borderTopWidth: index === 0 ? '0px' : '1px' }));
+    // Board REV-CHAN A: each channel's line icon on the built-in connector tile at the row's left,
+    // 12 px before its words: a browser window, a round and a square speech bubble, a phone.
+    for (const row of rows) {
+      const tile = row.firstElementChild as HTMLElement;
+      await expect(tile.className).toBe('cd-connector-icon cd-connector-icon--section cd-connector-icon--built-in');
+      expectComputed(tile, { width: '36px', height: '36px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
+      const text = one(row, '.cd-share-kit__later-text');
+      await expect(Math.round(text.getBoundingClientRect().left - tile.getBoundingClientRect().right)).toBe(12);
+      expectComputed(one(tile, 'svg'), { width: '20px', height: '20px' });
+    }
+    await expect(SHARE_CHANNELS.map(({ icon }) => icon)).toEqual(['app-window', 'message-circle', 'message-square', 'phone']);
     await expectFooter(canvasElement);
     await expectTabOrder(userEvent, [
       within(link).getByRole('button', { name: 'Copy link' }),
