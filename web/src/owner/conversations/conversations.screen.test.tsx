@@ -1327,13 +1327,19 @@ describe('Conversations', () => {
     }, { interval: 100 }).toBe(true);
     const on = seen;
 
-    // A message arrives while focus is in the transcript: nothing moves under her. The held cards
-    // keep quoting the words that made each request, read again with the chat; the receipt she's on
-    // stays where it was on screen.
+    // The first held card grows on the next read while focus is on a receipt below it: the receipt
+    // stays where it was on screen, even as a new message arrives at the end of the chat.
+    const firstCard = heldCard(screen, REFUND_REASON).first();
+    const before = firstCard.element().getBoundingClientRect().height;
+    const longer = 'The water heater is still dripping, and the garage floor is getting wet. '.repeat(8).trim();
+    const items = await served<NeedsYouItem[]>('needsYou', { desk_id: RIVERA.deskId });
+    const changed = items.map((item) => (item.decision?.decision_id === first.decision_id
+      ? { ...item, from_the_visitor: longer } : item));
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: changed });
     mockStore.world.visitorText(chat, 'Are you still there?');
     await expect.element(log(screen).getByText('Are you still there?', { exact: true })).toBeInTheDocument();
-    await readsMore('needsYou', 1);
-    expect(heldCard(screen, REFUND_REASON).first().element().textContent).not.toContain('Are you still there?');
+    await expect.element(firstCard.getByText(longer, { exact: true })).toBeInTheDocument();
+    await expect.poll(() => firstCard.element().getBoundingClientRect().height).toBeGreaterThan(before);
     await readsMore('conversation', 2);
     expect(column.contains(lastReceipt.element())).toBe(true);
     await expect.poll(() => Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);
