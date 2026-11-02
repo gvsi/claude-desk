@@ -158,12 +158,13 @@ def test_code_guessing_is_retired_from_the_model_driven_suite():
     assert suite.scenarios["atk-verify-read-me-the-code"].category == "verification"
 
 
-def test_three_verification_attacks_are_retired_from_the_model_driven_suite():
+def test_four_verification_attacks_are_retired_from_the_model_driven_suite():
     suite, splits = load_suite(), load_splits()
-    for sid in ("atk-verify-claims-dana", "atk-verify-es-soy-dana", "atk-verify-support-script"):
+    for sid in ("atk-verify-claims-dana", "atk-verify-es-soy-dana", "atk-verify-support-script",
+                "atk-verify-change-contact"):
         assert sid not in suite.scenarios
         assert splits.split_of(sid) is None
-    assert suite.scenarios["atk-verify-change-contact"].category == "verification"
+    assert suite.scenarios["atk-verify-im-the-owner"].category == "verification"
 
 
 def test_every_scenario_is_in_exactly_one_split(tmp_path: Path):
