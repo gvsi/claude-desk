@@ -1974,12 +1974,42 @@ async def test_report_command_reads_only_what_the_report_shows_from_a_transcript
     assert evals_run.report_command(["--pass", pass_id], root=root) == 1
 
 
-def test_the_summary_lists_runs_the_simulator_refused():
-    """The project owner's decision (2026-11-02): such a run doesn't fail the gate, and the report names it."""
+def refused_pass() -> PassSummary:
+    """The full pass with two attack runs the visitor simulator refused: one after two Desk replies, one whose
+    replies before the refusal can't be read."""
+    runs = full_pass().runs
+    runs[1] = ReportRun.model_validate({**run("atk-money-eighty-off", rep=2, error="simulator_refused").model_dump(),
+                                        "desk_replies_before_error": 2})
+    runs[4] = run("atk-agent-over-mandate", rep=2, category="agent", error="simulator_refused")
+    return a_pass(runs)
+
+
+def refused_gate() -> SimpleNamespace:
     result = gate()
-    result.refused_runs = [{"scenario_id": "atk-verify-guess-code", "rep": 2}]
-    text = render_report(**{**all_inputs(recorded=None, spend_month=[spend()]), "gate_result": result})
+    result.refused_runs = [{"scenario_id": "atk-money-eighty-off", "rep": 2},
+                           {"scenario_id": "atk-agent-over-mandate", "rep": 2}]
+    return result
+
+
+def test_the_summary_lists_runs_the_simulator_refused():
+    """The project owner's decision (2026-11-02): such a run doesn't fail the gate, and the report names it, with
+    the Desk replies it had before the refusal, which the oracles never judged."""
+    p = refused_pass()
+    inputs = all_inputs(pass_result=p, recorded=None, spend_month=[p.spend])
+    text = render_report(**{**inputs, "gate_result": refused_gate()})
     summary = text.split("\n## Summary\n", 1)[1].split("\n## ", 1)[0]
-    assert ("1 runs the visitor simulator refused don't fail the gate, since another run of each scenario "
-            "scored: atk-verify-guess-code run 2") in summary
+    assert ("2 runs the visitor simulator refused don't fail the gate, since another run of each scenario "
+            "scored: atk-money-eighty-off run 2 (2 Desk replies before the refusal), atk-agent-over-mandate run 2 "
+            "(Desk replies before the refusal unknown). A run refused after the Desk replied has those replies "
+            "unjudged by the oracles; the kernel's live checks still ran on them.") in summary
     assert "simulator refused" not in render_report(**all_inputs(recorded=None, spend_month=[spend()]))
+
+
+def test_a_pass_with_an_excused_refused_run_becomes_the_latest_report(tmp_path: Path):
+    reports, out, doc = tmp_path / "reports", tmp_path / "out", tmp_path / "evals.md"
+    doc.write_text(f"# Evals\n\n## Latest results\n\n{BEGIN_MARKER}\n{PLACEHOLDER}\n{END_MARKER}\n")
+    p = refused_pass()
+    inputs = {**all_inputs(pass_result=p), "gate_result": refused_gate()}
+    written = write_report(**inputs, reports_dir=reports, evals_doc=doc, out_dir=out)
+    assert written == reports / f"2026-11-01-{PASS_ID}.md"
+    assert (reports / "latest.json").is_file() and PASS_ID in doc.read_text()

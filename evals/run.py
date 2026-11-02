@@ -529,7 +529,8 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
             served_models=result.served_models, runs_per_scenario=config.runs, external=config.base_url is not None,
             dry_run=config.dry_run, null_baseline=config.null_baseline, stopped_by_budget=result.stopped_by_budget,
             pending=result.pending, heldout_sha256=result.heldout_sha256, spend=own[0],
-            simulator_fallbacks=result.simulator_fallbacks, runs=runs, uncovered=selection_problems(result, root),
+            simulator_fallbacks=result.simulator_fallbacks, runs=runs,
+            uncovered=selection_problems(result, root, excuse_refused=True),
             unchecked=unchecked_refusal(result, root))
     except ValidationError as error:
         raise ReportRefused(f"pass {pass_id} doesn't read as a report's pass ({error.error_count()} problems: "
@@ -585,7 +586,11 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
                 # An incomplete run keeps its error's kind; one with no error had a verdict that didn't fit a
                 # row, which the pass recorded as a harness (infra) error.
                 kind = outcome.error.kind if outcome.error is not None else "infra"
-                runs.append(ReportRun.from_run(scenario, row.split, error=kind, **common))
+                held = outcome.held_usage
+                replies = (None if held is None
+                           else sum(call.get("route") == "conversation" for call in held.usage))
+                runs.append(ReportRun.from_run(scenario, row.split, error=kind, desk_replies_before_error=replies,
+                                               **common))
                 continue
             if verdict is None or artifact is None or outcome.error is not None or (
                     row.violations, row.success, row.false_holds, row.expected_allow, row.skipped) != (

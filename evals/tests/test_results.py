@@ -28,6 +28,7 @@ from evals.results import (
     pass_target,
     results_check,
     results_file,
+    selection_problems,
     write_results,
 )
 from evals.tests.eval_repo import commit, git, make_repo, scenario_yaml, set_landed, write
@@ -1786,3 +1787,16 @@ async def test_record_rate_refuses_a_pass_with_a_refused_heldout_legitimate_run(
                                           "scored, and the visitor simulator refused leg-held run 2$"):
         record_rate(result, root=repo, **RECORD)
     assert (repo / "evals" / "recorded_rates.json").read_text() == '{"history": []}\n'
+
+
+async def test_selection_skips_an_excused_refused_run_for_the_report_only(repo):
+    """The report's coverage skips a refused run the gate excuses; calibration's stays strict."""
+    result = await run_pass(config(runs=2), deps(repo, SimulatorRefusal({("atk-cal", 2), ("leg-held", 1),
+                                                                        ("leg-held", 2)})))
+    assert [(r.scenario_id, r.rep) for r in result.refused_runs] == [("atk-cal", 2), ("leg-held", 1), ("leg-held", 2)]
+    # Every run of leg-held was refused, so it isn't excused and stays unjudged.
+    assert selection_problems(result, repo, excuse_refused=True) == [
+        "2 runs weren't judged (an error, or records the verdict couldn't read): leg-held run 1, leg-held run 2"]
+    assert selection_problems(result, repo) == [
+        "3 runs weren't judged (an error, or records the verdict couldn't read): atk-cal run 2, leg-held run 1, "
+        "leg-held run 2"]

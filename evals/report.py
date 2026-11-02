@@ -46,7 +46,9 @@ from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, StringConstraints, model_validator
 
 from desk.contracts import Effect, Violation
-from evals.gate import RunRef, WaivedViolation, not_evaluated, refused_summary, skipped_summary, waiver_summary
+from evals.gate import (
+    UNJUDGED_REPLIES, RunRef, WaivedViolation, not_evaluated, refused_summary, skipped_summary, waiver_summary,
+)
 from evals.results import gating_refusal, lowered_notice
 from evals.tier2.artifact import RunArtifact
 from evals.tier2.schema import (
@@ -345,6 +347,9 @@ class ReportRun(BaseModel):
     fallback_turns: StrictInt = Field(default=0, ge=0)
     switches: StrictInt = Field(default=0, ge=0)
     skipped: list[SkippedCheckName] = []   # the checks its verdict skipped while a plan hadn't landed
+    # An errored run's Desk replies before it failed, by the conversation calls in the usage it held; None when
+    # unknown (it held none, or its artifact was built).
+    desk_replies_before_error: StrictInt | None = Field(default=None, ge=0)
     # A judged legitimate run's conversation model (the API's `conversation` route): its visitor messages and Desk
     # turns, its calls, their cost and the models that served them, and each Desk turn's share once every call is
     # placed in one (`_conversation`). What it couldn't read or place leaves its figure None (its models empty),
@@ -385,8 +390,8 @@ class ReportRun(BaseModel):
     @classmethod
     def from_run(cls, scenario: Scenario, split: SplitName, *, artifact: RunArtifact | None = None,
                  verdict: RunVerdict | None = None, error: RunErrorKind | None = None, rep: int | None = None,
-                 fallback_turns: int = 0, switches: int = 0,
-                 turn_times: "TurnTimes | None" = None) -> "ReportRun":
+                 fallback_turns: int = 0, switches: int = 0, turn_times: "TurnTimes | None" = None,
+                 desk_replies_before_error: int | None = None) -> "ReportRun":
         """A run from what the runner kept: its artifact and verdict when it was judged, or its error
         kind when it couldn't be. What stopped an attack and how each reviewed decision ended are
         read from the artifact's records. `turn_times` is a legitimate run's visitor messages and when
@@ -403,7 +408,7 @@ class ReportRun(BaseModel):
             "switches": switches,
         }
         if error is not None:
-            return cls.model_validate({**data, "error": error})
+            return cls.model_validate({**data, "error": error, "desk_replies_before_error": desk_replies_before_error})
         if verdict is None or artifact is None:
             raise ValueError(f"{scenario.id} rep {rep}: a judged run needs its verdict and artifact")
         outcomes = {row.get("decision_id"): row.get("outcome") for row in artifact.records.get("decisions", [])}
@@ -1025,7 +1030,8 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
     else:
         out.append("The gate failed:\n\n" + "\n".join(f"- {reason}" for reason in g.reasons or ["no reason given"]))
     if g.refused_runs:
-        out.append(f"{refused_summary(g.refused_runs)}.")
+        replies = {(r.scenario_id, r.rep): r.desk_replies_before_error for r in p.runs}
+        out.append(f"{refused_summary(g.refused_runs, replies)}. {UNJUDGED_REPLIES}")
     out.append("Tier 2 reads AI denials strictly: a correct refusal that quotes the line it won't say is "
                f"flagged and read by hand; {waiver_summary(g)} in pass `{p.pass_id}`.")
     if p.dry_run:

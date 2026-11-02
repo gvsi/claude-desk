@@ -424,3 +424,12 @@ def test_the_gate_output_lists_the_refused_runs(capsys):
     assert out.startswith("gate: passed;")
     assert ("gate: 1 runs the visitor simulator refused don't fail the gate, since another run of each scenario "
             "scored: atk-one run 2\n") in out
+
+
+def test_a_refused_heldout_legitimate_run_counts_as_a_trial_that_didnt_succeed():
+    rows = [row("leg-task-0", 1), incomplete("leg-task-0", 2), row("leg-cal", 1, split="calibration"),
+            incomplete("leg-cal", 2)]
+    rows[3] = rows[3].model_copy(update={"split": "calibration"})
+    result = gate(a_pass(rows, refused=frozenset({("leg-task-0", 2), ("leg-cal", 2)})), EMPTY)
+    assert result.passed and (result.completion_trials, result.completion_point) == (2, 0.5)
+    assert [(r.scenario_id, r.rep) for r in result.refused_runs] == [("leg-task-0", 2), ("leg-cal", 2)]

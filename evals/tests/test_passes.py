@@ -1035,3 +1035,51 @@ async def test_pass_reads_its_commit_before_building_the_kernel(repo, monkeypatc
     result = await run_pass(config(results=True), logged)
     assert list(dict.fromkeys(steps)) == ["sha", "credential", "prices", "build"]
     assert git(repo, "rev-parse", "HEAD") != started and result.git_sha == started
+
+
+async def test_a_refusal_then_an_infra_error_stays_incomplete(repo):
+    run_one = Scripted(errors={("atk-held", 1): ["simulator_refused", "infra"]})
+    result = await run_pass(config(runs=1, suite="attack", split="heldout"), deps(repo, run_one))
+    assert [(r.scenario_id, r.status) for r in result.runs] == [("atk-held", "incomplete")]
+    assert result.refused_runs == []   # its final attempt was infra, so the gate fails it
+    from evals.gate import gate
+    from evals.tier2.schema import RecordedRates
+
+    assert gate(result, RecordedRates(history=[])).incomplete_runs[0].scenario_id == "atk-held"
+
+
+async def test_a_refusal_is_not_retried_once_the_budget_is_spent(repo):
+    import json
+
+    run_one = Scripted(errors={("atk-held", 1): ["simulator_refused"]})
+    result = await run_pass(config(runs=1, suite="attack", split="heldout", max_usd=0.4),
+                            deps(repo, run_one, cost_usd=0.9))
+    assert run_one.calls == [("atk-held", 1)] and result.stopped_by_budget
+    out = repo / "evals" / "out" / "passes" / result.pass_id
+    [line] = [json.loads(text) for text in (out / "errors.jsonl").read_text().splitlines()]
+    assert (line["kind"], line["retried"]) == ("simulator_refused", False)
+    from evals.gate import gate
+    from evals.tier2.schema import RecordedRates
+
+    assert not gate(result, RecordedRates(history=[])).passed   # a budget-stopped pass still fails
+
+
+async def test_an_excused_refusal_leaves_the_desks_earlier_replies_unjudged(repo):
+    """The accepted risk (the project owner's decision, 2026-11-02): a run the simulator refused after the Desk
+    replied is excused, and the oracles never judge those replies; the kernel's live checks still ran on them."""
+    from evals.gate import gate
+    from evals.tier2.runner import HeldUsage
+    from evals.tier2.schema import RecordedRates
+
+    async def run_one(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        if (scenario.id, rep) != ("atk-held", 2):
+            return outcome(scenario, rep, kwargs.get("pass_id", "p"))
+        refused = outcome(scenario, rep, kwargs.get("pass_id", "p"), error="simulator_refused")
+        replied = HeldUsage(usage=[{"part": "api", "route": "conversation"}] * 2)
+        return refused.model_copy(update={"held_usage": replied})
+
+    result = await run_pass(config(runs=2, suite="attack", split="heldout"), deps(repo, run_one))
+    judged = gate(result, RecordedRates(history=[]))
+    assert judged.passed and [(r.scenario_id, r.rep) for r in judged.refused_runs] == [("atk-held", 2)]
+    [row] = [r for r in result.runs if r.rep == 2]
+    assert row.status == "incomplete" and row.violations == []   # its two Desk replies were never judged

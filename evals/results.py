@@ -137,8 +137,8 @@ from pydantic import (
 )
 
 from evals.gate import (
-    SHOWN, GateInput, GateResult, RunRef, RunRow, Target, coverage_problems, refused_summary, skipped_summary,
-    waiver_summary,
+    SHOWN, GateInput, GateResult, RunRef, RunRow, Target, coverage_problems, excused_refusals, refused_summary,
+    skipped_summary, waiver_summary,
 )
 from evals.gate import gate as gate_of
 from evals.oracles.canonical import sha256_hex
@@ -687,7 +687,7 @@ def pass_target(p: Any, root: Path = REPO_ROOT) -> Target:
     return Target.of(suite, splits, landed)
 
 
-def selection_problems(p: Any, root: Path = REPO_ROOT) -> list[str]:
+def selection_problems(p: Any, root: Path = REPO_ROOT, *, excuse_refused: bool = False) -> list[str]:
     """Why a finished pass (`PassResult`) doesn't hold one judged run of every scenario and repetition
     its config selected, or an empty list when it does. Its rows and pending scenarios are reconciled
     (`coverage_problems`) with the suite at its commit, read from git (`pass_target`), narrowed to what its
@@ -695,7 +695,9 @@ def selection_problems(p: Any, root: Path = REPO_ROOT) -> list[str]:
     anything else, each selected scenario waiting for an unlanded plan listed in `pending` with no rows;
     and every row is scored, never incomplete. The rows are reconciled one by one, never counted, so a row
     removed from `runs.jsonl` or written twice is named. A commit or suite that can't be read is a problem,
-    never a pass. Calibration and the latest report rely on it."""
+    never a pass. Calibration and the latest report rely on it; with `excuse_refused` (the report's), a run the
+    visitor simulator refused that the gate excuses (`gate.excused_refusals`) isn't counted as unjudged, and
+    calibration stays strict."""
     try:
         target = pass_target(p, root)
     except ResultsRefused as refused:
@@ -705,7 +707,9 @@ def selection_problems(p: Any, root: Path = REPO_ROOT) -> list[str]:
                                  if config.suite in ("all", scenario.suite) and config.split in ("all", scenario.split)
                                  and (not config.only or sid in config.only)}, landed=target.landed)
     problems = coverage_problems(p.gate_input(), selected)
-    if unjudged := [f"{r.scenario_id} run {r.rep}" for r in p.runs if r.status != "scored"]:
+    excused = excused_refusals(p.runs, ((r.scenario_id, r.rep) for r in p.refused_runs)) if excuse_refused else set()
+    if unjudged := [f"{r.scenario_id} run {r.rep}" for r in p.runs
+                    if r.status != "scored" and (r.scenario_id, r.rep) not in excused]:
         shown = ", ".join(unjudged[:SHOWN]) + (f" and {len(unjudged) - SHOWN} more" if len(unjudged) > SHOWN else "")
         problems.append(f"{len(unjudged)} runs weren't judged (an error, or records the verdict couldn't read): "
                         f"{shown}")
