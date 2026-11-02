@@ -58,8 +58,8 @@ CONTACT_CHARS = 120                       # as a contact on record
 LEAD_CONTACT = " · "                      # a lead's note ends with the contact it was given (`capture_lead.lead_note`)
 # Said once, in the native tool's description and in each typed booking's.
 NEEDS_CONTACT = (
-    "It needs the visitor's name and a phone number or email: pass them as name and contact unless the visitor "
-    "is verified or you saved them with capture_lead in this conversation; it's refused until you have them.")
+    "It needs the visitor's name and a phone number or email, passed as name and contact, unless the visitor is "
+    "verified or they were saved with capture_lead in this conversation; it's refused without them.")
 
 
 class BookArgs(BaseModel):
