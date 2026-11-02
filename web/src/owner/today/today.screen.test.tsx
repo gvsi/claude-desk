@@ -229,6 +229,89 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
+/** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
+function failReads(path: string): { count: () => number; stop: () => void } {
+  let failing = true;
+  let count = 0;
+  worker.use(
+    http.get(path, () => {
+      if (!failing) return undefined;
+      count += 1;
+      return HttpResponse.json({ error: 'kernel', code: 'kernel_unavailable' }, { status: 503 });
+    }),
+  );
+  return {
+    count: () => count,
+    stop: () => {
+      failing = false;
+    },
+  };
+}
+
+/** The main Desk's Today, as the app reads it. */
+const todayReadPath = ROUTES.today.path.replace('{desk_id}', RIVERA.deskId);
+
+/** What "Last 7 days" says of a figure at zero, which it says only of a week its latest read gave. */
+const WEEK_ZERO_LINES = [
+  'No bookings in the last 7 days.',
+  'No conversations in the last 7 days.',
+  "You haven't stepped in.",
+  'Nothing turned down in the last 7 days.',
+  'Claude handled 0',
+  '$0 booked',
+] as const;
+
+/** The zero lines "Last 7 days" shows now. */
+function weekZeroLines(screen: RenderResult): string[] {
+  const text = region(screen, 'Last 7 days').element().textContent;
+  return WEEK_ZERO_LINES.filter((line) => text.includes(line));
+}
+
+/**
+ * Every zero line "Last 7 days" draws while it also says its read failed, even for a moment, from
+ * now until the test ends.
+ */
+function watchZeroLinesOverAFailure(screen: RenderResult): () => string[] {
+  const seen = new Set<string>();
+  const look = () => {
+    const block = screen.container.querySelector('.cd-week');
+    if (block === null || !block.textContent.includes(UNAVAILABLE)) return;
+    for (const line of WEEK_ZERO_LINES) if (block.textContent.includes(line)) seen.add(line);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => watch.disconnect());
+  return () => [...seen];
+}
+
+/**
+ * Whether "Since last night" draws "A quiet night", even for a moment, from the first frame it says
+ * its read failed (`failedLine`) until `recovering()`, and beside that line at any time. Once
+ * `recovering()` is called, a read that works may bring the quiet night back in place of the line.
+ */
+function watchQuietNightOverAFailure(failedLine: string = UNAVAILABLE): { drawn: () => boolean; recovering: () => void } {
+  let failed = false;
+  let recovering = false;
+  let drawn = false;
+  const look = () => {
+    const text = sinceLastNightHeading()?.closest('section')?.textContent ?? '';
+    const saysFailed = text.includes(failedLine);
+    if (saysFailed) failed = true;
+    if (text.includes('A quiet night') && (saysFailed || (failed && !recovering))) drawn = true;
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => watch.disconnect());
+  return {
+    drawn: () => drawn,
+    recovering: () => {
+      recovering = true;
+    },
+  };
+}
+
 /** The full-page shapes, with the real heading and no exposed navigation or Today yet. */
 function expectLoadingPage(): void {
   const layer = document.querySelector('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
@@ -1313,6 +1396,250 @@ describe('Today', () => {
     await expect.element(turnedDown).toHaveAttribute('href', `${DESK}/safety/${encodeURIComponent(refusals()[0]?.decision_id ?? '')}`);
     await expect.element(turnedDown.getByText(CAUSE_COPY.agent_limit, { exact: true })).toBeVisible();
     expect(turnedDown.element().textContent).not.toContain(refusals()[0]?.reason_plain);
+  });
+
+  it('this_week_holds_back_its_zero_lines_while_its_read_fails', { timeout: 15_000 }, async () => {
+    // A quiet week is read, then Today's refreshes fail. "Last 7 days" says so over what it read,
+    // with "Try again", and says none of its zero lines while it can't check them, nor while "Try
+    // again" reads. Once a read works, the line goes and the zero lines are back.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet', retryScale: 0 });
+    const block = region(screen, 'Last 7 days');
+    await expect.element(block.getByText('No bookings in the last 7 days.', { exact: true })).toBeVisible();
+    const quiet = ['No bookings in the last 7 days.', 'No conversations in the last 7 days.', 'Nothing turned down in the last 7 days.'];
+    expect(weekZeroLines(screen)).toEqual(quiet);
+    expect(block.getByRole('alert').elements()).toHaveLength(0);
+
+    const drawn = watchZeroLinesOverAFailure(screen);
+    const failing = failReads(todayReadPath);
+    const line = block.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    const retry = block.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual([]);
+    // Each part keeps its title, and Turned down its way to Safety. The flat bars go too: all they
+    // say is that no day had a booking.
+    const titles = ['Bookings', 'Handled by Claude, or by you', 'Turned down'];
+    for (const title of titles) await expect.element(block.getByRole('heading', { level: 3, name: title, exact: true })).toBeVisible();
+    expect(block.getByRole('list', { name: 'Bookings per day' }).elements()).toHaveLength(0);
+    await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+    // The line sits above the three parts, inside the card.
+    const notice = block.getByRole('alert').element();
+    expect(notice.closest('.cd-week')).not.toBeNull();
+    const bookings = block.getByRole('heading', { level: 3, name: 'Bookings', exact: true }).element();
+    expect(notice.compareDocumentPosition(bookings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // It stays while the polls read again and fail.
+    const failed = failing.count();
+    await vi.waitFor(() => expect(failing.count()).toBeGreaterThanOrEqual(failed + 2), { timeout: 4_000 });
+    expect(line.elements()).toHaveLength(1);
+    expect(weekZeroLines(screen)).toEqual([]);
+
+    // "Try again" reads again: busy while that read is out, and still no zero line.
+    const read = holdReads(todayReadPath);
+    await retry.click();
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    expect(line.elements()).toHaveLength(1);
+    expect(weekZeroLines(screen)).toEqual([]);
+
+    // A read that works takes the line away and brings the zero lines and the bars back.
+    failing.stop();
+    read.release();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.element(block.getByText('No bookings in the last 7 days.', { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(quiet);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    expect(block.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(drawn()).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'a_week_with_bookings_and_no_step_in',
+      figures: week({
+        bookings: 2,
+        booked_cents: 37_800,
+        conversations: 3,
+        handled: 3,
+        stepped_in: 0,
+        stopped: 2,
+        days: ZERO_DAYS.map((d, i) => ({ ...d, bookings: i === 4 || i === 6 ? 1 : 0 })),
+      }),
+      kept: ['$378 booked', '2 bookings, 1 so far today', 'Claude handled 3', '2 requests'],
+      held: ["You haven't stepped in."],
+      bars: 7,
+    },
+    {
+      name: 'a_week_the_owner_stepped_into_every_chat_of',
+      figures: week({ conversations: 2, handled: 0, stepped_in: 2, stopped: 1 }),
+      kept: ['You stepped in 2 times', '1 request'],
+      held: ['No bookings in the last 7 days.', 'Claude handled 0'],
+      bars: 0,
+    },
+    {
+      // A booking with no amount taken, as the API sends one: the count and its bar stay, the $0 doesn't.
+      name: 'a_week_with_a_booking_and_nothing_booked',
+      figures: week({
+        bookings: 1,
+        booked_cents: 0,
+        conversations: 1,
+        handled: 1,
+        days: ZERO_DAYS.map((d, i) => ({ ...d, bookings: i === 6 ? 1 : 0 })),
+      }),
+      kept: ['1 booking, 1 so far today', 'Claude handled 1'],
+      held: ["You haven't stepped in.", 'Nothing turned down in the last 7 days.', '$0 booked'],
+      bars: 7,
+    },
+  ])('this_week_keeps_its_figures_while_its_read_fails_$name', { timeout: 15_000 }, async ({ figures, kept, held, bars }) => {
+    // A week with figures is read, then Today's refreshes fail. Its figures above zero stay, with
+    // the line that says the read failed; only that week's zero lines are held back, until a read works.
+    await injectToday((t) => ({ ...t, this_week: figures }));
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const block = region(screen, 'Last 7 days');
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(held);
+
+    const drawn = watchZeroLinesOverAFailure(screen);
+    const failing = failReads(todayReadPath);
+    const line = block.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    await expect.element(block.getByRole('button', { name: 'Try again' })).toBeVisible();
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual([]);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(bars);
+    await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+
+    failing.stop();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    for (const text of kept) await expect.element(block.getByText(text, { exact: true })).toBeVisible();
+    expect(weekZeroLines(screen)).toEqual(held);
+    expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
+    expect(drawn()).toEqual([]);
+  });
+
+  it('since_last_night_holds_back_a_quiet_night_while_its_read_fails', { timeout: 15_000 }, async () => {
+    // A quiet night is read, then Today's refreshes fail. "Since last night" says so in its card,
+    // with "Try again", and holds back "A quiet night", a zero the page can't check, nor says it
+    // while "Try again" reads. Once a read works, the failure's line goes and the quiet night is back.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet', retryScale: 0 });
+    const since = region(screen, 'Since last night');
+    const quiet = since.getByText('A quiet night', { exact: true });
+    await expect.element(quiet).toBeVisible();
+    expect(since.getByRole('alert').elements()).toHaveLength(0);
+
+    const watch = watchQuietNightOverAFailure();
+    const failing = failReads(todayReadPath);
+    const line = since.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    const retry = since.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    expect(quiet.elements()).toHaveLength(0);
+    // The card holds the failure's line alone.
+    const card = since.getByRole('alert').element().parentElement;
+    expect(card).toHaveClass('cd-card');
+    expect(card?.childElementCount).toBe(1);
+
+    // It stays while the polls read again and fail.
+    const failed = failing.count();
+    await vi.waitFor(() => expect(failing.count()).toBeGreaterThanOrEqual(failed + 2), { timeout: 4_000 });
+    expect(line.elements()).toHaveLength(1);
+    expect(quiet.elements()).toHaveLength(0);
+
+    // "Try again" reads again: busy while that read is out, and still no quiet night.
+    const read = holdReads(todayReadPath);
+    await retry.click();
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    expect(line.elements()).toHaveLength(1);
+    expect(quiet.elements()).toHaveLength(0);
+
+    // A read that works takes the failure's line away and brings the quiet night back.
+    watch.recovering();
+    failing.stop();
+    read.release();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.element(quiet).toBeVisible();
+    await expect.element(since.getByText('Nothing new since 6:00 pm yesterday.', { exact: true })).toBeVisible();
+    expect(since.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(watch.drawn()).toBe(false);
+  });
+
+  it('since_last_night_holds_back_a_quiet_night_while_offline', async () => {
+    // A quiet night is read, then Today reads again with the network gone. The read can't start, so
+    // the card says so in place of "A quiet night" until the network is back and a read works.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    const since = region(screen, 'Since last night');
+    const quiet = since.getByText('A quiet night', { exact: true });
+    await expect.element(quiet).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+
+    const watch = watchQuietNightOverAFailure(OWNER_ERROR_COPY.network);
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    void queryClient.invalidateQueries({ queryKey: todayKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(queryClient.getQueryState(todayKey(RIVERA.deskId))?.fetchStatus).toBe('paused'));
+    const line = since.getByRole('alert').getByText(OWNER_ERROR_COPY.network, { exact: true });
+    await expect.element(line).toBeVisible();
+    await expect.element(since.getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(quiet.elements()).toHaveLength(0);
+
+    watch.recovering();
+    onlineManager.setOnline(true);
+    await expect.element(line).not.toBeInTheDocument();
+    await expect.element(quiet).toBeVisible();
+    expect(watch.drawn()).toBe(false);
+  });
+
+  it('since_last_night_keeps_its_night_while_its_read_fails', { timeout: 15_000 }, async () => {
+    // A night with things in it is read, then Today's refreshes fail. The card says so first, with
+    // "Try again", over what it read: the night's line, its rows and "See all" stay, as Last 7
+    // days' figures above zero do. Once a read works, the failure's line goes and the night stays.
+    await injectToday((t) => ({
+      ...t,
+      briefing: { ...t.briefing, total: 4, turned_down: 1, newest: { turned_down: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } },
+    }));
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const since = region(screen, 'Since last night');
+    const night = since.getByText(
+      '3 conversations since last night, all inside your rules. I booked one visit, answered one question and stopped one attempt.',
+      { exact: true },
+    );
+    await expect.element(night).toBeVisible();
+    const rows = since.getByRole('listitem');
+    expect(rows.elements()).toHaveLength(3);
+    const all = since.getByRole('link', { name: 'See all 4' });
+    await expect.element(all).toHaveAttribute('href', `${DESK}/today/briefing`);
+
+    const failing = failReads(todayReadPath);
+    const line = since.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    await expect.element(since.getByRole('button', { name: 'Try again' })).toBeVisible();
+    await expect.element(night).toBeVisible();
+    expect(rows.elements()).toHaveLength(3);
+    await expect.element(all).toHaveAttribute('href', `${DESK}/today/briefing`);
+    // The failure's line comes first in the card, 16 px over the night's line, as Last 7 days' is
+    // over its parts, and inset to the night's edge: its dot starts where the night's words do, and
+    // "Try again" ends where they may.
+    const notice = since.getByRole('alert').element();
+    expect(notice.parentElement).toHaveClass('cd-card');
+    expect(notice.parentElement?.firstElementChild).toBe(notice);
+    expect(Math.round(night.element().getBoundingClientRect().top - notice.getBoundingClientRect().bottom)).toBe(16);
+    const words = document.createRange();
+    words.selectNodeContents(night.element());
+    const dot = notice.querySelector('.cd-status-dot');
+    expect(Math.abs((dot?.getBoundingClientRect().left ?? -1) - words.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    const nightBox = night.element().getBoundingClientRect();
+    const nightEnd = nightBox.right - Number.parseFloat(getComputedStyle(night.element()).paddingRight);
+    const retry = since.getByRole('button', { name: 'Try again' }).element().getBoundingClientRect();
+    expect(Math.abs(retry.right - nightEnd)).toBeLessThanOrEqual(1);
+
+    failing.stop();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.element(night).toBeVisible();
+    expect(rows.elements()).toHaveLength(3);
+    await expect.element(all).toBeVisible();
+    expect(since.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
   });
 
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
@@ -3720,25 +4047,6 @@ describe("Today's Demo inbox", () => {
 
   /** The owner's read of one decision, as the app sends it. */
   const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
-
-  /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
-  function failReads(path: string): { count: () => number; stop: () => void } {
-    let failing = true;
-    let count = 0;
-    worker.use(
-      http.get(path, () => {
-        if (!failing) return undefined;
-        count += 1;
-        return HttpResponse.json({ error: 'kernel', code: 'kernel_unavailable' }, { status: 503 });
-      }),
-    );
-    return {
-      count: () => count,
-      stop: () => {
-        failing = false;
-      },
-    };
-  }
 
   /** The top of `el` is inside the window, where the owner can see it. */
   function expectInView(el: Element): void {

@@ -108,7 +108,9 @@ class DeskSummary(BaseModel):
     """One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back
     into it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.
     `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
-    setup."""
+    setup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set
+    (`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the
+    Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's."""
 
     desk_id: str
     slug: str
@@ -117,6 +119,7 @@ class DeskSummary(BaseModel):
     hours: list[HoursWindow]
     answering: bool
     setup: DeskSetup | None
+    business_type: DemoTaskSet
 
 
 class CopyOut(BaseModel):
@@ -420,12 +423,16 @@ class NeedsYouItem(BaseModel):
     """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
     applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
     an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
-    wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
-    characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
-    AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
-    shown as "Claude's note on what the Desk stopped: {summary}" and never quoted as the visitor's), else None. A held
-    request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
-    AI-written text: a visitor could steer a summary to sway an approval."""
+    wrote (`from_the_visitor`: at most two messages; a held request quotes only the visitor's lines since Claude's
+    last reply before its held status (a request whose status isn't in the chat quotes the chat's latest).
+    If that window is empty, it quotes the newest visitor line before the status. A handoff quotes the chat's
+    latest. Each is
+    a one-line glimpse of at most 200 characters, joined with " · "; their own untrusted words); and, on a handoff
+    only, the conversation's newest AI-written triage summary (`claude_summary`: what the person asked for and what
+    the Desk did, for the owner alone, shown as "Claude's note on what the Desk stopped: {summary}" and never quoted
+    as the visitor's), else None. A held request asks the owner for a decision, so neither it nor a handoff in a
+    session with one awaiting the owner carries AI-written text: a visitor could steer a summary to sway an
+    approval."""
 
     decision: Decision | None
     held_by: str | None

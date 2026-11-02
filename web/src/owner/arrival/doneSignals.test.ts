@@ -274,7 +274,7 @@ describe('answer a held request, in this view', () => {
 });
 
 function desk(deskId: string): DeskSummary {
-  return { desk_id: deskId, slug: deskId, name: deskId, business_name: 'Turner Plumbing', hours: [], answering: true, setup: null };
+  return { desk_id: deskId, slug: deskId, name: deskId, business_name: 'Turner Plumbing', hours: [], answering: true, setup: null, business_type: 'rivera' };
 }
 
 function business(businessId: string, desks: DeskSummary[]): BusinessOut {

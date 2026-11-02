@@ -1478,7 +1478,10 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
   const ownerName = ownerNameOf(text);
   const deskId = world.id('desk-setup');
   const desk: DeskRecord = {
-    summary: { desk_id: deskId, slug: slugFor(world, business), name: 'Main line', business_name: business, hours: [], answering: false },
+    summary: {
+      desk_id: deskId, slug: slugFor(world, business), name: 'Main line', business_name: business, hours: [], answering: false,
+      business_type: businessTypeOf(text),
+    },
     policy: firstVersion(deskId),
     versions: new Map(),
     ledger: [],

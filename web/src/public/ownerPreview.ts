@@ -27,7 +27,7 @@ export function useOwnerPreviewBack(slug: string, previewDeskId: string | undefi
   // `me`, a session probe: its 401 is an answer here, and never ends an owner's session elsewhere.
   const copy = useQuery({
     queryKey: ['me'],
-    queryFn: () => request('me'),
+    queryFn: ({ signal }) => request('me', { signal }),
     enabled,
     retry: false,
     refetchOnMount: 'always',
