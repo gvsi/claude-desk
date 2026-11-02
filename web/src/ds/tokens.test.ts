@@ -6,10 +6,10 @@ import { describe, expect, test } from 'vitest';
 
 import { buildTokensCss, type DesignTokens, type ThemedValues, type TypeStyle } from '../../scripts/build-tokens.mjs';
 import {
-  BRAND_TEXT_COLORS,
   CONTRAST_PAIRS,
   DECORATIVE_COLORS,
   LIGHT_THEME_EXEMPTIONS,
+  ON_BRAND_COLORS,
   THEMES,
   contrastRatio,
   pairContrast,
@@ -748,18 +748,29 @@ describe('design tokens', () => {
     expect(tokens.motion.tokens.map((t) => t.name).filter((name) => name.includes('skeleton'))).toEqual([]);
   });
 
-  test('text_on_brand_is_paper_ink_in_both_themes', () => {
-    // Text on an owner's chosen colour, the public header and Profile's header-colour preview: the
-    // dark theme's paper inks in both themes, since every colour an owner can pick is dark.
-    const names = ['text-on-brand', 'text-on-brand-secondary'];
-    expect(names.map(tokenValue)).toEqual(['rgba(250,249,245,0.92)', 'rgba(250,249,245,0.64)']);
+  test('colours_on_brand_are_the_same_in_both_themes', () => {
+    // On an owner's chosen colour, the public header and Profile's header-colour preview: the dark
+    // theme's paper inks for its words, and the dark theme's handled green for the open-status dot,
+    // in both themes, since every colour an owner can pick is dark.
+    const expected = {
+      'text-on-brand': 'rgba(250,249,245,0.92)',
+      'text-on-brand-secondary': 'rgba(250,249,245,0.64)',
+      'status-handled-on-brand': '#6fa859',
+    };
+    const names = Object.keys(expected);
+    expect(Object.fromEntries(names.map((name) => [name, tokenValue(name)]))).toEqual(expected);
     for (const name of names) {
       const token = tokens.color.tokens.find((t) => t.name === name);
       expect(Object.keys(token?.value ?? {}), `${name} has one value for both themes`).toEqual(['dark']);
     }
     // The colour under them isn't a token: it is checked where it is chosen, so they are classified
-    // as text on the owner's colour rather than listed against a token.
-    expect(Object.keys(BRAND_TEXT_COLORS).sort()).toEqual(names);
+    // as colours on the owner's colour rather than listed against a token, the words at 4.5:1 and the
+    // dot, a status mark, at 3:1.
+    expect(Object.fromEntries(Object.entries(ON_BRAND_COLORS).map(([name, { min }]) => [name, min]))).toEqual({
+      'text-on-brand': 4.5,
+      'text-on-brand-secondary': 4.5,
+      'status-handled-on-brand': 3,
+    });
   });
 
   test('every_color_token_is_classified', () => {
@@ -782,13 +793,13 @@ describe('design tokens', () => {
       expect(reason.trim().length, `${name} says why no contrast applies`).toBeGreaterThan(0);
     }
 
-    for (const [name, reason] of Object.entries(BRAND_TEXT_COLORS)) {
+    for (const [name, { use }] of Object.entries(ON_BRAND_COLORS)) {
       expect(colorNames, `${name} is a color token`).toContain(name);
-      expect(reason.trim().length, `${name} says where its contrast is checked`).toBeGreaterThan(0);
+      expect(use.trim().length, `${name} says where it is used and checked`).toBeGreaterThan(0);
     }
 
     const paired = new Set(CONTRAST_PAIRS.flatMap((p) => [p.fg, p.ground]));
-    const unclassified = colorNames.filter((name) => !paired.has(name) && !(name in DECORATIVE_COLORS) && !(name in BRAND_TEXT_COLORS));
+    const unclassified = colorNames.filter((name) => !paired.has(name) && !(name in DECORATIVE_COLORS) && !(name in ON_BRAND_COLORS));
     expect(unclassified).toEqual([]);
   });
 

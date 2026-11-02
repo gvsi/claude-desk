@@ -37,6 +37,7 @@
   --status-held: #dabe4a;
   --status-refused: #dc8290;
   --status-info: var(--text-secondary);
+  --status-handled-on-brand: #6fa859;
   --mark-tile: #ffffff;
   --mark-clay: #d97757;
   --mark-ink: #141413;

@@ -1,7 +1,7 @@
 // WCAG 2.2 contrast for the design tokens: every color pair the components use is
 // listed once in CONTRAST_PAIRS, with ratios computed from tokens.json in each theme it is
 // drawn in, and every color token is either in a pair, in DECORATIVE_COLORS with the
-// reason, or in BRAND_TEXT_COLORS, checked on the owner's colour.
+// reason, or in ON_BRAND_COLORS, checked on the owner's colour.
 
 import tokens from './tokens.json' with { type: 'json' };
 
@@ -276,13 +276,20 @@ export const LIGHT_THEME_EXEMPTIONS: readonly { readonly fg: string; readonly gr
 ]);
 
 /**
- * Text on an owner's chosen colour. That colour isn't a token, so no pair here can list it: the
- * colour is checked against these inks where it is chosen, and an owner's palette is tested for them.
+ * The colours drawn on an owner's chosen colour, each with the minimum it keeps there: 4.5:1 for
+ * words, 3:1 for a status dot. That colour isn't a token, so no pair here can list it: it is checked
+ * against these where it is chosen, and every colour of the owner's palette is tested for them.
  */
-export const BRAND_TEXT_COLORS: Readonly<Record<string, string>> = Object.freeze({
-  'text-on-brand':
-    "The names on an owner's chosen colour, in the public header and Profile's header-colour preview. A colour is used only where it keeps 4.5:1 with both inks, and every palette colour is tested for it.",
-  'text-on-brand-secondary': "The second line on an owner's chosen colour, checked with text-on-brand.",
+export const ON_BRAND_COLORS: Readonly<Record<string, { readonly min: 4.5 | 3; readonly use: string }>> = Object.freeze({
+  'text-on-brand': {
+    min: 4.5,
+    use: "The names on an owner's chosen colour, in the public header and Profile's header-colour preview. A colour is used only where it keeps 4.5:1 with both inks.",
+  },
+  'text-on-brand-secondary': { min: 4.5, use: "The second line on an owner's chosen colour, checked with text-on-brand." },
+  'status-handled-on-brand': {
+    min: 3,
+    use: "The open-status dot on an owner's chosen colour in the public header, beside the words that say the business is open.",
+  },
 });
 
 export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze({
