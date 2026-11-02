@@ -108,7 +108,9 @@ class DeskSummary(BaseModel):
     """One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back
     into it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.
     `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
-    setup."""
+    setup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set
+    (`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the
+    Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's."""
 
     desk_id: str
     slug: str
@@ -117,6 +119,7 @@ class DeskSummary(BaseModel):
     hours: list[HoursWindow]
     answering: bool
     setup: DeskSetup | None
+    business_type: DemoTaskSet
 
 
 class CopyOut(BaseModel):

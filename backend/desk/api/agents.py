@@ -158,14 +158,24 @@ async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> De
     newest of the copy's setup interviews that made it (`other` when that one has none); with no such interview, the
     copy's own Desk, its oldest (the Turner seed), reads `rivera` and any other `other`. Only that closed type and which
     Desk is the copy's oldest decide the set; no business's, owner's or visitor's words reach the agent."""
-    found = await conn.execute(select(INTERVIEWS.c.business_type).where(
-        INTERVIEWS.c.copy_id == ro.copy_id, INTERVIEWS.c.desk_id == desk_id).order_by(
-        INTERVIEWS.c.created_at.desc(), INTERVIEWS.c.interview_id.desc()).limit(1))
-    row = found.first()
-    if row is not None:
-        return row.business_type if row.business_type in BUSINESS_TYPES else "other"
-    desks = await ro.desks()
-    return "rivera" if desks and desks[0]["desk_id"] == desk_id else "other"
+    return (await demo_task_sets(conn, ro, [desk_id]))[desk_id]
+
+
+async def demo_task_sets(conn: AsyncConnection, ro: KernelRO, desk_ids: list[str]) -> dict[str, DemoTaskSet]:
+    """`demo_task_set` for several of the copy's Desks at once, by Desk ID, with one read of its setup interviews. The
+    owner's Desk list names each Desk's set, so the owner's pages word their fixed examples by the same closed type."""
+    if not desk_ids:
+        return {}
+    found = await conn.execute(select(INTERVIEWS.c.desk_id, INTERVIEWS.c.business_type).where(
+        INTERVIEWS.c.copy_id == ro.copy_id, INTERVIEWS.c.desk_id.in_(desk_ids)).order_by(
+        INTERVIEWS.c.created_at, INTERVIEWS.c.interview_id))
+    newest = {row.desk_id: row.business_type for row in found}          # the newest row of each Desk is read last
+    oldest = None
+    if any(desk_id not in newest for desk_id in desk_ids):
+        desks = await ro.desks()
+        oldest = desks[0]["desk_id"] if desks else None
+    return {desk_id: (newest[desk_id] if newest[desk_id] in BUSINESS_TYPES else "other") if desk_id in newest
+            else "rivera" if desk_id == oldest else "other" for desk_id in desk_ids}
 
 
 async def demo_tasks(ro: KernelRO, desk_id: str) -> list[DemoTask]:
