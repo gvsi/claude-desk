@@ -403,7 +403,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
     Unknown codes/IDs and a missing, malformed or mismatched entry have no label. A valid entry has a `decide`
     event with matching `ref_id` and `session_id`, a dict summary with outcome `refuse`, and a matching summary
     decision ID when present. Early refusals omit the summary decision ID, so the event reference is required.
-    The web holds the labels.
+    The web holds the labels; `prompts.TURNED_DOWN_BECAUSE` holds the same words for a triage summary.
 
     Source                                           Cause                 Signed label
     reason: paused                                   paused                The chat was paused

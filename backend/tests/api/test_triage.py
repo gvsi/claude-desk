@@ -27,6 +27,7 @@ from desk.api.main import create_app
 from desk.api.model import ModelRequest, ModelResponse
 from desk.api.ratelimit import LIMITS, Limit
 from desk.api.prompts import TRANSLATION_SYSTEM, TRIAGE_SYSTEM, Translation, Triage, wrap
+from desk.api.ro import KernelRO
 from desk.api.store import Ids, _read_triage, append_message
 from desk.api.triage import ANNOTATION_MODEL, ANNOTATION_TIMEOUT_S, translate_message, triage_attempt
 from tests.api.fakes import ScriptedModel, gated, response, tool_use, unavailable
@@ -40,7 +41,8 @@ from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 HAIKU = "claude-haiku-5-5"
 ENGLISH = Translation(language="en", translation="")
-REFUSAL_TRIAGE = Triage(summary="Asked to see every open time. The Desk refused the request.", category="other")
+REFUSAL_TRIAGE = Triage(summary="Asked to see every open time. It was turned down: your rule says no.",
+                        category="other")
 REPLY_TRIAGE = Triage(summary="Claude's reply named a price outside a card, so it was held back.", category="wording")
 SPANISH = "Hola, ¿cuánto cuesta destapar el desagüe?"
 SPANISH_IN_ENGLISH = Translation(language="es", translation="Hi, how much does it cost to clear the drain?")
@@ -157,7 +159,7 @@ async def test_refusal_gets_an_ai_written_triage(app, browser, fake, kernel_http
     (blocked,) = [sent_text(request) for request in asked if '"reply_blocked"' in sent_text(request)]
     assert json.loads(unwrapped(refusal, "stopped_event")) == {
         "kind": "refused", "tool": "native.find_slots", "effects": list(refused.action.effects),
-        "reason": refused.reason_plain}
+        "reason": refused.reason_plain, "turned_down_because": "Your rule says no"}
     assert json.loads(unwrapped(blocked, "stopped_event")) == {"kind": "reply_blocked",
         "violations": [{"kind": "number_in_prose", "rule": "digit"}]}
     # an owner-only triage row for each, the model's never; the refusal's receipt and the reply's stopped draft (Claude
@@ -185,6 +187,47 @@ async def test_refusal_gets_an_ai_written_triage(app, browser, fake, kernel_http
         ("reply_blocked", blocked_seq): REPLY_TRIAGE.model_dump(mode="json")}
     # each call's usage, under the conversation's session
     assert [call[:3] for call in await job_calls(engine, "triage")] == [(HAIKU, session_id, "end_turn")] * 2
+
+
+@pytest.mark.parametrize(("refusal", "cause", "because"), [
+    ("never", "owner_rule", "Your rule says no"),
+    ("no_such_slot", "no_such_slot", "That time isn't open"),
+    ("unknown_code", None, None),
+])
+async def test_a_refusal_carries_its_safety_why_label(app, browser, fake, kernel_http, model, engine, ro_schema,
+                                                      monkeypatch, refusal, cause, because):
+    """Haiku reads why a request was turned down in the words of the entry's label on Safety: the label of the cause
+    Safety derives for the same refusal, and none when Safety shows none (a code the API has no cause for)."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    visitor = await guest(kernel_http, fake, owner)
+    if refusal == "no_such_slot":
+        refused = await visitor.decide("native.book", {"slot_id": "S-20990101-0000"})
+    else:
+        fake.never(owner.desk_id, "native.find_slots")
+        refused = await visitor.decide("native.find_slots", {})
+    assert refused.outcome == "refuse"
+    if refusal == "unknown_code":
+        rows_of = KernelRO.rows
+
+        async def unknown_code(ro, view, **filters):
+            found = await rows_of(ro, view, **filters)
+            for row in found:
+                if view == "ledger_entries" and row["seq"] == refused.ledger_seq:
+                    row["event"]["summary"]["reason"] = "a_code_from_a_newer_kernel"
+            return found
+
+        monkeypatch.setattr(KernelRO, "rows", unknown_code)
+    model.jobs["triage"].append(answer(REFUSAL_TRIAGE))
+
+    assert await triage_attempt(engine, model, visitor.ids, refused.decision_id, "decision", ro_schema=ro_schema)
+
+    (request,) = model.job_requests
+    event = json.loads(unwrapped(sent_text(request), "stopped_event"))
+    assert (event["kind"], event["reason"]) == ("refused", refused.reason_plain)
+    assert event.get("turned_down_because") == because and ("turned_down_because" in event) == (because is not None)
+    (item,) = [item for item in (await owner.get(f"desks/{owner.desk_id}/safety")).json()
+               if item["ref_id"] == refused.decision_id]
+    assert item["cause"] == cause
 
 
 @pytest.mark.parametrize(("stored_category", "category"), [
