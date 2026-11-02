@@ -10,7 +10,7 @@ Giovanni Alcantara · November 2, 2026
 - apply the owner's policies to new cases
 - quote, book and negotiate within set limits
 
-It will still be open to **prompt injection** and **social engineering**, so the business's limits have to be **enforced in code, outside the model**.
+It will still be open to prompt injection and social engineering, so the business's limits have to be **enforced in code, outside the model**.
 
 On its own means over a whole conversation, in the visitor's language: the model works out what the visitor wants, finds the answer in what the owner has written, picks the tool that fits, applies the rules to a case nobody wrote down, and hands off what it can't settle.
 
