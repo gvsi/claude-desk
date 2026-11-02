@@ -43,10 +43,13 @@ export function GeneralPage() {
   /** The Desk is gone: another Desk's Today, preferring this business, or setup when none remain. */
   const leave = async (businesses: readonly BusinessOut[] = queryClient.getQueryData<BusinessOut[]>(DESKS_KEY) ?? [business]) => {
     setConfirming(false);
-    const now = businesses.find((b) => b.business_id === business.business_id);
-    const next = now?.desks.find((d) => d.desk_id !== desk.desk_id)
-      ?? businesses.flatMap((b) => b.desks).find((d) => d.desk_id !== desk.desk_id);
-    // Leave this Desk first: read again while it is still shown, the copy without it would say it's gone.
+    await queryClient.cancelQueries({ queryKey: DESKS_KEY });
+    const remaining = businesses
+      .map((b) => ({ ...b, desks: b.desks.filter((d) => d.desk_id !== desk.desk_id) }))
+      .filter((b) => b.desks.length > 0);
+    queryClient.setQueryData(DESKS_KEY, remaining);
+    const now = remaining.find((b) => b.business_id === business.business_id);
+    const next = now?.desks[0] ?? remaining.flatMap((b) => b.desks)[0];
     await navigate(next ? todayPath(next.desk_id) : '/app/setup', { replace: true });
     await invalidateCopy(queryClient);
   };
