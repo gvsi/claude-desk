@@ -42,6 +42,7 @@ import {
 import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
 import { skeletonSetupOf } from './today/TodaySkeleton.tsx';
+import { rememberedSetup, rememberSetups } from './today/todaySetupMemory.ts';
 import { ANSWERING_CONFIRM_COPY, answeringSaveFailed, answeringSaveUnconfirmed } from './answeringCopy.ts';
 import { connectorPageHref } from './connectors/pages.ts';
 import { useUnreadNotifications } from './notifications/useNotifications.ts';
@@ -201,8 +202,16 @@ function DeskGate({ deskId }: { deskId: string }) {
   const shown = found ?? held;
   const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
 
-  // Once the copy's Desks say this Desk's setup isn't finished, Today's shapes draw its card.
-  const setupShape = shown === null ? undefined : skeletonSetupOf(shown.desk);
+  // Once the copy's Desks say this Desk's setup isn't finished, Today's shapes draw its card. Until they
+  // are read (a reload), the shape this browser last saw for the Desk stands in, so the loading page
+  // draws the card from its first frame instead of dropping everything under it when the Desks arrive.
+  const [remembered] = useState(() => rememberedSetup(deskId));
+  const setupShape = shown === null ? (desks.data === undefined ? remembered : undefined) : skeletonSetupOf(shown.desk);
+  // Each settled read of the Desks rewrites the record: their unfinished Desks only.
+  const settledDesks = desks.data !== undefined && !desks.isFetching ? desks.data : null;
+  useEffect(() => {
+    if (settledDesks !== null) rememberSetups(settledDesks);
+  }, [settledDesks]);
 
   const titleId = useId();
   const failed = desks.isError && !desks.isFetching;

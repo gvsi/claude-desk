@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { cleanup } from 'vitest-browser-react';
 import { useRef } from 'react';
 import { useTextLines } from '../lib/useTextLines.ts';
+import { readLocal, writeLocal } from '../lib/storage.ts';
 import { page } from 'vitest/browser';
 
 import type { LedgerPage } from '../api/contracts.ts';
@@ -297,6 +298,85 @@ it.each([
   [1440, 900],
 ])('unfinished_setup_card_lands_from_todays_own_skeleton at %i by %i', async (width, height) => {
   await expectSetupCardLands(width, height, 'navigation');
+});
+
+it.each([
+  [390, 844],
+  [1440, 900],
+])('a_reload_draws_the_setup_card_before_the_desks_are_read_again at %i by %i', async (width, height) => {
+  // A reload reads the copy's Desks again. For a Desk this browser has seen unfinished, the loading
+  // page draws the "Not live yet" card's shape from its first frame, so nothing under it drops when
+  // the Desks arrive; the card then lands where its shape was.
+  const state = await deskLeftAtRules();
+  const today = `/app/${state.desk_id}/today`;
+  // A Desk this browser saw that the copy no longer has is dropped as the unfinished one is kept.
+  writeLocal('todaySetup', JSON.stringify({ 'desk-gone': { step: 'rules', answering: false, business: 'Old Plumbing' } }));
+  const first = await renderRoute(today, { viewport: { width, height } });
+  await expect.element(first.screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true })).toBeVisible();
+  expect(JSON.parse(readLocal('todaySetup') ?? '{}'), 'only the unfinished Desk is remembered').toEqual({
+    [state.desk_id]: { step: 'rules', answering: expect.any(Boolean), business: 'Okafor Plumbing' },
+  });
+  await cleanup();
+
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
+  const tops = watchTop(() => document.querySelector(`${FRAME_LAYER} .cd-how`) ?? landedElement('.cd-how'));
+  const { screen } = await renderRoute(today, { viewport: { width, height } });
+  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+  await document.fonts.ready;
+  await nextFrames();
+  // Drawn from the loading page's first frame, before it is shown, while the Desks are still out.
+  expect(setupShapeIn('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer'), 'the first frame draws the card').not.toBeNull();
+  await vi.waitFor(() => expect(setupShapeIn(FRAME_LAYER)).not.toBeNull());
+  expect(desks.held(), 'the Desks are still being read').toBeGreaterThan(0);
+  await nextFrames();
+  const shape = setupShapeIn(FRAME_LAYER);
+  expect(shape, "the card's shape is drawn while the Desks are read").not.toBeNull();
+  const shapeTop = shape!.getBoundingClientRect().top;
+
+  desks.release();
+  const card = screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true });
+  await expect.element(card).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await nextFrames();
+  expect(Math.abs(card.element().getBoundingClientRect().top - shapeTop), "the card lands at its shape's top").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  const howTops = tops();
+  expect(Math.max(...howTops) - Math.min(...howTops), 'How your Desk works never drops').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+});
+
+it('a_desk_no_longer_in_the_copy_is_forgotten_once_the_desks_are_read', async () => {
+  // A Desk deleted, or from an earlier copy, leaves the record when a read of the Desks doesn't list it;
+  // an unreadable record is no record at all.
+  writeLocal('todaySetup', JSON.stringify({ 'desk-gone': { step: 'rules', answering: false, business: 'Old Plumbing' } }));
+  const gone = await renderRoute('/app/desk-gone/today');
+  await expect.element(gone.screen.getByRole('heading', { level: 1 })).toBeVisible();
+  await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+  await cleanup();
+  for (const bad of ['not json', '[1]', JSON.stringify({ [RIVERA.deskId]: { step: 'live', answering: true, business: 'x' } })]) {
+    writeLocal('todaySetup', bad);
+    // While the Desks are read, an unreadable record draws no card on the loading page.
+    const desks = holdReads(ROUTES.desks.path);
+    onTestFinished(desks.release);
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+    await nextFrames();
+    expect(document.querySelector('.cd-owner-opening'), bad).not.toBeNull();
+    expect(document.querySelector('.cd-owner-opening .cd-continue-setup'), bad).toBeNull();
+    desks.release();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+    expect(document.querySelector('.cd-continue-setup'), bad).toBeNull();
+    await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+    await cleanup();
+  }
+});
+
+it('a_desk_that_went_live_is_forgotten_and_draws_no_card_on_a_reload', async () => {
+  // A Desk remembered unfinished that is live when the Desks are read leaves the record.
+  writeLocal('todaySetup', JSON.stringify({ [RIVERA.deskId]: { step: 'rules', answering: true, business: 'Turner Plumbing' } }));
+  const { screen } = await renderRoute(TODAY);
+  await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+  await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+  expect(document.querySelector('.cd-continue-setup')).toBeNull();
 });
 
 it('reload_opens_today_without_waiting_for_the_notifications', async () => {
