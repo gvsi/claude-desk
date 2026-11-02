@@ -1081,3 +1081,24 @@ async def test_a_read_never_waits_for_a_paid_quotes_row(desk_prove, app, client,
         holding.rollback()
     assert (await view(client, link.token)).state == "cancelled"
     assert await link_state(app, setup, link) == ("cancelled", None, (2_000, "released"))
+
+
+@pytest.mark.solver
+async def test_a_rule_change_cancels_a_paid_quotes_link_with_no_chat_line(desk_prove, app, client, frozen_clock):
+    """A rule change that would cancel a link for its rules says so in the link's chat, which asks the
+    customer to ask again if they still want to pay. A link whose quote another payment has paid can't be
+    paid whatever the rules say, so an activation that reaches it before any read cancels it as a read
+    would: `quote_paid`, naming no `cancel_reason`, its $20 released, and no chat line."""
+    setup = await agent_desk(app, client, frozen_clock)
+    signed = setup.turn()
+    link, charging = await link_and_charge(app, client, setup, signed)
+    assert (await executed(client, signed, charging)).state == "succeeded"
+    no_links = RuleCard(card_id="no-links", applies_to=LINK, mode="never", who="agent", agent_key_id=setup.agent.key_id,
+                        reason="This agent doesn't get payment links any more.")
+    version = await draft_and_confirm(client, setup.desk.owner_token, setup.desk.desk_id, [*CARDS, no_links])
+    assert payment_entries(await ledger_rows(app, setup.desk), link)[-1] == {
+        "link_id": link.link_id, "state": "cancelled", "reason": "quote_paid", "version": version.version}
+    assert await link_state(app, setup, link) == ("cancelled", None, (2_000, "released"))
+    assert await cancelled_links(client, setup.desk, version.version) == []
+    seen = await view(client, link.token)
+    assert (seen.state, seen.cancel_reason) == ("cancelled", None)
