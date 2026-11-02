@@ -10626,7 +10626,8 @@
           "resuming": {
             "type": "boolean",
             "title": "Resuming",
-            "default": false
+            "default": false,
+            "x-omitted-when-default": true
           },
           "generation": {
             "anyOf": [
@@ -10638,7 +10639,8 @@
                 "type": "null"
               }
             ],
-            "title": "Generation"
+            "title": "Generation",
+            "x-omitted-when-default": true
           }
         },
         "type": "object",

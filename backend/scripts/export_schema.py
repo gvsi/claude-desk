@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, TypeAdapter
 
-from desk import contracts, events
+from desk import contracts
 from desk.events import A2AResponse, SseEvent
 from desk.kernel_api import KERNEL_REQUESTS, KERNEL_RESPONSES
 
@@ -28,20 +28,6 @@ def _contract_models() -> list[type[BaseModel]]:
     ]
 
 
-def _mark_omitted_fields(defs: dict) -> None:
-    """Mark each field a model leaves out of its JSON while it holds a value its `exclude_if` excludes (a turn end's
-    `generation`, a hand-back's `resuming` and `generation`) with `x-omitted-when-default`: every other field is
-    sent every time, defaults included, which is how the web checks the mock's payloads against these contracts."""
-    modules = (contracts, events)
-    models = [value for module in modules for value in vars(module).values()
-              if isinstance(value, type) and issubclass(value, BaseModel) and value.__module__ == module.__name__]
-    for model in (*models, *KERNEL_REQUESTS, *KERNEL_RESPONSES):
-        properties = defs.get(model.__name__, {}).get("properties", {})
-        for name, field in model.model_fields.items():
-            if field.exclude_if is not None and name in properties:
-                properties[name]["x-omitted-when-default"] = True
-
-
 def export_schema() -> dict:
     """The JSON Schema of every contract but Principal, every kernel request and response, SseEvent and A2AResponse."""
     exported: dict[str, object] = {
@@ -58,7 +44,6 @@ def export_schema() -> dict:
     for (name, _mode), schema in by_name.items():
         if schema != {"$ref": f"#/$defs/{name}"}:   # a union such as SseEvent has no def of its own yet
             defs[name] = schema
-    _mark_omitted_fields(defs)
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Claude Desk shared contracts",

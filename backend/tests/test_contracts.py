@@ -7,7 +7,7 @@ from typing import get_args
 from zoneinfo import ZoneInfo
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -786,10 +786,19 @@ def test_a_copy_without_a_replay_carries_nothing_replayed():
 def test_schema_export_marks_the_fields_a_model_leaves_out_while_they_hold_their_default():
     # A turn end's generation and a hand-back's resume fields are sent only when they say something, so the web's
     # check of the mock's payloads (which takes every other field as always sent) may find them missing.
-    defs = export_schema()["$defs"]
-    marked = {(name, field) for name, model in defs.items()
-              for field, prop in (model.get("properties") or {}).items() if prop.get("x-omitted-when-default")}
-    assert marked == {("EvTurnEnd", "generation"), ("EvOwnerLeft", "resuming"), ("EvOwnerLeft", "generation")}
+    from desk import events
+    from scripts.export_openapi import export_openapi
+
+    left_out = {(model.__name__, name) for model in vars(events).values()
+                if isinstance(model, type) and issubclass(model, BaseModel) and model.__module__ == events.__name__
+                for name, field in model.model_fields.items() if field.exclude_if is not None}
+    assert left_out == {("EvTurnEnd", "generation"), ("EvOwnerLeft", "resuming"), ("EvOwnerLeft", "generation")}
+    # Marked so in both exports, wherever the model is in them (the API's document has no turn end).
+    for defs in (export_schema()["$defs"], export_openapi()["components"]["schemas"]):
+        marked = {(name, field) for name, model in defs.items()
+                  for field, prop in (model.get("properties") or {}).items() if prop.get("x-omitted-when-default")}
+        assert marked == {(name, field) for name, field in left_out if name in defs}
+        assert ("EvOwnerLeft", "resuming") in marked
     # Each one also as the model sends it: left out while it holds its default.
     from desk.events import EvOwnerLeft, EvTurnEnd
     assert EvTurnEnd(type="turn_end").model_dump(mode="json") == {"type": "turn_end"}
