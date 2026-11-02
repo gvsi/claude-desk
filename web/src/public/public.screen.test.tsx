@@ -1820,6 +1820,144 @@ describe('public chat page', () => {
     expect(getComputedStyle(main).opacity).toBe('1');
   });
 
+  it.each([
+    { viewport: 'desktop', preview: false },
+    { viewport: 'phone', preview: false },
+    { viewport: 'desktop', preview: true },
+    { viewport: 'phone', preview: true },
+  ] as const)('writing_dots_start_on_send_without_remounting ($viewport, preview: $preview)', async ({ viewport, preview }) => {
+    let chat: VisitorChatView | undefined;
+    const previewDeskId = preview ? RIVERA.deskId : undefined;
+    function ObservedPage() {
+      chat = useVisitorChat(RIVERA.slug, previewDeskId);
+      return <PublicPage />;
+    }
+    const path = preview ? `${PAGE}?preview=${RIVERA.deskId}` : PAGE;
+    const { screen } = await renderRoute(path, { viewport, routes: [{ path: '/d/:slug', Component: ObservedPage }] });
+    await ready(screen);
+    expect(mockStore.visitorSession(RIVERA.slug)?.ownerPreview).toBe(preview);
+    // Keep the send in flight: no event for this turn can arrive until the test emits it.
+    let release = () => {};
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-held' }, until });
+    const before = chatEvents().length;
+    const question = 'How much is drain clearing?';
+    await type(screen, question);
+    expect(chatEvents()).toHaveLength(before);
+    expect(chat?.state.writing).toBe(false);
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(1);
+    const indicator = screen.getByText('Claude is writing').element().closest('.cd-writing-indicator')!;
+    expect(document.querySelectorAll('.cd-writing-indicator')).toHaveLength(1);
+    expect(screen.getByRole('log').getByText(question, { exact: true }).element().compareDocumentPosition(indicator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const composer = screen.container.querySelector<HTMLElement>('.cd-composer__box')!;
+    expect(indicator.getBoundingClientRect().bottom).toBeLessThanOrEqual(composer.getBoundingClientRect().top);
+
+    // Every DOM change through the writing event keeps the same single indicator, so its dots
+    // keep their animation rather than disappearing or starting again.
+    const continuity: boolean[] = [];
+    const noteContinuity = () => {
+      const indicators = document.querySelectorAll('.cd-writing-indicator');
+      continuity.push(indicators.length === 1 && indicators[0] === indicator);
+    };
+    const observer = new MutationObserver(noteContinuity);
+    observer.observe(screen.container, { childList: true, subtree: true, attributes: true });
+    onTestFinished(() => observer.disconnect());
+    noteContinuity();
+    release();
+    mockStore.emit(RIVERA.slug, { type: 'writing' });
+    await expect.poll(() => chat?.state.writing).toBe(true);
+    await frames();
+    noteContinuity();
+    observer.disconnect();
+    expect(indicator.isConnected).toBe(true);
+    expect(continuity.length).toBeGreaterThan(0);
+    expect(continuity.every(Boolean)).toBe(true);
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(1);
+
+    const [, , reply] = rivera.events.quoteTurn as [SseEvent, SseEvent, EvMessage, SseEvent];
+    mockStore.emit(RIVERA.slug, reply);
+    mockStore.emit(RIVERA.slug, { type: 'turn_end' });
+    await turnEnded(before);
+    await expect.element(screen.getByRole('article', { name: 'Quote' })).toBeVisible();
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(0);
+  });
+
+  it('writing_dots_stop_when_send_fails_and_return_on_retry', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    let release = () => {};
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'sendMessage', status: 500, until });
+    await type(screen, 'How much is drain clearing?');
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(1);
+    expect(chatEvents()).toHaveLength(0);
+
+    release();
+    const failed = screen.getByRole('alert');
+    await expect.element(failed.getByText("That didn't send. Your message is still here.", { exact: true })).toBeVisible();
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(0);
+
+    // A retry waits on its own send again, even though the same visitor row failed before it.
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-retry' } });
+    await failed.getByRole('button', { name: 'Try again' }).click();
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(1);
+    mockStore.emit(RIVERA.slug, { type: 'turn_end' });
+    await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
+  });
+
+  it('writing_dots_stay_off_when_the_visitor_sends_to_the_owner', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const session = mockStore.visitorSession(RIVERA.slug);
+    if (!session) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(session);
+    await expect.element(screen.getByText(HEAD.en.ownerInChat, { exact: true })).toBeVisible();
+
+    let sawClaudeWriting = false;
+    const observer = new MutationObserver(() => {
+      if (screen.getByText('Claude is writing').elements().length > 0) sawClaudeWriting = true;
+    });
+    observer.observe(screen.container, { childList: true, subtree: true });
+    onTestFinished(() => observer.disconnect());
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-owner' } });
+    await type(screen, 'Are you still there, Mike?');
+    await expect.poll(() => requests('sendMessage').length).toBe(1);
+    mockStore.emit(RIVERA.slug, { type: 'owner_typing', name: 'Mike Turner', until: new Date(Date.now() + 5_000).toISOString() });
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Mike Turner is typing' })).toBeVisible();
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(0);
+    expect(sawClaudeWriting).toBe(false);
+  });
+
+  it.each(['reply', 'turn end', 'error', 'session ended', 'owner joins'] as const)('writing_dots_end_on_first_turn_event (%s)', async (event) => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    // Accept the message without running its scripted turn, so the first event is ours to send.
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-held' } });
+    await type(screen, 'How much is drain clearing?');
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(1);
+    expect(chatEvents()).toHaveLength(0);
+
+    if (event === 'reply') {
+      const [, , reply] = rivera.events.quoteTurn as [SseEvent, SseEvent, EvMessage, SseEvent];
+      mockStore.emit(RIVERA.slug, reply);
+      await expect.element(screen.getByRole('article', { name: 'Quote' })).toBeVisible();
+    } else if (event === 'turn end') {
+      mockStore.emit(RIVERA.slug, { type: 'turn_end' });
+    } else if (event === 'owner joins') {
+      const session = mockStore.visitorSession(RIVERA.slug);
+      if (!session) throw new Error('this browser has a chat');
+      mockStore.world.takeOver(session);
+      await expect.element(screen.getByText(HEAD.en.ownerInChat, { exact: true })).toBeVisible();
+    } else {
+      mockStore.emit(RIVERA.slug, { type: 'error', code: event === 'session ended' ? 'session' : 'kernel_unavailable' });
+      await expect.element(screen.getByText(event === 'session ended' ? CHAT_ENDED_COPY.en : UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+      if (event === 'session ended') await expect.element(chatBox(screen)).toBeDisabled();
+    }
+    await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
+  });
+
   it('a_live_reply_reveals_its_words_then_its_card_then_its_receipt', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);
