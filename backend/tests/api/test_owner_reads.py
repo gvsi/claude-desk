@@ -1028,6 +1028,26 @@ async def test_handoff_done_leaves_needs_you(app, browser, fake, kernel_http):
     assert (unknown.status_code, unknown.json()) == (404, {"error": "not_found"})
 
 
+async def test_a_superseded_handoff_is_not_waiting_for_the_owner(app, browser, fake, kernel_http):
+    """A handoff the one-open revision superseded (kernel_one_open_handoff) is `superseded` in kernel_ro.handoffs.
+    Needs you lists only open handoffs, so it never reaches the `Handoff` schema, whose status is open or done; and
+    the owner's mark of done on it is the kernel's 409, as on one already done."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    caller = await guest(kernel_http, fake, owner)
+    await caller.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                                 "reason": "Leaking water heater"})
+    (handoff_id,) = fake.handoffs
+    fake.handoffs[handoff_id]["status"] = "superseded"
+    fake._put("handoffs", (handoff_id,), dict(fake.handoffs[handoff_id]))
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    assert [item for item in listed.json() if item["handoff"] is not None] == []
+    done = await owner.browser.post(f"/api/owner/handoffs/{handoff_id}/done")
+    assert (done.status_code, done.json()) == (409, {"error": "kernel", "code": "conflict"})
+
+
 async def test_expired_hold_refreshes_on_read(app, browser, fake, kernel_http, ro_schema, api_conn):
     owner = await new_owner(app, browser, fake, kernel_http)
     seeded = seeded_hold(fake, owner)
