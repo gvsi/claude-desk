@@ -103,3 +103,19 @@ it('one_real_source_counts_without_mock_sources_on_another_desk', async () => {
   expect(list.getByRole('listitem').elements()).toHaveLength(1);
   expect(list.getByText('Mock', { exact: true }).query()).toBeNull();
 });
+
+
+it('mock_sources_do_not_follow_the_deleted_starting_desk', async () => {
+  const { screen, router } = await renderRoute(`/app/${RIVERA.deskId}/knowledge`, { seed: 'rivera_two_desks', pollScale: 100 });
+  await expect.element(screen.getByText('Maintenance plan.pdf', { exact: true })).toBeVisible();
+  await router.navigate(`/app/${RIVERA.deskId}/settings/general`);
+  await screen.getByRole('button', { name: 'Delete this Desk', exact: true }).click();
+  await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk', exact: true }).click();
+  await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+  await router.navigate(`/app/${RIVERA.emergenciesDeskId}/knowledge`);
+  await expect.poll(() => mockStore.requests.filter(({ key, path }) => key === 'knowledge' && path.includes(RIVERA.emergenciesDeskId)).length).toBeGreaterThan(0);
+  await mockDrain.waitForIdle();
+  const list = screen.getByRole('list', { name: 'What Claude knows' });
+  expect(list.getByText('Mock', { exact: true }).elements()).toHaveLength(0);
+  expect(screen.getByText('Maintenance plan.pdf', { exact: true }).query()).toBeNull();
+});

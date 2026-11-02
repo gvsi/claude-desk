@@ -17,6 +17,7 @@ import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, 
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, CopyOut, DeskSummary } from '../api/views.ts';
+import { startingDeskFor } from './arrival/keptCopy.ts';
 import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import {
@@ -189,6 +190,7 @@ function DeskGate({ deskId }: { deskId: string }) {
   // The demo bar's Demo inbox is read with the Desks, so the bar draws it with the frame: nothing
   // waits for it, and the bar's own read finds it read, or on its way.
   const queryClient = useQueryClient();
+  if (desks.data !== undefined) startingDeskFor(queryClient, desks.data);
   useEffect(() => {
     void queryClient.prefetchQuery({ ...ownerInboxQuery(), staleTime: FRESH_MS });
   }, [queryClient]);

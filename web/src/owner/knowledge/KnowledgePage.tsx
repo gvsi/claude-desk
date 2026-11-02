@@ -17,7 +17,7 @@ import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, NAV_LABELS, Notice, P
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { firstDesk } from '../arrival/doneSignals.ts';
+import { startingDeskFor } from '../arrival/keptCopy.ts';
 import { VisionNote } from '../settings/VisionNote.tsx';
 import { MOCK_SOURCES, MORE_SOURCES, SAMPLE_QUESTIONS } from './previewSources.ts';
 import { useReadFailure } from '../useReadFailure.ts';
@@ -93,7 +93,8 @@ function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
   const list = useQuery(knowledgeQuery(deskId));
   const failure = useReadFailure(list);
   const desks = useDesks(deskId, { passive: true });
-  const samples = desks.data !== undefined && firstDesk(desks.data) === deskId ? MOCK_SOURCES : [];
+  const queryClient = useQueryClient();
+  const samples = desks.data !== undefined && startingDeskFor(queryClient, desks.data) === deskId ? MOCK_SOURCES : [];
   const rows = [...rowsOf(list.data ?? [], timeZone), ...samples];
   const publicCount = rows.filter((item) => item.title !== null && item.readers.includes('public')).length;
   return (
