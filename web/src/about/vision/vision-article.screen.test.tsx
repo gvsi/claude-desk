@@ -270,6 +270,32 @@ describe('The Vision article', () => {
     await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
   });
 
+  it('read_next_ends_with_an_arrow_that_inks_on_hover', async () => {
+    // As on the other About pages, the "Read next" card ends with the arrow at its trailing edge, centred on the
+    // card and decoration only. Nothing on the article moves: pointing at the card turns it the paper's ink.
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+      const card = document.querySelector<HTMLElement>('.va-next');
+      const arrow = card?.querySelector<SVGSVGElement>('svg.va-next__arrow');
+      if (!card || !arrow) throw new Error(`${viewport}: Read next draws no arrow`);
+      expect(arrow.getAttribute('aria-hidden'), viewport).toBe('true');
+      const box = card.getBoundingClientRect();
+      const at = arrow.getBoundingClientRect();
+      expect([at.width, at.height], viewport).toEqual([20, 20]);
+      expect(Math.abs(box.right - 20 - at.right), viewport).toBeLessThanOrEqual(1);
+      expect(Math.abs((at.top + at.bottom) / 2 - (box.top + box.bottom) / 2), viewport).toBeLessThanOrEqual(1);
+      const words = card.querySelector('.va-next__summary')?.getBoundingClientRect();
+      expect(words && words.right <= at.left, viewport).toBe(true);
+      expect(getComputedStyle(arrow).color, viewport).toBe('rgb(92, 88, 80)');
+      card.scrollIntoView({ block: 'center' });
+      await userEvent.hover(card.querySelector('a') as HTMLElement);
+      await expect.poll(() => getComputedStyle(arrow).color, { message: viewport }).toBe('rgb(28, 27, 25)');
+      expect(getComputedStyle(arrow).transform, viewport).toBe('none');
+      await userEvent.unhover(card.querySelector('a') as HTMLElement);
+    }
+  });
+
   it('keyboard_focus_rings_in_the_papers_secondary_ink', async () => {
     // No blue focus ring on the paper either: keyboard focus on a link in the bar, a picture card and the way to the
     // next page shows the 2 px ring in the paper's secondary ink, 3:1 and more against the paper.

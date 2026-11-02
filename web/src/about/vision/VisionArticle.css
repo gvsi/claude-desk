@@ -343,7 +343,7 @@
 .vision-article .va-next {
   position: relative;
   margin: 24px 0;
-  padding: 16px 20px;
+  padding: 16px 56px 16px 20px;
   border: 1px solid var(--va-line);
   border-radius: 14px;
   background: var(--va-tile);
@@ -389,6 +389,22 @@
   margin: 4px 0 0;
   font-size: 13px;
   line-height: 19px;
+}
+
+/* The arrow at the card's trailing edge, centred on it: quiet at rest, in the paper's ink when the card is pointed
+   at or its link has keyboard focus. Nothing on the article moves, so unlike the other About pages it doesn't
+   nudge. */
+.vision-article .va-next__arrow {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  margin-top: -10px;
+  color: var(--va-ink-2);
+}
+
+.vision-article .va-next:hover .va-next__arrow,
+.vision-article .va-next:has(.va-next__link:focus-visible) .va-next__arrow {
+  color: var(--va-ink);
 }
 
 /* The phones. */

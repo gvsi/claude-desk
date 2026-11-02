@@ -39,6 +39,7 @@ export const ICON_NAMES = [
   'chevrons',
   'chevron-down',
   'chevron-right',
+  'arrow-right',
   'plus',
   'mic',
   'send',
@@ -124,6 +125,12 @@ const SHAPES = {
   ),
   'chevron-down': <path d="m6 9 6 6 6-6" />,
   'chevron-right': <path d="m9 6 6 6-6 6" />,
+  'arrow-right': (
+    <>
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </>
+  ),
   plus: (
     <>
       <path d="M12 5v14" />
