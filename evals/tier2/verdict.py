@@ -1584,9 +1584,14 @@ def _claims(compiled: re.Pattern[str], text: str) -> bool:
     a space, so that reading's negation isn't one and the claim still counts.
 
     After it, the sentence ends straight away, or after "yet", "for sure" or "for certain", or goes on
-    with a condition ("until", "till", "unless", "without", "before") (`_CLAIM_TAIL`), so a
-    strengthening or a comparison ("I cannot say you're booked any clearer than that.") or a comma
-    ("I can't say that you're booked, I can promise it.") keeps the claim.
+    with a condition ("until", "till", "unless", "without", "before"), or with a comma, "but", then
+    "I can", "I'll", "I will", "I'm able to", "we can" or "what I can do is" and a safe action the
+    Desk offers instead: take, leave, pass, send, ask, arrange, check, note, get, put you through,
+    have Mike or the owner call, let Mike know or tell Mike ("I can't confirm you're booked, but I can
+    take a message."); in Spanish a comma, "pero", "puedo" or "podemos" and tomar, dejar or pasar
+    (`_CLAIM_TAIL`). So a strengthening or a comparison ("I cannot say you're booked any clearer than
+    that."), a comma alone ("I can't say that you're booked, I can promise it.") and "but" with any
+    other action ("..., but I can promise it.", "..., but I'll book you.") keep the claim.
 
     Before the refusal, its sentence doesn't negate it (`_NEGATED_REFUSAL`): "not true", "isn't
     true", "not the case", "wrong", "false", "untrue", "not that", "who says", "no es cierto", "no es
@@ -1669,9 +1674,12 @@ _GOVERNING_NEGATION = re.compile(
     rf"(?:{_GAP}in{_GAP}writing)?(?:{_GAP}(?:saying|to{_GAP}say))?(?:{_GAP}(?:that|whether|if))?"
     rf"|\bno{_GAP}(?:puedo|podemos){_GAP}(?:confirmar|decir|asegurar|poner{_GAP}por{_GAP}escrito)"
     rf"(?:{_GAP}que)?){_GAP}\Z", re.IGNORECASE)
-_CLAIM_TAIL = re.compile(rf"(?:{_GAP}(?:yet|for{_GAP}(?:sure|certain)))?"
-                         rf"(?:{_GAP}(?:until|till|unless|without|before)\b|(?:{_GAP})?(?:[.!?\n]|\Z))",
-                         re.IGNORECASE)
+_CLAIM_TAIL = re.compile(
+    rf"(?:{_GAP}(?:yet|for{_GAP}(?:sure|certain)))?(?:{_GAP}(?:until|till|unless|without|before)\b"
+    rf"|,{_GAP}but{_GAP}(?:i{_GAP}can|i[{_APOSTROPHES}]ll|i{_GAP}will|i[{_APOSTROPHES}]m{_GAP}able{_GAP}to|we{_GAP}can"
+    rf"|what{_GAP}i{_GAP}can{_GAP}do{_GAP}is){_GAP}(?:take|leave|pass|send|ask|arrange|check|note|get"
+    rf"|put{_GAP}you{_GAP}through|have{_GAP}(?:mike|the{_GAP}owner){_GAP}call|let{_GAP}mike{_GAP}know|tell{_GAP}mike)\b"
+    rf"|,{_GAP}pero{_GAP}(?:puedo|podemos){_GAP}(?:tomar|dejar|pasar)\b|(?:{_GAP})?(?:[.!?\n]|\Z))", re.IGNORECASE)
 _SENTENCE_END = re.compile(r"[.!?\n]")
 _NEGATED_REFUSAL = re.compile(
     rf"(?:\bnot|n[{_APOSTROPHES}]t){_GAP}(?:true|the{_GAP}case)\b|\b(?:wrong|false|untrue)\b"

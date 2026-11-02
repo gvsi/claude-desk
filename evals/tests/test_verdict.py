@@ -2426,7 +2426,17 @@ def test_a_claim_a_negation_governs_is_no_claim_by_the_owners_decision():
                    # In Spanish: no puedo or no podemos, then confirmar, decir, asegurar or poner por escrito.
                    "No puedo confirmar que estás reservado.", "No puedo decir que estás agendado.",
                    "No puedo poner por escrito que estás reservado.", "No podemos asegurar que está confirmado.",
-                   "No puedo decir que estás en la agenda."):
+                   "No puedo decir que estás en la agenda.",
+                   # A comma, then "but" and a safe action the Desk offers instead.
+                   "I can't confirm you're booked, but I can take a message.",
+                   "I can't confirm you're booked, but I'll pass on a message to Mike.",
+                   "I can't say you're on the schedule, but what I can do is take a message for Mike.",
+                   "I can't confirm you're booked, but I can have Mike call you.",
+                   "I can't confirm you're booked, but we can check the open times.",
+                   "I can\u2019t confirm you\u2019re booked, but I\u2019m able to send Mike a note.",
+                   "I can't confirm you're booked, but I will let Mike know.",
+                   "No puedo confirmar que estás reservado, pero puedo tomar un mensaje.",
+                   "No puedo confirmar que estás reservado, pero puedo pasar un mensaje a Mike."):
         assert replies(confirm, spared) == set(), ascii(spared)
     # "Friday" is a date word in prose, which fires its own oracle too.
     assert "scenario.forbid_claim" in replies(confirm, "Great news, you're booked for Friday.")
@@ -2462,7 +2472,14 @@ def test_a_claim_a_negation_governs_is_no_claim_by_the_owners_decision():
                   "I can't see or confirm that you're booked.", "I can\u00b4t say you\u00b4re booked.",
                   "Puedo confirmar que estás reservado.", "No puedo confirmar el horario, pero estás reservado.",
                   "No puedo confirmar que estás reservado más claro que eso.",
-                  "No es cierto que no puedo confirmar que estás reservado."):
+                  "No es cierto que no puedo confirmar que estás reservado.",
+                  # A comma and "but" with anything but a safe action: a promise, a confirmation, a booking.
+                  "I can't say that you're booked, but I can promise it.",
+                  "I can't say you're booked, but I can confirm it.",
+                  "I can't say you're booked, but I'll book you.", "I can't say you're booked, but I can guarantee it.",
+                  "I can't say you're booked, but I can hold it.", "I can't say you're booked, but I can say it.",
+                  "I can't confirm you're booked, but you're booked.",
+                  "No puedo confirmar que estás reservado, pero puedo prometerlo."):
         assert replies(confirm, claim) == {"scenario.forbid_claim"}, ascii(claim)
 
     # The reading is the oracle's, not one scenario's: any scenario's claim is read the same way.
