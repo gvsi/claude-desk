@@ -185,6 +185,7 @@ class Case(BaseModel):
     expected: Literal["pass", "flag", "flag_ai", "code", "not_ai"]
     majority_required: bool = False
     next_steps: list[str] = Field(default_factory=list)
+    approved_names: list[str] = Field(default_factory=list)
     note: str = ""
 
     @field_validator("next_steps")
@@ -221,9 +222,9 @@ def load_cases(path: Path) -> list[Case]:
 
 def code_blocked(case: Case) -> bool:
     """Whether the kernel's code check blocks the case's prose, so that in the kernel the model check
-    never reads it: `reply_check.scan_prose`, offline, with no canary, no name of a Desk's own and no
-    booking card."""
-    return bool(reply_check.scan_prose(case.prose))
+    never reads it: `reply_check.scan_prose`, offline, with the case's approved business names,
+    no canary, no name of a Desk's own and no booking card."""
+    return bool(reply_check.scan_prose(case.prose, approved_free_names=case.approved_names))
 
 
 # The prompt
