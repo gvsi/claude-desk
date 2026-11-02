@@ -16,6 +16,16 @@ export function readTheme(): ThemeChoice {
   return stored === 'light' || stored === 'dark' ? stored : 'system';
 }
 
+/**
+ * The choice in force on this page: the root's light or dark mark, or the system's when it has none.
+ * index.html's first script marks the root from the stored choice, and every choice since marks it,
+ * so this holds the choice even where storage is blocked and nothing could be kept.
+ */
+export function activeTheme(): ThemeChoice {
+  const mark = document.documentElement.dataset.theme;
+  return mark === 'light' || mark === 'dark' ? mark : 'system';
+}
+
 /** Marks the root with a light or dark choice, or unmarks it for the system's. */
 export function applyTheme(choice: ThemeChoice): void {
   const root = document.documentElement;
@@ -44,9 +54,12 @@ export function watchTheme(onChange?: (choice: ThemeChoice) => void): () => void
   return () => window.removeEventListener('storage', heard);
 }
 
-/** For the theme switch: the choice in this browser, kept in step with other tabs, and how to change it. */
+/**
+ * For the theme switch: the choice in force on this page, kept in step with other tabs, and how to
+ * change it. It starts from the root's mark, not from storage, which a private window may block.
+ */
 export function useTheme(): { choice: ThemeChoice; choose: (choice: ThemeChoice) => void } {
-  const [choice, setChoice] = useState(readTheme);
+  const [choice, setChoice] = useState(activeTheme);
   useEffect(() => watchTheme(setChoice), []);
   const choose = useCallback((next: ThemeChoice) => {
     saveTheme(next);

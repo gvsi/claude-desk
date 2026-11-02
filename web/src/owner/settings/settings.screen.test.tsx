@@ -5,7 +5,7 @@
  * board draws it, on a laptop and on a phone.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
-import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
@@ -198,11 +198,44 @@ describe('Settings', () => {
     await expect.element(option('System')).toHaveAttribute('aria-checked', 'true');
     expect([root.hasAttribute('data-theme'), localStorage.getItem('claude-desk.theme')]).toEqual([false, null]);
 
-    // A choice kept from before is the one shown when the page opens again.
+    // A choice kept from before is the one shown when the app opens again, as index.html's first
+    // script marks the root with it.
     localStorage.setItem('claude-desk.theme', 'light');
+    root.dataset.theme = 'light';
     const again = await renderRoute(GENERAL);
     const kept = main(again.screen).getByRole('radiogroup', { name: 'Appearance' }).getByRole('radio', { name: 'Light', exact: true });
     await expect.element(kept).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('appearance_holds_its_choice_when_storage_is_blocked', async () => {
+    // A private window: nothing can be kept, but a choice holds while the page is open, and the
+    // control shows it after the owner moves to another section and back.
+    const root = document.documentElement;
+    onTestFinished(() => {
+      delete root.dataset.theme;
+    });
+    for (const method of ['getItem', 'setItem', 'removeItem'] as const) {
+      vi.spyOn(Storage.prototype, method).mockImplementation(() => {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      });
+    }
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { screen } = await renderRoute(GENERAL);
+    const option = (name: string) => main(screen).getByRole('radiogroup', { name: 'Appearance' }).getByRole('radio', { name, exact: true });
+    await option('Light').click();
+    await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
+    expect(root.dataset.theme).toBe('light');
+
+    await subNav(screen).getByRole('link', { name: 'Notifications' }).click();
+    await expect.element(main(screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
+    await subNav(screen).getByRole('link', { name: 'General' }).click();
+    await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
+
+    await option('System').click();
+    await expect.element(option('System')).toHaveAttribute('aria-checked', 'true');
+    expect(root.hasAttribute('data-theme')).toBe(false);
   });
 
   it('answering_is_one_switch', async () => {
