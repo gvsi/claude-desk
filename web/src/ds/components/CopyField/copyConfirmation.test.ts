@@ -2,17 +2,16 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { CopyField } from '../../ds/components/CopyField/CopyField.tsx';
-import { CopyList } from '../../ds/components/CopyList/CopyList.tsx';
-import { COPIED_FOR_MS } from '../today/TodayPage.tsx';
-import { CopyLink } from './CopyLink.tsx';
+import { CopyField } from './CopyField.tsx';
+import { CopyList } from '../CopyList/CopyList.tsx';
+import { CopyLink } from '../../../owner/share/CopyLink.tsx';
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
-it('shows only the latest copy, announces each press, and clears after the confirmation timeout', async () => {
+it('shows only the latest copy, announces each press, and keeps the confirmation until another press', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const writeText = vi.fn(async () => {});
@@ -37,7 +36,7 @@ it('shows only the latest copy, announces each press, and clears after the confi
     await press('Copy link');
     expect(copied()).toHaveLength(1);
     const linkStatus = copied()[0]!;
-    act(() => vi.advanceTimersByTime(COPIED_FOR_MS - 100));
+    act(() => vi.advanceTimersByTime(1_500));
     await press('Copy Google profile');
     expect(copied()).toHaveLength(1);
     expect(linkStatus.textContent).toBe('');
@@ -59,21 +58,23 @@ it('shows only the latest copy, announces each press, and clears after the confi
     });
     observer.observe(status, { childList: true, characterData: true, subtree: true });
     try {
-      act(() => vi.advanceTimersByTime(COPIED_FOR_MS - 1));
+      act(() => vi.advanceTimersByTime(1_599));
       await press('Copy address');
       expect(announcements).toEqual(['Copied.']);
       expect(copied()).toHaveLength(1);
-      act(() => vi.advanceTimersByTime(COPIED_FOR_MS - 1));
+      act(() => vi.advanceTimersByTime(1_599));
       expect(copied()).toHaveLength(1);
       act(() => vi.advanceTimersByTime(1));
-      expect(copied()).toHaveLength(0);
+      expect(copied()).toHaveLength(1);
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(copied()).toHaveLength(1);
     } finally {
       observer.disconnect();
     }
     expect(writeText.mock.calls).toHaveLength(5);
     await press('Copy link');
     act(() => root.unmount());
-    // Let React/jsdom's next-task work finish without advancing the confirmation clock.
+    // Let React/jsdom's next-task work finish.
     act(() => vi.advanceTimersByTime(0));
     expect(vi.getTimerCount()).toBe(0);
   } finally {
