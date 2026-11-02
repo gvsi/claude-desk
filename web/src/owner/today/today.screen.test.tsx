@@ -2954,7 +2954,8 @@ describe("Today's unfinished setup", () => {
     await liveSetupDeskIds("I'm Linda Chen. Chen & Co. keeps the books for small businesses in San Jose.");
     const state = await deskAtTools();
     // Answering on doesn't make a Desk still in setup live: only finishing setup does.
-    await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
+    const answering = await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
+    if ('network' in answering || answering.status !== 200) throw new Error('the mock sets Answering');
     const screen = await saveAndExitAtTools(state);
     const row = createRow(screen);
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
