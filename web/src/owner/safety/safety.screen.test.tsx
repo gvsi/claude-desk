@@ -4,7 +4,7 @@
  * each saying where it came from and when it happened.
  */
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
@@ -14,7 +14,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { isoTime } from '../../mocks/world.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../../test/screen.ts';
 import { attemptTime } from './copy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -34,6 +34,17 @@ async function readsMore(key: string, n: number): Promise<void> {
 function box(el: Element | null | undefined): DOMRect {
   if (!el) throw new Error('no element to measure');
   return el.getBoundingClientRect();
+}
+
+/** Two frames, so a layout the last step changed has been drawn. */
+function frames(): Promise<void> {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
+
+/** The page fits its window: neither the main area nor the window scrolls. */
+function expectPageFits(main: HTMLElement): void {
+  expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
+  expectNoWindowScroll();
 }
 
 /** Today as the mock reads it now, changed by `patch`, answering every read of it from here on. */
@@ -475,10 +486,12 @@ describe('Safety', () => {
     expect(trace.getByText(/Chain verified/).elements()).toHaveLength(0);
   });
 
-  it('a_long_trace_scrolls_in_its_column_and_the_page_stays_put', async () => {
+  it('a_long_trace_scrolls_in_itself_and_the_page_stays_put', async () => {
     // A trace taller than the window, in a window short enough for it (owner comment, 2026-11-01:
-    // "long trace column makes the whole page jump"). Opening it leaves the page where it was, and
-    // the trace scrolls inside its own column beside the list.
+    // "long trace column makes the whole page jump"; 2026-11-02: the side card scrolls instead of
+    // the full page). Opening it leaves the page where it was and the page still fits the window:
+    // the trace scrolls inside its own border beside the list, and the record's long list scrolls
+    // in its own column.
     const checks = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`check_${i}`, { status: 'ok', blocked: false, latency_ms: i }]));
     const entries = threeEntries();
     entries[2] = entry(3, '2026-10-20T16:52:00.000000Z', { kind: 'reply', session_id: 'ses-1', summary: { author: 'claude', ok: true, language: 'en', violations: [], soft_checks: checks } });
@@ -493,14 +506,90 @@ describe('Safety', () => {
     const trace = region(screen, 'Full trace of entry 3');
     await expect.element(trace).toBeVisible();
     await expect.poll(() => document.activeElement).toBe(trace.element());
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await frames();
     expect(main.scrollTop).toBe(before);
-    const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
-    if (!beside) throw new Error('the trace sits in the column beside the list');
-    expect(beside.scrollHeight).toBeGreaterThan(beside.clientHeight);
-    // Exactly the main area's height inside its 24 px top and 20 px bottom padding, so all of it
-    // shows once the page is scrolled to it, 20 px clear of the main area's bottom.
-    expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
+    expectPageFits(main);
+    // The trace scrolls inside its own border, all of it in the window, and Tab reaches it.
+    const scroller = trace.element();
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    expect(box(scroller).bottom).toBeLessThanOrEqual(box(main).bottom);
+    expect(scroller.tabIndex).toBe(0);
+
+    // Scrolled down, then another entry picked: its trace starts at its top.
+    scroller.scrollTop = scroller.scrollHeight;
+    expect(scroller.scrollTop).toBeGreaterThan(0);
+    await recordRow(screen, 2).click();
+    const next = region(screen, 'Full trace of entry 2');
+    await expect.element(next).toBeVisible();
+    await expect.poll(() => next.element().scrollTop).toBe(0);
+    expect(main.scrollTop).toBe(before);
+  });
+
+  it.each([
+    [1440, 900],
+    [1512, 945],
+  ] as const)('an_open_entry_fits_the_window_at_%sx%s_and_its_card_scrolls', async (width, height) => {
+    // The owner, 2026-11-02: "make sure it works well without scrolling.. maybe the side card can
+    // scroll instead of the full page". The agent's refused charge open, with how it was stopped
+    // and its full trace, record and all: the page fits the window, its header, count and record
+    // check stay in view, and the side card scrolls inside itself.
+    await refuseTheAgentsCharge();
+    const { screen } = await renderRoute(SAFETY, { viewport: { width, height } });
+    const open = detail(screen);
+    await expect.element(open.getByText("This action didn't run.", { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    await open.getByRole('button', { name: 'See how it was stopped' }).click();
+    await open.getByRole('button', { name: 'Full trace' }).click();
+    const trace = open.getByRole('region', { name: /^Full trace of entry \d+$/ });
+    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeInTheDocument();
+    await expect.poll(() => document.activeElement).toBe(trace.element());
+    await frames();
+    const main = open.element().closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    expect(main.scrollTop).toBe(0);
+    expectPageFits(main);
+    for (const part of [
+      screen.getByRole('heading', { level: 1, name: 'Safety', exact: true }),
+      screen.getByText(HEADLINE),
+      screen.getByText('No entry has been changed since it was written', { exact: true }),
+    ]) {
+      await expect.element(part).toBeVisible();
+      expect(box(part.element()).top).toBeGreaterThanOrEqual(box(main).top);
+    }
+
+    // The card scrolls itself, inside the window, and opening the trace scrolled it to the trace's
+    // top, or as far as the card goes.
+    const card = open.element();
+    expect(card.scrollHeight).toBeGreaterThan(card.clientHeight);
+    expect(box(card).bottom).toBeLessThanOrEqual(box(main).bottom);
+    expect(card.scrollTop).toBeGreaterThan(0);
+    const traceTop = box(trace.element()).top;
+    expect(traceTop).toBeGreaterThanOrEqual(box(card).top);
+    expect(traceTop < box(card).top + 40 || card.scrollTop >= card.scrollHeight - card.clientHeight - 1).toBe(true);
+    // A keyboard reaches it, and its own border shows the focus: no ring around it.
+    const how = open.getByRole('button', { name: 'See how it was stopped' });
+    how.element().focus();
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(card);
+    const edge = getComputedStyle(card);
+    expect([edge.borderTopColor, edge.boxShadow, edge.outlineStyle]).toEqual([tokenColor('--line-focus'), 'none', 'none']);
+  });
+
+  it('an_open_entry_on_a_phone_scrolls_with_the_page', async () => {
+    // On a phone the page scrolls as usual and the card is as tall as what it holds.
+    await refuseTheAgentsCharge();
+    const { screen } = await renderRoute(SAFETY, { viewport: 'phone' });
+    const open = detail(screen);
+    await expect.element(open.getByText("This action didn't run.", { exact: true })).toBeInTheDocument();
+    await open.getByRole('button', { name: 'Full trace' }).click();
+    await expect.element(open.getByText('What was recorded', { exact: true })).toBeInTheDocument();
+    const card = open.element();
+    expect(card.scrollHeight).toBeLessThanOrEqual(card.clientHeight);
+    expect(card.hasAttribute('tabindex')).toBe(false);
+    const main = card.closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    expect(main.scrollHeight).toBeGreaterThan(main.clientHeight);
+    expectNoWindowScroll();
   });
 
   it.each(['desktop', 'phone'] as const)('header_says_what_the_page_is_on_%s', async (viewport) => {

@@ -114,6 +114,8 @@ export const Verified: Story = {
     }
 
     // trace_closes_on_escape: from inside the trace, Escape closes it; so does the close button.
+    // The trace itself takes focus only when a screen moves it there: Tab goes to its close button.
+    await expect(trace).toHaveAttribute('tabindex', '-1');
     const close = canvas.getByRole('button', { name: 'Close the full trace' });
     await userEvent.tab();
     await expect(close).toHaveFocus();
@@ -151,5 +153,27 @@ export const DevKey: Story = {
     await expect(canvas.queryByText(/Chain verified|Chain broken/)).toBeNull();
     const dot = canvasElement.querySelector('.cd-full-trace__chain .cd-status-dot');
     await expect(dot).toHaveClass('cd-status-dot--info');
+  },
+};
+
+export const InTheTabOrder: Story = {
+  args: { tabIndex: 0 },
+  parameters: {
+    canvasNote:
+      'Beside Safety’s every-entry list the trace scrolls inside itself, so Tab reaches it, ahead of its close button, and its own border shows the focus.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    const trace = canvas.getByRole('region', { name: 'Full trace of entry 2' });
+    await userEvent.tab();
+    await expect(trace).toHaveFocus();
+    // line-focus as the browser computes it, read off a probe.
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--line-focus)';
+    trace.append(probe);
+    const lineFocus = getComputedStyle(probe).color;
+    probe.remove();
+    expectComputed(trace, { borderTopColor: lineFocus, boxShadow: 'none', outlineStyle: 'none' });
+    await userEvent.tab();
+    await expect(canvas.getByRole('button', { name: 'Close the full trace' })).toHaveFocus();
   },
 };

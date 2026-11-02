@@ -14,6 +14,7 @@
 - `chain`: the page's `chain_ok` and `first_bad_seq`, or `null` before the ledger has been checked.
 - `devKey`: `Health.dev_signing_key`.
 - `onClose`, called by the close button and by Escape anywhere inside the trace. To move focus into the trace when it opens, focus the trace itself (it has `tabIndex={-1}`); return focus to the receipt when it closes.
+- `tabIndex={0}` when the screen lets the trace scroll inside itself, as Safety's every-entry view does beside its list: Tab reaches it, so a keyboard can scroll it, and its border turns `line-focus` on keyboard focus.
 
 ## What it shows
 
@@ -33,3 +34,4 @@ Nothing in the trace is computed or formatted: the kernel's values are shown as 
 | `chain` | `Pick<LedgerPage, 'chain_ok' \| 'first_bad_seq'> \| null` | Required. |
 | `devKey` | `boolean` | Required. |
 | `onClose` | `() => void` | Required. |
+| `tabIndex` | `0 \| -1` | `-1` by default; `0` for a trace that scrolls inside itself. |

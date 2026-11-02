@@ -16,6 +16,12 @@ export interface FullTraceProps {
   devKey: Health['dev_signing_key'];
   /** Called by the close button and by Escape inside the trace. */
   onClose: () => void;
+  /**
+   * `-1` (the default): the screen that opens the trace can move focus to it. `0` for a trace that
+   * scrolls inside itself, so a keyboard can reach and scroll it, as Safety's every-entry view does
+   * beside its list.
+   */
+  tabIndex?: 0 | -1;
 }
 
 /** Values longer than this are shortened in the middle; the whole value is in the `title`. */
@@ -31,7 +37,7 @@ function shorten(value: string): string {
  * record in mono (the only mono in Claude Desk) and the chain's state. Nothing is computed:
  * values are shown as given, long ones shortened in the middle.
  */
-export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
+export function FullTrace({ entry, chain, devKey, onClose, tabIndex = -1 }: FullTraceProps) {
   const titleId = useId();
   const status = traceChainLine(chain, entry.seq);
   const fields: readonly [label: string, value: string, full?: string][] = [
@@ -50,8 +56,8 @@ export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
   };
 
   return (
-    // tabIndex -1: the screen that opens the trace can move focus to it.
-    <section className="cd-full-trace" aria-labelledby={titleId} tabIndex={-1} onKeyDown={handleKeyDown}>
+    // The screen that opens the trace can move focus to it, and Tab reaches one that scrolls itself.
+    <section className="cd-full-trace" aria-labelledby={titleId} tabIndex={tabIndex} onKeyDown={handleKeyDown}>
       <div className="cd-full-trace__top">
         <p id={titleId} className="cd-full-trace__title cd-type-control">
           Full trace of entry {entry.seq}
