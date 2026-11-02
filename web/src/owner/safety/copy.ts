@@ -114,6 +114,9 @@ export function rowLabel(a: Pick<Attempt, 'kind' | 'cause' | 'triage'>): string 
 /** What Safety holds, under its title as the other owner pages say theirs: both of its views, in the owner's signed words. */
 export const SAFETY_SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
 
+/** The header's way to the requests held for the owner, which the reload's shapes measure too. */
+export const heldForYou = (n: number): string => `${n} held for you`;
+
 /** An attempt Claude hasn't sorted into a category yet. */
 export const NOT_SORTED = 'Not sorted yet';
 

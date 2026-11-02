@@ -25,10 +25,12 @@
  * their left, a text node only, apart from the Desk's replies, and the panel first collapses their
  * whitespace and cuts them to 280 characters, so a long model message can't flood the page.
  * Anything else an agent turn holds is ignored. The Desk's turns are its checked replies, shown as
- * they came, each with its receipts' `visitor_plain` under it, read-only. They are in English, the
+ * they came, each with its receipts' `visitor_plain` under it, read-only, except that a payment
+ * link paid, cancelled or expired loses "Open payment page", as in the visitor's chat and the owner's
+ * transcript (`usePaymentLinks`). They are in English, the
  * language the built-in agent writes in, so their cards' chrome is too.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
 import { ApiError, isUncertain, newIdempotencyKey, request } from '../../api/http.ts';
@@ -57,6 +59,8 @@ import {
   receiptFromEvent,
   type CopyLanguage,
 } from '../../ds/index.ts';
+import { paymentLinkMemory } from '../paymentLinks.ts';
+import { usePaymentLinks } from '../usePaymentLinks.ts';
 import type { AgentSession } from './agentSession.ts';
 import { AgentsCardContent } from './AgentsCard.tsx';
 import { PUBLIC_COPY } from '../copy.ts';
@@ -497,6 +501,10 @@ interface RunRowsProps {
  */
 function RunRows({ turns, task, taskSet, ownerName, language }: RunRowsProps) {
   const copy = AGENTS_COPY[language];
+  const replies = useMemo(() => turns.flatMap((turn) => turn.author === 'desk'
+    ? [{ message_id: `turn-${turn.n}`, blocks: turn.blocks }] : []), [turns]);
+  const [paymentLinks] = useState(paymentLinkMemory);
+  const paymentBlock = usePaymentLinks(replies, paymentLinks);
   let requests = 0;
   return (
     <>
@@ -533,7 +541,7 @@ function RunRows({ turns, task, taskSet, ownerName, language }: RunRowsProps) {
         });
         return (
           <TranscriptRow key={index} margin={margin}>
-            <ClaudeMessage blocks={turn.blocks} language={RUN_LANGUAGE} ownerName={ownerName} />
+            <ClaudeMessage blocks={turn.blocks.map(paymentBlock)} language={RUN_LANGUAGE} ownerName={ownerName} />
           </TranscriptRow>
         );
       })}
