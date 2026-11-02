@@ -615,8 +615,9 @@ describe('Demo inbox', () => {
     await expect.element(heading).toBeVisible();
     const page = screen.getByRole('main');
     await expect.element(page.getByText(alert.body)).toBeVisible();
-    // Unread as the page opened, so a screen reader hears that before its kind.
-    expect([...page.element().querySelectorAll('.cd-notifications__kind')].map((kind) => kind.textContent)).toContain('Unread: Alert');
+    // Unread as the page opened, so a screen reader hears that before its heading: the alert's
+    // title, the kernel's fixed line for a request held for the owner.
+    expect([...page.element().querySelectorAll('.cd-notifications__kind')].map((kind) => kind.textContent)).toContain('Unread: A request needs your answer');
     expect(page.getByText('To owner').elements()).toHaveLength(0);
     await expect.element(page.getByText(OWNER_SUBTITLE)).toBeVisible();
     // When it came, on the business's clock, under its day.
