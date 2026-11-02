@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import BRAND_PALETTE, Claim, PriceItem, RenderedBlock
+from desk.contracts import BRAND_PALETTE, Claim, PriceItem
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import Fact as FactRow
@@ -47,17 +47,6 @@ async def public_page(client: httpx.AsyncClient, copy: Rivera, lang: str = "en")
     response = await client.get(f"/public/{copy.slug}", params={"lang": lang})
     assert response.status_code == 200, response.text
     return PublicDesk.model_validate(response.json())
-
-
-def card_naming(card: list[RenderedBlock], name: str, shown: str) -> list[RenderedBlock]:
-    """The Agent Card `card`, which names `name`, naming `shown` in its place."""
-    assert any(name in block.text for block in card)
-    return [block.model_copy(update={"text": block.text.replace(name, shown)}) for block in card]
-
-
-# What the Agent Card says in place of a name the page withholds: fixed words, never the name
-WITHHELD_BUSINESS = {"en": "this business", "es": "este negocio"}
-WITHHELD_OWNER = {"en": "the owner", "es": "la persona a cargo"}
 
 
 async def test_a_document_body_in_the_business_name_is_refused(app, client):
@@ -360,10 +349,8 @@ async def test_a_stored_canary_is_withheld_from_the_public_page(app, client, fro
     assert response.status_code == 200, response.text
     assert dana.canary not in response.text and "Dana Whitfield" not in response.text
     page = PublicDesk.model_validate(response.json())
-    # the name gives way to its fallback, in the Agent Card too, and the rest of the page is served as it was
-    assert page == clean.model_copy(update={"business_name": "",
-                                            "agent_card": card_naming(clean.agent_card, "Turner Plumbing",
-                                                                      WITHHELD_BUSINESS["en"])})
+    # the name gives way, and the rest of the page is served as it was, the Agent Card included
+    assert page == clean.model_copy(update={"business_name": ""})
     # the owner hears of it at most once an hour
     alert = ("Text from one of your private documents is in your business name, so your public page doesn't show "
              "it. Change it to show it again.")
@@ -385,9 +372,7 @@ async def test_each_field_is_withheld_alone_and_a_split_withholds_them_all(app, 
     # the owner's name and a brand color, each holding a canary however written, give way alone
     await store_business(app, copy, owner_display_name=f"Mike {bob.canary.upper()}",
                          brand={"primary": "#1F4E4A", "accent": full_width(dana.canary)})
-    assert await public_page(client, copy) == clean.model_copy(update={
-        "owner_display_name": "", "brand": {},
-        "agent_card": card_naming(clean.agent_card, "Mike Turner", WITHHELD_OWNER["en"])})
+    assert await public_page(client, copy) == clean.model_copy(update={"owner_display_name": "", "brand": {}})
     assert await withheld_alerts(app, copy) == [
         "Text from one of your private documents is in your display name and brand colors, so your public page "
         "doesn't show them. Change them to show them again."]
@@ -408,27 +393,25 @@ async def test_each_field_is_withheld_alone_and_a_split_withholds_them_all(app, 
 
 
 @pytest.mark.parametrize("lang", ["en", "es"])
-async def test_the_agent_card_names_a_withheld_name_in_fixed_words(app, client, frozen_clock, lang):
+async def test_the_agent_card_names_no_one_so_a_withheld_name_leaves_it_as_it_was(app, client, frozen_clock, lang):
     copy = await rivera(app, client)
     seeded = await documents(app, copy)
     dana, bob = seeded["dana-invoice"], seeded["bob-warranty"]
     clean = await public_page(client, copy, lang)
-    # the business's name holds Dana's invoice: the card says "this business" in the page's language
+    # the card lists what an agent can do, by plain label: neither the business nor the owner is named in it
+    assert clean.agent_card and not any(name in block.text for block in clean.agent_card for name in ("Turner", "Mike"))
+    # the business's name holds Dana's invoice: the header withholds it, and the card is as it was
     await store_business(app, copy, name=dana.body)
     response = await client.get(f"/public/{copy.slug}", params={"lang": lang})
     assert response.status_code == 200, response.text
     assert dana.canary not in response.text and "Dana Whitfield" not in response.text
-    card = PublicDesk.model_validate(response.json()).agent_card
-    assert card == card_naming(clean.agent_card, "Turner Plumbing", WITHHELD_BUSINESS[lang])
-    assert all("  " not in block.text for block in card)
-    # the owner's name holds Bob's canary instead: the card says "the owner"
+    assert PublicDesk.model_validate(response.json()).agent_card == clean.agent_card
+    # the owner's name holds Bob's canary instead: the same
     await store_business(app, copy, name="Turner Plumbing", owner_display_name=f"Mike {bob.canary}")
     response = await client.get(f"/public/{copy.slug}", params={"lang": lang})
     assert response.status_code == 200, response.text
     assert bob.canary not in response.text
-    card = PublicDesk.model_validate(response.json()).agent_card
-    assert card == card_naming(clean.agent_card, "Mike Turner", WITHHELD_OWNER[lang])
-    assert all("  " not in block.text and " 's" not in block.text for block in card)
+    assert PublicDesk.model_validate(response.json()).agent_card == clean.agent_card
 
 
 async def test_ordinary_names_pass(app, client):

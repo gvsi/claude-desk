@@ -6,13 +6,12 @@ the language asked for (`?lang=es`, else English): its hours, its contact, then 
 charter fact with nothing to show (hours with no windows) or carrying a document canary is left
 out; owner writes of the charter refuse a canary (`desks.refuse_public_canaries`), so only one
 stored before that check could carry it. Nothing else is read: no people, prices, quotes,
-bookings or documents. `agent_card` is how a visiting agent talks to the Desk, in prose the kernel
-writes (`render.agent_card`): the tools an agent session may be given on this Desk now (its enabled
-tools with an adapter, of those an agent declares, kept to lead capture and callbacks while
-Answering is off), by plain label, the endpoint, how to sign, and that agent keys aren't business
-credentials. It names the business and the owner as the header shows them, so a name the header
-withholds is withheld there too, and said in fixed words instead ("this business", "the owner"), and
-a block carrying a canary is left out.
+bookings or documents. `agent_card` is what a visiting agent can do on the Desk, in prose the kernel
+writes (`render.agent_card`): one block for each tool an agent session may be given on this Desk now
+(its enabled tools with an adapter, of those an agent declares, kept to lead capture and callbacks
+while Answering is off), by plain label, and a block carrying a canary is left out. It names no one:
+the page shows the AI disclosure, and the API's code-built card where to send requests and how to
+sign them.
 
 `open_status` is the header's open-now line ("Open status"), computed from the same `charter:hours`
 fact in the business's time zone on the kernel's clock (`desks.open_window_status`), with its text
@@ -219,8 +218,7 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
     tools = set(await decide.enabled_tools(ctx, desk.desk_id)) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
     if not desk.answering:
         tools &= decide.ANSWERING_OFF_TOOLS
-    card = render.agent_card(lang, business=header["business_name"], owner=header["owner_display_name"],
-                             slug=desk.slug, tools=tools)
+    card = render.agent_card(lang, tools)
     return PublicDesk(**header, charter=charter,
                       agent_card=[block for block in card if not reply_check.carries(block, canaries)],
                       open_status=_open_status(facts, info, now, lang), starters=_starters(rows, canaries, now, lang))

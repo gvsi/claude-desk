@@ -87,8 +87,8 @@ if (any(set(lines) != OWNER_STATUS_KEYS for lines in OWNER_STATUS.values())
 if any(set(lines) != set(en.EXECUTED) for lines in EXECUTED.values()):
     # so a tool with a line has one in whatever language the session reads by the time it runs
     raise RuntimeError("every language has an executed line for the same tools")
-if set(es.AGENT_TOOLS) != set(en.AGENT_TOOLS) or len(es.AGENT_CARD) != len(en.AGENT_CARD):
-    raise RuntimeError("every language has the whole Agent Card and a label for every agent tool")
+if set(es.AGENT_TOOLS) != set(en.AGENT_TOOLS):
+    raise RuntimeError("every language has a label for every agent tool")
 
 
 def language(last_language: str | None) -> Language:
@@ -133,20 +133,14 @@ def owner_line(key: str) -> str:
     return OWNER_STATUS[OWNER_LANGUAGE][key]
 
 
-def agent_card(lang: str, *, business: str, owner: str, slug: str, tools: Collection[str]) -> list[RenderedBlock]:
-    """The Agent Card of a Desk in `lang`: prose blocks naming who answers (an AI, Claude, within
-    `owner`'s rules), what an agent can do there (the labels of `tools`, in the order the card
-    lists them), the endpoint and how to sign, and that agent keys aren't business credentials.
-    A tool without a label is left out rather than named; nothing carries an amount or a key. An
-    empty `business` or `owner` (a name the public page withholds) reads as fixed words ("this
-    business", "the owner"), never as a blank."""
+def agent_card(lang: str, tools: Collection[str]) -> list[RenderedBlock]:
+    """The Agent Card of a Desk in `lang`: one prose block for each of `tools` an agent can ask
+    for, by its plain label, in the order the card lists them, or one block saying there is nothing
+    yet. A tool without a label is left out rather than named; no block carries an amount, a key or
+    a name. Where to send requests and how to sign them is the API's card, not this one."""
     module = en if lang == "en" else es
     labels = [label for tool, label in module.AGENT_TOOLS.items() if tool in tools]
-    listed = module.listing(labels) if labels else module.AGENT_CARD_NO_TOOLS
-    business = business if business.strip() else module.AGENT_CARD_BUSINESS
-    owner = owner if owner.strip() else module.AGENT_CARD_OWNER
-    return [RenderedBlock(kind="prose", text=line.format(business=business, owner=owner, slug=slug, tools=listed))
-            for line in module.AGENT_CARD]
+    return [RenderedBlock(kind="prose", text=label) for label in labels or [module.AGENT_CARD_NO_TOOLS]]
 
 
 def owner_preview(kind: str) -> str:
