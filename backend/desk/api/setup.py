@@ -540,7 +540,8 @@ def website_url(text: str | None) -> tuple[str, str] | None:
 class Entry(BaseModel):
     """One stored line of an interview: what the owner sees (`role`, `text`), and for code alone, the question a
     Claude line asks, the read a label stands for and what it returned (untrusted text, for later turns), and a
-    website the line named or read. A Claude question can carry choices; a card is a Claude entry with empty text.
+    website the line named or read. A Claude question can carry choices, and `several` when more than one of them can
+    be picked (never on a question code words itself, such as a limit's); a card is a Claude entry with empty text.
     Covered topics record what this entry's turn finished or skipped, for code alone. Planned cards and dropped
     proposal ids are hidden turn metadata; a shown card is a separate copy so its decision can change in place.
     A pending run ID marks an answer until its background work lands."""
@@ -555,6 +556,7 @@ class Entry(BaseModel):
     website: str | None = None
     search_queries: list[str] | None = None
     choices: list[Choice] = []
+    several: bool = False
     card: ProposalCard | None = None
     covered: list[QuestionKey] = []
     suggested: SuggestedFacts | None = None
@@ -765,7 +767,7 @@ def _stored(interview: Interview) -> dict:
             # Omit only top-level nulls and empty additions; nested card nulls are part of its payload.
             "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
                                                                  if value is None or
-                                                                 (name in {"choices", "covered", "planned", "dropped", "cards", "owner_fields",
+                                                                 (name in {"choices", "several", "covered", "planned", "dropped", "cards", "owner_fields",
                                                                            "owner_decided", "asks_after",
                                                                            "connector_connect_attempted"}
                                                                   and not value)})
@@ -862,7 +864,8 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False,
                       consent=interview.consent, question=interview.question, busy=interview.busy,
                       pending_card=interview.pending_card,
                       held_policy_keys=interview.held_policy_keys,
-                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry),
+                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices,
+                                             several=entry.several, card=visible(entry),
                                              owner_decided=entry.owner_decided)
                                 for entry in interview.transcript[1:]
                                 if (entry.text or entry.choices or entry.card is not None) and
@@ -1586,6 +1589,14 @@ def _ask(interview: Interview, key: QuestionKey) -> Entry:
                  choices=_limit_choices(interview, key))
 
 
+def _claudes_ask(interview: Interview, key: QuestionKey, question: str, choices: list[Choice], several: bool) -> Entry:
+    """A topic question in Claude's words (the topic's own when it gave none), with its choices: two to four, or none.
+    `several` lets the owner pick more than one, so it holds only with choices."""
+    choices = _normalize_choices(choices)
+    return Entry(role="claude", text=question.strip() or question_text(key, interview.business_type), question=key,
+                 choices=choices, several=several and bool(choices))
+
+
 def _limit_choices(interview: Interview, key: QuestionKey) -> list[Choice]:
     return [Choice(text=choice.text, recommended=False) for choice in LIMIT_CHOICES[key](interview.business_type)] \
         if key in LIMIT_CHOICES else []
@@ -1700,9 +1711,8 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
                                       connectable=True)
         opening.planned.append(ProposalCard(
             proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None, connector=connector))
-    interview.transcript.append(Entry(role="claude", text=answer.question.strip() or
-                                     question_text(answer.next_topic, interview.business_type),
-                                     question=answer.next_topic, choices=_normalize_choices(answer.choices)))
+    interview.transcript.append(_claudes_ask(interview, answer.next_topic, answer.question, answer.choices,
+                                             answer.several))
 
 
 def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:
@@ -2558,8 +2568,8 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
             fitting = follow_up.next.kind == "done" or (follow_up.next.kind == "topic"
                                                         and follow_up.next.topic not in LIMIT_CHOICES)
             if question and fitting and (reply is None or question != reply.text.strip()):
-                asked.text = question
-                asked.choices = _normalize_choices(follow_up.choices)
+                asked = _claudes_ask(interview, key, question, follow_up.choices,
+                                     follow_up.next.kind == "topic" and follow_up.next.several)
                 reason = "turn_question"
     else:
         added = {card.proposal_id for entry in interview.transcript[since:] for card in entry.planned}
@@ -2614,9 +2624,8 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     if isinstance(asked, str):
         fitting = source is not None and source.next.kind == "topic" and source.next.topic == asked
         interview.transcript.append(_ask(interview, asked) if asked in LIMIT_CHOICES or not fitting else
-                                    Entry(role="claude", text=source.question.strip() or
-                                          question_text(asked, interview.business_type), question=asked,
-                                          choices=_normalize_choices(source.choices)))
+                                    _claudes_ask(interview, asked, source.question, source.choices,
+                                                 source.next.several))
     elif isinstance(asked, ProposalCard):
         fitting = _names_card(source, asked)
         if fitting and source.question.strip():
@@ -2770,11 +2779,22 @@ async def _card_turn(owner, engine, model, interview: Interview, proposal_id: st
     await _advance(owner, engine, model, interview, following, reply)
 
 
+def picked_answer(choices: list[Choice], picks: list[str], text: str) -> str:
+    """The owner's answer as the transcript keeps it and the turn reads it (`owner_answer`): the picked choices in the
+    order the question lists them, joined by ", ", then the typed text, if any, on a line of its own. One pick and no
+    text reads exactly as the choice's text, as a click always did, so a limit's exact choice still applies."""
+    picked = ", ".join(dict.fromkeys(choice.text for choice in choices if choice.text in picks))
+    return "\n".join(part for part in (picked, text) if part)
+
+
 async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: SetupQuestion | None,
                  text: str, *, runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
-                 card: str | None = None, cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
-    """Run a question or typed card answer through the shared turn runner; busy repeats do no work."""
-    if (question is None) == (card is None):
+                 card: str | None = None, picks: list[str] | None = None, cards: bool = False,
+                 business_tools_enabled: bool = False) -> SetupState:
+    """Run a question or typed card answer through the shared turn runner; busy repeats do no work. A question's
+    answer may pick from its choices (`picks`), and reads as `picked_answer`."""
+    picks = list(picks or [])
+    if (question is None) == (card is None) or (card is not None and picks) or not (text or picks):
         raise ApiProblem(422, "invalid_request")
 
     connect = False
@@ -2786,9 +2806,15 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                 raise ApiProblem(409, "conflict")
         elif interview.question is None or interview.question != question:
             raise ApiProblem(409, "conflict")
+        if picks:
+            asked = interview.latest_ask
+            if (not set(picks) <= {choice.text for choice in asked.choices} or len(set(picks)) != len(picks)
+                    or (len(picks) > 1 and not asked.several)):
+                raise ApiProblem(422, "invalid")
 
     def stage(interview: Interview) -> list[Entry]:
-        return [Entry(role="owner", text=text)]
+        said = picked_answer(interview.latest_ask.choices, picks, text) if picks else text
+        return [Entry(role="owner", text=said)]
 
     async def run(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
         nonlocal connect
@@ -2805,7 +2831,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                 connect = _claim_connector_connect(interview)
             return
         said, = staged
-        await _question_turn(ctx, engine, model, interview, question, text, said)
+        await _question_turn(ctx, engine, model, interview, question, said.text, said)
         if interview.step == "tools":
             connect = _claim_connector_connect(interview)
 

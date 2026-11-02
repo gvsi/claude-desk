@@ -405,7 +405,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.32"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.33"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -589,6 +589,19 @@ def test_setup_only_offers_answers_from_facts_it_can_store():
     for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_TURN_SYSTEM,
                    SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
         assert "there's no place yet for other terms such as deposit or cancellation rules" in system
+
+
+def test_setup_says_when_a_question_takes_several_answers():
+    """A topic question whose choices can be true at once lets the owner pick several of them (`several`, inside
+    `next` on a planning turn and beside the choices in the opening); one with a single expected answer doesn't."""
+    for system in (prompts.SETUP_UNDERSTAND_SYSTEM, SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        line = next(line for line in system.splitlines() if "several" in line and "can be true at once" in line)
+        assert "what takes up their time" in line
+        assert "false when one answer is expected" in line
+        assert "false without choices" in line
+    for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
+        assert "which channels customers use" in system
+        assert "a yes or no, or a pick of one setting" in system
 
 
 def test_setup_follow_up_asks_about_the_part_still_open():

@@ -60,7 +60,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.32"
+PROMPT_VERSION = "2026-10-31.33"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -1005,6 +1005,9 @@ type their own, and when your question lists likely answers, put those in choice
 empty for a card. Mark one recommended only when it's a setting you're \
 proposing, with the reason in the question; never on a question about the business's facts, and never offer \
 choices for facts only the owner knows, such as hours, prices or contact details.
+- several (in next, for a topic): true when more than one of your choices can be true at once, such as what takes \
+up their time or which channels customers use, so the owner can pick several; false when one answer is expected, \
+such as a yes or no, or a pick of one setting, and always false without choices.
 - Order: what unlocks the most value first, with each job's prerequisites before it. Don't ask what \
 <answers_so_far> already holds.
 - skip: topics left that don't fit this business. drop: ids of planned items that no longer fit. add_jobs: at \
@@ -1063,7 +1066,9 @@ No plan and no list of what you'd set up yet: that comes once you've heard from 
 - next_topic what_you_do, and question: one open question about how their days go, such as what takes up their \
 time that isn't the work itself, which questions they answer over and over, or what slips through after hours. \
 choices: two to four of the likely answers your question names, such as calls about prices or people asking when \
-you can come, so the owner can tap one or type their own; never mark one recommended.
+you can come, so the owner can tap one or type their own; never mark one recommended. several: true when more than \
+one of those choices can be true at once, as with what takes up their time, so the owner can pick several; false \
+when one answer is expected, and always false without choices.
 - jobs and connectors: your plan, which stays hidden for now. The owner doesn't see it as a list; once you've \
 heard about their days you'll describe the fit and then propose each job one at a time, and you can drop or add \
 jobs as you learn more. The two or three jobs worth the most to this business, most valuable first (a fourth only \
@@ -1783,6 +1788,7 @@ class SetupUnderstanding(DraftOutput):
     next_topic: Literal["what_you_do", "hours_and_area", "contact_and_after_hours"]
     question: str = Field(max_length=300)
     choices: list[Choice] = Field(max_length=4)
+    several: bool = Field(description="True when more than one choice can be true at once.")
     suggested: SuggestedFacts
 
     @field_validator("choices", mode="before")
@@ -1796,6 +1802,10 @@ class NextTopic(BaseModel):
 
     kind: Literal["topic"]
     topic: QuestionKey
+    # Whether the owner may pick more than one of the question's choices. It rides here, inside `next`, because the
+    # fact turns are at the 20-property limit, and has no description, because the contact turn is near its
+    # character cap (tests/api/test_schema_budget.py); `_NEXT` says when to set it.
+    several: bool
 
 
 class NextJob(BaseModel):
@@ -1830,7 +1840,7 @@ def planning_fields() -> dict[str, tuple[object, Any]]:
         "choices": (list[Choice], Field(max_length=4, description="At most 4 topic choices; empty for cards.")),
         "skip": (list[QuestionKey], Field(max_length=7, description="At most 7 topics that do not fit.")),
         "drop": (list[str], Field(max_length=5, description="At most 5 planned ids that no longer fit.")),
-        "add_jobs": (list[JobDraft], Field(max_length=2, description="At most 2 newly revealed jobs; available next turn.")),
+        "add_jobs": (list[JobDraft], Field(max_length=2, description="At most 2 new jobs; available next turn.")),
         "plan": (str, Field(max_length=1500, description="Closing plan, at most 1500 characters; "
                                                         "read only when next is done.")),
     }

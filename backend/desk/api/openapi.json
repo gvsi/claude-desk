@@ -3335,7 +3335,7 @@
     "/api/owner/setup/{id}/answer": {
       "post": {
         "summary": "Setup Answer",
-        "description": "Use the shared turn runner for the owner's answer to the question waiting, which the answer names\n(409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Claude replies,\nupdates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to\n25 seconds: 200 with the landed state or 202 `SetupState` with `busy: true`. Any turn while busy answers 202\nwithout running or counting on the limits. Cancelling the request leaves the turn working. Failure or\nabandonment removes the staged answer and leaves the same question waiting, so the owner can retry.\n503 `model_unavailable` when Claude couldn't answer or the run deadline expires.",
+        "description": "Use the shared turn runner for the owner's answer to the question waiting, which the answer names\n(409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Picks that aren't the\nquestion's own choices, or more than one on a question without `several`, are 422 `invalid`. Claude replies,\nupdates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to\n25 seconds: 200 with the landed state or 202 `SetupState` with `busy: true`. Any turn while busy answers 202\nwithout running or counting on the limits. Cancelling the request leaves the turn working. Failure or\nabandonment removes the staged answer and leaves the same question waiting, so the owner can retry.\n503 `model_unavailable` when Claude couldn't answer or the run deadline expires.",
         "operationId": "owner_setup_answer",
         "parameters": [
           {
@@ -14053,17 +14053,25 @@
           "text": {
             "type": "string",
             "maxLength": 2000,
-            "minLength": 1,
-            "title": "Text"
+            "title": "Text",
+            "default": ""
+          },
+          "picks": {
+            "items": {
+              "type": "string",
+              "maxLength": 80,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Picks",
+            "default": []
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "text"
-        ],
         "title": "SetupAnswerIn",
-        "description": "`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.\nNaming the ask prevents a repeated answer from answering the next one."
+        "description": "`POST /api/owner/setup/{id}/answer`: the owner's answer to exactly one waiting question or card id, typed\n(`text`), picked from the question's choices (`picks`) or both, never neither. Naming the ask prevents a repeated\nanswer from answering the next one. Picks answer a question, never a card: each is the exact text of one of its\nchoices, once, and more than one only when the question has `several` (422 `invalid` otherwise)."
       },
       "SetupConsentIn": {
         "properties": {
@@ -14103,6 +14111,11 @@
             "title": "Choices",
             "default": []
           },
+          "several": {
+            "type": "boolean",
+            "title": "Several",
+            "default": false
+          },
           "card": {
             "anyOf": [
               {
@@ -14125,7 +14138,7 @@
           "text"
         ],
         "title": "SetupMessage",
-        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided\nthemselves, by a click or a typed answer; a card setup settled for them (as \"Use your suggestions\" does) stays\nfalse. Read-only: it only says what happened."
+        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices, and `several`\nmarks one whose choices the owner may pick more than one of (`SetupAnswerIn.picks`); a card belongs only to a\ncard message, with role `claude` and empty text. `owner_decided` marks a card the owner decided\nthemselves, by a click or a typed answer; a card setup settled for them (as \"Use your suggestions\" does) stays\nfalse. Read-only: it only says what happened."
       },
       "SetupProposalIn": {
         "properties": {
