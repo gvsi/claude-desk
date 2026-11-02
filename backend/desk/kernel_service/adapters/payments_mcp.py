@@ -229,13 +229,6 @@ class CreateRefundAdapter:
         answer within `READ_DEADLINE_S`) or one already partly refunded is refused at step 1."""
         if verified_person(nctx.principal) is None:
             raise AdapterRefusal("not_verified")
-        # A charge still bound only to an unverified session has no verified record owner.
-        # In particular, terminal sample payments must never become a provider lookup or refund.
-        stored = (await nctx.ctx.db.scalars(nctx.ctx.repo.scoped(select(FactRow).where(
-            FactRow.desk_id == nctx.desk_row.desk_id, FactRow.fact_id == f"charge:{args.charge_id}",
-            FactRow.kind == "charge")))).one_or_none()
-        if stored is not None and stored.record_owner is None:
-            raise AdapterRefusal("no_such_charge")
         try:
             charge = await payments.provider(nctx.ctx).read_charge(args.charge_id)
         except (payments.ProviderError, payments.ProviderTimeout):

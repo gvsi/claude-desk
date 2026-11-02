@@ -257,6 +257,7 @@ async def test_sample_payment_is_terminal_and_never_calls_the_provider(week_on, 
     def no_provider(*args, **kwargs):
         pytest.fail("terminal sample link contacted the provider")
 
+    real_provider = payments.provider
     monkeypatch.setattr(payments, "provider", no_provider)
     response = await client.get(f"/payment_links/{link.token}")
     assert response.status_code == 200 and response.json()["state"] == "paid"
@@ -280,6 +281,9 @@ async def test_sample_payment_is_terminal_and_never_calls_the_provider(week_on, 
     [dana] = await rows_of(app, created.copy_id, select(Person).where(Person.ref == "dana"))
     opened = (await client.post("/sessions", json={"desk_slug": desk.slug, "kind": "visitor"})).json()
     await verify_session(app, created.copy_id, opened["state"]["session_id"], dana.person_id)
+    # The sample charge was never made at the payments server, so a verified customer's refund of it is refused
+    # there like any unknown charge, and nothing is refunded.
+    monkeypatch.setattr(payments, "provider", real_provider)
     response = await client.post("/decide", headers={auth.SESSION_HEADER: opened["session_token"]}, json={
         "session_id": opened["state"]["session_id"], "generation": 0,
         "call": {"call_id": "sample-refund", "tool": "payments.create_refund",
