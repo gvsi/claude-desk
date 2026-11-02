@@ -95,6 +95,14 @@
   color: var(--text-primary);
 }
 
+/* An intake's questions, one numbered line each, in the row's meta type. */
+.cd-connector-review__setup-list {
+  margin: 0;
+  padding-inline-start: var(--space-16);
+  display: grid;
+  gap: var(--space-4);
+}
+
 @container cd-job-setup (max-width: 479.98px) {
   .cd-connector-review__setup-row {
     grid-template-columns: minmax(0, 1fr);
@@ -111,6 +119,11 @@
   border-top: 1px solid var(--line-hairline);
 }
 
+/* An app's one row before it is connected sits straight in the card, as the board draws it. */
+.cd-connector-review__tool--placeholder {
+  padding-block: 0;
+}
+
 .cd-connector-review__layout {
   display: flex;
   flex-wrap: wrap;
@@ -123,6 +136,14 @@
 .cd-connector-review__text {
   flex: 1 1 240px;
   min-width: 0;
+}
+
+/* "Not connected" where a tool's outcome sits, as a read-only outcome draws its words and dot. */
+.cd-connector-review__status {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
 }
 
 .cd-connector-review__name {

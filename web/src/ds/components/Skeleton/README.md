@@ -6,7 +6,7 @@
 
 - A page or a part of a page whose first read is out: the owner app's full-page loader, a page's list while it is read, the visitor's chat while it opens. The shapes stand where the content will be, so the content lands where they were.
 - Not an action at work, such as a click in flight: that is a busy `Button`. Not someone writing: that is `WritingIndicator`.
-- Not the loaders that keep `LoadingLine`: a customer's page, All rules, a rule draft and its change, the Demo inbox's open sheet, the connector review inside setup's tools step, setup's "Connecting Stripe", setup's live step while its Desks are read on a reload, and the agents page's run panel, whose line is an action at work.
+- Not the loaders that keep `LoadingLine`: a customer's page, All rules, a rule draft and its change, the Demo inbox's open sheet, the connector review inside setup's tools step, setup's live step while its Desks are read on a reload, and the agents page's run panel, whose line is an action at work.
 - A revisit whose reads are cached draws the page at once: `loading` is false from the start, so no skeleton mounts.
 
 ## What the consumer provides

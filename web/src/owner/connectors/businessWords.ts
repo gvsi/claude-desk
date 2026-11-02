@@ -10,7 +10,12 @@ export const BUSINESS_WORDS = {
   lead: 'A job from your setup questions. Here’s how it’s set up; nothing runs until you turn it on.',
 } as const;
 
-export interface BusinessSetupRow { label: string; value: string }
+/**
+ * One row of a job's "How it’s set up": its label and its value in one line. A value that is a list
+ * (an intake's questions) also carries its entries one by one in `items`, as the owner wrote them,
+ * so a review can set them one per line.
+ */
+export interface BusinessSetupRow { label: string; value: string; items?: readonly string[] }
 
 /**
  * The owner's own line per block, signed by the project owner.
@@ -84,7 +89,7 @@ export function businessRows(def: BusinessToolDef, mode: RuleMode): BusinessSetu
     ...next(mode === 'auto' ? 'The booking shows in Today, with their answers' : 'You approve each request in Needs you'),
   ];
   if (config.block === 'intake') return [
-    { label: BUSINESS_WORDS.asks, value: config.questions.join(' ') },
+    { label: BUSINESS_WORDS.asks, value: config.questions.join(' '), items: [...config.questions] },
     ...next('Their answers show on the booking'),
   ];
   if (config.block === 'purpose_payment') return [
