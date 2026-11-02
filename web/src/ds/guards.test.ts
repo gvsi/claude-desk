@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import { pairContrast } from './contrast.ts';
@@ -281,9 +282,80 @@ function webSources(): Source[] {
     .map((file) => ({ file, text: readFileSync(path.join(src, file), 'utf8') }));
 }
 
-/** `text` without its comments, so a guard reads only code and the strings code holds. */
-function withoutComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+/** What `withoutComments` made of each source it read, by grammar and text: several guards read the same files. */
+const COMMENT_FREE = new Map<string, string>();
+/**
+ * For a guard that reads every web source without its comments: parsing them all takes a few
+ * seconds, more on a CI runner, once for whichever such guard runs first (`COMMENT_FREE`).
+ */
+const READS_EVERY_SOURCE = { timeout: 30_000 };
+
+/** `text` with each of `ranges` (start and end offsets) blanked: spaces, its line breaks kept. */
+function blanked(text: string, ranges: Iterable<readonly [number, number]>): string {
+  const units = text.split('');
+  for (const [start, end] of ranges) {
+    for (let i = start; i < end; i += 1) if (units[i] !== '\n' && units[i] !== '\r') units[i] = ' ';
+  }
+  return units.join('');
+}
+
+/**
+ * `code` without its comments, so a guard reads only code and the strings code holds. TypeScript's
+ * own parser finds them, so a comment marker in a string, a template literal, a regex or JSX text is
+ * text, and a JSX expression holding only a comment is a comment. Each comment becomes spaces with its
+ * line breaks kept, so the code keeps its place. `file` picks the grammar: TypeScript for a `.ts`
+ * file, where `<T>(value: T) => value` is a generic, and TSX for anything else.
+ */
+function withoutComments(code: string, file = 'code.tsx'): string {
+  const kind = file.endsWith('.ts') ? ts.ScriptKind.TS : ts.ScriptKind.TSX;
+  const key = `${kind}\0${code}`;
+  const known = COMMENT_FREE.get(key);
+  if (known !== undefined) return known;
+  const tree = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true, kind);
+  const comments = new Map<number, number>();
+  const jsxText: [number, number][] = [];
+  const add = (ranges: ts.CommentRange[] | undefined) => {
+    for (const range of ranges ?? []) comments.set(range.pos, range.end);
+  };
+  // Every node and token, and the comments before and after each. JSX text is text, not trivia, and a
+  // JSDoc comment is found as the comment before its node.
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxText(node)) {
+      jsxText.push([node.pos, node.end]);
+      return;
+    }
+    add(ts.getLeadingCommentRanges(code, node.getFullStart()));
+    add(ts.getTrailingCommentRanges(code, node.end));
+    for (const child of node.getChildren(tree)) if (!ts.isJSDoc(child)) visit(child);
+  };
+  visit(tree);
+  const inText = (start: number) => jsxText.some(([from, to]) => from <= start && start < to);
+  const stripped = blanked(code, [...comments].filter(([start]) => !inText(start)));
+  COMMENT_FREE.set(key, stripped);
+  return stripped;
+}
+
+/**
+ * `css` without its comments, blanked as `withoutComments` blanks them. CSS has block comments only,
+ * so a "//" in a URL is text, and a comment marker inside a quoted string is text too.
+ */
+function withoutCssComments(css: string): string {
+  const comments: [number, number][] = [];
+  let quote = '';
+  for (let i = 0; i < css.length; i += 1) {
+    const char = css.charAt(i);
+    if (quote) {
+      if (char === '\\') i += 1;
+      else if (char === quote || char === '\n') quote = '';
+    } else if (char === '"' || char === "'") quote = char;
+    else if (css.startsWith('/*', i)) {
+      const close = css.indexOf('*/', i + 2);
+      const end = close === -1 ? css.length : close + 2;
+      comments.push([i, end]);
+      i = end - 1;
+    }
+  }
+  return blanked(css, comments);
 }
 
 /** Every stylesheet under `web/src/`, paths relative to it: the app's, the About pages' and the design system's. */
@@ -298,7 +370,7 @@ function webStylesheets(): Source[] {
 const BLUE_EDGE = /\b(?:outline(?:-color)?|box-shadow)\s*:[^;{}]*var\(\s*--(?:accent-blue|va-link)\s*(?:,[^)]*)?\)/g;
 
 function blueEdges(css: string): string[] {
-  return matches(BLUE_EDGE)(withoutComments(css));
+  return matches(BLUE_EDGE)(withoutCssComments(css));
 }
 
 // A selector for a state the pointer or the keyboard puts a control in.
@@ -323,7 +395,7 @@ function focusOrHoverRules(css: string): { selector: string; declarations: [stri
     }
     statement = '';
   };
-  for (const char of withoutComments(css)) {
+  for (const char of withoutCssComments(css)) {
     if (quote) {
       statement += char;
       if (escaped) escaped = false;
@@ -463,6 +535,47 @@ describe('design system source guards', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('strips_comments_outside_strings_only', () => {
+    // A comment marker inside a string, a template literal, a URL, a regex or JSX text is text, so the
+    // code after it stays.
+    const kept = [
+      "const a = '//'; const card = <FactCard />;",
+      'const a = "/*"; const card = <FactCard />;',
+      'const a = `a // b ${c} d`; const card = <FactCard />;',
+      "const url = 'https://example.com/a'; const card = <FactCard />;",
+      "const said = 'it\\'s // here'; const card = <FactCard />;",
+      'const re = /"/; const marker = "/*"; const card = <FactCard />;',
+      'const re = /\\/api\\//; const card = <FactCard />;',
+      'const re = /[`]/;\nconst x = `https://example.com`; const card = <FactCard />;',
+      "<p>It's ready</p> <a href='https://x.test'>go</a> <FactCard />",
+      'const page = <p>Read // this, then /* that</p>; const card = <FactCard />;',
+    ];
+    for (const code of kept) expect(withoutComments(code), code).toBe(code);
+    // Comments go, quotes and markers inside them included, each as spaces with its line breaks
+    // kept: a block comment, a line comment, one in a template literal's code, one after a regex,
+    // and one in a JSX expression.
+    const blank = (comment: string) => comment.replace(/[^\r\n]/g, ' ');
+    expect(withoutComments(`const a = "/*"; /* a FactCard's note */ const b = 1;`)).toBe(`const a = "/*"; ${blank("/* a FactCard's note */")} const b = 1;`);
+    expect(withoutComments("const a = 1; // it's a FactCard\nconst b = '//';")).toBe(`const a = 1; ${blank("// it's a FactCard")}\nconst b = '//';`);
+    expect(withoutComments('const a = `${b /* FactCard */} // c`;')).toBe('const a = `${b ' + blank('/* FactCard */') + '} // c`;');
+    expect(withoutComments("const re = /'/; // FactCard")).toBe(`const re = /'/; ${blank('// FactCard')}`);
+    const jsx = 'const page = (\n  <div>\n    {/* a FactCard\n       here */}\n    <Card />\n  </div>\n);';
+    expect(withoutComments(jsx)).toBe(jsx.replace('/* a FactCard\n       here */', blank('/* a FactCard\n       here */')));
+    // A `.ts` file reads as TypeScript, where `<T>(value: T) => value` is a generic, not JSX.
+    const generic = 'const same = <T,>(value: T) => value; // FactCard\nconst id = <T>(value: T): T => value; /* FactCard */';
+    expect(matches(/\bFactCard\b/)(withoutComments(generic, 'same.ts'))).toEqual([]);
+  });
+
+  it('strips_css_comments_outside_strings_only', () => {
+    // CSS has block comments only: a "//" in a URL is text, and so is a marker inside a quoted string.
+    const probe = '.a { background: url(https://x.test/a.png); } .b:focus { outline: 1px solid var(--accent-blue); }';
+    expect(withoutCssComments(probe)).toBe(probe);
+    expect(blueEdges(probe)).toEqual(['outline: 1px solid var(--accent-blue)']);
+    expect(ringsOnFocusOrHover(probe)).toEqual(['.b:focus { outline: 1px solid var(--accent-blue) }']);
+    const quoted = `.a::after { content: "/* not a comment */"; } /* a comment's note */ .b { margin: 0; }`;
+    expect(withoutCssComments(quoted)).toBe(quoted.replace("/* a comment's note */", ' '.repeat(22)));
   });
 
   const sources = scannedSources();
@@ -740,11 +853,11 @@ describe('design system source guards', () => {
     expect(problems.filter((problem) => problem !== null)).toEqual([]);
   });
 
-  it('fact_card_only_on_the_vision_pages', () => {
+  it('fact_card_only_on_the_vision_pages', READS_EVERY_SOURCE, () => {
     // FactCard shows a vision page's sample facts. A real conversation's facts reach a visitor only as
     // the kernel's rendered cards (ReplyCard), so nothing in the web app may name it but its own
     // folder, the index that exports it, the vision boards' page parts and the vision pages.
-    const named = (text: string) => matches(/\bFactCard\b/)(withoutComments(text));
+    const named = (text: string, file?: string) => matches(/\bFactCard\b/)(withoutComments(text, file));
     // An import names it three times: the binding and the path's folder and file.
     expect(named("import { FactCard } from '../components/FactCard/FactCard.tsx';")).toHaveLength(3);
     expect(named('const card = <FactCard label="Job card" icon="calendar" title="Friday" />;')).toHaveLength(1);
@@ -754,17 +867,17 @@ describe('design system source guards', () => {
     const allowed = (file: string) =>
       file.startsWith('ds/components/FactCard/') || file === 'ds/index.ts' || file === 'ds/boards/vision.tsx' || file.startsWith('vision/');
     const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
-    expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
+    expect(files.filter(({ file, text }) => !allowed(file) && named(text, file).length > 0).map(({ file }) => file)).toEqual([]);
     // It is named where it is meant to be, so the check can't pass by finding nothing.
-    expect(files.filter(({ file, text }) => file === 'ds/boards/vision.tsx' && named(text).length > 0)).toHaveLength(1);
+    expect(files.filter(({ file, text }) => file === 'ds/boards/vision.tsx' && named(text, file).length > 0)).toHaveLength(1);
   });
 
-  it('inert_controls_only_on_the_vision_pages', () => {
+  it('inert_controls_only_on_the_vision_pages', READS_EVERY_SOURCE, () => {
     // The inert props make a control do nothing, for a vision page, which makes no requests. A real
     // page must send, answer, download, pick a suggestion and ask for the owner, so only the
     // components that take them, the vision boards' page parts, the vision pages and the module of
     // the line an inert control shows may name them.
-    const named = (text: string) => matches(/\binert(?:Send|Answers|Download|Suggestions|Ask)\b/)(withoutComments(text));
+    const named = (text: string, file?: string) => matches(/\binert(?:Send|Answers|Download|Suggestions|Ask)\b/)(withoutComments(text, file));
     expect(named('<Composer variant="visitor" onSend={send} inertSend />')).toEqual(['inertSend']);
     expect(named('const props = { inertAnswers: true, inertDownload };')).toEqual(['inertAnswers', 'inertDownload']);
     expect(named('// inertSend in a comment\nconst inert = true; const inertSending = 1;')).toEqual([]);
@@ -783,7 +896,7 @@ describe('design system source guards', () => {
       file === 'ds/components/VisionBar/visionInert.tsx' ||
       file === 'ds/boards/vision.tsx';
     const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
-    expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
+    expect(files.filter(({ file, text }) => !allowed(file) && named(text, file).length > 0).map(({ file }) => file)).toEqual([]);
     // They are used where they are meant to be, so the check can't pass by finding nothing: the
     // phone's held quote and composer; the Claude account's invoice, composer and Ask; and the city
     // office's composer, Ask and suggestions.
@@ -799,13 +912,13 @@ describe('design system source guards', () => {
     ]);
   });
 
-  it('only_delivered_replies_and_setup_questions_can_open_markdown_links', () => {
+  it('only_delivered_replies_and_setup_questions_can_open_markdown_links', READS_EVERY_SOURCE, () => {
     // Default and explicit inert links stay available to stopped drafts. Any other links prop
     // (including a constant) or spread could open links, so only these consumers may use it:
     // delivered replies (ClaudeMessage), the owner chats' growing reply, which takes ClaudeMessage's
     // PROSE_LINKS so the saved reply replaces it without a jump, and setup's docked question.
-    const canOpen = (text: string) =>
-      matches(/<ChatMarkdown\b[\s\S]*?>/)(withoutComments(text)).filter(
+    const canOpen = (text: string, file?: string) =>
+      matches(/<ChatMarkdown\b[\s\S]*?>/)(withoutComments(text, file)).filter(
         (tag) =>
           /\{\s*\.\.\./.test(tag) ||
           (/\blinks\s*=/.test(tag) && !/\blinks\s*=\s*(?:["']inert["']|\{\s*["']inert["']\s*\})/.test(tag)),
@@ -820,37 +933,37 @@ describe('design system source guards', () => {
     const allowed = ['ds/components/ClaudeMessage/ClaudeMessage.tsx', 'lib/GrowingReply.tsx', 'setup/SetupChoices.tsx'];
     const consumers = webSources()
       .filter(({ file }) => !/\.(?:stories|test)\./.test(file))
-      .filter(({ text }) => canOpen(text).length > 0)
+      .filter(({ file, text }) => canOpen(text, file).length > 0)
       .map(({ file }) => file);
     expect(consumers).toEqual(allowed);
   });
 
-  it('plain_prose_only_on_the_vision_pages', () => {
+  it('plain_prose_only_on_the_vision_pages', READS_EVERY_SOURCE, () => {
     // Claude's prose renders as Markdown on every chat. The Vision pages aren't chats and show their
     // words as written, so only ClaudeMessage, the vision boards' page parts and the vision pages may
     // name `plainProse`.
-    const named = (text: string) => matches(/\bplainProse\b/)(withoutComments(text));
+    const named = (text: string, file?: string) => matches(/\bplainProse\b/)(withoutComments(text, file));
     expect(named('<ClaudeMessage plainProse blocks={blocks} />')).toEqual(['plainProse']);
     expect(named('// plainProse in a comment\nconst plainProsey = 1;')).toEqual([]);
     const allowed = (file: string) => file.startsWith('ds/components/ClaudeMessage/') || file === 'ds/boards/vision.tsx' || file.startsWith('vision/');
     const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
-    expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
+    expect(files.filter(({ file, text }) => !allowed(file) && named(text, file).length > 0).map(({ file }) => file)).toEqual([]);
     // Every vision page with Claude's words passes it, so the check can't pass by finding nothing.
-    expect(files.filter(({ file, text }) => file.startsWith('vision/') && named(text).length > 0).map(({ file }) => file)).toEqual([
+    expect(files.filter(({ file, text }) => file.startsWith('vision/') && named(text, file).length > 0).map(({ file }) => file)).toEqual([
       'vision/CityOfficePage.tsx',
       'vision/ClaudeAccountPage.tsx',
       'vision/PhonePage.tsx',
       'vision/VisionFrame.tsx',
     ]);
     // And every ClaudeMessage they draw passes it, however its props are laid out across lines.
-    const withoutPlainProse = (text: string) =>
-      matches(/<ClaudeMessage\b[\s\S]*?\/>/)(withoutComments(text)).filter((tag) => !/\bplainProse\b/.test(tag));
+    const withoutPlainProse = (text: string, file?: string) =>
+      matches(/<ClaudeMessage\b[\s\S]*?\/>/)(withoutComments(text, file)).filter((tag) => !/\bplainProse\b/.test(tag));
     expect(withoutPlainProse('<ClaudeMessage\n  blocks={blocks}\n  language="en"\n/>\n<ClaudeMessage\n  plainProse\n  blocks={blocks}\n/>')).toEqual([
       '<ClaudeMessage\n  blocks={blocks}\n  language="en"\n/>',
     ]);
     const visionTags = files.filter(({ file }) => file.startsWith('vision/') || file === 'ds/boards/vision.tsx');
-    expect(visionTags.flatMap(({ file, text }) => withoutPlainProse(text).map((tag) => `${file}: ${tag}`))).toEqual([]);
-    expect(visionTags.flatMap(({ text }) => matches(/<ClaudeMessage\b/)(withoutComments(text))).length).toBeGreaterThanOrEqual(14);
+    expect(visionTags.flatMap(({ file, text }) => withoutPlainProse(text, file).map((tag) => `${file}: ${tag}`))).toEqual([]);
+    expect(visionTags.flatMap(({ file, text }) => matches(/<ClaudeMessage\b/)(withoutComments(text, file))).length).toBeGreaterThanOrEqual(14);
   });
 
   it('focus_edges_are_never_the_link_blue', () => {
