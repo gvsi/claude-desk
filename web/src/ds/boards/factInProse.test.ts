@@ -1,7 +1,8 @@
 /**
  * `factsInProse`, the vision boards' mirror of the kernel's reply check on prose: it holds every
- * entry of the kernel's two lexicons and nothing else, it catches what the kernel catches, and every
- * signed line of Claude's words on the vision pages passes it.
+ * entry of the kernel's two lexicons and its lookalike table and nothing else, it reads text each way
+ * the kernel reads it, it reports what the kernel reports on every sentence of `factInProse.kernel.ts`,
+ * and every signed line of Claude's words on the vision pages passes it.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -9,7 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { LEXICON, factsInProse, toJavaScript, type LexiconEntry } from './factInProse.ts';
+import { LEXICON, factsInProse, toJavaScript, type FactHit, type LexiconEntry } from './factInProse.ts';
+import { KERNEL_CASES } from './factInProse.kernel.ts';
+import { LOOKALIKES } from './lookalikes.ts';
 import { CITY_TURNS, CLAUDE_ACCOUNT_TURNS, PHONE_REPLY, TEAM_REPLIES } from './vision.tsx';
 
 const LEXICON_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../backend/desk/kernel_service/lexicon');
@@ -24,8 +27,38 @@ function kernelEntries(language: 'en' | 'es'): string[] {
 
 const mirrored = (entry: LexiconEntry) => `${entry.language}\t${entry.category}\t${entry.pattern}`;
 
+/**
+ * The kernel's lookalike table, read as `labels._load_lookalikes` reads it: one `<code point>\t<letter
+ * or digit>` per line, what follows a `#` on it aside, `#` comment lines and blank lines aside. A
+ * malformed line or a second line for a character throws, as it stops the kernel from starting.
+ */
+function kernelLookalikes(): string[] {
+  const seen = new Set<string>();
+  return readFileSync(path.join(LEXICON_DIR, 'lookalikes.txt'), 'utf8')
+    .split(/\r?\n/)
+    .flatMap((line, index) => {
+      if (line.trim() === '' || line.startsWith('#')) return [];
+      const tab = line.indexOf('\t');
+      const code = tab === -1 ? line : line.slice(0, tab);
+      const looksLike = (line.slice(tab + 1).split('#')[0] ?? '').trim();
+      if (tab === -1 || !/^[0-9A-F]{4,6}$/.test(code) || parseInt(code, 16) < 0x80 || !/^[A-Za-z0-9]$/.test(looksLike)) {
+        throw new Error(`lookalikes.txt:${index + 1} is not a <code point>\\t<letter or digit> line`);
+      }
+      if (seen.has(code)) throw new Error(`lookalikes.txt:${index + 1} lists ${code} a second time`);
+      seen.add(code);
+      return [`${code}\t${looksLike}`];
+    });
+}
+
+const mirroredLookalike = ([code, looksLike]: readonly [number, string]) => `${code.toString(16).toUpperCase().padStart(4, '0')}\t${looksLike}`;
+
 /** The rules `factsInProse` reports for `text`, without and with a booking card beside it. */
 const rules = (text: string, bookingCard = false) => factsInProse(text, { bookingCard }).map((hit) => hit.rule);
+
+/** Hits as `[rule, span]` pairs in one order, so two scans' verdicts compare whatever order each reports. */
+const pairs = (hits: readonly (readonly [string, string])[]) =>
+  hits.map(([rule, span]) => `${rule}\t${span}`).sort();
+const ourPairs = (hits: readonly FactHit[]) => pairs(hits.map((hit) => [hit.rule, hit.span] as const));
 
 describe('fact_in_prose', () => {
   it('mirrors_the_kernel_lexicons', () => {
@@ -33,6 +66,16 @@ describe('fact_in_prose', () => {
     const ours = LEXICON.map(mirrored);
     expect(kernel.length).toBeGreaterThan(50);
     // Every kernel entry is mirrored, and nothing is mirrored that the kernel doesn't have.
+    expect(kernel.filter((entry) => !ours.includes(entry))).toEqual([]);
+    expect(ours.filter((entry) => !kernel.includes(entry))).toEqual([]);
+  });
+
+  it('mirrors_the_kernel_lookalikes', () => {
+    const kernel = kernelLookalikes();
+    const ours = LOOKALIKES.map(mirroredLookalike);
+    expect(kernel.length).toBeGreaterThan(400);
+    // Every kernel entry is mirrored, once, and nothing is mirrored that the kernel doesn't have.
+    expect(new Set(ours).size).toBe(ours.length);
     expect(kernel.filter((entry) => !ours.includes(entry))).toEqual([]);
     expect(ours.filter((entry) => !kernel.includes(entry))).toEqual([]);
   });
@@ -100,6 +143,65 @@ describe('fact_in_prose', () => {
     expect(rules('Next‐week works.')).toContain('lex.en.date');
     expect(rules('Youʼre   all set.')).toContain('lex.en.booking');
     expect(rules('Mañana.')).toContain('lex.es.date');
+  });
+
+  it('reads_a_capital_i_as_l', () => {
+    // Issue 142's first example: a capital I drawn for each l.
+    expect(rules('It costs tweIve doIIars.')).toEqual(['lex.en.number', 'lex.en.money']);
+  });
+
+  it('reads_a_spaced_acute_as_an_apostrophe_and_as_a_space', () => {
+    // Issue 142's second example. NFKC writes "´" as a space and a combining acute, which the kernel
+    // reads both as "’" ("You´re", "o´clock") and as the space it is drawn on ("no´charge").
+    expect(rules('You´re all set.')).toEqual(['lex.en.booking']);
+    expect(factsInProse('It opens at five o´clock.')).toContainEqual({ rule: 'lex.en.date', span: 'o \u0301clock' });
+    expect(rules('It comes at no´charge.')).toEqual(['lex.en.promise']);
+  });
+
+  it('reads_lookalike_letters_as_latin', () => {
+    // A Cyrillic small ie (U+0435) in a lexicon word, read as the Latin e it looks like.
+    expect(factsInProse('See you on Tu\u0435sday.')).toContainEqual({ rule: 'lex.en.date', span: 'Tu\u0435sday' });
+  });
+
+  it('ends_a_span_after_a_whole_character', () => {
+    // A lookalike outside the Basic Multilingual Plane is two UTF-16 units: the span holds both.
+    const astral = String.fromCodePoint(0x118c1);
+    expect(factsInProse(`It costs a few buck${astral}.`)).toContainEqual({ rule: 'lex.en.money', span: `buck${astral}` });
+  });
+
+  it('reads_a_bare_stroke_as_i', () => {
+    // Greek capitals spelling NINE: the iota is a bare stroke, which the kernel reads as l and as I.
+    expect(factsInProse('It takes \u039d\u0399\u039d\u0395 visits.')).toEqual([{ rule: 'lex.en.number', span: '\u039d\u0399\u039d\u0395' }]);
+  });
+
+  it('reads_digit_lookalikes_and_letters_shaped_like_0_or_1', () => {
+    // A Cyrillic Ze (U+0417) drawn as a 3 is a numeral, and the Cyrillic O (U+041E) next to a digit is part of its number.
+    expect(factsInProse('The gate code is \u0417.')).toEqual([{ rule: 'digit', span: '\u0417' }]);
+    expect(factsInProse('The gate code is 2\u041e\u041e.')).toEqual([{ rule: 'digit', span: '2\u041e\u041e' }]);
+    // A word made only of letters shaped like 0 or 1 is a number unless it is plain ASCII.
+    expect(factsInProse('Room \u0406\u041e\u041e is upstairs.')).toEqual([{ rule: 'digit', span: '\u0406\u041e\u041e' }]);
+    for (const text of ['I can check. OK?', 'Mike says lO is fine.']) expect(factsInProse(text), text).toEqual([]);
+  });
+
+  it('drops_ignorables_and_draws_hangul_fillers_as_spaces', () => {
+    // A combining grapheme joiner and a variation selector, which no font draws, inside a word.
+    expect(factsInProse('See you on Tues\u034fday.')).toEqual([{ rule: 'lex.en.date', span: 'Tuesday' }]);
+    expect(factsInProse('Come by tomor\ufe0frow.')).toEqual([{ rule: 'lex.en.date', span: 'tomorrow' }]);
+    // A Hangul filler, drawn as a blank, between two words.
+    expect(factsInProse('Your\u3164appointment is confirmed.')).toEqual([{ rule: 'lex.en.booking', span: 'Your appointment is confirmed' }]);
+  });
+
+  it('flags_words_mixing_scripts', () => {
+    // A Cyrillic i (U+0456) in a Latin word, with or without a lexicon word under it. A word in one
+    // other script alone, such as the Greek NINE above, mixes nothing.
+    expect(factsInProse('Ask M\u0456ke about it.')).toEqual([{ rule: 'mixed_script', span: 'M\u0456ke' }]);
+    expect(factsInProse('See you on Tu\u0435sday.')).toContainEqual({ rule: 'mixed_script', span: 'Tu\u0435sday' });
+    // Turned capital F, turned small f and the reversed Roman numeral one hundred belong to the Latin
+    // script, but their names don't start with "LATIN ", which is how the kernel tells a Latin letter:
+    // to it, these words mix scripts.
+    for (const [text, word] of [['It’s \u2132ree.', '\u2132ree'], ['Ask a\u214e about it.', 'a\u214e'], ['Ask \u2183a about it.', '\u2183a']] as const) {
+      expect(factsInProse(text), text).toEqual([{ rule: 'mixed_script', span: word }]);
+    }
   });
 
   it('passes_every_signed_vision_line', () => {
@@ -194,5 +296,16 @@ describe('fact_in_prose', () => {
     expect(rules('Your appointment with Mike is set up.')).toContain('lex.en.booking');
     const regex = toJavaScript(String.raw`context|(?P<claim>booked)`);
     expect([...('context booked'.matchAll(regex))].map((match) => match.groups?.claim)).toEqual([undefined, 'booked']);
+  });
+
+  it('agrees_with_the_kernel_on_every_case', () => {
+    // The kernel's own verdicts (`factInProse.kernel.ts`): the same hits, rule for rule and span for span.
+    expect(KERNEL_CASES.length).toBeGreaterThan(60);
+    const disagreements = KERNEL_CASES.flatMap(({ text, bookingCard = false, callbackCard = false, hits }) => {
+      const kernel = pairs(hits);
+      const ours = ourPairs(factsInProse(text, { bookingCard, callbackCard }));
+      return JSON.stringify(ours) === JSON.stringify(kernel) ? [] : [{ text, bookingCard, callbackCard, kernel, ours }];
+    });
+    expect(disagreements).toEqual([]);
   });
 });

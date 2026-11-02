@@ -25,7 +25,7 @@ function row(id: string, blocks: RenderedBlock[]): ChatRow {
 
 const link = (token: string) => ({ ...rivera.blocks.payment_link.en, href: `/pay/${token}`, fact_id: `payment_link:${token}` });
 function Harness({ rows }: { rows: ChatRow[] }) {
-  const project = usePaymentLinks(rows, memory);
+  const project = usePaymentLinks(rows.flatMap(({ item }) => (item.kind === 'message' ? [item.ev] : [])), memory);
   projected = rows.flatMap(({ item }) => item.kind === 'message' ? item.ev.blocks.map(project) : []);
   return null;
 }

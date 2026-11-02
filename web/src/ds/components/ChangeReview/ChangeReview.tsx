@@ -7,15 +7,23 @@ import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorNam
 import { Notice } from '../Notice/Notice.tsx';
 import { OUTCOME_TONE, outcomePhrase, type RuleMode } from '../OutcomeMenu/outcomeWords.ts';
 import type { RuleWord } from '../RuleRow/RuleRow.tsx';
+import { ToolTitleList, namesATool, type ToolTitles } from '../RuleRow/ToolTitles.tsx';
 import { StatusLabel } from '../StatusDot/StatusDot.tsx';
 import type { RuleField } from './ruleDiff.ts';
 
 import './ChangeReview.css';
 
+/**
+ * What a rule is about: the tools it names by their titles (`{ titles: ['Payment link'] }`), each
+ * the tool's own words and shown as its own user-text item, or the screen's own words for a group
+ * of tools ("Every tool that charges money").
+ */
+export type RuleTarget = ToolTitles | string;
+
 /** One side of a change: what a rule enforces before or after it, in the screen's words. */
 export interface ChangeSide {
-  /** What the rule applies to, in the screen's words: "Payment link", "Every tool that charges money". */
-  appliesTo?: string;
+  /** What the rule applies to: `{ titles: ['Payment link'] }`, or a group's words, "Every tool that charges money". */
+  appliesTo?: RuleTarget;
   mode: RuleMode;
   /** The formatted amount limit of an auto card ("$300"). */
   limit?: string;
@@ -27,8 +35,11 @@ export interface ChangeSide {
 export interface ChangeRowView {
   key: string;
   change: 'added' | 'removed' | 'changed' | 'turned_on';
-  /** The tool the rule is about: "Payment link". */
-  title: string;
+  /**
+   * What the rule is about: the tools it names (`{ titles: ['Payment link', 'Refund'] }`, shown
+   * "Payment link and Refund"), or a group's words ("Every tool that charges money").
+   */
+  title: RuleTarget;
   connector?: ConnectorView;
   /**
    * The rule is on a group of tools, such as every tool that charges money: the meta line says
@@ -114,6 +125,17 @@ function Outcome({ side, strong = false }: { side: ChangeSide; strong?: boolean 
   );
 }
 
+/** True when `target` says something: a tool's title, or a group's words. */
+function says(target: RuleTarget | undefined): target is RuleTarget {
+  if (target === undefined) return false;
+  return typeof target === 'string' ? target.trim() !== '' : namesATool(target);
+}
+
+/** A target as it reads: a group's words as they are, each tool's title its own user-text item. */
+function Target({ target }: { target: RuleTarget }) {
+  return typeof target === 'string' ? target : <ToolTitleList titles={target.titles} />;
+}
+
 /** What a row's meta line says after the connector when its rule is shared by several tools. */
 const SHARED_RULE = 'Shared rule';
 
@@ -132,19 +154,24 @@ function MetaLine({
 }: {
   connector?: ConnectorView;
   shared?: boolean;
-  appliesTo?: string;
+  appliesTo?: RuleTarget;
   words: readonly RuleWord[];
   tag?: boolean;
   /** The line's value changed: in weight 520. */
   strong?: boolean;
 }) {
   const text = joinWords(words);
-  const target = appliesTo?.trim() ?? '';
   const parts: ReactNode[] = [];
   // The review's rows name the connector without "Built in"; an app keeps its Mock badge.
   if (connector) parts.push(<ConnectorName key="connector" connector={connector} size="inline" hideBuiltIn />);
   if (shared) parts.push(<span key="shared">{SHARED_RULE}</span>);
-  if (target !== '') parts.push(<span key="target">{target}</span>);
+  if (says(appliesTo)) {
+    parts.push(
+      <span key="target">
+        <Target target={typeof appliesTo === 'string' ? appliesTo.trim() : appliesTo} />
+      </span>,
+    );
+  }
   if (text !== '') parts.push(<span key="words">{text}</span>);
   if (parts.length === 0) return null;
   return (
@@ -175,7 +202,7 @@ function Side({ label, side, changed }: { label: 'Before' | 'After'; side: Chang
         <div className="cd-change-review__side-text">
           {hasTarget(side) ? (
             <p className={`cd-change-review__meta cd-change-review__target cd-type-meta${has('applies_to') ? ' cd-change-review__strong' : ''}`}>
-              {side.appliesTo}
+              {side.appliesTo === undefined ? null : <Target target={side.appliesTo} />}
               {has('applies_to') ? (
                 <>
                   {' '}
@@ -206,7 +233,7 @@ function Side({ label, side, changed }: { label: 'Before' | 'After'; side: Chang
 
 /** True when the side says what its rule applies to. */
 function hasTarget(side: ChangeSide | null): boolean {
-  return side?.appliesTo !== undefined && side.appliesTo.trim() !== '';
+  return says(side?.appliesTo);
 }
 
 function Row({ row }: { row: ChangeRowView }) {
@@ -220,7 +247,7 @@ function Row({ row }: { row: ChangeRowView }) {
       <span className="cd-change-review__tag cd-type-caption">{TAGS[row.change] ?? TAGS.changed}</span>
       <div className="cd-change-review__body">
         <p className="cd-change-review__title cd-type-body">
-          {row.title}
+          <Target target={row.title} />
           {untaggedTarget ? (
             <>
               {' '}

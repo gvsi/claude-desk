@@ -861,7 +861,7 @@ async def test_a_failed_understanding_still_asks_the_first_question(
     state = await landed(owner, state["interview_id"], cards=True)
     assert state["question"] == "what_you_do"
     assert state["messages"][-1] == {"role": "claude", "text": question_text("what_you_do", "trade"),
-                                       "choices": [], "card": None}
+                                       "choices": [], "card": None, "owner_decided": False}
     assert not any(message["card"] for message in state["messages"])
     assert not any("suggested" in entry for entry in (await stored(engine, state["interview_id"]))["transcript"])
     assert "understanding" in caplog.text and "first question" in caplog.text
@@ -1555,7 +1555,7 @@ async def test_setups_messages_leave_out_the_owners_description(app, browser, fa
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
     assert state["messages"] == [{"role": "claude", "text": desk_setup.CONSENT_QUESTION,
-                                   "choices": [], "card": None}]
+                                   "choices": [], "card": None, "owner_decided": False}]
     interview_id = state["interview_id"]
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["messages"] == state["messages"]
     transcript = (await stored(engine, interview_id))["transcript"]
@@ -1641,7 +1641,7 @@ async def test_setup_tools_use_the_owner_session_and_desk(app, browser, fake, ke
     desk.tools["native.fetch_website"] = desk.tools["native.fetch_website"].model_copy(update={"status": "disabled"})
     consented = await consent(owner, other["interview_id"], True, model)
     assert consented["messages"][3] == {"role": "tool_label", "text": "Couldn't read turner-plumbing.example",
-                                        "choices": [], "card": None}
+                                        "choices": [], "card": None, "owner_decided": False}
     proposed = [call.body["call"]["tool"] for call in fake.called("POST /decide")
                 if call.body["desk_id"] == other["desk_id"]]
     assert proposed == ["native.read_memory"]
@@ -2309,7 +2309,7 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
             assert followed.json()["messages"][-1] == {"role": "claude", "text": "How much, at most?",
                                                        "choices": [{"text": choice.text, "recommended": False}
                                                                    for choice in LIMIT_CHOICES[key]("trade")],
-                                                       "card": None}
+                                                       "card": None, "owner_decided": False}
         patch = {"owner_display_name": "Mike Turner", "public_contact": "(510) 555-0142"} \
             if key == "contact_and_after_hours" else {}
         reply = await answer(owner, model, interview_id, f"About {key}.", turn(**patch))
@@ -3718,7 +3718,7 @@ async def test_claude_chooses_the_next_fact_topic_and_its_words(app, browser, ke
     assert reply.status_code == 200, reply.text
     assert reply.json()["question"] == "contact_and_after_hours"
     assert reply.json()["messages"][-1] == {"role": "claude", "text": "What happens after hours?",
-                                             "choices": choices, "card": None}
+                                             "choices": choices, "card": None, "owner_decided": False}
 
 
 @pytest.mark.parametrize("following", ["contact_and_after_hours", "done"])
@@ -3881,6 +3881,65 @@ async def test_every_close_ends_with_the_plan_or_the_fixed_line(monkeypatch, pat
         assert "setup answer gap filled (done, close)" in caplog.text
 
 
+@pytest.mark.parametrize("earlier", ["none", "blanked", "kept"])
+async def test_a_gap_closing_keeps_its_reply_unless_this_answer_already_has_one(monkeypatch, earlier, caplog):
+    plan = "Your Desk will take tax preparation requests."
+    closing = "Thanks, that's everything I need."
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."),
+        desk_setup.Entry(role="claude", text="", covered=list(QUESTION_KEYS)),
+    ])
+    replies = desk_setup._TurnReplies()
+    if earlier != "none":
+        reply = desk_setup.Entry(role="claude", text="Got it, I'll ask you first.")
+        interview.transcript.append(reply)
+        replies.track(reply)
+        if earlier == "blanked":
+            replies.before("quote_limit")      # blanked as before a limit question: it answers nothing now
+            assert reply.text == ""
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(return_value=SetupNextStep(
+        reply=closing, next=next_ask("done"), question="", choices=[], skip=[], drop=[], add_jobs=[], plan=plan)))
+    await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=replies)
+    assert "setup answer gap filled (done, close)" in caplog.text
+    assert interview.step == "tools"
+    assert [entry.text for entry in interview.transcript if entry.role == "claude" and entry.text] == (
+        ["Got it, I'll ask you first.", plan] if earlier == "kept" else [closing, plan])
+
+
+async def test_a_closing_retry_never_takes_back_the_reply_already_shown(monkeypatch):
+    from desk.api.owner_streaming import Display, displaying
+
+    plan = "Your Desk will take tax preparation requests."
+    said = "Understood, I'll leave Stripe out for now."
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."),
+        desk_setup.Entry(role="claude", text="", covered=list(QUESTION_KEYS)),
+    ])
+    reply = desk_setup.Entry(role="claude", text=said)
+    interview.transcript.append(reply)
+    replies = desk_setup._TurnReplies()
+    replies.track(reply)
+    # The decision's call was the run's first, so its reply is the text on the owner's display.
+    display = Display("r_1")
+    assert display.take()
+    display.begin("reply")(json.dumps({"reply": said}))
+    events = display.events()
+    assert await anext(events) == {"event": "delta", "data": json.dumps({"run": "r_1", "text": said},
+                                                                         separators=(",", ":"))}
+
+    def closing(reply, plan):
+        return SetupNextStep(reply=reply, next=next_ask("done"), question="", choices=[], skip=[], drop=[],
+                             add_jobs=[], plan=plan)
+
+    # No plan on the first try, with the same words as the decision's reply; the plan on the retry.
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(side_effect=[closing(said, ""), closing(said, plan)]))
+    with displaying(display):
+        await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=replies)
+    display.finish("done", {"run": "r_1"})
+    assert await anext(events) == {"event": "done", "data": '{"run":"r_1"}'}     # no reset: still shown
+    assert [entry.text for entry in interview.transcript if entry.role == "claude" and entry.text] == [said, plan]
+
+
 @pytest.mark.parametrize("typed", [True, False])
 @pytest.mark.parametrize("next_topic", ["what_you_do", "quote_limit"])
 async def test_a_card_answer_with_no_ask_uses_the_same_guard(monkeypatch, typed, next_topic, caplog):
@@ -3932,7 +3991,8 @@ async def test_a_gap_only_shows_cards_planned_before_this_turn(monkeypatch, capl
     if planned_on_this_turn:
         assert interview.pending_card is None
         assert not any(entry.card for entry in interview.transcript)
-        close.assert_awaited_once_with(None, None, None, interview)
+        # "Ready." already answers the owner, so the closing call's own reply isn't kept.
+        close.assert_awaited_once_with(None, None, None, interview, answered=True)
         assert "setup answer gap filled (done, close)" in caplog.text
     else:
         assert interview.pending_card == card.proposal_id
@@ -3952,7 +4012,7 @@ async def test_a_limit_topic_always_asks_codes_question_and_choices(app, browser
     assert reply.status_code == 200, reply.text
     assert reply.json()["question"] == "money_limit"
     assert reply.json()["messages"][-1] == {
-        "role": "claude", "text": question_text("money_limit", "office"), "card": None,
+        "role": "claude", "text": question_text("money_limit", "office"), "card": None, "owner_decided": False,
         "choices": [{"text": choice.text, "recommended": False}
                     for choice in LIMIT_CHOICES["money_limit"]("office")]}
 
@@ -4070,7 +4130,7 @@ async def test_opting_in_asks_codes_money_question(app, browser, kernel_http, mo
     assert response.status_code == 200, response.text
     assert response.json()["question"] == "money_limit"
     assert response.json()["messages"][-1] == {
-        "role": "claude", "text": question_text("money_limit", "trade"), "card": None,
+        "role": "claude", "text": question_text("money_limit", "trade"), "card": None, "owner_decided": False,
         "choices": [{"text": choice.text, "recommended": False} for choice in LIMIT_CHOICES["money_limit"]("trade")]}
 
 
@@ -4096,6 +4156,39 @@ async def test_the_closing_plan_comes_from_the_plan_field(app, browser, kernel_h
     assert not any(message["text"] == desk_setup.QUESTIONS_DONE for message in response.json()["messages"])
     assert finished == [state["interview_id"]]
     assert sum(request.output_schema is SetupNextStep for request in model.requests) == 1
+
+
+@pytest.mark.parametrize("last", ["contact_and_after_hours", "documents_and_payments"])
+@pytest.mark.parametrize("acknowledged", [True, False])
+async def test_the_last_answer_is_acknowledged_once_before_the_closing_plan(
+    app, browser, kernel_http, model, engine, last, acknowledged,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    others = [key for key in QUESTION_KEYS if key not in {"what_you_do", last}]
+    await answer(owner, model, interview_id, "We prepare tax returns.", turn(next=next_ask(last), skip=others))
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["question"] == last
+    before = await stored(engine, interview_id)
+    own = "Got it, that's how the Desk will handle it." if acknowledged else ""
+    # The closing call reads the same answer (as <owner_answer>) and answers it again.
+    again = "Understood, that settles the last question."
+    closing = next_step("what_you_do", next={"kind": "done"}, reply=again, plan="The closing plan.")
+    if last in LIMIT_CHOICES:
+        said = LIMIT_CHOICES[last]("office")[0].text
+        items = (turn(own), next_step(last, next={"kind": "done"}), closing)
+    else:
+        said = "Take a message after hours."
+        items = (turn(own, next=next_ask("done")), closing)
+    response = await answer(owner, model, interview_id, said, *items)
+    assert response.status_code == 200, response.text
+    assert response.json()["step"] == "tools"
+    closing_request = model.requests[-1].messages[0]["content"][0]["text"]
+    assert "Write the closing plan" in closing_request and "<owner_answer>" in closing_request
+    tail = (await stored(engine, interview_id))["transcript"][len(before["transcript"]):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
+        own or again, "The closing plan."]
 
 
 async def test_a_follow_up_wins_over_next_topic(app, browser, kernel_http, model, engine):
@@ -4778,7 +4871,8 @@ async def test_typed_card_answers_share_the_turn_guard(app, browser, kernel_http
         assert second.status_code == 202 and len(model.requests) == calls
         assert second.json()["busy"] is True
         assert second.json() == (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()
-        assert second.json()["messages"][-1] == {"role": "owner", "text": "Yes", "card": None, "choices": []}
+        assert second.json()["messages"][-1] == {"role": "owner", "text": "Yes", "card": None, "choices": [],
+                                                 "owner_decided": False}
         assert asked.count("setup_turn") == 1
     finally:
         release.set()

@@ -96,8 +96,21 @@ export function seedBusinessTools(desk: DeskRecord, rows: readonly ToolRow[] = c
   desk.tools = [...desk.tools.filter((row) => !names.has(row.tool)), ...seeded];
 }
 
-/** Append accepted setup jobs without replacing any tools already on the Desk. */
-export function appendBusinessTools(desk: DeskRecord | undefined, jobs: readonly JobProposal[]): void {
+/** Reconcile accepted jobs as the kernel does, preserving unchanged rows and disabling omissions. */
+export function replaceBusinessTools(desk: DeskRecord | undefined, jobs: readonly JobProposal[]): void {
   if (!desk) throw new Error('the setup Desk must exist');
-  seedBusinessTools(desk, businessToolRows(jobs, desk.tools.map(({ tool }) => tool)));
+  const remaining = new Map(desk.tools.filter(({ source }) => source === 'business').map((row) => [row.tool, row]));
+  const rows = businessToolRows(jobs, desk.tools.filter(({ source }) => source !== 'business').map(({ tool }) => tool));
+  const changed: ToolRow[] = [];
+  for (const row of rows) {
+    const before = remaining.get(row.tool);
+    remaining.delete(row.tool);
+    if (before && before.status !== 'disabled' && before.definition_sha256 === row.definition_sha256) continue;
+    changed.push({ ...row, review_reason: before && before.status !== 'disabled' ? 'changed' : 'new' });
+  }
+  for (const row of remaining.values()) {
+    row.status = 'disabled';
+    row.review_reason = null;
+  }
+  seedBusinessTools(desk, changed);
 }

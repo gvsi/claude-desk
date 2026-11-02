@@ -53,6 +53,7 @@
 
 /* What keyboard focus scrolls to stops clear of the top bar, whose height is on the root (AboutBar.css). */
 .vision-article main a,
+.vision-article .va-cards,
 .vision-article .va-end a {
   scroll-margin-top: calc(var(--about-top) + 24px);
 }

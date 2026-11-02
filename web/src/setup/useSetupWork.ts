@@ -1,7 +1,7 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { UNSAFE_DataRouterContext, useLocation } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { SetupState } from '../api/views.ts';
+import { useLeavingSignal } from '../app/useLeavingSignal.ts';
 
 /**
  * How long polling waits for setup's work before offering "Try again". It must outlast the API's
@@ -13,41 +13,24 @@ import type { SetupState } from '../api/views.ts';
 export const SETUP_WORK_GIVE_UP_MS = 140_000;
 
 /**
- * Polls only work still running on the questions step. `reread` updates the page's interview.
+ * Polls only a turn still running: on the questions step, or a change sent from a later step ("Change
+ * something"), which runs at that step until it lands. `reread` updates the page's interview.
  * `progress` counts what the turn's stream has said so far: the whole wait starts again with each,
  * so a turn that is visibly writing never reads as given up.
  */
 export function useSetupWork(state: SetupState, reread: () => Promise<SetupState | null>, progress = 0) {
-  const working = state.step === 'questions' && state.busy === true;
+  const working = state.busy === true;
   const [gaveUp, setGaveUp] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [visit, setVisit] = useState(0);
-  const leaving = useRef<AbortController | null>(null);
   const retryRead = useRef(false);
-  const router = useContext(UNSAFE_DataRouterContext)?.router;
-  const { pathname } = useLocation();
-  useEffect(() => {
-    let controller = new AbortController();
-    leaving.current = controller;
-    // Like StartStep, stop as soon as the router moves, before a suspended destination draws.
-    const stop = router?.subscribe((state) => {
-      if (state.location.pathname !== pathname) {
-        controller.abort();
-        return;
-      }
-      if (!controller.signal.aborted) return;
-      // Back before unmount: this visit can read again, without reviving work from the old visit.
-      controller = new AbortController();
-      leaving.current = controller;
-      retryRead.current = false;
-      setRetrying(false);
-      setVisit((now) => now + 1);
-    });
-    return () => {
-      stop?.();
-      controller.abort();
-    };
-  }, [state.interview_id, router, pathname]);
+  // Like StartStep, stop as soon as the router moves, before a suspended destination draws.
+  const leaving = useLeavingSignal(() => {
+    // Back before unmount: this visit can read again, without reviving work from the old visit.
+    retryRead.current = false;
+    setRetrying(false);
+    setVisit((now) => now + 1);
+  });
 
   // The turn's stream said something more: it hasn't given up, and the wait starts again.
   useEffect(() => {
@@ -59,8 +42,8 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
       setGaveUp(false);
       return;
     }
-    const signal = leaving.current?.signal;
-    if (gaveUp || signal === undefined || signal.aborted) return;
+    const signal = leaving();
+    if (gaveUp || signal.aborted) return;
     const controller = new AbortController();
     let reading = false;
     // Registered before the interval so the deadline wins over a tick at exactly the limit.
@@ -75,7 +58,7 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
       void reread()
         .then((next) => {
           if (controller.signal.aborted) return;
-          if (next !== null && (next.busy !== true || next.step !== 'questions')) stop();
+          if (next !== null && next.busy !== true) stop();
         })
         .catch(() => {
           // A failed read waits for the next tick.
@@ -94,12 +77,12 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
       signal.removeEventListener('abort', stop);
       stop();
     };
-  }, [state.interview_id, working, gaveUp, reread, visit, progress]);
+  }, [state.interview_id, working, gaveUp, reread, visit, progress, leaving]);
 
   /** Read first: a failed read keeps the notice; a still-busy interview gets a fresh wait. */
   const retry = useCallback(async () => {
-    const signal = leaving.current?.signal;
-    if (!gaveUp || retryRead.current || signal === undefined || signal.aborted) return;
+    const signal = leaving();
+    if (!gaveUp || retryRead.current || signal.aborted) return;
     retryRead.current = true;
     setRetrying(true);
     try {
@@ -114,7 +97,7 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
         setRetrying(false);
       }
     }
-  }, [gaveUp, reread]);
+  }, [gaveUp, reread, leaving]);
 
   return { gaveUp, retrying, retry };
 }

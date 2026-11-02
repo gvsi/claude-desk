@@ -10,8 +10,8 @@
 ## What it shows
 
 - A `Card` (`section`, named `label`, 16 px padding).
-- With `tool`: its name in `.cd-type-section` and its `description` in secondary `.cd-type-meta`, as one link to `tool.href` with `chevron-right` (`aria-hidden`). An empty description draws no description line (the "Name only" story). Without `tool.href` (the tool's page isn't built yet, as on All rules), the same words are plain text, with no chevron and no tab stop (the "Without a link" story).
-- A `RuleRow` per entry of `rules`, each under a hairline, in a list. Build them from `rulesForTool` (below), with each card's `ruleWords`, its formatted `limit` for an auto card with `max_amount_cents`, and `shared` for an effect card.
+- With `tool`: its name in `.cd-type-section`, marked `data-copy="user"` since a tool's title is its own words (a business's job from setup) and not the app's, and its `description` in secondary `.cd-type-meta`, as one link to `tool.href` with `chevron-right` (`aria-hidden`). An empty description draws no description line (the "Name only" story). Without `tool.href` (the tool's page isn't built yet, as on All rules), the same words are plain text, with no chevron and no tab stop (the "Without a link" story).
+- A `RuleRow` per entry of `rules`, each under a hairline, in a list. Build them from `rulesForTool` (below), with each card's `ruleWords`, its formatted `limit` for an auto card with `max_amount_cents`, and `shared` for an effect card (its group's words and the titles of the tools it covers, which `RuleRow` shows as user text).
 - `fallback` (true unless the screen passes false): "Anything else here: ask me." in secondary meta, with a ghost "Add a rule" calling `onAddRule` when given. The screen passes false when a `never` card for anyone covers the tool, since nothing is left to ask about. It is what the compiler's default ask card does, so default cards never get a row of their own.
 - Whatever comes first in the card has no hairline above it.
 

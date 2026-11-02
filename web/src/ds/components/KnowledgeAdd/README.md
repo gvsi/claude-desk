@@ -13,6 +13,8 @@
 - `onAddNote()`: "Add a note". The screen checks the note it holds and adds it for the owner only (`addKnowledge`, readers `["owner"]`).
 - `onAddFile(file)`: a file picked with "Add a file", the `File` as the browser gives it, unread. The screen checks it (`.txt` or `.md`, up to 100 KB), reads it as text and adds it for the owner only, or passes `error`.
 - `busy` while something is in flight: `'note'` or `'file'` for an add, `'switch'` for the switch's change.
+- `noteError`: validation shown under the note, marking it `aria-invalid` and associating the line with `aria-describedby`. The line is announced politely.
+- `websitePlaceholder`: the website example supplied by the screen; none by default.
 - `error`: what went wrong, in plain words, never a code ("That file is too big. Add files up to 100 KB."). With none, no line is drawn.
 - `added`, once the kernel has answered with the stored item:
   - `readers`: the returned item's `label.readers`, never the ones asked for. The switch is on only when they include "public", so an item the kernel keeps to the owner stays off.
@@ -42,7 +44,8 @@
 
 - The note's field is named by its label and described by its hint. "Add a file" is described by the line about files, so a screen reader hears what it accepts.
 - The file input is hidden and out of the tab order: "Add a file" is the control.
-- An error is an `alert`, read out at once; the "Added" line is a `status`; the screen's note under the switch sits in a polite live region, there from the start, so it is read out when it comes.
+- An `error` is an `alert`, read out at once. A `noteError` is announced politely; its line under the note is linked with `aria-describedby`, and the field is marked `aria-invalid`.
+- The "Added" line is a `status`; the screen's note under the switch sits in a polite live region, there from the start, so it is read out when it comes.
 
 ## Props
 
@@ -53,6 +56,8 @@
 | `onAddNote` | `() => void` | Required. "Add a note". |
 | `onAddFile` | `(file: File) => void` | Required. The file picked, unread. |
 | `busy` | `'note' \| 'file' \| 'switch'` | What is in flight: an add, or the switch's change. |
+| `noteError` | `string` | Validation under the note, associated with its field and announced politely. |
+| `websitePlaceholder` | `string` | The screen’s website example. None by default. |
 | `error` | `string` | What went wrong, in plain words. |
 | `added` | `KnowledgeAddedView` | The item just added: the "Added" card and its switch. |
 
@@ -64,4 +69,4 @@
 | `onPublicChange` | `(makePublic: boolean) => void` | Required. The switch was turned. |
 | `note` | `ReactNode` | The screen's line under the switch, in its own words. |
 
-Under the file caption, “A website” holds a local value with the example “turner-plumbing.example/blog”. “Add a website” is a secondary button beside a Mock pill. It is inert and sends no request. The caption explains: “Claude doesn’t read websites you add in this prototype yet.”
+Under the file caption, “A website” holds a local value. Its example is supplied by the screen through `websitePlaceholder`; without it, the field has no placeholder. “Add a website” is a secondary button beside a Mock pill. It is inert and sends no request. The caption explains: “Claude doesn’t read websites you add in this prototype yet.”
