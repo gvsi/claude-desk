@@ -170,7 +170,8 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     [NO, 'no thanks', '2'],
   ])('typing_on_%s_picks_nothing_until_an_answer_is_picked: %s', async (answer, words, pick) => {
     // Its answers are the only way to answer it: words typed with one highlighted go nowhere, and neither a
-    // space among them nor Enter after them, pressed again or after Backspace, picks an answer. A number key does.
+    // space among them nor Enter after them, pressed again or after any key that doesn't move, picks an answer.
+    // A number key does.
     const { state, ask } = await waitingInterview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
     const panel = screen.getByRole('region', { name: ask, exact: true });
@@ -180,8 +181,8 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     await expect.element(row).toHaveFocus();
     await userEvent.keyboard(`${words}{Enter}`);
     await new Promise((resolve) => setTimeout(resolve, 300));
-    // Nor after a typo is erased.
-    await userEvent.keyboard('s{Backspace}{Enter}');
+    // Nor after a typo is erased, or a key that neither moves nor picks, or with a modifier.
+    await userEvent.keyboard('s{Backspace}{Enter}{Home}{Enter}{End}{Enter}{ArrowRight}{Enter}{Alt>}{Enter}{/Alt}');
     await new Promise((resolve) => setTimeout(resolve, 300));
     await expect.element(row).toHaveFocus();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveValue('');

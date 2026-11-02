@@ -37,16 +37,22 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
   const questionId = useId();
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (disabled || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
       const inside = root.current?.contains(target);
-      // What was typed on a row ends once the owner leaves it, or presses a key that isn't a character.
-      // Shift and Caps Lock are part of typing ("2FA"). On the memory question so are Enter and the editing
-      // keys: after typed words, Enter picks nothing, however often it's pressed and whatever was erased.
-      const editing = ['Enter', 'Backspace', 'Delete', 'Dead', 'Process'].includes(event.key);
-      const keeps = event.key === 'Shift' || event.key === 'CapsLock' || (editing && !offersOther);
-      if ((!inside && target !== document.body) || (event.key.length !== 1 && !keeps)) typed.current = { digits: '', word: false };
+      if (disabled || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) {
+        // On the memory question, Enter with a modifier never presses an answer after typed words either.
+        if (!offersOther && inside && event.key === 'Enter' && typed.current.word) event.preventDefault();
+        return;
+      }
+      // What was typed on a row ends once the owner leaves it. On a question it also ends on a key that
+      // isn't a character, but Shift and Caps Lock, which are part of typing ("2FA"). On the memory question
+      // words end only on a key that moves (the arrows up and down, Tab, Esc) or picks (a number key, below):
+      // whatever else is pressed after them, Enter picks nothing.
+      const fresh = { digits: '', word: false };
+      if (!inside && target !== document.body) typed.current = fresh;
+      else if (offersOther ? event.key.length !== 1 && event.key !== 'Shift' && event.key !== 'CapsLock'
+        : ['ArrowUp', 'ArrowDown', 'Tab', 'Escape'].includes(event.key)) typed.current = fresh;
       if (event.key === 'Escape' && (inside || target === document.body || target.closest('.cd-setup-dock textarea'))) {
         event.preventDefault(); onDismiss(); return;
       }
