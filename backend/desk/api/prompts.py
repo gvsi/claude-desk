@@ -1808,12 +1808,12 @@ def _every_field_required(schema: dict[str, Any], model: type[BaseModel]) -> Non
     schema["required"] = list(schema["properties"])
 
 
+# A topic ask that says whether the owner may pick several of its choices: the consultant's next step and a typed card
+# answer only. The fact turns keep the plain topic: with this field inside their `next` the API refused to compile the
+# hours and the contact turns (a live probe, 2026-11-02), though both stayed within tests/api/test_schema_budget.py.
+# Required in the schema, so the model always says; False when code builds one. Notes stay in comments, not a
+# docstring, since a model's docstring goes into the schema the model reads.
 class NextTopicChoosing(NextTopic):
-    """A topic ask that says whether the owner may pick several of its choices: the consultant's next step and a
-    typed card answer only. The fact turns keep the plain topic: with this field inside their `next` the API refused
-    to compile the hours and the contact turns (a live probe, 2026-11-02), though both stayed within
-    tests/api/test_schema_budget.py. Required in the schema, so the model always says; False when code builds one."""
-
     model_config = ConfigDict(extra="forbid", json_schema_extra=_every_field_required)
 
     several: bool = Field(False, description="True when more than one choice can be true at once.")
