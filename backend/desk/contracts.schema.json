@@ -3713,6 +3713,15 @@
               "type": "null"
             }
           ]
+        },
+        "author": {
+          "default": "claude",
+          "enum": [
+            "claude",
+            "desk"
+          ],
+          "title": "Author",
+          "type": "string"
         }
       },
       "required": [

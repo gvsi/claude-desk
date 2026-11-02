@@ -137,6 +137,37 @@ it.each(['desktop', 'phone'] as const)('setup_sources_have_short_single_line_tit
   }
 });
 
+it.each(['phone', 'desktop'] as const)('source_titles_keep_their_room_beside_pills_%s', async (viewport) => {
+  const { screen } = await renderRoute(`/app/${RIVERA.deskId}/knowledge`, { viewport, pollScale: 100 });
+  const list = screen.getByRole('list', { name: 'What Claude knows' });
+  await expect.poll(() => list.getByRole('listitem').elements().length).toBe(6);
+  const website = list.getByText('turner-plumbing.example', { exact: true }).element();
+  expect(website.scrollWidth).toBeLessThanOrEqual(website.clientWidth);
+
+  // Real sources and the Mock sources give their words the same space.
+  for (const row of list.getByRole('listitem').elements()) {
+    const rowBox = row.getBoundingClientRect();
+    const words = row.querySelector('.cd-knowledge-list__words')!.getBoundingClientRect();
+    const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
+    expect(pill.left).toBeGreaterThanOrEqual(rowBox.left);
+    expect(pill.right).toBeLessThanOrEqual(rowBox.right);
+    expect(pill.bottom).toBeLessThanOrEqual(rowBox.bottom);
+    if (viewport === 'phone') {
+      expect(pill.top).toBeGreaterThanOrEqual(words.bottom);
+      expect(pill.left).toBe(words.left);
+    } else {
+      // Preserve the laptop's flex row, its gaps and its vertically centered pill.
+      const tile = row.querySelector('.cd-knowledge-list__tile')!.getBoundingClientRect();
+      expect(getComputedStyle(row).display).toBe('flex');
+      expect(words.left - tile.right).toBe(16);
+      expect(pill.left - words.right).toBe(16);
+      expect(rowBox.right - pill.right).toBe(16);
+      expect(Math.round(pill.top + pill.height / 2)).toBe(Math.round(rowBox.top + rowBox.height / 2));
+    }
+  }
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+});
+
 
 it('the_phone_source_list_keeps_its_skeleton_until_knowledge_arrives', async () => {
   let release!: () => void;
@@ -149,10 +180,25 @@ it('the_phone_source_list_keeps_its_skeleton_until_knowledge_arrives', async () 
   const known = screen.container.querySelector('.cd-knowledge__known')!;
   const add = screen.getByRole('region', { name: 'Add something', exact: true }).element();
   const pendingTop = add.getBoundingClientRect().top;
-  expect(known.querySelectorAll('.cd-knowledge-list__row')).toHaveLength(6);
+  const pendingRows = [...known.querySelectorAll('.cd-knowledge-list__row')];
+  expect(pendingRows).toHaveLength(6);
+  const pillPlace = (row: Element) => {
+    const words = row.querySelector('.cd-knowledge-list__words')!.getBoundingClientRect();
+    const pill = row.lastElementChild!.getBoundingClientRect();
+    return { left: pill.left - words.left, gap: pill.top - words.bottom };
+  };
+  const pendingPills = pendingRows.map(pillPlace);
+  expect(pendingPills).toEqual(Array.from({ length: 6 }, () => ({ left: 0, gap: 8 })));
   release();
   await expect.element(screen.getByRole('list', { name: 'What Claude knows' })).toBeVisible();
   const loadedTop = add.getBoundingClientRect().top;
+  expect([...known.querySelectorAll('.cd-knowledge-list__row')].map(pillPlace)).toEqual(pendingPills);
+  // Untiled previews keep their pill at the right on phones.
+  const more = screen.getByRole('region', { name: 'More sources' }).element();
+  for (const row of more.querySelectorAll('.cd-knowledge-list__row')) {
+    const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
+    expect(Math.round(row.getBoundingClientRect().right - pill.right)).toBe(16);
+  }
   // The unknown rows can be taller than their shapes, but the source list never collapses to a line.
   expect(Math.abs(loadedTop - pendingTop)).toBeLessThan(250);
 });

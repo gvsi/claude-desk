@@ -3,6 +3,7 @@ import { Icon } from '../../icons/index.tsx';
 import { CrossFade } from '../ConnectorSection/CrossFade.tsx';
 import { OutcomeMenu } from '../OutcomeMenu/OutcomeMenu.tsx';
 import type { RuleMode } from '../OutcomeMenu/outcomeWords.ts';
+import { ToolTitleList, type ToolTitles } from './ToolTitles.tsx';
 
 import './RuleRow.css';
 
@@ -23,10 +24,12 @@ export interface RuleRowProps {
   /** The screen's formatted amount for an auto card with `max_amount_cents` ("$300"). */
   limit?: string;
   /**
-   * A rule on an effect group (`effect:charge`), shown under every tool it governs: `appliesTo` is
-   * the screen's words for what it covers. Changing it from any of those tools changes the one rule.
+   * A rule on an effect group (`effect:charge`), shown under every tool it governs: `lead` is the
+   * screen's words for its group ("Applies to every tool that charges money") and `titles` the
+   * tools it covers, each its own user-text item, so the line reads "Shared rule. {lead}: {titles}."
+   * or, covering none, "Shared rule. {lead}.". Changing it from any of those tools changes the one rule.
    */
-  shared?: { appliesTo: string };
+  shared?: { lead: string } & ToolTitles;
   /** Makes the outcome a menu; the pick goes to the screen, which shows the drafted change first. */
   onChangeOutcome?: (mode: RuleMode) => void;
   /** Where a confirmed change landed: its reason and words cross-fade to the new ones as they change. */
@@ -62,7 +65,16 @@ export function RuleRow({ rule, words, limit, shared, onChangeOutcome, fade = fa
           {shared ? (
             <p className="cd-rule-row__shared cd-type-caption">
               <Icon name="shared" size={14} />
-              <span>Shared rule. {shared.appliesTo}</span>
+              <span>
+                Shared rule. {shared.lead}
+                {shared.titles.length > 0 ? (
+                  <>
+                    {': '}
+                    <ToolTitleList titles={shared.titles} />
+                  </>
+                ) : null}
+                .
+              </span>
             </p>
           ) : null}
         </div>

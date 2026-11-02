@@ -18,11 +18,11 @@ it.each(['desktop', 'phone'] as const)('profile_is_a_main_page_%s', async (viewp
     'Today',
     'Conversations',
     'Customers',
-    'Knowledge',
     'Rules',
     'Safety',
     'Profile',
     'Share',
+    'Knowledge',
     'Settings',
   ]);
   const link = nav.getByRole('link', { name: 'Profile', exact: true });

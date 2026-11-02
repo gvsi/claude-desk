@@ -55,7 +55,8 @@ from desk.api.schemas import (
     operation_ids,
 )
 from desk.api.sse import RUN_EVENTS, append_control, emit
-from desk.api.store import MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending, transcript
+from desk.api.store import (MESSAGES, Ids, Replayed, append_message, blocks_text, clear_hand_back_wake, has_pending,
+                            has_unanswered_message, transcript)
 from desk.contracts import (CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState,
                             effective_brand)
 from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
@@ -122,8 +123,8 @@ async def store_replayed_night(conn: AsyncConnection, created: CopyCreated, *, r
     """Store the night the kernel replayed into a new copy (Plan 01d) in the copy's transcripts, in the caller's
     transaction, and return how many events it stored. Each event, in shown order, is written at the moment it was
     shown with the copy's `replay_id`: a visitor's words as `visitor_text` (an agent's as `agent_text`), a reply
-    through `deliver()` as Claude's, and a receipt through `deliver()` as its final decision. A copy without a
-    `replay_id` stores nothing. An event that doesn't fit fails the whole night: a session that isn't one of the
+    through `deliver()` as Claude's via the API or the Desk's via the kernel, and a receipt as its final decision.
+    A copy without a `replay_id` stores nothing. An event that doesn't fit fails the whole night: a session that isn't one of the
     copy's closed visitor or agent sessions, an event without the one record its kind carries, a decision that isn't
     final or is another session's, or an event deliver() wouldn't show."""
     if created.replay_id is None:
@@ -147,7 +148,8 @@ async def store_replayed_night(conn: AsyncConnection, created: CopyCreated, *, r
             await append_message(conn, ids, REPLAYED_TEXT[session["kind"]], text=event.text, replayed=replayed)
             continue
         if event.kind == "reply":
-            item: Reply | Status = Reply(event.verdict, author="claude", via="api")
+            item: Reply | Status = Reply(event.verdict, author=event.author,
+                                         via="kernel" if event.author == "desk" else "api")
         else:
             decision = event.decision
             if decision.session_id != event.session_id or decision.state in NOT_FINAL:
@@ -698,16 +700,19 @@ async def _change_mode(ctx: OwnerCtx, session_id: str, mode: Literal["ai", "owne
 
 async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionState, name: str) -> None:
     """The visitor's event (`name` is the owner's, as the kernel has it) and Claude's note for a mode change; after
-    one back to Claude, a `run_resumable` row when work is waiting for it. A take-over or a hand-back also stays in
-    the transcript (`_transcribed`); a resume after a breaker pause has no event and leaves no item."""
+    one back to Claude, a `run_resumable` row when work is waiting for it. A take-over stops the wake of a hand-back
+    note no turn has read (`clear_hand_back_wake`). A take-over or a hand-back also stays in the transcript
+    (`_transcribed`); a resume after a breaker pause has no event and leaves no item."""
     if now.mode == "owner":
         await _transcribed(conn, ids, EvOwnerJoined(type="owner_joined", name=name))
         await append_message(conn, ids, "note", text=NOTES["taken_over"], wake=False)
+        await clear_hand_back_wake(conn, ids.session_id)   # the owner answers what an earlier hand-back woke for
         return
     if before == "owner":
         await _transcribed(conn, ids, EvOwnerLeft(type="owner_left"))
+    waiting = before == "owner" and await has_unanswered_message(conn, ids.session_id)
     await append_message(conn, ids, "note", text=NOTES["handed_back" if before == "owner" else "resumed"],
-                         wake=False)
+                         wake=waiting)
     if await has_pending(conn, ids.session_id):
         await append_control(conn, ids, "run_resumable", {"generation": now.generation})
 

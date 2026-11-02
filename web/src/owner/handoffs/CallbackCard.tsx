@@ -47,7 +47,11 @@ export function CallbackCard({ item, showJoin = true, onDone, showSummary = true
   const [error, setError] = useState<string | null>(null);
 
   const reread = () =>
-    Promise.all([queryClient.invalidateQueries({ queryKey: needsYouKey(deskId) }), queryClient.invalidateQueries({ queryKey: todayKey(deskId) })]);
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: needsYouKey(deskId) }),
+      queryClient.invalidateQueries({ queryKey: todayKey(deskId) }),
+      queryClient.invalidateQueries({ queryKey: ['conversations', deskId] }),
+    ]);
 
   // Reads the chat for its generation, takes it over at that generation, and opens it. A take-over
   // that fails still opens the chat, which then says why.

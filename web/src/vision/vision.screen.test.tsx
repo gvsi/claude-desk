@@ -86,7 +86,7 @@ function slotStart(slotId: string): string | null {
 const CITY_FACT_ANYWHERE = /[$€£]\s?\d|\bB-\d{4}-\d{4}\b|\b(?:passed|approved|issued|denied)\b/i;
 
 /** Where "Back to Vision" goes: the Vision article, under About this prototype. */
-const BACK_HREF = '/about/vision';
+const BACK_HREF = '/about/vision#vision-pages';
 
 /** The public page's AI disclosure, as every public page shows it. */
 const DISCLOSURE = "You're chatting with Claude, an AI answering for Turner Plumbing. Ask for Mike Turner anytime.";

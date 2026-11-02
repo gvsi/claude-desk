@@ -5,6 +5,7 @@ import { HeldRequest, type AnsweredFocus } from '../approvals/HeldRequest.tsx';
 import type { HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { heldOldestFirst } from '../useDesks.ts';
+import { useTodayNow } from './todayClock.ts';
 
 export type { CallbackItem } from '../handoffs/CallbackCard.tsx';
 
@@ -51,7 +52,7 @@ export interface NeedsYouProps {
  */
 export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, sectionRef, onDismiss, onDone }: NeedsYouProps) {
   const titleId = useId();
-  const now = new Date();
+  const now = useTodayNow();
   const open = held.length + callbacks.length;
   // Each request keeps its place, and its card, from held to answered.
   const requests = heldOldestFirst([...held, ...[...answers.answered.values()].map((entry) => entry.item)]);

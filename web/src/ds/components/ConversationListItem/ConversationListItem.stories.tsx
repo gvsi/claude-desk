@@ -229,6 +229,66 @@ export const QuotedLong: Story = {
   },
 };
 
+export const AgentLine: Story = {
+  args: {
+    name: rivera.conversations.alexAgent.name,
+    time: '11:42 am',
+    status: { tone: 'info', text: 'Agent · Visit booked' },
+    line: 'Booked Mon, Nov 2, 10:00 am.',
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'Nearest board N-Conv-Run1. What an agent did sits where a visitor’s words would, without quotes: it is the app’s line, not the agent’s.',
+  },
+  play: async ({ canvas }) => {
+    // The line joins the link's name between who and when and the status.
+    const link = canvas.getByRole('link', { name: "Alex Kim's assistant 11:42 am Booked Mon, Nov 2, 10:00 am. Agent · Visit booked" });
+
+    // The app's words, unquoted and not marked as someone's own, drawn as the quote is.
+    const line = canvas.getByText('Booked Mon, Nov 2, 10:00 am.', { exact: true });
+    await expect(line).toHaveClass('cd-conversation-item__quote');
+    await expect(line).toHaveClass('cd-type-meta');
+    await expect(line).not.toHaveAttribute('data-copy');
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontStyle: 'normal' });
+
+    // Under the first line and above the status, as the quote sits; the row grows to hold both.
+    const top = link.querySelector('.cd-conversation-item__top')?.getBoundingClientRect();
+    await expect(Math.round(line.getBoundingClientRect().top - (top?.bottom ?? 0))).toBe(2);
+    const status = canvas.getByText('Agent · Visit booked').parentElement!;
+    await expect(status.getBoundingClientRect().top).toBe(line.getBoundingClientRect().bottom);
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(69);
+  },
+};
+
+export const QuoteOverLine: Story = {
+  args: { name: 'Visitor', time: '1:55 am', status: undefined, quote: 'Tuesday at 2 works.', line: 'A request was turned down.' },
+  parameters: { canvas: 'none', canvasNote: 'Given both, the person’s own words win: the row has one preview line.' },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('link', { name: 'Visitor 1:55 am “Tuesday at 2 works.”' })).toBeVisible();
+    await expect(canvas.queryByText('A request was turned down.')).toBeNull();
+    await expect(canvasElement.querySelectorAll('.cd-conversation-item__quote')).toHaveLength(1);
+  },
+};
+
+export const BlankLine: Story = {
+  args: { name: 'Agent', time: '11:42 am', status: undefined, quote: '   ', line: '   ' },
+  parameters: { canvas: 'none', canvasNote: 'Blank previews leave the row with its name and time alone.' },
+  play: async ({ canvas, canvasElement }) => {
+    const link = canvas.getByRole('link', { name: 'Agent 11:42 am' });
+    await expect(canvasElement.querySelector('.cd-conversation-item__quote')).toBeNull();
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(48);
+  },
+};
+
+export const StatusOverLine: Story = {
+  args: { name: 'Agent', time: '11:42 am', status: { tone: 'held', text: 'Needs you' }, line: 'Paid $20 up front.', quoteWithStatus: false },
+  parameters: { canvas: 'none', canvasNote: 'The two-line layout gives status the preview’s place for an app line too.' },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('link', { name: 'Agent 11:42 am Needs you' })).toBeVisible();
+    await expect(canvasElement.querySelector('.cd-conversation-item__quote')).toBeNull();
+  },
+};
+
 export const StatusOverQuote: Story = {
   args: { name: 'Visitor', time: '10:58 am', status: { tone: 'held', text: 'Needs you' }, quote: 'Can I get 15% off if I pay cash?', quoteWithStatus: false },
   parameters: {

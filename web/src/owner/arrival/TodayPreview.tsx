@@ -4,8 +4,9 @@ import { Component, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { AppShell, ReviewerBar } from '../../ds/index.ts';
 import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { OwnerDeskProvider, OwnerSidebar, type OwnerDeskContext } from '../OwnerLayout.tsx';
+import { TodayClockContext } from '../today/todayClock.ts';
 import { TodayPage } from '../today/TodayPage.tsx';
-import { stillToday } from './preview.ts';
+import { previewClock, stillToday } from './preview.ts';
 import { StillQueryClient } from './StillQueryClient.ts';
 
 import '../OwnerLayout.css';
@@ -13,19 +14,29 @@ import '../today/Today.css';
 
 const ignore = () => undefined;
 
+export interface TodayPreviewProps {
+  /** When the copy opened, as the page read it the moment the copy answered (a `Date.now()` time), or null until then. */
+  openedAt: number | null;
+}
+
 /**
  * A still picture of Turner Plumbing's Today behind the intro dialog, drawn by Today itself in the
  * owner's frame (the reviewer bar, the sidebar), so the page the dialog leaves onto is the one it
  * showed: every part is where Today puts it. Today reads from a client of its own that holds a new
  * copy's reads and never asks the API (`StillQueryClient`): the picture is shown before any copy
- * exists. It is inert and hidden from assistive tech, and has no footer of its own: the dialog in
- * front of it carries the page's one. It is only a backdrop: if drawing it throws, the page behind
- * the dialog is left empty, and the dialog, the one way in, stays.
+ * exists. It is dated from when the page was drawn until the copy opens, then drawn again from
+ * `openedAt`, so the Today the dialog leaves onto has the times and days it showed. It is inert and
+ * hidden from assistive tech, and has no footer of its own: the dialog in front of it carries the
+ * page's one. It is only a backdrop: if drawing it throws, the page behind the dialog is left empty,
+ * and the dialog, the one way in, stays.
  */
-export function TodayPreview() {
+export function TodayPreview({ openedAt }: TodayPreviewProps) {
+  const [drawnAt] = useState(() => Date.now());
+  const { opened, readAt } = previewClock(drawnAt, openedAt);
   return (
     <NothingIfItThrows>
-      <StillToday />
+      {/* Drawn afresh for each opening: its still client holds one copy's reads. */}
+      <StillToday key={opened.getTime()} opened={opened.getTime()} readAt={readAt.getTime()} />
     </NothingIfItThrows>
   );
 }
@@ -43,15 +54,17 @@ class NothingIfItThrows extends Component<{ children: ReactNode }, { threw: bool
   }
 }
 
-/** The picture itself. */
-function StillToday() {
+/** The picture itself, of a copy that opened at `opened`, read and labelled at `readAt` (both `Date.now()` times). */
+function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [still] = useState(() => {
-    const { business, desk, liveCount, reads } = stillToday(new Date());
+    const { business, desk, liveCount, reads } = stillToday(new Date(opened), new Date(readAt));
     // Answering, a Desk's hold and a place to scroll back to do nothing here: the picture is inert,
     // and no copy exists yet.
     const context = { business, desk, setAnswering: ignore, holdDesk: ignore, reachPlace: ignore } satisfies OwnerDeskContext;
-    return { client: new StillQueryClient(reads), desk: context, liveCount };
+    // Today's labels are drawn at the moment the picture reads its copy, as Today will draw them.
+    const clock = () => new Date(readAt);
+    return { client: new StillQueryClient(reads), desk: context, liveCount, clock };
   });
   const { business, desk } = still.desk;
 
@@ -63,32 +76,34 @@ function StillToday() {
   return (
     <div ref={ref} className="cd-today-preview" aria-hidden="true">
       <QueryClientProvider client={still.client}>
-        <OwnerDeskProvider value={still.desk}>
-          <AppShell
-            business={business.name}
-            banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={ignore} actions={<OwnerInbox timezone={business.timezone} />} />}
-            sidebar={
-              <OwnerSidebar
-                businesses={[business]}
-                business={business}
-                desk={desk}
-                current="today"
-                liveCount={still.liveCount}
-                switching={false}
-                onToggleSwitcher={ignore}
-                onCloseSwitcher={ignore}
-                onPickBusiness={ignore}
-                onNewBusiness={ignore}
-                onSwitchDesk={ignore}
-                onAnsweringChange={ignore}
-              />
-            }
-          >
-            <div className="cd-owner-layout">
-              <TodayPage namesTheTab={false} />
-            </div>
-          </AppShell>
-        </OwnerDeskProvider>
+        <TodayClockContext.Provider value={still.clock}>
+          <OwnerDeskProvider value={still.desk}>
+            <AppShell
+              business={business.name}
+              banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={ignore} actions={<OwnerInbox timezone={business.timezone} />} />}
+              sidebar={
+                <OwnerSidebar
+                  businesses={[business]}
+                  business={business}
+                  desk={desk}
+                  current="today"
+                  liveCount={still.liveCount}
+                  switching={false}
+                  onToggleSwitcher={ignore}
+                  onCloseSwitcher={ignore}
+                  onPickBusiness={ignore}
+                  onNewBusiness={ignore}
+                  onSwitchDesk={ignore}
+                  onAnsweringChange={ignore}
+                />
+              }
+            >
+              <div className="cd-owner-layout">
+                <TodayPage namesTheTab={false} />
+              </div>
+            </AppShell>
+          </OwnerDeskProvider>
+        </TodayClockContext.Provider>
       </QueryClientProvider>
     </div>
   );
