@@ -2220,11 +2220,14 @@ describe('Things to try ticks off', () => {
     expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
     await expect.element(things.getByText('3 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
-    // Every read behind them was the main line's.
+    // Every read behind them was the main line's. Only "Watch a demo visitor", which is copy-wide (a
+    // demo visitor runs on the Desk it was started from), also reads this Desk's conversations.
     for (const key of ['conversations', 'ledger'] as const) {
-      expect(requests(key).length, key).toBeGreaterThan(0);
-      expect(requests(key).filter((r) => !r.path.startsWith(mainLinePath(key))), key).toEqual([]);
+      expect(requests(key).filter((r) => r.path.startsWith(mainLinePath(key))).length, key).toBeGreaterThan(0);
     }
+    expect(requests('ledger').filter((r) => !r.path.startsWith(mainLinePath('ledger')))).toEqual([]);
+    const elsewhere = requests('conversations').filter((r) => !r.path.startsWith(mainLinePath('conversations')));
+    expect(elsewhere.filter((r) => !r.path.startsWith(`/api/owner/desks/${encodeURIComponent(RIVERA.emergenciesDeskId)}/conversations`))).toEqual([]);
   });
 
   it('deleting_the_desk_the_copy_started_with_keeps_what_was_seen', async () => {

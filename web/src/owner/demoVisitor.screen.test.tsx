@@ -173,6 +173,23 @@ describe('Demo visitor', () => {
     expect(card.querySelector('button, a'), 'no next step once done').toBeNull();
   });
 
+  it('a_demo_visitor_started_from_a_second_desk_ticks_the_card', async () => {
+    const second = `/app/${RIVERA.emergenciesDeskId}/today`;
+    const { screen, router } = await renderRoute(second, { seed: 'rivera_two_desks' });
+    let things = region(screen, 'Things to try');
+    await expect.element(things.getByRole('heading', { level: 3, name: CARD_TITLE })).toBeVisible();
+    await startControl(things, 'desktop').click();
+    await expect.poll(() => router.state.location.pathname).toContain(`/app/${RIVERA.emergenciesDeskId}/conversations/`);
+    expect(demoChats()[0]!.deskId).toBe(RIVERA.emergenciesDeskId);
+
+    // Back on that Desk's Today, its card is done, as it would be on the first Desk's.
+    await router.navigate(second);
+    things = region(screen, 'Things to try');
+    const card = () => things.getByRole('heading', { level: 3, name: CARD_TITLE }).element().closest('.cd-things__item');
+    await expect.poll(() => card()?.querySelector('.cd-things__done')?.textContent ?? null, { timeout: 5_000 }).toBe('Done');
+    expect(card()?.querySelector('button, a'), 'no next step once done').toBeNull();
+  });
+
   it.each(['desktop', 'phone'] as const)('its_row_and_its_head_say_demo_visitor_on_%s', async (viewport: Viewport) => {
     const { session_id: sessionId } = await startOne('row-and-head');
     const { screen, router } = await renderRoute(LIST, { viewport });

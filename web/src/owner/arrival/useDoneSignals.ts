@@ -2,8 +2,10 @@
  * The reads behind Today's things to try, and what this view remembers of them. Every read is one
  * another owner screen already makes, under that screen's key, so they share it: the conversations
  * list, a preview chat's transcript, Safety's attempts and its signed record, and the copy's Desks.
- * Every signal but "Create your own Desk" reads the Desk the copy started with, on whichever Desk the
- * list shows; that one is copy-wide. A hidden list reads nothing, and a read stops once every thing it tells is
+ * "Chat as a customer", "Try to break it" and "Answer a held request" read the Desk the copy started
+ * with, on whichever Desk the list shows. "Watch a demo visitor" and "Create your own Desk" are
+ * copy-wide: a demo visitor runs on the Desk it was started from, so every listed Desk's
+ * conversations are read for one. A hidden list reads nothing, and a read stops once every thing it tells is
  * done. A read that is loading or failed ticks nothing and shows no error: the list is a guide.
  * What the list remembers (the Desk the copy started with and the things seen done) lasts while the
  * app runs, across visits to Today, until a reload or a new copy.
@@ -135,7 +137,7 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
   const conversations = useQuery({
     queryKey: conversationsKey(seeded ?? ''),
     queryFn: () => request('conversations', { params: { desk_id: seeded ?? '' } }),
-    enabled: reading && (seen.chat === undefined || seen.demo === undefined || seen.break === undefined),
+    enabled: reading && (seen.chat === undefined || seen.break === undefined),
     ...polled(),
   });
   const previews = conversations.data === undefined ? [] : previewSessions(conversations.data);
@@ -144,6 +146,16 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
       queryKey: conversationKey(sessionId),
       queryFn: () => request('conversation', { params: { session_id: sessionId } }),
       enabled: reading && seen.chat === undefined,
+      ...polled(),
+    })),
+  });
+  // "Watch a demo visitor": each listed Desk's conversations, the starting Desk's among them (the same
+  // read as above), until one lists a demo visitor's chat.
+  const demoReads = useQueries({
+    queries: listed.map((id) => ({
+      queryKey: conversationsKey(id),
+      queryFn: () => request('conversations', { params: { desk_id: id } }),
+      enabled: enabled && seen.demo === undefined,
       ...polled(),
     })),
   });
@@ -175,8 +187,11 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
       done: reading && conversationsWorked && chattedAsCustomer(chats),
     },
     demo: {
-      settled: reading && fresh(conversationsKey(seeded ?? ''), conversations),
-      done: reading && conversationsWorked && demoVisitorRan(conversations.data ?? []),
+      settled: enabled && listed.length > 0 && demoReads.every((read, i) => fresh(conversationsKey(listed[i] ?? ''), read)),
+      done: enabled && demoReads.some((read) => {
+        const listedThere = worked(read);
+        return listedThere !== undefined && demoVisitorRan(listedThere);
+      }),
     },
     break: {
       settled:
