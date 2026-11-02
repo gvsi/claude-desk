@@ -1166,7 +1166,8 @@ async def link_view(ctx: KernelCtx, token: str) -> PaymentLinkView:
     holding a document canary is withheld there, and here), and `customer_name`, read in the
     request's transaction (unbound until the token's hash names a copy) once the read has settled
     the link (`settle_link`, which commits what it moved before the read goes on): an issued link
-    past its expiry is `expired`, unless a completion has started. A link a rule change cancelled
+    past its expiry is `expired`, unless a completion has started, and one whose quote another
+    payment has paid is `cancelled`, naming no reason. A link a rule change cancelled
     says so (`cancel_reason`). A token no link has, or no token could be, is 404 `not_found`, the
     same for all."""
     digest = await _bind_token(ctx, token)
