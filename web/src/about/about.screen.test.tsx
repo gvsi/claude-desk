@@ -148,7 +148,7 @@ describe('About pages', () => {
     ] as const;
     const SUMMARIES: Record<string, string> = {
       'Capability prediction':
-        'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
+        'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
       'Product proposal': 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
       Vision: 'A front desk that never closes: where a Desk could go next, and the rules that wouldn’t change.',
     };
@@ -243,7 +243,7 @@ describe('About pages', () => {
         await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true }), { message: where }).toBeVisible();
         expect(look(screen.container, screen.container.querySelector('[data-summary]'), viewport === 'phone'), where).toEqual(paper);
         // The figures sit on the article's paper cards, and a link in the text is in the article's link color.
-        const frame = screen.container.querySelector('[data-hero] .cd-about-frame') as HTMLElement;
+        const frame = screen.container.querySelector('main .cd-about-frame') as HTMLElement;
         expect(getComputedStyle(frame).backgroundColor, where).toBe(paper.card[0]);
         const link = screen.container.querySelector('a.cd-text-link') as HTMLElement;
         expect(getComputedStyle(link).color, where).toBe(LINK);
