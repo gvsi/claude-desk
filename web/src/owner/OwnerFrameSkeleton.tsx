@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
-import { ABOUT_LINKS } from '../about/links.ts';
+import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
 import { AppShell, ConceptFooter, ReviewerBarSkeleton, SidebarSkeleton, type NavKey } from '../ds/index.ts';
 import { ConversationsSkeleton } from './conversations/ConversationsSkeleton.tsx';
 import { CENTERED_PAGES, FILL_PAGES } from './OwnerLayout.tsx';
@@ -45,7 +45,7 @@ export function OwnerFrameSkeleton({ pathname }: { pathname: string }) {
       skeleton
       business=""
       banner={<ReviewerBarSkeleton inbox />}
-      sidebar={<SidebarSkeleton rows={9} about={ABOUT_LINKS.links.length} />}
+      sidebar={<SidebarSkeleton rows={9} about={SIDEBAR_ABOUT.links.length} />}
       fill={fill}
     >
       <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}${centered ? ' cd-owner-layout--centered' : ''}`}>

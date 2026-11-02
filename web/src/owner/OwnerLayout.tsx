@@ -15,9 +15,9 @@ import {
 } from 'react';
 import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, useParams } from 'react-router';
 
-import { ABOUT_LINKS } from '../about/links.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, CopyOut, DeskSummary } from '../api/views.ts';
+import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import {
   AppShell,
@@ -539,7 +539,7 @@ export function OwnerSidebar(props: OwnerSidebarProps) {
         onAnsweringChange={props.onAnsweringChange}
         owner={{ name: business.owner_display_name, status: 'Available for chats' }}
         linkComponent={RouterLink}
-        about={ABOUT_LINKS}
+        about={SIDEBAR_ABOUT}
       />
       {props.switching ? (
         <BesideTheBusinessRow container={ref}>

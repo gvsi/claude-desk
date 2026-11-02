@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
-import { ABOUT_LINKS } from '../../about/links.ts';
+import { SIDEBAR_ABOUT } from '../../owner/sidebarAbout.ts';
 import { Sidebar } from '../components/Sidebar/Sidebar.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
@@ -10,8 +10,8 @@ import { SPEC, expectTabOrder, one } from './spec.ts';
 
 /** The documents behind the prototype, the owner reading the first. */
 const ABOUT = {
-  ...ABOUT_LINKS,
-  links: ABOUT_LINKS.links.map((link) => ({ ...link, current: link.id === 'prediction' })),
+  ...SIDEBAR_ABOUT,
+  links: SIDEBAR_ABOUT.links.map((link) => ({ ...link, current: link.id === 'prediction' })),
 };
 
 /** The sidebar alone, in the column the AppShell gives it, with the "About this prototype" group. */

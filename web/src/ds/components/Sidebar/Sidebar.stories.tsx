@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
-import { ABOUT_LINKS } from '../../../about/links.ts';
+import { SIDEBAR_ABOUT } from '../../../owner/sidebarAbout.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { CAPS_BADGE } from '../../test/copy.ts';
 import { loadWebFonts } from '../../test/fonts.ts';
@@ -475,7 +475,7 @@ export const SidebarSkeletonPhone: Story = {
 
 /** The main Profile row and the repository link shown by the owner app. */
 export const ProfileAndGitHub: Story = {
-  args: { current: 'profile', desks: [MAIN_LINE], about: ABOUT_LINKS },
+  args: { current: 'profile', desks: [MAIN_LINE], about: SIDEBAR_ABOUT },
   parameters: { canvas: 'none', canvasNote: 'Profile follows Safety. GitHub follows Vision and opens the repository in a new tab.' },
   play: async ({ canvas, canvasElement }) => {
     const profile = canvas.getByRole('link', { name: 'Profile' });

@@ -44,5 +44,3 @@ export const Board: Story = {
     await expect(canvas.getByRole('button', { name: 'Add a website' })).toBeVisible();
   },
 };
-
-export const Phone: Story = { ...Board, globals: { viewport: { value: 'phone', isRotated: false } } };

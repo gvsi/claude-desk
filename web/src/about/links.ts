@@ -51,7 +51,7 @@ export const ABOUT_SET_LINKS: SidebarAboutLink[] = ORDER.map((id) => ({ id, labe
 /** The sidebar's "About this prototype" group: the two documents, then the Vision article. */
 export const ABOUT_LINKS: SidebarAbout = {
   title: 'About this prototype',
-  links: [...ABOUT_SET_LINKS, { id: 'github', label: 'GitHub', href: 'https://github.com/gvsi/claude-desk', external: true, icon: 'github' }],
+  links: ABOUT_SET_LINKS,
 };
 
 /** What "Read next" offers at the end of a page: the next page in the set, and after the last, the first again. */
