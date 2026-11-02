@@ -882,8 +882,9 @@ const SERVED: ServedRoutes = {
     const { session } = visitor;
     // One answer for a wrong, expired or used-up code, so a refusal never says which.
     if (!sv.world.checkCode(session, code)) return failWith(422, 'kernel', { code: 'invalid' });
-    // The API wakes Claude, which goes on with what the visitor asked for.
-    sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
+    // The API wakes Claude, which goes on with what the visitor asked for, but only while it has the
+    // chat, as for a message: after the owner took over, the chat stays his and Claude stays quiet.
+    if (session.state.mode === 'ai') sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
     return ok({ state: session.state } satisfies VerifyChecked);
   },
   visitorInbox(sv, req) {

@@ -696,6 +696,46 @@ it('seeds How we help as customer-readable lines that pass the scan', async () =
   }
 });
 
+let cardRuns = 0;
+
+/** The CPA starter with its cards, each job card decided by `accept`, then on to the rules step. */
+async function cpaAtRulesDeciding(accept: (job: string) => boolean) {
+  const query = { cards: '1' };
+  const started = await mockStore.dispatch('startSetup', { query, body: {
+    description: START_EXAMPLES.en.examples[3]!.description,
+    timezone: 'America/Los_Angeles', idempotency_key: `how-we-help-${++cardRuns}`,
+  } });
+  if ('network' in started) throw new Error('start failed');
+  const params = { id: (started.body as SetupState).interview_id };
+  const next = async (key: 'setupConsent' | 'setupAnswer' | 'setupSuggestions' | 'setupProposal', body: unknown, proposal_id?: string) => {
+    const answer = await mockStore.dispatch(key, { params: { ...params, ...(proposal_id ? { proposal_id } : {}) }, query, body });
+    if ('network' in answer || answer.status !== 200) throw new Error(`${key} must answer 200`);
+    return answer.body as SetupState;
+  };
+  let state = await next('setupConsent', { allow: true });
+  state = await next('setupAnswer', { question: state.question, text: 'Both, about evenly' });
+  while (state.pending_card) {
+    const card = state.messages.at(-1)!.card!;
+    const yes = card.job === null || accept(card.job.job);
+    state = await next('setupProposal', yes && card.job?.job === 'payment' ? { accept: true, amount_cents: 50000 } : { accept: yes }, card.proposal_id);
+  }
+  if (state.step !== 'tools') state = await next('setupSuggestions', {});
+  await mockStore.dispatch('setupRules', { params });
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read || read.status !== 200) throw new Error('public lines unavailable');
+  return (read.body as SetupPublicLines).lines.find(({ key }) => key === 'policy:how_we_help');
+}
+
+it('leaves out of How we help the job the owner turned down, and the line when they turned down every job', async () => {
+  const booking = 'New clients book a short introductory call.';
+  const intake = 'Before their call, new clients answer three short questions.';
+  const retainer = 'Clients get a secure link to pay a retainer before work starts.';
+  expect((await cpaAtRulesDeciding(() => true))?.text).toBe([booking, intake, retainer].join('\n'));
+  expect((await cpaAtRulesDeciding((job) => job !== 'payment'))?.text).toBe([booking, intake].join('\n'));
+  expect((await cpaAtRulesDeciding((job) => job !== 'intake'))?.text).toBe([booking, retainer].join('\n'));
+  expect(await cpaAtRulesDeciding(() => false)).toBeUndefined();
+});
+
 it('scans read-only How we help before confirmation and public publication', async () => {
   const params = await atRules();
   const read = await mockStore.dispatch('setupPublicLines', { params });

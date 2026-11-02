@@ -1,7 +1,7 @@
 /** Setup's public lines, scoped to the mock copy and interview. The real API uses the kernel scan. */
-import type { SetupPublicLine, SetupPublicLines, PublicPriceItem, SetupState } from '../api/views.ts';
+import type { JobProposal, SetupPublicLine, SetupPublicLines, PublicPriceItem, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
-import { SETUP_QUESTIONS, SETUP_ROUTES, TEST_CLIENT_OFFER, setupAbout } from './setup.ts';
+import { SETUP_QUESTIONS, SETUP_ROUTES, TEST_CLIENT_OFFER, setupAbout, setupDeclinedJobs } from './setup.ts';
 import { heldPublicLineSeed, storedPublicState, storePublicState } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import { publicLineLimit } from '../setup/publicLineLimit.ts';
@@ -14,8 +14,22 @@ const CPA_LINES = [
   ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
   ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
   ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
-  ['how_we_help', 'New clients book a short introductory call.\nBefore their call, new clients answer three short questions.\nClients get a secure link to pay a retainer before work starts.'],
 ] as const;
+
+/**
+ * The signed How we help line, one sentence per job. As in the API, which lists only the jobs the owner took
+ * on, a job whose card the owner turned down leaves its sentence out, and turning down every job leaves no line.
+ */
+const CPA_HOW_WE_HELP: readonly (readonly [JobProposal['job'], string])[] = [
+  ['schedule', 'New clients book a short introductory call.'],
+  ['intake', 'Before their call, new clients answer three short questions.'],
+  ['payment', 'Clients get a secure link to pay a retainer before work starts.'],
+];
+
+function cpaHowWeHelp(sv: Server, state: SetupState): string {
+  const declined = setupDeclinedJobs(sv.world, state.interview_id);
+  return CPA_HOW_WE_HELP.filter(([job]) => !declined.has(job)).map(([, sentence]) => sentence).join('\n');
+}
 
 /** Only customer-facing after-hours statements are known; private instructions stay out. */
 function afterHoursOf(answer: string | undefined): string | undefined {
@@ -46,9 +60,9 @@ function priceItems(items: Pick<PublicPriceItem, 'title' | 'unit_cents'>[]): Pub
 function seed(sv: Server, state: SetupState): Omit<SetupPublicLines, 'revision'> {
   const desk = sv.world.desk(state.desk_id);
   if (/^Chen & Co\.?(?: CPA)?$/i.test(desk?.summary.business_name ?? '')) {
-    const lines = CPA_LINES.map(([key, text]): SetupPublicLine => ({
-      key: `policy:${key}`, text, source: 'owner', editable: key !== 'how_we_help',
-    }));
+    const lines = CPA_LINES.map(([key, text]): SetupPublicLine => ({ key: `policy:${key}`, text, source: 'owner', editable: true }));
+    const howWeHelp = cpaHowWeHelp(sv, state);
+    if (howWeHelp) lines.push({ key: 'policy:how_we_help', text: howWeHelp, source: 'owner', editable: false });
     lines.splice(1, 0, { key: 'contact', text: '(408) 555-0199, linda@chenandco.com', source: 'suggested', editable: true });
     return {
       lines,

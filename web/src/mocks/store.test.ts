@@ -1994,6 +1994,21 @@ describe('the owner in the chat', () => {
     expect(read.last_seq).toBe(events.at(-1)?.[0]);
   });
 
+  it('a_code_confirmed_while_the_owner_has_the_chat_verifies_without_waking_claude', async () => {
+    // As the API: the visitor is verified, but while the owner has the chat Claude takes no turn,
+    // so it doesn't answer for him and the chat stays his.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
+    const before = events.length;
+    const checked = await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } });
+    expect(checked).toMatchObject({ status: 200, body: { state: { verified: true, mode: 'owner' } } });
+    await drain();
+    expect(typesOf(events.slice(before)).filter((type) => ['writing', 'message', 'turn_end'].includes(type))).toEqual([]);
+    expect((await call('visitorSession', { params: { slug } })).body).toMatchObject({ state: { mode: 'owner' } });
+  });
+
   it('typing_shows_both_ways', async () => {
     const { session, events } = await openChat();
     const sessionId = session.session_id;
