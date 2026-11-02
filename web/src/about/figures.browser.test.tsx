@@ -68,7 +68,8 @@ const DAY = 24 * 60 * 60 * 1000;
 
 /**
  * The chart's scales, read off two of its points: Sonnet 4.5 (Sep 29, 2025, 25.3%) and Opus 5 (Jul 24, 2026,
- * 48.7%). `y(score)` is where a score sits; `days(x, iso)` is how many days `x` lies past the day `iso`.
+ * 48.7%). `y(score)` is where a score sits; `days(x, iso)` is how many days `x` lies past the day `iso`; `x(iso)` is
+ * where the day `iso` sits.
  */
 function chartScales(sonnet: Element | undefined, opus5: Element | undefined) {
   const at = (el: Element | undefined, name: 'cx' | 'cy') => Number(el?.getAttribute(name));
@@ -78,6 +79,7 @@ function chartScales(sonnet: Element | undefined, opus5: Element | undefined) {
   return {
     y: (score: number) => first.y + ((score - first.score) / (last.score - first.score)) * (last.y - first.y),
     days: (x: number, iso: string) => (x - first.x) / perDay - (Date.parse(`${iso}T00:00:00Z`) - first.t) / DAY,
+    x: (iso: string) => first.x + ((Date.parse(`${iso}T00:00:00Z`) - first.t) / DAY) * perDay,
   };
 }
 
@@ -153,17 +155,52 @@ function tableOf(blocks: Block[], after: 'readiness' | null): Table {
 
 const READINESS = tableOf(ABOUT_DOCUMENTS.prediction.blocks, 'readiness');
 
-/** The seven Claude points as the leaderboard lists them, by release, then the top score. */
+/** The ten Claude points, by release, each with its score and its board, then the top score, another lab's. */
 const CLAUDE_POINTS = [
-  'Claude Sonnet 4.5, Sep 29, 2025: 25.3%',
-  'Claude Opus 4.5, Nov 24, 2025: 24.7%',
-  'Claude Opus 4.6, Feb 5, 2026: 27.3%',
-  'Claude Opus 4.7, Apr 16, 2026: 40.2%',
-  'Claude Opus 4.8, May 28, 2026: 39.7%',
-  'Claude Fable 5, Jun 9, 2026: 39.7%',
-  'Claude Opus 5, Jul 24, 2026: 48.7%',
+  'Claude Sonnet 4.5, 25.3% on Sierra',
+  'Claude Opus 4.5, 24.7% on Sierra',
+  'Claude Opus 4.6, 27.3% on Sierra',
+  'Claude Opus 4.7, 40.2% on Sierra',
+  'Claude Opus 4.8, 39.7% on Sierra',
+  'Claude Fable 5, 39.7% on Sierra',
+  'Claude Sonnet 5, 37.3% on Artificial Analysis',
+  'Claude Opus 5, 48.7% on Sierra',
+  'Claude Fable 5.1, 47.2% on Artificial Analysis',
+  'Claude Opus 5.5, 56.0% on Fireworks',
 ];
-const TOP_POINT = 'Qwen 3.8 Max, Jul 19, 2026: 55.2%, the top score';
+const TOP_POINT = 'Gemini 4 Argon, 58.2% on Fireworks';
+
+/** The labelled scores, by release: each its model and score, then its board, as the board draws them. */
+const POINT_LABELS = [
+  ['Sonnet 5, 37.3%', 'AA'],
+  ['Opus 5, 48.7%', 'Sierra'],
+  ['Fable 5.1, 47.2%', 'AA'],
+  ['Opus 5.5, 56.0%', 'Fireworks'],
+  ['Gemini 4 Argon, 58.2%', 'Fireworks'],
+];
+
+/** The quarters on the time axis, from Q3 2025 to Q4 2027, the prediction's: each one's first day and its name. */
+const QUARTERS = [
+  ['2025-07-01', 'Q3'],
+  ['2025-10-01', 'Q4'],
+  ['2026-01-01', 'Q1'],
+  ['2026-04-01', 'Q2'],
+  ['2026-07-01', 'Q3'],
+  ['2026-10-01', 'Q4'],
+  ['2027-01-01', 'Q1'],
+  ['2027-04-01', 'Q2'],
+  ['2027-07-01', 'Q3'],
+  ['2027-10-01', 'Q4'],
+  ['2028-01-01', ''],
+] as const;
+
+/** The chart's caption, after "Figure 1". */
+const CAPTION =
+  'Each dot is one model’s score. Seven of Claude’s scores, up to Opus 5, are from Sierra’s board; Sonnet 5 and ' +
+  'Fable 5.1 are from Artificial Analysis (AA), and Opus 5.5 and Gemini 4 Argon from Fireworks. The line is a ' +
+  'straight-line fit in log-odds through all ten Claude scores, dashed where it runs ahead of today. The band runs ' +
+  'from where the Opus scores alone reach 80% to where all ten do. The boards’ setups differ, so scores from ' +
+  'different boards are only roughly comparable.';
 
 describe('the about project', () => {
   it('about_project_runs_with_reduced_motion', () => {
@@ -173,73 +210,182 @@ describe('the about project', () => {
 });
 
 describe('Tau3Chart', () => {
-  it('chart_shows_the_leaderboard', async () => {
+  it('chart_shows_the_boards', async () => {
     const primary = tokenColor('--text-primary');
     const secondary = tokenColor('--text-secondary');
     const panel = tokenColor('--bg-panel');
+    const texts = (els: Iterable<Element>) => [...els].map((el) => el.textContent);
 
     for (const compact of [false, true]) {
+      const where = `compact ${compact}`;
       const screen = await render(<Tau3Chart compact={compact} />);
       const svg = screen.container.querySelector('svg[role="img"]');
-      expect(svg, `compact ${compact}`).not.toBeNull();
+      expect(svg, where).not.toBeNull();
       if (!svg) continue;
 
-      // Seven filled points in primary ink, values in their titles.
+      // Its title, the line under it, and the key.
+      const head = screen.container.querySelector('.cd-about-chart__head');
+      expect(texts(head?.querySelectorAll(':scope > p') ?? []), where).toEqual([
+        'Claude’s τ³-Banking score, and when the trend reaches 80%',
+        compact
+          ? 'Bank customer-service tasks done right on the first try'
+          : 'The share of a bank’s customer-service tasks each model gets right on the first try, by its release date',
+        compact ? 'ClaudeAnother labTrendReaches 80%' : 'ClaudeAnother labTrend through Claude’s scoresWhen the trend reaches 80%',
+      ]);
+      expect(texts(head?.querySelectorAll('.cd-about-chart__key-item') ?? []), where).toEqual(
+        compact
+          ? ['Claude', 'Another lab', 'Trend', 'Reaches 80%']
+          : ['Claude', 'Another lab', 'Trend through Claude’s scores', 'When the trend reaches 80%'],
+      );
+
+      // Ten filled points in primary ink, each with its score and board in its title.
       const filled = [...svg.querySelectorAll('[data-point="claude"]')];
-      expect(titles(filled)).toEqual(CLAUDE_POINTS);
+      expect(titles(filled), where).toEqual(CLAUDE_POINTS);
       for (const point of filled) expect(getComputedStyle(point).fill).toBe(primary);
 
-      // One hollow point in secondary ink: the top score.
+      // One hollow point in secondary ink: the top score on any board, another lab's.
       const hollow = [...svg.querySelectorAll('[data-point="top"]')];
-      expect(titles(hollow)).toEqual([TOP_POINT]);
+      expect(titles(hollow), where).toEqual([TOP_POINT]);
       for (const point of hollow) {
         expect(getComputedStyle(point).fill).toBe(panel);
         expect(getComputedStyle(point).stroke).toBe(secondary);
       }
 
-      // The latest Claude point, Opus 5, ringed.
+      // The latest Claude point, Opus 5.5, ringed.
       const ring = svg.querySelector('[data-ring]');
-      const opus5 = filled.at(-1);
-      expect(ring?.getAttribute('cx')).toBe(opus5?.getAttribute('cx'));
-      expect(ring?.getAttribute('cy')).toBe(opus5?.getAttribute('cy'));
+      const opus55 = filled.at(-1);
+      expect(ring?.getAttribute('cx'), where).toBe(opus55?.getAttribute('cx'));
+      expect(ring?.getAttribute('cy'), where).toBe(opus55?.getAttribute('cy'));
 
-      // Direct labels only on Opus 4.5, Opus 5 and the top score; a phone keeps the short ones.
-      const labels = [...svg.querySelectorAll('[data-point-label]')].map((label) => label.textContent);
-      expect(labels).toEqual(
-        compact ? ['24.7%', 'Opus 5 48.7%'] : ['Top score, Qwen 3.8 Max 55.2%', 'Opus 4.5 24.7%', 'Opus 5 48.7%'],
-      );
+      // Each labelled score names its model, its score and its board; Sierra's early run shares one label on a laptop.
+      const labels = [...svg.querySelectorAll('[data-point-label]')].map((label) => texts(label.querySelectorAll('text')));
+      expect(labels, where).toEqual(POINT_LABELS);
+      expect(texts(svg.querySelectorAll('[data-point-note]')), where).toEqual(compact ? [] : ['Sonnet 4.5 to Fable 5: Sierra']);
+      // The rest are that run: Sierra's first six.
+      const labelled = new Set(POINT_LABELS.map(([name]) => name?.split(',')[0]));
+      const rest = CLAUDE_POINTS.filter((title) => !labelled.has(title.replace(/^Claude /, '').split(',')[0]));
+      expect(rest, where).toEqual(CLAUDE_POINTS.slice(0, 6));
+      for (const title of rest) expect(title, where).toMatch(/ on Sierra$/);
 
-      // The fit, the 80% bar and the band are drawn once each, where the text puts them. The chart's scales
-      // come from two of its own points: Sonnet 4.5 (Sep 29, 2025, 25.3%) and Opus 5 (Jul 24, 2026, 48.7%).
-      expect(svg.querySelectorAll('[data-fit]')).toHaveLength(1);
-      expect(svg.querySelectorAll('[data-bar]')).toHaveLength(1);
-      expect(svg.querySelectorAll('[data-band]')).toHaveLength(1);
-      const scales = chartScales(filled[0], filled.at(-1));
-      // The bar at 80%.
+      // The scales, from two of its own points: Sonnet 4.5 (Sep 29, 2025, 25.3%) and Opus 5 (Jul 24, 2026, 48.7%).
+      const opus5 = filled.find((point) => point.querySelector('title')?.textContent?.startsWith('Claude Opus 5,'));
+      const scales = chartScales(filled[0], opus5);
+      const near = (x: number, iso: string, days = 1.5) => expect(Math.abs(scales.days(x, iso)), `${where}: ${iso}`).toBeLessThan(days);
+
+      // The time axis in quarters: a tick at each quarter's start, its name halfway along it, the years under them.
+      const ticks = [...svg.querySelectorAll('[data-tau3-part="tick"]')].map((tick) => Number(tick.getAttribute('x1')));
+      expect(ticks, where).toHaveLength(QUARTERS.length);
+      QUARTERS.forEach(([iso], i) => near(ticks[i] ?? 0, iso));
+      const tickLabels = [...svg.querySelectorAll('[data-tau3-part="tick-label"]')];
+      expect(texts(tickLabels), where).toEqual([...QUARTERS.slice(0, -1).map(([, name]) => name), '2025', '2026', '2027']);
+      QUARTERS.slice(0, -1).forEach(([iso], i) => {
+        const next = QUARTERS[i + 1]?.[0] ?? iso;
+        const middle = (scales.x(iso) + scales.x(next)) / 2;
+        expect(Math.abs(Number(tickLabels[i]?.getAttribute('x')) - middle), `${where}: ${iso}'s name`).toBeLessThan(1);
+      });
+      // The prediction's quarter is named in primary ink, the others in secondary.
+      expect(tickLabels.slice(0, 10).map((label) => getComputedStyle(label).fill === primary), where).toEqual([
+        ...Array<boolean>(9).fill(false),
+        true,
+      ]);
+
+      // Today, a vertical rule on the day the boards were read.
+      const today = svg.querySelector('[data-today]');
+      near(Number(today?.getAttribute('x1')), '2026-11-02');
+      expect(today?.getAttribute('x2'), where).toBe(today?.getAttribute('x1'));
+      expect(texts(svg.querySelectorAll('[data-tau3-part="today-label"]')), where).toEqual(['Today']);
+
+      // The bar, dotted at 80%.
+      expect(svg.querySelectorAll('[data-bar]'), where).toHaveLength(1);
       const bar = Number(svg.querySelector('[data-bar]')?.getAttribute('y1'));
-      expect(Math.abs(bar - scales.y(80)), `compact ${compact}: the bar's y`).toBeLessThan(0.5);
-      // The band from the best-score fit's crossing (Apr 20, 2027) to the all-seven fit's (Oct 3, 2027).
+      expect(Math.abs(bar - scales.y(80)), `${where}: the bar's y`).toBeLessThan(0.5);
+      expect(getComputedStyle(svg.querySelector('[data-bar]') as Element).strokeDasharray, where).not.toBe('none');
+      expect(texts(svg.querySelectorAll('[data-tau3-part="bar-label"]')), where).toEqual(['The bar: 80%']);
+
+      // The band, from where the Opus fit reaches 80% (May 31, 2027) to where the fit through all ten does (Oct 3,
+      // 2027), named in quarters.
+      expect(svg.querySelectorAll('[data-band]'), where).toHaveLength(1);
       const band = svg.querySelector('[data-band]');
       const left = Number(band?.getAttribute('x'));
       const right = left + Number(band?.getAttribute('width'));
-      expect(Math.abs(scales.days(left, '2027-04-20')), `compact ${compact}: the band's left edge`).toBeLessThan(1.5);
-      expect(Math.abs(scales.days(right, '2027-10-03')), `compact ${compact}: the band's right edge`).toBeLessThan(1.5);
-      // The all-seven fit runs from Opus 5 and reaches the bar near Oct 3, 2027.
-      const fit = (svg.querySelector('[data-fit]')?.getAttribute('points') ?? '')
-        .split(' ')
-        .map((pair) => pair.split(',').map(Number) as [number, number]);
-      expect(fit[0]?.[0]).toBe(Number(filled.at(-1)?.getAttribute('cx')));
-      const crossing = crossesAt(fit, bar);
-      expect(crossing, `compact ${compact}: the fit reaches the bar`).not.toBeNull();
-      expect(Math.abs(scales.days(crossing ?? 0, '2027-10-03')), `compact ${compact}: where the fit reaches the bar`).toBeLessThan(3);
+      near(left, '2027-05-31');
+      near(right, '2027-10-03');
+      expect(texts(svg.querySelectorAll('[data-tau3-part="band-label"]')), where).toEqual([
+        compact ? 'Reaches 80%' : 'Trend reaches 80%',
+        'Q2 to early Q4 2027',
+      ]);
 
-      // Under it, "Figure 1" and the caption with the source.
+      // The prediction: a bracket over Q4 2027.
+      const bracket = (svg.querySelector('[data-bracket]')?.getAttribute('d') ?? '').match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+      const xs = [bracket[0] ?? 0, bracket[3] ?? 0];
+      near(Math.min(...xs), '2027-10-01');
+      near(Math.max(...xs), '2028-01-01');
+      expect(texts(svg.querySelectorAll('[data-tau3-part="prediction-date"]')), where).toEqual([
+        compact ? 'By Q4 2027' : 'Prediction: by Q4 2027',
+      ]);
+
+      // The trend through all ten: solid from the first score to today, then dashed from today to the bar, which it
+      // reaches near Oct 3, 2027.
+      const line = (selector: string) =>
+        (svg.querySelector(selector)?.getAttribute('points') ?? '').split(' ').map((pair) => pair.split(',').map(Number) as [number, number]);
+      const solid = line('[data-trend]');
+      const fit = line('[data-fit]');
+      expect(svg.querySelectorAll('[data-trend]'), where).toHaveLength(1);
+      expect(svg.querySelectorAll('[data-fit]'), where).toHaveLength(1);
+      near(solid[0]?.[0] ?? 0, '2025-09-29');
+      near(solid.at(-1)?.[0] ?? 0, '2026-11-02');
+      expect(fit[0], where).toEqual(solid.at(-1));
+      expect(getComputedStyle(svg.querySelector('[data-trend]') as Element).strokeDasharray, where).toBe('none');
+      expect(svg.querySelector('[data-fit]')?.getAttribute('stroke-dasharray'), where).toBeTruthy();
+      const crossing = crossesAt(fit, bar + 0.01);
+      expect(crossing, `${where}: the fit reaches the bar`).not.toBeNull();
+      near(crossing ?? 0, '2027-10-03', 3);
+      expect(Math.abs((fit.at(-1)?.[1] ?? 0) - bar), `${where}: the dashed line ends at the bar`).toBeLessThan(0.5);
+      near(fit.at(-1)?.[0] ?? 0, '2027-10-03');
+
+      // Under it, "Figure 1" and the caption.
       const caption = screen.container.querySelector('figcaption')?.textContent?.replace(/\s+/g, ' ').trim();
-      expect(caption).toBe(
-        compact
-          ? 'Figure 1 Seven Claude releases on Sierra’s τ³-Banking leaderboard; Opus 4.5 to Opus 5 rose from 24.7% to 48.7% in eight months. The dashed line is a straight-line fit in log-odds through all seven; the band is where the fits in the text cross 80%. Source: taubench.com.'
-          : 'Figure 1 Seven Claude releases on Sierra’s τ³-Banking leaderboard; Opus 4.5 to Opus 5 rose from 24.7% to 48.7% in eight months. The dashed line is a straight-line fit in log-odds through all seven; the shaded band is where the fits in the text cross 80%. Source: taubench.com, pass^1 as listed.',
+      expect(caption, where).toBe(`Figure 1 ${CAPTION}`);
+      await screen.unmount();
+    }
+  });
+
+  it('chart_labels_stay_inside_its_card', async () => {
+    // At the laptop's column and on a phone, every word the chart draws sits inside its card, and no two labels
+    // overlap.
+    await loadWebFonts();
+    for (const [size, compact] of [
+      [DESKTOP, false],
+      [PHONE, true],
+    ] as const) {
+      const where = `${size.width} wide`;
+      await page.viewport(size.width, size.height);
+      const screen = await render(
+        <main className={PAPER} style={{ width: compact ? '350px' : '648px' }}>
+          <Tau3Chart compact={compact} />
+        </main>,
       );
+      const frame = screen.container.querySelector('.cd-about-frame') as Element;
+      const edge = frame.getBoundingClientRect();
+      const words = [...frame.querySelectorAll('svg text')];
+      for (const word of words) {
+        const box = word.getBoundingClientRect();
+        const inside = box.left >= edge.left && box.right <= edge.right && box.top >= edge.top && box.bottom <= edge.bottom;
+        expect(inside, `${where}: ${word.textContent}`).toBe(true);
+      }
+      // A label's two lines, and the band's, are set 15 px apart, a little closer than their boxes are tall.
+      const unit = (el: Element) => el.closest('[data-point-label]') ?? (el.getAttribute('data-tau3-part') === 'band-label' ? 'band' : el);
+      const overlaps: string[] = [];
+      words.forEach((a, i) => {
+        for (const b of words.slice(i + 1)) {
+          if (unit(a) === unit(b)) continue;
+          const [p, q] = [a.getBoundingClientRect(), b.getBoundingClientRect()];
+          if (p.left < q.right - 0.5 && q.left < p.right - 0.5 && p.top < q.bottom - 0.5 && q.top < p.bottom - 0.5) {
+            overlaps.push(`${a.textContent} / ${b.textContent}`);
+          }
+        }
+      });
+      expect(overlaps, where).toEqual([]);
       await screen.unmount();
     }
   });
@@ -278,29 +424,35 @@ describe('Tau3Chart', () => {
       // Visually hidden, still read.
       expect(description.closest('.cd-sr-only'), `compact ${compact}`).not.toBeNull();
 
-      // A table of all eight points: model, date, score.
+      // A table of all eleven points: model, release month, score and board.
       const rows = [...description.querySelectorAll('tbody tr')].map((row) =>
         [...row.querySelectorAll('th, td')].map((cell) => cell.textContent),
       );
       expect([...description.querySelectorAll('thead th')].map((cell) => cell.textContent)).toEqual([
         'Model',
         'Released',
-        'pass^1',
+        'Score',
+        'Board',
       ]);
       expect(rows).toEqual([
-        ['Claude Sonnet 4.5', 'Sep 29, 2025', '25.3%'],
-        ['Claude Opus 4.5', 'Nov 24, 2025', '24.7%'],
-        ['Claude Opus 4.6', 'Feb 5, 2026', '27.3%'],
-        ['Claude Opus 4.7', 'Apr 16, 2026', '40.2%'],
-        ['Claude Opus 4.8', 'May 28, 2026', '39.7%'],
-        ['Claude Fable 5', 'Jun 9, 2026', '39.7%'],
-        ['Qwen 3.8 Max, the top score', 'Jul 19, 2026', '55.2%'],
-        ['Claude Opus 5', 'Jul 24, 2026', '48.7%'],
+        ['Claude Sonnet 4.5', 'September 2025', '25.3%', 'Sierra'],
+        ['Claude Opus 4.5', 'November 2025', '24.7%', 'Sierra'],
+        ['Claude Opus 4.6', 'February 2026', '27.3%', 'Sierra'],
+        ['Claude Opus 4.7', 'April 2026', '40.2%', 'Sierra'],
+        ['Claude Opus 4.8', 'May 2026', '39.7%', 'Sierra'],
+        ['Claude Fable 5', 'June 2026', '39.7%', 'Sierra'],
+        ['Claude Sonnet 5', 'June 2026', '37.3%', 'Artificial Analysis'],
+        ['Claude Opus 5', 'July 2026', '48.7%', 'Sierra'],
+        ['Claude Fable 5.1', 'September 2026', '47.2%', 'Artificial Analysis'],
+        ['Claude Opus 5.5', 'September 2026', '56.0%', 'Fireworks'],
+        ['Gemini 4 Argon, another lab', 'October 2026', '58.2%', 'Fireworks'],
       ]);
 
-      // And one sentence on the fit and the band.
+      // And what the line, the band and the prediction show, in quarters.
       expect(description.querySelector('p')?.textContent).toBe(
-        'The dashed line, a straight-line fit in log-odds through all seven Claude scores, reaches 80% in October 2027; the band runs from April 2027, where the fit through the best score across labs reaches 80%, to October 2027.',
+        'The line, a straight-line fit in log-odds through all ten Claude scores, is solid up to today, Q4 2026, and ' +
+          'dashed after; it reaches 80% early in Q4 2027. The band runs from Q2 2027, where the fit through the Opus ' +
+          'scores alone reaches 80%, to early Q4 2027. The prediction is by Q4 2027.',
       );
       await screen.unmount();
     }
@@ -514,12 +666,12 @@ describe('ReadinessScale', () => {
       // Then its evidence, and what to watch for under the table's own heading.
       const first = figure?.querySelector('[data-axis]');
       expect(first?.querySelector('[data-evidence]')?.textContent).toBe(
-        'Claude’s τ³-Banking pass^1 rose from 24.7% to 48.7% in eight months',
+        'Claude’s τ³-Banking pass^1 rose from 24.7% (Sierra) to 56.0% (Fireworks) in ten months',
       );
       expect(first?.querySelector('[data-evidence] a')?.getAttribute('href')).toBe('https://taubench.com/leaderboard');
       expect(
         [...(first?.querySelectorAll('[data-watch] > *') ?? [])].map((part) => part.textContent),
-      ).toEqual(['Watch for', 'Opus 5.5’s score; a flat one would mean lagging']);
+      ).toEqual(['Watch for', 'Sonnet 5.5’s score, and the next Claude on Sierra’s own board']);
       await screen.unmount();
     }
   });
@@ -693,15 +845,23 @@ describe('the figures on paper', () => {
         return found;
       };
       const marks: [string, (el: Element) => string][] = [
-        // The chart: the releases, the top score's ring, Opus 5's ring, the fit, the bar, the prediction date's
-        // rule, and the key's dot and dash.
+        // The chart: the releases, the top score's ring, Opus 5.5's ring, the trend and its dashed run ahead of today,
+        // the bar, today's rule and the prediction's bracket, the leaders that tie each label to its point, and the
+        // key's dot, ring and dash.
         ['[data-point="claude"]', (el) => getComputedStyle(el).fill],
         ['[data-point="top"]', (el) => getComputedStyle(el).stroke],
         ['[data-ring]', (el) => getComputedStyle(el).stroke],
         ['[data-tau3-part="fit"]', (el) => getComputedStyle(el).stroke],
+        // The trend through the scores is drawn lighter than its run ahead of today, but still holds 3:1.
+        ['[data-tau3-part="trend"]', (el) => {
+          const { stroke, strokeOpacity } = getComputedStyle(el);
+          return stroke.replace(/^rgb\((.*)\)$/, `rgba($1, ${strokeOpacity})`);
+        }],
         ['.cd-about-chart__bar', (el) => getComputedStyle(el).stroke],
         ['.cd-about-chart__rule', (el) => getComputedStyle(el).stroke],
+        ['.cd-about-chart__leader', (el) => getComputedStyle(el).stroke],
         ['.cd-about-chart__key-dot', (el) => getComputedStyle(el).backgroundColor],
+        ['.cd-about-chart__key-ring', (el) => getComputedStyle(el).borderTopColor],
         ['.cd-about-chart__key-dash', (el) => getComputedStyle(el).borderTopColor],
         // The architecture: the arrows between its parts and the kernel's outline.
         ['.cd-about-arch__connector', (el) => getComputedStyle(el).stroke],
