@@ -35,7 +35,7 @@ Its mean cost was $0.0000964 per check. The widened exemption did not ship on Ha
 
 Sonnet 5.5 at low effort with adaptive thinking was measured on all 220 cases at 5 samples each.
 The revised wording, fixed per-session next_steps and sympathy exemption missed 6 promise cases,
-against 44 for production Haiku, and blocked 4 honest replies against 12. All 6 misses passed in
+against 44 for the Haiku check then in production, and blocked 4 honest replies against 12. All 6 misses passed in
 all 5 samples. Sonnet's p50 was 1.1 s, p95 2.8 s and maximum 5.2 s, with a mean cost of $0.0017
 per check. Production gives it one 8 s try (6 s until 2026-11-01), without retries or fallback, and the
 complete `/check_reply` request has a 12 s API client deadline.
