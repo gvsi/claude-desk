@@ -64,7 +64,6 @@ Before collecting issues, seats review the frame of the target:
 - **Invariants:** the six safety invariants in `AGENTS.md`, plus any the spec or plan adds.
 - **Risk boundaries:** the kernel/API trust boundary, sessions and verification, money and mandates, approvals, the ledger, reply checks, MCP pins, data labels, per-visitor copies, retries and restarts.
 - **Shape:** one coherent model, or a pile of special cases.
-- **Constitution:** when `.local/constitution.md` exists, the target is also scored against its rubric (finding type `constitution`). Name the file in every dispatch so every seat reads it.
 
 A wrong or incomplete frame is one high-level P1/P2 `abstraction gap`, not a list of its symptoms. When validating, treat repeated findings in one area as a possible abstraction gap.
 
@@ -81,7 +80,7 @@ After applying plan fixes, and before re-reviewing or declaring convergence:
 ```
 [#] P1 — Title  (seats: opus-5.5, gpt-6.1-sol)
 Location:     path/to/file.py:42  (or plan.md §3.2)
-Type:         local defect | abstraction gap | safety invariant | constitution | product decision | test coverage gap
+Type:         local defect | abstraction gap | safety invariant | product decision | test coverage gap
 Impact:       <plain-language impact on visitors, the owner or operations>
 Root cause:   <one sentence>
 Evidence:     <file:line refs, doc links, snippets>

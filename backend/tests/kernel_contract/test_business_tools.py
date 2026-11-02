@@ -531,7 +531,8 @@ async def test_reviewed_typed_booking_books_its_slot_and_keeps_its_note_owner_on
     await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
     session = http.session(visitor.session_token)
-    args = {'slot_id': slot['slot_id'], 'note': 'Use the side entrance.'}
+    args = {'slot_id': slot['slot_id'], 'note': 'Use the side entrance.', 'name': 'Jane Doe',
+            'contact': 'jane@example.com'}
     allowed = await decide(session, visitor.state.session_id, visitor.state.generation, 'consult', tool.tool, args)
     assert allowed.outcome == 'allow'
     assert allowed.action.resource.kind == 'slot' and allowed.action.resource.id == slot['slot_id']
@@ -542,10 +543,12 @@ async def test_reviewed_typed_booking_books_its_slot_and_keeps_its_note_owner_on
     claims = {claim.key: claim.value for claim in fact.claims}
     assert (claims['appointment_type'], claims['appointment_minutes']) == ('Free consult', '20')
     assert 'note' not in claims and 'Use the side entrance.' not in result.model_dump_json()
+    assert not {'name', 'contact'} & set(claims) and 'jane@example.com' not in result.model_dump_json()
     [note] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.facts WHERE fact_id = %s',
                      ('booking_note:' + result.model_view['booking_id'],))
     assert note['readers'] == ['owner']
-    assert {claim['key']: claim['value'] for claim in note['claims']}['note'] == args['note']
+    saved = {claim['key']: claim['value'] for claim in note['claims']}
+    assert (saved['note'], saved['name'], saved['contact']) == (args['note'], args['name'], args['contact'])
     assert (await read_decision(session, allowed.decision_id)).visitor_plain == (
         '“Book a consult”: booked on Mike Turner\'s calendar')
     checked = await session.call('POST /check_reply', CheckReplyRequest(draft=ReplyDraft(

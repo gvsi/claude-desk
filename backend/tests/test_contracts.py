@@ -7,7 +7,7 @@ from typing import get_args
 from zoneinfo import ZoneInfo
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
@@ -474,6 +474,19 @@ def test_demo_inbox_decision_id_is_optional():
     assert "decision_id" not in export_schema()["$defs"]["DemoInboxEntry"]["required"]   # optional in the web's too
 
 
+def test_demo_inbox_title_is_optional():
+    # the owner's alert carries its preview line as a title; every other entry, every entry a session reads, and a
+    # kernel that doesn't fill it, still validate
+    alert = {"entry_id": "inbox-1", "to": "owner", "kind": "alert", "body": "Sam Lee reported a burst pipe.",
+             "created_at": "2026-10-30T10:04:05-07:00"}
+    assert DemoInboxEntry.model_validate_json(json.dumps(alert)).title is None
+    assert DemoInboxEntry.model_validate_json(json.dumps(alert | {"title": None})).title is None
+    titled = alert | {"title": "Urgent callback requested"}
+    assert DemoInboxEntry.model_validate_json(json.dumps(titled)).title == "Urgent callback requested"
+    assert list(DemoInboxEntry.model_fields)[-2:] == ["decision_id", "title"]
+    assert "title" not in export_schema()["$defs"]["DemoInboxEntry"]["required"]   # optional in the web's too
+
+
 def test_a_decisions_owner_reason_is_optional_and_unsigned():
     # why an action didn't run, for the owner alone: None unless the kernel filled it, so a kernel that doesn't
     # and every answer to a session still validate; it sits beside reason_plain, and the signature leaves it out
@@ -781,6 +794,33 @@ def test_a_copy_without_a_replay_carries_nothing_replayed():
     assert CopyCreated.model_fields["replay_id"].annotation == str | None
     # a kernel that sends neither field still answers a valid copy, with live data only
     assert not {"replayed_messages", "replay_id"} & set(export_schema()["$defs"]["CopyCreated"]["required"])
+
+
+def test_schema_export_marks_the_fields_a_model_leaves_out_while_they_hold_their_default():
+    # A turn end's generation and a hand-back's resume fields are sent only when they say something, so the web's
+    # check of the mock's payloads (which takes every other field as always sent) may find them missing.
+    from desk import events
+
+    left_out = {(model.__name__, name) for model in vars(events).values()
+                if isinstance(model, type) and issubclass(model, BaseModel) and model.__module__ == events.__name__
+                for name, field in model.model_fields.items() if field.exclude_if is not None}
+    assert left_out == {("EvTurnEnd", "generation"), ("EvOwnerLeft", "resuming"), ("EvOwnerLeft", "generation")}
+    # Marked so in both exports, wherever the model is in them (the API's document has no turn end). The API's is read
+    # as committed (`test_openapi.py` keeps it current): building the API app here would install its log redaction
+    # for the rest of this process, outside the API tests that put the record factory back
+    # (`tests/test_log_record_factory.py`).
+    openapi = json.loads((Path(__file__).resolve().parents[1] / "desk" / "api" / "openapi.json").read_text())
+    for defs in (export_schema()["$defs"], openapi["components"]["schemas"]):
+        marked = {(name, field) for name, model in defs.items()
+                  for field, prop in (model.get("properties") or {}).items() if prop.get("x-omitted-when-default")}
+        assert marked == {(name, field) for name, field in left_out if name in defs}
+        assert ("EvOwnerLeft", "resuming") in marked
+    # Each one also as the model sends it: left out while it holds its default.
+    from desk.events import EvOwnerLeft, EvTurnEnd
+    assert EvTurnEnd(type="turn_end").model_dump(mode="json") == {"type": "turn_end"}
+    assert EvOwnerLeft(type="owner_left").model_dump(mode="json") == {"type": "owner_left"}
+    assert EvOwnerLeft(type="owner_left", resuming=True, generation=3).model_dump(mode="json") == {
+        "type": "owner_left", "resuming": True, "generation": 3}
 
 
 def test_schema_export_is_current():

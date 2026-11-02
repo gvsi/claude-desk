@@ -171,7 +171,8 @@ async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request
 async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: Request,
                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
     """Use the shared turn runner for the owner's answer to the question waiting, which the answer names
-    (409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Claude replies,
+    (409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Picks that aren't the
+    question's own choices, or more than one on a question without `several`, are 422 `invalid`. Claude replies,
     updates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to
     25 seconds: 200 with the landed state or 202 `SetupState` with `busy: true`. Any turn while busy answers 202
     without running or counting on the limits. Cancelling the request leaves the turn working. Failure or
@@ -183,7 +184,7 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
         await _moving_on(request, ctx)
 
     answer = await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, card=body.card,
-                                runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
+                                picks=body.picks, runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
                                 cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)

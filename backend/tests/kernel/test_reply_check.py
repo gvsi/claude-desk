@@ -3013,6 +3013,25 @@ def test_a_repeat_of_a_business_tools_name_reads_apostrophes_dashes_and_spaces_a
     assert reply_check.scan_prose(prose, approved_free_names=names) == []
 
 
+@pytest.mark.parametrize(("prose", "names", "used"), [
+    # Only the name the prose repeats, never the Desk's other titles and appointment types.
+    ("Would you like to book a free intro call?", ("Book a consult", "Free consult", "Book a free intro call"),
+     ["Book a free intro call"]),
+    ("May I help with that?", ("Book a free intro call", "Free consult"), []),
+    ("Your \uff26\uff32\uff25\uff25 CONSULT is ready.", FREE_CONSULT, ["Free consult"]),     # as the scan reads it
+    ("Tu consulta gratuíta está lista.", CONSULTA_GRATUITA, ["Consulta gratuita"]),
+    ("I can book you a Free  consult.", FREE_CONSULT, ["Free consult"]),
+    ("I can book an Emergency callback.", ("Emergency callback",), []),       # no free word to lend
+    ("Las consultas son gratis.", ("Gratis",), []),                           # free words alone back none
+    ("Ofrecemos una videoconsulta gratuita.", CONSULTA_GRATUITA, []),         # not at a word's start
+    ("A Free consult, then another free consult.", FREE_CONSULT * 2, ["Free consult"]),   # each name once
+])
+def test_the_soft_check_is_shown_only_the_free_names_the_prose_repeats(prose, names, used):
+    """The approved names the soft-promise check reads: those with a free word, not of free words
+    alone, that the prose repeats at a word's start as the scan reads it (`free_names_used`)."""
+    assert reply_check.free_names_used(prose, names) == used
+
+
 def test_a_long_draft_repeating_a_business_tools_name_is_scanned_in_one_pass():
     """Each free word is looked up once among the names' repeats, not once per repeat."""
     prose = "Your Free consult is free. " * 800
