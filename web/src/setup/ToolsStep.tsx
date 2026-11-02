@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
+import { useLayoutEffect, useRef } from 'react';
 
 import type { RuleCard } from '../api/contracts.ts';
 import { ownerErrorCopy, request } from '../api/http.ts';
-import type { BusinessToolDef, SetupState, ToolRow } from '../api/views.ts';
+import type { BusinessToolDef, SetupMessage, SetupState, ToolRow } from '../api/views.ts';
 import {
   Button,
   ConnectorReview,
@@ -25,7 +26,7 @@ import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { MOCK_PAYMENTS, useConnectorFlow } from './connectorFlow.ts';
 import { SETUP_COPY } from './copy.ts';
-import { aroundBusiness } from './shared.ts';
+import { aroundBusiness, useOpensAtTop } from './shared.ts';
 import { ToolsListSkeleton } from './StepSkeletons.tsx';
 
 const copy = SETUP_COPY.tools;
@@ -73,6 +74,35 @@ export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewTool
     mode: startingMode(row, cards),
     coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
   };
+}
+
+/** Whether two values from the API hold the same data, whatever order an object's keys come in. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, index) => sameData(item, b[index]));
+  }
+  if (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null) {
+    const one = a as Record<string, unknown>;
+    const other = b as Record<string, unknown>;
+    const keys = Object.keys(one);
+    return keys.length === Object.keys(other).length && keys.every((key) => Object.hasOwn(other, key) && sameData(one[key], other[key]));
+  }
+  return a === b;
+}
+
+/**
+ * The owner's own accepted choice for one of the Desk's own jobs, read from setup's conversation:
+ * the `autonomy` of the card the job was made from (setup publishes each accepted job's title and
+ * setup as its definition, so it is the card with both), when the owner accepted it themselves
+ * (`owner_decided`, as Rules drafting counts it). Null when no such card matches, or two that match
+ * disagree: a card "Use your suggestions" accepted for them was never their choice. It changes only
+ * words on the review: the job's own rule comes from the card the owner confirms at the Rules step.
+ */
+export function acceptedAutonomy(def: BusinessToolDef, messages: readonly SetupMessage[]): 'auto' | 'ask' | null {
+  const choices = new Set(messages.flatMap(({ card, owner_decided: decided }) =>
+    decided === true && card?.state === 'accepted' && card.job?.config && card.job.title === def.title && sameData(card.job.config, def.config)
+      ? [card.job.autonomy] : []));
+  return choices.size === 1 ? [...choices][0] ?? null : null;
 }
 
 /** Setup supports new jobs at their listed hash; changed, delisted and turned-off jobs stay out. */
@@ -131,6 +161,38 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   const rules = useQuery({ ...rulesQuery(deskId), refetchOnWindowFocus: false });
   const flow = useConnectorFlow({ interviewId: id, deskId, tools: tools.data });
   const { view, connecting, listError, turningOn, reviewError } = flow;
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const returnTo = useRef<string | null>(null);
+  const focusRow = useRef(false);
+  const reviewReady = rules.data !== undefined && tools.data !== undefined;
+  const viewKey = view.kind === 'confirm' ? `confirm:${view.draft.version}` : view.kind;
+  useOpensAtTop(viewKey);
+  // View swaps announce their heading. Back and Cancel return to the opener; a confirm returns
+  // to its row immediately, so focus survives the refresh replacing its button with "On".
+  useLayoutEffect(() => {
+    if (viewKey !== 'list') {
+      titleRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (returnTo.current === null) return;
+    const row = rowRefs.current.get(returnTo.current);
+    if (row === undefined) return;
+    returnTo.current = null;
+    const button = focusRow.current ? null : row.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    focusRow.current = false;
+    if (button) button.focus({ preventScroll: true });
+    else {
+      row.setAttribute('tabindex', '-1');
+      row.addEventListener('blur', () => row.removeAttribute('tabindex'), { once: true });
+      row.focus({ preventScroll: true });
+    }
+    row.scrollIntoView({ block: 'nearest' });
+  }, [viewKey, reviewReady]);
+  const open = (key: Parameters<typeof flow.open>[0]) => {
+    returnTo.current = key;
+    flow.open(key);
+  };
 
   const rows = (tools.data?.tools ?? []).filter((row) =>
     row !== null && typeof row === 'object' && typeof row.tool === 'string' && (row.source !== 'business' || isSetupJob(row)),
@@ -144,7 +206,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
     // tools are asked for once more, and the new draft is shown to confirm (`confirmChange`).
     return (
       <div className="cd-setup-step">
-        <PageHeader title={copy.turnOnTitle(name)} subtitle={copy.turnOnSubtitle} />
+        <PageHeader titleRef={titleRef} title={copy.turnOnTitle(name)} subtitle={copy.turnOnSubtitle} />
         {view.changed ? <Notice tone="info">{copy.changedSince}</Notice> : null}
         <RuleDraftReview
           key={view.draft.version}
@@ -152,7 +214,10 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
           draft={view.draft}
           inline
           confirm={flow.confirm}
-          onDone={() => void flow.backToList()}
+          onDone={(outcome) => {
+            focusRow.current = outcome === 'confirmed';
+            void flow.backToList();
+          }}
         />
       </div>
     );
@@ -183,10 +248,18 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       const tool = reviewTool(job, cards);
       const glyph = businessGlyph(job.business.config);
       if (glyph === null) return null;
+      // The owner chose to let the job run on its own, but its own rule comes from the card they
+      // confirm at the Rules step: until then it asks first, and the review says so. Words only.
+      // Only a booking card shows the owner that choice, so only a booking job (the typed_booking
+      // block, made only from schedule cards) says they made it.
+      const booking = job.business.config.block === 'typed_booking';
+      const chosenOnItsOwn = booking && tool.mode === 'ask' && acceptedAutonomy(job.business, state.messages) === 'auto';
+      const shown = chosenOnItsOwn ? { ...tool, uncoveredLine: copy.chosenOnItsOwn } : tool;
       return (
         <ConnectorReview
+          titleRef={titleRef}
           job={{ title: tool.name, glyph, rows: businessRows(job.business, tool.mode) }}
-          tools={[tool]}
+          tools={[shown]}
           onTurnOn={() => void flow.turnOn(view.key, [job])}
           onCancel={flow.cancel}
           pending={turningOn}
@@ -201,6 +274,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
     const app = connector.view.source.kind === 'external';
     return (
       <ConnectorReview
+        titleRef={titleRef}
         connector={connector.view}
         {...(app ? { connection: flow.mustConnect ? 'not_connected' : 'connected', onConnect: () => void flow.connect() } as const : {})}
         tools={turnedOn.map((row) => reviewTool(row, cards))}
@@ -236,10 +310,22 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       const title = toolDisplayName(row.tool, businessTools([row])) ?? 'A connected tool';
       const job = { key: row.tool, title, line, glyph };
       return [toolState(row) === 'on' ? { ...job, state: 'on' } : {
-        ...job, state: 'needs_review', onReview: () => flow.open(row.tool),
+        ...job, state: 'needs_review', onReview: () => open(row.tool),
       }];
     });
-    list = <SetupToolsList jobs={jobRows} {...setupRows(rows, tools.data.connectable.includes('mock_payments'), (key) => void flow.choose(key))} />;
+    list = (
+      <SetupToolsList
+        rowRef={(key, row) => {
+          if (row) rowRefs.current.set(key, row);
+          else rowRefs.current.delete(key);
+        }}
+        jobs={jobRows}
+        {...setupRows(rows, tools.data.connectable.includes('mock_payments'), (key) => {
+          returnTo.current = key;
+          flow.choose(key);
+        })}
+      />
+    );
   }
 
   return (

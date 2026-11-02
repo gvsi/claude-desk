@@ -5,7 +5,20 @@
  * that opens a new tab, one another handler already took) is left to the browser.
  */
 import type { MouseEvent } from 'react';
-import type { NavigateFunction } from 'react-router';
+import type { NavigateFunction, NavigateOptions } from 'react-router';
+
+/** A back link uses its remembered history entry, or an optional routed arrival after a reload. */
+export function returnThroughHistory(navigate: NavigateFunction, href: string, remembered: boolean, fallback?: NavigateOptions) {
+  return (event: MouseEvent<HTMLElement>) => {
+    if (!remembered && fallback === undefined) return;
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+    if (!(link instanceof HTMLAnchorElement) || link.target !== '' || link.getAttribute('href') !== href) return;
+    event.preventDefault();
+    if (remembered) void navigate(-1);
+    else void navigate(href, fallback);
+  };
+}
 
 /** A click handler for a page's container that routes its in-app links. */
 export function followInAppLinks(navigate: NavigateFunction) {

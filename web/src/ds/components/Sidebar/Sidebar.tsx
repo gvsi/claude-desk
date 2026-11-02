@@ -104,12 +104,12 @@ const NAV_ROWS = [
   { key: 'today', icon: 'today', label: NAV_LABELS.today },
   { key: 'conversations', icon: 'conversations', label: NAV_LABELS.conversations },
   { key: 'people', icon: 'people', label: null },
-  { key: 'knowledge', icon: 'knowledge', label: NAV_LABELS.knowledge },
   { key: 'rules', icon: 'rules', label: NAV_LABELS.rules },
   { key: 'connectors', icon: 'connectors', label: NAV_LABELS.connectors },
   { key: 'safety', icon: 'safety', label: NAV_LABELS.safety },
   { key: 'profile', icon: 'store', label: NAV_LABELS.profile },
   { key: 'share', icon: 'share', label: NAV_LABELS.share },
+  { key: 'knowledge', icon: 'knowledge', label: NAV_LABELS.knowledge },
   { key: 'settings', icon: 'settings', label: NAV_LABELS.settings },
 ] as const satisfies readonly { key: NavKey; icon: IconName; label: string | null }[];
 

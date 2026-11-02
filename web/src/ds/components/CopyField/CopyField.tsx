@@ -1,6 +1,7 @@
 import { useId, useRef } from 'react';
 
 import { Button } from '../Button/Button.tsx';
+import { CopyResult } from '../CopyResult/CopyResult.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { copyResultLine, useCopyText } from './useCopyText.ts';
 
@@ -31,7 +32,7 @@ export interface CopyFieldProps {
 export function CopyField({ label, value, copyLabel, onCopy, note, layout = 'inline', language }: CopyFieldProps) {
   const valueRef = useRef<HTMLElement>(null);
   const labelId = `${useId()}-label`;
-  const { state, copy } = useCopyText(onCopy ?? (() => {}));
+  const { state, announcement, copy } = useCopyText(onCopy ?? (() => {}));
   const copies = copyLabel !== undefined && onCopy !== undefined;
   const result = copyResultLine(state, { language });
 
@@ -65,11 +66,8 @@ export function CopyField({ label, value, copyLabel, onCopy, note, layout = 'inl
           {note === undefined ? null : <p className="cd-copy-field__note cd-type-meta">{note}</p>}
         </div>
       ) : null}
-      {/* Always there, so the line after a press is read out when it appears. */}
       {copies ? (
-        <p role="status" className="cd-copy-field__result cd-type-meta">
-          {result}
-        </p>
+        <CopyResult result={result} announcement={announcement} className="cd-copy-field__result cd-type-meta" />
       ) : null}
     </div>
   );

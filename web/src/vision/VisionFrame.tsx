@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useContext, useLayoutEffect, type ReactNode } from 'react';
+import { UNSAFE_DataRouterContext, UNSAFE_NavigationContext, useLocation, useNavigate } from 'react-router';
 
 import { usePagePlace } from '../about/usePagePlace.ts';
+import { forgetVisionCardFocus, remembersVisionCard } from '../about/vision/cardReturn.ts';
 import { AppShell, ClaudeMessage, Sidebar, VisionBar } from '../ds/index.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
-import { followInAppLinks } from '../owner/inAppLinks.ts';
+import { followInAppLinks, returnThroughHistory } from '../owner/inAppLinks.ts';
 import { proseOf, VISION_BACK_HREF, VISION_SIDEBAR_HREFS, type VisionOwner } from './data.ts';
 
 import './Vision.css';
@@ -27,13 +28,25 @@ export interface VisionFrameProps {
  */
 export function VisionFrame({ title, children }: VisionFrameProps) {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, key, state } = useLocation();
+  const { navigator } = useContext(UNSAFE_NavigationContext);
+  const router = useContext(UNSAFE_DataRouterContext)?.router;
   usePagePlace(pathname);
+
+  useLayoutEffect(() => () => {
+    if (!router || typeof state?.fromVision !== 'string' || router.state.location.key === key) return;
+    // Only leaving this page for its own article entry can refocus its opener.
+    // A StrictMode cleanup while this entry is still current leaves the record alone.
+    if (router.state.historyAction !== 'POP' || router.state.location.key !== state.fromVision) {
+      forgetVisionCardFocus(navigator, state.fromVision);
+    }
+  }, [router, navigator, key, state]);
 
   useDocumentTitle(title);
 
+  const remembered = typeof state?.fromVision === 'string' && remembersVisionCard(navigator, state.fromVision, pathname);
   return (
-    <div className="cd-vision-frame" onClick={followInAppLinks(navigate)}>
+    <div className="cd-vision-frame" onClick={followInAppLinks(navigate)} onClickCapture={returnThroughHistory(navigate, VISION_BACK_HREF, remembered, { state: { visionCard: pathname } })}>
       {children(<VisionBar backHref={VISION_BACK_HREF} />)}
     </div>
   );

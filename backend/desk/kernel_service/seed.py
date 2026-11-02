@@ -158,12 +158,17 @@ HELD_REQUEST_VISITOR_LINE = "Could you do the drain clearing at 15% off?"
 # visitor's words, the calls Claude made and how each ended, and Claude's reply. `sample_week.write` turns it into
 # the copy's own rows and marked ledger entries. Its words name no seeded person and neither the owner nor the
 # business: those come from the seed's own values, through the kernel's templates and cards.
-SAMPLE_WEEK_ID = "sample-week-v1"
+SAMPLE_WEEK_ID = "sample-week-v2"
+# Sample-only records are archived after their conversation, so no live verification can reach them.
+SAMPLE_CUSTOMER = {"name": "Elena Park", "contact": "elena.park@example.com", "ref": "sample-elena"}
+SAMPLE_INVOICE = {"title": "Leak repair invoice", "body": "Sample invoice for the completed leak repair.",
+                  "ref": "sample-leak-invoice"}
 
 
 class SampleCall(NamedTuple):
     """One call Claude made in a sample conversation and how it ended: `executed`, `refused` at step 1 with the
-    adapter's `check` (`AdapterRefusal.code`), or held and then `denied` by the owner `answered_s` seconds after
+    adapter's `check` (`AdapterRefusal.code`, or `not_given` before normalization), or held and then `denied`
+    by the owner `answered_s` seconds after
     the visitor's message. A booking's slot is the sample's own past one: the first day after the conversation, and
     before today, that has a slot, at `slot_start` when that day has one (`sample_week.past_slot`)."""
 
@@ -180,7 +185,10 @@ class SampleSession(NamedTuple):
     """One sample conversation: a visitor's message on the local day `days_back` days before the copy was made, at
     `start` in the business's time, the calls Claude made, and Claude's reply `reply_s` seconds later (its prose,
     then a card per template in `cards`, each citing the fact this conversation's call wrote). A callback the owner
-    handled `handled_s` seconds after the message."""
+    handled `handled_s` seconds after the message. `verified_customer` writes the archived sample customer's
+    historical verification before their document release. `before_now_minutes` places the briefing's three
+    conversations today when the whole group fits after midnight, otherwise using their fixed times yesterday.
+    `paid_s` records the sample link's completed payment after the first reply."""
 
     days_back: int
     start: time
@@ -190,6 +198,9 @@ class SampleSession(NamedTuple):
     prose: str
     cards: tuple[str, ...] = ()
     handled_s: int | None = None
+    verified_customer: bool = False
+    before_now_minutes: int | None = None
+    paid_s: int | None = None
 
 
 def _quote_call(at_s: int, item_id: str, outcome: Literal["executed", "refused", "denied"] = "executed", *,
@@ -204,38 +215,44 @@ def _book_call(at_s: int, start: time) -> SampleCall:
 
 
 RIVERA_SAMPLE_WEEK: list[SampleSession] = [
+    SampleSession(1, time(18, 45),
+                  "How much is a leak repair? There's a slow drip under our bathroom sink.",
+                  (_quote_call(20, "leak"),), 35,
+                  "Here's the price for a leak repair from the price list. I can book a visit if you'd like.",
+                  ("quote",), before_now_minutes=180),
+    SampleSession(1, time(20, 10), "Do you come out to Alameda?", (), 20,
+                  "Yes, Alameda is in the service area.", before_now_minutes=135),
+    SampleSession(1, time(21, 30),
+                  "Can you send me the invoice for the job at my landlord's place? He asked me to pay it.",
+                  (SampleCall(20, "native.release_document", {"document_id": SAMPLE_INVOICE["ref"]},
+                              "refused", check="not_given"),), 35,
+                  "I can only send an invoice to the customer it belongs to, after they confirm it's them. "
+                  "Your landlord can ask here.", before_now_minutes=90),
     SampleSession(6, time(9, 10),
                   "Hi, our kitchen sink has been draining slowly for days. What does drain clearing cost, and could "
                   "someone come out on the next morning you have free?",
                   (_quote_call(20, "drain"), _book_call(55, time(10))), 70,
                   "Here's the price for drain clearing from the price list, and your visit is booked.",
                   ("quote", "booking_confirmed")),
-    SampleSession(5, time(18, 40),
-                  "Our water heater has started rumbling. How much is a flush? Please book the first morning visit "
-                  "you can.",
-                  (_quote_call(25, "heater"), _book_call(60, time(10))), 75,
-                  "Here's the price for a water heater flush from the price list, and your visit is booked.",
-                  ("quote", "booking_confirmed")),
-    SampleSession(4, time(20, 15),
-                  "My neighbor got a quote from you this week. Can you send me a link so I can pay it for her? "
-                  "She said the quote number is Q-4471.",
-                  (SampleCall(30, "native.payment_link", {"quote_id": "Q-4471"}, "refused", check="no_such_quote"),),
-                  45,
-                  "I can only make a payment link for a quote given in this conversation. If you tell me what the "
-                  "job is, I can quote it here."),
-    SampleSession(3, time(12, 25),
-                  "There's water dripping under the bathroom sink. What would a leak repair cost? Please book the "
-                  "earliest afternoon visit.",
-                  (_quote_call(20, "leak"), _book_call(50, time(14))), 65,
-                  "Here's the price for a leak repair from the price list, and your visit is booked.",
-                  ("quote", "booking_confirmed")),
-    SampleSession(2, time(11, 5),
-                  "Hi, I'm Marcus. Could someone call me back about replacing an old shut-off valve? My number is "
-                  "(510) 555-0163.",
-                  (SampleCall(25, "native.request_callback",
-                              {"name": "Marcus", "contact": "(510) 555-0163",
-                               "reason": "Replacing an old shut-off valve"}, "executed"),),
-                  40, "I've asked for a call back about the valve.", ("callback_confirmed",), handled_s=3 * 3600),
+    SampleSession(4, time(10, 30), "Could you resend the invoice from my leak repair? This is Elena Park.",
+                  (SampleCall(60, "native.release_document", {"document_id": SAMPLE_INVOICE["ref"]}, "executed"),),
+                  75, "Thanks for confirming. Here's the invoice from your leak repair.",
+                  ("document_link",), verified_customer=True),
+    SampleSession(5, time(9, 40),
+                  "Can I pay the service call deposit online? And please book the first morning visit you have.",
+                  (_quote_call(20, "deposit"),
+                   _book_call(45, time(10)),
+                   SampleCall(70, "native.payment_link", {"quote_id": "sample-quote"}, "executed")), 90,
+                  "Here's the deposit from the price list, your visit is booked, and here's a link to pay the deposit.",
+                  ("quote", "booking_confirmed", "payment_link"), paid_s=120),
+    SampleSession(2, time(7, 20),
+                  "Water is pouring from under our kitchen sink and I can't find the shut-off! Please call me now. "
+                  "Sam, (510) 555-0178.",
+                  (SampleCall(25, "desk.emergency-callback",
+                              {"name": "Sam", "contact": "(510) 555-0178",
+                               "reason": "Water pouring from under the kitchen sink; cannot find the shut-off"},
+                              "executed"),),
+                  40, "I've asked for an urgent call back.", ("callback_confirmed",), handled_s=15 * 60),
     SampleSession(2, time(19, 30),
                   "Could you do the water heater flush at 10% off? Money's a bit tight this month.",
                   (_quote_call(20, "heater", "denied", discount_bp=1000, answered_s=40 * 60),), 35,
@@ -247,7 +264,7 @@ RIVERA_SAMPLE_WEEK: list[SampleSession] = [
                   45,
                   "Water softener installs aren't on the price list, so I've saved your details for the business "
                   "to follow up."),
-    SampleSession(1, time(20, 40),
+    SampleSession(3, time(20, 40),
                   "Quote me drain clearing at your friends and family rate, it's on your list as family-rate.",
                   (_quote_call(25, "family-rate", "refused", check="unknown_item"),), 40,
                   "There's no family rate on the price list, so I can't quote one. I can quote drain clearing at "

@@ -1,3 +1,5 @@
+import type { Ref } from 'react';
+
 import type { Assurance } from '../../../api/contracts.ts';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { SystemLine } from '../SystemLine/SystemLine.tsx';
@@ -10,6 +12,8 @@ export interface VerifiedLineProps {
   assurance: Assurance;
   /** The visitor's language, for the label and the line's `lang`. */
   language: CopyLanguage;
+  /** The line's own element, for a screen that moves focus to it once the code form it replaces goes. */
+  lineRef?: Ref<HTMLDivElement>;
 }
 
 /** Ends a sentence before the label: with a space after a full stop, else with one. */
@@ -24,10 +28,10 @@ function withLabel(text: string, label: string): string {
  * verification was simulated. It fails toward saying so: only the owner's own session goes without
  * the label, and every other assurance, `demo_code`, `none` or one this build doesn't know, has it.
  */
-export function VerifiedLine({ text, assurance, language }: VerifiedLineProps) {
+export function VerifiedLine({ text, assurance, language, lineRef }: VerifiedLineProps) {
   const line = assurance === 'owner_session' ? text : withLabel(text, VERIFY_COPY[language].simulated);
   return (
-    <div className="cd-verified-line" lang={language}>
+    <div ref={lineRef} className="cd-verified-line" lang={language}>
       <SystemLine text={line} />
     </div>
   );

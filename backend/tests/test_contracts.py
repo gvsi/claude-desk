@@ -728,8 +728,9 @@ def test_a_copy_replays_the_recorded_night_only_when_asked():
 
 
 def test_replayed_events_carry_the_kernels_signed_records():
-    assert list(ReplayedEvent.model_fields) == ["session_id", "shown_at", "kind", "text", "verdict", "decision"]
-    assert export_schema()["$defs"]["ReplayedEvent"]["required"] == list(ReplayedEvent.model_fields)   # nulls explicit
+    assert list(ReplayedEvent.model_fields) == ["session_id", "shown_at", "kind", "text", "verdict", "decision", "author"]
+    assert export_schema()["$defs"]["ReplayedEvent"]["required"] == [
+        name for name in ReplayedEvent.model_fields if name != "author"]   # nulls explicit; author defaults
     assert get_args(ReplayedEvent.model_fields["kind"].annotation) == ("visitor_message", "reply", "receipt")
     assert ReplayedEvent.model_fields["verdict"].annotation == ReplyVerdict | None
     assert ReplayedEvent.model_fields["decision"].annotation == Decision | None
@@ -747,6 +748,15 @@ def test_replayed_events_carry_the_kernels_signed_records():
                             decision=decision)
     for event in (said, reply, receipt):                    # the kernel's signed fields arrive unchanged
         assert ReplayedEvent.model_validate_json(event.model_dump_json()) == event
+        assert event.author == "claude"
+    desk_reply = ReplayedEvent.model_validate(reply.model_dump() | {"author": "desk"})
+    assert desk_reply.author == "desk"
+    assert ReplayedEvent.model_validate_json(desk_reply.model_dump_json()) == desk_reply
+    for event in (said, receipt):
+        with pytest.raises(ValidationError, match="only a replayed reply"):
+            ReplayedEvent.model_validate(event.model_dump() | {"author": "desk"})
+    with pytest.raises(ValidationError):
+        ReplayedEvent.model_validate(reply.model_dump() | {"author": "owner"})
     with pytest.raises(ValidationError):                    # shown_at is a SignedTime, not any timestamp
         ReplayedEvent(session_id="s1", shown_at="2026-10-28T23:41:07+00:00", kind="visitor_message", text="Hi",
                       verdict=None, decision=None)

@@ -83,7 +83,7 @@ describe('About pages', () => {
     const back = screen.getByRole('link', { name: 'Back to Vision', exact: true }).element() as HTMLAnchorElement;
     back.click();
     await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
-    await expect.poll(() => window.scrollY).toBe(0);
+    await expect.poll(() => window.scrollY).toBe(articlePlace);
   });
 
   it('about_pages_render_at_their_routes', async () => {

@@ -5,8 +5,19 @@
  */
 import type { Effect, RuleCard } from '../../api/contracts.ts';
 import type { AnyToolName, PeopleOut, ToolRow } from '../../api/views.ts';
-import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeSide, type ConnectorView, type ReviewChange, type RulesTool } from '../../ds/index.ts';
-import { formatCents, listWords } from '../../lib/format.ts';
+import {
+  reviewChanges,
+  ruleDiff,
+  rulesForTool,
+  type ChangeRowView,
+  type ChangeSide,
+  type ConnectorView,
+  type ReviewChange,
+  type RulesTool,
+  type RuleTarget,
+  type ToolTitles,
+} from '../../ds/index.ts';
+import { formatCents } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOf, isCatalogTool, type BusinessTools } from '../connectors/catalog.ts';
 import type { RuleDraft } from './drafts.ts';
 import { toolOutcome } from './outcome.ts';
@@ -34,7 +45,7 @@ function connectorFor(card: RuleCard): ConnectorView | undefined {
  * or narrowed target shows. Otherwise the row's title names the target and the sides don't repeat
  * it (N-Conn-18).
  */
-function cardSide(card: RuleCard, people: PeopleOut | null | undefined, appliesTo: string | undefined): ChangeSide {
+function cardSide(card: RuleCard, people: PeopleOut | null | undefined, appliesTo: RuleTarget | undefined): ChangeSide {
   const amount = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
   return {
     ...(appliesTo === undefined ? {} : { appliesTo }),
@@ -51,7 +62,15 @@ function defaultSide(): ChangeSide {
 }
 
 /** A card shared by every tool with that effect (`effect:charge`), which a tool's own card outranks. */
-const isEffectCard = (card: RuleCard) => card.applies_to.startsWith('effect:');
+const isEffectCard = (card: Pick<RuleCard, 'applies_to'>) => card.applies_to.startsWith('effect:');
+
+/**
+ * What a card applies to as a review shows it (`targetWords`): a tool by its title, which the
+ * review shows as user text, or a group's words ("Every tool that charges money"), the app's own.
+ */
+function targetOf(appliesTo: string, business: BusinessTools): RuleTarget {
+  return isEffectCard({ applies_to: appliesTo }) ? targetWords(appliesTo, business) : { titles: [targetWords(appliesTo, business)] };
+}
 
 /** Every tool in the order the Connectors page lists them, then the setup interview's own. */
 const TOOL_ORDER: readonly string[] = [...new Set<string>([...CONNECTORS.flatMap((connector) => connector.tools), ...Object.keys(TOOL_NAMES)])];
@@ -64,7 +83,7 @@ function toolPlace(tool: string): number {
 
 /** A row's card as the review lists it: its title, its connector, and its place among the rows. */
 interface RowLabel {
-  title: string;
+  title: RuleTarget;
   connector?: ConnectorView;
   place: number;
 }
@@ -97,9 +116,9 @@ export function coveredTools(card: RuleCard, cards: readonly RuleCard[], catalog
 function rowLabel(card: RuleCard, side: readonly RuleCard[], catalog: readonly RulesTool[], business: BusinessTools): RowLabel {
   if (!isEffectCard(card)) {
     const connector = connectorFor(card);
-    return { title: targetWords(card.applies_to, business), ...(connector === undefined ? {} : { connector }), place: toolPlace(card.applies_to) };
+    return { title: targetOf(card.applies_to, business), ...(connector === undefined ? {} : { connector }), place: toolPlace(card.applies_to) };
   }
-  return coveredLabel(coveredTools(card, side, catalog), business) ?? { title: targetWords(card.applies_to, business), place: LAST_PLACE };
+  return coveredLabel(coveredTools(card, side, catalog), business) ?? { title: targetOf(card.applies_to, business), place: LAST_PLACE };
 }
 
 /**
@@ -117,21 +136,21 @@ function coveredLabel(covered: readonly AnyToolName[], business: BusinessTools):
   return connector === undefined ? { title, place: LAST_PLACE } : { title, connector, place: toolPlace(first) + 0.5 };
 }
 
-/** The names of the tools a shared rule covers, joined ("Share a document, See charges and Refund"). */
-function coveredWords(covered: readonly AnyToolName[], business: BusinessTools): string {
-  return listWords(covered.map((tool) => targetWords(tool, business)));
+/** The titles of the tools a shared rule covers, which the review joins ("Share a document, See charges and Refund"). */
+function coveredWords(covered: readonly AnyToolName[], business: BusinessTools): ToolTitles {
+  return { titles: covered.map((tool) => targetWords(tool, business)) };
 }
 
-/** What a side covers, in words: its tools' names, or its group's words when it covers none of this Desk's. */
-function sideCoverage(card: RuleCard, covered: readonly AnyToolName[], business: BusinessTools): string {
-  return covered.length > 0 ? coveredWords(covered, business) : targetWords(card.applies_to, business);
+/** What a side covers: its tools' titles, or its group's words when it covers none of this Desk's. */
+function sideCoverage(card: RuleCard, covered: readonly AnyToolName[], business: BusinessTools): RuleTarget {
+  return covered.length > 0 ? coveredWords(covered, business) : targetOf(card.applies_to, business);
 }
 
-/** A row that moves in the tools it covers: its label, and what each side covers in words. */
+/** A row that moves in the tools it covers: its label, and what each side covers. */
 interface CoverageMove {
   label: RowLabel;
-  before: string;
-  after: string;
+  before: RuleTarget;
+  after: RuleTarget;
 }
 
 /**
@@ -232,7 +251,7 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     const move = before !== null && after !== null ? coverageMove(before, after, draft, catalog, business) : undefined;
     const { title, connector, place } = move?.label ?? labelOf(card, before === null ? afterLabels : beforeLabels);
     const retargeted = before !== null && after !== null && after.applies_to !== before.applies_to;
-    const target = (side: RuleCard, covered: string | undefined) => covered ?? (retargeted ? targetWords(side.applies_to, business) : undefined);
+    const target = (side: RuleCard, covered: RuleTarget | undefined) => covered ?? (retargeted ? targetOf(side.applies_to, business) : undefined);
     // A rule on a group of tools on every side it has (dropped, changed, added, or replaced by
     // another group's rule) is a shared rule, and its row says so: "Payments · Shared rule". A rule
     // that moves between one tool and a group leaves it unset, since its sides' `appliesTo` show
@@ -256,7 +275,7 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
   const rows: ChangeRowView[] = byPlace(placed, ({ place }) => place).map(({ row }) => row);
 
   for (const row of [...draft.turnedOn].sort((a, b) => toolPlace(a.tool) - toolPlace(b.tool))) {
-    const title = targetWords(row.tool, business);
+    const title = targetOf(row.tool, business);
     const connector = isCatalogTool(row.tool) ? connectorOf(row.tool)?.view : undefined;
     const { rule } = toolOutcome({ tool: row.tool, effects: row.effects }, draft.after);
     rows.push({

@@ -9,7 +9,7 @@ import { readLocal, writeLocal } from '../../lib/storage.ts';
 import { VISION_ARTICLE } from '../../about/links.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { firstName, useToday } from '../useDesks.ts';
+import { firstName, isLive, useToday } from '../useDesks.ts';
 import { TODAY_COPY } from '../today/copy.ts';
 import { doneCaption, type UncountedAnswer } from './doneSignals.ts';
 import { THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
@@ -21,9 +21,9 @@ export interface ThingsToTryProps {
    * for; null while there is none.
    */
   firstHeld: NeedsYouItem | null;
-  /** The final decisions of the requests answered on Today in this view. */
+  /** The decisions of the requests answered on Today in this view, each as last read. */
   answered: Iterable<{ state: Decision['state'] }>;
-  /** The final decision of the request answered on Today last, kept when its card is dismissed. */
+  /** The decision of the request answered on Today last, as last read, kept when its card is dismissed. */
   latestAnswer: { decision_id: string; state: Decision['state']; owner_plain?: string | null } | null;
   /** "Open the request": brings the held request's card into view and focus. */
   onFocusRequest: () => void;
@@ -90,7 +90,8 @@ function routerClick(go: () => void) {
  * "Answer a held request" says where a request will show until something is held (no next step, so
  * the four keep their places), and stays once it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
  * it doesn't (a request that had expired or been cancelled, or an answer given on a Desk the list
- * doesn't count). The public page always opens in a new tab, never on Today. "Hide this list" is
+ * doesn't count). "Create your own Desk" says a new Desk is live only on a live Desk's Today. The
+ * public page always opens in a new tab, never on Today. "Hide this list" is
  * remembered in this browser when it can be, and a hidden list reads nothing.
  */
 export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest }: ThingsToTryProps) {
@@ -146,6 +147,10 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
       ticks: false, atLoad: false,
     } : null);
   const answerWaits = answerDone === null && waiting;
+  // "Create your own Desk" is done for the copy once another Desk is live. Its done line says a new
+  // Desk is live, so on the Today of a Desk still in setup ("Not live yet"), the row keeps its own
+  // words and its Done pill is read out, as "Answer a held request" does on another Desk.
+  const createDone = isLive(desk) ? rowDone(signals.done.create, CREATE.done) : rowDone(signals.done.create, null, false);
 
   return (
     <section className="cd-things" aria-labelledby={titleId}>
@@ -187,7 +192,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             icon="plus"
             title={CREATE.title}
             detail={TODAY_COPY.createDetail}
-            end={rowDone(signals.done.create, CREATE.done)}
+            end={createDone}
             step={{ label: 'Start a Desk', href: '/app/setup', onClick: routerClick(() => void navigate('/app/setup')) }}
           />
         </ul>

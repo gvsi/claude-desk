@@ -17,9 +17,10 @@ kernel:
 kernel-serve:
 	cd backend && uv run --env-file ../.env python -m desk.kernel_service
 
+# The kernel's and the backend's tests, with .tools/cvc5 as CVC5 unless CVC5 is set (as tier 1 does below).
 test:
-	cd kernel && cargo test --locked
-	cd backend && uv run pytest
+	cd kernel && $(call tier1_default,CVC5)cargo test --locked
+	cd backend && $(call tier1_default,CVC5)uv run pytest
 
 # The API's kernel contract tests against the real kernel, not only FakeKernel, for the kernel plans
 # listed in evals/tier1/landed.toml: starts `make kernel-serve` with the kernel's development test hooks
