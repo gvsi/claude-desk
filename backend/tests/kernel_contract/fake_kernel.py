@@ -4620,13 +4620,15 @@ class FakeKernelState:
         self.append(desk, "payment", {"link_id": link.link_id, "state": state, **summary},
                     session_id=link.session_id)
 
-    def _settle_paid_quote(self, link: PaymentLink) -> None:
+    def _settle_paid_quote(self, link: PaymentLink) -> bool:
         """An `issued` link whose quote another payment has paid can never be paid: a read or a completion cancels
         it, with no `cancel_reason` and no chat line, ledgered `{link_id, state: "cancelled", reason: "quote_paid"}`,
-        as the kernel's read (`reconcile_link`) and its completion's quote check do."""
+        as the kernel's read (`reconcile_link`) and its completion's quote check do. Whether it moved the link."""
         quote = self.quotes.get(link.quote_id)
         if link.state == "issued" and quote is not None and quote["status"] == "paid":
             self._move_link(link, "cancelled", reason="quote_paid")
+            return True
+        return False
 
     def _issued(self, link: PaymentLink, step: str) -> None:
         """Completing or cancelling needs an `issued` link; anything else is 409 `conflict`, ledgered."""
@@ -4682,7 +4684,8 @@ class FakeKernelState:
         session, and the answer carries the kernel's `payment_confirmed` verdict for that session at its current
         generation, ledgered `reply` by the Desk, in any mode (`deliver()` decides whether it is shown)."""
         link = self._payment_link(request)
-        self._settle_paid_quote(link)
+        if self._settle_paid_quote(link):
+            raise Refusal(409, "conflict")              # one `payment` entry, the cancel, as the kernel's C2 writes
         self._issued(link, "complete")
         desk, session = self.desks[link.desk_id], self.sessions[link.session_id]
         charge_id = new_id("charge")
