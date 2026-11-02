@@ -1,7 +1,8 @@
 """The built-in visiting agent (Plan 02b, Task 5; master plan, "Trust boundary": the simulated third party).
 
-A visitor on a Desk's public page can send Alex Kim's assistant, an AI agent this process runs, to do one of three
-tasks on the Desk (`DEMO_TASKS`): book, pay up front within its spending limit, or ask for a charge above that limit.
+A visitor on a Desk's public page can send Alex Kim's assistant, an AI agent this process runs, to do one of four
+tasks on the Desk (`DEMO_TASKS`): book, ask a question, pay up front within its spending limit, or ask for a charge
+above that limit.
 Each task is a fixed line from the Desk's set (plan 09, C2): code picks it by the business type setup stored for the
 Desk, or Turner's for the copy's own Desk (`demo_task_set`), so the agent asks a CPA's Desk for a consult and a
 landlord's for a viewing, and no business's, owner's or visitor's words reach its model through its task. The kernel
@@ -169,11 +170,11 @@ async def demo_task_set(conn: AsyncConnection, ro: KernelRO, desk_id: str) -> De
 
 
 async def demo_tasks(ro: KernelRO, desk_id: str) -> list[DemoTask]:
-    """The page's tasks in order: booking always, payments only with an enabled agent payment tool."""
+    """The page's tasks in order: booking and questions always, payments only with an enabled agent payment tool."""
     enabled = {row["tool"] for row in await ro.rows("tools", desk_id=desk_id, status="enabled")}
     if enabled & {"native.payment_link", "native.charge_mandate"}:
-        return ["book_visit", "quote_and_deposit", "push_the_limit"]
-    return ["book_visit"]
+        return ["book_visit", "ask_question", "quote_and_deposit", "push_the_limit"]
+    return ["book_visit", "ask_question"]
 
 
 # One run ------------------------------------------------------------------------------------------------------

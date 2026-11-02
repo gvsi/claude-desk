@@ -79,7 +79,7 @@ export function agentCardOut(slug: string): AgentCardOut {
 export const AGENT_NAME = rivera.conversations.alexAgent.name;
 
 /** The built-in agent's tasks, as the API names them (plan 02b's `DEMO_TASKS`). */
-export const DEMO_AGENT_TASKS = ['book_visit', 'quote_and_deposit', 'push_the_limit'] as const;
+export const DEMO_AGENT_TASKS = ['book_visit', 'ask_question', 'quote_and_deposit', 'push_the_limit'] as const;
 
 export type DemoAgentTask = (typeof DEMO_AGENT_TASKS)[number];
 
@@ -141,7 +141,7 @@ const AGENT_DECISIONS = {
  */
 interface Exchange {
   request: string;
-  decision: DecisionSpec;
+  decision?: DecisionSpec;
   reply: readonly RenderedBlock[];
 }
 
@@ -186,6 +186,11 @@ function exchangesFor(task: DemoAgentTask): Exchange[] {
           reply: [blocks.prose.details.en, blocks.booking_confirmed.en],
         },
       ];
+    case 'ask_question':
+      return [{
+        request: 'Do you flush water heaters, for Alex Kim?',
+        reply: [proseBlock('Yes, we do water heater flushes.')],
+      }];
     case 'quote_and_deposit':
       return fixtureExchanges();
     case 'push_the_limit':
@@ -226,8 +231,8 @@ function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task
     },
     (n) => {
       const ctx = world.context(agent, 'en', exchange.request);
-      const allowed = desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
-      const receipts = allowed ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
+      const allowed = exchange.decision === undefined || desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
+      const receipts = allowed && exchange.decision !== undefined ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
       for (const receipt of receipts) world.emit(agent, receipt);
       const reply = ctx.reply((allowed ? exchange.reply : [handoffBlock('en', ctx.owner)]).map(copyBlock));
       world.emit(agent, reply);

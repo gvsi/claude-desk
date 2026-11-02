@@ -8179,6 +8179,7 @@
               "type": "string",
               "enum": [
                 "book_visit",
+                "ask_question",
                 "quote_and_deposit",
                 "push_the_limit"
               ]
@@ -9623,6 +9624,7 @@
             "type": "string",
             "enum": [
               "book_visit",
+              "ask_question",
               "quote_and_deposit",
               "push_the_limit"
             ],
@@ -13404,6 +13406,7 @@
             "type": "string",
             "enum": [
               "book_visit",
+              "ask_question",
               "quote_and_deposit",
               "push_the_limit"
             ],

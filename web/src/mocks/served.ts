@@ -895,7 +895,7 @@ const SERVED: ServedRoutes = {
       && (row.tool === 'native.payment_link' || row.tool === 'native.charge_mandate'));
     return ok({
       task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other'),
-      tasks: payments ? ['book_visit', 'quote_and_deposit', 'push_the_limit'] : ['book_visit'],
+      tasks: payments ? ['book_visit', 'ask_question', 'quote_and_deposit', 'push_the_limit'] : ['book_visit', 'ask_question'],
     } satisfies AgentTasks);
   },
   sendAgent(sv, req) {
