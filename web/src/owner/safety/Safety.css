@@ -2,7 +2,8 @@
    a bar between hairlines with the record's check filling it from the left, its signing key at
    the end, and the view at the right. Under it, the list (the attempts with their filters, or
    every entry of the record) and, from 1280 px, the open attempt or entry in a 360 px column
-   beside it; under that width the column stacks under the list. A failed read's line sits first,
+   beside it, the page fitting the window; under that width the column stacks under the list and
+   the page scrolls. A failed read's line sits first,
    over what was read before. Positioned, so the visually hidden words in each attempt's checkpoint
    line sit inside it: with no positioned ancestor they would sit against the window, and below the
    wide layout, deep in the scrolled page, they would stretch the window, so picking an attempt
@@ -54,24 +55,71 @@
   align-items: start;
 }
 
-/* 360 px: the illustration column's 400, less the page gutter. Beside the list, the column stays
-   in view as the page scrolls, and a trace taller than the window scrolls inside it, so the list
-   keeps its place (owner comment, 2026-11-01). Its height is the main area's: the window, less the
-   reviewer bar's line (ReviewerBar.css, its min-height) and the main area's padding (AppShell.css,
-   .cd-app-shell__main), so a change to either changes this too. A little padding inside, taken back outside,
-   keeps the open trace's focus ring clear of the column's edge. */
+/* 360 px: the illustration column's 400, less the page gutter. Side by side, the page fits the
+   window (owner comments, 2026-11-01 and 2026-11-02: "make sure it works well without scrolling..
+   maybe the side card can scroll instead of the full page"). The frame's column is at least the
+   main area's height: the window, less the reviewer bar's line (ReviewerBar.css, its min-height)
+   and the main area's padding (AppShell.css, .cd-app-shell__main), so a change to either changes
+   this too. The page fills what the concept footer leaves, its header, count and record check stay
+   in view, and the list and the open attempt or entry share the rest: the list scrolls in its
+   column, and the open attempt's card, or every entry's trace, scrolls inside its own border, so
+   the list keeps its place when a long trace opens. The two shrink with a short laptop's window;
+   under six controls' height for them, where little of either would show, the page scrolls
+   instead. Each scroller is positioned, so the words only a screen reader reads, placed out of the
+   flow in a row or a meter, stay inside it rather than stretching the page. The loading shapes
+   fill the same height: their layer is a column like the page's. */
 @media (min-width: 1280px) {
-  .cd-safety__split {
-    grid-template-columns: minmax(0, 1fr) calc(var(--size-intro-illustration) - var(--space-40));
+  .cd-owner-layout:has(> .cd-safety) {
+    min-height: calc(100dvh - var(--size-control) - var(--space-4) - var(--space-24) - var(--space-20));
   }
 
-  .cd-safety__beside {
-    position: sticky;
-    top: var(--space-24);
-    box-sizing: border-box;
-    max-height: calc(100dvh - var(--size-control) - var(--space-4) - var(--space-24) - var(--space-20));
-    margin: calc(-1 * var(--space-4));
-    padding: var(--space-4);
+  .cd-safety,
+  .cd-safety__region,
+  .cd-safety__region > .cd-skeleton-screen__body,
+  .cd-safety__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+    flex: 1 0 auto;
+  }
+
+  .cd-safety__region,
+  .cd-safety__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cd-safety__split {
+    flex: 1 1 0;
+    grid-template-columns: minmax(0, 1fr) calc(var(--size-intro-illustration) - var(--space-40));
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+    min-height: calc(6 * var(--size-control));
+  }
+
+  .cd-attempts,
+  .cd-record {
+    position: relative;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* The record's rows keep their own height in a column taller than they are. */
+  .cd-record {
+    align-content: start;
+  }
+
+  .cd-safety__beside,
+  .cd-safety__opened {
+    min-height: 0;
+  }
+
+  .cd-safety__opened {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cd-safety__opened > .cd-card,
+  .cd-safety__beside > .cd-full-trace {
+    position: relative;
+    min-height: 0;
     overflow-y: auto;
   }
 }

@@ -148,3 +148,37 @@ export const HoldsCards: Story = {
     await expect(Math.round(held.getBoundingClientRect().left - frame.getBoundingClientRect().left)).toBe(17);
   },
 };
+
+export const ScrollsItself: Story = {
+  args: {
+    as: 'section',
+    label: 'Details',
+    tabIndex: 0,
+    children: (
+      <p className="cd-type-body" style={{ margin: 0 }}>
+        Alex Kim’s assistant tried to charge $185.00 in one go, over its signed limit of $20 a charge. This action didn’t run.
+      </p>
+    ),
+  },
+  render: (args) => (
+    <div style={{ maxWidth: 360 }}>
+      <Card {...args} />
+    </div>
+  ),
+  parameters: {
+    canvasNote: 'Safety’s open attempt beside the list scrolls inside itself, so Tab reaches it; with keyboard focus its own border turns line-focus.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    const card = canvas.getByRole('region', { name: 'Details' });
+    expectComputed(card, CARD_LOOK);
+    await userEvent.tab();
+    await expect(card).toHaveFocus();
+    // line-focus as the browser computes it, read off a probe.
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--line-focus)';
+    card.append(probe);
+    const lineFocus = getComputedStyle(probe).color;
+    probe.remove();
+    expectComputed(card, { borderTopColor: lineFocus, boxShadow: 'none', outlineStyle: 'none' });
+  },
+};
