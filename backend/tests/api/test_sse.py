@@ -24,7 +24,7 @@ async def listener(db) -> AsyncIterator[Listener]:
         yield listener
 
 
-async def read_frames(response, count: int, *, timeout: float = 5.0) -> list[str]:
+async def raw_frames(response, count: int, *, timeout: float = 5.0) -> list[str]:
     """Runs an SSE response as a browser would until `count` frames (events or comments) arrived, then hangs up."""
     frames: list[str] = []
     hung_up = asyncio.Event()
@@ -42,6 +42,13 @@ async def read_frames(response, count: int, *, timeout: float = 5.0) -> list[str
                 hung_up.set()
 
     await asyncio.wait_for(response({"type": "http", "method": "GET"}, receive, send), timeout)
+    return frames
+
+
+async def read_frames(response, count: int, *, timeout: float = 5.0) -> list[str]:
+    """The `count` frames after the comment every stream opens with, which comes first."""
+    opening, *frames = await raw_frames(response, count + 1, timeout=timeout)
+    assert opening == ": open\r\n\r\n"
     return frames
 
 
@@ -160,6 +167,17 @@ async def test_replay_after_last_event_id(engine, listener):
     assert json.loads(first[0].split("data: ", 1)[1]) == {"type": "writing"}
 
 
+async def test_a_stream_with_nothing_to_send_opens_at_once(engine, listener):
+    """A browser's EventSource opens at the body's first byte. A stream with no event to replay sends a comment as it
+    starts, before on_open returns and long before its first keep-alive: no event, data or id, so it never moves the
+    client's Last-Event-ID."""
+    async def on_open() -> None:
+        await asyncio.Event().wait()                # holds the stream until the client hangs up
+
+    stream = event_stream(engine, listener, SESSION_A, None, on_open=on_open, on_control=None, ping_s=60)
+    assert await raw_frames(stream, 1, timeout=1.0) == [": open\r\n\r\n"]
+
+
 async def test_heartbeat_is_a_comment(engine, listener):
     stream = event_stream(engine, listener, SESSION_A, None, on_open=None, on_control=None, ping_s=0.05)
     frames = await read_frames(stream, 2)
@@ -180,7 +198,7 @@ async def test_a_hang_up_that_a_read_reports_as_its_own_error_ends_the_stream_qu
             raise RuntimeError("can't change 'autocommit' now: connection in transaction status ACTIVE") from None
 
     stream = event_stream(engine, listener, SESSION_A, None, on_open=on_open, on_control=None)
-    frames = await read_frames(stream, 1)                  # hangs up after the first frame, while on_open reads
+    frames = await read_frames(stream, 1)                  # hangs up after the first event, while on_open reads
 
     assert reading.is_set() and len(frames) == 1            # ended as a hang-up ends it, with nothing raised
 

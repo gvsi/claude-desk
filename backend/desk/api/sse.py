@@ -15,14 +15,15 @@ notices meant for the visitor (a code sent to the contact on record), code-free 
 reach a session.
 
 The stream: one `Listener` per process holds the only `LISTEN desk_run_events` connection and wakes the
-streams of the session each notification names. `event_stream` replays the session's events after the
-client's `Last-Event-ID`, calls `on_open`, then sends each new event as it is committed (a wake-up, or a
-poll every 2 s when a notification is missed) and hands each control row that appears unhandled while it is
-open to `on_control`, once per stream; an idle stream gets a `keep-alive` comment every `ping_s`. A hang-up
-ends the stream wherever it is, as a cancellation, even when a database read reports it as an error of its own. A
-stream whose `Wakeup` is closed (a newer stream of its session took its place) ends at once when a send of its waits
-for the client (one that stopped reading never lets it finish), else at its next look, and is cancelled wherever it
-waits should it still run `CLOSE_GRACE_S` later. `on_end` runs once the stream has ended, however it ended.
+streams of the session each notification names. `event_stream` sends an `open` comment at once (a browser's
+EventSource opens only at the body's first byte), replays the session's events after the client's `Last-Event-ID`,
+calls `on_open`, then sends each new event as it is committed (a wake-up, or a poll every 2 s when a notification is
+missed) and hands each control row that appears unhandled while it is open to `on_control`, once per stream; an idle
+stream gets a `keep-alive` comment every `ping_s`. A hang-up ends the stream wherever it is, as a cancellation, even
+when a database read reports it as an error of its own. A stream whose `Wakeup` is closed (a newer stream of its
+session took its place) ends at once when a send of its waits for the client (one that stopped reading never lets it
+finish), else at its next look, and is cancelled wherever it waits should it still run `CLOSE_GRACE_S` later.
+`on_end` runs once the stream has ended, however it ended.
 """
 
 import asyncio
@@ -57,6 +58,8 @@ _EVENT = TypeAdapter(SseEvent)
 POLL_S = 2.0
 PING_S = 15.0
 RECONNECT_S = 1.0
+# The comment a stream starts with: no event, data or id, so it never moves the client's Last-Event-ID.
+OPENING = ServerSentEvent(comment="open")
 # How long a closed stream with no send waiting has to end at its next look before it is cancelled wherever it waits.
 CLOSE_GRACE_S = 1.0
 logger = logging.getLogger(__name__)
@@ -302,6 +305,9 @@ async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
                   wakeup: Wakeup) -> AsyncIterator[ServerSentEvent]:
     try:
         async with listener.subscribe(ids.session_id, wakeup) as wakeup:
+            # First, before any read: the browser's EventSource opens at the body's first byte, which would otherwise
+            # wait for the first event or keep-alive.
+            yield OPENING
             # Control rows are tracked by the IDs this stream has seen, not by a high-water mark: a row's ID is
             # taken at insert and rows commit in any order, so a lower ID can become visible after a higher one.
             # Rows already waiting are on_open's.
@@ -378,11 +384,11 @@ def event_stream(engine: AsyncEngine, listener: Listener, ids: Ids, last_event_i
                  on_open: Callable[[], Awaitable[None]] | None, ping_s: float = PING_S,
                  poll_s: float = POLL_S, wakeup: Wakeup | None = None,
                  on_end: Callable[[], None] | None = None) -> EventStream:
-    """The session's events after `last_event_id` (all of them when None), then live ones: SSE `event` is the
-    event's `type` and `id` its `seq`. `on_open` runs after the replay (the control rows and pending work already
-    waiting); `on_control` gets each control row that appears unhandled while the stream is open, whatever order
-    the rows' writers commit in. `wakeup`, when given, is the stream's own, and its `close()` ends the stream
-    (`EventStream`); `on_end` runs once the stream has ended, however it ended.
+    """An `open` comment at once, then the session's events after `last_event_id` (all of them when None), then live
+    ones: SSE `event` is the event's `type` and `id` its `seq`. `on_open` runs after the replay (the control rows and
+    pending work already waiting); `on_control` gets each control row that appears unhandled while the stream is open,
+    whatever order the rows' writers commit in. `wakeup`, when given, is the stream's own, and its `close()` ends the
+    stream (`EventStream`); `on_end` runs once the stream has ended, however it ended.
 
     Both callbacks run inside the stream and hold back its frames until they return, so they return promptly
     and start longer work (a resumed turn) as a task. A row can reach `on_open` and `on_control`, or several
